@@ -80,7 +80,7 @@ class SSHTransport:
         cmd = ["ssh"]
         if self._port:
             cmd += ["-p", str(self._port)]
-        cmd += [dest, "--"] + list(remote_args)
+        cmd += [dest] + list(remote_args)
         result = subprocess.run(cmd, input=stdin, capture_output=True)
         if result.returncode != 0:
             raise SyncError(f"SSH command failed: {result.stderr.decode().strip()}")
@@ -122,7 +122,7 @@ def get_transport(url: str) -> tuple[LocalTransport | SSHTransport, str]:
 
     if parsed.scheme == "ssh":
         netloc = parsed.netloc  # "user@host" or "host" or "user@host:port"
-        path = parsed.path      # "/path/to/repo"
+        path = parsed.path      # "/path/to/repo" or "/~/home-relative"
         user: str | None = None
         host: str = netloc
         port: int | None = None
@@ -135,6 +135,12 @@ def get_transport(url: str) -> tuple[LocalTransport | SSHTransport, str]:
             port = parsed.port
             # Remove ":port" from host string
             host = host.rsplit(":", 1)[0]
+
+        # URL parsing always prepends "/" to the path component, turning
+        # ssh://host/~/repo into path="/~/repo". Strip the leading "/" when
+        # the path is home-relative so the remote shell expands "~" correctly.
+        if path.startswith("/~"):
+            path = path[1:]
 
         return SSHTransport(host=host, remote_path=path, user=user, port=port), path
 
