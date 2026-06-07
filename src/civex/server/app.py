@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from civex.domain.exceptions import CivexError
-from civex.server.routers import datasets, files, jobs, records, schemas, workflows
+from civex.server.routers import datasets, files, jobs, records, remote, schemas, workflows
 
 _DIST = Path(__file__).resolve().parent.parent.parent.parent / "frontend" / "dist"
 
@@ -38,6 +38,7 @@ def create_app() -> FastAPI:
     app.include_router(files.router, prefix="/api")
     app.include_router(workflows.router, prefix="/api")
     app.include_router(jobs.router, prefix="/api")
+    app.include_router(remote.router, prefix="/api")
 
     @app.get("/health", include_in_schema=False)
     def health():

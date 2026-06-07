@@ -219,7 +219,7 @@ export default function WorkflowsPage() {
       />
 
       {!workflows?.length ? (
-        <EmptyState message="No workflows yet. Click '+ New workflow' to create one." />
+        <EmptyState title="No workflows yet" message="Click '+ New workflow' to create one." />
       ) : (
         <table className="w-full text-sm border-collapse">
           <thead>

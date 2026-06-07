@@ -2,8 +2,7 @@
 AppContext bundles all services for a single CLI command invocation (or HTTP request).
 
 build_local_context() wires together the SQLAlchemy repos and the local file store.
-For the future FastAPI server, call build_local_context() once per request, sharing
-the cached engine but not the Session.
+If a [remote] is configured, a transport is passed to FileService for lazy object fetch.
 """
 from __future__ import annotations
 
@@ -65,11 +64,16 @@ def build_local_context(config: Config) -> AppContext:
     job_repo = LocalWorkflowJobRepository(session)
     file_store = LocalFileObjectStore(config.objects_dir)
 
+    remote_transport = None
+    if config.remote:
+        from civex.sync.transport import get_transport
+        remote_transport, _path = get_transport(config.remote.url)
+
     schema_svc = SchemaService(schema_repo)
     dataset_svc = DatasetService(dataset_repo)
     job_svc = WorkflowJobService(job_repo, config.civex_dir)
     record_svc = RecordService(schema_svc, dataset_repo, record_repo, file_store, job_svc)
-    file_svc = FileService(file_store)
+    file_svc = FileService(file_store, remote_transport=remote_transport)
 
     return AppContext(
         schema_svc=schema_svc,

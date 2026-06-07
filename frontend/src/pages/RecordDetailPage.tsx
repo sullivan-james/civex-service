@@ -118,7 +118,7 @@ export default function RecordDetailPage() {
   const children = childPage?.items ?? []
 
   function startEditing() {
-    setEditValues({ ...record.data })
+    setEditValues({ ...record!.data })
     setIsEditing(true)
   }
 
@@ -132,7 +132,7 @@ export default function RecordDetailPage() {
       else coerced[field.name] = v
     }
     updateRecord.mutate(
-      { id: record.id, data: coerced },
+      { id: record!.id, data: coerced },
       { onSuccess: () => setIsEditing(false) },
     )
   }

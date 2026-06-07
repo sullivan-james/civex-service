@@ -40,7 +40,7 @@ export default function JobsTable({recordId}: Props) {
   return (
     <>
       {!jobs?.length ? (
-        <EmptyState message="No jobs yet. Run a workflow from the Workflows page." />
+        <EmptyState title="No jobs yet" message="Run a workflow from the Workflows page." />
       ) : (
         <table className="w-full text-sm border-collapse">
           <thead>
