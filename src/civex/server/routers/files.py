@@ -18,8 +18,12 @@ async def upload_file(file: UploadFile, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.get("/{sha256}")
-def download_file(sha256: str, ctx: AppContext = Depends(get_ctx)):
-    if not ctx.file_svc.exists(sha256):
-        raise HTTPException(404, detail=f"Object {sha256} not found")
-    data = ctx.file_svc.retrieve(sha256)
-    return Response(content=data, media_type="application/octet-stream")
+def download_file(sha256: str, filename: str = "", ctx: AppContext = Depends(get_ctx)):
+    try:
+        data = ctx.file_svc.retrieve(sha256)
+    except Exception:
+        raise HTTPException(404, detail=f"Object {sha256} not found locally or on remote")
+    headers = {}
+    if filename:
+        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return Response(content=data, media_type="application/octet-stream", headers=headers)

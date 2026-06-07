@@ -35,8 +35,15 @@ function FieldValue({ value }: { value: unknown }) {
   if (typeof value === 'object' && 'sha256' in (value as object)) {
     const ref = value as { filename: string; size: number; sha256: string }
     return (
-      <span className="font-mono text-xs text-[#656d76]">
-        {ref.filename} ({ref.size} bytes)
+      <span className="inline-flex items-center gap-2 text-xs text-[#656d76]">
+        <span>{ref.filename} ({(ref.size / 1024).toFixed(1)} KB)</span>
+        <a
+          href={`/api/files/${ref.sha256}?filename=${encodeURIComponent(ref.filename)}`}
+          download={ref.filename}
+          className="text-[#0969da] hover:underline"
+        >
+          Download
+        </a>
       </span>
     )
   }
