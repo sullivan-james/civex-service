@@ -67,7 +67,7 @@ def build_local_context(config: Config) -> AppContext:
     remote_transport = None
     if config.remote:
         from civex.sync.transport import get_transport
-        remote_transport, _path = get_transport(config.remote.url)
+        remote_transport, _path = get_transport(config.remote.url, remote_civex=config.remote.remote_civex)
 
     schema_svc = SchemaService(schema_repo)
     dataset_svc = DatasetService(dataset_repo)

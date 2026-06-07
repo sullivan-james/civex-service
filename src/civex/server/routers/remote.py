@@ -55,7 +55,7 @@ def remote_push():
         raise HTTPException(400, detail="No remote configured. Run `civex remote set <url>` first.")
 
     try:
-        transport, _path = get_transport(config.remote.url)
+        transport, _path = get_transport(config.remote.url, remote_civex=config.remote.remote_civex)
     except SyncError as e:
         raise HTTPException(400, detail=str(e))
 
@@ -103,7 +103,7 @@ def remote_pull():
         raise HTTPException(400, detail="No remote configured. Run `civex remote set <url>` first.")
 
     try:
-        transport, _path = get_transport(config.remote.url)
+        transport, _path = get_transport(config.remote.url, remote_civex=config.remote.remote_civex)
     except SyncError as e:
         raise HTTPException(400, detail=str(e))
 

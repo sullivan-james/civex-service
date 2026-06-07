@@ -1,9 +1,12 @@
 """
-civex clone <url> [local-dir]
+civex clone <url> [local-dir] [--remote-civex <path>]
 
 Clones a bare repository into a new local working directory.
 Database rows are transferred via DTOs (SyncBundle). Objects are NOT downloaded
 immediately — they are fetched on demand when accessed (lazy).
+
+Use --remote-civex when civex is not on PATH on the remote (e.g. installed in a venv):
+    civex clone ssh://js521/~/civex-test-repo --remote-civex ~/venv/bin/civex
 """
 from __future__ import annotations
 
@@ -21,12 +24,17 @@ from civex.sync.transport import SyncError, get_transport
 
 
 def clone(
-    url: str = typer.Argument(..., help="Remote URL (ssh://user@host:/path or file:///path)"),
+    url: str = typer.Argument(..., help="Remote URL (ssh://user@host/path or file:///path)"),
     local_dir: Path = typer.Argument(None, help="Destination directory (default: derived from URL)"),
+    remote_civex: str = typer.Option(
+        "civex",
+        "--remote-civex",
+        help="Path to the civex executable on the remote (use when civex is in a venv, e.g. ~/venv/bin/civex)",
+    ),
 ) -> None:
     """Clone a remote bare repository into a new local project."""
     try:
-        transport, _remote_path = get_transport(url)
+        transport, _remote_path = get_transport(url, remote_civex=remote_civex)
     except SyncError as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
@@ -72,20 +80,15 @@ def clone(
     engine.dispose()
 
     now = datetime.now(timezone.utc)
-    (civex_dir / "config.toml").write_text(
-        f'[db]\nurl = "{db_url}"\n'
-        f'\n[remote]\nurl = "{url}"\n'
-        f'last_pulled_at = "{now.isoformat()}"\n'
-    )
-
-    n_schemas = len(bundle.schemas)
-    n_datasets = len(bundle.datasets)
-    n_records = len(bundle.records)
-    n_objects = len(bundle.object_refs)
+    remote_lines = f'[db]\nurl = "{db_url}"\n\n[remote]\nurl = "{url}"\n'
+    if remote_civex != "civex":
+        remote_lines += f'remote_civex = "{remote_civex}"\n'
+    remote_lines += f'last_pulled_at = "{now.isoformat()}"\n'
+    (civex_dir / "config.toml").write_text(remote_lines)
 
     console.print(f"[success]Cloned successfully.[/success]")
-    console.print(f"  Schemas    {n_schemas}")
-    console.print(f"  Datasets   {n_datasets}")
-    console.print(f"  Records    {n_records}")
-    console.print(f"  Objects    {n_objects} available remotely (fetched on demand)")
+    console.print(f"  Schemas    {len(bundle.schemas)}")
+    console.print(f"  Datasets   {len(bundle.datasets)}")
+    console.print(f"  Records    {len(bundle.records)}")
+    console.print(f"  Objects    {len(bundle.object_refs)} available remotely (fetched on demand)")
     console.print(f"  Local dir  {local_dir}")

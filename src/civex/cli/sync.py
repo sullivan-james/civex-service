@@ -31,7 +31,7 @@ def push() -> None:
         raise typer.Exit(1)
 
     try:
-        transport, _path = get_transport(config.remote.url)
+        transport, _path = get_transport(config.remote.url, remote_civex=config.remote.remote_civex)
     except SyncError as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
@@ -79,7 +79,7 @@ def pull() -> None:
         raise typer.Exit(1)
 
     try:
-        transport, _path = get_transport(config.remote.url)
+        transport, _path = get_transport(config.remote.url, remote_civex=config.remote.remote_civex)
     except SyncError as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)

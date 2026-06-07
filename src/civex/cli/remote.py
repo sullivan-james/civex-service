@@ -11,7 +11,12 @@ app = typer.Typer(help="Manage the remote repository.")
 
 @app.command("set")
 def remote_set(
-    url: str = typer.Argument(..., help="Remote URL (ssh://user@host:/path or file:///path)"),
+    url: str = typer.Argument(..., help="Remote URL (ssh://user@host/path or file:///path)"),
+    remote_civex: str = typer.Option(
+        "civex",
+        "--remote-civex",
+        help="Path to civex on the remote (e.g. ~/venv/bin/civex)",
+    ),
 ) -> None:
     """Set (or replace) the remote URL for this project."""
     from civex.sync.transport import SyncError, get_transport
@@ -26,7 +31,7 @@ def remote_set(
     config = config.__class__(
         project_root=config.project_root,
         db=config.db,
-        remote=RemoteConfig(url=url),
+        remote=RemoteConfig(url=url, remote_civex=remote_civex),
     )
     save_config(config)
     console.print(f"[success]Remote set to {url}[/success]")

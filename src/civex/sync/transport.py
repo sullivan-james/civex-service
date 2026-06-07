@@ -69,11 +69,19 @@ class LocalTransport:
 class SSHTransport:
     """Accesses a bare repo on a remote host via SSH + civex plumbing commands."""
 
-    def __init__(self, host: str, remote_path: str, user: str | None = None, port: int | None = None) -> None:
+    def __init__(
+        self,
+        host: str,
+        remote_path: str,
+        user: str | None = None,
+        port: int | None = None,
+        civex_cmd: str = "civex",
+    ) -> None:
         self._host = host
         self._user = user
         self._port = port
         self._remote_path = remote_path
+        self._civex = civex_cmd
 
     def _ssh(self, *remote_args: str, stdin: bytes | None = None) -> bytes:
         dest = f"{self._user}@{self._host}" if self._user else self._host
@@ -87,23 +95,23 @@ class SSHTransport:
         return result.stdout
 
     def transfer_pack(self, since: datetime | None) -> SyncBundle:
-        args = ["civex", "transfer-pack", self._remote_path]
+        args = [self._civex, "transfer-pack", self._remote_path]
         if since is not None:
             args += ["--since", since.isoformat()]
         raw = self._ssh(*args)
         return SyncBundle.from_json(raw.decode())
 
     def receive_pack(self, bundle: SyncBundle) -> None:
-        self._ssh("civex", "receive-pack", self._remote_path, stdin=bundle.to_json().encode())
+        self._ssh(self._civex, "receive-pack", self._remote_path, stdin=bundle.to_json().encode())
 
     def get_object(self, sha256: str) -> bytes:
-        return self._ssh("civex", "get-object", self._remote_path, sha256)
+        return self._ssh(self._civex, "get-object", self._remote_path, sha256)
 
     def put_object(self, sha256: str, data: bytes) -> None:
-        self._ssh("civex", "put-object", self._remote_path, sha256, stdin=data)
+        self._ssh(self._civex, "put-object", self._remote_path, sha256, stdin=data)
 
 
-def get_transport(url: str) -> tuple[LocalTransport | SSHTransport, str]:
+def get_transport(url: str, remote_civex: str = "civex") -> tuple[LocalTransport | SSHTransport, str]:
     """
     Parse a remote URL and return (transport, remote_path).
 
@@ -142,6 +150,6 @@ def get_transport(url: str) -> tuple[LocalTransport | SSHTransport, str]:
         if path.startswith("/~"):
             path = path[1:]
 
-        return SSHTransport(host=host, remote_path=path, user=user, port=port), path
+        return SSHTransport(host=host, remote_path=path, user=user, port=port, civex_cmd=remote_civex), path
 
     raise SyncError(f"Unsupported remote URL scheme '{parsed.scheme}'. Use ssh:// or file://")

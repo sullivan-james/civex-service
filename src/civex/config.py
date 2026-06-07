@@ -32,6 +32,7 @@ class RemoteConfig:
     url: str
     last_pushed_at: datetime | None = None
     last_pulled_at: datetime | None = None
+    remote_civex: str = "civex"   # path to civex on the remote (for SSH transport)
 
 
 @dataclass
@@ -73,6 +74,7 @@ def load_config() -> Config:
             url=data["remote"]["url"],
             last_pushed_at=_parse_dt(data["remote"].get("last_pushed_at")),
             last_pulled_at=_parse_dt(data["remote"].get("last_pulled_at")),
+            remote_civex=data["remote"].get("remote_civex", "civex"),
         )
 
     return Config(
@@ -90,6 +92,8 @@ def save_config(config: Config) -> None:
     ]
     if config.remote:
         lines += ["\n[remote]\n", f'url = "{config.remote.url}"\n']
+        if config.remote.remote_civex != "civex":
+            lines.append(f'remote_civex = "{config.remote.remote_civex}"\n')
         if config.remote.last_pushed_at:
             lines.append(f'last_pushed_at = "{config.remote.last_pushed_at.isoformat()}"\n')
         if config.remote.last_pulled_at:
