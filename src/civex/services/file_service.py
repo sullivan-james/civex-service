@@ -14,6 +14,10 @@ class FileService:
         """Read a file from disk and store it in the object store."""
         return self._store.put(path.read_bytes(), path.name)
 
+    def store_bytes(self, data: bytes, filename: str) -> FileRef:
+        """Store raw bytes (e.g. from an HTTP upload) in the object store."""
+        return self._store.put(data, filename)
+
     def retrieve(self, sha256: str) -> bytes:
         return self._store.get(sha256)
 

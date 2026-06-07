@@ -17,7 +17,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-import typer
+from civex.domain.exceptions import ConfigError
 
 
 @dataclass
@@ -58,8 +58,7 @@ def find_project_root() -> Path | None:
 def load_config() -> Config:
     root = find_project_root()
     if root is None:
-        typer.echo("Error: no civex project found. Run `civex init` to create one.", err=True)
-        raise typer.Exit(1)
+        raise ConfigError("No civex project found. Run `civex init` to create one.")
 
     config_path = root / ".civex" / "config.toml"
     with open(config_path, "rb") as f:

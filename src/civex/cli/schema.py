@@ -5,16 +5,11 @@ from typing import Optional
 import typer
 from rich.table import Table
 
-from civex.config import load_config
+from civex.cli.utils import get_ctx as _ctx
 from civex.console import console
-from civex.context import build_local_context
 from civex.domain.exceptions import AlreadyExistsError, CivexError, NotFoundError
 
 app = typer.Typer(help="Manage schemas (data structure definitions)")
-
-
-def _ctx():
-    return build_local_context(load_config())
 
 
 @app.command("create")
@@ -103,6 +98,62 @@ def schema_add_field(
         req = " (required)" if field.required else ""
         console.print(f"[success]Added '{field.name}' ({field.dtype}{req}) to schema '{schema_name}'.[/success]")
     except (NotFoundError, AlreadyExistsError, ValueError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+
+
+@app.command("update")
+def schema_update(
+    name: str = typer.Argument(...),
+    rename: Optional[str] = typer.Option(None, "--rename", help="New name for the schema"),
+    description: Optional[str] = typer.Option(None, "--description", "-d"),
+) -> None:
+    """Update a schema's name or description."""
+    if rename is None and description is None:
+        console.print("[error]Provide at least one of --rename or --description.[/error]")
+        raise typer.Exit(1)
+    ctx = _ctx()
+    try:
+        schema = ctx.schema_svc.update(name, new_name=rename, description=description)
+        ctx.commit()
+        console.print(f"[success]Updated schema '{schema.name}'.[/success]")
+    except (NotFoundError, AlreadyExistsError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+
+
+@app.command("update-field")
+def schema_update_field(
+    schema_name: str = typer.Argument(...),
+    field_name: str = typer.Argument(...),
+    required: bool = typer.Option(..., "--required/--optional"),
+) -> None:
+    """Toggle whether a field is required."""
+    ctx = _ctx()
+    try:
+        # Warn if making required but existing records are missing this field.
+        if required:
+            all_datasets = ctx.dataset_svc.list_all()
+            affected = []
+            for d in all_datasets:
+                missing = [
+                    r for r in ctx.record_svc.find(d.name, schema_name=schema_name, filters=[], limit=100_000)
+                    if field_name not in r.data
+                ]
+                if missing:
+                    affected.append((d.name, len(missing)))
+            if affected:
+                for dataset_name, count in affected:
+                    console.print(
+                        f"[warning]{count} record(s) in '{dataset_name}' are missing '{field_name}'.[/warning]"
+                    )
+                typer.confirm("Make field required anyway?", abort=True)
+
+        field = ctx.schema_svc.update_field(schema_name, field_name, required=required)
+        ctx.commit()
+        status = "required" if field.required else "optional"
+        console.print(f"[success]Field '{field.name}' is now {status}.[/success]")
+    except (NotFoundError, AlreadyExistsError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 

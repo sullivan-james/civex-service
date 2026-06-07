@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% set active = 'workflows' %}
+{% block content %}
+<h2>Workflows</h2>
+<p>Workflow definitions are YAML files in <code>.civex/workflows/</code>.</p>
+
+{% if workflows %}
+<table>
+  <thead><tr><th>Name</th><th>Description</th><th>Steps</th><th>File</th><th></th></tr></thead>
+  <tbody>
+    {% for wf in workflows %}
+    <tr>
+      <td><strong>{{ wf.name }}</strong></td>
+      <td>{{ wf.description or '' }}</td>
+      <td>{{ wf.steps }}</td>
+      <td><code>{{ wf.filename }}</code></td>
+      <td>
+        <button class="outline" style="padding:0.2rem 0.6rem; font-size:0.8rem;"
+                onclick="openRunDialog('{{ wf.name }}')">Run</button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No workflows found. Add a YAML file to <code>.civex/workflows/</code>.</p>
+{% endif %}
+
+<dialog id="run-dialog">
+  <article>
+    <header>
+      <button aria-label="Close" rel="prev" onclick="document.getElementById('run-dialog').removeAttribute('open')"></button>
+      <h3>Run workflow: <span id="run-wf-name"></span></h3>
+    </header>
+    <form method="post" action="" id="run-form">
+      <label>Record ID
+        <input name="record_id" id="run-record-id" required placeholder="e.g. 0c45e37f">
+        <small>Short ID or full UUID of the record to run the workflow against.</small>
+      </label>
+      <footer>
+        <button type="submit">Run</button>
+      </footer>
+    </form>
+  </article>
+</dialog>
+
+<script>
+function openRunDialog(name) {
+  document.getElementById('run-wf-name').textContent = name;
+  document.getElementById('run-form').action = '/ui/workflows/' + name + '/run';
+  document.getElementById('run-dialog').setAttribute('open', '');
+}
+</script>
+{% endblock %}

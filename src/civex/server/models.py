@@ -1,0 +1,200 @@
+"""
+Pydantic models for the HTTP boundary only.
+DTOs (domain/dtos.py) stay as plain dataclasses throughout the service layer.
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel
+
+from civex.domain.dtos import DatasetDTO, RecordDTO, SchemaDTO, WorkflowJobDTO
+
+
+# --- Schemas ---
+
+class FieldResponse(BaseModel):
+    id: str
+    name: str
+    type: str
+    required: bool
+
+
+class SchemaResponse(BaseModel):
+    id: str
+    name: str
+    description: str | None
+    parent_id: str | None
+    fields: list[FieldResponse]
+
+    @classmethod
+    def from_dto(cls, dto: SchemaDTO) -> SchemaResponse:
+        return cls(
+            id=str(dto.id),
+            name=dto.name,
+            description=dto.description,
+            parent_id=str(dto.parent_id) if dto.parent_id else None,
+            fields=[
+                FieldResponse(id=str(f.id), name=f.name, type=f.dtype, required=f.required)
+                for f in dto.fields
+            ],
+        )
+
+
+class CreateSchemaRequest(BaseModel):
+    name: str
+    description: str | None = None
+    parent: str | None = None
+
+
+class AddFieldRequest(BaseModel):
+    name: str
+    type: str
+    required: bool = False
+
+
+class UpdateSchemaRequest(BaseModel):
+    rename: str | None = None
+    description: str | None = None
+
+
+class UpdateFieldRequest(BaseModel):
+    required: bool
+
+
+# --- Datasets ---
+
+class DatasetResponse(BaseModel):
+    id: str
+    name: str
+    description: str | None
+    record_count: int
+
+    @classmethod
+    def from_dto(cls, dto: DatasetDTO) -> DatasetResponse:
+        return cls(
+            id=str(dto.id),
+            name=dto.name,
+            description=dto.description,
+            record_count=dto.record_count,
+        )
+
+
+class CreateDatasetRequest(BaseModel):
+    name: str
+    description: str | None = None
+
+
+# --- Records ---
+
+class RecordResponse(BaseModel):
+    id: str
+    dataset_id: str
+    schema_name: str
+    parent_record_id: str | None
+    data: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_dto(cls, dto: RecordDTO) -> RecordResponse:
+        return cls(
+            id=str(dto.id),
+            dataset_id=str(dto.dataset_id),
+            schema_name=dto.schema_name,
+            parent_record_id=str(dto.parent_record_id) if dto.parent_record_id else None,
+            data=dto.data,
+            created_at=dto.created_at,
+            updated_at=dto.updated_at,
+        )
+
+
+class PaginatedRecordResponse(BaseModel):
+    items: list[RecordResponse]
+    total: int
+    offset: int
+    limit: int
+
+
+class CreateRecordRequest(BaseModel):
+    schema_name: str
+    data: dict[str, Any] = {}
+    parent_record_id: str | None = None
+
+
+class UpdateRecordRequest(BaseModel):
+    data: dict[str, Any]
+
+
+# --- Files ---
+
+class FileRefResponse(BaseModel):
+    sha256: str
+    filename: str
+    size: int
+
+
+# --- Workflows ---
+
+class WorkflowInputResponse(BaseModel):
+    type: str
+    label: str | None
+    description: str | None
+
+
+class WorkflowResponse(BaseModel):
+    name: str
+    description: str | None
+    steps: int
+    filename: str
+    stem: str
+    record_schema: str | None = None
+    inputs: dict[str, WorkflowInputResponse] | None = None
+
+
+class WorkflowDetailResponse(BaseModel):
+    name: str
+    description: str | None
+    steps: int
+    filename: str
+    stem: str
+    record_schema: str | None = None
+    inputs: dict[str, WorkflowInputResponse] | None = None
+    content: str  # raw YAML
+
+
+class WorkflowSaveRequest(BaseModel):
+    content: str  # raw YAML
+
+
+# --- Jobs ---
+
+class WorkflowJobResponse(BaseModel):
+    id: str
+    workflow_name: str
+    record_id: str
+    schema_name: str
+    trigger: str
+    status: str
+    error: str | None
+    log: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+    @classmethod
+    def from_dto(cls, dto: WorkflowJobDTO) -> WorkflowJobResponse:
+        return cls(
+            id=str(dto.id),
+            workflow_name=dto.workflow_name,
+            record_id=str(dto.record_id),
+            schema_name=dto.schema_name,
+            trigger=dto.trigger,
+            status=dto.status,
+            error=dto.error,
+            log=dto.log,
+            created_at=dto.created_at,
+            started_at=dto.started_at,
+            finished_at=dto.finished_at,
+        )

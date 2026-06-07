@@ -23,14 +23,18 @@ class LocalDatasetRepository:
     def list_all(self) -> list[DatasetDTO]:
         return [_to_dto(r) for r in self._s.query(Dataset).order_by(Dataset.created_at).all()]
 
-    def create(
-        self,
-        name: str,
-        description: str | None,
-        schema_id: uuid.UUID,
-    ) -> DatasetDTO:
-        row = Dataset(name=name, description=description, schema_id=schema_id)
+    def create(self, name: str, description: str | None) -> DatasetDTO:
+        row = Dataset(name=name, description=description)
         self._s.add(row)
+        self._s.flush()
+        return _to_dto(row)
+
+    def update(self, id: uuid.UUID, name: str | None, description: str | None) -> DatasetDTO:
+        row = self._s.query(Dataset).filter_by(id=id).first()
+        if name is not None:
+            row.name = name
+        if description is not None:
+            row.description = description
         self._s.flush()
         return _to_dto(row)
 
@@ -46,8 +50,6 @@ def _to_dto(row: Dataset) -> DatasetDTO:
         id=row.id,
         name=row.name,
         description=row.description,
-        schema_id=row.schema_id,
-        schema_name=row.schema.name,
         record_count=len(row.records),
         created_at=row.created_at,
     )

@@ -1,0 +1,60 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { schemasApi } from '../api/schemas'
+
+export function useSchemas() {
+  return useQuery({ queryKey: ['schemas'], queryFn: schemasApi.list })
+}
+
+export function useSchema(name: string) {
+  return useQuery({
+    queryKey: ['schemas', name],
+    queryFn: () => schemasApi.get(name),
+    enabled: !!name,
+  })
+}
+
+export function useCreateSchema() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: schemasApi.create,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
+  })
+}
+
+export function useUpdateSchema(name: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { rename?: string; description?: string }) =>
+      schemasApi.update(name, body),
+    onSuccess: (updated) => {
+      qc.invalidateQueries({ queryKey: ['schemas'] })
+      qc.setQueryData(['schemas', updated.name], updated)
+    },
+  })
+}
+
+export function useAddField(schemaName: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { name: string; type: string; required?: boolean }) =>
+      schemasApi.addField(schemaName, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas', schemaName] }),
+  })
+}
+
+export function useUpdateField(schemaName: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ fieldName, required }: { fieldName: string; required: boolean }) =>
+      schemasApi.updateField(schemaName, fieldName, { required }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas', schemaName] }),
+  })
+}
+
+export function useDeleteSchema() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: schemasApi.delete,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
+  })
+}

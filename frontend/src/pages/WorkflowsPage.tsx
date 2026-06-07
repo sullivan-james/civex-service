@@ -1,0 +1,296 @@
+import { useState, useRef, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
+import {
+  useWorkflows, useWorkflow, useSaveWorkflow,
+  useDeleteWorkflow, useRunWorkflow,
+} from '../hooks/useWorkflows'
+import { PageHeader, Button, Badge, LoadingState, ErrorState, EmptyState } from '../components/ui'
+import type { Workflow } from '../api/workflows'
+
+const NEW_TEMPLATE = `name: my-workflow
+description: null
+
+triggers:
+  record_created:
+    schema: MySchema
+  # record_updated:
+  #   schema: MySchema
+  #   fields:
+  #     - my_field
+
+steps:
+  - id: load_bytes
+    plugin: civex.load_file
+    config:
+      field: my_file_field
+
+  - id: parse_csv
+    plugin: civex.load_csv
+    config:
+      delimiter: ","
+    inputs:
+      bytes: load_bytes.bytes
+`
+
+// ---------------------------------------------------------------------------
+// YAML editor modal
+// ---------------------------------------------------------------------------
+
+interface EditorProps {
+  stem: string
+  isNew: boolean
+  onClose: () => void
+}
+
+function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
+  const [stem, setStem] = useState(initialStem)
+  const [content, setContent] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const { data: detail, isLoading } = useWorkflow(isNew ? '' : initialStem)
+  const save = useSaveWorkflow()
+
+  // Populate content once loaded
+  if (!isNew && detail && content === null) {
+    setContent(detail.content)
+  }
+  if (isNew && content === null) {
+    setContent(NEW_TEMPLATE)
+  }
+
+  // Tab key → 2 spaces
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      const el = e.currentTarget
+      const start = el.selectionStart
+      const end = el.selectionEnd
+      const next = el.value.slice(0, start) + '  ' + el.value.slice(end)
+      setContent(next)
+      requestAnimationFrame(() => {
+        el.selectionStart = el.selectionEnd = start + 2
+      })
+    }
+  }, [])
+
+  async function handleSave() {
+    if (!stem.trim() || content === null) return
+    setSaveError(null)
+    try {
+      await save.mutateAsync({ stem: stem.trim(), content })
+      onClose()
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Save failed')
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl flex flex-col" style={{ height: '90vh' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#d0d7de]">
+          <h2 className="text-base font-semibold text-[#1f2328]">
+            {isNew ? 'New workflow' : `Edit — ${initialStem}.yaml`}
+          </h2>
+          <button
+            onClick={onClose}
+            className="text-[#656d76] hover:text-[#1f2328] text-xl leading-none"
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex flex-col gap-3 p-5 flex-1 min-h-0">
+          {isNew && (
+            <label className="block">
+              <span className="text-xs font-medium text-[#1f2328]">Filename stem</span>
+              <div className="flex items-center gap-1 mt-1">
+                <input
+                  type="text"
+                  value={stem}
+                  onChange={e => setStem(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
+                  placeholder="my-workflow"
+                  className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm w-56 focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+                />
+                <span className="text-sm text-[#656d76]">.yaml</span>
+              </div>
+              <p className="text-xs text-[#656d76] mt-1">Letters, numbers, hyphens and underscores only.</p>
+            </label>
+          )}
+
+          {isLoading ? (
+            <div className="flex-1 flex items-center justify-center text-sm text-[#656d76]">Loading…</div>
+          ) : (
+            <div className="flex-1 flex flex-col min-h-0">
+              <span className="text-xs font-medium text-[#1f2328] mb-1">YAML</span>
+              <textarea
+                ref={textareaRef}
+                value={content ?? ''}
+                onChange={e => setContent(e.target.value)}
+                onKeyDown={handleKeyDown}
+                spellCheck={false}
+                className="flex-1 min-h-0 font-mono text-xs border border-[#d0d7de] rounded-md p-3 resize-none bg-[#f6f8fa] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] leading-relaxed"
+                style={{ minHeight: '200px' }}
+              />
+            </div>
+          )}
+
+          {saveError && (
+            <pre className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 whitespace-pre-wrap">
+              {saveError}
+            </pre>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-2 px-5 py-4 border-t border-[#d0d7de]">
+          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            onClick={handleSave}
+            disabled={save.isPending || !stem.trim()}
+          >
+            {save.isPending ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
+
+export default function WorkflowsPage() {
+  const { data: workflows, isLoading, error } = useWorkflows()
+  const run = useRunWorkflow()
+  const deleteWf = useDeleteWorkflow()
+  const navigate = useNavigate()
+
+  const [editor, setEditor] = useState<{ stem: string; isNew: boolean } | null>(null)
+  const [runTarget, setRunTarget] = useState<string | null>(null)
+  const [recordId, setRecordId] = useState('')
+  const [runError, setRunError] = useState<string | null>(null)
+
+  function openNew() {
+    setEditor({ stem: 'new-workflow', isNew: true })
+  }
+
+  function openEdit(wf: Workflow) {
+    setEditor({ stem: wf.stem, isNew: false })
+  }
+
+  async function handleDelete(wf: Workflow) {
+    if (!confirm(`Delete workflow '${wf.name}'? This cannot be undone.`)) return
+    deleteWf.mutate(wf.stem)
+  }
+
+  function openRun(name: string) {
+    setRunTarget(name)
+    setRecordId('')
+    setRunError(null)
+  }
+
+  async function handleRun(e: React.FormEvent) {
+    e.preventDefault()
+    if (!runTarget) return
+    setRunError(null)
+    try {
+      await run.mutateAsync({ name: runTarget, recordId: recordId.trim() })
+      setRunTarget(null)
+      navigate('/jobs')
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : 'Failed to enqueue workflow')
+    }
+  }
+
+  if (isLoading) return <LoadingState />
+  if (error)     return <ErrorState message={error.message} />
+
+  return (
+    <>
+      <PageHeader
+        title="Workflows"
+        description="YAML workflow definitions in .civex/workflows/"
+        action={<Button variant="primary" size="sm" onClick={openNew}>+ New workflow</Button>}
+      />
+
+      {!workflows?.length ? (
+        <EmptyState message="No workflows yet. Click '+ New workflow' to create one." />
+      ) : (
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-[#d0d7de]">
+              <th className="text-left py-2 px-3 font-medium text-[#1f2328]">Name</th>
+              <th className="text-left py-2 px-3 font-medium text-[#1f2328]">Description</th>
+              <th className="text-left py-2 px-3 font-medium text-[#1f2328]">Steps</th>
+              <th className="text-left py-2 px-3 font-medium text-[#1f2328]">File</th>
+              <th className="py-2 px-3 text-right" />
+            </tr>
+          </thead>
+          <tbody>
+            {workflows.map(wf => (
+              <tr key={wf.stem} className="border-b border-[#d0d7de] hover:bg-[#f6f8fa]">
+                <td className="py-2 px-3 font-medium text-[#1f2328]">{wf.name}</td>
+                <td className="py-2 px-3 text-[#656d76]">{wf.description ?? '—'}</td>
+                <td className="py-2 px-3 text-[#656d76]">{wf.steps}</td>
+                <td className="py-2 px-3 font-mono text-xs text-[#656d76]">{wf.filename}</td>
+                <td className="py-2 px-3">
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" onClick={() => openRun(wf.name)}>Run</Button>
+                    <Button size="sm" variant="default" onClick={() => openEdit(wf)}>Edit</Button>
+                    <Button size="sm" variant="danger" onClick={() => handleDelete(wf)}>Delete</Button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {/* YAML editor modal */}
+      {editor && (
+        <WorkflowEditor
+          stem={editor.stem}
+          isNew={editor.isNew}
+          onClose={() => setEditor(null)}
+        />
+      )}
+
+      {/* Run dialog */}
+      {runTarget && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
+            <h2 className="text-base font-semibold text-[#1f2328] mb-4">
+              Run <span className="font-mono">{runTarget}</span>
+            </h2>
+            <form onSubmit={handleRun} className="space-y-4">
+              <label className="block">
+                <span className="text-sm font-medium text-[#1f2328]">Record ID</span>
+                <input
+                  autoFocus
+                  type="text"
+                  value={recordId}
+                  onChange={e => setRecordId(e.target.value)}
+                  placeholder="Short ID or full UUID"
+                  required
+                  className="mt-1 w-full border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+                />
+              </label>
+              {runError && <p className="text-sm text-red-600">{runError}</p>}
+              <div className="flex justify-end gap-2">
+                <Button variant="default" onClick={() => setRunTarget(null)} type="button">Cancel</Button>
+                <Button variant="primary" type="submit" disabled={run.isPending}>
+                  {run.isPending ? 'Queuing…' : 'Run'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}

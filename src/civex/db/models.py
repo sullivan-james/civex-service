@@ -55,7 +55,6 @@ class Schema(Base):
         "Schema", remote_side="Schema.id", back_populates="children"
     )
     children: Mapped[list[Schema]] = relationship("Schema", back_populates="parent")
-    datasets: Mapped[list[Dataset]] = relationship("Dataset", back_populates="schema")
 
 
 class Field(Base):
@@ -80,18 +79,17 @@ class Field(Base):
 
 class Dataset(Base):
     """
-    A named collection of records, all conforming to the same schema.
-    Think: a study, an experiment run, a measurement session.
+    A named container for a study or investigation.
+    Records within a dataset may use any schema; the schema hierarchy
+    and parent_record_id links express the structure.
     """
     __tablename__ = "datasets"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(String(1000))
-    schema_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("schemas.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
-    schema: Mapped[Schema] = relationship("Schema", back_populates="datasets")
     records: Mapped[list[Record]] = relationship(
         "Record", back_populates="dataset", cascade="all, delete-orphan"
     )
@@ -99,16 +97,48 @@ class Dataset(Base):
 
 class Record(Base):
     """
-    A single data entry in a dataset.
+    A single data entry in a dataset, typed by its schema.
     data is a JSON dict — keys are field names, values are the typed field values.
     Validation against the schema's fields happens at write time in application code.
+
+    parent_record_id links child-schema records to the parent record they extend
+    (e.g. a Recording record referencing its Encounter record within the same dataset).
     """
     __tablename__ = "records"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     dataset_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("datasets.id"), nullable=False)
+    schema_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("schemas.id"), nullable=False)
+    parent_record_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("records.id"), nullable=True)
     data: Mapped[dict[str, Any]] = mapped_column(_JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     dataset: Mapped[Dataset] = relationship("Dataset", back_populates="records")
+    schema: Mapped[Schema] = relationship("Schema")
+
+
+class WorkflowJob(Base):
+    """
+    A queued or completed workflow execution.
+    Jobs are enqueued automatically when a record event matches a workflow trigger,
+    or manually via `civex worker enqueue`. The worker drains pending jobs in order.
+    status: pending → running → completed | failed
+    trigger: record_created | record_updated | manual
+    """
+    __tablename__ = "workflow_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    record_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("records.id"), nullable=False)
+    schema_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    trigger: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    log: Mapped[str | None] = mapped_column(String, nullable=True)
+    input_data: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    record: Mapped[Record] = relationship("Record")

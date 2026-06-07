@@ -65,9 +65,36 @@ class SchemaService:
             restrictions=restrictions or {},
         )
 
+    def update(
+        self,
+        name: str,
+        new_name: str | None = None,
+        description: str | None = None,
+    ) -> SchemaDTO:
+        schema = self.get(name)
+        if new_name and new_name != name:
+            if self._repo.get_by_name(new_name):
+                raise AlreadyExistsError(f"Schema '{new_name}' already exists")
+        return self._repo.update(schema.id, name=new_name, description=description)
+
+    def update_field(self, schema_name: str, field_name: str, required: bool) -> FieldDTO:
+        schema = self.get(schema_name)
+        field = next((f for f in schema.fields if f.name == field_name), None)
+        if field is None:
+            raise NotFoundError(f"Field '{field_name}' not found on schema '{schema_name}'")
+        return self._repo.update_field(field.id, required=required)
+
     def delete(self, name: str) -> None:
         schema = self.get(name)
         self._repo.delete(schema.id)
+
+    def name_to_id_map(self, schema: SchemaDTO) -> dict[str, str]:
+        """field name → str(field.id), including inherited fields."""
+        return {rf.field.name: str(rf.field.id) for rf in self.collect_fields(schema)}
+
+    def id_to_name_map(self, schema: SchemaDTO) -> dict[str, str]:
+        """str(field.id) → field name, including inherited fields."""
+        return {str(rf.field.id): rf.field.name for rf in self.collect_fields(schema)}
 
     def collect_fields(self, schema: SchemaDTO) -> list[ResolvedField]:
         """

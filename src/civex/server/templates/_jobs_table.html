@@ -1,0 +1,53 @@
+<div id="jobs-table"{% if has_active %} hx-get="/ui/jobs/partial" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+{% if jobs %}
+<table>
+  <thead>
+    <tr>
+      <th>Job</th><th>Workflow</th><th>Record</th><th>Schema</th>
+      <th>Trigger</th><th>Status</th><th>Created</th><th>Duration</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for j in jobs %}
+    {% set jid = j.id | string %}
+    {% set rid = j.record_id | string %}
+    <tr>
+      <td><code>{{ jid[:8] }}…</code></td>
+      <td>{{ j.workflow_name }}</td>
+      <td><a href="/ui/records/{{ rid }}"><code>{{ rid[:8] }}…</code></a></td>
+      <td>{{ j.schema_name }}</td>
+      <td><span class="tag">{{ j.trigger }}</span></td>
+      <td>
+        {% if j.status == 'completed' %}
+          <span class="status-completed">✓ completed</span>
+        {% elif j.status == 'running' %}
+          <span class="status-running"><span class="spin">↻</span> running</span>
+        {% elif j.status == 'failed' %}
+          <span class="status-failed" title="{{ j.error or '' }}">✗ failed</span>
+        {% else %}
+          <span class="status-pending">· pending</span>
+        {% endif %}
+      </td>
+      <td>{{ j.created_at.strftime('%H:%M:%S') }}</td>
+      <td>
+        {% if j.started_at and j.finished_at %}
+          {{ ((j.finished_at - j.started_at).total_seconds()) | round(1) }}s
+        {% elif j.started_at %}
+          <span class="status-running">running…</span>
+        {% else %}
+          —
+        {% endif %}
+      </td>
+    </tr>
+    {% if j.status == 'failed' and j.error %}
+    <tr>
+      <td colspan="8"><small class="status-failed">{{ j.error }}</small></td>
+    </tr>
+    {% endif %}
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No jobs yet. Run a workflow from the <a href="/ui/workflows">Workflows</a> page.</p>
+{% endif %}
+</div>

@@ -1,0 +1,68 @@
+from __future__ import annotations
+
+import uuid
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+
+from civex.context import AppContext
+from civex.domain.exceptions import NotFoundError
+from civex.server.background import run_pending_jobs
+from civex.server.deps import get_ctx
+from civex.server.models import WorkflowJobResponse
+
+router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+@router.get("", response_model=list[WorkflowJobResponse])
+def list_jobs(
+    status: str | None = None,
+    record_id: str | None = None,
+    ctx: AppContext = Depends(get_ctx),
+):
+    jobs = ctx.job_svc.list_jobs(status=status)
+    if record_id:
+        jobs = [j for j in jobs if str(j.record_id) == record_id]
+    return [WorkflowJobResponse.from_dto(j) for j in jobs]
+
+
+@router.post("/drain", status_code=202)
+def drain_jobs(background_tasks: BackgroundTasks):
+    """Kick off the worker to process all pending jobs."""
+    background_tasks.add_task(run_pending_jobs)
+    return {"status": "draining"}
+
+
+@router.post("/{job_id}/rerun", response_model=WorkflowJobResponse, status_code=202)
+def rerun_job(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Enqueue a new job using the same workflow and record as an existing job."""
+    try:
+        original = ctx.job_svc.get_job(uuid.UUID(job_id))
+    except ValueError:
+        raise HTTPException(400, detail="Invalid job ID")
+    if original is None:
+        raise HTTPException(404, detail=f"Job '{job_id}' not found")
+
+    try:
+        record = ctx.record_svc.get(str(original.record_id))
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+
+    job = ctx.job_svc.enqueue_manual(original.workflow_name, record)
+    ctx.commit()
+    background_tasks.add_task(run_pending_jobs)
+    return WorkflowJobResponse.from_dto(job)
+
+
+@router.get("/{job_id}", response_model=WorkflowJobResponse)
+def get_job(job_id: str, ctx: AppContext = Depends(get_ctx)):
+    try:
+        job = ctx.job_svc.get_job(uuid.UUID(job_id))
+    except ValueError:
+        raise HTTPException(400, detail="Invalid job ID")
+    if job is None:
+        raise HTTPException(404, detail=f"Job '{job_id}' not found")
+    return WorkflowJobResponse.from_dto(job)

@@ -5,6 +5,10 @@ class CivexError(Exception):
     """Base for all domain errors — catch this to handle any civex failure."""
 
 
+class ConfigError(CivexError):
+    """Raised when no civex project can be found or config is invalid."""
+
+
 class NotFoundError(CivexError):
     pass
 

@@ -31,11 +31,15 @@ def init(
 
     objects_dir = civex_dir / "objects"
     objects_dir.mkdir()
+    (civex_dir / "workflows").mkdir()
+    (civex_dir / "plugins").mkdir()
 
     engine = create_engine(db_url)
     Base.metadata.create_all(engine)
 
     console.print(f"[success]Initialized civex project at {target}[/success]")
-    console.print(f"  Database  {db_path}")
-    console.print(f"  Objects   {objects_dir}")
-    console.print(f"  Config    {civex_dir / 'config.toml'}")
+    console.print(f"  Database   {db_path}")
+    console.print(f"  Objects    {objects_dir}")
+    console.print(f"  Workflows  {civex_dir / 'workflows'}")
+    console.print(f"  Plugins    {civex_dir / 'plugins'}")
+    console.print(f"  Config     {civex_dir / 'config.toml'}")

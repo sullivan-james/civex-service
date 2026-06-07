@@ -46,8 +46,6 @@ class DatasetDTO:
     id: uuid.UUID
     name: str
     description: str | None
-    schema_id: uuid.UUID
-    schema_name: str        # denormalised for display — resolved at read time
     record_count: int
     created_at: datetime
 
@@ -74,6 +72,25 @@ class FileRef:
 class RecordDTO:
     id: uuid.UUID
     dataset_id: uuid.UUID
+    schema_id: uuid.UUID
+    schema_name: str         # denormalised for display
+    parent_record_id: uuid.UUID | None  # set for child-schema records
     data: dict[str, Any]    # field_name → coerced value or FileRef.to_dict()
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass
+class WorkflowJobDTO:
+    id: uuid.UUID
+    workflow_name: str
+    record_id: uuid.UUID
+    schema_name: str
+    trigger: str             # record_created | record_updated | manual
+    status: str              # pending | running | completed | failed
+    error: str | None
+    log: str | None          # captured stdout/stderr from execution
+    input_data: dict[str, Any] | None  # pre-seeded __input__ step outputs for manual+batch runs
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None

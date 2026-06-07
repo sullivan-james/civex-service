@@ -52,6 +52,15 @@ class LocalSchemaRepository:
         self._s.flush()
         return _schema_to_dto(row)
 
+    def update(self, id: uuid.UUID, name: str | None, description: str | None) -> SchemaDTO:
+        row = self._s.query(Schema).filter_by(id=id).first()
+        if name is not None:
+            row.name = name
+        if description is not None:
+            row.description = description
+        self._s.flush()
+        return _schema_to_dto(row)
+
     def delete(self, id: uuid.UUID) -> None:
         row = self._s.query(Schema).filter_by(id=id).first()
         if row:
@@ -74,6 +83,12 @@ class LocalSchemaRepository:
             restrictions=restrictions,
         )
         self._s.add(row)
+        self._s.flush()
+        return _field_to_dto(row)
+
+    def update_field(self, field_id: uuid.UUID, required: bool) -> FieldDTO:
+        row = self._s.query(Field).filter_by(id=field_id).first()
+        row.required = required
         self._s.flush()
         return _field_to_dto(row)
 

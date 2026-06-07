@@ -1,0 +1,266 @@
+civex_version: 0.1.0
+exported_at: '2026-06-05T08:07:13.465929+00:00'
+schemas:
+- name: Encounter
+  description: null
+  parent: null
+  fields:
+  - name: encounter
+    type: string
+    required: true
+  - name: location
+    type: string
+    required: false
+  - name: project
+    type: string
+    required: false
+  - name: species
+    type: string
+    required: false
+- name: Recording
+  description: null
+  parent: Encounter
+  fields:
+  - name: start_time
+    type: string
+    required: true
+  - name: recording_file
+    type: file
+    required: false
+  - name: selection_table_file
+    type: file
+    required: false
+- name: Selection
+  description: null
+  parent: Recording
+  fields:
+  - name: selection_number
+    type: integer
+    required: true
+  - name: view
+    type: string
+    required: false
+  - name: channel
+    type: integer
+    required: false
+  - name: begin_time
+    type: float
+    required: true
+  - name: end_time
+    type: float
+    required: true
+  - name: low_frequency
+    type: float
+    required: false
+  - name: high_frequency
+    type: float
+    required: false
+  - name: delta_time
+    type: float
+    required: false
+  - name: delta_frequency
+    type: float
+    required: false
+  - name: avg_power
+    type: float
+    required: false
+  - name: annotation
+    type: string
+    required: false
+  - name: freq_max
+    type: float
+    required: false
+  - name: freq_min
+    type: float
+    required: false
+  - name: duration
+    type: float
+    required: false
+  - name: freq_begin
+    type: float
+    required: false
+  - name: freq_end
+    type: float
+    required: false
+  - name: freq_range
+    type: float
+    required: false
+  - name: dc_mean
+    type: float
+    required: false
+  - name: dc_standarddeviation
+    type: float
+    required: false
+  - name: freq_mean
+    type: float
+    required: false
+  - name: freq_standarddeviation
+    type: float
+    required: false
+  - name: freq_median
+    type: float
+    required: false
+  - name: freq_center
+    type: float
+    required: false
+  - name: freq_relbw
+    type: float
+    required: false
+  - name: freq_maxminratio
+    type: float
+    required: false
+  - name: freq_begendratio
+    type: float
+    required: false
+  - name: freq_quarter1
+    type: float
+    required: false
+  - name: freq_quarter2
+    type: float
+    required: false
+  - name: freq_quarter3
+    type: float
+    required: false
+  - name: freq_spread
+    type: float
+    required: false
+  - name: dc_quarter1mean
+    type: float
+    required: false
+  - name: dc_quarter2mean
+    type: float
+    required: false
+  - name: dc_quarter3mean
+    type: float
+    required: false
+  - name: dc_quarter4mean
+    type: float
+    required: false
+  - name: freq_cofm
+    type: float
+    required: false
+  - name: freq_stepup
+    type: integer
+    required: false
+  - name: freq_stepdown
+    type: integer
+    required: false
+  - name: freq_numsteps
+    type: integer
+    required: false
+  - name: freq_slopemean
+    type: float
+    required: false
+  - name: freq_absslopemean
+    type: float
+    required: false
+  - name: freq_posslopemean
+    type: float
+    required: false
+  - name: freq_negslopemean
+    type: float
+    required: false
+  - name: freq_sloperatio
+    type: float
+    required: false
+  - name: freq_begsweep
+    type: integer
+    required: false
+  - name: freq_begup
+    type: integer
+    required: false
+  - name: freq_begdown
+    type: integer
+    required: false
+  - name: freq_endsweep
+    type: integer
+    required: false
+  - name: freq_endup
+    type: integer
+    required: false
+  - name: freq_enddown
+    type: integer
+    required: false
+  - name: num_sweepsupdown
+    type: integer
+    required: false
+  - name: num_sweepsdownup
+    type: integer
+    required: false
+  - name: num_sweepsupflat
+    type: integer
+    required: false
+  - name: num_sweepsdownflat
+    type: integer
+    required: false
+  - name: num_sweepsflatup
+    type: integer
+    required: false
+  - name: num_sweepsflatdown
+    type: integer
+    required: false
+  - name: freq_sweepuppercent
+    type: float
+    required: false
+  - name: freq_sweepdownpercent
+    type: float
+    required: false
+  - name: freq_sweepflatpercent
+    type: float
+    required: false
+  - name: num_inflections
+    type: integer
+    required: false
+  - name: inflection_maxdelta
+    type: float
+    required: false
+  - name: inflection_mindelta
+    type: float
+    required: false
+  - name: inflection_maxmindelta
+    type: float
+    required: false
+  - name: inflection_mediandelta
+    type: float
+    required: false
+  - name: inflection_meandelta
+    type: float
+    required: false
+  - name: inflection_standarddeviationdelta
+    type: float
+    required: false
+  - name: inflection_duration
+    type: float
+    required: false
+  - name: step_duration
+    type: float
+    required: false
+  - name: contour_file
+    type: file
+    required: false
+datasets:
+- name: test
+  description: null
+records: []
+workflows:
+- filename: process-contour-file.yaml
+  content: "name: process-contour-file\ndescription: Load a contour file from a Selection\
+    \ record and calculate contour statistics.\n\ntriggers:\n  record_updated:\n \
+    \   schema: Selection\n    fields:\n      - contour_file\n\nsteps:\n  - id: load_bytes\n\
+    \    plugin: civex.load_file\n    config:\n      field: contour_file\n\n  - id:\
+    \ parse_csv\n    plugin: civex.load_csv\n    config:\n      delimiter: \",\"\n\
+    \    inputs:\n      bytes: load_bytes.bytes\n\n  - id: calculate_stats\n    plugin:\
+    \ project.calculate_contour_stats\n    inputs:\n      table: parse_csv.table\n\
+    \n  - id: save_stats\n    plugin: civex.save_fields\n    inputs:\n      updates:\
+    \ calculate_stats.updates\n"
+- filename: unpack-selection-table.yaml
+  content: "name: unpack-selection-table\ndescription: Parse a Raven selection table\
+    \ file on a Recording record and upsert Selection records.\n\ntriggers:\n  record_created:\n\
+    \    schema: Recording\n  record_updated:\n    schema: Recording\n    fields:\n\
+    \      - selection_table_file\n\nsteps:\n  - id: load_bytes\n    plugin: civex.load_file\n\
+    \    config:\n      field: selection_table_file\n\n  - id: parse_csv\n    plugin:\
+    \ civex.load_csv\n    config:\n      delimiter: \",\"\n    inputs:\n      bytes:\
+    \ load_bytes.bytes\n\n  - id: parse_table\n    plugin: project.parse_selection_table\n\
+    \    inputs:\n      table: parse_csv.table\n\n  - id: upsert_selections\n    plugin:\
+    \ civex.upsert_records\n    config:\n      schema: Selection\n      key_field:\
+    \ selection_number\n    inputs:\n      table: parse_table.table\n"

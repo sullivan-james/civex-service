@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% set active = 'schemas' %}
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ul>
+    <li><a href="/ui/schemas">Schemas</a></li>
+    <li>{{ schema.name }}</li>
+  </ul>
+</nav>
+
+<div style="display:flex; justify-content:space-between; align-items:center;">
+  <div>
+    <h2>{{ schema.name }}</h2>
+    {% if schema.description %}<p>{{ schema.description }}</p>{% endif %}
+    {% if schema.parent_id %}<p>Inherits from: <a href="/ui/schemas/{{ parent_name }}">{{ parent_name }}</a></p>{% endif %}
+  </div>
+  <button onclick="document.getElementById('add-field').setAttribute('open','')">+ Add field</button>
+</div>
+
+<dialog id="add-field">
+  <article>
+    <header>
+      <button aria-label="Close" rel="prev" onclick="document.getElementById('add-field').removeAttribute('open')"></button>
+      <h3>Add field to {{ schema.name }}</h3>
+    </header>
+    <form method="post" action="/ui/schemas/{{ schema.name }}/fields">
+      <label>Field name <input name="name" required autofocus></label>
+      <label>Type
+        <select name="type">
+          <option>string</option>
+          <option>integer</option>
+          <option>float</option>
+          <option>boolean</option>
+          <option>file</option>
+        </select>
+      </label>
+      <label><input type="checkbox" name="required" value="on"> Required</label>
+      <footer>
+        <button type="submit">Add</button>
+      </footer>
+    </form>
+  </article>
+</dialog>
+
+<h3>Fields</h3>
+{% if fields %}
+<table>
+  <thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Source</th></tr></thead>
+  <tbody>
+    {% for rf in fields %}
+    <tr class="{% if rf.source != schema.name %}inherited{% endif %}">
+      <td>{{ rf.field.name }}</td>
+      <td><span class="tag">{{ rf.field.type }}</span></td>
+      <td>{% if rf.field.required %}yes{% endif %}</td>
+      <td>{% if rf.source != schema.name %}↑ {{ rf.source }}{% else %}{{ rf.source }}{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No fields defined. Add one above.</p>
+{% endif %}
+
+<h3>Datasets using this schema</h3>
+{% if datasets %}
+<ul>
+  {% for d in datasets %}
+  <li><a href="/ui/datasets/{{ d.name }}">{{ d.name }}</a> ({{ d.record_count }} records)</li>
+  {% endfor %}
+</ul>
+{% else %}
+<p>No datasets.</p>
+{% endif %}
+{% endblock %}

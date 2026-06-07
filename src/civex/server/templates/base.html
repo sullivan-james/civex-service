@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>civex{% if title %} — {{ title }}{% endif %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+  <style>
+    nav a[aria-current] { font-weight: bold; }
+    .flash-error { color: var(--pico-color-red-500); margin-bottom: 1rem; }
+    .flash-ok    { color: var(--pico-color-green-500); margin-bottom: 1rem; }
+    table { font-size: 0.9rem; }
+    .tag  { font-size: 0.75rem; background: var(--pico-secondary-background); padding: 0.1rem 0.4rem; border-radius: 0.25rem; }
+    .inherited { color: var(--pico-muted-color); font-style: italic; }
+    .status-pending   { color: var(--pico-muted-color); }
+    .status-running   { color: var(--pico-color-blue-500); }
+    .status-completed { color: var(--pico-color-green-500); }
+    .status-failed    { color: var(--pico-color-red-500); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { display: inline-block; animation: spin 1s linear infinite; }
+  </style>
+  <script>
+    async function uploadFile(prefix, hiddenName) {
+      const input = document.getElementById(prefix + '_upload');
+      if (!input || !input.files[0]) return;
+      const fd = new FormData();
+      fd.append('file', input.files[0]);
+      const resp = await fetch('/files', { method: 'POST', body: fd });
+      if (!resp.ok) { alert('Upload failed'); return; }
+      const ref = await resp.json();
+      document.getElementById(prefix + '_value').value = JSON.stringify(ref);
+      const status = document.getElementById(prefix + '_status');
+      if (status) status.textContent = '✓ ' + ref.filename;
+    }
+  </script>
+</head>
+<body>
+  <header class="container-fluid" style="border-bottom: 1px solid var(--pico-muted-border-color); padding: 0.75rem 2rem;">
+    <nav>
+      <ul>
+        <li><a href="/ui"><strong>civex</strong></a></li>
+      </ul>
+      <ul>
+        <li><a href="/ui/schemas"   {% if active == 'schemas'   %}aria-current="true"{% endif %}>Schemas</a></li>
+        <li><a href="/ui/datasets"  {% if active == 'datasets'  %}aria-current="true"{% endif %}>Datasets</a></li>
+        <li><a href="/ui/workflows" {% if active == 'workflows' %}aria-current="true"{% endif %}>Workflows</a></li>
+        <li><a href="/ui/jobs"      {% if active == 'jobs'      %}aria-current="true"{% endif %}>Jobs</a></li>
+        <li><a href="/docs" target="_blank">API</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main class="container" style="padding-top: 2rem;">
+    {% if flash_error %}<p class="flash-error">{{ flash_error }}</p>{% endif %}
+    {% if flash_ok    %}<p class="flash-ok">{{ flash_ok }}</p>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+from typing import Optional
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+
+from civex.context import AppContext
+from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.server.background import run_pending_jobs
+from civex.server.deps import get_ctx
+from civex.server.models import (
+    CreateRecordRequest,
+    PaginatedRecordResponse,
+    RecordResponse,
+    UpdateRecordRequest,
+)
+
+router = APIRouter(tags=["records"])
+
+
+@router.get("/datasets/{dataset_name}/records", response_model=PaginatedRecordResponse)
+def list_records(
+    dataset_name: str,
+    schema: Optional[str] = Query(default=None),
+    parent_record_id: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(default=None, description="Full-text search across all field values"),
+    where: list[str] = Query(default=[]),
+    limit: int = Query(default=50, le=1000),
+    offset: int = Query(default=0, ge=0),
+    ctx: AppContext = Depends(get_ctx),
+):
+    try:
+        items = ctx.record_svc.find(
+            dataset_name,
+            schema_name=schema,
+            parent_record_id=parent_record_id or None,
+            filters=where,
+            search=search or None,
+            limit=limit,
+            offset=offset,
+        )
+        total = ctx.record_svc.count(
+            dataset_name,
+            schema_name=schema,
+            parent_record_id=parent_record_id or None,
+            filters=where,
+            search=search or None,
+        )
+    except (NotFoundError, ValueError) as e:
+        raise HTTPException(404 if isinstance(e, NotFoundError) else 422, detail=str(e))
+    return PaginatedRecordResponse(
+        items=[RecordResponse.from_dto(r) for r in items],
+        total=total,
+        offset=offset,
+        limit=limit,
+    )
+
+
+@router.post("/datasets/{dataset_name}/records", response_model=RecordResponse, status_code=201)
+def create_record(
+    dataset_name: str,
+    body: CreateRecordRequest,
+    background_tasks: BackgroundTasks,
+    ctx: AppContext = Depends(get_ctx),
+):
+    try:
+        dto = ctx.record_svc.add(
+            dataset_name, body.schema_name, body.data,
+            parent_record_id=body.parent_record_id,
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    ctx.commit()
+    background_tasks.add_task(run_pending_jobs)
+    return RecordResponse.from_dto(dto)
+
+
+@router.get("/records/{record_id}", response_model=RecordResponse)
+def get_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
+    try:
+        return RecordResponse.from_dto(ctx.record_svc.get(record_id))
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+
+
+@router.patch("/records/{record_id}", response_model=RecordResponse)
+def update_record(
+    record_id: str,
+    body: UpdateRecordRequest,
+    background_tasks: BackgroundTasks,
+    ctx: AppContext = Depends(get_ctx),
+):
+    try:
+        dto = ctx.record_svc.update(record_id, body.data)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    ctx.commit()
+    background_tasks.add_task(run_pending_jobs)
+    return RecordResponse.from_dto(dto)
+
+
+@router.delete("/records/{record_id}", status_code=204)
+def delete_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
+    try:
+        ctx.record_svc.delete(record_id)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+
+
