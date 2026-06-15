@@ -39,8 +39,15 @@ def push() -> None:
     since = config.remote.last_pushed_at
     console.print(f"Pushing to [bold]{config.remote.url}[/bold]" + (f" (changes since {since.date()})" if since else " (full)") + " ...")
 
+    from civex.repositories.local.audit_repo import LocalAuditRepository
     with Session(_engine()) as session:
+        audit_repo = LocalAuditRepository(session)
+        staged = audit_repo.count_staged()
+        if staged["total"] > 0:
+            audit_repo.create_commit(message="push")
+            session.commit()
         bundle = export_bundle(session, since)
+        unpushed_ids = [c.id for c in audit_repo.list_unpushed_commits()]
 
     # Push objects referenced by the bundle before the DB rows.
     from civex.repositories.local.file_store import LocalFileObjectStore
@@ -63,6 +70,11 @@ def push() -> None:
     now = datetime.now(timezone.utc)
     config.remote.last_pushed_at = now
     save_config(config)
+
+    if unpushed_ids:
+        with Session(_engine()) as session:
+            LocalAuditRepository(session).mark_pushed(unpushed_ids)
+            session.commit()
 
     console.print(f"[success]Push complete.[/success]")
     console.print(f"  Schemas    {len(bundle.schemas)}")

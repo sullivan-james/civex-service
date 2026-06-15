@@ -1,0 +1,1 @@
+ipx install --force "civex[postgres] @ git+ssh://git@github.com/sullivan-james/civex-service.git"

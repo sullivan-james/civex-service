@@ -12,7 +12,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from civex.db.models import Dataset, Field, Record, Schema
+from civex.db.models import AuditLog, Commit, Dataset, Field, Record, Schema
 from civex.sync.bundle import SyncBundle
 
 
@@ -32,6 +32,20 @@ def export_bundle(session: Session, since: datetime | None) -> SyncBundle:
         q = q.filter(Record.updated_at >= since_cmp)
     records = [_record_row(r) for r in q.all()]
 
+    unpushed_commits = (
+        session.query(Commit)
+        .filter(Commit.pushed_at.is_(None))
+        .order_by(Commit.created_at)
+        .all()
+    )
+    commit_ids = [c.id for c in unpushed_commits]
+    audit_entries = (
+        session.query(AuditLog)
+        .filter(AuditLog.commit_id.in_(commit_ids))
+        .order_by(AuditLog.timestamp)
+        .all()
+    ) if commit_ids else []
+
     return SyncBundle(
         version=1,
         exported_at=now.isoformat(),
@@ -40,6 +54,8 @@ def export_bundle(session: Session, since: datetime | None) -> SyncBundle:
         datasets=datasets,
         records=records,
         object_refs=_collect_object_refs(records),
+        commits=[_commit_row(c) for c in unpushed_commits],
+        audit_log=[_audit_row(e) for e in audit_entries],
     )
 
 
@@ -87,6 +103,31 @@ def _record_row(r: Record) -> dict:
         "data": r.data or {},
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+    }
+
+
+def _commit_row(r: Commit) -> dict:
+    return {
+        "id": str(r.id),
+        "message": r.message,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "record_count": r.record_count,
+        "schema_count": r.schema_count,
+        "dataset_count": r.dataset_count,
+        "pushed_at": r.pushed_at.isoformat() if r.pushed_at else None,
+    }
+
+
+def _audit_row(r: AuditLog) -> dict:
+    return {
+        "id": str(r.id),
+        "commit_id": str(r.commit_id) if r.commit_id else None,
+        "action": r.action,
+        "entity_type": r.entity_type,
+        "entity_id": str(r.entity_id),
+        "old_data": r.old_data,
+        "new_data": r.new_data,
+        "timestamp": r.timestamp.isoformat() if r.timestamp else None,
     }
 
 

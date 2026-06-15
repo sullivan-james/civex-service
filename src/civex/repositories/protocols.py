@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from civex.domain.dtos import DatasetDTO, FieldDTO, FileRef, RecordDTO, SchemaDTO, WorkflowJobDTO
+from civex.domain.dtos import AuditLogDTO, CommitDTO, DatasetDTO, FieldDTO, FileRef, RecordDTO, SchemaDTO, WorkflowJobDTO
 
 
 @runtime_checkable
@@ -93,6 +93,19 @@ class WorkflowJobRepository(Protocol):
     def mark_failed(self, job_id: uuid.UUID, error: str, log: str | None = None) -> None: ...
     def list_all(self, status: str | None = None) -> list[WorkflowJobDTO]: ...
     def get_by_id(self, job_id: uuid.UUID) -> WorkflowJobDTO | None: ...
+
+
+@runtime_checkable
+class AuditRepository(Protocol):
+    """Write-side audit interface used by services to record changes."""
+    def log_change(
+        self,
+        action: str,
+        entity_type: str,
+        entity_id: uuid.UUID,
+        old_data: dict | None,
+        new_data: dict | None,
+    ) -> None: ...
 
 
 @runtime_checkable

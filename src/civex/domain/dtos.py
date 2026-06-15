@@ -81,6 +81,29 @@ class RecordDTO:
 
 
 @dataclass
+class CommitDTO:
+    id: uuid.UUID
+    message: str | None
+    created_at: datetime
+    record_count: int
+    schema_count: int
+    dataset_count: int
+    pushed_at: datetime | None
+
+
+@dataclass
+class AuditLogDTO:
+    id: uuid.UUID
+    commit_id: uuid.UUID | None
+    action: str              # "create" | "update" | "delete"
+    entity_type: str         # "record" | "schema" | "field" | "dataset"
+    entity_id: uuid.UUID
+    old_data: dict[str, Any] | None
+    new_data: dict[str, Any] | None
+    timestamp: datetime
+
+
+@dataclass
 class WorkflowJobDTO:
     id: uuid.UUID
     workflow_name: str

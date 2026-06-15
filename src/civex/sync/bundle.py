@@ -21,6 +21,8 @@ class SyncBundle:
     datasets: list[dict[str, Any]]    # full Dataset rows
     records: list[dict[str, Any]]     # incremental Record rows (updated_at >= since)
     object_refs: list[str] = field(default_factory=list)  # sha256s that exist on source
+    commits: list[dict[str, Any]] = field(default_factory=list)
+    audit_log: list[dict[str, Any]] = field(default_factory=list)
 
     def to_json(self) -> str:
         return json.dumps({
@@ -31,6 +33,8 @@ class SyncBundle:
             "datasets": self.datasets,
             "records": self.records,
             "object_refs": self.object_refs,
+            "commits": self.commits,
+            "audit_log": self.audit_log,
         })
 
     @classmethod
@@ -44,4 +48,6 @@ class SyncBundle:
             datasets=d["datasets"],
             records=d["records"],
             object_refs=d.get("object_refs", []),
+            commits=d.get("commits", []),
+            audit_log=d.get("audit_log", []),
         )

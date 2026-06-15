@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -116,6 +116,37 @@ class Record(Base):
 
     dataset: Mapped[Dataset] = relationship("Dataset", back_populates="records")
     schema: Mapped[Schema] = relationship("Schema")
+
+
+class Commit(Base):
+    """A named snapshot grouping a set of audit log entries (uncommitted changes)."""
+    __tablename__ = "commits"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    message: Mapped[str | None] = mapped_column(String(1000))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    record_count: Mapped[int] = mapped_column(Integer, default=0)
+    schema_count: Mapped[int] = mapped_column(Integer, default=0)
+    dataset_count: Mapped[int] = mapped_column(Integer, default=0)
+    pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    entries: Mapped[list[AuditLog]] = relationship("AuditLog", back_populates="commit")
+
+
+class AuditLog(Base):
+    """One row per entity write — create, update, or delete — from any source."""
+    __tablename__ = "audit_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    commit_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("commits.id"), nullable=True)
+    action: Mapped[str] = mapped_column(String(20), nullable=False)   # create | update | delete
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)  # record | schema | field | dataset
+    entity_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    old_data: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    new_data: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    commit: Mapped[Commit | None] = relationship("Commit", back_populates="entries")
 
 
 class WorkflowJob(Base):

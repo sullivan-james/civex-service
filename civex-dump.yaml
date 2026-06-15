@@ -1,5 +1,5 @@
 civex_version: 0.1.0
-exported_at: '2026-06-05T08:07:13.465929+00:00'
+exported_at: '2026-06-07T06:43:26.546523+00:00'
 schemas:
 - name: Encounter
   description: null
@@ -243,24 +243,35 @@ datasets:
   description: null
 records: []
 workflows:
+- filename: load-contour-files.yaml
+  content: "name: load-contour-files\ndescription: Match uploaded contour files to\
+    \ Selection records by filename, then trigger stat calculation.\nrecord_schema:\
+    \ Recording\n\ninputs:\n  files:\n    type: files\n    label: Contour files\n\
+    \    description: >\n      Raven contour CSV files. Each filename must contain\
+    \ the selection number\n      as a capture group matched by the pattern in the\
+    \ match step (default: sel_(\\d+)).\n\nsteps:\n  - id: match\n    plugin: civex.match_files_to_records\n\
+    \    config:\n      schema: Selection\n      key_field: selection_number\n   \
+    \   file_field: contour_file\n      pattern: 'sel_(\\d+)'\n    inputs:\n     \
+    \ files: __input__.files\n"
 - filename: process-contour-file.yaml
   content: "name: process-contour-file\ndescription: Load a contour file from a Selection\
-    \ record and calculate contour statistics.\n\ntriggers:\n  record_updated:\n \
-    \   schema: Selection\n    fields:\n      - contour_file\n\nsteps:\n  - id: load_bytes\n\
-    \    plugin: civex.load_file\n    config:\n      field: contour_file\n\n  - id:\
-    \ parse_csv\n    plugin: civex.load_csv\n    config:\n      delimiter: \",\"\n\
-    \    inputs:\n      bytes: load_bytes.bytes\n\n  - id: calculate_stats\n    plugin:\
-    \ project.calculate_contour_stats\n    inputs:\n      table: parse_csv.table\n\
-    \n  - id: save_stats\n    plugin: civex.save_fields\n    inputs:\n      updates:\
-    \ calculate_stats.updates\n"
+    \ record and calculate contour statistics.\nrecord_schema: Selection\n\ntriggers:\n\
+    \  record_updated:\n    schema: Selection\n    fields:\n      - contour_file\n\
+    \nsteps:\n  - id: load_bytes\n    plugin: civex.load_file\n    config:\n     \
+    \ field: contour_file\n\n  - id: parse_csv\n    plugin: civex.load_csv\n    config:\n\
+    \      delimiter: \",\"\n    inputs:\n      bytes: load_bytes.bytes\n\n  - id:\
+    \ calculate_stats\n    plugin: project.calculate_contour_stats\n    inputs:\n\
+    \      table: parse_csv.table\n\n  - id: save_stats\n    plugin: civex.save_fields\n\
+    \    inputs:\n      updates: calculate_stats.updates\n"
 - filename: unpack-selection-table.yaml
   content: "name: unpack-selection-table\ndescription: Parse a Raven selection table\
-    \ file on a Recording record and upsert Selection records.\n\ntriggers:\n  record_created:\n\
-    \    schema: Recording\n  record_updated:\n    schema: Recording\n    fields:\n\
-    \      - selection_table_file\n\nsteps:\n  - id: load_bytes\n    plugin: civex.load_file\n\
-    \    config:\n      field: selection_table_file\n\n  - id: parse_csv\n    plugin:\
-    \ civex.load_csv\n    config:\n      delimiter: \",\"\n    inputs:\n      bytes:\
-    \ load_bytes.bytes\n\n  - id: parse_table\n    plugin: project.parse_selection_table\n\
-    \    inputs:\n      table: parse_csv.table\n\n  - id: upsert_selections\n    plugin:\
-    \ civex.upsert_records\n    config:\n      schema: Selection\n      key_field:\
-    \ selection_number\n    inputs:\n      table: parse_table.table\n"
+    \ file on a Recording record and upsert Selection records.\nrecord_schema: Recording\n\
+    \ntriggers:\n  record_created:\n    schema: Recording\n  record_updated:\n   \
+    \ schema: Recording\n    fields:\n      - selection_table_file\n\nsteps:\n  -\
+    \ id: load_bytes\n    plugin: civex.load_file\n    config:\n      field: selection_table_file\n\
+    \n  - id: parse_csv\n    plugin: civex.load_csv\n    config:\n      delimiter:\
+    \ \",\"\n    inputs:\n      bytes: load_bytes.bytes\n\n  - id: parse_table\n \
+    \   plugin: project.parse_selection_table\n    inputs:\n      table: parse_csv.table\n\
+    \n  - id: upsert_selections\n    plugin: civex.upsert_records\n    config:\n \
+    \     schema: Selection\n      key_field: selection_number\n    inputs:\n    \
+    \  table: parse_table.table\n"

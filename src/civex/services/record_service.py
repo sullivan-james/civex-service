@@ -7,7 +7,7 @@ from typing import Any
 
 from civex.domain.dtos import FileRef, RecordDTO, ResolvedField
 from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
-from civex.repositories.protocols import DatasetRepository, FileObjectStore, RecordRepository
+from civex.repositories.protocols import AuditRepository, DatasetRepository, FileObjectStore, RecordRepository
 from civex.services.schema_service import SchemaService
 
 from typing import TYPE_CHECKING
@@ -30,12 +30,14 @@ class RecordService:
         record_repo: RecordRepository,
         file_store: FileObjectStore,
         job_svc: WorkflowJobService | None = None,
+        audit_repo: AuditRepository | None = None,
     ) -> None:
         self._schema_svc = schema_svc
         self._datasets = dataset_repo
         self._records = record_repo
         self._files = file_store
         self._job_svc = job_svc
+        self._audit = audit_repo
 
     # ------------------------------------------------------------------
     # Field ID translation (name-keyed ↔ UUID-keyed record data)
@@ -140,6 +142,8 @@ class RecordService:
             parent_record_id=resolved_parent_id,
         )
         named = self._with_names(dto)
+        if self._audit:
+            self._audit.log_change("create", "record", dto.id, None, named.data)
         if self._job_svc:
             self._job_svc.trigger_for_record(named, "record_created")
         return named
@@ -158,6 +162,8 @@ class RecordService:
         id_data = self._names_to_ids(data, raw.schema_id)
         dto = self._records.update(id=raw.id, data=id_data)
         named = self._with_names(dto)
+        if self._audit:
+            self._audit.log_change("update", "record", raw.id, old_data, named.data)
         if self._job_svc:
             changed = {k for k in set(old_data) | set(named.data) if old_data.get(k) != named.data.get(k)}
             self._job_svc.trigger_for_record(named, "record_updated", changed_fields=changed)
@@ -248,4 +254,6 @@ class RecordService:
 
     def delete(self, record_id: str) -> None:
         record = self.get(record_id)
+        if self._audit:
+            self._audit.log_change("delete", "record", record.id, record.data, None)
         self._records.delete(record.id)

@@ -5,14 +5,15 @@ from typing import Any
 
 from civex.domain.dtos import FieldDTO, ResolvedField, SchemaDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError
-from civex.repositories.protocols import SchemaRepository
+from civex.repositories.protocols import AuditRepository, SchemaRepository
 
 VALID_DTYPES = frozenset(["integer", "float", "string", "boolean", "file"])
 
 
 class SchemaService:
-    def __init__(self, repo: SchemaRepository) -> None:
+    def __init__(self, repo: SchemaRepository, audit_repo: AuditRepository | None = None) -> None:
         self._repo = repo
+        self._audit = audit_repo
 
     def create(
         self,
@@ -30,7 +31,10 @@ class SchemaService:
                 raise NotFoundError(f"Parent schema '{parent}' not found")
             parent_id = parent_dto.id
 
-        return self._repo.create(name=name, description=description, parent_id=parent_id)
+        dto = self._repo.create(name=name, description=description, parent_id=parent_id)
+        if self._audit:
+            self._audit.log_change("create", "schema", dto.id, None, {"name": dto.name, "description": dto.description})
+        return dto
 
     def get(self, name: str) -> SchemaDTO:
         dto = self._repo.get_by_name(name)
@@ -57,13 +61,16 @@ class SchemaService:
         if any(f.name == field_name for f in schema.fields):
             raise AlreadyExistsError(f"Field '{field_name}' already exists on schema '{schema_name}'")
 
-        return self._repo.add_field(
+        field = self._repo.add_field(
             schema_id=schema.id,
             name=field_name,
             dtype=dtype,
             required=required,
             restrictions=restrictions or {},
         )
+        if self._audit:
+            self._audit.log_change("create", "field", field.id, None, {"name": field_name, "dtype": dtype, "schema": schema_name})
+        return field
 
     def update(
         self,
@@ -86,6 +93,8 @@ class SchemaService:
 
     def delete(self, name: str) -> None:
         schema = self.get(name)
+        if self._audit:
+            self._audit.log_change("delete", "schema", schema.id, {"name": schema.name, "description": schema.description}, None)
         self._repo.delete(schema.id)
 
     def name_to_id_map(self, schema: SchemaDTO) -> dict[str, str]:

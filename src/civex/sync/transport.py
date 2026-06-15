@@ -1,12 +1,13 @@
 """
 Transport layer for remote sync.
 
-Two implementations:
+Three implementations:
   LocalTransport  — file:// or absolute path; opens the bare repo's SQLite directly.
   SSHTransport    — ssh://user@host/path; spawns civex plumbing commands on the remote.
+  HttpTransport   — https://hub/owner/repo; talks to a civex-hub server via HTTP(S).
 
 Usage:
-  transport = get_transport("ssh://user@host:/srv/repos/myrepo")
+  transport = get_transport("https://civexhub.example.com/alice/myrepo")
   bundle = transport.transfer_pack(since=None)   # full clone
   transport.receive_pack(bundle)                 # push bundle to remote
   data = transport.get_object("sha256hex")       # lazy object fetch
@@ -111,11 +112,78 @@ class SSHTransport:
         self._ssh(self._civex, "put-object", self._remote_path, sha256, stdin=data)
 
 
-def get_transport(url: str, remote_civex: str = "civex") -> tuple[LocalTransport | SSHTransport, str]:
+class HttpTransport:
+    """Accesses a civex-hub repo over HTTP(S)."""
+
+    def __init__(self, base_url: str, owner: str, repo: str, token: str) -> None:
+        self._base = base_url.rstrip("/")
+        self._owner = owner
+        self._repo = repo
+        self._token = token
+
+    def _url(self, path: str) -> str:
+        return f"{self._base}/api/v1/repos/{self._owner}/{self._repo}/{path}"
+
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._token}"}
+
+    def _request(self, method: str, url: str, data: bytes | None = None) -> bytes:
+        import urllib.request
+        req = urllib.request.Request(url, data=data, headers=self._headers(), method=method)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as e:
+            raise SyncError(f"HTTP {e.code} from {url}: {e.read().decode(errors='replace')}")
+
+    def transfer_pack(self, since: datetime | None) -> SyncBundle:
+        path = "transfer-pack"
+        if since is not None:
+            from urllib.parse import quote
+            path += f"?since={quote(since.isoformat())}"
+        raw = self._request("GET", self._url(path))
+        return SyncBundle.from_json(raw.decode())
+
+    def receive_pack(self, bundle: SyncBundle) -> None:
+        self._request("POST", self._url("receive-pack"), data=bundle.to_json().encode())
+
+    def get_object(self, sha256: str) -> bytes:
+        return self._request("GET", self._url(f"objects/{sha256}"))
+
+    def put_object(self, sha256: str, data: bytes) -> None:
+        self._request("PUT", self._url(f"objects/{sha256}"), data=data)
+
+
+def _load_token(base_url: str) -> str:
+    """Read the stored auth token for a hub URL from ~/.civex/tokens.toml."""
+    tokens_path = Path.home() / ".civex" / "tokens.toml"
+    if not tokens_path.exists():
+        raise SyncError(
+            f"Not logged in to {base_url}. Run `civex auth login {base_url}` first."
+        )
+    try:
+        import tomllib
+        with open(tokens_path, "rb") as f:
+            data = tomllib.load(f)
+    except Exception as e:
+        raise SyncError(f"Failed to read token store: {e}")
+
+    entry = data.get(base_url, {})
+    token = entry.get("token")
+    if not token:
+        raise SyncError(
+            f"No token found for {base_url}. Run `civex auth login {base_url}` first."
+        )
+    return token
+
+
+def get_transport(url: str, remote_civex: str = "civex") -> tuple[LocalTransport | SSHTransport | HttpTransport, str]:
     """
     Parse a remote URL and return (transport, remote_path).
 
     Supported schemes:
+      https://civexhub.example.com/owner/repo  (civex-hub)
+      http://localhost:8001/owner/repo          (civex-hub, local dev)
       ssh://[user@]host[:port]/path
       file:///path
       /abs/path  (treated as file://)
@@ -127,6 +195,17 @@ def get_transport(url: str, remote_civex: str = "civex") -> tuple[LocalTransport
 
     if parsed.scheme == "file":
         return LocalTransport(Path(parsed.path)), parsed.path
+
+    if parsed.scheme in ("http", "https"):
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+        parts = parsed.path.strip("/").split("/")
+        if len(parts) < 2:
+            raise SyncError(
+                f"Invalid civex-hub URL '{url}'. Expected https://hub/owner/repo"
+            )
+        owner, repo_name = parts[0], parts[1]
+        token = _load_token(base_url)
+        return HttpTransport(base_url, owner, repo_name, token), parsed.path
 
     if parsed.scheme == "ssh":
         netloc = parsed.netloc  # "user@host" or "host" or "user@host:port"
@@ -152,4 +231,4 @@ def get_transport(url: str, remote_civex: str = "civex") -> tuple[LocalTransport
 
         return SSHTransport(host=host, remote_path=path, user=user, port=port, civex_cmd=remote_civex), path
 
-    raise SyncError(f"Unsupported remote URL scheme '{parsed.scheme}'. Use ssh:// or file://")
+    raise SyncError(f"Unsupported remote URL scheme '{parsed.scheme}'. Use https://, ssh://, or file://")

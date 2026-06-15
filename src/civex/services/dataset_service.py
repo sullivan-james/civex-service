@@ -2,17 +2,21 @@ from __future__ import annotations
 
 from civex.domain.dtos import DatasetDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError
-from civex.repositories.protocols import DatasetRepository
+from civex.repositories.protocols import AuditRepository, DatasetRepository
 
 
 class DatasetService:
-    def __init__(self, dataset_repo: DatasetRepository) -> None:
+    def __init__(self, dataset_repo: DatasetRepository, audit_repo: AuditRepository | None = None) -> None:
         self._datasets = dataset_repo
+        self._audit = audit_repo
 
     def create(self, name: str, description: str | None = None) -> DatasetDTO:
         if self._datasets.get_by_name(name):
             raise AlreadyExistsError(f"Dataset '{name}' already exists")
-        return self._datasets.create(name=name, description=description)
+        dto = self._datasets.create(name=name, description=description)
+        if self._audit:
+            self._audit.log_change("create", "dataset", dto.id, None, {"name": dto.name, "description": dto.description})
+        return dto
 
     def get(self, name: str) -> DatasetDTO:
         dto = self._datasets.get_by_name(name)
@@ -37,4 +41,6 @@ class DatasetService:
 
     def delete(self, name: str) -> None:
         dataset = self.get(name)
+        if self._audit:
+            self._audit.log_change("delete", "dataset", dataset.id, {"name": dataset.name, "description": dataset.description}, None)
         self._datasets.delete(dataset.id)

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from civex.db.models import Dataset, Field, Record, Schema
+from civex.db.models import AuditLog, Commit, Dataset, Field, Record, Schema
 from civex.sync.bundle import SyncBundle
 
 
@@ -21,6 +21,8 @@ def apply_bundle(session: Session, bundle: SyncBundle) -> None:
     _upsert_fields(session, bundle.fields)
     _upsert_datasets(session, bundle.datasets)
     _upsert_records(session, bundle.records)
+    _upsert_commits(session, bundle.commits)
+    _upsert_audit_log(session, bundle.audit_log)
     session.flush()
 
 
@@ -107,6 +109,42 @@ def _upsert_records(session: Session, rows: list[dict]) -> None:
             if incoming_updated and (local_updated is None or incoming_updated > local_updated):
                 existing.data = d.get("data") or {}
                 existing.updated_at = incoming_updated
+
+
+def _upsert_commits(session: Session, rows: list[dict]) -> None:
+    now = datetime.now(timezone.utc)
+    for d in rows:
+        uid = uuid.UUID(d["id"])
+        existing = session.get(Commit, uid)
+        if existing is None:
+            session.add(Commit(
+                id=uid,
+                message=d.get("message"),
+                created_at=_parse_dt(d.get("created_at")) or now,
+                record_count=d.get("record_count", 0),
+                schema_count=d.get("schema_count", 0),
+                dataset_count=d.get("dataset_count", 0),
+                pushed_at=now,
+            ))
+        else:
+            if not existing.pushed_at:
+                existing.pushed_at = now
+
+
+def _upsert_audit_log(session: Session, rows: list[dict]) -> None:
+    for d in rows:
+        uid = uuid.UUID(d["id"])
+        if session.get(AuditLog, uid) is None:
+            session.add(AuditLog(
+                id=uid,
+                commit_id=uuid.UUID(d["commit_id"]) if d.get("commit_id") else None,
+                action=d["action"],
+                entity_type=d["entity_type"],
+                entity_id=uuid.UUID(d["entity_id"]),
+                old_data=d.get("old_data"),
+                new_data=d.get("new_data"),
+                timestamp=_parse_dt(d.get("timestamp")) or datetime.now(timezone.utc),
+            ))
 
 
 def _parse_dt(s: str | None) -> datetime | None:
