@@ -18,7 +18,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="civex",
         description="Research data management API",
-        version="0.1.0",
+        version="0.0.3",
     )
 
     @app.exception_handler(CivexError)
