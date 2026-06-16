@@ -1,18 +1,40 @@
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
-from sqlalchemy import cast, func, String
+from sqlalchemy import cast, func, literal, String
+from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlalchemy.orm import Session
 
 from civex.db.models import Record, Schema
 from civex.domain.dtos import RecordDTO
 
 
+def _coerce_json_value(v: str) -> Any:
+    """Parse v as JSON so JSONB @> containment is type-correct (e.g. "30" → 30)."""
+    try:
+        return json.loads(v)
+    except (json.JSONDecodeError, ValueError):
+        return v
+
+
+def _search_text(data: dict[str, Any]) -> str:
+    """Concatenate searchable values for FTS. Skips bools and file-ref dicts."""
+    parts: list[str] = []
+    for v in data.values():
+        if isinstance(v, bool) or isinstance(v, dict):
+            continue
+        if isinstance(v, (str, int, float)):
+            parts.append(str(v))
+    return " ".join(parts)
+
+
 class LocalRecordRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, is_postgres: bool = False) -> None:
         self._s = session
+        self._pg = is_postgres
 
     def get_by_id(self, id: uuid.UUID) -> RecordDTO | None:
         row = self._s.query(Record).filter_by(id=id).first()
@@ -49,7 +71,7 @@ class LocalRecordRepository:
         offset: int,
         limit: int,
     ) -> list[RecordDTO]:
-        q = _base_query(self._s, dataset_id, schema_id, parent_record_id, field_filters, search)
+        q = _base_query(self._s, dataset_id, schema_id, parent_record_id, field_filters, search, self._pg)
         rows = q.order_by(Record.created_at).offset(offset).limit(limit).all()
         return [_to_dto(r) for r in rows]
 
@@ -61,7 +83,7 @@ class LocalRecordRepository:
         field_filters: list[tuple[str, str]],
         search: str | None,
     ) -> int:
-        q = _base_query(self._s, dataset_id, schema_id, parent_record_id, field_filters, search)
+        q = _base_query(self._s, dataset_id, schema_id, parent_record_id, field_filters, search, self._pg)
         return q.count()
 
     def count_by_schema(self, dataset_id: uuid.UUID) -> dict[str, int]:
@@ -81,7 +103,14 @@ class LocalRecordRepository:
         data: dict[str, Any],
         parent_record_id: uuid.UUID | None = None,
     ) -> RecordDTO:
-        row = Record(dataset_id=dataset_id, schema_id=schema_id, data=data, parent_record_id=parent_record_id)
+        sv = func.to_tsvector("simple", _search_text(data)) if self._pg else None
+        row = Record(
+            dataset_id=dataset_id,
+            schema_id=schema_id,
+            data=data,
+            parent_record_id=parent_record_id,
+            search_vector=sv,
+        )
         self._s.add(row)
         self._s.flush()
         return _to_dto(row)
@@ -89,6 +118,7 @@ class LocalRecordRepository:
     def update(self, id: uuid.UUID, data: dict[str, Any]) -> RecordDTO:
         row = self._s.query(Record).filter_by(id=id).first()
         row.data = data
+        row.search_vector = func.to_tsvector("simple", _search_text(data)) if self._pg else None
         self._s.flush()
         return _to_dto(row)
 
@@ -106,6 +136,7 @@ def _base_query(
     parent_record_id: uuid.UUID | None,
     field_filters: list[tuple[str, str]],
     search: str | None = None,
+    is_postgres: bool = False,
 ):
     q = session.query(Record).filter(Record.dataset_id == dataset_id)
     if schema_id is not None:
@@ -113,15 +144,21 @@ def _base_query(
     if parent_record_id is not None:
         q = q.filter(Record.parent_record_id == parent_record_id)
     for key, value in field_filters:
-        # cast(data[key], String) compiles to:
-        #   SQLite:     CAST(json_extract(data, '$.key') AS VARCHAR)
-        #   PostgreSQL: CAST(data ->> 'key' AS VARCHAR)
-        q = q.filter(cast(Record.data[key], String) == value)
+        if is_postgres:
+            # @> containment uses the GIN index on PostgreSQL.
+            # _coerce_json_value converts "30" → 30 so numeric/bool fields match correctly.
+            doc = json.dumps({key: _coerce_json_value(value)})
+            q = q.filter(Record.data.op("@>")(cast(literal(doc), PG_JSONB)))
+        else:
+            # cast(data[key], String) compiles to CAST(json_extract(data, '$.key') AS VARCHAR) on SQLite.
+            q = q.filter(cast(Record.data[key], String) == value)
     if search:
-        # Full-text search across the entire JSON data blob.
-        # ilike compiles to LOWER(col) LIKE LOWER(pattern) on SQLite,
-        # and col ILIKE pattern on PostgreSQL.
-        q = q.filter(cast(Record.data, String).ilike(f"%{search}%"))
+        if is_postgres:
+            q = q.filter(
+                Record.search_vector.op("@@")(func.plainto_tsquery("simple", search))
+            )
+        else:
+            q = q.filter(cast(Record.data, String).ilike(f"%{search}%"))
     return q
 
 

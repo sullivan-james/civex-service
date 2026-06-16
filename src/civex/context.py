@@ -61,6 +61,19 @@ def _apply_migrations(session: Session, engine: Engine) -> None:
     from sqlalchemy import text
     migrations = [
         "ALTER TABLE workflow_jobs ADD COLUMN log TEXT",
+        "ALTER TABLE records ADD COLUMN search_vector TSVECTOR",
+        "CREATE INDEX IF NOT EXISTS ix_records_search_vector ON records USING gin(search_vector)",
+        (
+            "UPDATE records "
+            "SET search_vector = to_tsvector('simple', ("
+            "  SELECT coalesce(string_agg(value, ' '), '') "
+            "  FROM jsonb_each_text(data) "
+            "  WHERE value IS NOT NULL "
+            "    AND value NOT IN ('true', 'false') "
+            "    AND value NOT LIKE '{%'"
+            "))"
+        ),
+        "ALTER TABLE commits ADD COLUMN seq INTEGER",
     ]
     for sql in migrations:
         try:
@@ -68,6 +81,21 @@ def _apply_migrations(session: Session, engine: Engine) -> None:
             session.commit()
         except Exception:
             session.rollback()
+
+    # Backfill seq for any commits that predate the column.
+    from civex.db.models import Commit as _Commit
+    unsequenced = (
+        session.query(_Commit)
+        .filter(_Commit.seq.is_(None))
+        .order_by(_Commit.created_at)
+        .all()
+    )
+    if unsequenced:
+        from sqlalchemy import func as _func
+        max_seq = session.query(_func.max(_Commit.seq)).scalar() or 0
+        for i, row in enumerate(unsequenced, start=max_seq + 1):
+            row.seq = i
+        session.commit()
 
 
 def build_local_context(
@@ -79,7 +107,7 @@ def build_local_context(
     _apply_migrations(session, engine)
     schema_repo = LocalSchemaRepository(session)
     dataset_repo = LocalDatasetRepository(session)
-    record_repo = LocalRecordRepository(session)
+    record_repo = LocalRecordRepository(session, is_postgres=engine.dialect.name == "postgresql")
     job_repo = LocalWorkflowJobRepository(session)
     audit_repo = LocalAuditRepository(session)
     if file_store is None:

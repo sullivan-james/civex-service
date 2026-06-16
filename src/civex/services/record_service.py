@@ -143,7 +143,7 @@ class RecordService:
         )
         named = self._with_names(dto)
         if self._audit:
-            self._audit.log_change("create", "record", dto.id, None, named.data)
+            self._audit.log_change("create", "record", dto.id, None, named.to_dict())
         if self._job_svc:
             self._job_svc.trigger_for_record(named, "record_created")
         return named
@@ -163,7 +163,8 @@ class RecordService:
         dto = self._records.update(id=raw.id, data=id_data)
         named = self._with_names(dto)
         if self._audit:
-            self._audit.log_change("update", "record", raw.id, old_data, named.data)
+            old_named = dataclasses.replace(raw, data=old_data, schema_name=named.schema_name)
+            self._audit.log_change("update", "record", raw.id, old_named.to_dict(), named.to_dict())
         if self._job_svc:
             changed = {k for k in set(old_data) | set(named.data) if old_data.get(k) != named.data.get(k)}
             self._job_svc.trigger_for_record(named, "record_updated", changed_fields=changed)
@@ -255,5 +256,5 @@ class RecordService:
     def delete(self, record_id: str) -> None:
         record = self.get(record_id)
         if self._audit:
-            self._audit.log_change("delete", "record", record.id, record.data, None)
+            self._audit.log_change("delete", "record", record.id, record.to_dict(), None)
         self._records.delete(record.id)

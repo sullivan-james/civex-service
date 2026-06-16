@@ -2,12 +2,12 @@ from typing import Optional
 
 import typer
 
-from civex.cli import auth, dataset, plugin, record, remote, schema, workflow, worker
+from civex.cli import auth, dataset, db, plugin, record, remote, schema, workflow, worker
 from civex.cli.clone import clone
 from civex.cli.dump import dump, restore
 from civex.cli.init import init
 from civex.cli.log import commit, log
-from civex.cli.plumbing import get_object, put_object, receive_pack, transfer_pack
+from civex.cli.plumbing import get_object, head_seq, put_object, receive_pack, transfer_pack
 from civex.cli.resolve import resolve
 from civex.cli.status import status
 from civex.cli.sync import pull, push
@@ -26,6 +26,7 @@ _COLLAB = "Collaborate"
 
 app.command("init", rich_help_panel=_START)(init)
 app.command("clone", rich_help_panel=_START)(clone)
+app.add_typer(db.app, name="db", rich_help_panel=_START)
 
 app.add_typer(schema.app, name="schema", rich_help_panel=_WORK)
 app.add_typer(dataset.app, name="dataset", rich_help_panel=_WORK)
@@ -49,6 +50,7 @@ app.command("restore", rich_help_panel=_COLLAB)(restore)
 # Plumbing commands — called by SSHTransport on the remote side via SSH subprocess.
 app.command("transfer-pack", hidden=True)(transfer_pack)
 app.command("receive-pack", hidden=True)(receive_pack)
+app.command("head-seq", hidden=True)(head_seq)
 app.command("get-object", hidden=True)(get_object)
 app.command("put-object", hidden=True)(put_object)
 

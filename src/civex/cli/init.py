@@ -12,15 +12,16 @@ from civex.db.models import Base
 def init(
     path: Path = typer.Argument(Path("."), help="Directory to initialize"),
     bare: bool = typer.Option(False, "--bare", help="Create a bare repository (remote storage, no working directory)"),
+    sqlite: bool = typer.Option(False, "--sqlite", help="Force SQLite instead of Docker PostgreSQL"),
 ) -> None:
     """Initialize a new civex project in the given directory."""
     if bare:
         _init_bare(path.resolve())
     else:
-        _init_working(path.resolve())
+        _init_working(path.resolve(), use_sqlite=sqlite)
 
 
-def _init_working(target: Path) -> None:
+def _init_working(target: Path, use_sqlite: bool = False) -> None:
     civex_dir = target / ".civex"
 
     if civex_dir.exists():
@@ -28,29 +29,87 @@ def _init_working(target: Path) -> None:
         raise typer.Exit(0)
 
     civex_dir.mkdir(parents=True)
-
-    db_path = civex_dir / "civex.db"
-    db_url = f"sqlite:///{db_path}"
-
-    (civex_dir / "config.toml").write_text(
-        f'[db]\nurl = "{db_url}"\n'
-    )
-
     objects_dir = civex_dir / "objects"
     objects_dir.mkdir()
     (civex_dir / "workflows").mkdir()
     (civex_dir / "plugins").mkdir()
 
+    db_url = _resolve_db_url(target, civex_dir, use_sqlite)
+
+    (civex_dir / "config.toml").write_text(f'[db]\nurl = "{db_url}"\n')
+
     engine = create_engine(db_url)
     Base.metadata.create_all(engine)
     engine.dispose()
 
-    console.print(f"[success]Initialized civex project at {target}[/success]")
-    console.print(f"  Database   {db_path}")
+    console.print(f"\n[success]Initialized civex project at {target}[/success]")
+    console.print(f"  Database   {_display_url(db_url)}")
     console.print(f"  Objects    {objects_dir}")
     console.print(f"  Workflows  {civex_dir / 'workflows'}")
     console.print(f"  Plugins    {civex_dir / 'plugins'}")
     console.print(f"  Config     {civex_dir / 'config.toml'}")
+
+
+def _resolve_db_url(target: Path, civex_dir: Path, use_sqlite: bool) -> str:
+    """Return the database URL to use, starting Docker postgres if available."""
+    if not use_sqlite:
+        from civex.cli._docker import docker_available, docker_error_hint, setup_docker_postgres
+        if docker_available():
+            db_url = setup_docker_postgres(target.name)
+            if db_url:
+                _ensure_psycopg2()
+                return db_url
+            console.print(
+                "  [warning]Docker postgres setup failed — falling back to SQLite.[/warning]"
+            )
+        else:
+            hint = docker_error_hint()
+            console.print(f"[dim]Docker not available — using SQLite.[/dim]")
+            console.print(f"  [dim]{hint}[/dim]")
+            console.print(
+                "  [dim]Run `civex db setup-docker` or `civex db setup-postgres` "
+                "to switch to PostgreSQL.[/dim]"
+            )
+
+    db_path = civex_dir / "civex.db"
+    return f"sqlite:///{db_path}"
+
+
+def _ensure_psycopg2() -> None:
+    """Install psycopg2-binary if no postgres driver is present."""
+    try:
+        import psycopg2  # noqa: F401
+        return
+    except ImportError:
+        pass
+    try:
+        import psycopg  # noqa: F401
+        return
+    except ImportError:
+        pass
+    import subprocess, sys
+    console.print("  Installing psycopg2-binary...", end="  ")
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "psycopg2-binary"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        console.print("[success]OK[/success]")
+    else:
+        console.print("[warning]FAILED — you may need to install it manually[/warning]")
+
+
+def _display_url(db_url: str) -> str:
+    """Redact password and driver prefix for display."""
+    import urllib.parse
+    try:
+        parsed = urllib.parse.urlparse(db_url)
+        if parsed.scheme.startswith("postgresql"):
+            return f"postgresql://{parsed.hostname}:{parsed.port or 5432}{parsed.path}"
+    except Exception:
+        pass
+    return db_url
 
 
 def _init_bare(target: Path) -> None:

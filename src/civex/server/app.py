@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from civex.domain.exceptions import CivexError
 from civex.server.routers import datasets, files, jobs, records, remote, schemas, workflows
 
-_DIST = Path(__file__).resolve().parent.parent.parent.parent / "frontend" / "dist"
+_DIST = Path(__file__).parent / "static"
 
 
 def create_app() -> FastAPI:
@@ -44,7 +44,7 @@ def create_app() -> FastAPI:
     def health():
         return {"status": "ok"}
 
-    if _DIST.exists():
+    if (_DIST / "index.html").exists():
         app.mount("/assets", StaticFiles(directory=str(_DIST / "assets")), name="assets")
 
         @app.get("/{full_path:path}", include_in_schema=False)
@@ -53,7 +53,7 @@ def create_app() -> FastAPI:
     else:
         @app.get("/", include_in_schema=False)
         def root():
-            return {"message": "civex API — build the frontend with `cd frontend && npm run build`"}
+            return {"message": "civex API — run `cd frontend && npm run build` then reinstall"}
 
     return app
 

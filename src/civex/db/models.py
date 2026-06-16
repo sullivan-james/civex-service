@@ -14,12 +14,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 # Transparently uses JSONB on PostgreSQL, JSON text on SQLite.
 _JSON = JSON().with_variant(JSONB(), "postgresql")
+# Transparently uses TSVECTOR on PostgreSQL, plain text (unused) on SQLite.
+_TSVECTOR = Text().with_variant(TSVECTOR(), "postgresql")
 
 
 def _now() -> datetime:
@@ -105,6 +107,14 @@ class Record(Base):
     (e.g. a Recording record referencing its Encounter record within the same dataset).
     """
     __tablename__ = "records"
+    __table_args__ = (
+        Index("ix_records_dataset_schema", "dataset_id", "schema_id"),
+        Index("ix_records_dataset_created", "dataset_id", "created_at"),
+        Index("ix_records_dataset_parent", "dataset_id", "parent_record_id"),
+        # GIN index enables containment (@>) queries on JSONB data fields.
+        # On SQLite this degrades to a plain B-tree on the JSON text column (harmless).
+        Index("ix_records_data_gin", "data", postgresql_using="gin"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     dataset_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("datasets.id"), nullable=False)
@@ -113,6 +123,7 @@ class Record(Base):
     data: Mapped[dict[str, Any]] = mapped_column(_JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+    search_vector: Mapped[str | None] = mapped_column(_TSVECTOR, nullable=True, default=None)
 
     dataset: Mapped[Dataset] = relationship("Dataset", back_populates="records")
     schema: Mapped[Schema] = relationship("Schema")
@@ -123,6 +134,7 @@ class Commit(Base):
     __tablename__ = "commits"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    seq: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True)
     message: Mapped[str | None] = mapped_column(String(1000))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     record_count: Mapped[int] = mapped_column(Integer, default=0)

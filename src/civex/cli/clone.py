@@ -10,7 +10,6 @@ Use --remote-civex when civex is not on PATH on the remote (e.g. installed in a 
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
@@ -79,11 +78,11 @@ def clone(
         session.commit()
     engine.dispose()
 
-    now = datetime.now(timezone.utc)
     remote_lines = f'[db]\nurl = "{db_url}"\n\n[remote]\nurl = "{url}"\n'
     if remote_civex != "civex":
         remote_lines += f'remote_civex = "{remote_civex}"\n'
-    remote_lines += f'last_pulled_at = "{now.isoformat()}"\n'
+    remote_lines += f'last_pulled_seq = {bundle.to_seq}\n'
+    remote_lines += f'last_pushed_seq = 0\n'
     (civex_dir / "config.toml").write_text(remote_lines)
 
     console.print(f"[success]Cloned successfully.[/success]")

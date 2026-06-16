@@ -9,14 +9,13 @@ Minimal config.toml (local only):
 With a remote (added by `civex remote set <url>`):
     [remote]
     url = "ssh://user@host:/srv/repos/myrepo"
-    last_pushed_at = "2026-06-07T10:00:00+00:00"   # optional
-    last_pulled_at = "2026-06-07T11:00:00+00:00"   # optional
+    last_pushed_seq = 42   # optional, monotonic commit sequence number
+    last_pulled_seq = 38   # optional
 """
 from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
 from civex.domain.exceptions import ConfigError
@@ -30,8 +29,8 @@ class DBConfig:
 @dataclass
 class RemoteConfig:
     url: str
-    last_pushed_at: datetime | None = None
-    last_pulled_at: datetime | None = None
+    last_pushed_seq: int = 0
+    last_pulled_seq: int = 0
     remote_civex: str = "civex"   # path to civex on the remote (for SSH transport)
 
 
@@ -72,8 +71,8 @@ def load_config() -> Config:
     if "remote" in data:
         remote = RemoteConfig(
             url=data["remote"]["url"],
-            last_pushed_at=_parse_dt(data["remote"].get("last_pushed_at")),
-            last_pulled_at=_parse_dt(data["remote"].get("last_pulled_at")),
+            last_pushed_seq=int(data["remote"].get("last_pushed_seq", 0)),
+            last_pulled_seq=int(data["remote"].get("last_pulled_seq", 0)),
             remote_civex=data["remote"].get("remote_civex", "civex"),
         )
 
@@ -94,18 +93,7 @@ def save_config(config: Config) -> None:
         lines += ["\n[remote]\n", f'url = "{config.remote.url}"\n']
         if config.remote.remote_civex != "civex":
             lines.append(f'remote_civex = "{config.remote.remote_civex}"\n')
-        if config.remote.last_pushed_at:
-            lines.append(f'last_pushed_at = "{config.remote.last_pushed_at.isoformat()}"\n')
-        if config.remote.last_pulled_at:
-            lines.append(f'last_pulled_at = "{config.remote.last_pulled_at.isoformat()}"\n')
+        lines.append(f'last_pushed_seq = {config.remote.last_pushed_seq}\n')
+        lines.append(f'last_pulled_seq = {config.remote.last_pulled_seq}\n')
 
     (config.civex_dir / "config.toml").write_text("".join(lines))
-
-
-def _parse_dt(s: str | None) -> datetime | None:
-    if not s:
-        return None
-    dt = datetime.fromisoformat(s)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt

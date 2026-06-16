@@ -33,7 +33,7 @@ class SchemaService:
 
         dto = self._repo.create(name=name, description=description, parent_id=parent_id)
         if self._audit:
-            self._audit.log_change("create", "schema", dto.id, None, {"name": dto.name, "description": dto.description})
+            self._audit.log_change("create", "schema", dto.id, None, dto.to_dict())
         return dto
 
     def get(self, name: str) -> SchemaDTO:
@@ -69,7 +69,7 @@ class SchemaService:
             restrictions=restrictions or {},
         )
         if self._audit:
-            self._audit.log_change("create", "field", field.id, None, {"name": field_name, "dtype": dtype, "schema": schema_name})
+            self._audit.log_change("create", "field", field.id, None, field.to_dict())
         return field
 
     def update(
@@ -82,19 +82,27 @@ class SchemaService:
         if new_name and new_name != name:
             if self._repo.get_by_name(new_name):
                 raise AlreadyExistsError(f"Schema '{new_name}' already exists")
-        return self._repo.update(schema.id, name=new_name, description=description)
+        old_dict = schema.to_dict()
+        updated = self._repo.update(schema.id, name=new_name, description=description)
+        if self._audit:
+            self._audit.log_change("update", "schema", updated.id, old_dict, updated.to_dict())
+        return updated
 
     def update_field(self, schema_name: str, field_name: str, required: bool) -> FieldDTO:
         schema = self.get(schema_name)
         field = next((f for f in schema.fields if f.name == field_name), None)
         if field is None:
             raise NotFoundError(f"Field '{field_name}' not found on schema '{schema_name}'")
-        return self._repo.update_field(field.id, required=required)
+        old_dict = field.to_dict()
+        updated = self._repo.update_field(field.id, required=required)
+        if self._audit:
+            self._audit.log_change("update", "field", updated.id, old_dict, updated.to_dict())
+        return updated
 
     def delete(self, name: str) -> None:
         schema = self.get(name)
         if self._audit:
-            self._audit.log_change("delete", "schema", schema.id, {"name": schema.name, "description": schema.description}, None)
+            self._audit.log_change("delete", "schema", schema.id, schema.to_dict(), None)
         self._repo.delete(schema.id)
 
     def name_to_id_map(self, schema: SchemaDTO) -> dict[str, str]:

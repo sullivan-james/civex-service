@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from civex.db.models import AuditLog, Commit
@@ -48,7 +49,9 @@ class LocalAuditRepository:
         schema_count = sum(1 for e in staged if e.entity_type in ("schema", "field"))
         dataset_count = sum(1 for e in staged if e.entity_type == "dataset")
 
+        next_seq = (self._s.query(func.max(Commit.seq)).scalar() or 0) + 1
         commit = Commit(
+            seq=next_seq,
             message=message,
             record_count=record_count,
             schema_count=schema_count,
@@ -170,6 +173,7 @@ class LocalAuditRepository:
 def _commit_dto(r: Commit) -> CommitDTO:
     return CommitDTO(
         id=r.id,
+        seq=r.seq,
         message=r.message,
         created_at=r.created_at,
         record_count=r.record_count,

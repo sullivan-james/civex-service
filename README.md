@@ -352,14 +352,57 @@ ctx.create_record(dataset_name, data)  # create a new record in any dataset
 
 ## PostgreSQL
 
-Edit `.civex/config.toml` to point at a PostgreSQL database:
+### Starting a local PostgreSQL container
+
+```bash
+docker run -d \
+  --name civex-pg \
+  -e POSTGRES_USER=civex \
+  -e POSTGRES_PASSWORD=civex \
+  -e POSTGRES_DB=civex \
+  -p 5432:5432 \
+  postgres:16
+
+# Stop / remove when done
+docker stop civex-pg && docker rm civex-pg
+```
+
+### Connecting civex to it
+
+Edit `.civex/config.toml`:
 
 ```toml
 [db]
-url = "postgresql://user:password@localhost:5432/civex"
+url = "postgresql://civex:civex@localhost:5432/civex"
 ```
 
 JSON fields (`record.data`, `field.restrictions`) automatically upgrade to JSONB on PostgreSQL for indexed querying. Install the driver with `pip install -e ".[postgres]"`.
+
+### Index benchmark
+
+A benchmark script is included that shows the query speedup from the composite B-tree and GIN indexes added to the `records` table. It seeds 100 000 records, measures query times before and after creating the indexes, and prints a comparison table with `EXPLAIN ANALYZE` output.
+
+```bash
+# Spin up a throw-away benchmark database
+docker run -d \
+  --name civex-bench \
+  -e POSTGRES_USER=civex \
+  -e POSTGRES_PASSWORD=civex \
+  -e POSTGRES_DB=civex_bench \
+  -p 5432:5432 \
+  postgres:16
+
+pip install -e ".[postgres]"
+
+PG_URL=postgresql://civex:civex@localhost/civex_bench \
+  python tests/bench_indexes.py
+
+# Optional: fewer records for a quick smoke-test
+PG_URL=postgresql://civex:civex@localhost/civex_bench \
+  python tests/bench_indexes.py --records 20000
+
+docker stop civex-bench && docker rm civex-bench
+```
 
 ---
 

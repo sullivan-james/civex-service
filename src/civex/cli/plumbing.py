@@ -4,15 +4,15 @@ Plumbing commands — internal, called by SSHTransport on the remote side.
 These mirror git's upload-pack / receive-pack model: the SSH client spawns these
 commands on the remote machine and communicates over stdin/stdout.
 
-  civex transfer-pack <bare-path> [--since <iso>]
+  civex transfer-pack <bare-path> [--since-seq N]
   civex receive-pack  <bare-path>
+  civex head-seq      <bare-path>
   civex get-object    <bare-path> <sha256>
   civex put-object    <bare-path> <sha256>
 """
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
@@ -22,27 +22,21 @@ from civex.sync.bundle import SyncBundle
 from civex.sync.exporter import export_bundle
 from civex.sync.importer import apply_bundle
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func
 from sqlalchemy.orm import Session
 
 
 def transfer_pack(
     bare_path: Path = typer.Argument(..., help="Path to the bare repository directory"),
-    since: str = typer.Option(None, "--since", help="ISO 8601 timestamp; export only records updated after this"),
+    since_seq: int = typer.Option(0, "--since-seq", help="Export only commits with seq > this value"),
 ) -> None:
     """[Plumbing] Export repository data to stdout as JSON (called by SSH client)."""
     bare_path = bare_path.resolve()
     _require_bare(bare_path)
 
-    since_dt: datetime | None = None
-    if since:
-        since_dt = datetime.fromisoformat(since)
-        if since_dt.tzinfo is None:
-            since_dt = since_dt.replace(tzinfo=timezone.utc)
-
     engine = create_engine(f"sqlite:///{bare_path / 'civex.db'}")
     with Session(engine) as session:
-        bundle = export_bundle(session, since_dt)
+        bundle = export_bundle(session, since_seq)
     engine.dispose()
 
     sys.stdout.buffer.write(bundle.to_json().encode())
@@ -64,6 +58,23 @@ def receive_pack(
         apply_bundle(session, bundle)
         session.commit()
     engine.dispose()
+
+
+def head_seq(
+    bare_path: Path = typer.Argument(..., help="Path to the bare repository directory"),
+) -> None:
+    """[Plumbing] Print the maximum commit sequence number to stdout (called by SSH client)."""
+    bare_path = bare_path.resolve()
+    _require_bare(bare_path)
+
+    from civex.db.models import Commit
+    engine = create_engine(f"sqlite:///{bare_path / 'civex.db'}")
+    with Session(engine) as session:
+        seq = session.query(func.max(Commit.seq)).scalar() or 0
+    engine.dispose()
+
+    sys.stdout.write(str(seq) + "\n")
+    sys.stdout.flush()
 
 
 def get_object(

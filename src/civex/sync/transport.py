@@ -8,23 +8,22 @@ Three implementations:
 
 Usage:
   transport = get_transport("https://civexhub.example.com/alice/myrepo")
-  bundle = transport.transfer_pack(since=None)   # full clone
-  transport.receive_pack(bundle)                 # push bundle to remote
-  data = transport.get_object("sha256hex")       # lazy object fetch
-  transport.put_object("sha256hex", data)        # push object
+  bundle = transport.transfer_pack(since_seq=0)    # full clone
+  transport.receive_pack(bundle)                   # push bundle to remote
+  remote_seq = transport.get_head_seq()            # highest commit seq on remote
+  data = transport.get_object("sha256hex")         # lazy object fetch
+  transport.put_object("sha256hex", data)          # push object
 """
 from __future__ import annotations
 
 import subprocess
-import sys
-from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func
 from sqlalchemy.orm import Session
 
-from civex.db.models import Base
+from civex.db.models import Base, Commit
 from civex.sync.bundle import SyncBundle
 from civex.sync.exporter import export_bundle
 from civex.sync.importer import apply_bundle
@@ -40,10 +39,10 @@ class LocalTransport:
     def __init__(self, bare_path: Path) -> None:
         self._path = bare_path.resolve()
 
-    def transfer_pack(self, since: datetime | None) -> SyncBundle:
+    def transfer_pack(self, since_seq: int = 0) -> SyncBundle:
         engine = create_engine(f"sqlite:///{self._path / 'civex.db'}")
         with Session(engine) as session:
-            bundle = export_bundle(session, since)
+            bundle = export_bundle(session, since_seq)
         engine.dispose()
         return bundle
 
@@ -53,6 +52,13 @@ class LocalTransport:
             apply_bundle(session, bundle)
             session.commit()
         engine.dispose()
+
+    def get_head_seq(self) -> int:
+        engine = create_engine(f"sqlite:///{self._path / 'civex.db'}")
+        with Session(engine) as session:
+            seq = session.query(func.max(Commit.seq)).scalar() or 0
+        engine.dispose()
+        return seq
 
     def get_object(self, sha256: str) -> bytes:
         obj_path = self._path / "objects" / sha256[:2] / sha256[2:]
@@ -95,15 +101,16 @@ class SSHTransport:
             raise SyncError(f"SSH command failed: {result.stderr.decode().strip()}")
         return result.stdout
 
-    def transfer_pack(self, since: datetime | None) -> SyncBundle:
-        args = [self._civex, "transfer-pack", self._remote_path]
-        if since is not None:
-            args += ["--since", since.isoformat()]
-        raw = self._ssh(*args)
+    def transfer_pack(self, since_seq: int = 0) -> SyncBundle:
+        raw = self._ssh(self._civex, "transfer-pack", self._remote_path, "--since-seq", str(since_seq))
         return SyncBundle.from_json(raw.decode())
 
     def receive_pack(self, bundle: SyncBundle) -> None:
         self._ssh(self._civex, "receive-pack", self._remote_path, stdin=bundle.to_json().encode())
+
+    def get_head_seq(self) -> int:
+        raw = self._ssh(self._civex, "head-seq", self._remote_path)
+        return int(raw.decode().strip())
 
     def get_object(self, sha256: str) -> bytes:
         return self._ssh(self._civex, "get-object", self._remote_path, sha256)
@@ -136,16 +143,16 @@ class HttpTransport:
         except urllib.error.HTTPError as e:
             raise SyncError(f"HTTP {e.code} from {url}: {e.read().decode(errors='replace')}")
 
-    def transfer_pack(self, since: datetime | None) -> SyncBundle:
-        path = "transfer-pack"
-        if since is not None:
-            from urllib.parse import quote
-            path += f"?since={quote(since.isoformat())}"
-        raw = self._request("GET", self._url(path))
+    def transfer_pack(self, since_seq: int = 0) -> SyncBundle:
+        raw = self._request("GET", self._url(f"transfer-pack?since_seq={since_seq}"))
         return SyncBundle.from_json(raw.decode())
 
     def receive_pack(self, bundle: SyncBundle) -> None:
         self._request("POST", self._url("receive-pack"), data=bundle.to_json().encode())
+
+    def get_head_seq(self) -> int:
+        raw = self._request("GET", self._url("head-seq"))
+        return int(raw.decode().strip())
 
     def get_object(self, sha256: str) -> bytes:
         return self._request("GET", self._url(f"objects/{sha256}"))

@@ -24,3 +24,6 @@ server = ["fastapi>=0.111", "uvicorn[standard]>=0.30", "python-multipart>=0.0.9"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+civex = ["server/static/**"]

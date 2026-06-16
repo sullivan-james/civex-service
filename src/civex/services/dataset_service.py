@@ -15,7 +15,7 @@ class DatasetService:
             raise AlreadyExistsError(f"Dataset '{name}' already exists")
         dto = self._datasets.create(name=name, description=description)
         if self._audit:
-            self._audit.log_change("create", "dataset", dto.id, None, {"name": dto.name, "description": dto.description})
+            self._audit.log_change("create", "dataset", dto.id, None, dto.to_dict())
         return dto
 
     def get(self, name: str) -> DatasetDTO:
@@ -37,10 +37,14 @@ class DatasetService:
         if new_name and new_name != name:
             if self._datasets.get_by_name(new_name):
                 raise AlreadyExistsError(f"Dataset '{new_name}' already exists")
-        return self._datasets.update(dataset.id, name=new_name, description=description)
+        old_dict = dataset.to_dict()
+        updated = self._datasets.update(dataset.id, name=new_name, description=description)
+        if self._audit:
+            self._audit.log_change("update", "dataset", updated.id, old_dict, updated.to_dict())
+        return updated
 
     def delete(self, name: str) -> None:
         dataset = self.get(name)
         if self._audit:
-            self._audit.log_change("delete", "dataset", dataset.id, {"name": dataset.name, "description": dataset.description}, None)
+            self._audit.log_change("delete", "dataset", dataset.id, dataset.to_dict(), None)
         self._datasets.delete(dataset.id)
