@@ -10,6 +10,8 @@ from civex.domain.exceptions import CivexError
 from civex.server.routers import datasets, files, jobs, records, remote, schemas, workflows
 
 _DIST = Path(__file__).parent / "static"
+if not (_DIST / "index.html").exists():
+    _DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
 
 def create_app() -> FastAPI:
