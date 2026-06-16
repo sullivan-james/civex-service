@@ -2,8 +2,8 @@ import { type ReactNode } from 'react'
 
 export function Table({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`border border-[#d0d7de] rounded-md overflow-hidden ${className}`}>
-      <table className="w-full text-sm border-collapse">{children}</table>
+    <div className={`border border-[#d0d7de] rounded-md overflow-x-auto ${className}`}>
+      <table className="w-full min-w-max text-sm border-collapse">{children}</table>
     </div>
   )
 }

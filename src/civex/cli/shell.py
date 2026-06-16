@@ -39,6 +39,9 @@ def run_shell() -> None:
             sys.stdout.flush()
             continue
 
+        if args and args[-1].lower() == "help":
+            args[-1] = "--help"
+
         try:
             app(args, standalone_mode=True)
         except SystemExit:

@@ -1,5 +1,5 @@
 civex_version: 0.1.0
-exported_at: '2026-06-07T06:43:26.546523+00:00'
+exported_at: '2026-06-16T08:09:18.348888+00:00'
 schemas:
 - name: Encounter
   description: null
@@ -241,7 +241,257 @@ schemas:
 datasets:
 - name: test
   description: null
-records: []
+records:
+- dataset: test
+  schema: Encounter
+  data:
+    encounter: HICEAS2002
+- dataset: test
+  schema: Recording
+  data:
+    start_time: dsfgbwu3i
+    recording_file:
+      sha256: 99eccc66c29c2462175b309a286a1d3575ce40fbcec499c325141672fa2b72bd
+      filename: HICEAS02sfh0814-115dfsh547 - Copy.wav
+      size: 18000044
+    selection_table_file:
+      sha256: 3c73672d9232e38b5973c2450b68a3df1f5c4bd91b9ebddd9369378d771efe1f
+      filename: HICEAS020814-115547.Table.1.selections.txt (2) - Copy.txt
+      size: 1104
+  parent_record_id: 31a83ee1-e4f6-464e-b155-b4873d071ee1
+- dataset: test
+  schema: Recording
+  data:
+    start_time: 3r2ff
+    selection_table_file:
+      sha256: 4a96ef2201df40a426caa90cdfcacd33c90d5724f2bcff35d9781be693f3e40a
+      filename: PMC-BS_12_20210218-075000ch1min2.Table.1.selections.csv
+      size: 1126
+  parent_record_id: 31a83ee1-e4f6-464e-b155-b4873d071ee1
+- dataset: test
+  schema: Selection
+  data:
+    selection_number: 1
+    view: Spectrogram 1
+    channel: 1
+    begin_time: 6.242480709
+    end_time: 7.244469218
+    low_frequency: 6852.248
+    high_frequency: 8693.79
+    delta_time: 1.002
+    delta_frequency: 1841.542
+    annotation: M
+    contour_file:
+      sha256: 3ff39293ea8f86c819c6c48923fb3906491e5998f3cf27c5d353d2f7e5999f38
+      filename: pc_20210218_075000_min10_sel_01_PMC_12_Brazil.csv
+      size: 2003
+    duration: 0.235
+    num_inflections: 0
+    inflection_maxdelta: 0.0
+    inflection_mindelta: 0.0
+    inflection_maxmindelta: 0.0
+    inflection_meandelta: 0.0
+    inflection_standarddeviationdelta: 0.0
+    inflection_mediandelta: 0.0
+    inflection_duration: 0.0
+    freq_sweepuppercent: 8.0
+    freq_sweepdownpercent: 84.0
+    freq_sweepflatpercent: 8.0
+    num_sweepsupdown: 0
+    num_sweepsdownup: 0
+    num_sweepsdownflat: 1
+    num_sweepsflatdown: 1
+    num_sweepsflatup: 0
+    num_sweepsupflat: 0
+    freq_sloperatio: -0.0
+    freq_slopemean: -4167.7427685950415
+    freq_posslopemean: 0.0
+    freq_negslopemean: -5393.549465240642
+    freq_absslopemean: 4167.7427685950415
+    freq_begsweep: 0
+    freq_begup: false
+    freq_begdown: true
+    freq_endsweep: 0
+    freq_endup: false
+    freq_enddown: true
+    dc_mean: 0.23944103518619264
+    dc_standarddeviation: 0.0997483233398151
+    dc_quarter1mean: 0.3034812474970823
+    dc_quarter2mean: 0.11053522867304673
+    dc_quarter3mean: 0.30725497027751963
+    dc_quarter4mean: 0.2471660630156032
+    freq_max: 8203.125
+    freq_min: 7218.75
+    freq_range: 984.375
+    freq_median: 7546.875
+    freq_center: 7710.9375
+    freq_relbw: 0.1276595744680851
+    freq_maxminratio: 1.1363636363636365
+    freq_begin: 8203.125
+    freq_end: 7218.75
+    freq_begendratio: 1.1363636363636365
+    freq_mean: 7595.788043478261
+    freq_standarddeviation: 283.54118626889243
+    freq_quarter1: 7828.125
+    freq_quarter2: 7546.875
+    freq_quarter3: 7359.375
+    freq_spread: 445.3125
+    freq_numsteps: 0
+    freq_stepup: 0
+    freq_stepdown: 0
+    step_duration: 0.0
+    freq_cofm: 0.0703125
+  parent_record_id: cd3367c5-2ab0-4a93-a80a-0f04c3a3b584
+- dataset: test
+  schema: Selection
+  data:
+    selection_number: 3
+    annotation: N
+    view: Spectrogram 1
+    channel: '1'
+    begin_time: 6.976786841
+    end_time: 8.054372954
+    low_frequency: 6081.37
+    high_frequency: 7366.167
+    delta_time: 1.0776
+    delta_frequency: 1284.797
+    average_power: -91.14
+  parent_record_id: cd3367c5-2ab0-4a93-a80a-0f04c3a3b584
+- dataset: test
+  schema: Selection
+  data:
+    selection_number: 4
+    annotation: M
+    view: Spectrogram 1
+    channel: '1'
+    begin_time: 17.10348242
+    end_time: 18.97309433
+    low_frequency: 5353.319
+    high_frequency: 12205.567
+    delta_time: 1.8696
+    delta_frequency: 6852.248
+    average_power: -90.66
+  parent_record_id: cd3367c5-2ab0-4a93-a80a-0f04c3a3b584
+- dataset: test
+  schema: Selection
+  data:
+    selection_number: 5
+    annotation: M
+    view: Spectrogram 1
+    channel: '1'
+    begin_time: 29.24263151
+    end_time: 30.2447866
+    low_frequency: 4539.615
+    high_frequency: 8094.218
+    delta_time: 1.0022
+    delta_frequency: 3554.604
+    average_power: -89.56
+  parent_record_id: cd3367c5-2ab0-4a93-a80a-0f04c3a3b584
+- dataset: test
+  schema: Selection
+  data:
+    selection_number: 6
+    annotation: N
+    view: Spectrogram 1
+    channel: '1'
+    begin_time: 28.61250703
+    end_time: 29.61449554
+    low_frequency: 4025.696
+    high_frequency: 7665.953
+    delta_time: 1.002
+    delta_frequency: 3640.257
+    average_power: -89.99
+  parent_record_id: cd3367c5-2ab0-4a93-a80a-0f04c3a3b584
+- dataset: test
+  schema: Selection
+  data:
+    selection_number: 7
+    annotation: N
+    view: Spectrogram 1
+    channel: '1'
+    begin_time: 30.70325622
+    end_time: 31.94248025
+    low_frequency: 4668.094
+    high_frequency: 8993.576
+    delta_time: 1.2392
+    delta_frequency: 4325.482
+    average_power: -90.79
+  parent_record_id: cd3367c5-2ab0-4a93-a80a-0f04c3a3b584
+- dataset: test
+  schema: Selection
+  data:
+    selection_number: 8
+    annotation: M
+    view: Spectrogram 1
+    channel: '1'
+    begin_time: 34.57177285
+    end_time: 35.57931586
+    low_frequency: 5481.799
+    high_frequency: 8565.31
+    delta_time: 1.0075
+    delta_frequency: 3083.512
+    average_power: -90.85
+  parent_record_id: cd3367c5-2ab0-4a93-a80a-0f04c3a3b584
+- dataset: test
+  schema: Selection
+  data:
+    selection_number: 9
+    annotation: M
+    view: Spectrogram 1
+    channel: '1'
+    begin_time: 36.34614984
+    end_time: 37.35908079
+    low_frequency: 5096.36
+    high_frequency: 8479.657
+    delta_time: 1.0129
+    delta_frequency: 3383.298
+    average_power: -90.53
+  parent_record_id: cd3367c5-2ab0-4a93-a80a-0f04c3a3b584
+- dataset: test
+  schema: Selection
+  data:
+    selection_number: 10
+    annotation: M
+    view: Spectrogram 1
+    channel: '1'
+    begin_time: 37.28903769
+    end_time: 38.29119278
+    low_frequency: 5010.707
+    high_frequency: 8222.698
+    delta_time: 1.0022
+    delta_frequency: 3211.991
+    average_power: -90.93
+  parent_record_id: cd3367c5-2ab0-4a93-a80a-0f04c3a3b584
+- dataset: test
+  schema: Selection
+  data:
+    selection_number: 11
+    annotation: N
+    view: Spectrogram 1
+    channel: '1'
+    begin_time: 39.74886499
+    end_time: 41.27364934
+    low_frequency: 3897.216
+    high_frequency: 8436.831
+    delta_time: 1.5248
+    delta_frequency: 4539.615
+    average_power: -90.78
+  parent_record_id: cd3367c5-2ab0-4a93-a80a-0f04c3a3b584
+- dataset: test
+  schema: Selection
+  data:
+    selection_number: 13
+    annotation: M
+    view: Spectrogram 1
+    channel: '1'
+    begin_time: 42.15720076
+    end_time: 43.29405411
+    low_frequency: 4488.017
+    high_frequency: 6405.229
+    delta_time: 1.1369
+    delta_frequency: 1917.211
+    average_power: -90.14
+  parent_record_id: cd3367c5-2ab0-4a93-a80a-0f04c3a3b584
 workflows:
 - filename: load-contour-files.yaml
   content: "name: load-contour-files\ndescription: Match uploaded contour files to\
@@ -275,3 +525,203 @@ workflows:
     \n  - id: upsert_selections\n    plugin: civex.upsert_records\n    config:\n \
     \     schema: Selection\n      key_field: selection_number\n    inputs:\n    \
     \  table: parse_table.table\n"
+plugins:
+- filename: calculate_contour_stats.py
+  content: "from __future__ import annotations\n\nfrom enum import Enum\nfrom typing\
+    \ import Any\n\nimport numpy as np\nimport pandas as pd\nfrom pydantic import\
+    \ BaseModel\n\nfrom civex.plugins.base import BasePlugin, WorkflowContext\n\n\n\
+    class _Sweep(Enum):\n    DOWN = 0\n    FLAT = 1\n    UP   = 2\n\n\nclass _Step(Enum):\n\
+    \    DOWN = 0\n    FLAT = 1\n    UP   = 2\n\n\ndef _round_nearest(num: float)\
+    \ -> int:\n    return int(num) if num % 1 < 0.5 else int(num) + 1\n\n\ndef _calculate(df:\
+    \ pd.DataFrame) -> dict[str, Any]:\n    df = df.rename(columns=lambda c: c.strip())\n\
+    \n    required = (\"Time [ms]\", \"Peak Frequency [Hz]\", \"Duty Cycle\", \"Energy\"\
+    , \"WindowRMS\")\n    missing = [c for c in required if c not in df.columns]\n\
+    \    if missing:\n        raise ValueError(f\"Missing required contour columns:\
+    \ {', '.join(missing)}\")\n\n    df = df.sort_values(\"Time [ms]\").reset_index(drop=True)\n\
+    \    times = df[\"Time [ms]\"].tolist()\n    freqs = df[\"Peak Frequency [Hz]\"\
+    ].tolist()\n    duties = df[\"Duty Cycle\"].tolist()\n    n = len(df)\n\n    #\
+    \ ── slopes ──────────────────────────────────────────────────────────────\n \
+    \   slopes = [0.0] * n\n    slope_sum = slope_abs_sum = 0.0\n    slope_pos_sum\
+    \ = slope_neg_sum = 0.0\n    slope_pos_count = slope_neg_count = 0\n\n    for\
+    \ i in range(1, n):\n        dt = times[i] - times[i - 1]\n        df_ = freqs[i]\
+    \ - freqs[i - 1]\n        if dt > 0:\n            s = df_ / dt\n            slopes[i]\
+    \ = s\n            slope_sum += s\n            slope_abs_sum += abs(s)\n     \
+    \       if s > 0:\n                slope_pos_sum += s\n                slope_pos_count\
+    \ += 1\n            elif s < 0:\n                slope_neg_sum += s\n        \
+    \        slope_neg_count += 1\n\n    # ── sweeps & steps ──────────────────────────────────────────────────────\n\
+    \    steps  = [_Step.FLAT]  * n\n    sweeps = [None]        * n\n    step_sensitivity\
+    \ = 11\n\n    freq_stepup = freq_stepdown = 0\n    sweep_up = sweep_down = sweep_flat\
+    \ = 0\n    num_sweeps_up_down = num_sweeps_down_up = 0\n    num_sweeps_down_flat\
+    \ = num_sweeps_flat_down = 0\n    num_sweeps_flat_up  = num_sweeps_up_flat  =\
+    \ 0\n\n    last_sweep = _Sweep.FLAT\n\n    dc_quarter_sums   = [0.0, 0.0, 0.0,\
+    \ 0.0]\n    dc_quarter_counts = [0,   0,   0,   0  ]\n\n    direction: _Sweep\
+    \ | None = None\n    num_inflections = 0\n    inflection_times: list[float] =\
+    \ []\n\n    for i in range(n):\n        # duty-cycle quarters\n        q = 0 if\
+    \ i < n // 4 else 1 if i < n // 2 else 2 if i < 3 * n // 4 else 3\n        dc_quarter_sums[q]\
+    \   += duties[i]\n        dc_quarter_counts[q] += 1\n\n        # steps\n     \
+    \   if i >= 1:\n            if (steps[i - 1] == _Step.FLAT and\n             \
+    \       freqs[i] >= freqs[i - 1] * (1 + step_sensitivity / 100)):\n          \
+    \      steps[i] = _Step.UP\n                freq_stepup += 1\n            elif\
+    \ (steps[i - 1] == _Step.FLAT and\n                    freqs[i] <= freqs[i - 1]\
+    \ * (1 - step_sensitivity / 100)):\n                steps[i] = _Step.DOWN\n  \
+    \              freq_stepdown += 1\n            else:\n                steps[i]\
+    \ = _Step.FLAT\n\n        # sweeps (interior points only)\n        if 0 < i <\
+    \ n - 1:\n            p, c_, nx = freqs[i - 1], freqs[i], freqs[i + 1]\n     \
+    \       if p <= c_ <= nx:\n                sweep_up += 1\n                last_sweep\
+    \ = _Sweep.UP\n            if p >= c_ >= nx:\n                sweep_down += 1\n\
+    \                last_sweep = _Sweep.DOWN\n            if p == c_ == nx:\n   \
+    \             sweep_flat += 1\n                last_sweep = _Sweep.FLAT\n    \
+    \        sweeps[i] = last_sweep\n\n        # legacy: last element is always DOWN\n\
+    \        if i == n - 1:\n            sweeps[i] = _Sweep.DOWN\n\n        # sweep-pair\
+    \ counters\n        if i > 1:\n            curr = sweeps[i]\n            prev\
+    \ = sweeps[i - 1]\n            if   prev == _Sweep.UP   and curr == _Sweep.DOWN:\
+    \  num_sweeps_up_down   += 1\n            elif prev == _Sweep.DOWN and curr ==\
+    \ _Sweep.UP:    num_sweeps_down_up   += 1\n            elif prev == _Sweep.DOWN\
+    \ and curr == _Sweep.FLAT:  num_sweeps_down_flat += 1\n            elif prev ==\
+    \ _Sweep.FLAT and curr == _Sweep.DOWN:  num_sweeps_flat_down += 1\n          \
+    \  elif prev == _Sweep.FLAT and curr == _Sweep.UP:    num_sweeps_flat_up   +=\
+    \ 1\n            elif prev == _Sweep.UP   and curr == _Sweep.FLAT:  num_sweeps_up_flat\
+    \   += 1\n\n        # inflections\n        if i == 1:\n            direction =\
+    \ sweeps[1]\n        elif i > 1:\n            curr_sweep = _Sweep.DOWN if i ==\
+    \ n - 1 else sweeps[i]  # legacy bug preserved\n            if direction in (_Sweep.UP,\
+    \ _Sweep.DOWN):\n                if ((curr_sweep == _Sweep.UP   and direction\
+    \ == _Sweep.DOWN) or\n                        (curr_sweep == _Sweep.DOWN and direction\
+    \ == _Sweep.UP)):\n                    direction = curr_sweep\n              \
+    \      num_inflections += 1\n                    inflection_times.append(times[i])\n\
+    \            elif direction == _Sweep.FLAT:\n                direction = curr_sweep\n\
+    \n    # ── assemble results ────────────────────────────────────────────────────\n\
+    \    duration = (times[-1] - times[0]) / 1000\n\n    # inflection delta stats\n\
+    \    if num_inflections > 1:\n        deltas = sorted([(inflection_times[k] -\
+    \ inflection_times[k - 1]) / 1000\n                         for k in range(1,\
+    \ len(inflection_times))])\n        inf_max    = deltas[-1]\n        inf_min \
+    \   = deltas[0]\n        inf_maxmin = inf_max / inf_min if inf_min != 0 else 0.0\n\
+    \        inf_mean   = sum(deltas) / len(deltas)\n        inf_std    = float(pd.Series(deltas).std())\
+    \ if len(deltas) > 1 else 0.0\n        inf_med    = float(pd.Series(deltas).median())\n\
+    \        inf_dur    = num_inflections / duration\n    else:\n        inf_max =\
+    \ inf_min = inf_maxmin = inf_mean = inf_std = inf_med = inf_dur = 0.0\n\n    #\
+    \ sweep percentages\n    sweep_total = sweep_up + sweep_down + sweep_flat\n  \
+    \  sweep_up_pct   = (sweep_up   / sweep_total) * 100 if sweep_total else 0.0\n\
+    \    sweep_down_pct = (sweep_down / sweep_total) * 100 if sweep_total else 0.0\n\
+    \    sweep_flat_pct = (sweep_flat / sweep_total) * 100 if sweep_total else 0.0\n\
+    \n    # slope summaries\n    freq_posslopemean = (slope_pos_sum / slope_pos_count)\
+    \ * 1000 if slope_pos_count else 0.0\n    freq_negslopemean = (slope_neg_sum /\
+    \ slope_neg_count) * 1000 if slope_neg_count else 0.0\n    freq_sloperatio   =\
+    \ freq_posslopemean / freq_negslopemean if freq_negslopemean != 0 else 0.0\n \
+    \   freq_slopemean    = (slope_sum     / (n - 1)) * 1000 if n > 1 else 0.0\n \
+    \   freq_absslopemean = (slope_abs_sum / (n - 1)) * 1000 if n > 1 else 0.0\n\n\
+    \    # beg/end sweeps (need at least 4 points)\n    if n >= 4:\n        beg_avg\
+    \ = (slopes[1] + slopes[2] + slopes[3]) / 3\n        end_avg = (slopes[-4] + slopes[-3]\
+    \ + slopes[-2]) / 3\n    else:\n        beg_avg = end_avg = 0.0\n\n    def _sweep_flags(avg:\
+    \ float) -> tuple[int, bool, bool]:\n        if avg > 0:   return _Sweep.UP.value,\
+    \   True,  False\n        elif avg < 0: return _Sweep.DOWN.value,  False, True\n\
+    \        else:          return _Sweep.FLAT.value,  False, False\n\n    freq_begsweep,\
+    \ freq_begup, freq_begdown = _sweep_flags(beg_avg)\n    freq_endsweep, freq_endup,\
+    \ freq_enddown = _sweep_flags(end_avg)\n\n    freq_s = pd.Series(freqs)\n    dc_s\
+    \   = pd.Series(duties)\n\n    freq_max     = freq_s.max()\n    freq_min_val =\
+    \ freq_s.min()\n    freq_range   = freq_max - freq_min_val\n    freq_center  =\
+    \ (freq_max + freq_min_val) / 2\n    freq_median  = float(freq_s.median())\n \
+    \   freq_mean    = float(freq_s.mean())\n    freq_std     = float(freq_s.std())\n\
+    \    freq_relbw   = freq_range / freq_center if freq_center else 0.0\n    freq_mmratio\
+    \ = freq_max / freq_min_val  if freq_min_val else 0.0\n    freq_begin   = freqs[0]\n\
+    \    freq_end_val = freqs[-1]\n    freq_begratio = freq_begin / freq_end_val if\
+    \ freq_end_val else 0.0\n    freq_q1      = freqs[_round_nearest(n / 4) - 1]\n\
+    \    freq_q2      = freqs[_round_nearest(n / 2) - 1]\n    freq_q3      = freqs[_round_nearest(3\
+    \ * n / 4) - 1]\n    freq_spread  = float(freq_s.quantile(0.75) - freq_s.quantile(0.25))\n\
+    \n    freq_cofm = 0.0\n    for i in range(6, n, 3):\n        freq_cofm += abs(freqs[i]\
+    \ - freqs[i - 3])\n    freq_cofm /= 10000\n\n    dc_qmeans = [\n        dc_quarter_sums[q]\
+    \ / dc_quarter_counts[q] if dc_quarter_counts[q] else 0.0\n        for q in range(4)\n\
+    \    ]\n\n    return {\n        \"duration\":                        duration,\n\
+    \        \"num_inflections\":                 num_inflections,\n        \"inflection_maxdelta\"\
+    :             inf_max,\n        \"inflection_mindelta\":             inf_min,\n\
+    \        \"inflection_maxmindelta\":          inf_maxmin,\n        \"inflection_meandelta\"\
+    :            inf_mean,\n        \"inflection_standarddeviationdelta\": inf_std,\n\
+    \        \"inflection_mediandelta\":          inf_med,\n        \"inflection_duration\"\
+    :             inf_dur,\n        \"freq_sweepuppercent\":             sweep_up_pct,\n\
+    \        \"freq_sweepdownpercent\":           sweep_down_pct,\n        \"freq_sweepflatpercent\"\
+    :           sweep_flat_pct,\n        \"num_sweepsupdown\":                num_sweeps_up_down,\n\
+    \        \"num_sweepsdownup\":                num_sweeps_down_up,\n        \"\
+    num_sweepsdownflat\":              num_sweeps_down_flat,\n        \"num_sweepsflatdown\"\
+    :              num_sweeps_flat_down,\n        \"num_sweepsflatup\":          \
+    \      num_sweeps_flat_up,\n        \"num_sweepsupflat\":                num_sweeps_up_flat,\n\
+    \        \"freq_sloperatio\":                 freq_sloperatio,\n        \"freq_slopemean\"\
+    :                  freq_slopemean,\n        \"freq_posslopemean\":           \
+    \    freq_posslopemean,\n        \"freq_negslopemean\":               freq_negslopemean,\n\
+    \        \"freq_absslopemean\":               freq_absslopemean,\n        \"freq_begsweep\"\
+    :                   freq_begsweep,\n        \"freq_begup\":                  \
+    \    freq_begup,\n        \"freq_begdown\":                    freq_begdown,\n\
+    \        \"freq_endsweep\":                   freq_endsweep,\n        \"freq_endup\"\
+    :                      freq_endup,\n        \"freq_enddown\":                \
+    \    freq_enddown,\n        \"dc_mean\":                         float(dc_s.mean()),\n\
+    \        \"dc_standarddeviation\":            float(dc_s.std()),\n        \"dc_quarter1mean\"\
+    :                 dc_qmeans[0],\n        \"dc_quarter2mean\":                \
+    \ dc_qmeans[1],\n        \"dc_quarter3mean\":                 dc_qmeans[2],\n\
+    \        \"dc_quarter4mean\":                 dc_qmeans[3],\n        \"freq_max\"\
+    :                        freq_max,\n        \"freq_min\":                    \
+    \    freq_min_val,\n        \"freq_range\":                      freq_range,\n\
+    \        \"freq_median\":                     freq_median,\n        \"freq_center\"\
+    :                     freq_center,\n        \"freq_relbw\":                  \
+    \    freq_relbw,\n        \"freq_maxminratio\":                freq_mmratio,\n\
+    \        \"freq_begin\":                      freq_begin,\n        \"freq_end\"\
+    :                        freq_end_val,\n        \"freq_begendratio\":        \
+    \        freq_begratio,\n        \"freq_mean\":                       freq_mean,\n\
+    \        \"freq_standarddeviation\":          freq_std,\n        \"freq_quarter1\"\
+    :                   freq_q1,\n        \"freq_quarter2\":                   freq_q2,\n\
+    \        \"freq_quarter3\":                   freq_q3,\n        \"freq_spread\"\
+    :                     freq_spread,\n        \"freq_numsteps\":               \
+    \    freq_stepup + freq_stepdown,\n        \"freq_stepup\":                  \
+    \   freq_stepup,\n        \"freq_stepdown\":                   freq_stepdown,\n\
+    \        \"step_duration\":                   (freq_stepup + freq_stepdown) /\
+    \ duration if duration else 0.0,\n        \"freq_cofm\":                     \
+    \  freq_cofm,\n    }\n\n\nclass Plugin(BasePlugin):\n    id = \"project.calculate_contour_stats\"\
+    \n    name = \"Calculate Contour Stats\"\n    description = \"Compute Raven contour\
+    \ statistics from a contour CSV table.\"\n    category = \"transforms\"\n\n  \
+    \  class Config(BaseModel):\n        pass\n\n    def run(self, inputs: dict[str,\
+    \ Any], config: Config, ctx: WorkflowContext) -> dict[str, Any]:\n        table:\
+    \ pd.DataFrame = inputs[\"table\"]\n        updates = _calculate(table)\n    \
+    \    return {\"updates\": updates}\n"
+- filename: parse_selection_table.py
+  content: "from __future__ import annotations\n\nfrom typing import Any\n\nfrom pydantic\
+    \ import BaseModel\n\nfrom civex.plugins.base import BasePlugin, WorkflowContext\n\
+    \n\ndef _coerce_annotation(value: Any) -> str:\n    if isinstance(value, str):\n\
+    \        a = value.upper().strip()\n        if a == \"Y\" or a.startswith(\"Y\"\
+    ):\n            return \"Y\"\n        elif a == \"N\" or a.startswith(\"N\"):\n\
+    \            return \"N\"\n    return \"M\"\n\n\nclass Plugin(BasePlugin):\n \
+    \   id = \"project.parse_selection_table\"\n    name = \"Parse Selection Table\"\
+    \n    description = \"Map a Raven selection table CSV to Selection record rows\
+    \ ready for civex.upsert_records.\"\n    category = \"transforms\"\n\n    class\
+    \ Config(BaseModel):\n        coerce_annotations: bool = True\n\n    def run(self,\
+    \ inputs: dict[str, Any], config: Config, ctx: WorkflowContext) -> dict[str, Any]:\n\
+    \        try:\n            import pandas as pd\n        except ImportError:\n\
+    \            raise ImportError(\"project.parse_selection_table requires pandas\"\
+    )\n\n        df: pd.DataFrame = inputs[\"table\"]\n        df = df.rename(columns=lambda\
+    \ c: c.strip())\n\n        required = (\"Selection\", \"View\", \"Channel\", \"\
+    Begin Time (s)\", \"End Time (s)\",\n                    \"Low Freq (Hz)\", \"\
+    High Freq (Hz)\", \"Annotation\")\n        missing = [c for c in required if c\
+    \ not in df.columns]\n        if missing:\n            raise ValueError(f\"Missing\
+    \ required columns: {', '.join(missing)}\")\n\n        rows = []\n        for\
+    \ _, row in df.iterrows():\n            begin_time = float(row[\"Begin Time (s)\"\
+    ])\n            end_time   = float(row[\"End Time (s)\"])\n            low_freq\
+    \   = float(row[\"Low Freq (Hz)\"])\n            high_freq  = float(row[\"High\
+    \ Freq (Hz)\"])\n\n            delta_time = (\n                float(row[\"Delta\
+    \ Time (s)\"])\n                if \"Delta Time (s)\" in df.columns and pd.notna(row[\"\
+    Delta Time (s)\"])\n                else end_time - begin_time\n            )\n\
+    \            delta_freq = (\n                float(row[\"Delta Freq (Hz)\"])\n\
+    \                if \"Delta Freq (Hz)\" in df.columns and pd.notna(row[\"Delta\
+    \ Freq (Hz)\"])\n                else high_freq - low_freq\n            )\n  \
+    \          avg_power = (\n                float(row[\"Avg Power Density (dB FS/Hz)\"\
+    ])\n                if \"Avg Power Density (dB FS/Hz)\" in df.columns\n      \
+    \             and pd.notna(row[\"Avg Power Density (dB FS/Hz)\"])\n          \
+    \      else None\n            )\n\n            annotation = (\n              \
+    \  _coerce_annotation(row[\"Annotation\"])\n                if config.coerce_annotations\n\
+    \                else (str(row[\"Annotation\"]).strip() or None)\n           \
+    \     if isinstance(row[\"Annotation\"], str)\n                else None\n   \
+    \         )\n\n            entry: dict[str, Any] = {\n                \"selection_number\"\
+    : int(row[\"Selection\"]),\n                \"annotation\":       annotation,\n\
+    \                \"view\":             str(row[\"View\"]),\n                \"\
+    channel\":          str(row[\"Channel\"]),\n                \"begin_time\":  \
+    \     begin_time,\n                \"end_time\":         end_time,\n         \
+    \       \"low_frequency\":    low_freq,\n                \"high_frequency\": \
+    \  high_freq,\n                \"delta_time\":       delta_time,\n           \
+    \     \"delta_frequency\":  delta_freq,\n            }\n            if avg_power\
+    \ is not None:\n                entry[\"average_power\"] = avg_power\n\n     \
+    \       rows.append(entry)\n\n        return {\"table\": pd.DataFrame(rows)}\n"

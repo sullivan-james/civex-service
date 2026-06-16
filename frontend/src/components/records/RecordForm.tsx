@@ -11,6 +11,10 @@ interface Props {
   onCancel: () => void
   isPending?: boolean
   error?: string | null
+  /** Restrict the schema picker to these schema ids (e.g. children of the current record's schema). */
+  selectableSchemaIds?: string[]
+  /** Pre-set the parent record (e.g. the record this form was opened from) and hide the parent picker. */
+  lockedParentRecordId?: string
 }
 
 function recordSummary(data: Record<string, unknown>, schema: Schema): string {
@@ -22,13 +26,27 @@ function recordSummary(data: Record<string, unknown>, schema: Schema): string {
   return parts.length ? parts.join(' · ') : ''
 }
 
-export function RecordForm({ schemas, datasetName, onSubmit, onCancel, isPending, error }: Props) {
-  const [selectedSchemaId, setSelectedSchemaId] = useState<string>(schemas[0]?.id ?? '')
+export function RecordForm({
+  schemas,
+  datasetName,
+  onSubmit,
+  onCancel,
+  isPending,
+  error,
+  selectableSchemaIds,
+  lockedParentRecordId,
+}: Props) {
+  const pickableSchemas = selectableSchemaIds
+    ? schemas.filter(s => selectableSchemaIds.includes(s.id))
+    : schemas
+  const [selectedSchemaId, setSelectedSchemaId] = useState<string>(pickableSchemas[0]?.id ?? '')
   const [parentRecordId, setParentRecordId] = useState<string>('')
   const [values, setValues] = useState<Record<string, unknown>>({})
 
-  const schema = schemas.find(s => s.id === selectedSchemaId)
-  const parentSchema = schema?.parent_id ? schemas.find(s => s.id === schema.parent_id) : null
+  const schema = pickableSchemas.find(s => s.id === selectedSchemaId)
+  const parentSchema = !lockedParentRecordId && schema?.parent_id
+    ? schemas.find(s => s.id === schema.parent_id)
+    : null
 
   // Fetch parent candidates lazily — only runs when a child schema is selected
   const { data: parentPage } = useRecords(
@@ -57,7 +75,7 @@ export function RecordForm({ schemas, datasetName, onSubmit, onCancel, isPending
       const coerced = coerce(values[field.name], field.type)
       if (coerced !== undefined) data[field.name] = coerced
     }
-    onSubmit(schema.name, data, parentRecordId || undefined)
+    onSubmit(schema.name, data, lockedParentRecordId || parentRecordId || undefined)
   }
 
   if (!schema) return null
@@ -69,7 +87,7 @@ export function RecordForm({ schemas, datasetName, onSubmit, onCancel, isPending
       <div className="flex flex-col gap-1">
         <label className="text-xs font-semibold text-[#656d76] uppercase tracking-wide">Schema</label>
         <div className="flex flex-wrap gap-2">
-          {schemas.map(s => (
+          {pickableSchemas.map(s => (
             <button
               key={s.id}
               onClick={() => handleSchemaChange(s.id)}

@@ -34,6 +34,7 @@ def _sort_schemas(schemas: list[dict]) -> list[dict]:
 def dump(
     output: Path = typer.Option(Path("civex-dump.yaml"), "--output", "-o", help="Destination file"),
     no_data: bool = typer.Option(False, "--no-data", help="Omit records from the export"),
+    no_workflows: bool = typer.Option(False, "--no-workflows", help="Omit workflows and plugins from the export"),
 ) -> None:
     """Export all schemas, datasets, records, and workflows to a YAML file."""
     config = cli_load_config()
@@ -75,10 +76,19 @@ def dump(
 
     # --- workflows ---
     workflows_out = []
-    workflows_dir = config.civex_dir / "workflows"
-    if workflows_dir.exists():
-        for path in sorted(workflows_dir.glob("*.yaml")) + sorted(workflows_dir.glob("*.yml")):
-            workflows_out.append({"filename": path.name, "content": path.read_text()})
+    if not no_workflows:
+        workflows_dir = config.civex_dir / "workflows"
+        if workflows_dir.exists():
+            for path in sorted(workflows_dir.glob("*.yaml")) + sorted(workflows_dir.glob("*.yml")):
+                workflows_out.append({"filename": path.name, "content": path.read_text()})
+
+    # --- plugins ---
+    plugins_out = []
+    if not no_workflows:
+        plugins_dir = config.civex_dir / "plugins"
+        if plugins_dir.exists():
+            for path in sorted(plugins_dir.glob("*.py")):
+                plugins_out.append({"filename": path.name, "content": path.read_text()})
 
     dump_doc = {
         "civex_version": "0.1.0",
@@ -87,6 +97,7 @@ def dump(
         "datasets": datasets_out,
         "records": records_out,
         "workflows": workflows_out,
+        "plugins": plugins_out,
     }
 
     output.write_text(yaml.dump(dump_doc, default_flow_style=False, allow_unicode=True, sort_keys=False))
@@ -103,6 +114,7 @@ def dump(
     console.print(f"  Datasets   {len(datasets_out)}")
     console.print(f"  Records    {total_records}")
     console.print(f"  Workflows  {len(workflows_out)}")
+    console.print(f"  Plugins    {len(plugins_out)}")
     if file_refs:
         console.print(
             f"  [warning]File references: {file_refs} — copy .civex/objects/ to restore file content.[/warning]"
@@ -124,6 +136,7 @@ def restore(
     n_datasets  = len(doc.get("datasets", []))
     n_records   = len(doc.get("records", []))
     n_workflows = len(doc.get("workflows", []))
+    n_plugins   = len(doc.get("plugins", []))
 
     console.print(f"Restoring from [bold]{dump_file}[/bold]")
     console.print(f"  Exported   {doc.get('exported_at', 'unknown')}")
@@ -131,6 +144,7 @@ def restore(
     console.print(f"  Datasets   {n_datasets}")
     console.print(f"  Records    {n_records}")
     console.print(f"  Workflows  {n_workflows}")
+    console.print(f"  Plugins    {n_plugins}")
 
     if not yes:
         typer.confirm("Proceed?", abort=True)
@@ -200,4 +214,18 @@ def restore(
         dest.write_text(wf["content"])
 
     console.print(f"  Workflows restored.")
+
+    # --- plugins ---
+    plugins_dir = config.civex_dir / "plugins"
+    plugins_dir.mkdir(exist_ok=True)
+    plugins_restored = 0
+    for p in doc.get("plugins", []):
+        filename = p["filename"]
+        if "/" in filename or "\\" in filename or filename.startswith(".") or not filename.endswith(".py"):
+            console.print(f"  [warning]Plugin '{filename}': invalid filename — skipped.[/warning]")
+            continue
+        (plugins_dir / filename).write_text(p["content"])
+        plugins_restored += 1
+
+    console.print(f"  Plugins restored: {plugins_restored}/{n_plugins}.")
     console.print(f"[success]Restore complete.[/success]")

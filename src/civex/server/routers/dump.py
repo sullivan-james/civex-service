@@ -20,6 +20,7 @@ class RestoreResult(BaseModel):
     records_restored: int
     records_total: int
     workflows: int
+    plugins: int
 
 
 @router.get("/dump")
@@ -70,6 +71,16 @@ def export_dump(
     except Exception:
         workflows_out = []
 
+    try:
+        config = load_config()
+        plugins_out = []
+        plugins_dir = config.civex_dir / "plugins"
+        if plugins_dir.exists():
+            for path in sorted(plugins_dir.glob("*.py")):
+                plugins_out.append({"filename": path.name, "content": path.read_text()})
+    except Exception:
+        plugins_out = []
+
     dump_doc = {
         "civex_version": "0.1.0",
         "exported_at": datetime.now(timezone.utc).isoformat(),
@@ -77,6 +88,7 @@ def export_dump(
         "datasets": datasets_out,
         "records": records_out,
         "workflows": workflows_out,
+        "plugins": plugins_out,
     }
 
     content = yaml.dump(dump_doc, default_flow_style=False, allow_unicode=True, sort_keys=False)
@@ -154,12 +166,31 @@ async def import_dump(
     except Exception:
         pass
 
+    plugins_restored = 0
+    try:
+        from civex.config import load_config
+        config = load_config()
+        plugins_dir = config.civex_dir / "plugins"
+        plugins_dir.mkdir(exist_ok=True)
+        for p in doc.get("plugins", []):
+            filename = p["filename"]
+            if "/" in filename or "\\" in filename or filename.startswith(".") or not filename.endswith(".py"):
+                continue
+            (plugins_dir / filename).write_text(p["content"])
+            plugins_restored += 1
+        if plugins_restored:
+            from civex.plugins.registry import discover_user_plugins
+            discover_user_plugins(plugins_dir)
+    except Exception:
+        pass
+
     return RestoreResult(
         schemas=schemas_restored,
         datasets=datasets_restored,
         records_restored=records_restored,
         records_total=records_total,
         workflows=workflows_restored,
+        plugins=plugins_restored,
     )
 
 

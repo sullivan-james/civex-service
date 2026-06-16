@@ -12,7 +12,6 @@ export default function TerminalPage() {
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
     term.open(containerRef.current!)
-    fitAddon.fit()
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${protocol}//${window.location.host}/api/terminal/ws`)
@@ -26,23 +25,30 @@ export default function TerminalPage() {
       }
     }
 
+    const sendResize = () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
+      }
+    }
+
+    ws.onopen = () => {
+      fitAddon.fit()
+      sendResize()
+    }
     ws.onclose = () => term.write('\r\n\x1b[31m[disconnected]\x1b[0m\r\n')
 
+    // Sent as binary so the backend can tell raw keystrokes apart from JSON resize control messages.
     term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(data)
+      if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data))
     })
 
-    term.onResize(({ cols, rows }) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', cols, rows }))
-      }
-    })
+    term.onResize(sendResize)
 
-    const onResize = () => fitAddon.fit()
-    window.addEventListener('resize', onResize)
+    const onWindowResize = () => fitAddon.fit()
+    window.addEventListener('resize', onWindowResize)
 
     return () => {
-      window.removeEventListener('resize', onResize)
+      window.removeEventListener('resize', onWindowResize)
       ws.close()
       term.dispose()
     }

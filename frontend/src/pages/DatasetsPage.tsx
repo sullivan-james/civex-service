@@ -75,6 +75,7 @@ function ImportResultModal({ result, onClose }: { result: RestoreResult; onClose
             </dd>
           </div>
           <div className="flex justify-between"><dt className="text-[#656d76]">Workflows</dt><dd className="font-medium">{result.workflows}</dd></div>
+          <div className="flex justify-between"><dt className="text-[#656d76]">Plugins</dt><dd className="font-medium">{result.plugins}</dd></div>
         </dl>
         <div className="flex justify-end mt-4">
           <Button variant="primary" onClick={onClose}>Done</Button>

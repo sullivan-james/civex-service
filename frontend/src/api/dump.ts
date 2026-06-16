@@ -4,6 +4,7 @@ export interface RestoreResult {
   records_restored: number
   records_total: number
   workflows: number
+  plugins: number
 }
 
 export const dumpApi = {

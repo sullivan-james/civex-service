@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { useRecord, useRecords, useUpdateRecord } from '../hooks/useRecords'
+import { useRecord, useRecords, useUpdateRecord, useCreateRecord } from '../hooks/useRecords'
 import { useDataset } from '../hooks/useDatasets'
 import { useSchemas } from '../hooks/useSchemas'
 // import { useRecordJobs } from '../hooks/useWorkflows'
@@ -11,6 +11,7 @@ import {
   LoadingState, ErrorState,
 } from '../components/ui'
 import { DynamicField } from '../components/records/DynamicField'
+import { RecordForm } from '../components/records/RecordForm'
 import { formatDate } from '../lib/utils'
 import type { Schema } from '../api/schemas'
 import type { CivexRecord } from '../api/records'
@@ -104,12 +105,14 @@ export default function RecordDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [isEditing, setIsEditing] = useState(false)
   const [editValues, setEditValues] = useState<Record<string, unknown>>({})
+  const [addingChild, setAddingChild] = useState(false)
 
   const { data: record, isLoading, error } = useRecord(id)
   const { data: dataset } = useDataset(record?.dataset_id ?? '')
   const { data: schemas } = useSchemas()
   const { data: parent } = useRecord(record?.parent_record_id)
   const updateRecord = useUpdateRecord()
+  const createRecord = useCreateRecord(dataset?.name ?? '')
 
   // All children of this record — any schema
   const { data: childPage } = useRecords(dataset?.name ?? '', {
@@ -123,6 +126,7 @@ export default function RecordDetailPage() {
   const schema = schemas?.find(s => s.name === record.schema_name)
   const parentSchema = schema?.parent_id ? schemas?.find(s => s.id === schema.parent_id) : null
   const children = childPage?.items ?? []
+  const childSchemas = schemas?.filter(s => s.parent_id === schema?.id) ?? []
 
   function startEditing() {
     setEditValues({ ...record!.data })
@@ -141,6 +145,13 @@ export default function RecordDetailPage() {
     updateRecord.mutate(
       { id: record!.id, data: coerced },
       { onSuccess: () => setIsEditing(false) },
+    )
+  }
+
+  function handleAddChild(schemaName: string, data: Record<string, unknown>, parentRecordId?: string) {
+    createRecord.mutate(
+      { schema_name: schemaName, data, parent_record_id: parentRecordId },
+      { onSuccess: () => setAddingChild(false) },
     )
   }
 
@@ -275,14 +286,33 @@ export default function RecordDetailPage() {
       </div>
 
       {/* Children */}
-      {Object.keys(childrenBySchema).length > 0 && (
+      {(childSchemas.length > 0 || Object.keys(childrenBySchema).length > 0) && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold text-[#1f2328]">
               Children
               <span className="ml-2 text-sm font-normal text-[#656d76]">{children.length} total</span>
             </h2>
+            {childSchemas.length > 0 && !addingChild && (
+              <Button variant="primary" size="sm" onClick={() => setAddingChild(true)}>
+                + Add record
+              </Button>
+            )}
           </div>
+
+          {addingChild && dataset && schemas && (
+            <RecordForm
+              schemas={schemas}
+              datasetName={dataset.name}
+              selectableSchemaIds={childSchemas.map(s => s.id)}
+              lockedParentRecordId={record.id}
+              onSubmit={handleAddChild}
+              onCancel={() => setAddingChild(false)}
+              isPending={createRecord.isPending}
+              error={createRecord.error ? String(createRecord.error) : null}
+            />
+          )}
+
           {Object.entries(childrenBySchema).map(([schemaName, recs]) => (
             <ChildTable
               key={schemaName}

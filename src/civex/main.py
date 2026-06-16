@@ -71,6 +71,11 @@ def serve(
 
     typer.echo(f"Starting civex server at http://{host}:{port}")
     typer.echo(f"API docs: http://{host}:{port}/docs")
+    if reload:
+        typer.echo(
+            "Dev mode: for frontend HMR run `cd frontend && npm run dev` "
+            "and browse to http://localhost:5173"
+        )
     uvicorn.run("civex.server.app:app", host=host, port=port, reload=reload)
 
 

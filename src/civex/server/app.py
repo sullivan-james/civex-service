@@ -58,7 +58,13 @@ def create_app() -> FastAPI:
     else:
         @app.get("/", include_in_schema=False)
         def root():
-            return {"message": "civex API — run `cd frontend && npm run build` then reinstall"}
+            return {
+                "message": (
+                    "civex API is running — no built frontend found. "
+                    "For production: `cd frontend && npm run build`. "
+                    "For development: `cd frontend && npm run dev` then browse to http://localhost:5173"
+                )
+            }
 
     return app
 
