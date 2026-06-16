@@ -38,7 +38,7 @@ export function useAddField(schemaName: string) {
   return useMutation({
     mutationFn: (body: { name: string; type: string; required?: boolean }) =>
       schemasApi.addField(schemaName, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas', schemaName] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
   })
 }
 
@@ -47,7 +47,7 @@ export function useUpdateField(schemaName: string) {
   return useMutation({
     mutationFn: ({ fieldName, required }: { fieldName: string; required: boolean }) =>
       schemasApi.updateField(schemaName, fieldName, { required }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas', schemaName] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
   })
 }
 

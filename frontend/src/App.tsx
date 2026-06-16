@@ -8,6 +8,7 @@ import RecordDetailPage from './pages/RecordDetailPage'
 import WorkflowsPage from './pages/WorkflowsPage'
 import JobsPage from './pages/JobsPage'
 import JobDetailPage from './pages/JobDetailPage'
+import TerminalPage from './pages/TerminalPage'
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="/workflows" element={<WorkflowsPage />} />
         <Route path="/jobs" element={<JobsPage />} />
         <Route path="/jobs/:id" element={<JobDetailPage />} />
+        <Route path="/terminal" element={<TerminalPage />} />
       </Routes>
     </Layout>
   )

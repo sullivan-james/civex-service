@@ -8,6 +8,7 @@ const tabs = [
   { to: '/schemas',   label: 'Schemas' },
   { to: '/workflows', label: 'Workflows' },
   { to: '/jobs',      label: 'Jobs' },
+  { to: '/terminal',  label: 'Terminal' },
 ]
 
 function SyncMessage({ result, error, op }: { result: SyncResult | null; error: string | null; op: 'push' | 'pull' }) {

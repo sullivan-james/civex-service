@@ -3,6 +3,7 @@ from typing import Optional
 import typer
 
 from civex.cli import auth, dataset, db, plugin, record, remote, schema, workflow, worker
+from civex.cli.shell import run_shell
 from civex.cli.clone import clone
 from civex.cli.dump import dump, restore
 from civex.cli.init import init
@@ -71,6 +72,12 @@ def serve(
     typer.echo(f"Starting civex server at http://{host}:{port}")
     typer.echo(f"API docs: http://{host}:{port}/docs")
     uvicorn.run("civex.server.app:app", host=host, port=port, reload=reload)
+
+
+@app.command("shell")
+def shell() -> None:
+    """Start an interactive civex shell (no 'civex' prefix needed)."""
+    run_shell()
 
 
 if __name__ == "__main__":
