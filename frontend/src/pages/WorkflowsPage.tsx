@@ -1,11 +1,40 @@
 import { useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   useWorkflows, useWorkflow, useSaveWorkflow,
   useDeleteWorkflow, useRunWorkflow,
 } from '../hooks/useWorkflows'
 import { PageHeader, Button, Badge, LoadingState, ErrorState, EmptyState } from '../components/ui'
 import type { Workflow } from '../api/workflows'
+import { api } from '../api/client'
+
+interface PluginInfo { id: string; description: string; builtin: boolean }
+
+function usePlugins() {
+  return useQuery<PluginInfo[]>({
+    queryKey: ['plugins'],
+    queryFn: () => api.get<PluginInfo[]>('/plugins'),
+    staleTime: 30_000,
+  })
+}
+
+function useUploadPlugin() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch('/api/plugins/upload', { method: 'POST', body: form })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail ?? `HTTP ${res.status}`)
+      }
+      return res.json()
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['plugins'] }),
+  })
+}
 
 const NEW_TEMPLATE = `name: my-workflow
 description: null
@@ -166,14 +195,30 @@ function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
 
 export default function WorkflowsPage() {
   const { data: workflows, isLoading, error } = useWorkflows()
+  const { data: pluginList } = usePlugins()
+  const uploadPlugin = useUploadPlugin()
   const run = useRunWorkflow()
   const deleteWf = useDeleteWorkflow()
   const navigate = useNavigate()
+  const pluginInputRef = useRef<HTMLInputElement>(null)
 
   const [editor, setEditor] = useState<{ stem: string; isNew: boolean } | null>(null)
   const [runTarget, setRunTarget] = useState<string | null>(null)
   const [recordId, setRecordId] = useState('')
   const [runError, setRunError] = useState<string | null>(null)
+  const [pluginUploadError, setPluginUploadError] = useState<string | null>(null)
+
+  async function handlePluginFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setPluginUploadError(null)
+    try {
+      await uploadPlugin.mutateAsync(file)
+    } catch (err) {
+      setPluginUploadError(err instanceof Error ? err.message : String(err))
+    }
+  }
 
   function openNew() {
     setEditor({ stem: 'new-workflow', isNew: true })
@@ -250,6 +295,59 @@ export default function WorkflowsPage() {
           </tbody>
         </table>
       )}
+
+      {/* Plugins panel */}
+      <input ref={pluginInputRef} type="file" accept=".py" className="hidden" onChange={handlePluginFile} />
+      <div className="mt-10">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-base font-semibold text-[#1f2328]">Plugins</h2>
+            <p className="text-xs text-[#656d76] mt-0.5">Step implementations available to workflows</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {pluginUploadError && <span className="text-xs text-[#d1242f]">{pluginUploadError}</span>}
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => pluginInputRef.current?.click()}
+              disabled={uploadPlugin.isPending}
+            >
+              {uploadPlugin.isPending ? 'Uploading…' : 'Upload plugin'}
+            </Button>
+          </div>
+        </div>
+        {pluginList && pluginList.length > 0 && (
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="border-b border-[#d0d7de]">
+                <th className="text-left py-2 px-3 font-medium text-[#1f2328]">Plugin ID</th>
+                <th className="text-left py-2 px-3 font-medium text-[#1f2328]">Description</th>
+                <th className="text-left py-2 px-3 font-medium text-[#1f2328]">Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pluginList.map(p => (
+                <tr key={p.id} className="border-b border-[#d0d7de] hover:bg-[#f6f8fa]">
+                  <td className="py-2 px-3 font-mono text-xs text-[#1f2328]">{p.id}</td>
+                  <td className="py-2 px-3 text-[#656d76]">{p.description || '—'}</td>
+                  <td className="py-2 px-3">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                      p.builtin
+                        ? 'bg-[#ddf4ff] text-[#0969da]'
+                        : 'bg-[#dafbe1] text-[#1a7f37]'
+                    }`}>
+                      {p.builtin ? 'built-in' : 'user'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {pluginList?.length === 0 && (
+          <p className="text-sm text-[#656d76]">No plugins loaded yet.</p>
+        )}
+      </div>
 
       {/* YAML editor modal */}
       {editor && (
