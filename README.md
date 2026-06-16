@@ -22,6 +22,13 @@ A command-line research data management system. Define schemas, collect records 
 ## Installation
 
 ```bash
+gh release download v0.0.1 -R sullivan-james/civex-service --pattern "*.whl"
+pip install "civex[server] @ civex-0.0.1-py3-none-any.whl"
+```
+
+(replace version number with required version).
+
+```bash
 python -m venv venv
 source venv/bin/activate
 

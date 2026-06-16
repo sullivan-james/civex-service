@@ -72,7 +72,7 @@ def _resolve_db_url(target: Path, civex_dir: Path, use_sqlite: bool) -> str:
             )
 
     db_path = civex_dir / "civex.db"
-    return f"sqlite:///{db_path}"
+    return f"sqlite:///{db_path.as_posix()}"
 
 
 def _ensure_psycopg2() -> None:
@@ -121,7 +121,7 @@ def _init_bare(target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
 
     db_path = target / "civex.db"
-    db_url = f"sqlite:///{db_path}"
+    db_url = f"sqlite:///{db_path.as_posix()}"
 
     (target / "objects").mkdir(exist_ok=True)
     marker.write_text("")
