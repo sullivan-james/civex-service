@@ -396,14 +396,15 @@ _WELCOME_HTML = """<!DOCTYPE html>
       return;
     }
     el.innerHTML = items.map(item => `
-      <div class="recent-item" onclick="doOpenRecent(${JSON.stringify(item.path)})">
+      <div class="recent-item" data-path="${esc(item.path)}" onclick="doOpenRecent(this.dataset.path)">
         <span class="ri-icon">⬡</span>
         <div class="ri-info">
           <div class="ri-name">${esc(item.name)}</div>
           <div class="ri-path">${esc(item.path)}</div>
         </div>
         <button class="rm" title="Remove from list"
-          onclick="doRemove(event,${JSON.stringify(item.path)})">×</button>
+          data-path="${esc(item.path)}"
+          onclick="doRemove(event,this.dataset.path)">×</button>
       </div>`).join('');
   }
 

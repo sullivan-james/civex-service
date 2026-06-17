@@ -3,6 +3,17 @@ import { NavLink } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { remoteApi, type SyncResult } from '../api/remote'
 
+declare global {
+  interface Window {
+    pywebview?: { api: {
+      open_project: () => Promise<{ ok?: boolean; error?: string } | null>
+      create_project: () => Promise<{ ok?: boolean; error?: string } | null>
+    } }
+  }
+}
+
+const isDesktop = typeof window !== 'undefined' && !!window.pywebview
+
 const tabs = [
   { to: '/datasets',  label: 'Datasets' },
   { to: '/schemas',   label: 'Schemas' },
@@ -59,6 +70,31 @@ export default function Layout({ children }: { children: ReactNode }) {
       {/* Top navbar */}
       <header className="bg-[#24292f] px-6 py-3 flex items-center gap-4">
         <span className="text-[#f0f6fc] font-semibold text-base tracking-tight">civex</span>
+
+        {isDesktop && (
+          <div className="flex items-center gap-1 ml-2">
+            <button
+              onClick={() => window.pywebview!.api.open_project()}
+              title="Open a different civex project"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+                <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75z"/>
+              </svg>
+              Open project
+            </button>
+            <button
+              onClick={() => window.pywebview!.api.create_project()}
+              title="Create a new civex project"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+                <path d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2z"/>
+              </svg>
+              New project
+            </button>
+          </div>
+        )}
 
         <div className="flex-1" />
 
