@@ -39,7 +39,7 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
-        run: npm ci && npm run build
+        run: rm -rf node_modules && npm ci && npm run build
 
       - name: Install Python dependencies
         run: pip install ".[postgres,workflows,server,desktop]" pyinstaller
