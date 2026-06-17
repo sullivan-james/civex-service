@@ -59,12 +59,21 @@ export const workflowsApi = {
 }
 
 export const jobsApi = {
-  list: (status?: string, recordId?: string) => {
+  list: (status?: string, recordId?: string, offset?: number, limit?: number) => {
+    const p = new URLSearchParams()
+    if (status)            p.set('status', status)
+    if (recordId)          p.set('record_id', recordId)
+    if (offset !== undefined) p.set('offset', String(offset))
+    if (limit !== undefined)  p.set('limit', String(limit))
+    const qs = p.toString()
+    return api.get<WorkflowJob[]>(`/jobs${qs ? `?${qs}` : ''}`)
+  },
+  count: (status?: string, recordId?: string) => {
     const p = new URLSearchParams()
     if (status)   p.set('status', status)
     if (recordId) p.set('record_id', recordId)
     const qs = p.toString()
-    return api.get<WorkflowJob[]>(`/jobs${qs ? `?${qs}` : ''}`)
+    return api.get<{ total: number }>(`/jobs/count${qs ? `?${qs}` : ''}`)
   },
   get:   (id: string) => api.get<WorkflowJob>(`/jobs/${id}`),
   rerun: (id: string) => api.post<WorkflowJob>(`/jobs/${id}/rerun`, {}),

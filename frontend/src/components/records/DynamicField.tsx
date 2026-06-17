@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { api } from '../../api/client'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import type { Field } from '../../api/schemas'
+import { utcToDatetimeLocal, datetimeLocalToUTC } from '../../utils/dates'
 
 export interface FileRef {
   sha256: string
@@ -18,14 +19,36 @@ interface Props {
 const inputClass =
   'w-full border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]'
 
+function fileAccept(restrictions: Record<string, unknown> | undefined): string | undefined {
+  const acc = restrictions?.accept
+  return typeof acc === 'string' ? acc : undefined
+}
+
+function fileMaxSize(restrictions: Record<string, unknown> | undefined): number | undefined {
+  const ms = restrictions?.max_size
+  return ms !== undefined ? Number(ms) : undefined
+}
+
+function validateFileSize(file: File, maxSize: number | undefined): string | null {
+  if (maxSize !== undefined && file.size > maxSize) {
+    const limit = maxSize >= 1_048_576 ? `${(maxSize / 1_048_576).toFixed(1)} MB` : maxSize >= 1024 ? `${(maxSize / 1024).toFixed(0)} KB` : `${maxSize} B`
+    return `File too large (${(file.size / 1024).toFixed(0)} KB) — max ${limit}`
+  }
+  return null
+}
+
 function FileField({ field, value, onChange }: Props) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const ref = value as FileRef | null | undefined
+  const accept = fileAccept(field.restrictions)
+  const maxSize = fileMaxSize(field.restrictions)
 
   async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    const sizeErr = validateFileSize(file, maxSize)
+    if (sizeErr) { setError(sizeErr); return }
     setUploading(true)
     setError(null)
     try {
@@ -57,6 +80,7 @@ function FileField({ field, value, onChange }: Props) {
       )}
       <input
         type="file"
+        accept={accept}
         onChange={handleChange}
         disabled={uploading}
         className="block w-full text-sm text-[#1f2328] file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-[#f6f8fa] file:text-[#1f2328] hover:file:bg-[#eaeef2] cursor-pointer disabled:opacity-50"
@@ -67,14 +91,20 @@ function FileField({ field, value, onChange }: Props) {
   )
 }
 
-function FileListField({ value, onChange }: Props) {
+function FileListField({ field, value, onChange }: Props) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const existing = (value as FileRef[] | null | undefined) ?? []
+  const accept = fileAccept(field.restrictions)
+  const maxSize = fileMaxSize(field.restrictions)
 
   async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
     if (!files.length) return
+    for (const file of files) {
+      const sizeErr = validateFileSize(file, maxSize)
+      if (sizeErr) { setError(sizeErr); return }
+    }
     setUploading(true)
     setError(null)
     try {
@@ -108,6 +138,7 @@ function FileListField({ value, onChange }: Props) {
       <input
         type="file"
         multiple
+        accept={accept}
         onChange={handleChange}
         disabled={uploading}
         className="block w-full text-sm text-[#1f2328] file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-[#f6f8fa] file:text-[#1f2328] hover:file:bg-[#eaeef2] cursor-pointer disabled:opacity-50"
@@ -119,7 +150,7 @@ function FileListField({ value, onChange }: Props) {
 }
 
 function ReferenceField({ field, value, onChange }: Props) {
-  const targetSchema = field.restrictions?.schema ?? ''
+  const targetSchema = String(field.restrictions?.schema ?? '')
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<CivexRecord[]>([])
   const [open, setOpen] = useState(false)
@@ -200,40 +231,93 @@ function ReferenceField({ field, value, onChange }: Props) {
 
 export function DynamicField({ field, value, onChange }: Props) {
   switch (field.type) {
-    case 'string':
+    case 'string': {
+      const choices = field.restrictions?.choices
+      if (Array.isArray(choices) && choices.length) {
+        return (
+          <select
+            value={(value as string) ?? ''}
+            onChange={e => onChange(e.target.value)}
+            className={inputClass}
+          >
+            {!field.required && <option value="">— optional —</option>}
+            {(choices as string[]).map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )
+      }
+      const maxLength = field.restrictions?.max_length !== undefined ? Number(field.restrictions.max_length) : undefined
       return (
         <input
           type="text"
           value={(value as string) ?? ''}
           onChange={e => onChange(e.target.value)}
           placeholder={field.required ? 'Required' : 'Optional'}
+          maxLength={maxLength}
           className={inputClass}
         />
       )
+    }
 
-    case 'integer':
+    case 'integer': {
+      const rMin = field.restrictions?.min !== undefined ? Number(field.restrictions.min) : undefined
+      const rMax = field.restrictions?.max !== undefined ? Number(field.restrictions.max) : undefined
       return (
         <input
           type="number"
           step="1"
+          min={rMin}
+          max={rMax}
           value={(value as string) ?? ''}
           onChange={e => onChange(e.target.value)}
           placeholder={field.required ? 'Required' : 'Optional'}
           className={inputClass}
         />
       )
+    }
 
-    case 'float':
+    case 'float': {
+      const rMin = field.restrictions?.min !== undefined ? Number(field.restrictions.min) : undefined
+      const rMax = field.restrictions?.max !== undefined ? Number(field.restrictions.max) : undefined
       return (
         <input
           type="number"
           step="any"
+          min={rMin}
+          max={rMax}
           value={(value as string) ?? ''}
           onChange={e => onChange(e.target.value)}
           placeholder={field.required ? 'Required' : 'Optional'}
           className={inputClass}
         />
       )
+    }
+
+    case 'date':
+      return (
+        <input
+          type="date"
+          value={(value as string) ?? ''}
+          min={field.restrictions?.min !== undefined ? String(field.restrictions.min) : undefined}
+          max={field.restrictions?.max !== undefined ? String(field.restrictions.max) : undefined}
+          onChange={e => onChange(e.target.value)}
+          className={inputClass}
+        />
+      )
+
+    case 'datetime': {
+      const rMin = field.restrictions?.min !== undefined ? utcToDatetimeLocal(String(field.restrictions.min)) : undefined
+      const rMax = field.restrictions?.max !== undefined ? utcToDatetimeLocal(String(field.restrictions.max)) : undefined
+      return (
+        <input
+          type="datetime-local"
+          value={value ? utcToDatetimeLocal(value as string) : ''}
+          min={rMin}
+          max={rMax}
+          onChange={e => onChange(e.target.value ? datetimeLocalToUTC(e.target.value) : '')}
+          className={inputClass}
+        />
+      )
+    }
 
     case 'boolean':
       return (

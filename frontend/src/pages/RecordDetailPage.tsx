@@ -154,7 +154,7 @@ export default function RecordDetailPage() {
   const [runWorkflow, setRunWorkflow] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
-  const { data: record, isLoading, error } = useRecord(id)
+  const { data: record, isLoading, error } = useRecord(id, 3000)
   const { data: dataset } = useDataset(record?.dataset_id ?? '')
   const { data: schemas } = useSchemas()
   const { data: workflows } = useWorkflows()

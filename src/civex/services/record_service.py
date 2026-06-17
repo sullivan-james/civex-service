@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from datetime import date as _date, datetime as _dt, timezone as _tz
 from pathlib import Path
 from typing import Any
 
@@ -14,12 +15,97 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from civex.services.workflow_job_service import WorkflowJobService
 
+def _parse_date(v: str) -> str:
+    return _date.fromisoformat(v.strip()).isoformat()
+
+def _parse_datetime(v: str) -> str:
+    s = v.strip()
+    # datetime-local inputs omit seconds; fromisoformat needs them on Python <3.11
+    if len(s) == 16 and s[10] == "T":
+        s += ":00"
+    dt = _dt.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_tz.utc)
+    return dt.astimezone(_tz.utc).isoformat()
+
 _COERCE: dict[str, Any] = {
     "integer": int,
     "float": float,
     "string": str,
     "boolean": lambda v: v.strip().lower() in ("true", "yes", "1"),
+    "date": _parse_date,
+    "datetime": _parse_datetime,
 }
+
+
+def _check_restrictions(value: Any, dtype: str, restrictions: dict[str, Any], field_name: str) -> None:
+    """Raise ValidationError if value violates field restrictions. Single source of truth."""
+    if not restrictions or value is None:
+        return
+
+    if dtype in ("integer", "float"):
+        mn = restrictions.get("min")
+        mx = restrictions.get("max")
+        if mn is not None and value < mn:
+            raise ValidationError(f"Field '{field_name}': {value} is below minimum ({mn})")
+        if mx is not None and value > mx:
+            raise ValidationError(f"Field '{field_name}': {value} exceeds maximum ({mx})")
+
+    elif dtype == "string":
+        choices = restrictions.get("choices")
+        max_length = restrictions.get("max_length")
+        if choices is not None and value not in choices:
+            raise ValidationError(
+                f"Field '{field_name}': '{value}' must be one of: {', '.join(str(c) for c in choices)}"
+            )
+        if max_length is not None and len(value) > int(max_length):
+            raise ValidationError(
+                f"Field '{field_name}': value length {len(value)} exceeds max_length {max_length}"
+            )
+
+    elif dtype in ("date", "datetime"):
+        mn = restrictions.get("min")
+        mx = restrictions.get("max")
+        # Compare via parsed objects so timezone offsets don't cause lexicographic bugs.
+        try:
+            if dtype == "date":
+                v_cmp = _date.fromisoformat(str(value))
+                mn_cmp = _date.fromisoformat(str(mn)) if mn is not None else None
+                mx_cmp = _date.fromisoformat(str(mx)) if mx is not None else None
+            else:
+                v_cmp = _dt.fromisoformat(str(value))
+                mn_cmp = _dt.fromisoformat(str(mn)) if mn is not None else None
+                mx_cmp = _dt.fromisoformat(str(mx)) if mx is not None else None
+            if mn_cmp is not None and v_cmp < mn_cmp:
+                raise ValidationError(f"Field '{field_name}': {value} is before minimum ({mn})")
+            if mx_cmp is not None and v_cmp > mx_cmp:
+                raise ValidationError(f"Field '{field_name}': {value} is after maximum ({mx})")
+        except (ValueError, TypeError):
+            pass  # malformed restriction — let it through; the value was already normalised
+
+    elif dtype in ("file", "file_list"):
+        refs = value if isinstance(value, list) else [value]
+        accept = restrictions.get("accept")
+        max_size = restrictions.get("max_size")
+        allowed_exts = (
+            {e.strip().lower().lstrip(".") for e in accept.split(",") if e.strip().startswith(".")}
+            if accept else set()
+        )
+        for ref in refs:
+            if not isinstance(ref, dict):
+                continue
+            if allowed_exts:
+                ext = Path(ref.get("filename", "")).suffix.lstrip(".").lower()
+                if ext not in allowed_exts:
+                    raise ValidationError(
+                        f"Field '{field_name}': '{ref.get('filename')}' type '.{ext}' not allowed"
+                        f" — accepted: {accept}"
+                    )
+            if max_size is not None and ref.get("size", 0) > int(max_size):
+                raise ValidationError(
+                    f"Field '{field_name}': file size {ref.get('size', 0)} bytes"
+                    f" exceeds max_size {max_size}"
+                )
 
 
 class RecordService:
@@ -66,14 +152,18 @@ class RecordService:
             if not path.exists():
                 raise CoercionError(field_name, dtype, raw)
             file_ref = self._files.put(path.read_bytes(), path.name)
-            return file_ref.to_dict()
+            value = file_ref.to_dict()
+            _check_restrictions(value, dtype, restrictions or {}, field_name)
+            return value
 
         if dtype == "file_list":
             path = Path(raw)
             if not path.exists():
                 raise CoercionError(field_name, dtype, raw)
             file_ref = self._files.put(path.read_bytes(), path.name)
-            return [file_ref.to_dict()]
+            value = [file_ref.to_dict()]
+            _check_restrictions(value, dtype, restrictions or {}, field_name)
+            return value
 
         if dtype == "reference":
             record = self._records.get_by_prefix(raw)
@@ -91,9 +181,23 @@ class RecordService:
         if coerce is None:
             raise CoercionError(field_name, dtype, raw)
         try:
-            return coerce(raw)
+            value = coerce(raw)
         except (ValueError, TypeError):
             raise CoercionError(field_name, dtype, raw)
+        _check_restrictions(value, dtype, restrictions or {}, field_name)
+        return value
+
+    def _validate_data(self, data: dict[str, Any], schema_id: uuid.UUID) -> None:
+        """Validate all field values in data against their restrictions."""
+        schema = self._schema_svc._repo.get_by_id(schema_id)
+        if schema is None:
+            return
+        fields_by_name = {rf.field.name: rf.field for rf in self._schema_svc.collect_fields(schema)}
+        for name, value in data.items():
+            field = fields_by_name.get(name)
+            if field is None or value is None:
+                continue
+            _check_restrictions(value, field.dtype, field.restrictions, name)
 
     def validate(self, data: dict[str, Any], fields: list[ResolvedField]) -> None:
         missing = [
@@ -153,6 +257,7 @@ class RecordService:
         else:
             self.validate(data, self._schema_svc.collect_fields(schema))
 
+        self._validate_data(data, schema.id)
         id_data = self._names_to_ids(data, schema.id)
         dto = self._records.create(
             dataset_id=dataset.id,
@@ -168,7 +273,9 @@ class RecordService:
             if named.data:
                 # Also fire record_updated so field-specific triggers (e.g. triggered on
                 # a particular field being set) fire even when the record is first created.
-                self._job_svc.trigger_for_record(named, "record_updated", changed_fields=set(named.data.keys()))
+                set_fields = {k for k, v in named.data.items() if v is not None}
+                if set_fields:
+                    self._job_svc.trigger_for_record(named, "record_updated", changed_fields=set_fields)
         return named
 
     def get(self, record_id: str) -> RecordDTO:
@@ -181,6 +288,7 @@ class RecordService:
         raw = self._records.get_by_prefix(record_id)
         if not raw:
             raise NotFoundError(f"Record '{record_id}' not found")
+        self._validate_data(data, raw.schema_id)
         old_data = self._ids_to_names(raw.data, raw.schema_id)
         id_data = self._names_to_ids(data, raw.schema_id)
         dto = self._records.update(id=raw.id, data=id_data)

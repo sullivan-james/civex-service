@@ -4,7 +4,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from civex.db.models import Dataset
+from civex.db.models import Dataset, Record, WorkflowJob
 from civex.domain.dtos import DatasetDTO
 
 
@@ -39,6 +39,16 @@ class LocalDatasetRepository:
         return _to_dto(row)
 
     def delete(self, id: uuid.UUID) -> None:
+        # Bulk-delete dependents first so SQLAlchemy doesn't load every record into
+        # memory and issue per-row DELETEs via ORM cascade.
+        record_ids = self._s.query(Record.id).filter_by(dataset_id=id).subquery()
+        self._s.query(WorkflowJob).filter(WorkflowJob.record_id.in_(record_ids)).delete(synchronize_session=False)
+        # Clear parent_record_id before bulk-deleting records to satisfy the
+        # self-referential FK on PostgreSQL (SQLite ignores it without PRAGMA).
+        self._s.query(Record).filter_by(dataset_id=id).update(
+            {"parent_record_id": None}, synchronize_session=False
+        )
+        self._s.query(Record).filter_by(dataset_id=id).delete(synchronize_session=False)
         row = self._s.query(Dataset).filter_by(id=id).first()
         if row:
             self._s.delete(row)

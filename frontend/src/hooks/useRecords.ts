@@ -18,11 +18,12 @@ export function useRecordCounts(datasetName: string) {
   })
 }
 
-export function useRecord(id: string | null | undefined) {
+export function useRecord(id: string | null | undefined, refetchInterval?: number | false) {
   return useQuery({
     queryKey: ['record', id],
     queryFn: () => recordsApi.get(id!),
     enabled: !!id,
+    refetchInterval: refetchInterval ?? false,
   })
 }
 

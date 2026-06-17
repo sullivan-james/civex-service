@@ -62,7 +62,9 @@ class UpdateSchemaRequest(BaseModel):
 
 
 class UpdateFieldRequest(BaseModel):
-    required: bool
+    rename: str | None = None
+    required: bool | None = None
+    restrictions: dict[str, Any] | None = None
 
 
 # --- Datasets ---

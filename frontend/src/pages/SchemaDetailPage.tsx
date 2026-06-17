@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
+import { utcToDatetimeLocal, datetimeLocalToUTC } from '../utils/dates'
 import { useSchema, useUpdateSchema, useAddField, useUpdateField, useDeleteSchema, useDeleteField, useSchemas } from '../hooks/useSchemas'
 import {
   Button, Badge,
@@ -7,7 +8,7 @@ import {
   LoadingState, ErrorState,
 } from '../components/ui'
 
-const FIELD_TYPES = ['string', 'integer', 'float', 'boolean', 'file', 'reference']
+const FIELD_TYPES = ['string', 'integer', 'float', 'boolean', 'date', 'datetime', 'file', 'reference']
 
 // --- Inline metadata editor ---
 
@@ -62,67 +63,345 @@ function MetaEditor({
   )
 }
 
+// --- Restrictions summary chip ---
+
+function RestrictionsSummary({ restrictions, type }: { restrictions: Record<string, unknown>; type: string }) {
+  if (!restrictions || !Object.keys(restrictions).length) return null
+  const parts: string[] = []
+  if (type === 'integer' || type === 'float') {
+    if (restrictions.min !== undefined) parts.push(`min ${restrictions.min}`)
+    if (restrictions.max !== undefined) parts.push(`max ${restrictions.max}`)
+  }
+  if (type === 'string') {
+    if (Array.isArray(restrictions.choices)) parts.push(`choices: ${(restrictions.choices as string[]).join(', ')}`)
+    if (restrictions.max_length !== undefined) parts.push(`max ${restrictions.max_length} chars`)
+  }
+  if (type === 'file' || type === 'file_list') {
+    if (restrictions.accept) parts.push(`accept ${restrictions.accept}`)
+    if (restrictions.max_size !== undefined) {
+      const bytes = Number(restrictions.max_size)
+      parts.push(`max ${bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : bytes >= 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${bytes} B`}`)
+    }
+  }
+  if (type === 'date' || type === 'datetime') {
+    if (restrictions.min !== undefined) parts.push(`from ${restrictions.min}`)
+    if (restrictions.max !== undefined) parts.push(`until ${restrictions.max}`)
+  }
+  if (!parts.length) return null
+  return <span className="text-[10px] text-[#656d76] leading-tight">{parts.join(' · ')}</span>
+}
+
 // --- Add field form ---
+
+const inputSm = 'border border-[#d0d7de] rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]'
 
 function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () => void }) {
   const [fieldName, setFieldName] = useState('')
   const [type, setType] = useState('string')
   const [required, setRequired] = useState(false)
+  // reference
   const [refSchema, setRefSchema] = useState('')
+  // integer/float
+  const [minVal, setMinVal] = useState('')
+  const [maxVal, setMaxVal] = useState('')
+  // string
+  const [choices, setChoices] = useState('')
+  const [maxLength, setMaxLength] = useState('')
+  // file/file_list
+  const [accept, setAccept] = useState('')
+  const [maxSize, setMaxSize] = useState('')
+  // date/datetime
+  const [minDate, setMinDate] = useState('')
+  const [maxDate, setMaxDate] = useState('')
+
   const addField = useAddField(schemaName)
   const { data: allSchemas } = useSchemas()
 
   const canAdd = !!fieldName.trim() && (type !== 'reference' || !!refSchema)
 
+  function handleTypeChange(t: string) {
+    setType(t)
+    setRefSchema(''); setMinVal(''); setMaxVal(''); setChoices(''); setMaxLength(''); setAccept(''); setMaxSize(''); setMinDate(''); setMaxDate('')
+  }
+
+  function buildRestrictions(): Record<string, unknown> | undefined {
+    const r: Record<string, unknown> = {}
+    if (type === 'reference' && refSchema) r.schema = refSchema
+    if (type === 'integer' || type === 'float') {
+      if (minVal !== '') r.min = type === 'integer' ? parseInt(minVal) : parseFloat(minVal)
+      if (maxVal !== '') r.max = type === 'integer' ? parseInt(maxVal) : parseFloat(maxVal)
+    }
+    if (type === 'string') {
+      if (choices.trim()) r.choices = choices.split(',').map(c => c.trim()).filter(Boolean)
+      if (maxLength !== '') r.max_length = parseInt(maxLength)
+    }
+    if (type === 'file' || type === 'file_list') {
+      if (accept.trim()) r.accept = accept.trim()
+      if (maxSize !== '') r.max_size = parseInt(maxSize)
+    }
+    if (type === 'date') {
+      if (minDate) r.min = minDate
+      if (maxDate) r.max = maxDate
+    }
+    if (type === 'datetime') {
+      if (minDate) r.min = datetimeLocalToUTC(minDate)
+      if (maxDate) r.max = datetimeLocalToUTC(maxDate)
+    }
+    return Object.keys(r).length ? r : undefined
+  }
+
   function handleAdd() {
     if (!canAdd) return
-    const restrictions = type === 'reference' ? { schema: refSchema } : undefined
     addField.mutate(
-      { name: fieldName.trim(), type, required, restrictions },
-      { onSuccess: () => { setFieldName(''); setType('string'); setRequired(false); setRefSchema(''); onDone() } },
+      { name: fieldName.trim(), type, required, restrictions: buildRestrictions() },
+      { onSuccess: () => { setFieldName(''); handleTypeChange('string'); setRequired(false); onDone() } },
     )
   }
 
   return (
-    <div className="border-t border-[#d0d7de] bg-[#f6f8fa] px-4 py-3 flex items-center gap-3 flex-wrap">
-      <input
-        value={fieldName}
-        onChange={e => setFieldName(e.target.value)}
-        onKeyDown={e => e.key === 'Enter' && handleAdd()}
-        placeholder="Field name"
-        autoFocus
-        className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white w-40 focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
-      />
-      <select
-        value={type}
-        onChange={e => { setType(e.target.value); setRefSchema('') }}
-        className="border border-[#d0d7de] rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da]"
-      >
-        {FIELD_TYPES.map(t => <option key={t}>{t}</option>)}
-      </select>
-      {type === 'reference' && (
+    <div className="border-t border-[#d0d7de] bg-[#f6f8fa] px-4 py-3 flex flex-col gap-3">
+      {/* Row 1: name, type, required */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <input
+          value={fieldName}
+          onChange={e => setFieldName(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleAdd()}
+          placeholder="Field name"
+          autoFocus
+          className={`${inputSm} w-40`}
+        />
         <select
-          value={refSchema}
-          onChange={e => setRefSchema(e.target.value)}
-          className="border border-[#d0d7de] rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da]"
+          value={type}
+          onChange={e => handleTypeChange(e.target.value)}
+          className={inputSm}
         >
-          <option value="">— target schema —</option>
-          {allSchemas?.filter(s => s.name !== schemaName).map(s => (
-            <option key={s.id} value={s.name}>{s.name}</option>
-          ))}
+          {FIELD_TYPES.map(t => <option key={t}>{t}</option>)}
         </select>
-      )}
-      <label className="flex items-center gap-1.5 text-sm text-[#1f2328] cursor-pointer select-none">
-        <input type="checkbox" checked={required} onChange={e => setRequired(e.target.checked)} />
-        Required
-      </label>
-      {addField.error && <span className="text-xs text-[#d1242f]">{String(addField.error)}</span>}
-      <div className="flex gap-2 ml-auto">
-        <Button variant="primary" size="sm" onClick={handleAdd} disabled={addField.isPending || !canAdd}>
-          {addField.isPending ? 'Adding…' : 'Add field'}
-        </Button>
-        <Button size="sm" onClick={onDone}>Cancel</Button>
+        {type === 'reference' && (
+          <select
+            value={refSchema}
+            onChange={e => setRefSchema(e.target.value)}
+            className={inputSm}
+          >
+            <option value="">— target schema —</option>
+            {allSchemas?.filter(s => s.name !== schemaName).map(s => (
+              <option key={s.id} value={s.name}>{s.name}</option>
+            ))}
+          </select>
+        )}
+        <label className="flex items-center gap-1.5 text-sm text-[#1f2328] cursor-pointer select-none">
+          <input type="checkbox" checked={required} onChange={e => setRequired(e.target.checked)} />
+          Required
+        </label>
+        <div className="flex gap-2 ml-auto">
+          <Button variant="primary" size="sm" onClick={handleAdd} disabled={addField.isPending || !canAdd}>
+            {addField.isPending ? 'Adding…' : 'Add field'}
+          </Button>
+          <Button size="sm" onClick={onDone}>Cancel</Button>
+        </div>
       </div>
+
+      {/* Row 2: type-specific restrictions */}
+      {(type === 'integer' || type === 'float') && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Min
+            <input type="number" step={type === 'integer' ? '1' : 'any'} value={minVal} onChange={e => setMinVal(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Max
+            <input type="number" step={type === 'integer' ? '1' : 'any'} value={maxVal} onChange={e => setMaxVal(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
+          </label>
+        </div>
+      )}
+      {type === 'string' && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Choices (comma-separated)
+            <input value={choices} onChange={e => setChoices(e.target.value)} placeholder="e.g. left,right,bilateral" className={`${inputSm} w-52`} />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Max length
+            <input type="number" step="1" min="1" value={maxLength} onChange={e => setMaxLength(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
+          </label>
+        </div>
+      )}
+      {(type === 'file' || type === 'file_list') && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Accept
+            <input value={accept} onChange={e => setAccept(e.target.value)} placeholder=".csv,.txt" className={`${inputSm} w-36`} />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Max size (bytes)
+            <input type="number" step="1" min="1" value={maxSize} onChange={e => setMaxSize(e.target.value)} placeholder="none" className={`${inputSm} w-28`} />
+          </label>
+        </div>
+      )}
+      {(type === 'date' || type === 'datetime') && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Not before
+            <input type={type === 'date' ? 'date' : 'datetime-local'} value={minDate} onChange={e => setMinDate(e.target.value)} className={inputSm} />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Not after
+            <input type={type === 'date' ? 'date' : 'datetime-local'} value={maxDate} onChange={e => setMaxDate(e.target.value)} className={inputSm} />
+          </label>
+        </div>
+      )}
+
+      {addField.error && <span className="text-xs text-[#d1242f]">{String(addField.error)}</span>}
+    </div>
+  )
+}
+
+// --- Inline field editor ---
+
+function FieldEditForm({ field, schemaName, onDone }: { field: { id: string; name: string; type: string; required: boolean; restrictions: Record<string, unknown> }; schemaName: string; onDone: () => void }) {
+  const [name, setName] = useState(field.name)
+  const [required, setRequired] = useState(field.required)
+  const [minVal, setMinVal] = useState(field.restrictions?.min !== undefined ? String(field.restrictions.min) : '')
+  const [maxVal, setMaxVal] = useState(field.restrictions?.max !== undefined ? String(field.restrictions.max) : '')
+  const [choices, setChoices] = useState(Array.isArray(field.restrictions?.choices) ? (field.restrictions.choices as string[]).join(', ') : '')
+  const [maxLength, setMaxLength] = useState(field.restrictions?.max_length !== undefined ? String(field.restrictions.max_length) : '')
+  const [accept, setAccept] = useState(typeof field.restrictions?.accept === 'string' ? field.restrictions.accept : '')
+  const [maxSize, setMaxSize] = useState(field.restrictions?.max_size !== undefined ? String(field.restrictions.max_size) : '')
+  // date/datetime — stored as UTC ISO; display in datetime-local format
+  const [minDate, setMinDate] = useState(
+    field.restrictions?.min !== undefined
+      ? (field.type === 'datetime' ? utcToDatetimeLocal(String(field.restrictions.min)) : String(field.restrictions.min))
+      : ''
+  )
+  const [maxDate, setMaxDate] = useState(
+    field.restrictions?.max !== undefined
+      ? (field.type === 'datetime' ? utcToDatetimeLocal(String(field.restrictions.max)) : String(field.restrictions.max))
+      : ''
+  )
+
+  const updateField = useUpdateField(schemaName)
+
+  function buildRestrictions(): Record<string, unknown> {
+    const r: Record<string, unknown> = {}
+    if (field.type === 'reference' && field.restrictions?.schema) r.schema = field.restrictions.schema
+    if (field.type === 'integer' || field.type === 'float') {
+      if (minVal !== '') r.min = field.type === 'integer' ? parseInt(minVal) : parseFloat(minVal)
+      if (maxVal !== '') r.max = field.type === 'integer' ? parseInt(maxVal) : parseFloat(maxVal)
+    }
+    if (field.type === 'string') {
+      if (choices.trim()) r.choices = choices.split(',').map(c => c.trim()).filter(Boolean)
+      if (maxLength !== '') r.max_length = parseInt(maxLength)
+    }
+    if (field.type === 'file' || field.type === 'file_list') {
+      if (accept.trim()) r.accept = accept.trim()
+      if (maxSize !== '') r.max_size = parseInt(maxSize)
+    }
+    if (field.type === 'date') {
+      if (minDate) r.min = minDate
+      if (maxDate) r.max = maxDate
+    }
+    if (field.type === 'datetime') {
+      if (minDate) r.min = datetimeLocalToUTC(minDate)
+      if (maxDate) r.max = datetimeLocalToUTC(maxDate)
+    }
+    return r
+  }
+
+  function handleSave() {
+    const trimmed = name.trim()
+    updateField.mutate(
+      {
+        fieldName: field.name,
+        rename: trimmed !== field.name ? trimmed : undefined,
+        required,
+        restrictions: buildRestrictions(),
+      },
+      { onSuccess: onDone },
+    )
+  }
+
+  const dtype = field.type
+
+  return (
+    <div className="bg-[#f0f6ff] border-t border-[#d0d7de] px-4 py-3 flex flex-col gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
+        <input
+          value={name}
+          onChange={e => setName(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSave()}
+          autoFocus
+          className={`${inputSm} w-40`}
+        />
+        <Badge variant="accent">{dtype}</Badge>
+        <label className="flex items-center gap-1.5 text-sm text-[#1f2328] cursor-pointer select-none">
+          <input type="checkbox" checked={required} onChange={e => setRequired(e.target.checked)} />
+          Required
+        </label>
+        <div className="flex gap-2 ml-auto">
+          <Button variant="primary" size="sm" onClick={handleSave} disabled={updateField.isPending || !name.trim()}>
+            {updateField.isPending ? 'Saving…' : 'Save'}
+          </Button>
+          <Button size="sm" onClick={onDone}>Cancel</Button>
+        </div>
+      </div>
+
+      {(dtype === 'integer' || dtype === 'float') && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Min
+            <input type="number" step={dtype === 'integer' ? '1' : 'any'} value={minVal} onChange={e => setMinVal(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Max
+            <input type="number" step={dtype === 'integer' ? '1' : 'any'} value={maxVal} onChange={e => setMaxVal(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
+          </label>
+        </div>
+      )}
+      {dtype === 'string' && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Choices (comma-separated)
+            <input value={choices} onChange={e => setChoices(e.target.value)} placeholder="none" className={`${inputSm} w-52`} />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Max length
+            <input type="number" step="1" min="1" value={maxLength} onChange={e => setMaxLength(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
+          </label>
+        </div>
+      )}
+      {(dtype === 'file' || dtype === 'file_list') && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Accept
+            <input value={accept} onChange={e => setAccept(e.target.value)} placeholder=".csv,.txt" className={`${inputSm} w-36`} />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Max size (bytes)
+            <input type="number" step="1" min="1" value={maxSize} onChange={e => setMaxSize(e.target.value)} placeholder="none" className={`${inputSm} w-28`} />
+          </label>
+        </div>
+      )}
+      {(dtype === 'date' || dtype === 'datetime') && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Not before
+            <input type={dtype === 'date' ? 'date' : 'datetime-local'} value={minDate} onChange={e => setMinDate(e.target.value)} className={inputSm} />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Not after
+            <input type={dtype === 'date' ? 'date' : 'datetime-local'} value={maxDate} onChange={e => setMaxDate(e.target.value)} className={inputSm} />
+          </label>
+        </div>
+      )}
+      {updateField.error && <span className="text-xs text-[#d1242f]">{String(updateField.error)}</span>}
     </div>
   )
 }
@@ -142,6 +421,7 @@ export default function SchemaDetailPage() {
   const updateField = useUpdateField(schema?.name ?? '')
   const deleteField = useDeleteField(schema?.name ?? '')
   const deleteSchema = useDeleteSchema()
+  const [editingField, setEditingField] = useState<string | null>(null)
   const [confirmDeleteField, setConfirmDeleteField] = useState<string | null>(null)
 
   if (isLoading) return <LoadingState />
@@ -213,62 +493,90 @@ export default function SchemaDetailPage() {
               <Tr><td colSpan={4} className="px-4 py-3 text-sm text-[#656d76] italic">No fields yet.</td></Tr>
             )}
             {schema.fields.map(field => (
-              <Tr key={field.id}>
-                <Td><span className="font-mono text-sm">{field.name}</span></Td>
-                <Td>
-                  <Badge variant="accent">{field.type}</Badge>
-                  {field.type === 'reference' && field.restrictions?.schema && (
-                    <span className="ml-1.5 text-xs text-[#656d76]">
-                      {'→ '}
-                      <Link
-                        to={`/schemas/${allSchemas?.find(s => s.name === field.restrictions.schema)?.id ?? field.restrictions.schema}`}
-                        className="text-[#0969da] hover:underline"
-                      >
-                        {field.restrictions.schema}
-                      </Link>
-                    </span>
-                  )}
-                </Td>
-                <Td>
-                  <button
-                    onClick={() => updateField.mutate({ fieldName: field.name, required: !field.required })}
-                    className={`text-xs font-medium px-2 py-0.5 rounded-full border cursor-pointer transition-colors ${
-                      field.required
-                        ? 'bg-[#dafbe1] text-[#1a7f37] border-[#4ac26b66] hover:bg-[#aceebb]'
-                        : 'bg-[#f6f8fa] text-[#656d76] border-[#d0d7de] hover:bg-[#eff2f5]'
-                    }`}
-                  >
-                    {field.required ? 'Required' : 'Optional'}
-                  </button>
-                </Td>
-                <Td>
-                  {confirmDeleteField === field.name ? (
-                    <span className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => deleteField.mutate(field.name, { onSuccess: () => setConfirmDeleteField(null) })}
-                        disabled={deleteField.isPending}
-                        className="text-xs text-[#d1242f] font-medium hover:underline disabled:opacity-50"
-                      >
-                        Confirm
-                      </button>
-                      <button
-                        onClick={() => setConfirmDeleteField(null)}
-                        className="text-xs text-[#656d76] hover:underline"
-                      >
-                        Cancel
-                      </button>
-                    </span>
-                  ) : (
+              editingField === field.name ? (
+                <Tr key={field.id}>
+                  <td colSpan={4} className="p-0">
+                    <FieldEditForm
+                      field={field}
+                      schemaName={schema.name}
+                      onDone={() => setEditingField(null)}
+                    />
+                  </td>
+                </Tr>
+              ) : (
+                <Tr key={field.id}>
+                  <Td><span className="font-mono text-sm">{field.name}</span></Td>
+                  <Td>
+                    <div className="flex flex-col gap-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="accent">{field.type}</Badge>
+                        {field.type === 'reference' && !!field.restrictions?.schema && (
+                          <span className="text-xs text-[#656d76]">
+                            {'→ '}
+                            <Link
+                              to={`/schemas/${allSchemas?.find(s => s.name === String(field.restrictions.schema))?.id ?? String(field.restrictions.schema)}`}
+                              className="text-[#0969da] hover:underline"
+                            >
+                              {String(field.restrictions.schema)}
+                            </Link>
+                          </span>
+                        )}
+                      </div>
+                      <RestrictionsSummary restrictions={field.restrictions} type={field.type} />
+                    </div>
+                  </Td>
+                  <Td>
                     <button
-                      onClick={() => setConfirmDeleteField(field.name)}
-                      className="text-xs text-[#656d76] hover:text-[#d1242f] transition-colors"
-                      title="Remove field"
+                      onClick={() => updateField.mutate({ fieldName: field.name, required: !field.required })}
+                      className={`text-xs font-medium px-2 py-0.5 rounded-full border cursor-pointer transition-colors ${
+                        field.required
+                          ? 'bg-[#dafbe1] text-[#1a7f37] border-[#4ac26b66] hover:bg-[#aceebb]'
+                          : 'bg-[#f6f8fa] text-[#656d76] border-[#d0d7de] hover:bg-[#eff2f5]'
+                      }`}
                     >
-                      ✕
+                      {field.required ? 'Required' : 'Optional'}
                     </button>
-                  )}
-                </Td>
-              </Tr>
+                  </Td>
+                  <Td>
+                    <span className="flex items-center gap-2">
+                      {confirmDeleteField === field.name ? (
+                        <>
+                          <button
+                            onClick={() => deleteField.mutate(field.name, { onSuccess: () => setConfirmDeleteField(null) })}
+                            disabled={deleteField.isPending}
+                            className="text-xs text-[#d1242f] font-medium hover:underline disabled:opacity-50"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteField(null)}
+                            className="text-xs text-[#656d76] hover:underline"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => { setConfirmDeleteField(null); setEditingField(field.name) }}
+                            className="text-xs text-[#656d76] hover:text-[#0969da] transition-colors"
+                            title="Edit field"
+                          >
+                            ✎
+                          </button>
+                          <button
+                            onClick={() => { setEditingField(null); setConfirmDeleteField(field.name) }}
+                            className="text-xs text-[#656d76] hover:text-[#d1242f] transition-colors"
+                            title="Remove field"
+                          >
+                            ✕
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  </Td>
+                </Tr>
+              )
             ))}
           </Tbody>
           {addingField && (

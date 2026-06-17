@@ -13,15 +13,24 @@ from civex.server.models import WorkflowJobResponse
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
-@router.get("", response_model=list[WorkflowJobResponse])
-def list_jobs(
+@router.get("/count")
+def count_jobs(
     status: str | None = None,
     record_id: str | None = None,
     ctx: AppContext = Depends(get_ctx),
 ):
-    jobs = ctx.job_svc.list_jobs(status=status)
-    if record_id:
-        jobs = [j for j in jobs if str(j.record_id) == record_id]
+    return {"total": ctx.job_svc.count_jobs(status=status, record_id=record_id)}
+
+
+@router.get("", response_model=list[WorkflowJobResponse])
+def list_jobs(
+    status: str | None = None,
+    record_id: str | None = None,
+    offset: int = 0,
+    limit: int | None = None,
+    ctx: AppContext = Depends(get_ctx),
+):
+    jobs = ctx.job_svc.list_jobs(status=status, record_id=record_id, offset=offset, limit=limit)
     return [WorkflowJobResponse.from_dto(j) for j in jobs]
 
 

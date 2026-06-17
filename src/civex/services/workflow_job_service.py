@@ -80,8 +80,17 @@ class WorkflowJobService:
     def mark_failed(self, job_id: uuid.UUID, error: str, log: str | None = None) -> None:
         self._repo.mark_failed(job_id, error, log=log)
 
-    def list_jobs(self, status: str | None = None) -> list[WorkflowJobDTO]:
-        return self._repo.list_all(status=status)
+    def list_jobs(
+        self,
+        status: str | None = None,
+        record_id: str | None = None,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> list[WorkflowJobDTO]:
+        return self._repo.list_all(status=status, record_id=record_id, offset=offset, limit=limit)
+
+    def count_jobs(self, status: str | None = None, record_id: str | None = None) -> int:
+        return self._repo.count(status=status, record_id=record_id)
 
     def get_job(self, job_id: uuid.UUID) -> WorkflowJobDTO | None:
         return self._repo.get_by_id(job_id)

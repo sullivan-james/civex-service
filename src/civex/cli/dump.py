@@ -58,16 +58,12 @@ def dump(
         })
     schemas_out = _sort_schemas(schemas_out)
 
-    # --- datasets ---
-    datasets_out = [
-        {"name": d.name, "description": d.description}
-        for d in ctx.dataset_svc.list_all()
-    ]
-
-    # --- records ---
+    # --- datasets + records ---
+    datasets_out = []
     records_out = []
     if not no_data:
         for dataset in ctx.dataset_svc.list_all():
+            datasets_out.append({"name": dataset.name, "description": dataset.description})
             for record in ctx.record_svc.find(dataset.name, schema_name=None, filters=[], limit=100_000):
                 rec: dict = {"dataset": dataset.name, "schema": record.schema_name, "data": record.data}
                 if record.parent_record_id:

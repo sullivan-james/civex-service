@@ -61,6 +61,35 @@ export function useJobs(status?: string, recordId?: string) {
   })
 }
 
+export function useJobsPaged(page: number, pageSize: number, status?: string, recordId?: string) {
+  const offset = page * pageSize
+  const jobs = useQuery({
+    queryKey: ['jobs', 'paged', page, pageSize, status, recordId],
+    queryFn: () => jobsApi.list(status, recordId, offset, pageSize),
+    refetchInterval: (query) => {
+      const data = query.state.data as WorkflowJob[] | undefined
+      return data?.some(j => j.status === 'pending' || j.status === 'running') ? 2000 : 5000
+    },
+  })
+  const total = useQuery({
+    queryKey: ['jobs', 'count', status, recordId],
+    queryFn: () => jobsApi.count(status, recordId),
+    refetchInterval: 5000,
+  })
+  return { jobs, total: total.data?.total ?? 0, isLoading: jobs.isLoading || total.isLoading, error: jobs.error }
+}
+
+export function useActiveJobCount() {
+  return useQuery({
+    queryKey: ['jobs', 'count', 'active'],
+    queryFn: async () => {
+      const [r, p] = await Promise.all([jobsApi.count('running'), jobsApi.count('pending')])
+      return { running: r.total, pending: p.total }
+    },
+    refetchInterval: 3000,
+  })
+}
+
 export function useRerunJob() {
   const qc = useQueryClient()
   return useMutation({

@@ -5,7 +5,7 @@ export interface Field {
   name: string
   type: string
   required: boolean
-  restrictions: Record<string, string>
+  restrictions: Record<string, unknown>
 }
 
 export interface Schema {
@@ -24,9 +24,9 @@ export const schemasApi = {
   update: (name: string, body: { rename?: string; description?: string }) =>
     api.patch<Schema>(`/schemas/${name}`, body),
   delete: (name: string)                             => api.delete<void>(`/schemas/${name}`),
-  addField: (name: string, body: { name: string; type: string; required?: boolean; restrictions?: Record<string, string> }) =>
+  addField: (name: string, body: { name: string; type: string; required?: boolean; restrictions?: Record<string, unknown> }) =>
     api.post<Field>(`/schemas/${name}/fields`, body),
-  updateField: (name: string, fieldName: string, body: { required: boolean }) =>
+  updateField: (name: string, fieldName: string, body: { rename?: string; required?: boolean; restrictions?: Record<string, unknown> | null }) =>
     api.patch<Field>(`/schemas/${name}/fields/${fieldName}`, body),
   deleteField: (name: string, fieldName: string) =>
     api.delete<void>(`/schemas/${name}/fields/${fieldName}`),

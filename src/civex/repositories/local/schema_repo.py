@@ -86,9 +86,14 @@ class LocalSchemaRepository:
         self._s.flush()
         return _field_to_dto(row)
 
-    def update_field(self, field_id: uuid.UUID, required: bool) -> FieldDTO:
+    def update_field(self, field_id: uuid.UUID, *, name: str | None = None, required: bool | None = None, restrictions: dict | None = None) -> FieldDTO:
         row = self._s.query(Field).filter_by(id=field_id).first()
-        row.required = required
+        if name is not None:
+            row.name = name
+        if required is not None:
+            row.required = required
+        if restrictions is not None:
+            row.restrictions = restrictions
         self._s.flush()
         return _field_to_dto(row)
 

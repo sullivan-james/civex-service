@@ -7,7 +7,7 @@ from civex.domain.dtos import FieldDTO, ResolvedField, SchemaDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError
 from civex.repositories.protocols import AuditRepository, SchemaRepository
 
-VALID_DTYPES = frozenset(["integer", "float", "string", "boolean", "file", "file_list", "reference"])
+VALID_DTYPES = frozenset(["integer", "float", "string", "boolean", "file", "file_list", "reference", "date", "datetime"])
 
 
 class SchemaService:
@@ -97,13 +97,24 @@ class SchemaService:
             self._audit.log_change("delete", "field", field.id, field.to_dict(), None)
         self._repo.delete_field(field.id)
 
-    def update_field(self, schema_name: str, field_name: str, required: bool) -> FieldDTO:
+    def update_field(
+        self,
+        schema_name: str,
+        field_name: str,
+        *,
+        new_name: str | None = None,
+        required: bool | None = None,
+        restrictions: dict | None = None,
+    ) -> FieldDTO:
         schema = self.get(schema_name)
         field = next((f for f in schema.fields if f.name == field_name), None)
         if field is None:
             raise NotFoundError(f"Field '{field_name}' not found on schema '{schema_name}'")
+        if new_name and new_name != field_name:
+            if any(f.name == new_name for f in schema.fields):
+                raise AlreadyExistsError(f"Field '{new_name}' already exists on schema '{schema_name}'")
         old_dict = field.to_dict()
-        updated = self._repo.update_field(field.id, required=required)
+        updated = self._repo.update_field(field.id, name=new_name, required=required, restrictions=restrictions)
         if self._audit:
             self._audit.log_change("update", "field", updated.id, old_dict, updated.to_dict())
         return updated

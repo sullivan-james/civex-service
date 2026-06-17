@@ -69,11 +69,36 @@ class LocalWorkflowJobRepository:
             row.log = log
             self._s.flush()
 
-    def list_all(self, status: str | None = None) -> list[WorkflowJobDTO]:
+    def list_all(
+        self,
+        status: str | None = None,
+        record_id: str | None = None,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> list[WorkflowJobDTO]:
         q = self._s.query(WorkflowJob)
         if status:
             q = q.filter_by(status=status)
-        return [_to_dto(r) for r in q.order_by(WorkflowJob.created_at.desc()).all()]
+        if record_id:
+            try:
+                q = q.filter_by(record_id=uuid.UUID(record_id))
+            except ValueError:
+                return []
+        q = q.order_by(WorkflowJob.created_at.desc()).offset(offset)
+        if limit is not None:
+            q = q.limit(limit)
+        return [_to_dto(r) for r in q.all()]
+
+    def count(self, status: str | None = None, record_id: str | None = None) -> int:
+        q = self._s.query(WorkflowJob)
+        if status:
+            q = q.filter_by(status=status)
+        if record_id:
+            try:
+                q = q.filter_by(record_id=uuid.UUID(record_id))
+            except ValueError:
+                return 0
+        return q.count()
 
     def get_by_id(self, job_id: uuid.UUID) -> WorkflowJobDTO | None:
         row = self._s.query(WorkflowJob).filter_by(id=job_id).first()

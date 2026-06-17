@@ -93,9 +93,18 @@ def delete_field(name: str, field_name: str, ctx: AppContext = Depends(get_ctx))
 
 @router.patch("/{name}/fields/{field_name}", response_model=FieldResponse)
 def update_field(name: str, field_name: str, body: UpdateFieldRequest, ctx: AppContext = Depends(get_ctx)):
+    if body.rename is None and body.required is None and body.restrictions is None:
+        raise HTTPException(422, detail="Provide at least one of: rename, required, restrictions")
     try:
-        field = ctx.schema_svc.update_field(name, field_name, required=body.required)
+        field = ctx.schema_svc.update_field(
+            name, field_name,
+            new_name=body.rename,
+            required=body.required,
+            restrictions=body.restrictions,
+        )
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
-    return FieldResponse(id=str(field.id), name=field.name, type=field.dtype, required=field.required)
+    except AlreadyExistsError as e:
+        raise HTTPException(409, detail=str(e))
+    return FieldResponse(id=str(field.id), name=field.name, type=field.dtype, required=field.required, restrictions=field.restrictions)
