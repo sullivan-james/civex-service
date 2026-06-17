@@ -16,14 +16,13 @@
 #   Windows — uses WebView2 (Edge Chromium, ships with Win 10/11 since 2021)
 #   Linux   — uses WebKitGTK; users need: libwebkit2gtk-4.0 or libwebkitgtk-6.0
 
-_HIDDEN = [
-    # Plugin auto-discovery walks the package at runtime — PyInstaller misses it
-    "civex.plugins.builtins",
-    "civex.plugins.builtins.load_file",
-    "civex.plugins.builtins.load_csv",
-    "civex.plugins.builtins.get_field",
-    "civex.plugins.builtins.save_field",
-    "civex.plugins.builtins.rows_to_records",
+from PyInstaller.utils.hooks import collect_submodules
+
+# Collect every civex.* submodule — avoids missing any module that is only
+# referenced by string (e.g. "civex.server.app:app" passed to uvicorn.run).
+_CIVEX_ALL = collect_submodules("civex")
+
+_HIDDEN = _CIVEX_ALL + [
     # uvicorn internals are imported dynamically
     "uvicorn",
     "uvicorn.logging",
