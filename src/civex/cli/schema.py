@@ -169,6 +169,25 @@ def schema_update_field(
         raise typer.Exit(1)
 
 
+@app.command("remove-field")
+def schema_remove_field(
+    schema_name: str = typer.Argument(...),
+    field_name: str = typer.Argument(...),
+    yes: bool = typer.Option(False, "--yes", "-y"),
+) -> None:
+    """Remove a field from a schema."""
+    if not yes:
+        typer.confirm(f"Remove field '{field_name}' from schema '{schema_name}'?", abort=True)
+    ctx = _ctx()
+    try:
+        ctx.schema_svc.delete_field(schema_name, field_name)
+        ctx.commit()
+        console.print(f"[success]Removed field '{field_name}' from '{schema_name}'.[/success]")
+    except NotFoundError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+
+
 @app.command("delete")
 def schema_delete(
     name: str = typer.Argument(...),

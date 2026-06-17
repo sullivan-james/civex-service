@@ -1,11 +1,11 @@
 import { useState, useRef, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   useWorkflows, useWorkflow, useSaveWorkflow,
-  useDeleteWorkflow, useRunWorkflow,
+  useDeleteWorkflow,
 } from '../hooks/useWorkflows'
 import { PageHeader, Button, Badge, LoadingState, ErrorState, EmptyState } from '../components/ui'
+import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import type { Workflow } from '../api/workflows'
 import { api } from '../api/client'
 
@@ -197,15 +197,11 @@ export default function WorkflowsPage() {
   const { data: workflows, isLoading, error } = useWorkflows()
   const { data: pluginList } = usePlugins()
   const uploadPlugin = useUploadPlugin()
-  const run = useRunWorkflow()
   const deleteWf = useDeleteWorkflow()
-  const navigate = useNavigate()
   const pluginInputRef = useRef<HTMLInputElement>(null)
 
   const [editor, setEditor] = useState<{ stem: string; isNew: boolean } | null>(null)
-  const [runTarget, setRunTarget] = useState<string | null>(null)
-  const [recordId, setRecordId] = useState('')
-  const [runError, setRunError] = useState<string | null>(null)
+  const [runTarget, setRunTarget] = useState<Workflow | null>(null)
   const [pluginUploadError, setPluginUploadError] = useState<string | null>(null)
 
   async function handlePluginFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -233,23 +229,8 @@ export default function WorkflowsPage() {
     deleteWf.mutate(wf.stem)
   }
 
-  function openRun(name: string) {
-    setRunTarget(name)
-    setRecordId('')
-    setRunError(null)
-  }
-
-  async function handleRun(e: React.FormEvent) {
-    e.preventDefault()
-    if (!runTarget) return
-    setRunError(null)
-    try {
-      await run.mutateAsync({ name: runTarget, recordId: recordId.trim() })
-      setRunTarget(null)
-      navigate('/jobs')
-    } catch (err) {
-      setRunError(err instanceof Error ? err.message : 'Failed to enqueue workflow')
-    }
+  function openRun(wf: Workflow) {
+    setRunTarget(wf)
   }
 
   if (isLoading) return <LoadingState />
@@ -285,7 +266,7 @@ export default function WorkflowsPage() {
                 <td className="py-2 px-3 font-mono text-xs text-[#656d76]">{wf.filename}</td>
                 <td className="py-2 px-3">
                   <div className="flex justify-end gap-2">
-                    <Button size="sm" onClick={() => openRun(wf.name)}>Run</Button>
+                    <Button size="sm" onClick={() => openRun(wf)}>Run</Button>
                     <Button size="sm" variant="default" onClick={() => openEdit(wf)}>Edit</Button>
                     <Button size="sm" variant="danger" onClick={() => handleDelete(wf)}>Delete</Button>
                   </div>
@@ -358,36 +339,11 @@ export default function WorkflowsPage() {
         />
       )}
 
-      {/* Run dialog */}
       {runTarget && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
-            <h2 className="text-base font-semibold text-[#1f2328] mb-4">
-              Run <span className="font-mono">{runTarget}</span>
-            </h2>
-            <form onSubmit={handleRun} className="space-y-4">
-              <label className="block">
-                <span className="text-sm font-medium text-[#1f2328]">Record ID</span>
-                <input
-                  autoFocus
-                  type="text"
-                  value={recordId}
-                  onChange={e => setRecordId(e.target.value)}
-                  placeholder="Short ID or full UUID"
-                  required
-                  className="mt-1 w-full border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
-                />
-              </label>
-              {runError && <p className="text-sm text-red-600">{runError}</p>}
-              <div className="flex justify-end gap-2">
-                <Button variant="default" onClick={() => setRunTarget(null)} type="button">Cancel</Button>
-                <Button variant="primary" type="submit" disabled={run.isPending}>
-                  {run.isPending ? 'Queuing…' : 'Run'}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <WorkflowRunModal
+          workflow={runTarget}
+          onClose={() => setRunTarget(null)}
+        />
       )}
     </>
   )

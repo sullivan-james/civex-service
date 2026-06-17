@@ -39,6 +39,15 @@ export function useRunWorkflow() {
   })
 }
 
+export function useRunWorkflowWithFiles() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, recordId, fileInputs }: { name: string; recordId: string; fileInputs: Record<string, File[]> }) =>
+      workflowsApi.runWithFiles(name, recordId, fileInputs),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['jobs'] }),
+  })
+}
+
 export function useJobs(status?: string, recordId?: string) {
   return useQuery({
     queryKey: ['jobs', status, recordId],

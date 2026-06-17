@@ -58,3 +58,11 @@ export function useDeleteSchema() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
   })
 }
+
+export function useDeleteField(schemaName: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (fieldName: string) => schemasApi.deleteField(schemaName, fieldName),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
+  })
+}

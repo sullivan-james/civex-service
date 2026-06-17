@@ -28,4 +28,6 @@ export const schemasApi = {
     api.post<Field>(`/schemas/${name}/fields`, body),
   updateField: (name: string, fieldName: string, body: { required: boolean }) =>
     api.patch<Field>(`/schemas/${name}/fields/${fieldName}`, body),
+  deleteField: (name: string, fieldName: string) =>
+    api.delete<void>(`/schemas/${name}/fields/${fieldName}`),
 }

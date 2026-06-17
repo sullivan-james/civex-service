@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { useSchema, useUpdateSchema, useAddField, useUpdateField, useDeleteSchema, useSchemas } from '../hooks/useSchemas'
+import { useSchema, useUpdateSchema, useAddField, useUpdateField, useDeleteSchema, useDeleteField, useSchemas } from '../hooks/useSchemas'
 import {
   Button, Badge,
   Table, Thead, Th, Tbody, Tr, Td,
@@ -140,7 +140,9 @@ export default function SchemaDetailPage() {
   const { data: schema, isLoading, error } = useSchema(id!)
   const { data: allSchemas } = useSchemas()
   const updateField = useUpdateField(schema?.name ?? '')
+  const deleteField = useDeleteField(schema?.name ?? '')
   const deleteSchema = useDeleteSchema()
+  const [confirmDeleteField, setConfirmDeleteField] = useState<string | null>(null)
 
   if (isLoading) return <LoadingState />
   if (error || !schema) return <ErrorState message={error ? String(error) : 'Schema not found'} />
@@ -203,11 +205,12 @@ export default function SchemaDetailPage() {
               <Th>Name</Th>
               <Th>Type</Th>
               <Th>Required</Th>
+              <Th className="w-20" />
             </tr>
           </Thead>
           <Tbody>
             {schema.fields.length === 0 && !addingField && (
-              <Tr><Td className="text-[#656d76] italic">No fields yet.</Td></Tr>
+              <Tr><td colSpan={4} className="px-4 py-3 text-sm text-[#656d76] italic">No fields yet.</td></Tr>
             )}
             {schema.fields.map(field => (
               <Tr key={field.id}>
@@ -238,13 +241,40 @@ export default function SchemaDetailPage() {
                     {field.required ? 'Required' : 'Optional'}
                   </button>
                 </Td>
+                <Td>
+                  {confirmDeleteField === field.name ? (
+                    <span className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => deleteField.mutate(field.name, { onSuccess: () => setConfirmDeleteField(null) })}
+                        disabled={deleteField.isPending}
+                        className="text-xs text-[#d1242f] font-medium hover:underline disabled:opacity-50"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteField(null)}
+                        className="text-xs text-[#656d76] hover:underline"
+                      >
+                        Cancel
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDeleteField(field.name)}
+                      className="text-xs text-[#656d76] hover:text-[#d1242f] transition-colors"
+                      title="Remove field"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </Td>
               </Tr>
             ))}
           </Tbody>
           {addingField && (
             <tfoot>
               <tr>
-                <td colSpan={3} className="p-0">
+                <td colSpan={4} className="p-0">
                   <AddFieldForm schemaName={schema.name} onDone={() => setAddingField(false)} />
                 </td>
               </tr>

@@ -1,11 +1,19 @@
 import { api } from './client'
 
+export interface WorkflowInput {
+  type: string
+  label: string | null
+  description: string | null
+}
+
 export interface Workflow {
   name: string
   description: string | null
   steps: number
   filename: string
   stem: string
+  record_schema: string | null
+  inputs: Record<string, WorkflowInput> | null
 }
 
 export interface WorkflowDetail extends Workflow {
@@ -32,6 +40,22 @@ export const workflowsApi = {
   save:   (stem: string, content: string)             => api.put<WorkflowDetail>(`/workflows/${encodeURIComponent(stem)}`, { content }),
   delete: (stem: string)                              => api.delete<void>(`/workflows/${encodeURIComponent(stem)}`),
   run:    (name: string, record_id: string)           => api.post<WorkflowJob>(`/workflows/${encodeURIComponent(name)}/run`, { record_id }),
+
+  runWithFiles: async (name: string, recordId: string, fileInputs: Record<string, File[]>): Promise<WorkflowJob> => {
+    const form = new FormData()
+    form.append('record_id', recordId)
+    for (const [inputName, files] of Object.entries(fileInputs)) {
+      for (const file of files) {
+        form.append(inputName, file)
+      }
+    }
+    const res = await fetch(`/api/workflows/${encodeURIComponent(name)}/run`, { method: 'POST', body: form })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail ?? `HTTP ${res.status}`)
+    }
+    return res.json()
+  },
 }
 
 export const jobsApi = {

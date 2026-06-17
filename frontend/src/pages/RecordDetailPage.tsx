@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { useRecord, useRecords, useUpdateRecord, useCreateRecord } from '../hooks/useRecords'
+import { Link, useParams, useNavigate } from 'react-router-dom'
+import { useRecord, useRecords, useUpdateRecord, useCreateRecord, useDeleteRecord } from '../hooks/useRecords'
 import { useDataset } from '../hooks/useDatasets'
 import { useSchemas } from '../hooks/useSchemas'
-// import { useRecordJobs } from '../hooks/useWorkflows'
+import { useWorkflows, useJobs } from '../hooks/useWorkflows'
 import type { WorkflowJob } from '../api/workflows'
+import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import {
   Badge, Button, MonoId,
   Table, Thead, Th, Tbody, Tr, Td,
@@ -33,6 +34,19 @@ function JobStatusBadge({ status }: { status: WorkflowJob['status'] }) {
 function FieldValue({ value }: { value: unknown }) {
   if (value === null || value === undefined) return <span className="text-[#818b98]">—</span>
   if (typeof value === 'boolean') return <Badge variant={value ? 'success' : 'default'}>{String(value)}</Badge>
+  if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object' && 'sha256' in value[0]) {
+    const refs = value as { filename: string; size: number; sha256: string }[]
+    return (
+      <span className="flex flex-col gap-1">
+        {refs.map(ref => (
+          <span key={ref.sha256} className="inline-flex items-center gap-2 text-xs text-[#656d76]">
+            <span>{ref.filename} ({(ref.size / 1024).toFixed(1)} KB)</span>
+            <a href={`/api/files/${ref.sha256}?filename=${encodeURIComponent(ref.filename)}`} download={ref.filename} className="text-[#0969da] hover:underline">Download</a>
+          </span>
+        ))}
+      </span>
+    )
+  }
   if (typeof value === 'object' && 'sha256' in (value as object)) {
     const ref = value as { filename: string; size: number; sha256: string }
     return (
@@ -56,13 +70,16 @@ function ChildTable({
   schema,
   records,
   datasetId,
+  onDelete,
 }: {
   schemaName: string
   schema: Schema | undefined
   records: CivexRecord[]
   datasetId: string
+  onDelete: (id: string) => void
 }) {
   const cols = schema?.fields.filter(f => f.type !== 'file').map(f => f.name) ?? []
+  const [confirmId, setConfirmId] = useState<string | null>(null)
 
   return (
     <div className="space-y-2">
@@ -79,6 +96,7 @@ function ChildTable({
             <Th className="w-24">ID</Th>
             {cols.map(c => <Th key={c}>{c}</Th>)}
             <Th className="w-28">Added</Th>
+            <Th className="w-20" />
           </tr>
         </Thead>
         <Tbody>
@@ -93,6 +111,32 @@ function ChildTable({
                 <Td key={col}><FieldValue value={r.data[col]} /></Td>
               ))}
               <Td className="text-[#656d76]">{formatDate(r.created_at)}</Td>
+              <Td>
+                {confirmId === r.id ? (
+                  <span className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => { onDelete(r.id); setConfirmId(null) }}
+                      className="text-xs text-[#d1242f] font-medium hover:underline"
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      onClick={() => setConfirmId(null)}
+                      className="text-xs text-[#656d76] hover:underline"
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => setConfirmId(r.id)}
+                    className="text-xs text-[#656d76] hover:text-[#d1242f] transition-colors"
+                    title="Delete record"
+                  >
+                    ✕
+                  </button>
+                )}
+              </Td>
             </Tr>
           ))}
         </Tbody>
@@ -103,22 +147,29 @@ function ChildTable({
 
 export default function RecordDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [isEditing, setIsEditing] = useState(false)
   const [editValues, setEditValues] = useState<Record<string, unknown>>({})
   const [addingChild, setAddingChild] = useState(false)
+  const [runWorkflow, setRunWorkflow] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const { data: record, isLoading, error } = useRecord(id)
   const { data: dataset } = useDataset(record?.dataset_id ?? '')
   const { data: schemas } = useSchemas()
+  const { data: workflows } = useWorkflows()
   const { data: parent } = useRecord(record?.parent_record_id)
+  const { data: recordJobs } = useJobs(undefined, id)
   const updateRecord = useUpdateRecord()
   const createRecord = useCreateRecord(dataset?.name ?? '')
+  const deleteRecord = useDeleteRecord(dataset?.name ?? '')
 
-  // All children of this record — any schema
+  // All children of this record — poll faster while jobs are active
+  const hasActiveJobs = (recordJobs ?? []).some(j => j.status === 'pending' || j.status === 'running')
   const { data: childPage } = useRecords(dataset?.name ?? '', {
     parent_record_id: id,
     limit: 500,
-  })
+  }, hasActiveJobs ? 2000 : 5000)
 
   if (isLoading) return <LoadingState />
   if (error || !record) return <ErrorState message={error ? String(error) : 'Record not found'} />
@@ -127,6 +178,10 @@ export default function RecordDetailPage() {
   const parentSchema = schema?.parent_id ? schemas?.find(s => s.id === schema.parent_id) : null
   const children = childPage?.items ?? []
   const childSchemas = schemas?.filter(s => s.parent_id === schema?.id) ?? []
+  const applicableWorkflows = (workflows ?? []).filter(
+    wf => !wf.record_schema || wf.record_schema === record.schema_name
+  )
+  const runWorkflowDef = runWorkflow ? applicableWorkflows.find(wf => wf.name === runWorkflow) ?? null : null
 
   function startEditing() {
     setEditValues({ ...record!.data })
@@ -320,12 +375,76 @@ export default function RecordDetailPage() {
               schema={schemas?.find(s => s.name === schemaName)}
               records={recs}
               datasetId={record.dataset_id}
+              onDelete={childId => deleteRecord.mutate(childId)}
             />
           ))}
         </div>
       )}
 
+      {applicableWorkflows.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-base font-semibold text-[#1f2328]">Workflows</h2>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {applicableWorkflows.map(wf => (
+              <button
+                key={wf.name}
+                onClick={() => setRunWorkflow(wf.name)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md hover:bg-[#f6f8fa] hover:border-[#0969da] transition-colors text-[#1f2328]"
+              >
+                <span>▶</span>
+                <span className="font-mono text-xs">{wf.name}</span>
+                {wf.inputs && Object.values(wf.inputs).some(i => i.type === 'files') && (
+                  <span className="text-xs text-[#656d76]">· files</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {runWorkflowDef && (
+        <WorkflowRunModal
+          workflow={runWorkflowDef}
+          recordId={record.id}
+          onClose={() => setRunWorkflow(null)}
+        />
+      )}
+
       <JobsTable recordId={record.id} />
+
+      {/* Danger zone */}
+      <div className="border border-[#d1242f33] rounded-md">
+        <div className="px-4 py-3 border-b border-[#d1242f33] bg-[#ffebe9] rounded-t-md">
+          <h2 className="text-sm font-semibold text-[#d1242f]">Danger zone</h2>
+        </div>
+        <div className="px-4 py-3 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-[#1f2328]">Delete this record</p>
+            <p className="text-xs text-[#656d76]">Permanently removes this record and all its children.</p>
+          </div>
+          {confirmDelete ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-[#656d76]">Are you sure?</span>
+              <Button
+                variant="danger" size="sm"
+                onClick={() => deleteRecord.mutate(record.id, {
+                  onSuccess: () => navigate(dataset ? `/datasets/${record.dataset_id}` : '/datasets'),
+                })}
+                disabled={deleteRecord.isPending}
+              >
+                {deleteRecord.isPending ? 'Deleting…' : 'Confirm delete'}
+              </Button>
+              <Button size="sm" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+            </div>
+          ) : (
+            <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>
+              Delete record
+            </Button>
+          )}
+        </div>
+      </div>
 
     </div>
   )

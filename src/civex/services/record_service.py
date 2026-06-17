@@ -68,6 +68,13 @@ class RecordService:
             file_ref = self._files.put(path.read_bytes(), path.name)
             return file_ref.to_dict()
 
+        if dtype == "file_list":
+            path = Path(raw)
+            if not path.exists():
+                raise CoercionError(field_name, dtype, raw)
+            file_ref = self._files.put(path.read_bytes(), path.name)
+            return [file_ref.to_dict()]
+
         if dtype == "reference":
             record = self._records.get_by_prefix(raw)
             if not record:
@@ -158,6 +165,10 @@ class RecordService:
             self._audit.log_change("create", "record", dto.id, None, named.to_dict())
         if self._job_svc:
             self._job_svc.trigger_for_record(named, "record_created")
+            if named.data:
+                # Also fire record_updated so field-specific triggers (e.g. triggered on
+                # a particular field being set) fire even when the record is first created.
+                self._job_svc.trigger_for_record(named, "record_updated", changed_fields=set(named.data.keys()))
         return named
 
     def get(self, record_id: str) -> RecordDTO:

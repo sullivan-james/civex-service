@@ -7,7 +7,7 @@ from civex.domain.dtos import FieldDTO, ResolvedField, SchemaDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError
 from civex.repositories.protocols import AuditRepository, SchemaRepository
 
-VALID_DTYPES = frozenset(["integer", "float", "string", "boolean", "file", "reference"])
+VALID_DTYPES = frozenset(["integer", "float", "string", "boolean", "file", "file_list", "reference"])
 
 
 class SchemaService:
@@ -87,6 +87,15 @@ class SchemaService:
         if self._audit:
             self._audit.log_change("update", "schema", updated.id, old_dict, updated.to_dict())
         return updated
+
+    def delete_field(self, schema_name: str, field_name: str) -> None:
+        schema = self.get(schema_name)
+        field = next((f for f in schema.fields if f.name == field_name), None)
+        if field is None:
+            raise NotFoundError(f"Field '{field_name}' not found on schema '{schema_name}'")
+        if self._audit:
+            self._audit.log_change("delete", "field", field.id, field.to_dict(), None)
+        self._repo.delete_field(field.id)
 
     def update_field(self, schema_name: str, field_name: str, required: bool) -> FieldDTO:
         schema = self.get(schema_name)

@@ -67,6 +67,57 @@ function FileField({ field, value, onChange }: Props) {
   )
 }
 
+function FileListField({ value, onChange }: Props) {
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const existing = (value as FileRef[] | null | undefined) ?? []
+
+  async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    if (!files.length) return
+    setUploading(true)
+    setError(null)
+    try {
+      const newRefs: FileRef[] = []
+      for (const file of files) {
+        const fd = new FormData()
+        fd.append('file', file)
+        const ref = await api.upload<FileRef>('/files', fd)
+        newRefs.push(ref)
+      }
+      onChange([...existing, ...newRefs])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  function remove(sha256: string) {
+    onChange(existing.filter(r => r.sha256 !== sha256))
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {existing.map(ref => (
+        <div key={ref.sha256} className="flex items-center gap-2 text-xs text-[#656d76]">
+          <span className="truncate">{ref.filename} ({(ref.size / 1024).toFixed(1)} KB)</span>
+          <button type="button" onClick={() => remove(ref.sha256)} className="text-[#d1242f] hover:underline shrink-0">✕</button>
+        </div>
+      ))}
+      <input
+        type="file"
+        multiple
+        onChange={handleChange}
+        disabled={uploading}
+        className="block w-full text-sm text-[#1f2328] file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-[#f6f8fa] file:text-[#1f2328] hover:file:bg-[#eaeef2] cursor-pointer disabled:opacity-50"
+      />
+      {uploading && <p className="text-xs text-[#656d76]">Uploading…</p>}
+      {error   && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  )
+}
+
 function ReferenceField({ field, value, onChange }: Props) {
   const targetSchema = field.restrictions?.schema ?? ''
   const [search, setSearch] = useState('')
@@ -205,6 +256,9 @@ export function DynamicField({ field, value, onChange }: Props) {
 
     case 'reference':
       return <ReferenceField field={field} value={value} onChange={onChange} />
+
+    case 'file_list':
+      return <FileListField field={field} value={value} onChange={onChange} />
 
     default:
       return (

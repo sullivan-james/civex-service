@@ -168,6 +168,14 @@ export default function Layout({ children }: { children: ReactNode }) {
               {label}
             </NavLink>
           ))}
+          <a
+            href="/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-4 py-3 text-sm font-medium border-b-2 border-transparent text-[#656d76] hover:text-[#1f2328] hover:border-[#d0d7de] transition-colors"
+          >
+            API docs ↗
+          </a>
         </nav>
       </div>
 

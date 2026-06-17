@@ -92,6 +92,12 @@ class LocalSchemaRepository:
         self._s.flush()
         return _field_to_dto(row)
 
+    def delete_field(self, field_id: uuid.UUID) -> None:
+        row = self._s.query(Field).filter_by(id=field_id).first()
+        if row:
+            self._s.delete(row)
+            self._s.flush()
+
 
 # ------------------------------------------------------------------
 # DTO converters (private to this module)

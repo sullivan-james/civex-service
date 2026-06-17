@@ -82,6 +82,15 @@ def add_field(name: str, body: AddFieldRequest, ctx: AppContext = Depends(get_ct
     return FieldResponse(id=str(field.id), name=field.name, type=field.dtype, required=field.required, restrictions=field.restrictions)
 
 
+@router.delete("/{name}/fields/{field_name}", status_code=204)
+def delete_field(name: str, field_name: str, ctx: AppContext = Depends(get_ctx)):
+    try:
+        ctx.schema_svc.delete_field(name, field_name)
+        ctx.commit()
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+
+
 @router.patch("/{name}/fields/{field_name}", response_model=FieldResponse)
 def update_field(name: str, field_name: str, body: UpdateFieldRequest, ctx: AppContext = Depends(get_ctx)):
     try:
