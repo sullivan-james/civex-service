@@ -64,7 +64,7 @@ def _resolve_db_url(target: Path, civex_dir: Path, use_sqlite: bool) -> str:
             )
         else:
             hint = docker_error_hint()
-            console.print(f"[dim]Docker not available — using SQLite.[/dim]")
+            console.print("[dim]Docker not available — using SQLite.[/dim]")
             console.print(f"  [dim]{hint}[/dim]")
             console.print(
                 "  [dim]Run `civex db setup-docker` or `civex db setup-postgres` "
@@ -87,7 +87,8 @@ def _ensure_psycopg2() -> None:
         return
     except ImportError:
         pass
-    import subprocess, sys
+    import subprocess
+    import sys
     console.print("  Installing psycopg2-binary...", end="  ")
     result = subprocess.run(
         [sys.executable, "-m", "pip", "install", "psycopg2-binary"],

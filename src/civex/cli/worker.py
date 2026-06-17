@@ -36,7 +36,7 @@ def worker_run(
             run_job(job, ctx)
             ctx.job_svc.mark_completed(job.id)
             ctx.commit()
-            console.print(f"    [success]✓ done[/success]")
+            console.print("    [success]✓ done[/success]")
         except Exception as e:
             ctx.job_svc.mark_failed(job.id, str(e))
             ctx.commit()
@@ -75,7 +75,6 @@ def worker_logs(
     job_id: str = typer.Argument(..., help="Job ID or short prefix"),
 ) -> None:
     """Show captured log output for a job."""
-    import uuid as _uuid
     ctx = get_ctx()
     jobs = ctx.job_svc.list_jobs()
     job = next(

@@ -82,10 +82,10 @@ def clone(
     if remote_civex != "civex":
         remote_lines += f'remote_civex = "{remote_civex}"\n'
     remote_lines += f'last_pulled_seq = {bundle.to_seq}\n'
-    remote_lines += f'last_pushed_seq = 0\n'
+    remote_lines += 'last_pushed_seq = 0\n'
     (civex_dir / "config.toml").write_text(remote_lines)
 
-    console.print(f"[success]Cloned successfully.[/success]")
+    console.print("[success]Cloned successfully.[/success]")
     console.print(f"  Schemas    {len(bundle.schemas)}")
     console.print(f"  Datasets   {len(bundle.datasets)}")
     console.print(f"  Records    {len(bundle.records)}")

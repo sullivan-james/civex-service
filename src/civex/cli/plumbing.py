@@ -17,7 +17,6 @@ from pathlib import Path
 
 import typer
 
-from civex.db.models import Base
 from civex.sync.bundle import SyncBundle
 from civex.sync.exporter import export_bundle
 from civex.sync.importer import apply_bundle

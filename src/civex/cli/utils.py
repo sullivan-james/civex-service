@@ -23,7 +23,9 @@ def get_ctx() -> AppContext:
 
 def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[None, str]:
     """Execute one workflow job. Returns captured log output. Raises on failure."""
-    import contextlib, io, logging as _logging
+    import contextlib
+    import io
+    import logging as _logging
 
     from civex.plugins import registry as plugin_registry
     from civex.plugins.base import WorkflowContext
@@ -75,7 +77,7 @@ def drain_jobs(ctx: AppContext) -> None:
             _, log = run_job(job, ctx)
             ctx.job_svc.mark_completed(job.id, log=log or None)
             ctx.commit()
-            console.print(f"    [success]✓ done[/success]")
+            console.print("    [success]✓ done[/success]")
         except Exception as e:
             ctx.job_svc.mark_failed(job.id, str(e))
             ctx.commit()

@@ -10,10 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
-from civex.plugins import registry as plugin_registry
-from civex.plugins.base import WorkflowContext
 from civex.server.deps import get_ctx
-from civex.workflows import executor
 from civex.workflows.definition import load_workflow
 
 router = APIRouter(prefix="/ui", include_in_schema=False)
@@ -342,7 +339,7 @@ def workflow_run(
     job = ctx.job_svc.enqueue_manual(name, record)
     ctx.commit()
     background_tasks.add_task(_run_pending_jobs)
-    return _r(f"/ui/jobs", flash_ok=f"Workflow '{name}' queued — job {str(job.id)[:8]}…")
+    return _r("/ui/jobs", flash_ok=f"Workflow '{name}' queued — job {str(job.id)[:8]}…")
 
 
 # --- Jobs ---

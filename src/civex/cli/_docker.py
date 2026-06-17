@@ -135,7 +135,7 @@ def setup_docker_postgres(project_name: str) -> str | None:
     name = container_name(project_name)
     port = find_free_port(5432)
 
-    console.print(f"\nSetting up PostgreSQL via Docker...")
+    console.print("\nSetting up PostgreSQL via Docker...")
     console.print(f"  Starting container [bold]{name}[/bold]...", end="  ")
 
     ok, err = start_pg_container(name, port)
@@ -149,7 +149,7 @@ def setup_docker_postgres(project_name: str) -> str | None:
     if not wait_for_postgres(port):
         console.print("[error]timed out[/error]")
         console.print(
-            f"  [dim]Container started but postgres didn't respond within 60s.[/dim]"
+            "  [dim]Container started but postgres didn't respond within 60s.[/dim]"
         )
         return None
     console.print("[success]OK[/success]")

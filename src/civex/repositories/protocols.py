@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from civex.domain.dtos import AuditLogDTO, CommitDTO, DatasetDTO, FieldDTO, FileRef, RecordDTO, SchemaDTO, WorkflowJobDTO
+from civex.domain.dtos import DatasetDTO, FieldDTO, FileRef, RecordDTO, SchemaDTO, WorkflowJobDTO
 
 
 @runtime_checkable

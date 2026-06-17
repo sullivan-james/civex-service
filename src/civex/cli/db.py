@@ -316,7 +316,7 @@ def setup_docker() -> None:
 
     import urllib.parse
     parsed = urllib.parse.urlparse(db_url)
-    console.print(f"\n[success]Docker PostgreSQL setup complete.[/success]")
+    console.print("\n[success]Docker PostgreSQL setup complete.[/success]")
     console.print(f"  Database   postgresql://{parsed.hostname}:{parsed.port or 5432}{parsed.path}")
     console.print(f"  Config     {civex_dir / 'config.toml'}")
     if is_new:
@@ -433,7 +433,7 @@ def setup_postgres(
         raise typer.Exit(1)
 
     # ---- Summary ------------------------------------------------------------
-    console.print(f"\n[success]PostgreSQL setup complete.[/success]")
+    console.print("\n[success]PostgreSQL setup complete.[/success]")
     console.print(f"  Database   postgresql://{display}")
     console.print(f"  Config     {civex_dir / 'config.toml'}")
     if is_new:
@@ -450,7 +450,7 @@ def _run_wizard(driver: str) -> tuple[str, str]:
     """
     current_user = getpass.getuser()
 
-    console.print(f"\n[bold]Detecting local PostgreSQL server...[/bold]", end="  ")
+    console.print("\n[bold]Detecting local PostgreSQL server...[/bold]", end="  ")
     found = _probe_local()
 
     if found:

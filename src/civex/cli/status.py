@@ -1,7 +1,6 @@
 """civex status — show uncommitted changes and unpushed commits."""
 from __future__ import annotations
 
-import typer
 
 from civex.cli.utils import get_ctx
 from civex.console import console

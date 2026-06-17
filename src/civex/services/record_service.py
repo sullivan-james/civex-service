@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from civex.domain.dtos import FileRef, RecordDTO, ResolvedField
+from civex.domain.dtos import RecordDTO, ResolvedField
 from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
 from civex.repositories.protocols import AuditRepository, DatasetRepository, FileObjectStore, RecordRepository
 from civex.services.schema_service import SchemaService

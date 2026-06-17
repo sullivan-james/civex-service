@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import Session
 
-from civex.db.models import Base, Commit
+from civex.db.models import Commit
 from civex.sync.bundle import SyncBundle
 from civex.sync.exporter import export_bundle
 from civex.sync.importer import apply_bundle

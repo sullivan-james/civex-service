@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from civex.db.models import AuditLog, Commit, Dataset, Field, Record, Schema

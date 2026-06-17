@@ -63,7 +63,7 @@ def run_pending_jobs() -> None:
                     record = ctx.record_svc.get(str(job.record_id))
                     dataset = ctx.dataset_svc._datasets.get_by_id(record.dataset_id)
                     if dataset is None:
-                        raise ValueError(f"Dataset for record not found")
+                        raise ValueError("Dataset for record not found")
                     wf_ctx = WorkflowContext(record=record, dataset=dataset, _app_ctx=ctx)
                     initial_outputs = job.input_data or None
                     executor.run(wf_def, wf_ctx, plugins, initial_outputs=initial_outputs)

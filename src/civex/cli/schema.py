@@ -7,7 +7,7 @@ from rich.table import Table
 
 from civex.cli.utils import get_ctx as _ctx
 from civex.console import console
-from civex.domain.exceptions import AlreadyExistsError, CivexError, NotFoundError
+from civex.domain.exceptions import AlreadyExistsError, NotFoundError
 
 app = typer.Typer(help="Manage schemas (data structure definitions)")
 

@@ -168,7 +168,7 @@ def restore(
             except AlreadyExistsError:
                 pass
 
-    console.print(f"  Schemas restored.")
+    console.print("  Schemas restored.")
 
     # --- datasets ---
     for d in doc.get("datasets", []):
@@ -178,7 +178,7 @@ def restore(
         except AlreadyExistsError as e:
             console.print(f"  [warning]Dataset '{d['name']}': {e} — skipped.[/warning]")
 
-    console.print(f"  Datasets restored.")
+    console.print("  Datasets restored.")
 
     # --- records ---
     file_field_count = 0
@@ -213,7 +213,7 @@ def restore(
         dest = workflows_dir / wf["filename"]
         dest.write_text(wf["content"])
 
-    console.print(f"  Workflows restored.")
+    console.print("  Workflows restored.")
 
     # --- plugins ---
     plugins_dir = config.civex_dir / "plugins"
@@ -228,4 +228,4 @@ def restore(
         plugins_restored += 1
 
     console.print(f"  Plugins restored: {plugins_restored}/{n_plugins}.")
-    console.print(f"[success]Restore complete.[/success]")
+    console.print("[success]Restore complete.[/success]")

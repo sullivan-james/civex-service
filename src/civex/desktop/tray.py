@@ -1,7 +1,9 @@
-"""Desktop launcher: native webview window + embedded uvicorn server."""
+"""Desktop launcher: project picker welcome screen + per-project native window."""
 from __future__ import annotations
 
+import json
 import os
+import socket
 import threading
 import time
 import urllib.request
@@ -9,106 +11,425 @@ from pathlib import Path
 
 from sqlalchemy import create_engine
 
-_URL = "http://127.0.0.1:8000"
+# Stored alongside other per-user config, outside any project directory.
+_RECENT_FILE = Path.home() / ".config" / "civex" / "recent.json"
 
-_LOADING_HTML = """<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    height: 100vh; background: #f6f8fa; color: #656d76;
-  }
-  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-         background: #0a7ea4; margin: 0 3px;
-         animation: pulse 1.2s ease-in-out infinite; }
-  .dot:nth-child(2) { animation-delay: 0.2s; }
-  .dot:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes pulse { 0%,80%,100% { opacity: 0.2; } 40% { opacity: 1; } }
-  p { margin-top: 16px; font-size: 13px; }
-</style>
-</head>
-<body>
-  <div><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
-  <p>Starting civex&hellip;</p>
-</body>
-</html>"""
+# Set in main() before webview.start() so Api methods can reference it.
+_window = None
 
 
-def _auto_init(project: Path) -> None:
-    """Create ~/civex/.civex/ with a default SQLite config on first run."""
-    civex_dir = project / ".civex"
+# ── Recent-projects list ──────────────────────────────────────────────────────
+
+def _load_recent() -> list[dict]:
+    try:
+        items = json.loads(_RECENT_FILE.read_text())
+        # Drop entries whose project directory no longer exists.
+        return [i for i in items if (Path(i["path"]) / ".civex").exists()]
+    except Exception:
+        return []
+
+
+def _save_recent(path: Path) -> None:
+    items = _load_recent()
+    entry = {"path": str(path), "name": path.name}
+    items = [i for i in items if i["path"] != str(path)]  # deduplicate
+    items.insert(0, entry)
+    _RECENT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _RECENT_FILE.write_text(json.dumps(items[:10], indent=2))
+
+
+def _remove_from_recent(path_str: str) -> None:
+    items = _load_recent()
+    _RECENT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _RECENT_FILE.write_text(json.dumps([i for i in items if i["path"] != path_str], indent=2))
+
+
+# ── Project initialisation ────────────────────────────────────────────────────
+
+def _init_project(path: Path) -> None:
+    """Create a .civex/ directory inside path, initialising the SQLite DB."""
+    civex_dir = path / ".civex"
     if civex_dir.exists():
         return
-
-    project.mkdir(parents=True, exist_ok=True)
+    path.mkdir(parents=True, exist_ok=True)
     civex_dir.mkdir()
-    (civex_dir / "workflows").mkdir()
-    (civex_dir / "plugins").mkdir()
-    (civex_dir / "objects").mkdir()
-
+    for sub in ("workflows", "plugins", "objects"):
+        (civex_dir / sub).mkdir()
     db_path = civex_dir / "project.db"
     (civex_dir / "config.toml").write_text(f'[db]\nurl = "sqlite:///{db_path}"\n')
-
-    # Initialise DB schema directly (bypasses the cached _engine singleton)
     from civex.db.models import Base
     engine = create_engine(f"sqlite:///{db_path}")
     Base.metadata.create_all(engine)
     engine.dispose()
 
 
-def _run_server() -> None:
+# ── Server ────────────────────────────────────────────────────────────────────
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _run_server(port: int) -> None:
     import uvicorn
-    uvicorn.run("civex.server.app:app", host="127.0.0.1", port=8000, log_level="warning")
+    uvicorn.run("civex.server.app:app", host="127.0.0.1", port=port, log_level="warning")
 
 
-def _wait_for_server(timeout: float = 30.0) -> bool:
+def _wait_for_server(url: str, timeout: float = 30.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            urllib.request.urlopen(f"{_URL}/health", timeout=1)
+            urllib.request.urlopen(f"{url}/health", timeout=1)
             return True
         except Exception:
             time.sleep(0.1)
     return False
 
 
-def main() -> None:
-    import webview
+def _launch_project(path: Path) -> dict:
+    """Start the server for path and navigate the window to it."""
+    _save_recent(path)
+    os.chdir(path)
 
-    home_project = Path.home() / "civex"
-    _auto_init(home_project)
+    port = _free_port()
+    url = f"http://127.0.0.1:{port}"
 
-    # Set CWD so find_project_root() walks up and finds .civex/
-    os.chdir(home_project)
+    threading.Thread(target=_run_server, args=(port,), daemon=True).start()
 
-    threading.Thread(target=_run_server, daemon=True).start()
-
-    window = webview.create_window(
-        "civex",
-        html=_LOADING_HTML,
-        width=1280,
-        height=800,
-        min_size=(800, 600),
-    )
-
-    def _navigate_when_ready():
-        if _wait_for_server():
-            window.load_url(_URL)
+    def _navigate() -> None:
+        if _wait_for_server(url):
+            _window.resize(1280, 800)
+            _window.load_url(url)
         else:
-            window.load_html(
-                "<body style='font-family:sans-serif;padding:2rem'>"
-                "<h2>civex failed to start</h2>"
-                "<p>The server did not respond within 30 seconds.</p>"
+            _window.load_html(
+                "<body style='font-family:sans-serif;padding:2rem;color:#d1242f'>"
+                "<h2>Failed to start</h2>"
+                "<p>The server did not respond within 30 s.</p>"
                 "</body>"
             )
 
-    # pywebview calls func in a background thread after the GUI is initialised
-    webview.start(func=_navigate_when_ready)
+    threading.Thread(target=_navigate, daemon=True).start()
+    return {"ok": True}
+
+
+# ── JS bridge ─────────────────────────────────────────────────────────────────
+
+class _Api:
+    def get_recent(self) -> list[dict]:
+        return _load_recent()
+
+    def open_project(self) -> dict | None:
+        import webview
+        result = _window.create_file_dialog(webview.FOLDER_DIALOG, allow_multiple=False)
+        if not result:
+            return None
+        path = Path(result[0])
+        if not (path / ".civex").exists():
+            return {"error": f"'{path.name}' is not a civex project — use Create project to initialise it."}
+        return _launch_project(path)
+
+    def create_project(self) -> dict | None:
+        import webview
+        result = _window.create_file_dialog(webview.FOLDER_DIALOG, allow_multiple=False)
+        if not result:
+            return None
+        _init_project(Path(result[0]))
+        return _launch_project(Path(result[0]))
+
+    def open_recent(self, path_str: str) -> dict:
+        path = Path(path_str)
+        if not path.exists() or not (path / ".civex").exists():
+            _remove_from_recent(path_str)
+            return {"error": f"Project not found: {path_str}"}
+        return _launch_project(path)
+
+    def remove_recent(self, path_str: str) -> dict:
+        _remove_from_recent(path_str)
+        return {"ok": True}
+
+
+# ── Welcome screen HTML ───────────────────────────────────────────────────────
+
+_WELCOME_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>civex</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: #f6f8fa;
+    color: #1f2328;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .wrap {
+    width: 100%;
+    max-width: 600px;
+    padding: 0 32px;
+  }
+
+  /* ── Header ── */
+  .header { text-align: center; margin-bottom: 36px; }
+
+  .logo {
+    width: 52px; height: 52px;
+    background: #0969da;
+    border-radius: 13px;
+    margin: 0 auto 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; font-weight: 700; color: white; letter-spacing: -0.5px;
+  }
+
+  h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
+
+  .tagline { margin-top: 5px; font-size: 13px; color: #656d76; }
+
+  /* ── Action buttons ── */
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 32px; }
+
+  .action-btn {
+    padding: 16px 18px;
+    border-radius: 8px;
+    border: 1px solid #d0d7de;
+    background: white;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    transition: border-color .15s, background .15s, box-shadow .15s;
+  }
+
+  .action-btn:hover {
+    border-color: #0969da;
+    background: #f0f6ff;
+    box-shadow: 0 0 0 3px rgba(9,105,218,.12);
+  }
+
+  .action-btn:active { background: #dbe9ff; }
+
+  .action-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  .btn-icon { font-size: 20px; margin-bottom: 8px; display: block; }
+  .btn-label { font-size: 13px; font-weight: 600; color: #1f2328; display: block; }
+  .btn-desc  { font-size: 11px; color: #656d76; margin-top: 2px; display: block; }
+
+  /* ── Error banner ── */
+  .error-banner {
+    background: #ffebe9; border: 1px solid #ffcecb; border-radius: 6px;
+    padding: 10px 14px; font-size: 12px; color: #d1242f;
+    margin-bottom: 12px; display: none;
+  }
+  .error-banner.show { display: block; }
+
+  /* ── Recent projects ── */
+  .recent-label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .6px; color: #656d76; margin-bottom: 8px;
+  }
+
+  .recent-list {
+    border: 1px solid #d0d7de; border-radius: 8px;
+    background: white; overflow: hidden;
+  }
+
+  .recent-item {
+    display: flex; align-items: center;
+    padding: 11px 14px;
+    border-bottom: 1px solid #f0f2f4;
+    cursor: pointer;
+    transition: background .1s;
+  }
+  .recent-item:last-child { border-bottom: none; }
+  .recent-item:hover { background: #f6f8fa; }
+  .recent-item:hover .rm { opacity: 1; }
+
+  .ri-icon { font-size: 15px; margin-right: 11px; flex-shrink: 0; color: #656d76; }
+
+  .ri-info { flex: 1; min-width: 0; }
+  .ri-name {
+    font-size: 13px; font-weight: 600; color: #1f2328;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .ri-path {
+    font-size: 11px; color: #818b98; margin-top: 1px;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  .rm {
+    opacity: 0; background: none; border: none; cursor: pointer;
+    padding: 3px 7px; color: #818b98; font-size: 15px; border-radius: 4px;
+    flex-shrink: 0; font-family: inherit; line-height: 1;
+    transition: opacity .1s, color .1s, background .1s;
+  }
+  .rm:hover { color: #d1242f; background: #ffebe9; }
+
+  .empty {
+    padding: 22px 14px; text-align: center;
+    font-size: 12px; color: #818b98; font-style: italic;
+  }
+
+  /* ── Loading overlay ── */
+  .loading {
+    position: fixed; inset: 0;
+    background: rgba(246,248,250,.93);
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px;
+  }
+  .loading.show { display: flex; }
+
+  .spinner {
+    width: 28px; height: 28px;
+    border: 3px solid #d0d7de; border-top-color: #0969da;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loading-msg { font-size: 13px; color: #656d76; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="header">
+    <div class="logo">c</div>
+    <h1>civex</h1>
+    <p class="tagline">Research data management</p>
+  </div>
+
+  <div id="err" class="error-banner"></div>
+
+  <div class="actions">
+    <button class="action-btn" id="btn-open" onclick="doOpen()">
+      <span class="btn-icon">📂</span>
+      <span class="btn-label">Open project</span>
+      <span class="btn-desc">Select an existing civex project folder</span>
+    </button>
+    <button class="action-btn" id="btn-create" onclick="doCreate()">
+      <span class="btn-icon">✦</span>
+      <span class="btn-label">Create project</span>
+      <span class="btn-desc">Initialise a new civex project in a folder</span>
+    </button>
+  </div>
+
+  <p class="recent-label">Recent</p>
+  <div class="recent-list" id="recent"></div>
+</div>
+
+<div class="loading" id="loading">
+  <div class="spinner"></div>
+  <p class="loading-msg" id="loading-msg">Opening project…</p>
+</div>
+
+<script>
+  function esc(s) {
+    return String(s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function showErr(msg, duration) {
+    const el = document.getElementById('err');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.classList.remove('show'), duration || 6000);
+  }
+
+  function showLoading(msg) {
+    document.getElementById('loading-msg').textContent = msg || 'Opening project…';
+    document.getElementById('loading').classList.add('show');
+  }
+
+  function setBusy(on) {
+    ['btn-open','btn-create'].forEach(id => {
+      document.getElementById(id).disabled = on;
+    });
+  }
+
+  function renderRecent(items) {
+    const el = document.getElementById('recent');
+    if (!items || !items.length) {
+      el.innerHTML = '<div class="empty">No recent projects</div>';
+      return;
+    }
+    el.innerHTML = items.map(item => `
+      <div class="recent-item" onclick="doOpenRecent(${JSON.stringify(item.path)})">
+        <span class="ri-icon">⬡</span>
+        <div class="ri-info">
+          <div class="ri-name">${esc(item.name)}</div>
+          <div class="ri-path">${esc(item.path)}</div>
+        </div>
+        <button class="rm" title="Remove from list"
+          onclick="doRemove(event,${JSON.stringify(item.path)})">×</button>
+      </div>`).join('');
+  }
+
+  async function loadRecent() {
+    renderRecent(await window.pywebview.api.get_recent());
+  }
+
+  async function doOpen() {
+    setBusy(true);
+    const r = await window.pywebview.api.open_project();
+    if (!r) { setBusy(false); return; }
+    if (r.error) { showErr(r.error); setBusy(false); return; }
+    showLoading('Opening project…');
+  }
+
+  async function doCreate() {
+    setBusy(true);
+    const r = await window.pywebview.api.create_project();
+    if (!r) { setBusy(false); return; }
+    if (r.error) { showErr(r.error); setBusy(false); return; }
+    showLoading('Creating project…');
+  }
+
+  async function doOpenRecent(pathStr) {
+    const r = await window.pywebview.api.open_recent(pathStr);
+    if (!r) return;
+    if (r.error) { showErr(r.error); loadRecent(); return; }
+    showLoading('Opening project…');
+  }
+
+  async function doRemove(e, pathStr) {
+    e.stopPropagation();
+    await window.pywebview.api.remove_recent(pathStr);
+    loadRecent();
+  }
+
+  window.addEventListener('pywebviewready', loadRecent);
+</script>
+</body>
+</html>"""
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+def main() -> None:
+    global _window
+    import webview
+
+    api = _Api()
+    _window = webview.create_window(
+        "civex",
+        html=_WELCOME_HTML,
+        js_api=api,
+        width=680,
+        height=580,
+        min_size=(560, 480),
+        resizable=True,
+    )
+    webview.start()
 
 
 if __name__ == "__main__":
