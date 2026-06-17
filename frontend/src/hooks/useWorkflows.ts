@@ -45,7 +45,9 @@ export function useJobs(status?: string, recordId?: string) {
     queryFn: () => jobsApi.list(status, recordId),
     refetchInterval: (query) => {
       const jobs = query.state.data as WorkflowJob[] | undefined
-      return jobs?.some(j => j.status === 'pending' || j.status === 'running') ? 2000 : false
+      // Fast poll while jobs are active; slow baseline so newly-triggered
+      // jobs (e.g. from record create/update hooks) appear without a manual refresh.
+      return jobs?.some(j => j.status === 'pending' || j.status === 'running') ? 2000 : 5000
     },
   })
 }

@@ -34,6 +34,7 @@ export function useCreateRecord(datasetName: string) {
       qc.invalidateQueries({ queryKey: ['records', datasetName] })
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
       qc.invalidateQueries({ queryKey: ['datasets'] })
+      qc.invalidateQueries({ queryKey: ['jobs'] })
     },
   })
 }
@@ -45,6 +46,7 @@ export function useUpdateRecord() {
       recordsApi.update(id, { data }),
     onSuccess: (updated) => {
       qc.invalidateQueries({ queryKey: ['record', updated.id] })
+      qc.invalidateQueries({ queryKey: ['jobs'] })
     },
   })
 }
