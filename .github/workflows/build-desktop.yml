@@ -8,15 +8,21 @@ on:
 
 jobs:
   build:
+    permissions:
+      contents: write   # required to upload release assets
+
     strategy:
       matrix:
         include:
           - os: macos-latest
             artifact: civex-macos
+            asset: civex-macos.dmg
           - os: windows-latest
             artifact: civex-windows
+            asset: civex-windows.zip
           - os: ubuntu-latest
             artifact: civex-linux
+            asset: civex-linux.zip
 
     runs-on: ${{ matrix.os }}
 
@@ -54,34 +60,27 @@ jobs:
             -ov -format UDZO \
             civex-macos.dmg
 
-      - name: Upload DMG (macOS)
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: civex-macos.dmg
-
       # ── Windows: zip both executables ─────────────────────────────────────
       - name: Package ZIP (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: Compress-Archive -Path dist\civex-desktop.exe,dist\civex.exe -DestinationPath civex-windows.zip
 
-      - name: Upload ZIP (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: civex-windows.zip
-
       # ── Linux: zip both binaries ──────────────────────────────────────────
       - name: Package ZIP (Linux)
         if: runner.os == 'Linux'
         run: zip civex-linux.zip dist/civex-desktop dist/civex
 
-      - name: Upload ZIP (Linux)
-        if: runner.os == 'Linux'
+      # ── Upload artifact (all runs) ────────────────────────────────────────
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: civex-linux.zip
+          path: ${{ matrix.asset }}
+
+      # ── Attach to GitHub Release (tag pushes only) ────────────────────────
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}
