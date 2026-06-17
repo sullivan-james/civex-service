@@ -17,6 +17,15 @@ export function useCreateDataset() {
   })
 }
 
+export function useUpdateDataset() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, body }: { name: string; body: { rename?: string; description?: string } }) =>
+      datasetsApi.update(name, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['datasets'] }),
+  })
+}
+
 export function useDeleteDataset() {
   const qc = useQueryClient()
   return useMutation({

@@ -72,7 +72,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <span className="text-[#f0f6fc] font-semibold text-base tracking-tight">civex</span>
 
         <button
-          onClick={() => queryClient.invalidateQueries()}
+          onClick={() => queryClient.refetchQueries({ type: 'active' })}
           title="Refresh all data"
           className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
         >

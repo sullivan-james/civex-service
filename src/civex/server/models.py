@@ -88,6 +88,11 @@ class CreateDatasetRequest(BaseModel):
     description: str | None = None
 
 
+class UpdateDatasetRequest(BaseModel):
+    rename: str | None = None
+    description: str | None = None
+
+
 # --- Records ---
 
 class RecordResponse(BaseModel):

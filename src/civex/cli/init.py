@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 
 from civex.console import console
 from civex.db.models import Base
+from civex.project import scaffold_project
 
 
 def init(
@@ -28,23 +29,12 @@ def _init_working(target: Path, use_sqlite: bool = False) -> None:
         console.print("[warning]Already initialized.[/warning]")
         raise typer.Exit(0)
 
-    civex_dir.mkdir(parents=True)
-    objects_dir = civex_dir / "objects"
-    objects_dir.mkdir()
-    (civex_dir / "workflows").mkdir()
-    (civex_dir / "plugins").mkdir()
-
     db_url = _resolve_db_url(target, civex_dir, use_sqlite)
-
-    (civex_dir / "config.toml").write_text(f'[db]\nurl = "{db_url}"\n')
-
-    engine = create_engine(db_url)
-    Base.metadata.create_all(engine)
-    engine.dispose()
+    scaffold_project(target, db_url=db_url)
 
     console.print(f"\n[success]Initialized civex project at {target}[/success]")
     console.print(f"  Database   {_display_url(db_url)}")
-    console.print(f"  Objects    {objects_dir}")
+    console.print(f"  Objects    {civex_dir / 'objects'}")
     console.print(f"  Workflows  {civex_dir / 'workflows'}")
     console.print(f"  Plugins    {civex_dir / 'plugins'}")
     console.print(f"  Config     {civex_dir / 'config.toml'}")

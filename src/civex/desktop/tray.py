@@ -11,7 +11,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from civex.project import scaffold_project
 
 # Stored alongside other per-user config, outside any project directory.
 _RECENT_FILE = Path.home() / ".config" / "civex" / "recent.json"
@@ -66,19 +66,10 @@ def _remove_from_recent(path_str: str) -> None:
 
 def _init_project(path: Path) -> None:
     """Create a .civex/ directory inside path, initialising the SQLite DB."""
-    civex_dir = path / ".civex"
-    if civex_dir.exists():
-        return
-    path.mkdir(parents=True, exist_ok=True)
-    civex_dir.mkdir()
-    for sub in ("workflows", "plugins", "objects"):
-        (civex_dir / sub).mkdir()
-    db_path = civex_dir / "project.db"
-    (civex_dir / "config.toml").write_text(f'[db]\nurl = "sqlite:///{db_path}"\n')
-    from civex.db.models import Base
-    engine = create_engine(f"sqlite:///{db_path}")
-    Base.metadata.create_all(engine)
-    engine.dispose()
+    try:
+        scaffold_project(path)
+    except FileExistsError:
+        pass  # already initialised — open it as-is
 
 
 # ── Server ────────────────────────────────────────────────────────────────────

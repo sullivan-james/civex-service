@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { useDataset } from '../hooks/useDatasets'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useDataset, useUpdateDataset, useDeleteDataset } from '../hooks/useDatasets'
 import { useRecords, useRecordCounts, useCreateRecord } from '../hooks/useRecords'
 import { useSchemas } from '../hooks/useSchemas'
 import {
@@ -20,11 +20,15 @@ function schemaColumns(schema: Schema): string[] {
 
 export default function DatasetDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [selectedSchema, setSelectedSchema] = useState<string | null>(null)
   const [offset, setOffset] = useState(0)
   const [addingRecord, setAddingRecord] = useState(false)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
+  const [renaming, setRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   useEffect(() => {
     const t = setTimeout(() => { setSearch(searchInput); setOffset(0) }, 300)
@@ -50,6 +54,8 @@ export default function DatasetDetailPage() {
   })
 
   const createRecord = useCreateRecord(dataset?.name ?? '')
+  const updateDataset = useUpdateDataset()
+  const deleteDataset = useDeleteDataset()
 
   if (datasetLoading) return <LoadingState />
   if (datasetError || !dataset) return <ErrorState message={datasetError ? String(datasetError) : 'Dataset not found'} />
@@ -65,6 +71,15 @@ export default function DatasetDetailPage() {
   function selectSchema(name: string | null) {
     setSelectedSchema(name)
     setOffset(0)
+  }
+
+  function handleRename() {
+    const newName = renameValue.trim()
+    if (!newName || newName === dataset!.name) { setRenaming(false); return }
+    updateDataset.mutate(
+      { name: dataset!.name, body: { rename: newName } },
+      { onSuccess: () => setRenaming(false) },
+    )
   }
 
   function handleAddRecord(schemaName: string, data: Record<string, unknown>, parentRecordId?: string) {
@@ -83,7 +98,27 @@ export default function DatasetDetailPage() {
         <span className="text-[#1f2328] font-medium">{dataset.name}</span>
       </nav>
 
-      <PageHeader title={dataset.name} description={dataset.description ?? undefined} />
+      {renaming ? (
+        <div className="border border-[#d0d7de] rounded-md p-4 bg-[#f6f8fa] flex items-center gap-3">
+          <input
+            autoFocus
+            value={renameValue}
+            onChange={e => setRenameValue(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setRenaming(false) }}
+            className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] w-64"
+          />
+          {updateDataset.error && <span className="text-xs text-[#d1242f]">{String(updateDataset.error)}</span>}
+          <Button variant="primary" size="sm" onClick={handleRename} disabled={updateDataset.isPending || !renameValue.trim()}>
+            {updateDataset.isPending ? 'Saving…' : 'Save'}
+          </Button>
+          <Button size="sm" onClick={() => setRenaming(false)}>Cancel</Button>
+        </div>
+      ) : (
+        <div className="flex items-start justify-between">
+          <PageHeader title={dataset.name} description={dataset.description ?? undefined} />
+          <Button size="sm" onClick={() => { setRenameValue(dataset.name); setRenaming(true) }}>Rename</Button>
+        </div>
+      )}
 
       {/* Schema filter pills + Add button */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -221,6 +256,34 @@ export default function DatasetDetailPage() {
           )}
         </>
       )}
+      {/* Danger zone */}
+      <div className="border border-[#d1242f33] rounded-md">
+        <div className="px-4 py-3 border-b border-[#d1242f33] bg-[#ffebe9] rounded-t-md">
+          <h2 className="text-sm font-semibold text-[#d1242f]">Danger zone</h2>
+        </div>
+        <div className="px-4 py-3 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-[#1f2328]">Delete this dataset</p>
+            <p className="text-xs text-[#656d76]">Permanently removes this dataset and all its records.</p>
+          </div>
+          {confirmDelete ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-[#656d76]">Are you sure?</span>
+              <Button
+                variant="danger" size="sm"
+                onClick={() => deleteDataset.mutate(dataset.name, { onSuccess: () => navigate('/datasets') })}
+                disabled={deleteDataset.isPending}
+              >
+                {deleteDataset.isPending ? 'Deleting…' : 'Confirm delete'}
+              </Button>
+              <Button size="sm" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+            </div>
+          ) : (
+            <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>Delete dataset</Button>
+          )}
+        </div>
+      </div>
+
     </div>
   )
 }
