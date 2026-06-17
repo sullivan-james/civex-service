@@ -71,9 +71,17 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _run_server(port: int) -> None:
+def _run_server(port: int, errors: list[str]) -> None:
+    import asyncio
     import uvicorn
-    uvicorn.run("civex.server.app:app", host="127.0.0.1", port=port, log_level="warning")
+    # On Windows the default ProactorEventLoop must be set explicitly in a
+    # non-main thread; without this uvicorn.run() can silently fail.
+    if sys.platform == "win32":
+        asyncio.set_event_loop(asyncio.ProactorEventLoop())
+    try:
+        uvicorn.run("civex.server.app:app", host="127.0.0.1", port=port, log_level="warning")
+    except Exception as exc:
+        errors.append(str(exc))
 
 
 def _wait_for_server(url: str, timeout: float = 30.0) -> bool:
@@ -95,17 +103,22 @@ def _launch_project(path: Path) -> dict:
     port = _free_port()
     url = f"http://127.0.0.1:{port}"
 
-    threading.Thread(target=_run_server, args=(port,), daemon=True).start()
+    errors: list[str] = []
+    threading.Thread(target=_run_server, args=(port, errors), daemon=True).start()
 
     def _navigate() -> None:
         if _wait_for_server(url):
             _window.resize(1280, 800)
             _window.load_url(url)
         else:
+            detail = errors[0] if errors else "The server did not respond within 30 s."
             _window.load_html(
                 "<body style='font-family:sans-serif;padding:2rem;color:#d1242f'>"
-                "<h2>Failed to start</h2>"
-                "<p>The server did not respond within 30 s.</p>"
+                "<h2>Failed to start server</h2>"
+                f"<pre style='white-space:pre-wrap;font-size:13px'>{detail}</pre>"
+                "<p style='margin-top:1rem;color:#57606a;font-size:13px'>"
+                "Check that all civex dependencies are installed: "
+                "<code>pip install -e \".[server]\"</code></p>"
                 "</body>"
             )
 
