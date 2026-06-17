@@ -51,7 +51,10 @@ def record_add(
 
     data: dict = {}
     for rf in fields:
-        label = f"  {rf.field.name} ({rf.field.dtype})"
+        dtype_label = rf.field.dtype
+        if rf.field.dtype == "reference" and rf.field.restrictions.get("schema"):
+            dtype_label = f"reference → {rf.field.restrictions['schema']}"
+        label = f"  {rf.field.name} ({dtype_label})"
         if rf.field.required:
             label += " [required]"
 
@@ -60,7 +63,7 @@ def record_add(
             if raw == "" and not rf.field.required:
                 break
             try:
-                data[rf.field.name] = ctx.record_svc.coerce_value(raw, rf.field.dtype, rf.field.name)
+                data[rf.field.name] = ctx.record_svc.coerce_value(raw, rf.field.dtype, rf.field.name, rf.field.restrictions)
                 break
             except CoercionError as e:
                 console.print(f"[error]  {e}[/error]")
@@ -120,7 +123,10 @@ def record_update(record_id: str = typer.Argument(...)) -> None:
     data = dict(record.data)
     for rf in fields:
         current = data.get(rf.field.name, "")
-        label = f"  {rf.field.name} ({rf.field.dtype})"
+        dtype_label = rf.field.dtype
+        if rf.field.dtype == "reference" and rf.field.restrictions.get("schema"):
+            dtype_label = f"reference → {rf.field.restrictions['schema']}"
+        label = f"  {rf.field.name} ({dtype_label})"
         if rf.field.required:
             label += " [required]"
 
@@ -130,7 +136,7 @@ def record_update(record_id: str = typer.Argument(...)) -> None:
                 data.pop(rf.field.name, None)
                 break
             try:
-                data[rf.field.name] = ctx.record_svc.coerce_value(raw, rf.field.dtype, rf.field.name)
+                data[rf.field.name] = ctx.record_svc.coerce_value(raw, rf.field.dtype, rf.field.name, rf.field.restrictions)
                 break
             except CoercionError as e:
                 console.print(f"[error]  {e}[/error]")

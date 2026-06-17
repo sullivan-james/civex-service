@@ -1,0 +1,87 @@
+name: Build Desktop
+
+on:
+  push:
+    tags:
+      - "v*"          # trigger on version tags, e.g. v0.1.0
+  workflow_dispatch:  # allow manual runs from the Actions tab
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: civex-macos
+          - os: windows-latest
+            artifact: civex-windows
+          - os: ubuntu-latest
+            artifact: civex-linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm ci && npm run build
+
+      - name: Install Python dependencies
+        run: pip install ".[postgres,workflows,server,desktop]" pyinstaller
+
+      - name: Build executables
+        run: pyinstaller civex.spec
+
+      # ── macOS: wrap in a DMG ──────────────────────────────────────────────
+      - name: Package DMG (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p staging
+          cp -r dist/civex-desktop staging/
+          cp dist/civex staging/
+          hdiutil create \
+            -volname "civex" \
+            -srcfolder staging \
+            -ov -format UDZO \
+            civex-macos.dmg
+
+      - name: Upload DMG (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: civex-macos.dmg
+
+      # ── Windows: zip both executables ─────────────────────────────────────
+      - name: Package ZIP (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist\civex-desktop.exe,dist\civex.exe -DestinationPath civex-windows.zip
+
+      - name: Upload ZIP (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: civex-windows.zip
+
+      # ── Linux: zip both binaries ──────────────────────────────────────────
+      - name: Package ZIP (Linux)
+        if: runner.os == 'Linux'
+        run: zip civex-linux.zip dist/civex-desktop dist/civex
+
+      - name: Upload ZIP (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: civex-linux.zip

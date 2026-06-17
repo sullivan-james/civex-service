@@ -22,8 +22,11 @@ class ValidationError(CivexError):
 
 
 class CoercionError(ValidationError):
-    def __init__(self, field_name: str, dtype: str, raw: str) -> None:
+    def __init__(self, field_name: str, dtype: str, raw: str, extra: str | None = None) -> None:
         self.field_name = field_name
         self.dtype = dtype
         self.raw = raw
-        super().__init__(f"Cannot coerce '{raw}' to {dtype} for field '{field_name}'")
+        msg = f"Cannot coerce '{raw}' to {dtype} for field '{field_name}'"
+        if extra:
+            msg += f": {extra}"
+        super().__init__(msg)

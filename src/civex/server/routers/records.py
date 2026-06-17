@@ -18,6 +18,20 @@ from civex.server.models import (
 router = APIRouter(tags=["records"])
 
 
+@router.get("/records", response_model=list[RecordResponse])
+def search_records_global(
+    schema: str = Query(..., description="Schema name to search within"),
+    search: Optional[str] = Query(default=None),
+    limit: int = Query(default=20, le=100),
+    ctx: AppContext = Depends(get_ctx),
+):
+    try:
+        items = ctx.record_svc.find_by_schema(schema, search=search or None, limit=limit)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    return [RecordResponse.from_dto(r) for r in items]
+
+
 @router.get("/datasets/{dataset_name}/records", response_model=PaginatedRecordResponse)
 def list_records(
     dataset_name: str,

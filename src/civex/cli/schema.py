@@ -89,14 +89,25 @@ def schema_add_field(
     field_name: str = typer.Argument(...),
     dtype: str = typer.Option(..., "--type", "-t"),
     required: bool = typer.Option(False, "--required/--optional"),
+    references: Optional[str] = typer.Option(None, "--references", help="Target schema name (required when --type reference)"),
 ) -> None:
     """Add a field to a schema."""
+    restrictions: dict = {}
+    if dtype == "reference":
+        if not references:
+            console.print("[error]--references SCHEMA is required when --type is reference.[/error]")
+            raise typer.Exit(1)
+        restrictions = {"schema": references}
+    elif references:
+        console.print("[error]--references is only valid for --type reference.[/error]")
+        raise typer.Exit(1)
     ctx = _ctx()
     try:
-        field = ctx.schema_svc.add_field(schema_name, field_name, dtype, required=required)
+        field = ctx.schema_svc.add_field(schema_name, field_name, dtype, required=required, restrictions=restrictions or None)
         ctx.commit()
         req = " (required)" if field.required else ""
-        console.print(f"[success]Added '{field.name}' ({field.dtype}{req}) to schema '{schema_name}'.[/success]")
+        ref = f" → {references}" if dtype == "reference" else ""
+        console.print(f"[success]Added '{field.name}' ({field.dtype}{ref}{req}) to schema '{schema_name}'.[/success]")
     except (NotFoundError, AlreadyExistsError, ValueError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)

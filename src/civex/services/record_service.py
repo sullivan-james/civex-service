@@ -60,13 +60,25 @@ class RecordService:
     def _with_names(self, dto: RecordDTO) -> RecordDTO:
         return dataclasses.replace(dto, data=self._ids_to_names(dto.data, dto.schema_id))
 
-    def coerce_value(self, raw: str, dtype: str, field_name: str) -> Any:
+    def coerce_value(self, raw: str, dtype: str, field_name: str, restrictions: dict[str, Any] | None = None) -> Any:
         if dtype == "file":
             path = Path(raw)
             if not path.exists():
                 raise CoercionError(field_name, dtype, raw)
             file_ref = self._files.put(path.read_bytes(), path.name)
             return file_ref.to_dict()
+
+        if dtype == "reference":
+            record = self._records.get_by_prefix(raw)
+            if not record:
+                raise CoercionError(field_name, dtype, raw, extra="record not found")
+            target_schema = (restrictions or {}).get("schema")
+            if target_schema and record.schema_name != target_schema:
+                raise CoercionError(
+                    field_name, dtype, raw,
+                    extra=f"record has schema '{record.schema_name}', expected '{target_schema}'",
+                )
+            return str(record.id)
 
         coerce = _COERCE.get(dtype)
         if coerce is None:
@@ -252,6 +264,16 @@ class RecordService:
             field_filters.append((name_map.get(key, key), value))
 
         return dataset, schema_id, parent_uuid, field_filters
+
+    def find_by_schema(
+        self,
+        schema_name: str,
+        search: str | None = None,
+        limit: int = 20,
+    ) -> list[RecordDTO]:
+        schema = self._schema_svc.get(schema_name)
+        records = self._records.list_by_schema(schema.id, search=search, limit=limit)
+        return [self._with_names(r) for r in records]
 
     def delete(self, record_id: str) -> None:
         record = self.get(record_id)

@@ -1,6 +1,6 @@
 # civex
 
-A command-line research data management system. Define schemas, collect records into datasets, attach files, and run data processing workflows — all locally, with a server/collaborative layer designed to follow.
+A command-line research data management system. Define schemas, collect records into datasets, attach files, and run data processing workflows — all locally, with an optional HTTP server and web UI.
 
 ---
 
@@ -14,6 +14,7 @@ A command-line research data management system. Define schemas, collect records 
 - [Records](#records)
 - [Workflows](#workflows)
 - [Plugins](#plugins)
+- [Web UI & server](#web-ui--server)
 - [PostgreSQL](#postgresql)
 - [Architecture](#architecture)
 
@@ -21,24 +22,28 @@ A command-line research data management system. Define schemas, collect records 
 
 ## Installation
 
-```bash
-gh release download v0.0.1 -R sullivan-james/civex-service --pattern "*.whl"
-pip install "civex[server] @ civex-0.0.1-py3-none-any.whl"
-```
-
-(replace version number with required version).
+### Recommended: pipx (installs once, works in any terminal)
 
 ```bash
-python -m venv venv
-source venv/bin/activate
-
-pip install -e .                   # SQLite (default)
-pip install -e ".[postgres]"       # add PostgreSQL driver
-pip install -e ".[workflows]"      # add pandas for CSV workflow plugins
-pip install -e ".[postgres,workflows]"  # both
+# Install pipx if you don't have it
+pip install pipx
+pipx ensurepath        # adds civex to PATH — open a new terminal after this
 ```
 
-The `civex` command is available anywhere within the activated environment.
+Download the latest release and install:
+
+```bash
+gh release download --repo sullivan-james/civex-service --pattern "*.whl"
+pipx install "./civex-0.0.3-py3-none-any.whl[server]"
+```
+
+Replace `0.0.3` with the version you downloaded. After installation, `civex` is available in any terminal without activating anything.
+
+### Upgrade
+
+```bash
+pipx install --force "./civex-0.0.3-py3-none-any.whl[server]"
+```
 
 ---
 
@@ -49,9 +54,10 @@ civex init                                          # initialise a project here
 civex schema create trial --description "A single experimental trial"
 civex schema add-field trial subject --type string --required
 civex schema add-field trial duration --type float
-civex dataset create study-2024 --schema trial
+civex dataset create study-2024
 civex record add --to study-2024
 civex record find --in study-2024
+civex serve                                         # open http://localhost:8000
 ```
 
 ---
@@ -116,10 +122,10 @@ Own fields shadow parent fields of the same name. Inheritance is resolved recurs
 
 ## Datasets
 
-A dataset is a named collection of records that all conform to one schema.
+A dataset is a named container for records. Records within a dataset can have different schemas (e.g. a dataset can hold both `trial` and `experiment` records).
 
 ```bash
-civex dataset create <name> --schema <schema> [--description TEXT]
+civex dataset create <name> [--description TEXT]
 civex dataset list
 civex dataset show <name>
 civex dataset delete <name> [--yes]
@@ -128,10 +134,9 @@ civex dataset delete <name> [--yes]
 **Example:**
 
 ```bash
-civex dataset create pilot-study --schema trial --description "Pilot run, n=10"
+civex dataset create pilot-study --description "Pilot run, n=10"
 civex dataset show pilot-study
 # pilot-study
-#   Schema   trial
 #   Records  0
 #   Pilot run, n=10
 ```
@@ -143,7 +148,7 @@ civex dataset show pilot-study
 Records are individual data entries within a dataset. `record add` prompts for each field in the schema (including inherited fields). Required fields cannot be skipped.
 
 ```bash
-civex record add    --to <dataset>
+civex record add    --to <dataset> [--schema SCHEMA]
 civex record show   <id>
 civex record update <id>
 civex record find   --in <dataset> [--where field=value ...] [--limit N]
@@ -153,7 +158,7 @@ civex record delete <id> [--yes]
 **Adding a record:**
 
 ```bash
-civex record add --to pilot-study
+civex record add --to pilot-study --schema trial
 #   duration (float) []: 45.3
 #   condition (string) []: A
 #   subject (string) [required]: S01
@@ -184,7 +189,7 @@ civex record delete 0c45e37f --yes
 ```bash
 civex schema add-field trial raw_data --type file
 
-civex record add --to pilot-study
+civex record add --to pilot-study --schema trial
 #   duration (float) []: 30.0
 #   condition (string) []: B
 #   raw_data (file) []: /path/to/eeg_session_01.csv
@@ -243,11 +248,11 @@ Each step's `inputs` references the output of an earlier step using `step_id.out
 civex schema create experiment
 civex schema add-field experiment subject  --type string --required
 civex schema add-field experiment raw_data --type file
-civex dataset create study   --schema experiment
-civex dataset create results --schema experiment
+civex dataset create study
+civex dataset create results
 
 # 2. Add a trigger record that holds the CSV file
-civex record add --to study
+civex record add --to study --schema experiment
 #   subject (string) [required]: batch-01
 #   raw_data (file) []: /path/to/data.csv
 
@@ -357,6 +362,23 @@ ctx.create_record(dataset_name, data)  # create a new record in any dataset
 
 ---
 
+## Web UI & server
+
+```bash
+civex serve [--host HOST] [--port PORT]
+```
+
+Starts a local HTTP server (default `http://127.0.0.1:8000`) with:
+
+- A React web UI for browsing schemas, datasets, records, workflows, and jobs
+- A full REST API at `/api/` (OpenAPI docs at `/docs`)
+- An interactive civex shell in the browser (Terminal tab)
+- Import/export YAML dumps from the Datasets page
+
+The server requires the `[server]` extra (included in the `pipx install` command above).
+
+---
+
 ## PostgreSQL
 
 ### Starting a local PostgreSQL container
@@ -383,14 +405,13 @@ Edit `.civex/config.toml`:
 url = "postgresql://civex:civex@localhost:5432/civex"
 ```
 
-JSON fields (`record.data`, `field.restrictions`) automatically upgrade to JSONB on PostgreSQL for indexed querying. Install the driver with `pip install -e ".[postgres]"`.
+JSON fields (`record.data`) automatically upgrade to JSONB on PostgreSQL for indexed querying. Install the driver with `pipx inject civex psycopg2-binary`.
 
 ### Index benchmark
 
 A benchmark script is included that shows the query speedup from the composite B-tree and GIN indexes added to the `records` table. It seeds 100 000 records, measures query times before and after creating the indexes, and prints a comparison table with `EXPLAIN ANALYZE` output.
 
 ```bash
-# Spin up a throw-away benchmark database
 docker run -d \
   --name civex-bench \
   -e POSTGRES_USER=civex \
@@ -399,14 +420,8 @@ docker run -d \
   -p 5432:5432 \
   postgres:16
 
-pip install -e ".[postgres]"
-
 PG_URL=postgresql://civex:civex@localhost/civex_bench \
   python tests/bench_indexes.py
-
-# Optional: fewer records for a quick smoke-test
-PG_URL=postgresql://civex:civex@localhost/civex_bench \
-  python tests/bench_indexes.py --records 20000
 
 docker stop civex-bench && docker rm civex-bench
 ```
@@ -425,6 +440,7 @@ civex-service/
     repositories/  # Protocol interfaces + SQLAlchemy implementations
     domain/        # Plain dataclasses (DTOs) and exceptions — no framework dependency
     db/            # SQLAlchemy models and session factory
+    server/        # FastAPI app, routers, and static frontend assets
     config.py      # Project root discovery + config loading
     context.py     # AppContext factory (wires all repos + services)
 ```
@@ -439,14 +455,3 @@ civex-service/
 **File storage** mirrors the git object store: `.civex/objects/<sha256[:2]>/<sha256[2:]>`. Content-addressed and idempotent — the same file uploaded twice is stored once.
 
 **Workflow execution** is git-hook-like: definitions are YAML files in `.civex/workflows/`, checked into version control alongside your data config. The executor runs a topological sort of steps, resolves `step_id.output_name` input references, and calls each plugin's `run()` in order.
-
-### Future layers
-
-```toml
-# .civex/config.toml — optional remote block (absent = local-only)
-[remote]
-url   = "https://civex.example.com"
-token = "pat_abc123"
-```
-
-A future FastAPI server will expose the same `AppContext` via HTTP. The service layer is already server-ready — the CLI and server will share identical business logic. On the server, only registered built-in plugins execute; raw code and `.civex/plugins/` are local-only.

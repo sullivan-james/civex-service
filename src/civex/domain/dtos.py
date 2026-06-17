@@ -22,7 +22,7 @@ class FieldDTO:
     id: uuid.UUID
     schema_id: uuid.UUID
     name: str
-    dtype: str          # "integer" | "float" | "string" | "boolean" | "file"
+    dtype: str          # "integer" | "float" | "string" | "boolean" | "file" | "reference"
     required: bool
     restrictions: dict[str, Any]
     created_at: datetime

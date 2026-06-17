@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -9,9 +10,22 @@ from fastapi.staticfiles import StaticFiles
 from civex.domain.exceptions import CivexError
 from civex.server.routers import datasets, dump, files, jobs, plugins, records, remote, schemas, terminal, workflows
 
-_DIST = Path(__file__).parent / "static"
-if not (_DIST / "index.html").exists():
-    _DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+
+def _find_dist() -> Path:
+    # 1. Package-installed static copy (populated by `civex install` / pip data)
+    p = Path(__file__).parent / "static"
+    if (p / "index.html").exists():
+        return p
+    # 2. PyInstaller one-file bundle — sys._MEIPASS is the temp extraction root
+    if getattr(sys, "frozen", False):
+        p = Path(sys._MEIPASS) / "frontend_dist"  # noqa: SLF001
+        if (p / "index.html").exists():
+            return p
+    # 3. Development source tree
+    return Path(__file__).resolve().parents[3] / "frontend" / "dist"
+
+
+_DIST = _find_dist()
 
 
 def create_app() -> FastAPI:

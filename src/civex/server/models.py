@@ -19,6 +19,7 @@ class FieldResponse(BaseModel):
     name: str
     type: str
     required: bool
+    restrictions: dict[str, Any] = {}
 
 
 class SchemaResponse(BaseModel):
@@ -36,7 +37,7 @@ class SchemaResponse(BaseModel):
             description=dto.description,
             parent_id=str(dto.parent_id) if dto.parent_id else None,
             fields=[
-                FieldResponse(id=str(f.id), name=f.name, type=f.dtype, required=f.required)
+                FieldResponse(id=str(f.id), name=f.name, type=f.dtype, required=f.required, restrictions=f.restrictions)
                 for f in dto.fields
             ],
         )
@@ -52,6 +53,7 @@ class AddFieldRequest(BaseModel):
     name: str
     type: str
     required: bool = False
+    restrictions: dict[str, Any] | None = None
 
 
 class UpdateSchemaRequest(BaseModel):

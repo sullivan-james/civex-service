@@ -81,7 +81,7 @@ class Schema(Base):
 class Field(Base):
     """
     A single field definition within a schema.
-    dtype is one of: integer, float, string, boolean, file.
+    dtype is one of: integer, float, string, boolean, file, reference.
     restrictions is a freeform JSON dict (e.g. min/max for numbers, regex for strings).
     """
     __tablename__ = "fields"

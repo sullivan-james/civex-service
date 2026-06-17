@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dev dependencies
+        run: pip install ruff mypy
+
+      - name: Ruff lint
+        run: ruff check src/
+
+      - name: Ruff format check
+        run: ruff format --check src/
+
+      - name: Mypy
+        run: mypy src/civex --ignore-missing-imports --no-error-summary
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install with dev extras
+        run: pip install -e ".[server,workflows,dev]"
+
+      - name: Run tests
+        run: pytest tests/ -x -q --ignore=tests/bench_indexes.py

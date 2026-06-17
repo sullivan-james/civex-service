@@ -4,7 +4,7 @@ import json
 import uuid
 from typing import Any
 
-from sqlalchemy import cast, func, literal, String
+from sqlalchemy import cast, func, literal, or_, String
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlalchemy.orm import Session
 
@@ -85,6 +85,16 @@ class LocalRecordRepository:
     ) -> int:
         q = _base_query(self._s, dataset_id, schema_id, parent_record_id, field_filters, search, self._pg)
         return q.count()
+
+    def list_by_schema(self, schema_id: uuid.UUID, search: str | None = None, limit: int = 20) -> list[RecordDTO]:
+        q = self._s.query(Record).filter(Record.schema_id == schema_id)
+        if search:
+            q = q.filter(or_(
+                cast(Record.data, String).ilike(f"%{search}%"),
+                cast(Record.id, String).ilike(f"{search}%"),
+            ))
+        rows = q.order_by(Record.created_at.desc()).limit(limit).all()
+        return [_to_dto(r) for r in rows]
 
     def count_by_schema(self, dataset_id: uuid.UUID) -> dict[str, int]:
         rows = (

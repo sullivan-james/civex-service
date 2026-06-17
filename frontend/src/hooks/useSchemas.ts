@@ -36,7 +36,7 @@ export function useUpdateSchema(name: string) {
 export function useAddField(schemaName: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { name: string; type: string; required?: boolean }) =>
+    mutationFn: (body: { name: string; type: string; required?: boolean; restrictions?: Record<string, string> }) =>
       schemasApi.addField(schemaName, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
   })

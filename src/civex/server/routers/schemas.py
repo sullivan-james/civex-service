@@ -73,13 +73,13 @@ def delete_schema(name: str, ctx: AppContext = Depends(get_ctx)):
 @router.post("/{name}/fields", response_model=FieldResponse, status_code=201)
 def add_field(name: str, body: AddFieldRequest, ctx: AppContext = Depends(get_ctx)):
     try:
-        field = ctx.schema_svc.add_field(name, body.name, body.type, required=body.required)
+        field = ctx.schema_svc.add_field(name, body.name, body.type, required=body.required, restrictions=body.restrictions)
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except (AlreadyExistsError, ValueError) as e:
         raise HTTPException(422, detail=str(e))
-    return FieldResponse(id=str(field.id), name=field.name, type=field.dtype, required=field.required)
+    return FieldResponse(id=str(field.id), name=field.name, type=field.dtype, required=field.required, restrictions=field.restrictions)
 
 
 @router.patch("/{name}/fields/{field_name}", response_model=FieldResponse)

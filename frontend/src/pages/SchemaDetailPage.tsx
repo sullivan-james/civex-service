@@ -7,7 +7,7 @@ import {
   LoadingState, ErrorState,
 } from '../components/ui'
 
-const FIELD_TYPES = ['string', 'integer', 'float', 'boolean', 'file']
+const FIELD_TYPES = ['string', 'integer', 'float', 'boolean', 'file', 'reference']
 
 // --- Inline metadata editor ---
 
@@ -68,13 +68,18 @@ function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () =
   const [fieldName, setFieldName] = useState('')
   const [type, setType] = useState('string')
   const [required, setRequired] = useState(false)
+  const [refSchema, setRefSchema] = useState('')
   const addField = useAddField(schemaName)
+  const { data: allSchemas } = useSchemas()
+
+  const canAdd = !!fieldName.trim() && (type !== 'reference' || !!refSchema)
 
   function handleAdd() {
-    if (!fieldName.trim()) return
+    if (!canAdd) return
+    const restrictions = type === 'reference' ? { schema: refSchema } : undefined
     addField.mutate(
-      { name: fieldName.trim(), type, required },
-      { onSuccess: () => { setFieldName(''); setType('string'); setRequired(false); onDone() } },
+      { name: fieldName.trim(), type, required, restrictions },
+      { onSuccess: () => { setFieldName(''); setType('string'); setRequired(false); setRefSchema(''); onDone() } },
     )
   }
 
@@ -90,18 +95,30 @@ function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () =
       />
       <select
         value={type}
-        onChange={e => setType(e.target.value)}
+        onChange={e => { setType(e.target.value); setRefSchema('') }}
         className="border border-[#d0d7de] rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da]"
       >
         {FIELD_TYPES.map(t => <option key={t}>{t}</option>)}
       </select>
+      {type === 'reference' && (
+        <select
+          value={refSchema}
+          onChange={e => setRefSchema(e.target.value)}
+          className="border border-[#d0d7de] rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da]"
+        >
+          <option value="">— target schema —</option>
+          {allSchemas?.filter(s => s.name !== schemaName).map(s => (
+            <option key={s.id} value={s.name}>{s.name}</option>
+          ))}
+        </select>
+      )}
       <label className="flex items-center gap-1.5 text-sm text-[#1f2328] cursor-pointer select-none">
         <input type="checkbox" checked={required} onChange={e => setRequired(e.target.checked)} />
         Required
       </label>
       {addField.error && <span className="text-xs text-[#d1242f]">{String(addField.error)}</span>}
       <div className="flex gap-2 ml-auto">
-        <Button variant="primary" size="sm" onClick={handleAdd} disabled={addField.isPending || !fieldName.trim()}>
+        <Button variant="primary" size="sm" onClick={handleAdd} disabled={addField.isPending || !canAdd}>
           {addField.isPending ? 'Adding…' : 'Add field'}
         </Button>
         <Button size="sm" onClick={onDone}>Cancel</Button>
@@ -195,7 +212,20 @@ export default function SchemaDetailPage() {
             {schema.fields.map(field => (
               <Tr key={field.id}>
                 <Td><span className="font-mono text-sm">{field.name}</span></Td>
-                <Td><Badge variant="accent">{field.type}</Badge></Td>
+                <Td>
+                  <Badge variant="accent">{field.type}</Badge>
+                  {field.type === 'reference' && field.restrictions?.schema && (
+                    <span className="ml-1.5 text-xs text-[#656d76]">
+                      {'→ '}
+                      <Link
+                        to={`/schemas/${allSchemas?.find(s => s.name === field.restrictions.schema)?.id ?? field.restrictions.schema}`}
+                        className="text-[#0969da] hover:underline"
+                      >
+                        {field.restrictions.schema}
+                      </Link>
+                    </span>
+                  )}
+                </Td>
                 <Td>
                   <button
                     onClick={() => updateField.mutate({ fieldName: field.name, required: !field.required })}

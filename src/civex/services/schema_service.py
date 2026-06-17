@@ -7,7 +7,7 @@ from civex.domain.dtos import FieldDTO, ResolvedField, SchemaDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError
 from civex.repositories.protocols import AuditRepository, SchemaRepository
 
-VALID_DTYPES = frozenset(["integer", "float", "string", "boolean", "file"])
+VALID_DTYPES = frozenset(["integer", "float", "string", "boolean", "file", "reference"])
 
 
 class SchemaService:

@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api } from '../../api/client'
+import { recordsApi, type CivexRecord } from '../../api/records'
 import type { Field } from '../../api/schemas'
 
 export interface FileRef {
@@ -66,6 +67,86 @@ function FileField({ field, value, onChange }: Props) {
   )
 }
 
+function ReferenceField({ field, value, onChange }: Props) {
+  const targetSchema = field.restrictions?.schema ?? ''
+  const [search, setSearch] = useState('')
+  const [results, setResults] = useState<CivexRecord[]>([])
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const selectedId = value as string | undefined
+
+  useEffect(() => {
+    if (!targetSchema) return
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(async () => {
+      setLoading(true)
+      try {
+        const records = await recordsApi.searchBySchema(targetSchema, search || undefined)
+        setResults(records)
+      } finally {
+        setLoading(false)
+      }
+    }, 250)
+    return () => { if (timerRef.current) clearTimeout(timerRef.current) }
+  }, [search, targetSchema])
+
+  function handleFocus() {
+    setOpen(true)
+    if (!results.length && targetSchema) {
+      recordsApi.searchBySchema(targetSchema).then(setResults)
+    }
+  }
+
+  function handleSelect(record: CivexRecord) {
+    onChange(record.id)
+    setOpen(false)
+    setSearch('')
+  }
+
+  function labelFor(record: CivexRecord) {
+    const vals = Object.values(record.data).filter(v => typeof v === 'string' || typeof v === 'number')
+    const preview = vals.slice(0, 2).join(' · ')
+    return preview ? `${record.id.slice(0, 8)} — ${preview}` : record.id.slice(0, 8)
+  }
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={selectedId ? (results.find(r => r.id === selectedId) ? labelFor(results.find(r => r.id === selectedId)!) : selectedId.slice(0, 8)) : search}
+        onChange={e => { setSearch(e.target.value); onChange(undefined); setOpen(true) }}
+        onFocus={handleFocus}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={targetSchema ? `Search ${targetSchema} records…` : 'Record ID'}
+        className={inputClass}
+      />
+      {open && (
+        <div className="absolute z-10 mt-1 w-full bg-white border border-[#d0d7de] rounded-md shadow-sm max-h-48 overflow-y-auto text-sm">
+          {loading && <div className="px-3 py-2 text-[#656d76]">Loading…</div>}
+          {!loading && results.length === 0 && (
+            <div className="px-3 py-2 text-[#656d76] italic">No records found</div>
+          )}
+          {results.map(record => (
+            <button
+              key={record.id}
+              onMouseDown={() => handleSelect(record)}
+              className="w-full text-left px-3 py-1.5 hover:bg-[#f6f8fa] truncate"
+            >
+              <span className="font-mono text-xs text-[#656d76]">{record.id.slice(0, 8)}</span>
+              {' '}
+              <span className="text-[#1f2328]">
+                {Object.values(record.data).filter(v => typeof v === 'string' || typeof v === 'number').slice(0, 2).join(' · ')}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function DynamicField({ field, value, onChange }: Props) {
   switch (field.type) {
     case 'string':
@@ -121,6 +202,9 @@ export function DynamicField({ field, value, onChange }: Props) {
 
     case 'file':
       return <FileField field={field} value={value} onChange={onChange} />
+
+    case 'reference':
+      return <ReferenceField field={field} value={value} onChange={onChange} />
 
     default:
       return (

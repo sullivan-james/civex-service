@@ -51,4 +51,11 @@ export const recordsApi = {
 
   delete: (id: string) => api.delete<void>(`/records/${id}`),
 
+  searchBySchema: (schemaName: string, search?: string, limit = 20) => {
+    const qs = new URLSearchParams({ schema: schemaName })
+    if (search) qs.set('search', search)
+    qs.set('limit', String(limit))
+    return api.get<CivexRecord[]>(`/records?${qs}`)
+  },
+
 }
