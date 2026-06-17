@@ -67,7 +67,7 @@ def export_dump(
         workflows_dir = config.civex_dir / "workflows"
         if workflows_dir.exists():
             for path in sorted(workflows_dir.glob("*.yaml")) + sorted(workflows_dir.glob("*.yml")):
-                workflows_out.append({"filename": path.name, "content": path.read_text()})
+                workflows_out.append({"filename": path.name, "content": path.read_text(encoding="utf-8")})
     except Exception:
         workflows_out = []
 
@@ -77,7 +77,7 @@ def export_dump(
         plugins_dir = config.civex_dir / "plugins"
         if plugins_dir.exists():
             for path in sorted(plugins_dir.glob("*.py")):
-                plugins_out.append({"filename": path.name, "content": path.read_text()})
+                plugins_out.append({"filename": path.name, "content": path.read_text(encoding="utf-8")})
     except Exception:
         plugins_out = []
 
@@ -154,35 +154,28 @@ async def import_dump(
         except (NotFoundError, ValidationError, AlreadyExistsError):
             pass
 
+    from civex.config import load_config
+    config = load_config()
+
     workflows_restored = 0
-    try:
-        from civex.config import load_config
-        config = load_config()
-        workflows_dir = config.civex_dir / "workflows"
-        workflows_dir.mkdir(exist_ok=True)
-        for wf in doc.get("workflows", []):
-            (workflows_dir / wf["filename"]).write_text(wf["content"])
-            workflows_restored += 1
-    except Exception:
-        pass
+    workflows_dir = config.civex_dir / "workflows"
+    workflows_dir.mkdir(exist_ok=True)
+    for wf in doc.get("workflows", []):
+        (workflows_dir / wf["filename"]).write_text(wf["content"], encoding="utf-8")
+        workflows_restored += 1
 
     plugins_restored = 0
-    try:
-        from civex.config import load_config
-        config = load_config()
-        plugins_dir = config.civex_dir / "plugins"
-        plugins_dir.mkdir(exist_ok=True)
-        for p in doc.get("plugins", []):
-            filename = p["filename"]
-            if "/" in filename or "\\" in filename or filename.startswith(".") or not filename.endswith(".py"):
-                continue
-            (plugins_dir / filename).write_text(p["content"])
-            plugins_restored += 1
-        if plugins_restored:
-            from civex.plugins.registry import discover_user_plugins
-            discover_user_plugins(plugins_dir)
-    except Exception:
-        pass
+    plugins_dir = config.civex_dir / "plugins"
+    plugins_dir.mkdir(exist_ok=True)
+    for p in doc.get("plugins", []):
+        filename = p["filename"]
+        if "/" in filename or "\\" in filename or filename.startswith(".") or not filename.endswith(".py"):
+            continue
+        (plugins_dir / filename).write_text(p["content"], encoding="utf-8")
+        plugins_restored += 1
+    if plugins_restored:
+        from civex.plugins.registry import discover_user_plugins
+        discover_user_plugins(plugins_dir)
 
     return RestoreResult(
         schemas=schemas_restored,
