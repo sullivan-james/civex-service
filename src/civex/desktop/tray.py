@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
+import sys
 import threading
 import time
 import urllib.request
@@ -13,9 +15,25 @@ from sqlalchemy import create_engine
 
 # Stored alongside other per-user config, outside any project directory.
 _RECENT_FILE = Path.home() / ".config" / "civex" / "recent.json"
+_LOG_FILE = Path.home() / ".config" / "civex" / "civex.log"
 
 # Set in main() before webview.start() so Api methods can reference it.
 _window = None
+
+
+def _setup_logging() -> None:
+    _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=[
+            logging.FileHandler(_LOG_FILE, encoding="utf-8"),
+            *([] if getattr(sys, "frozen", False) else [logging.StreamHandler()]),
+        ],
+    )
+
+
+_log = logging.getLogger("civex.desktop")
 
 
 # ── Recent-projects list ──────────────────────────────────────────────────────
@@ -78,9 +96,11 @@ def _run_server(port: int, errors: list[str]) -> None:
     # non-main thread; without this uvicorn.run() can silently fail.
     if sys.platform == "win32":
         asyncio.set_event_loop(asyncio.ProactorEventLoop())
+    _log.info("Starting uvicorn on port %d", port)
     try:
         uvicorn.run("civex.server.app:app", host="127.0.0.1", port=port, log_level="warning")
     except Exception as exc:
+        _log.exception("Server failed to start on port %d", port)
         errors.append(str(exc))
 
 
@@ -431,6 +451,9 @@ _WELCOME_HTML = """<!DOCTYPE html>
 def main() -> None:
     global _window
     import webview
+
+    _setup_logging()
+    _log.info("civex desktop starting (log: %s)", _LOG_FILE)
 
     api = _Api()
     _window = webview.create_window(
