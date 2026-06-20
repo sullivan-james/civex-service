@@ -14,7 +14,7 @@ router = APIRouter(prefix="/files", tags=["files"])
 async def upload_file(file: UploadFile, ctx: AppContext = Depends(get_ctx)):
     data = await file.read()
     ref = ctx.file_svc.store_bytes(data, file.filename or "upload")
-    return FileRefResponse(sha256=ref.sha256, filename=ref.filename, size=ref.size)
+    return FileRefResponse(sha256=ref.sha256, filename=ref.filename, size=ref.size, volume=ref.volume)
 
 
 @router.get("/{sha256}")

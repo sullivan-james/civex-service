@@ -52,8 +52,14 @@ def get_schema(name_or_id: str, ctx: AppContext = Depends(get_ctx)):
 
 @router.patch("/{name}", response_model=SchemaResponse)
 def update_schema(name: str, body: UpdateSchemaRequest, ctx: AppContext = Depends(get_ctx)):
+    display_field = body.display_field if "display_field" in body.model_fields_set else ...
     try:
-        dto = ctx.schema_svc.update(name, new_name=body.rename, description=body.description)
+        dto = ctx.schema_svc.update(
+            name,
+            new_name=body.rename,
+            description=body.description,
+            display_field=display_field,
+        )
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))

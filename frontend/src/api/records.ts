@@ -6,6 +6,7 @@ export interface CivexRecord {
   schema_name: string
   parent_record_id: string | null
   data: Record<string, unknown>
+  natural_name: string | null
   created_at: string
   updated_at: string
 }

@@ -188,9 +188,7 @@ function ReferenceField({ field, value, onChange }: Props) {
   }
 
   function labelFor(record: CivexRecord) {
-    const vals = Object.values(record.data).filter(v => typeof v === 'string' || typeof v === 'number')
-    const preview = vals.slice(0, 2).join(' · ')
-    return preview ? `${record.id.slice(0, 8)} — ${preview}` : record.id.slice(0, 8)
+    return record.natural_name ?? record.id.slice(0, 8)
   }
 
   return (
@@ -217,10 +215,9 @@ function ReferenceField({ field, value, onChange }: Props) {
               className="w-full text-left px-3 py-1.5 hover:bg-[#f6f8fa] truncate"
             >
               <span className="font-mono text-xs text-[#656d76]">{record.id.slice(0, 8)}</span>
-              {' '}
-              <span className="text-[#1f2328]">
-                {Object.values(record.data).filter(v => typeof v === 'string' || typeof v === 'number').slice(0, 2).join(' · ')}
-              </span>
+              {record.natural_name && (
+                <span className="ml-2 text-[#1f2328]">{record.natural_name}</span>
+              )}
             </button>
           ))}
         </div>

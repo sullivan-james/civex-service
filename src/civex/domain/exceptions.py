@@ -21,6 +21,18 @@ class ValidationError(CivexError):
     pass
 
 
+class VolumeUnavailableError(CivexError):
+    pass
+
+
+class VolumeFullError(CivexError):
+    pass
+
+
+class AllVolumesFull(CivexError):
+    pass
+
+
 class CoercionError(ValidationError):
     def __init__(self, field_name: str, dtype: str, raw: str, extra: str | None = None) -> None:
         self.field_name = field_name

@@ -38,10 +38,31 @@ class RemoteConfig:
 
 
 @dataclass
+class VolumeConfig:
+    name: str
+    path: str              # raw string — may be relative (resolved against project root) or absolute
+    allocated_gb: float | None = None  # None = unlimited
+
+
+@dataclass
+class StoreConfig:
+    volumes: dict[str, VolumeConfig]
+    volume_queue: list[str]
+    warn_below_pct: float = 10.0  # show warning in UI when less than this % of space remains
+    full_below_gb: float = 1.0    # treat volume as full below this disk headroom (absolute)
+
+
+def _default_store(project_root: Path) -> StoreConfig:
+    default_vol = VolumeConfig(name="default", path=".civex/objects")
+    return StoreConfig(volumes={"default": default_vol}, volume_queue=["default"])
+
+
+@dataclass
 class Config:
     project_root: Path
     db: DBConfig
     remote: RemoteConfig | None   # None when [remote] is absent — local-only mode
+    store: StoreConfig | None = None  # None until first access; use store_config property
 
     @property
     def civex_dir(self) -> Path:
@@ -50,6 +71,12 @@ class Config:
     @property
     def objects_dir(self) -> Path:
         return self.civex_dir / "objects"
+
+    @property
+    def store_config(self) -> StoreConfig:
+        if self.store is None:
+            self.store = _default_store(self.project_root)
+        return self.store
 
 
 def find_project_root() -> Path | None:
@@ -95,15 +122,38 @@ def load_config() -> Config:
             last_pulled_at=_parse_dt(data["remote"].get("last_pulled_at")),
         )
 
+    store: StoreConfig | None = None
+    if "store" in data:
+        sd = data["store"]
+        raw_vols = sd.get("volumes", {})
+        volumes = {
+            name: VolumeConfig(
+                name=name,
+                path=vcfg["path"],
+                allocated_gb=vcfg.get("allocated_gb"),
+            )
+            for name, vcfg in raw_vols.items()
+        }
+        if not volumes:
+            volumes = {"default": VolumeConfig(name="default", path=".civex/objects")}
+        queue = sd.get("volume_queue", list(volumes.keys()))
+        store = StoreConfig(
+            volumes=volumes,
+            volume_queue=queue,
+            warn_below_pct=float(sd.get("warn_below_pct", 10.0)),
+            full_below_gb=float(sd.get("full_below_gb", 1.0)),
+        )
+
     return Config(
         project_root=root,
         db=DBConfig(url=data["db"]["url"]),
         remote=remote,
+        store=store,
     )
 
 
 def save_config(config: Config) -> None:
-    """Write config back to .civex/config.toml (used to update sync watermarks)."""
+    """Write config back to .civex/config.toml."""
     lines: list[str] = [
         "[db]\n",
         f'url = "{config.db.url}"\n',
@@ -118,5 +168,29 @@ def save_config(config: Config) -> None:
             lines.append(f'last_pushed_at = "{config.remote.last_pushed_at.isoformat()}"\n')
         if config.remote.last_pulled_at:
             lines.append(f'last_pulled_at = "{config.remote.last_pulled_at.isoformat()}"\n')
+
+    sc = config.store
+    if sc is not None:
+        is_default = (
+            list(sc.volumes.keys()) == ["default"]
+            and sc.volumes["default"].path == ".civex/objects"
+            and sc.volumes["default"].allocated_gb is None
+            and sc.volume_queue == ["default"]
+            and sc.warn_below_pct == 10.0
+            and sc.full_below_gb == 1.0
+        )
+        if not is_default:
+            queue_str = ", ".join(f'"{n}"' for n in sc.volume_queue)
+            lines += [
+                "\n[store]\n",
+                f'volume_queue = [{queue_str}]\n',
+                f'warn_below_pct = {sc.warn_below_pct}\n',
+                f'full_below_gb = {sc.full_below_gb}\n',
+            ]
+            for vol in sc.volumes.values():
+                lines.append(f'\n[store.volumes.{vol.name}]\n')
+                lines.append(f'path = "{vol.path}"\n')
+                if vol.allocated_gb is not None:
+                    lines.append(f'allocated_gb = {vol.allocated_gb}\n')
 
     (config.civex_dir / "config.toml").write_text("".join(lines))

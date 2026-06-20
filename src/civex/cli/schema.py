@@ -165,14 +165,21 @@ def schema_update(
     name: str = typer.Argument(...),
     rename: Optional[str] = typer.Option(None, "--rename", help="New name for the schema"),
     description: Optional[str] = typer.Option(None, "--description", "-d"),
+    display_field: Optional[str] = typer.Option(None, "--display-field", help="Field name to use as the record's natural name"),
+    clear_display_field: bool = typer.Option(False, "--clear-display-field", help="Remove the display field (revert to auto)"),
 ) -> None:
-    """Update a schema's name or description."""
-    if rename is None and description is None:
-        console.print("[error]Provide at least one of --rename or --description.[/error]")
+    """Update a schema's name, description, or display field."""
+    if rename is None and description is None and display_field is None and not clear_display_field:
+        console.print("[error]Provide at least one of --rename, --description, --display-field, or --clear-display-field.[/error]")
         raise typer.Exit(1)
+    df = ...
+    if display_field is not None:
+        df = display_field
+    elif clear_display_field:
+        df = None
     ctx = _ctx()
     try:
-        schema = ctx.schema_svc.update(name, new_name=rename, description=description)
+        schema = ctx.schema_svc.update(name, new_name=rename, description=description, display_field=df)
         ctx.commit()
         console.print(f"[success]Updated schema '{schema.name}'.[/success]")
     except (NotFoundError, AlreadyExistsError) as e:

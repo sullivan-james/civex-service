@@ -421,8 +421,13 @@ export default function SchemaDetailPage() {
   const updateField = useUpdateField(schema?.name ?? '')
   const deleteField = useDeleteField(schema?.name ?? '')
   const deleteSchema = useDeleteSchema()
+  const updateSchema = useUpdateSchema(schema?.name ?? '')
   const [editingField, setEditingField] = useState<string | null>(null)
   const [confirmDeleteField, setConfirmDeleteField] = useState<string | null>(null)
+
+  function setDisplayField(fieldName: string | null) {
+    updateSchema.mutate({ display_field: fieldName })
+  }
 
   if (isLoading) return <LoadingState />
   if (error || !schema) return <ErrorState message={error ? String(error) : 'Schema not found'} />
@@ -505,7 +510,16 @@ export default function SchemaDetailPage() {
                 </Tr>
               ) : (
                 <Tr key={field.id}>
-                  <Td><span className="font-mono text-sm">{field.name}</span></Td>
+                  <Td>
+                    <span className="flex items-center gap-1.5">
+                      <span className="font-mono text-sm">{field.name}</span>
+                      {schema.display_field === field.name && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]" title="Display field — used as record name">
+                          display
+                        </span>
+                      )}
+                    </span>
+                  </Td>
                   <Td>
                     <div className="flex flex-col gap-0.5">
                       <div className="flex items-center gap-1.5">
@@ -557,6 +571,13 @@ export default function SchemaDetailPage() {
                         </>
                       ) : (
                         <>
+                          <button
+                            onClick={() => setDisplayField(schema.display_field === field.name ? null : field.name)}
+                            className={`text-xs transition-colors ${schema.display_field === field.name ? 'text-[#9a6700]' : 'text-[#d0d7de] hover:text-[#9a6700]'}`}
+                            title={schema.display_field === field.name ? 'Clear display field' : 'Set as display field'}
+                          >
+                            ★
+                          </button>
                           <button
                             onClick={() => { setConfirmDeleteField(null); setEditingField(field.name) }}
                             className="text-xs text-[#656d76] hover:text-[#0969da] transition-colors"

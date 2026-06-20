@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from civex.config import Config
 from civex.repositories.local.audit_repo import LocalAuditRepository
 from civex.repositories.local.dataset_repo import LocalDatasetRepository
-from civex.repositories.local.file_store import LocalFileObjectStore
+from civex.repositories.local.file_store import VolumeAwareFileObjectStore
 from civex.repositories.local.job_repo import LocalWorkflowJobRepository
 from civex.repositories.local.record_repo import LocalRecordRepository
 from civex.repositories.local.schema_repo import LocalSchemaRepository
@@ -27,6 +27,7 @@ from civex.services.dataset_service import DatasetService
 from civex.services.file_service import FileService
 from civex.services.record_service import RecordService
 from civex.services.schema_service import SchemaService
+from civex.services.store_service import StoreService
 from civex.services.workflow_job_service import WorkflowJobService
 
 
@@ -43,6 +44,7 @@ class AppContext:
     record_svc: RecordService
     file_svc: FileService
     job_svc: WorkflowJobService
+    store_svc: StoreService
     audit_svc: LocalAuditRepository
     _session: Session
 
@@ -74,6 +76,7 @@ def _apply_migrations(session: Session, engine: Engine) -> None:
             "))"
         ),
         "ALTER TABLE commits ADD COLUMN seq INTEGER",
+        "ALTER TABLE schemas ADD COLUMN display_field VARCHAR(255)",
     ]
     for sql in migrations:
         try:
@@ -111,7 +114,7 @@ def build_local_context(
     job_repo = LocalWorkflowJobRepository(session)
     audit_repo = LocalAuditRepository(session)
     if file_store is None:
-        file_store = LocalFileObjectStore(config.objects_dir)
+        file_store = VolumeAwareFileObjectStore(config.store_config, config.project_root)
 
     remote_transport = None
     if config.remote:
@@ -123,6 +126,7 @@ def build_local_context(
     job_svc = WorkflowJobService(job_repo, config.civex_dir)
     record_svc = RecordService(schema_svc, dataset_repo, record_repo, file_store, job_svc, audit_repo)
     file_svc = FileService(file_store, remote_transport=remote_transport)
+    store_svc = StoreService(config, file_store)
 
     return AppContext(
         schema_svc=schema_svc,
@@ -130,6 +134,7 @@ def build_local_context(
         record_svc=record_svc,
         file_svc=file_svc,
         job_svc=job_svc,
+        store_svc=store_svc,
         audit_svc=audit_repo,
         _session=session,
     )

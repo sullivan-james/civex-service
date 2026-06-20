@@ -24,7 +24,7 @@ export function useCreateSchema() {
 export function useUpdateSchema(name: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { rename?: string; description?: string }) =>
+    mutationFn: (body: { rename?: string; description?: string; display_field?: string | null }) =>
       schemasApi.update(name, body),
     onSuccess: (updated) => {
       qc.invalidateQueries({ queryKey: ['schemas'] })

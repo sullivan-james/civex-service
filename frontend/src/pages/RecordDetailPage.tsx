@@ -103,8 +103,8 @@ function ChildTable({
           {records.map(r => (
             <Tr key={r.id}>
               <Td>
-                <Link to={`/records/${r.id}`} className="font-mono text-xs text-[#0969da] hover:underline">
-                  {r.id.slice(0, 8)}
+                <Link to={`/records/${r.id}`} className="text-xs text-[#0969da] hover:underline">
+                  {r.natural_name ?? <span className="font-mono">{r.id.slice(0, 8)}</span>}
                 </Link>
               </Td>
               {cols.map(col => (
@@ -230,14 +230,14 @@ export default function RecordDetailPage() {
             <span>/</span>
           </>
         )}
-        <span className="font-mono text-[#1f2328]">{record.id.slice(0, 8)}</span>
+        <span className="font-mono text-[#1f2328]">{record.natural_name ?? record.id.slice(0, 8)}</span>
       </nav>
 
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-mono font-semibold text-[#1f2328]">{record.id.slice(0, 8)}</h1>
+            <h1 className="text-xl font-semibold text-[#1f2328]">{record.natural_name ?? <span className="font-mono">{record.id.slice(0, 8)}</span>}</h1>
             {schema
               ? <Link to={`/schemas/${schema.id}`}><Badge variant="accent">{record.schema_name}</Badge></Link>
               : <Badge variant="accent">{record.schema_name}</Badge>
@@ -258,24 +258,9 @@ export default function RecordDetailPage() {
             Parent — {parentSchema?.name ?? 'unknown'}
           </p>
           {parent ? (
-            <div className="flex items-center gap-3">
-              <Link
-                to={`/records/${parent.id}`}
-                className="font-mono text-sm text-[#0969da] hover:underline"
-              >
-                {parent.id.slice(0, 8)}
-              </Link>
-              <div className="flex gap-3 text-sm text-[#1f2328]">
-                {Object.entries(parent.data)
-                  .filter(([, v]) => typeof v === 'string' || typeof v === 'number')
-                  .slice(0, 3)
-                  .map(([k, v]) => (
-                    <span key={k}>
-                      <span className="text-[#656d76]">{k}:</span> {String(v)}
-                    </span>
-                  ))}
-              </div>
-            </div>
+            <Link to={`/records/${parent.id}`} className="text-sm text-[#0969da] hover:underline">
+              {parent.natural_name ?? <span className="font-mono">{parent.id.slice(0, 8)}</span>}
+            </Link>
           ) : (
             <Link to={`/records/${record.parent_record_id}`} className="font-mono text-sm text-[#0969da] hover:underline">
               {record.parent_record_id.slice(0, 8)}

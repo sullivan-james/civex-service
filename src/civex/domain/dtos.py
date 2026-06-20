@@ -59,6 +59,7 @@ class SchemaDTO:
     parent_id: uuid.UUID | None
     created_at: datetime
     fields: list[FieldDTO] = field(default_factory=list)
+    display_field: str | None = None  # field name to use as the record's natural name
 
     def to_dict(self) -> dict[str, Any]:
         # fields excluded — it's a loaded relationship, not a scalar property
@@ -67,6 +68,7 @@ class SchemaDTO:
             "name": self.name,
             "description": self.description,
             "parent_id": str(self.parent_id) if self.parent_id else None,
+            "display_field": self.display_field,
             "created_at": self.created_at.isoformat(),
         }
 
@@ -77,6 +79,7 @@ class SchemaDTO:
             name=d["name"],
             description=d.get("description"),
             parent_id=uuid.UUID(d["parent_id"]) if d.get("parent_id") else None,
+            display_field=d.get("display_field"),
             created_at=datetime.fromisoformat(d["created_at"]),
         )
 
@@ -123,18 +126,19 @@ class DatasetDTO:
 class FileRef:
     """
     Stored as a dict in record.data for 'file' dtype fields.
-    The actual bytes live in .civex/objects/<sha256[:2]>/<sha256[2:]>.
+    The actual bytes live in <volume_path>/<sha256[:2]>/<sha256[2:]>.
     """
     sha256: str
     filename: str           # original user-facing filename
     size: int               # bytes
+    volume: str = "default" # which named volume holds this object
 
     def to_dict(self) -> dict[str, Any]:
-        return {"sha256": self.sha256, "filename": self.filename, "size": self.size}
+        return {"sha256": self.sha256, "filename": self.filename, "size": self.size, "volume": self.volume}
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> FileRef:
-        return cls(sha256=d["sha256"], filename=d["filename"], size=d["size"])
+        return cls(sha256=d["sha256"], filename=d["filename"], size=d["size"], volume=d.get("volume", "default"))
 
 
 @dataclass
@@ -147,6 +151,7 @@ class RecordDTO:
     data: dict[str, Any]    # field_name → coerced value or FileRef.to_dict()
     created_at: datetime
     updated_at: datetime
+    natural_name: str | None = None  # first meaningful field value; computed by RecordService
 
     def to_dict(self) -> dict[str, Any]:
         # schema_name excluded — denormalized display field, not stored on the entity

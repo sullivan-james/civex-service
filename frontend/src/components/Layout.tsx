@@ -20,6 +20,7 @@ const tabs = [
   { to: '/workflows', label: 'Workflows' },
   { to: '/jobs',      label: 'Jobs' },
   { to: '/terminal',  label: 'Terminal' },
+  { to: '/storage',   label: 'Storage' },
 ]
 
 function SyncMessage({ result, error, op }: { result: SyncResult | null; error: string | null; op: 'push' | 'pull' }) {

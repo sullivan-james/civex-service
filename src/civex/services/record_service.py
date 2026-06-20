@@ -108,6 +108,25 @@ def _check_restrictions(value: Any, dtype: str, restrictions: dict[str, Any], fi
                 )
 
 
+_SKIP_TYPES = {'reference', 'file', 'file_list'}
+
+
+def _natural_name(data: dict[str, Any], fields: list, display_field: str | None = None) -> str | None:
+    if display_field:
+        val = data.get(display_field)
+        if val is not None and str(val).strip():
+            return str(val)
+        return None
+    for rf in fields:
+        f = rf.field
+        if f.dtype in _SKIP_TYPES:
+            continue
+        val = data.get(f.name)
+        if val is not None and str(val).strip():
+            return str(val)
+    return None
+
+
 class RecordService:
     def __init__(
         self,
@@ -144,7 +163,14 @@ class RecordService:
         return {id_map.get(k, k): v for k, v in data.items()}
 
     def _with_names(self, dto: RecordDTO) -> RecordDTO:
-        return dataclasses.replace(dto, data=self._ids_to_names(dto.data, dto.schema_id))
+        schema = self._schema_svc._repo.get_by_id(dto.schema_id)
+        if schema is None:
+            return dataclasses.replace(dto)
+        id_map = self._schema_svc.id_to_name_map(schema)
+        named_data = {id_map.get(k, k): v for k, v in dto.data.items()}
+        fields = self._schema_svc.collect_fields(schema)
+        natural_name = _natural_name(named_data, fields, schema.display_field)
+        return dataclasses.replace(dto, data=named_data, natural_name=natural_name)
 
     def coerce_value(self, raw: str, dtype: str, field_name: str, restrictions: dict[str, Any] | None = None) -> Any:
         if dtype == "file":

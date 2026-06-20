@@ -27,6 +27,7 @@ class SchemaResponse(BaseModel):
     name: str
     description: str | None
     parent_id: str | None
+    display_field: str | None
     fields: list[FieldResponse]
 
     @classmethod
@@ -36,6 +37,7 @@ class SchemaResponse(BaseModel):
             name=dto.name,
             description=dto.description,
             parent_id=str(dto.parent_id) if dto.parent_id else None,
+            display_field=dto.display_field,
             fields=[
                 FieldResponse(id=str(f.id), name=f.name, type=f.dtype, required=f.required, restrictions=f.restrictions)
                 for f in dto.fields
@@ -59,6 +61,7 @@ class AddFieldRequest(BaseModel):
 class UpdateSchemaRequest(BaseModel):
     rename: str | None = None
     description: str | None = None
+    display_field: str | None = None
 
 
 class UpdateFieldRequest(BaseModel):
@@ -103,6 +106,7 @@ class RecordResponse(BaseModel):
     schema_name: str
     parent_record_id: str | None
     data: dict[str, Any]
+    natural_name: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -114,6 +118,7 @@ class RecordResponse(BaseModel):
             schema_name=dto.schema_name,
             parent_record_id=str(dto.parent_record_id) if dto.parent_record_id else None,
             data=dto.data,
+            natural_name=dto.natural_name,
             created_at=dto.created_at,
             updated_at=dto.updated_at,
         )
@@ -142,6 +147,35 @@ class FileRefResponse(BaseModel):
     sha256: str
     filename: str
     size: int
+    volume: str = "default"
+
+
+class VolumeStatsResponse(BaseModel):
+    name: str
+    path: str
+    allocated_gb: float | None
+    civex_used_bytes: int | None
+    disk_free_bytes: int | None
+    disk_total_bytes: int | None
+    available: bool
+    warning: bool
+    in_queue: bool
+
+
+class AddVolumeRequest(BaseModel):
+    name: str
+    path: str
+    allocated_gb: float | None = None
+
+
+class UpdateVolumeRequest(BaseModel):
+    path: str | None = None
+    allocated_gb: float | None = None
+    clear_allocation: bool = False
+
+
+class SetQueueRequest(BaseModel):
+    queue: list[str]
 
 
 # --- Workflows ---

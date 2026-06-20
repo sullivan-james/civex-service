@@ -202,8 +202,8 @@ export default function DatasetDetailPage() {
               {records.map(r => (
                 <Tr key={r.id}>
                   <Td>
-                    <Link to={`/records/${r.id}`} className="font-mono text-xs text-[#0969da] hover:underline">
-                      {r.id.slice(0, 8)}
+                    <Link to={`/records/${r.id}`} className="text-xs text-[#0969da] hover:underline">
+                      {r.natural_name ?? <span className="font-mono">{r.id.slice(0, 8)}</span>}
                     </Link>
                   </Td>
                   {!selectedSchema && (

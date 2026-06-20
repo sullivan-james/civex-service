@@ -1,7 +1,7 @@
 
 import typer
 
-from civex.cli import auth, dataset, db, plugin, record, remote, schema, workflow, worker
+from civex.cli import auth, dataset, db, plugin, record, remote, schema, store, workflow, worker
 from civex.cli.shell import run_shell
 from civex.cli.clone import clone
 from civex.cli.dump import dump, restore
@@ -31,6 +31,7 @@ app.add_typer(db.app, name="db", rich_help_panel=_START)
 app.add_typer(schema.app, name="schema", rich_help_panel=_WORK)
 app.add_typer(dataset.app, name="dataset", rich_help_panel=_WORK)
 app.add_typer(record.app, name="record", rich_help_panel=_WORK)
+app.add_typer(store.app, name="store", rich_help_panel=_WORK)
 app.add_typer(workflow.app, name="workflow", rich_help_panel=_WORK)
 app.add_typer(plugin.app, name="plugin", rich_help_panel=_WORK)
 app.add_typer(worker.app, name="worker", rich_help_panel=_WORK)

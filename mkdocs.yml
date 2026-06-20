@@ -1,0 +1,49 @@
+site_name: Civex
+site_description: Research data management — schemas, records, files, and workflows.
+repo_url: https://github.com/sullivan-james/civex-service
+repo_name: civex
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - tables
+  - attr_list
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Schemas: schemas.md
+  - Datasets & Records: datasets-records.md
+  - Files: files.md
+  - Workflows: workflows.md
+  - Plugins: plugins.md
+  - Server & UI: server-ui.md
+  - Remote sync: remote-sync.md
+  - CLI reference: cli-reference.md

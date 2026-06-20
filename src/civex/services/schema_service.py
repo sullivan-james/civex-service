@@ -77,13 +77,20 @@ class SchemaService:
         name: str,
         new_name: str | None = None,
         description: str | None = None,
+        display_field=...,
     ) -> SchemaDTO:
         schema = self.get(name)
         if new_name and new_name != name:
             if self._repo.get_by_name(new_name):
                 raise AlreadyExistsError(f"Schema '{new_name}' already exists")
+        if display_field is not ... and display_field is not None:
+            all_fields = self.collect_fields(schema)
+            names = {rf.field.name for rf in all_fields}
+            if display_field not in names:
+                raise NotFoundError(f"Field '{display_field}' not found on schema '{name}'")
         old_dict = schema.to_dict()
-        updated = self._repo.update(schema.id, name=new_name, description=description)
+        extra = {} if display_field is ... else {"display_field": display_field}
+        updated = self._repo.update(schema.id, name=new_name, description=description, **extra)
         if self._audit:
             self._audit.log_change("update", "schema", updated.id, old_dict, updated.to_dict())
         return updated

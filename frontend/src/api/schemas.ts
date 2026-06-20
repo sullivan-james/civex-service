@@ -13,6 +13,7 @@ export interface Schema {
   name: string
   description: string | null
   parent_id: string | null
+  display_field: string | null
   fields: Field[]
 }
 
@@ -21,7 +22,7 @@ export const schemasApi = {
   get:  (name: string)                               => api.get<Schema>(`/schemas/${name}`),
   create: (body: { name: string; description?: string; parent?: string }) =>
     api.post<Schema>('/schemas', body),
-  update: (name: string, body: { rename?: string; description?: string }) =>
+  update: (name: string, body: { rename?: string; description?: string; display_field?: string | null }) =>
     api.patch<Schema>(`/schemas/${name}`, body),
   delete: (name: string)                             => api.delete<void>(`/schemas/${name}`),
   addField: (name: string, body: { name: string; type: string; required?: boolean; restrictions?: Record<string, unknown> }) =>
