@@ -45,6 +45,9 @@ def _upsert_schemas(session: Session, rows: list[dict]) -> None:
         dto = SchemaDTO.from_dict(d)
         existing = session.get(Schema, dto.id)
         if existing is None:
+            # Fall back to name lookup — handles re-created schemas with new UUIDs.
+            existing = session.query(Schema).filter_by(name=dto.name).first()
+        if existing is None:
             session.add(Schema(
                 id=dto.id,
                 name=dto.name,
@@ -53,7 +56,6 @@ def _upsert_schemas(session: Session, rows: list[dict]) -> None:
                 created_at=dto.created_at,
             ))
         else:
-            existing.name = dto.name
             existing.description = dto.description
             existing.parent_id = dto.parent_id
 
@@ -62,6 +64,13 @@ def _upsert_fields(session: Session, rows: list[dict]) -> None:
     for d in rows:
         dto = FieldDTO.from_dict(d)
         existing = session.get(Field, dto.id)
+        if existing is None:
+            # Fall back to (schema_id, name) lookup — handles re-created fields with new UUIDs.
+            existing = (
+                session.query(Field)
+                .filter_by(schema_id=dto.schema_id, name=dto.name)
+                .first()
+            )
         if existing is None:
             session.add(Field(
                 id=dto.id,
@@ -73,7 +82,6 @@ def _upsert_fields(session: Session, rows: list[dict]) -> None:
                 created_at=dto.created_at,
             ))
         else:
-            existing.name = dto.name
             existing.dtype = dto.dtype
             existing.required = dto.required
             existing.restrictions = dto.restrictions
@@ -83,6 +91,8 @@ def _upsert_datasets(session: Session, rows: list[dict]) -> None:
     for d in rows:
         dto = DatasetDTO.from_dict(d)
         existing = session.get(Dataset, dto.id)
+        if existing is None:
+            existing = session.query(Dataset).filter_by(name=dto.name).first()
         if existing is None:
             session.add(Dataset(
                 id=dto.id,
