@@ -64,7 +64,7 @@ def clone(
     # Create local project structure.
     civex_dir.mkdir(parents=True)
     db_path = civex_dir / "civex.db"
-    db_url = f"sqlite:///{db_path}"
+    db_url = f"sqlite:///{db_path.as_posix()}"
 
     (civex_dir / "objects").mkdir()
     (civex_dir / "workflows").mkdir()

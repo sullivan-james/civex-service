@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from civex.config import load_config, save_config
+from civex.config import load_config
+from civex.context import AppContext
 from civex.domain.exceptions import ConfigError
-from civex.repositories.local.file_store import LocalFileObjectStore
-from civex.sync.exporter import export_bundle
-from civex.sync.importer import apply_bundle
-from civex.sync.transport import SyncError, get_transport
+from civex.server.deps import get_ctx
+from civex.services.sync_service import SyncService
+from civex.sync.transport import SyncError
 
 router = APIRouter(prefix="/remote", tags=["remote"])
 
@@ -21,20 +21,24 @@ class RemoteStatus(BaseModel):
     last_pulled_at: datetime | None
 
 
-class SyncResult(BaseModel):
+class SyncResponse(BaseModel):
     schemas: int
     datasets: int
     records: int
     objects: int
 
 
+def _load_cfg():
+    try:
+        return load_config()
+    except ConfigError as e:
+        raise HTTPException(500, detail=str(e))
+
+
 @router.get("", response_model=RemoteStatus)
 def remote_status():
     """Return the configured remote URL and last sync timestamps."""
-    try:
-        config = load_config()
-    except ConfigError as e:
-        raise HTTPException(500, detail=str(e))
+    config = _load_cfg()
     if config.remote is None:
         raise HTTPException(404, detail="No remote configured")
     return RemoteStatus(
@@ -44,88 +48,31 @@ def remote_status():
     )
 
 
-@router.post("/push", response_model=SyncResult)
-def remote_push():
-    """Push local changes to the remote bare repository."""
-    try:
-        config = load_config()
-    except ConfigError as e:
-        raise HTTPException(500, detail=str(e))
+@router.post("/push", response_model=SyncResponse)
+def remote_push(ctx: AppContext = Depends(get_ctx)):
+    """Push local changes (including any uncommitted edits) to the remote."""
+    config = _load_cfg()
     if config.remote is None:
         raise HTTPException(400, detail="No remote configured. Run `civex remote set <url>` first.")
-
+    svc = SyncService(config, ctx._session, ctx.audit_svc, ctx.file_svc._store)
     try:
-        transport, _path = get_transport(config.remote.url, remote_civex=config.remote.remote_civex)
+        result = svc.push()
     except SyncError as e:
-        raise HTTPException(400, detail=str(e))
-
-    from civex.db.session import _engine
-    from sqlalchemy.orm import Session
-
-    with Session(_engine()) as session:
-        bundle = export_bundle(session, config.remote.last_pushed_seq)
-
-    local_store = LocalFileObjectStore(config.objects_dir)
-    pushed_objects = 0
-    for sha256 in bundle.object_refs:
-        if local_store.exists(sha256):
-            try:
-                transport.put_object(sha256, local_store.get(sha256))
-                pushed_objects += 1
-            except SyncError:
-                pass
-
-    try:
-        transport.receive_pack(bundle)
-    except SyncError as e:
-        raise HTTPException(502, detail=f"Push failed: {e}")
-
-    config.remote.last_pushed_seq = bundle.to_seq
-    config.remote.last_pushed_at = datetime.now(timezone.utc)
-    save_config(config)
-
-    return SyncResult(
-        schemas=len(bundle.schemas),
-        datasets=len(bundle.datasets),
-        records=len(bundle.records),
-        objects=pushed_objects,
-    )
+        raise HTTPException(502, detail=str(e))
+    return SyncResponse(schemas=result.schemas, datasets=result.datasets,
+                        records=result.records, objects=result.objects)
 
 
-@router.post("/pull", response_model=SyncResult)
-def remote_pull():
+@router.post("/pull", response_model=SyncResponse)
+def remote_pull(ctx: AppContext = Depends(get_ctx)):
     """Pull remote changes into the local project."""
-    try:
-        config = load_config()
-    except ConfigError as e:
-        raise HTTPException(500, detail=str(e))
+    config = _load_cfg()
     if config.remote is None:
         raise HTTPException(400, detail="No remote configured. Run `civex remote set <url>` first.")
-
+    svc = SyncService(config, ctx._session, ctx.audit_svc, ctx.file_svc._store)
     try:
-        transport, _path = get_transport(config.remote.url, remote_civex=config.remote.remote_civex)
+        result = svc.pull()
     except SyncError as e:
-        raise HTTPException(400, detail=str(e))
-
-    try:
-        bundle = transport.transfer_pack(since_seq=config.remote.last_pulled_seq)
-    except SyncError as e:
-        raise HTTPException(502, detail=f"Pull failed: {e}")
-
-    from civex.db.session import _engine
-    from sqlalchemy.orm import Session
-
-    with Session(_engine()) as session:
-        apply_bundle(session, bundle)
-        session.commit()
-
-    config.remote.last_pulled_seq = bundle.to_seq
-    config.remote.last_pulled_at = datetime.now(timezone.utc)
-    save_config(config)
-
-    return SyncResult(
-        schemas=len(bundle.schemas),
-        datasets=len(bundle.datasets),
-        records=len(bundle.records),
-        objects=len(bundle.object_refs),
-    )
+        raise HTTPException(502, detail=str(e))
+    return SyncResponse(schemas=result.schemas, datasets=result.datasets,
+                        records=result.records, objects=result.objects)
