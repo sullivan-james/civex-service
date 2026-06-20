@@ -1,0 +1,2 @@
+civex-hub/start.sh text eol=lf
+civex-hub/sshd_config_append.txt text eol=lf

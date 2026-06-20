@@ -35,7 +35,7 @@ RUN cat /tmp/sshd_config_append.txt >> /etc/ssh/sshd_config && \
 COPY --from=frontend /frontend/dist /civexhub/frontend/dist
 
 COPY civex-hub/start.sh /usr/local/bin/start.sh
-RUN chmod +x /usr/local/bin/start.sh
+RUN sed -i 's/\r//' /usr/local/bin/start.sh && chmod +x /usr/local/bin/start.sh
 
 EXPOSE 8001 22
 CMD ["/usr/local/bin/start.sh"]
