@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from civex.domain.exceptions import AlreadyExistsError, CivexError, NotFoundError, ValidationError
 from civexhub.config import HubConfig, load_config
-from civexhub.db.session import _apply_hub_migrations, create_hub_tables, get_engine
+from civexhub.db.session import create_hub_tables, get_engine
 from civexhub.server.routers import auth, data, orgs, repos, settings, sync
 
 
@@ -33,8 +33,12 @@ def get_object_store():
             access_key=cfg.s3_access_key,
             secret_key=cfg.s3_secret_key,
         )
-    from civexhub.repositories.object_store import FilesystemObjectStore
-    return FilesystemObjectStore(cfg.objects_dir)
+    from civex.config import StoreConfig, VolumeConfig
+    from civex.repositories.local.file_store import VolumeAwareFileObjectStore
+    objects_dir = cfg.objects_dir
+    vol = VolumeConfig(name="default", path=str(objects_dir))
+    sc = StoreConfig(volumes={"default": vol}, volume_queue=["default"])
+    return VolumeAwareFileObjectStore(sc, objects_dir)
 
 
 def create_app() -> FastAPI:
@@ -42,7 +46,7 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     def _run_migrations() -> None:
-        _apply_hub_migrations(get_hub_engine())
+        create_hub_tables(get_hub_engine())
 
     @app.exception_handler(NotFoundError)
     async def not_found_handler(request: Request, exc: NotFoundError) -> JSONResponse:

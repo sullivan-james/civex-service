@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from civex.sync.bundle import SyncBundle
@@ -27,7 +25,7 @@ def transfer_pack(
     name: str,
     session: HubSession,
     current_user: OptionalUser,
-    since: str | None = None,
+    since_seq: int = 0,
 ) -> Response:
     svc = get_repo_service(session)
     repo = _get_repo_or_404(svc, owner, name)
@@ -39,18 +37,9 @@ def transfer_pack(
         if role is None:
             raise HTTPException(status_code=403, detail="Access denied")
 
-    since_dt: datetime | None = None
-    if since:
-        try:
-            since_dt = datetime.fromisoformat(since)
-            if since_dt.tzinfo is None:
-                since_dt = since_dt.replace(tzinfo=timezone.utc)
-        except ValueError:
-            raise HTTPException(status_code=422, detail=f"Invalid since datetime: {since!r}")
-
     ctx = svc.build_repo_context(repo.id)
     try:
-        bundle = export_bundle(ctx._session, since_dt)
+        bundle = export_bundle(ctx._session, since_seq)
     finally:
         ctx.close()
 
@@ -100,8 +89,10 @@ def get_object(
     owner: str,
     name: str,
     sha256: str,
+    request: Request,
     session: HubSession,
     current_user: OptionalUser,
+    filename: str | None = None,
 ) -> Response:
     svc = get_repo_service(session)
     repo = _get_repo_or_404(svc, owner, name)
@@ -119,7 +110,12 @@ def get_object(
         data = store.get(sha256)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Object {sha256} not found")
-    return Response(content=data, media_type="application/octet-stream")
+    dl_name = filename or sha256
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'},
+    )
 
 
 @router.put("/{owner}/{name}/objects/{sha256}", status_code=204)

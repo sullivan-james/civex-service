@@ -21,6 +21,8 @@ s3 = ["boto3>=1.34"]
 
 [project.scripts]
 civexhub = "civexhub.main:app"
+civexhub-shell = "civexhub.shell:shell_main"
+civexhub-keys = "civexhub.shell:keys_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

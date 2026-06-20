@@ -9,6 +9,11 @@ RUN npm run build
 # --- Stage 2: Python runtime ---
 FROM python:3.12-slim
 
+# Install openssh-server for SSH transport support
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-server && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir /var/run/sshd
+
 # Install civex (parent package) with the PostgreSQL driver.
 # Installed non-editable; only its importable code is needed.
 COPY src/ /civex-service/src/
@@ -21,8 +26,16 @@ COPY civex-hub/src/ /civexhub/src/
 COPY civex-hub/pyproject.toml /civexhub/
 RUN pip install --no-cache-dir -e /civexhub
 
+# Configure sshd: AuthorizedKeysCommand uses civexhub-keys to serve keys from the DB
+COPY civex-hub/sshd_config_append.txt /tmp/sshd_config_append.txt
+RUN cat /tmp/sshd_config_append.txt >> /etc/ssh/sshd_config && \
+    rm /tmp/sshd_config_append.txt
+
 # Place the built frontend where app.py expects it.
 COPY --from=frontend /frontend/dist /civexhub/frontend/dist
 
-EXPOSE 8001
-CMD ["civexhub", "serve", "--host", "0.0.0.0", "--port", "8001"]
+COPY civex-hub/start.sh /usr/local/bin/start.sh
+RUN chmod +x /usr/local/bin/start.sh
+
+EXPOSE 8001 22
+CMD ["/usr/local/bin/start.sh"]

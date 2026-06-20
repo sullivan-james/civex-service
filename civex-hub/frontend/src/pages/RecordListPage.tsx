@@ -1,23 +1,15 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { listRecords } from "../api/data";
-import { listSchemas } from "../api/data";
-
-interface CivexRecord {
-  id: string;
-  schema: string;
-  dataset_id: string;
-  parent_record_id: string | null;
-  data: Record<string, unknown>;
-  updated_at: string | null;
-}
+import { listRecords, listSchemas } from "../api/data";
+import type { CivexRecord } from "../api/data";
 
 interface Schema { id: string; name: string }
 
 export default function RecordListPage() {
   const { owner, name, dataset } = useParams<{ owner: string; name: string; dataset: string }>();
   const [schemaFilter, setSchemaFilter] = useState("");
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
 
   const { data: schemas } = useQuery<Schema[]>({
@@ -27,22 +19,20 @@ export default function RecordListPage() {
   });
 
   const { data, isLoading, error } = useQuery<CivexRecord[]>({
-    queryKey: ["records", owner, name, dataset, schemaFilter],
+    queryKey: ["records", owner, name, dataset, schemaFilter, search],
     queryFn: () =>
       listRecords(owner!, name!, dataset!, {
         schema: schemaFilter || undefined,
+        search: search || undefined,
         limit: 100,
       }),
     enabled: !!owner && !!name && !!dataset,
   });
 
-  const filtered = search
-    ? data?.filter((r) =>
-        r.id.toLowerCase().includes(search.toLowerCase()) ||
-        r.schema.toLowerCase().includes(search.toLowerCase()) ||
-        JSON.stringify(r.data).toLowerCase().includes(search.toLowerCase())
-      )
-    : data;
+  function handleSearchSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setSearch(searchInput)
+  }
 
   if (isLoading) return <p className="text-sm text-gray-400">Loading records…</p>;
   if (error) return <p className="text-sm text-red-500">Failed to load records.</p>;
@@ -57,7 +47,7 @@ export default function RecordListPage() {
         <h2 className="text-lg font-semibold">{dataset}</h2>
       </div>
 
-      <div className="flex gap-3 mb-4">
+      <form className="flex gap-3 mb-4" onSubmit={handleSearchSubmit}>
         <select
           value={schemaFilter}
           onChange={(e) => setSchemaFilter(e.target.value)}
@@ -72,34 +62,38 @@ export default function RecordListPage() {
         <input
           type="search"
           placeholder="Search records…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          onBlur={() => setSearch(searchInput)}
           className="text-sm border border-gray-200 rounded px-3 py-1.5 flex-1"
         />
-      </div>
+      </form>
 
-      {!filtered?.length && <p className="text-sm text-gray-400">No records found.</p>}
+      {!data?.length && <p className="text-sm text-gray-400">No records found.</p>}
 
-      {filtered && filtered.length > 0 && (
+      {data && data.length > 0 && (
         <div className="overflow-x-auto border border-gray-200 rounded-lg">
           <table className="w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 w-24">ID</th>
+                <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 w-40">Name / ID</th>
                 <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Schema</th>
                 <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Data preview</th>
                 <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 w-28">Updated</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filtered.map((r) => (
+              {data.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50">
                   <td className="px-3 py-2">
                     <Link
                       to={`/${owner}/${name}/records/${r.id}`}
-                      className="font-mono text-xs text-blue-600 hover:underline"
+                      className="text-blue-600 hover:underline"
                     >
-                      {r.id.slice(0, 8)}…
+                      {r.natural_name
+                        ? <span>{r.natural_name}</span>
+                        : <span className="font-mono text-xs">{r.id.slice(0, 8)}…</span>
+                      }
                     </Link>
                     {r.parent_record_id && (
                       <span className="ml-1 text-xs text-gray-400 italic">child</span>
@@ -108,6 +102,7 @@ export default function RecordListPage() {
                   <td className="px-3 py-2 text-gray-600 text-xs">{r.schema}</td>
                   <td className="px-3 py-2 text-gray-500 text-xs font-mono max-w-sm truncate">
                     {Object.entries(r.data)
+                      .filter(([, v]) => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')
                       .slice(0, 3)
                       .map(([k, v]) => `${k}: ${String(v)}`)
                       .join("  ·  ")}

@@ -29,6 +29,17 @@ def _apply_hub_migrations(engine: Engine) -> None:
         "ALTER TABLE civexhub.users ADD COLUMN IF NOT EXISTS display_name VARCHAR(255)",
         "ALTER TABLE civexhub.users ADD COLUMN IF NOT EXISTS bio VARCHAR(500)",
         "ALTER TABLE civexhub.users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(1000)",
+        """
+        CREATE TABLE IF NOT EXISTS civexhub.ssh_keys (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID NOT NULL REFERENCES civexhub.users(id) ON DELETE CASCADE,
+            title VARCHAR(255) NOT NULL,
+            public_key VARCHAR(4096) NOT NULL UNIQUE,
+            fingerprint VARCHAR(255) NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            last_used_at TIMESTAMPTZ
+        )
+        """,
     ]
     with engine.connect() as conn:
         for sql in migrations:

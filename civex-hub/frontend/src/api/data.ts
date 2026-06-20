@@ -14,12 +14,23 @@ export const listDatasets = (owner: string, name: string) =>
   api.get(`${base(owner, name)}/datasets`).then((r) => r.data);
 
 // Records
+export interface CivexRecord {
+  id: string
+  schema: string
+  natural_name: string | null
+  dataset_id: string
+  parent_record_id: string | null
+  data: Record<string, unknown>
+  created_at: string | null
+  updated_at: string | null
+}
+
 export const listRecords = (
   owner: string,
   name: string,
   dataset: string,
-  params?: { schema?: string; limit?: number; offset?: number }
-) =>
+  params?: { schema?: string; search?: string; limit?: number; offset?: number }
+): Promise<CivexRecord[]> =>
   api
     .get(`${base(owner, name)}/datasets/${dataset}/records`, { params })
     .then((r) => r.data);

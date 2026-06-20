@@ -19,6 +19,7 @@ services:
       dockerfile: civex-hub/Dockerfile
     ports:
       - "8001:8001"
+      - "2222:22"
     environment:
       CIVEXHUB_DATABASE_URL: postgresql://civexhub:civexhub@db/civexhub
       CIVEXHUB_OBJECT_STORE: filesystem

@@ -137,12 +137,13 @@ def create_dataset(owner: str, name: str, body: dict, session: HubSession, curre
 def list_records(
     owner: str, name: str, dataset_name: str,
     session: HubSession, current_user: OptionalUser,
-    schema: str | None = None, limit: int = 50, offset: int = 0,
+    schema: str | None = None, search: str | None = None,
+    limit: int = 50, offset: int = 0,
 ) -> list[dict]:
     svc = get_repo_service(session)
     ctx = _get_repo_and_ctx(svc, owner, name, session, current_user)
     try:
-        records = ctx.record_svc.find(dataset_name, schema_name=schema, limit=limit, offset=offset)
+        records = ctx.record_svc.find(dataset_name, schema_name=schema, search=search, limit=limit, offset=offset)
         return [_record_dict(r) for r in records]
     finally:
         ctx.close()
@@ -558,6 +559,7 @@ def _record_dict(r) -> dict:
     return {
         "id": str(r.id),
         "schema": r.schema_name,
+        "natural_name": r.natural_name,
         "dataset_id": str(r.dataset_id),
         "parent_record_id": str(r.parent_record_id) if r.parent_record_id else None,
         "data": r.data,

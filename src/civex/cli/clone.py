@@ -56,7 +56,7 @@ def clone(
 
     # Fetch the full bundle before creating any local state.
     try:
-        bundle = transport.transfer_pack(since=None)
+        bundle = transport.transfer_pack(since_seq=0)
     except SyncError as e:
         console.print(f"[error]Clone failed: {e}[/error]")
         raise typer.Exit(1)

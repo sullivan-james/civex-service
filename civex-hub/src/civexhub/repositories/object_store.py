@@ -5,38 +5,6 @@ from pathlib import Path
 from civex.domain.dtos import FileRef
 
 
-class FilesystemObjectStore:
-    """Content-addressed blob store backed by the local filesystem."""
-
-    def __init__(self, root: Path) -> None:
-        self._root = root
-        self._root.mkdir(parents=True, exist_ok=True)
-
-    def put(self, data: bytes, original_filename: str) -> FileRef:
-        import hashlib
-        sha256 = hashlib.sha256(data).hexdigest()
-        dest = self._object_path(sha256)
-        if not dest.exists():
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(data)
-        return FileRef(sha256=sha256, filename=original_filename, size=len(data))
-
-    def get(self, sha256: str) -> bytes:
-        path = self._object_path(sha256)
-        if not path.exists():
-            raise FileNotFoundError(f"Object {sha256} not found")
-        return path.read_bytes()
-
-    def exists(self, sha256: str) -> bool:
-        return self._object_path(sha256).exists()
-
-    def object_path(self, sha256: str) -> Path:
-        return self._object_path(sha256)
-
-    def _object_path(self, sha256: str) -> Path:
-        return self._root / sha256[:2] / sha256[2:]
-
-
 class S3ObjectStore:
     """Content-addressed blob store backed by S3-compatible storage."""
 
