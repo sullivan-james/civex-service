@@ -12,7 +12,7 @@ FROM python:3.12-slim
 # Install openssh-server for SSH transport support
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-server && \
     rm -rf /var/lib/apt/lists/* && \
-    mkdir /var/run/sshd
+    mkdir -p /var/run/sshd
 
 # Install civex (parent package) with the PostgreSQL driver.
 # Installed non-editable; only its importable code is needed.

@@ -62,9 +62,8 @@ def remote_push():
     from civex.db.session import _engine
     from sqlalchemy.orm import Session
 
-    since = config.remote.last_pushed_at
     with Session(_engine()) as session:
-        bundle = export_bundle(session, since)
+        bundle = export_bundle(session, config.remote.last_pushed_seq)
 
     local_store = LocalFileObjectStore(config.objects_dir)
     pushed_objects = 0
@@ -81,6 +80,7 @@ def remote_push():
     except SyncError as e:
         raise HTTPException(502, detail=f"Push failed: {e}")
 
+    config.remote.last_pushed_seq = bundle.to_seq
     config.remote.last_pushed_at = datetime.now(timezone.utc)
     save_config(config)
 
@@ -108,7 +108,7 @@ def remote_pull():
         raise HTTPException(400, detail=str(e))
 
     try:
-        bundle = transport.transfer_pack(since=config.remote.last_pulled_at)
+        bundle = transport.transfer_pack(since_seq=config.remote.last_pulled_seq)
     except SyncError as e:
         raise HTTPException(502, detail=f"Pull failed: {e}")
 
@@ -119,6 +119,7 @@ def remote_pull():
         apply_bundle(session, bundle)
         session.commit()
 
+    config.remote.last_pulled_seq = bundle.to_seq
     config.remote.last_pulled_at = datetime.now(timezone.utc)
     save_config(config)
 
