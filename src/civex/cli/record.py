@@ -205,3 +205,23 @@ def record_delete(
     except NotFoundError as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
+
+
+@app.command("delete-all")
+def record_delete_all(
+    dataset_name: str = typer.Argument(..., help="Dataset to delete records from"),
+    schema: Optional[str] = typer.Option(None, "--schema", "-s", help="Limit to this schema"),
+    yes: bool = typer.Option(False, "--yes", "-y"),
+) -> None:
+    """Delete all records in a dataset (optionally filtered by schema)."""
+    target = f"all '{schema}' records" if schema else "ALL records"
+    if not yes:
+        typer.confirm(f"Delete {target} in dataset '{dataset_name}'?", abort=True)
+    ctx = _ctx()
+    try:
+        deleted = ctx.record_svc.delete_all(dataset_name, schema_name=schema)
+        ctx.commit()
+        console.print(f"[success]Deleted {deleted} record(s) from '{dataset_name}'.[/success]")
+    except NotFoundError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)

@@ -27,7 +27,7 @@ def add_volume(body: AddVolumeRequest, ctx: AppContext = Depends(get_ctx)):
         ctx.store_svc.add_volume(body.name, body.path, body.allocated_gb)
     except AlreadyExistsError as e:
         raise HTTPException(409, detail=str(e))
-    except VolumeUnavailableError as e:
+    except (ValidationError, VolumeUnavailableError) as e:
         raise HTTPException(422, detail=str(e))
     stats = ctx.store_svc.volume_stats()
     vol = next((v for v in stats if v["name"] == body.name), None)

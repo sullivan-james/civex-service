@@ -152,16 +152,29 @@ def load_config() -> Config:
     )
 
 
+def _ts(s: str) -> str:
+    """Escape a string for use inside a TOML double-quoted value."""
+    return s.replace("\\", "/")  # backslashes → forward slashes (valid on all OSes)
+
+
+def _tk(s: str) -> str:
+    """Return a TOML key segment, quoted if necessary."""
+    import re
+    if re.fullmatch(r"[A-Za-z0-9_-]+", s):
+        return s
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def save_config(config: Config) -> None:
-    """Write config back to .civex/config.toml."""
+    """Write config back to .civex/config.toml with backup/restore on failure."""
     lines: list[str] = [
         "[db]\n",
-        f'url = "{config.db.url}"\n',
+        f'url = "{_ts(config.db.url)}"\n',
     ]
     if config.remote:
-        lines += ["\n[remote]\n", f'url = "{config.remote.url}"\n']
+        lines += ["\n[remote]\n", f'url = "{_ts(config.remote.url)}"\n']
         if config.remote.remote_civex != "civex":
-            lines.append(f'remote_civex = "{config.remote.remote_civex}"\n')
+            lines.append(f'remote_civex = "{_ts(config.remote.remote_civex)}"\n')
         lines.append(f'last_pushed_seq = {config.remote.last_pushed_seq}\n')
         lines.append(f'last_pulled_seq = {config.remote.last_pulled_seq}\n')
         if config.remote.last_pushed_at:
@@ -180,7 +193,7 @@ def save_config(config: Config) -> None:
             and sc.full_below_gb == 1.0
         )
         if not is_default:
-            queue_str = ", ".join(f'"{n}"' for n in sc.volume_queue)
+            queue_str = ", ".join(f'"{_ts(n)}"' for n in sc.volume_queue)
             lines += [
                 "\n[store]\n",
                 f'volume_queue = [{queue_str}]\n',
@@ -188,9 +201,29 @@ def save_config(config: Config) -> None:
                 f'full_below_gb = {sc.full_below_gb}\n',
             ]
             for vol in sc.volumes.values():
-                lines.append(f'\n[store.volumes.{vol.name}]\n')
-                lines.append(f'path = "{vol.path}"\n')
+                key = f"store.volumes.{_tk(vol.name)}"
+                lines.append(f'\n[{key}]\n')
+                lines.append(f'path = "{_ts(vol.path)}"\n')
                 if vol.allocated_gb is not None:
                     lines.append(f'allocated_gb = {vol.allocated_gb}\n')
 
-    (config.civex_dir / "config.toml").write_text("".join(lines))
+    config_path = config.civex_dir / "config.toml"
+    content = "".join(lines)
+
+    # Validate the generated TOML before touching the file.
+    try:
+        import tomllib
+        tomllib.loads(content)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"Generated config is invalid TOML: {e}\n\nContent:\n{content}") from e
+
+    # Atomic-ish write: backup → write → verify read-back → restore on failure.
+    backup = config_path.read_text(encoding="utf-8") if config_path.exists() else None
+    try:
+        config_path.write_text(content, encoding="utf-8")
+        with open(config_path, "rb") as f:
+            tomllib.load(f)
+    except Exception as e:
+        if backup is not None:
+            config_path.write_text(backup, encoding="utf-8")
+        raise ConfigError(f"Failed to write config (original restored): {e}") from e

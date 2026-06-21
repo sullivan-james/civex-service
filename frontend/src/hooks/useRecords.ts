@@ -64,3 +64,27 @@ export function useDeleteRecord(datasetName: string) {
     },
   })
 }
+
+export function useDeleteManyRecords(datasetName: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (ids: string[]) => recordsApi.deleteMany(ids),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['records', datasetName] })
+      qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
+      qc.invalidateQueries({ queryKey: ['datasets'] })
+    },
+  })
+}
+
+export function useDeleteAllRecords(datasetName: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (schema?: string) => recordsApi.deleteAll(datasetName, schema),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['records', datasetName] })
+      qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
+      qc.invalidateQueries({ queryKey: ['datasets'] })
+    },
+  })
+}

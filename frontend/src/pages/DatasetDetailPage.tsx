@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useDataset, useUpdateDataset, useDeleteDataset } from '../hooks/useDatasets'
-import { useRecords, useRecordCounts, useCreateRecord } from '../hooks/useRecords'
+import { useRecords, useRecordCounts, useCreateRecord, useDeleteManyRecords, useDeleteAllRecords } from '../hooks/useRecords'
 import { useSchemas } from '../hooks/useSchemas'
 import {
   Button, Badge, MonoId,
@@ -29,6 +29,8 @@ export default function DatasetDetailPage() {
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
 
   useEffect(() => {
     const t = setTimeout(() => { setSearch(searchInput); setOffset(0) }, 300)
@@ -56,6 +58,8 @@ export default function DatasetDetailPage() {
   const createRecord = useCreateRecord(dataset?.name ?? '')
   const updateDataset = useUpdateDataset()
   const deleteDataset = useDeleteDataset()
+  const deleteManyRecords = useDeleteManyRecords(dataset?.name ?? '')
+  const deleteAllRecords = useDeleteAllRecords(dataset?.name ?? '')
 
   if (datasetLoading) return <LoadingState />
   if (datasetError || !dataset) return <ErrorState message={datasetError ? String(datasetError) : 'Dataset not found'} />
@@ -71,6 +75,31 @@ export default function DatasetDetailPage() {
   function selectSchema(name: string | null) {
     setSelectedSchema(name)
     setOffset(0)
+    setSelected(new Set())
+  }
+
+  function toggleSelect(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (selected.size === records.length) {
+      setSelected(new Set())
+    } else {
+      setSelected(new Set(records.map(r => r.id)))
+    }
+  }
+
+  function handleDeleteSelected() {
+    deleteManyRecords.mutate([...selected], { onSuccess: () => setSelected(new Set()) })
+  }
+
+  function handleDeleteAll() {
+    deleteAllRecords.mutate(selectedSchema ?? undefined, { onSuccess: () => setConfirmDeleteAll(false) })
   }
 
   function handleRename() {
@@ -149,11 +178,28 @@ export default function DatasetDetailPage() {
           ))}
         </div>
 
-        {!addingRecord && (
-          <Button variant="primary" size="sm" onClick={() => setAddingRecord(true)}>
-            + Add record
-          </Button>
-        )}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {selectedSchema && (
+            confirmDeleteAll ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[#656d76]">Delete all {selectedSchema}?</span>
+                <Button variant="danger" size="sm" disabled={deleteAllRecords.isPending} onClick={handleDeleteAll}>
+                  {deleteAllRecords.isPending ? 'Deleting…' : 'Confirm'}
+                </Button>
+                <Button size="sm" onClick={() => setConfirmDeleteAll(false)}>Cancel</Button>
+              </div>
+            ) : (
+              <Button variant="danger" size="sm" onClick={() => setConfirmDeleteAll(true)}>
+                Delete all {selectedSchema}
+              </Button>
+            )
+          )}
+          {!addingRecord && (
+            <Button variant="primary" size="sm" onClick={() => setAddingRecord(true)}>
+              + Add record
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Search */}
@@ -189,9 +235,33 @@ export default function DatasetDetailPage() {
         />
       ) : (
         <>
+          {selected.size > 0 && (
+            <div className="flex items-center gap-3 px-3 py-2 bg-[#ddf4ff] border border-[#54aeff] rounded-md text-sm">
+              <span className="text-[#0969da] font-medium">{selected.size} selected</span>
+              <Button
+                variant="danger" size="sm"
+                disabled={deleteManyRecords.isPending}
+                onClick={handleDeleteSelected}
+              >
+                {deleteManyRecords.isPending ? 'Deleting…' : `Delete ${selected.size}`}
+              </Button>
+              <button className="text-xs text-[#656d76] hover:text-[#1f2328]" onClick={() => setSelected(new Set())}>
+                Clear selection
+              </button>
+            </div>
+          )}
           <Table>
             <Thead>
               <tr>
+                <Th className="w-8">
+                  <input
+                    type="checkbox"
+                    checked={selected.size === records.length && records.length > 0}
+                    ref={el => { if (el) el.indeterminate = selected.size > 0 && selected.size < records.length }}
+                    onChange={toggleSelectAll}
+                    className="cursor-pointer"
+                  />
+                </Th>
                 <Th className="w-24">ID</Th>
                 {!selectedSchema && <Th className="w-32">Schema</Th>}
                 {columns.map(col => <Th key={col}>{col}</Th>)}
@@ -201,6 +271,14 @@ export default function DatasetDetailPage() {
             <Tbody>
               {records.map(r => (
                 <Tr key={r.id}>
+                  <Td>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(r.id)}
+                      onChange={() => toggleSelect(r.id)}
+                      className="cursor-pointer"
+                    />
+                  </Td>
                   <Td>
                     <Link to={`/records/${r.id}`} className="text-xs text-[#0969da] hover:underline">
                       {r.natural_name ?? <span className="font-mono">{r.id.slice(0, 8)}</span>}

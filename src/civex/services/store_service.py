@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import re
+
 from civex.config import Config, VolumeConfig, save_config
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError, VolumeUnavailableError
 from civex.repositories.local.file_store import VolumeAwareFileObjectStore
 
 _UNSET = object()
+_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _normalize_path(path: str) -> str:
+    return path.replace("\\", "/")
 
 
 class StoreService:
@@ -16,9 +23,14 @@ class StoreService:
         return self._store.volume_stats()
 
     def add_volume(self, name: str, path: str, allocated_gb: float | None = None) -> None:
+        if not _NAME_RE.match(name):
+            raise ValidationError(
+                f"Volume name '{name}' is invalid. Use only letters, digits, hyphens, and underscores."
+            )
         sc = self._config.store_config
         if name in sc.volumes:
             raise AlreadyExistsError(f"Volume '{name}' already exists")
+        path = _normalize_path(path)
         vc = VolumeConfig(name=name, path=path, allocated_gb=allocated_gb)
         resolved = self._store._resolve_path(vc)
         try:
@@ -34,7 +46,7 @@ class StoreService:
             raise NotFoundError(f"Volume '{name}' not found")
         vc = sc.volumes[name]
         if path is not None:
-            vc.path = path
+            vc.path = _normalize_path(path)
         if allocated_gb is not _UNSET:
             vc.allocated_gb = allocated_gb
         self._store._used_cache.pop(name, None)

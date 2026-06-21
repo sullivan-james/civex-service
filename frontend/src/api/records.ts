@@ -52,6 +52,14 @@ export const recordsApi = {
 
   delete: (id: string) => api.delete<void>(`/records/${id}`),
 
+  deleteMany: (ids: string[]) =>
+    api.post<{ deleted: number }>('/records/bulk-delete', { ids }),
+
+  deleteAll: (datasetName: string, schema?: string) => {
+    const qs = schema ? `?schema=${encodeURIComponent(schema)}` : ''
+    return api.delete<{ deleted: number }>(`/datasets/${encodeURIComponent(datasetName)}/records${qs}`)
+  },
+
   searchBySchema: (schemaName: string, search?: string, limit = 20) => {
     const qs = new URLSearchParams({ schema: schemaName })
     if (search) qs.set('search', search)

@@ -172,6 +172,14 @@ class _Api:
         _remove_from_recent(path_str)
         return {"ok": True}
 
+    def browse_folder(self) -> dict:
+        """Open a native folder picker and return the selected path (forward slashes)."""
+        import webview
+        result = _window.create_file_dialog(webview.FOLDER_DIALOG, allow_multiple=False)
+        if not result:
+            return {"path": None}
+        return {"path": str(result[0]).replace("\\", "/")}
+
 
 # ── Welcome screen HTML ───────────────────────────────────────────────────────
 

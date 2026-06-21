@@ -422,6 +422,42 @@ class RecordService:
 
     def delete(self, record_id: str) -> None:
         record = self.get(record_id)
-        if self._audit:
-            self._audit.log_change("delete", "record", record.id, record.to_dict(), None)
-        self._records.delete(record.id)
+        self._delete_recursive(record.id)
+
+    def delete_many(self, record_ids: list[str]) -> int:
+        deleted = 0
+        for rid in record_ids:
+            try:
+                record = self.get(rid)
+            except NotFoundError:
+                continue
+            self._delete_recursive(record.id)
+            deleted += 1
+        return deleted
+
+    def delete_all(self, dataset_name: str, schema_name: str | None = None) -> int:
+        dataset = self._datasets.get_by_name(dataset_name)
+        if not dataset:
+            raise NotFoundError(f"Dataset '{dataset_name}' not found")
+        schema_id = None
+        if schema_name:
+            schema = self._schema_svc.get(schema_name)
+            schema_id = schema.id
+        records = self._records.list_by_dataset(dataset.id)
+        deleted = 0
+        for r in records:
+            if schema_id and r.schema_id != schema_id:
+                continue
+            if not self._records.get_by_id(r.id):
+                continue  # already gone via a parent cascade
+            self._delete_recursive(r.id)
+            deleted += 1
+        return deleted
+
+    def _delete_recursive(self, id: uuid.UUID) -> None:
+        for child in self._records.list_children(id):
+            self._delete_recursive(child.id)
+        record_dto = self._records.get_by_id(id)
+        if self._audit and record_dto:
+            self._audit.log_change("delete", "record", id, record_dto.to_dict(), None)
+        self._records.delete(id)

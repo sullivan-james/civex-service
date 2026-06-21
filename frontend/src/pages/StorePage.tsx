@@ -3,6 +3,18 @@ import { useVolumes, useAddVolume, useUpdateVolume, useRemoveVolume, useSetQueue
 import type { VolumeStats } from '../api/store'
 import { Button, LoadingState, ErrorState } from '../components/ui'
 
+const isDesktop = typeof window !== 'undefined' && !!window.pywebview
+
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, '/')
+}
+
+async function browseFolderDesktop(): Promise<string | null> {
+  if (!window.pywebview) return null
+  const r = await window.pywebview.api.browse_folder()
+  return r.path ?? null
+}
+
 const inputCls = 'border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] w-full'
 
 function fmtBytes(b: number | null): string {
@@ -183,7 +195,20 @@ function VolumeCard({
         <div className="border-t border-[#d0d7de] px-4 py-3 bg-[#f6f8fa] space-y-2 rounded-b-md">
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-[#656d76] uppercase tracking-wide">Path</label>
-            <input value={editPath} onChange={e => setEditPath(e.target.value)} className={inputCls} />
+            <div className="flex gap-2">
+              <input
+                value={editPath}
+                onChange={e => setEditPath(normalizePath(e.target.value))}
+                onBlur={e => setEditPath(normalizePath(e.target.value))}
+                className={inputCls}
+              />
+              {isDesktop && (
+                <Button size="sm" onClick={async () => {
+                  const p = await browseFolderDesktop()
+                  if (p) setEditPath(p)
+                }}>Browse…</Button>
+              )}
+            </div>
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-[#656d76] uppercase tracking-wide">Allocation (GB)</label>
@@ -236,7 +261,7 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
       <p className="text-xs font-semibold text-[#0969da] uppercase tracking-wide">New volume</p>
       <div className="grid grid-cols-3 gap-3">
         <div className="flex flex-col gap-1">
-          <label className="text-xs text-[#656d76]">Name</label>
+          <label className="text-xs text-[#656d76]">Name <span className="text-[#818b98]">(letters, digits, - _)</span></label>
           <input
             value={name}
             onChange={e => setName(e.target.value)}
@@ -247,12 +272,21 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs text-[#656d76]">Path</label>
-          <input
-            value={path}
-            onChange={e => setPath(e.target.value)}
-            placeholder="/media/WD-8TB/civex-objects"
-            className={inputCls}
-          />
+          <div className="flex gap-2">
+            <input
+              value={path}
+              onChange={e => setPath(normalizePath(e.target.value))}
+              onBlur={e => setPath(normalizePath(e.target.value))}
+              placeholder="/media/WD-8TB/civex-objects"
+              className={inputCls}
+            />
+            {isDesktop && (
+              <Button size="sm" onClick={async () => {
+                const p = await browseFolderDesktop()
+                if (p) setPath(p)
+              }}>Browse…</Button>
+            )}
+          </div>
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs text-[#656d76]">Allocation (GB, optional)</label>

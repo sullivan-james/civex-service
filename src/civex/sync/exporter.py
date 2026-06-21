@@ -10,6 +10,7 @@ as IDs only (the row is gone) in deleted_record_ids.
 """
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -86,7 +87,7 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
         RecordDTO(
             id=r.id, dataset_id=r.dataset_id, schema_id=r.schema_id,
             schema_name="", parent_record_id=r.parent_record_id,
-            data=r.data or {}, created_at=r.created_at or now,
+            data=_sanitize_nan(r.data or {}), created_at=r.created_at or now,
             updated_at=r.updated_at or now,
         ).to_dict()
         for r in (
@@ -119,12 +120,24 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
             AuditLogDTO(
                 id=e.id, commit_id=e.commit_id, action=e.action,
                 entity_type=e.entity_type, entity_id=e.entity_id,
-                old_data=e.old_data, new_data=e.new_data,
+                old_data=_sanitize_nan(e.old_data),
+                new_data=_sanitize_nan(e.new_data),
                 timestamp=e.timestamp or now,
             ).to_dict()
             for e in audit_entries
         ],
     )
+
+
+def _sanitize_nan(obj: object) -> object:
+    """Replace float NaN/Inf with None so the value is valid JSONB on PostgreSQL."""
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_nan(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_nan(v) for v in obj]
+    return obj
 
 
 def _collect_object_refs(records: list[dict]) -> list[str]:

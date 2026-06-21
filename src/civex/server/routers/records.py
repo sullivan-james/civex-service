@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 
 from civex.context import AppContext
 from civex.domain.exceptions import NotFoundError, ValidationError
@@ -121,5 +121,30 @@ def delete_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
         ctx.record_svc.delete(record_id)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+    ctx.commit()
+
+
+@router.post("/records/bulk-delete")
+def bulk_delete_records(
+    ids: list[str] = Body(..., embed=True),
+    ctx: AppContext = Depends(get_ctx),
+):
+    deleted = ctx.record_svc.delete_many(ids)
+    ctx.commit()
+    return {"deleted": deleted}
+
+
+@router.delete("/datasets/{dataset_name}/records")
+def delete_all_records(
+    dataset_name: str,
+    schema: Optional[str] = Query(default=None),
+    ctx: AppContext = Depends(get_ctx),
+):
+    try:
+        deleted = ctx.record_svc.delete_all(dataset_name, schema_name=schema or None)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    ctx.commit()
+    return {"deleted": deleted}
 
 

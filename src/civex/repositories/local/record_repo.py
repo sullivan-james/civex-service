@@ -96,6 +96,10 @@ class LocalRecordRepository:
         rows = q.order_by(Record.created_at.desc()).limit(limit).all()
         return [_to_dto(r) for r in rows]
 
+    def list_children(self, parent_id: uuid.UUID) -> list[RecordDTO]:
+        rows = self._s.query(Record).filter_by(parent_record_id=parent_id).all()
+        return [_to_dto(r) for r in rows]
+
     def count_by_schema(self, dataset_id: uuid.UUID) -> dict[str, int]:
         rows = (
             self._s.query(Schema.name, func.count(Record.id))

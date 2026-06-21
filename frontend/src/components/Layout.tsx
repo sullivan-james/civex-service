@@ -8,6 +8,7 @@ declare global {
     pywebview?: { api: {
       open_project: () => Promise<{ ok?: boolean; error?: string } | null>
       create_project: () => Promise<{ ok?: boolean; error?: string } | null>
+      browse_folder: () => Promise<{ path: string | null }>
     } }
   }
 }
