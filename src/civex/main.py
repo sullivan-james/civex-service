@@ -1,6 +1,8 @@
 
 import typer
+from typing import Annotated, Optional
 
+from civex import __version__
 from civex.cli import auth, dataset, db, plugin, record, remote, schema, store, workflow, worker
 from civex.cli.shell import run_shell
 from civex.cli.clone import clone
@@ -18,6 +20,24 @@ app = typer.Typer(
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"civex {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: Annotated[Optional[bool], typer.Option(
+        "--version", "-v",
+        help="Show version and exit.",
+        callback=_version_callback,
+        is_eager=True,
+    )] = None,
+) -> None:
+    pass
 
 _START = "Start a working area"
 _WORK = "Work on the current change"
