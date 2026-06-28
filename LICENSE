@@ -1,37 +1,163 @@
+CIVEX SOFTWARE LICENSE AGREEMENT
+
 Copyright (c) 2026 James Sullivan. All rights reserved.
 
-CIVEX FREEWARE LICENSE
+PLEASE READ THIS LICENSE AGREEMENT CAREFULLY BEFORE INSTALLING OR USING THIS
+SOFTWARE. BY INSTALLING, COPYING, OR OTHERWISE USING CIVEX, YOU AGREE TO BE
+BOUND BY THE TERMS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT INSTALL OR
+USE THE SOFTWARE.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software (the "Software"), to use the Software for any purpose,
-including commercial use, subject to the following conditions:
+────────────────────────────────────────────────────────────────────────────────
 
-1. RESTRICTIONS. You may not:
-   (a) redistribute, sell, sublicense, or otherwise transfer the Software or
-       any substantial portion of it to any third party;
-   (b) modify, adapt, translate, or create derivative works based on the
+1. DEFINITIONS
+
+   "Software" means the civex application, including all source code, object
+   code, documentation, configuration files, and any updates or patches
+   provided by the Licensor.
+
+   "Licensor" means James Sullivan, the copyright holder of the Software.
+
+   "You" (or "Your") means the individual or legal entity exercising rights
+   under this Agreement.
+
+   "Commercial Use" means use of the Software in a professional, business,
+   government, or revenue-generating context, including internal use within
+   an organisation.
+
+────────────────────────────────────────────────────────────────────────────────
+
+2. GRANT OF LICENSE
+
+   Subject to the terms and conditions of this Agreement, the Licensor hereby
+   grants You a non-exclusive, non-transferable, royalty-free license to:
+
+   (a) install and use the Software on any number of devices You own or
+       control, for any purpose including Commercial Use; and
+
+   (b) make a reasonable number of copies of the Software solely for backup
+       or archival purposes.
+
+────────────────────────────────────────────────────────────────────────────────
+
+3. RESTRICTIONS
+
+   You may not, and you may not permit others to:
+
+   (a) redistribute, sell, rent, lease, sublicense, or otherwise transfer the
+       Software or any portion of it to any third party, whether for payment
+       or free of charge;
+
+   (b) modify, adapt, translate, reverse engineer (except to the extent
+       expressly permitted by applicable law), decompile, or disassemble the
        Software;
-   (c) remove or alter any copyright, trademark, or other proprietary notices
-       contained in the Software.
 
-2. SOURCE VISIBILITY. The source code distributed with or included in the
-   Software is made available for inspection and personal study only. It does
-   not constitute an open-source or free-software grant under any recognised
-   open-source definition, and the restrictions in Section 1 apply fully to
-   the source code.
+   (c) create derivative works based on the Software;
 
-3. NO WARRANTY. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
-   KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
-   IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-   DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR
-   OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
-   USE OR OTHER DEALINGS IN THE SOFTWARE.
+   (d) remove, obscure, or alter any copyright notice, trademark, or other
+       proprietary rights notice appearing in or on the Software;
 
-4. TERMINATION. Any breach of the conditions above automatically terminates
-   your rights under this license. Upon termination you must cease all use
-   and destroy all copies of the Software in your possession.
+   (e) use the Software to build a product or service that competes directly
+       with the Software or with any product offered by the Licensor.
 
-For permissions beyond the scope of this license — including redistribution,
-embedding in a commercial product, or OEM licensing — contact:
-sullivanj041@gmail.com
+────────────────────────────────────────────────────────────────────────────────
+
+4. SOURCE CODE
+
+   The Software is distributed with or alongside its source code. The
+   availability of source code does not constitute an open-source or
+   free-software grant under any recognised open-source definition (including
+   those of the Open Source Initiative or the Free Software Foundation).
+
+   Source code is made available for transparency and personal study only.
+   All restrictions in Section 3 apply equally to the source code.
+
+────────────────────────────────────────────────────────────────────────────────
+
+5. INTELLECTUAL PROPERTY
+
+   The Software and all copies thereof are proprietary to the Licensor and
+   title thereto remains in the Licensor. All rights in the Software not
+   specifically granted in this Agreement are reserved to the Licensor. You
+   acknowledge that no title to the intellectual property in the Software is
+   transferred to You.
+
+────────────────────────────────────────────────────────────────────────────────
+
+6. THIRD-PARTY COMPONENTS
+
+   The Software may include third-party open-source components. Those
+   components are licensed under their respective terms, which are not
+   affected by this Agreement. A list of third-party components and their
+   licenses is available via `pip show civex` or in the installed package
+   metadata.
+
+────────────────────────────────────────────────────────────────────────────────
+
+7. DISCLAIMER OF WARRANTIES
+
+   THE SOFTWARE IS PROVIDED "AS IS" AND THE LICENSOR EXPRESSLY DISCLAIMS ALL
+   WARRANTIES, EXPRESS, IMPLIED, OR STATUTORY, INCLUDING BUT NOT LIMITED TO
+   THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+   PURPOSE, TITLE, AND NON-INFRINGEMENT. THE LICENSOR DOES NOT WARRANT THAT
+   THE SOFTWARE WILL BE ERROR-FREE, THAT DEFECTS WILL BE CORRECTED, OR THAT
+   THE SOFTWARE IS FREE OF VIRUSES OR OTHER HARMFUL COMPONENTS.
+
+   YOU ASSUME ALL RISK AS TO THE QUALITY AND PERFORMANCE OF THE SOFTWARE.
+
+────────────────────────────────────────────────────────────────────────────────
+
+8. LIMITATION OF LIABILITY
+
+   TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE
+   LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL,
+   PUNITIVE, OR EXEMPLARY DAMAGES (INCLUDING BUT NOT LIMITED TO LOSS OF DATA,
+   LOSS OF PROFITS, OR BUSINESS INTERRUPTION) ARISING OUT OF OR IN CONNECTION
+   WITH THIS AGREEMENT OR THE USE OR INABILITY TO USE THE SOFTWARE, EVEN IF
+   THE LICENSOR HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+   THE LICENSOR'S TOTAL CUMULATIVE LIABILITY ARISING OUT OF OR RELATED TO
+   THIS AGREEMENT SHALL NOT EXCEED THE AMOUNT PAID BY YOU FOR THE SOFTWARE
+   IN THE TWELVE (12) MONTHS PRECEDING THE CLAIM, OR USD $100, WHICHEVER
+   IS GREATER.
+
+────────────────────────────────────────────────────────────────────────────────
+
+9. TERMINATION
+
+   This Agreement is effective until terminated. Your rights under this
+   Agreement will terminate automatically and without notice from the Licensor
+   if You fail to comply with any term of this Agreement.
+
+   Upon termination of this Agreement, You must cease all use of the Software
+   and destroy all copies, full or partial, in your possession or control.
+
+   Sections 3, 4, 5, 7, 8, and 10 shall survive termination of this
+   Agreement.
+
+────────────────────────────────────────────────────────────────────────────────
+
+10. GENERAL
+
+   (a) Entire Agreement. This Agreement constitutes the entire agreement
+       between You and the Licensor concerning the Software and supersedes
+       all prior or contemporaneous understandings, negotiations, or
+       agreements relating to the Software.
+
+   (b) Governing Law. This Agreement shall be governed by and construed in
+       accordance with the laws of Ireland, without regard to its conflict
+       of law provisions.
+
+   (c) Severability. If any provision of this Agreement is held to be
+       unenforceable, that provision shall be modified to the minimum extent
+       necessary to make it enforceable, and the remaining provisions shall
+       continue in full force and effect.
+
+   (d) No Waiver. Failure by the Licensor to enforce any provision of this
+       Agreement shall not be deemed a waiver of future enforcement of that
+       or any other provision.
+
+   (e) Contact. For permissions beyond the scope of this license — including
+       redistribution rights, OEM licensing, or embedding in a commercial
+       product — contact: sullivanj041@gmail.com
+
+────────────────────────────────────────────────────────────────────────────────

@@ -578,3 +578,9 @@ civex-service/
 **File storage** mirrors the git object store: `.civex/objects/<sha256[:2]>/<sha256[2:]>`. Content-addressed and idempotent — the same file uploaded twice is stored once.
 
 **Workflow execution** is git-hook-like: definitions are YAML files in `.civex/workflows/`, checked into version control alongside your data config. The executor runs a topological sort of steps, resolves `step_id.output_name` input references, and calls each plugin's `run()` in order.
+
+---
+
+## License
+
+civex is free to use for any purpose, including commercial use. Redistribution and modification are not permitted. See [LICENSE](LICENSE) for full terms.
