@@ -23,27 +23,31 @@ A command-line research data management system. Define schemas, collect records 
 
 ## Installation
 
-### Recommended: pipx (installs once, works in any terminal)
+### Recommended: pipx (installs once, available in any terminal)
 
 ```bash
-# Install pipx if you don't have it
+pipx install "civex[server,workflows]"
+```
+
+If you don't have pipx:
+
+```bash
 pip install pipx
-pipx ensurepath        # adds civex to PATH — open a new terminal after this
+pipx ensurepath   # adds pipx-managed commands to PATH — open a new terminal after this
 ```
 
-Download the latest release and install:
-
-```bash
-gh release download --repo sullivan-james/civex-service --pattern "*.whl"
-pipx install "./civex-0.0.3-py3-none-any.whl[server]"
-```
-
-Replace `0.0.3` with the version you downloaded. After installation, `civex` is available in any terminal without activating anything.
+After installation, `civex` is available in any terminal without activating a virtual environment.
 
 ### Upgrade
 
 ```bash
-pipx install --force "./civex-0.0.3-py3-none-any.whl[server]"
+pipx upgrade civex
+```
+
+### Alternative: pip (inside a virtual environment)
+
+```bash
+pip install "civex[server,workflows]"
 ```
 
 ---
