@@ -76,8 +76,11 @@ def run(
     plugins: dict[str, type[BasePlugin]],
     initial_outputs: dict[str, dict[str, Any]] | None = None,
 ) -> None:
+    log.info(wf)
     virtual_ids = set(initial_outputs.keys()) if initial_outputs else None
+    log.info("Virtual IDs: %s", virtual_ids)
     order = _topological_sort(wf.steps, virtual_ids=virtual_ids)
+    log.info("Execution order: %s", [s.id for s in order])
     step_outputs: dict[str, dict[str, Any]] = dict(initial_outputs or {})
 
     log.info("▶ workflow '%s' | record %s | %d step(s)", wf.name, str(ctx.record.id)[:8], len(order))

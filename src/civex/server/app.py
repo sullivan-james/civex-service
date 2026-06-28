@@ -29,10 +29,11 @@ _DIST = _find_dist()
 
 
 def create_app() -> FastAPI:
+    from civex import __version__
     app = FastAPI(
         title="civex",
         description="Research data management API",
-        version="0.0.3",
+        version=__version__,
     )
 
     @app.exception_handler(CivexError)
