@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 
-from fastapi import APIRouter, WebSocket
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 router = APIRouter(prefix="/terminal", tags=["terminal"])
 

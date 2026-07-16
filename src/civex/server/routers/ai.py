@@ -1851,10 +1851,11 @@ def update_ai_config(body: AiConfigUpdate):
 async def chat(body: ChatRequest):
     try:
         config = load_config()
-    except ConfigError as e:
+    except ConfigError as err:
+        error_message = str(err)
 
         async def no_project():
-            yield _sse({"type": "error", "message": str(e)})
+            yield _sse({"type": "error", "message": error_message})
 
         return StreamingResponse(
             no_project(),

@@ -161,8 +161,6 @@ def _upsert_commits(session: Session, rows: list[dict]) -> None:
 
 
 def _upsert_audit_log(session: Session, rows: list[dict]) -> None:
-    from datetime import datetime, timezone
-    # now = datetime.now(timezone.utc)
     for d in rows:
         dto = AuditLogDTO.from_dict(d)
         if session.get(AuditLog, dto.id) is None:
