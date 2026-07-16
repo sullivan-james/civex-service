@@ -1852,10 +1852,12 @@ async def chat(body: ChatRequest):
     try:
         config = load_config()
     except ConfigError as err:
-        error_message = str(err)
+        message = "AI assistant unavailable: no civex project found. Run `civex init` to create one."
+        if "No civex project found" not in str(err):
+            message = "AI assistant unavailable due to configuration error."
 
         async def no_project():
-            yield _sse({"type": "error", "message": error_message})
+            yield _sse({"type": "error", "message": message})
 
         return StreamingResponse(
             no_project(),
