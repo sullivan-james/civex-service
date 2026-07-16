@@ -42,7 +42,7 @@ def ai_status() -> None:
     source = "environment variable (ANTHROPIC_API_KEY)" if ai.from_env else "_civex/config.toml"
 
     console.print("[bold]AI Configuration[/bold]")
-    console.print(f"  Status   [success]configured[/success]")
+    console.print("  Status   [success]configured[/success]")
     console.print(f"  Key      {hint}")
     console.print(f"  Model    {ai.model}")
     console.print(f"  Provider {ai.provider}")
