@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
+from civex.server.background import run_pending_jobs as _run_pending_jobs
 from civex.server.deps import get_ctx
 from civex.workflows.definition import load_workflow
 
@@ -18,9 +19,6 @@ router = APIRouter(prefix="/ui", include_in_schema=False)
 _templates = Jinja2Templates(
     directory=str(Path(__file__).parent.parent / "templates")
 )
-
-
-from civex.server.background import run_pending_jobs as _run_pending_jobs
 
 
 def _r(url: str, flash_ok: str = "", flash_error: str = "") -> RedirectResponse:
@@ -270,11 +268,15 @@ async def record_update(
         elif raw == "":
             data.pop(rf.field.name, None)
         elif dtype == "integer":
-            try: data[rf.field.name] = int(raw)
-            except ValueError: pass
+            try:
+                data[rf.field.name] = int(raw)
+            except ValueError:
+                pass
         elif dtype == "float":
-            try: data[rf.field.name] = float(raw)
-            except ValueError: pass
+            try:
+                data[rf.field.name] = float(raw)
+            except ValueError:
+                pass
         elif dtype == "boolean":
             data[rf.field.name] = raw.lower() in ("true", "on", "1", "yes")
         else:
