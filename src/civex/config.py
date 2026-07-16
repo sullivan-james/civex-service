@@ -1,5 +1,5 @@
 """
-Project config — finds the nearest .civex/ directory (like git walks up from cwd)
+Project config — finds the nearest _civex/ directory (like git walks up from cwd)
 and loads config.toml from it.
 
 Minimal config.toml (local only):
@@ -15,11 +15,33 @@ With a remote (added by `civex remote set <url>`):
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 from civex.domain.exceptions import ConfigError
+
+
+@dataclass
+class AIConfig:
+    api_key: str
+    model: str = "claude-sonnet-4-6"
+    provider: str = "anthropic"          # "anthropic" | "openai-compat"
+    base_url: str | None = None          # required when provider == "openai-compat"
+    from_env: bool = False               # True when key came from ANTHROPIC_API_KEY; not written to config.toml
+
+
+@dataclass
+class LoggingConfig:
+    level: str = "INFO"
+    json_console: bool | None = None   # None = auto (pretty on a TTY, JSON otherwise)
+    to_file: bool = True               # write rotating JSON logs to _civex/logs/
+
+
+@dataclass
+class TelemetryConfig:
+    dsn: str | None = None             # opt-in Sentry DSN; None = disabled (default)
+    environment: str = "local"
 
 
 @dataclass
@@ -53,7 +75,7 @@ class StoreConfig:
 
 
 def _default_store(project_root: Path) -> StoreConfig:
-    default_vol = VolumeConfig(name="default", path=".civex/objects")
+    default_vol = VolumeConfig(name="default", path="_civex/objects")
     return StoreConfig(volumes={"default": default_vol}, volume_queue=["default"])
 
 
@@ -63,10 +85,13 @@ class Config:
     db: DBConfig
     remote: RemoteConfig | None   # None when [remote] is absent — local-only mode
     store: StoreConfig | None = None  # None until first access; use store_config property
+    ai: AIConfig | None = None    # None when [ai] is absent and ANTHROPIC_API_KEY not set
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
+    telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
 
     @property
     def civex_dir(self) -> Path:
-        return self.project_root / ".civex"
+        return self.project_root / "_civex"
 
     @property
     def objects_dir(self) -> Path:
@@ -80,10 +105,10 @@ class Config:
 
 
 def find_project_root() -> Path | None:
-    """Walk up from cwd looking for a .civex directory."""
+    """Walk up from cwd looking for a _civex directory."""
     cwd = Path.cwd()
     for directory in [cwd, *cwd.parents]:
-        if (directory / ".civex").is_dir():
+        if (directory / "_civex").is_dir():
             return directory
     return None
 
@@ -93,7 +118,7 @@ def load_config() -> Config:
     if root is None:
         raise ConfigError("No civex project found. Run `civex init` to create one.")
 
-    config_path = root / ".civex" / "config.toml"
+    config_path = root / "_civex" / "config.toml"
     try:
         with open(config_path, "rb") as f:
             data = tomllib.load(f)
@@ -135,7 +160,7 @@ def load_config() -> Config:
             for name, vcfg in raw_vols.items()
         }
         if not volumes:
-            volumes = {"default": VolumeConfig(name="default", path=".civex/objects")}
+            volumes = {"default": VolumeConfig(name="default", path="_civex/objects")}
         queue = sd.get("volume_queue", list(volumes.keys()))
         store = StoreConfig(
             volumes=volumes,
@@ -144,11 +169,42 @@ def load_config() -> Config:
             full_below_gb=float(sd.get("full_below_gb", 1.0)),
         )
 
+    ai: AIConfig | None = None
+    ai_data = data.get("ai", {})
+    import os
+    config_key = ai_data.get("api_key")
+    env_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = config_key or env_key
+    if api_key:
+        ai = AIConfig(
+            api_key=api_key,
+            model=ai_data.get("model", "claude-sonnet-4-6"),
+            provider=ai_data.get("provider", "anthropic"),
+            base_url=ai_data.get("base_url") or None,
+            from_env=(not config_key and bool(env_key)),
+        )
+
+    log_data = data.get("logging", {})
+    logging_cfg = LoggingConfig(
+        level=str(log_data.get("level", "INFO")),
+        json_console=log_data.get("json_console"),
+        to_file=bool(log_data.get("to_file", True)),
+    )
+
+    tel_data = data.get("telemetry", {})
+    telemetry_cfg = TelemetryConfig(
+        dsn=tel_data.get("dsn") or os.environ.get("CIVEX_SENTRY_DSN"),
+        environment=str(tel_data.get("environment", "local")),
+    )
+
     return Config(
         project_root=root,
         db=DBConfig(url=data["db"]["url"]),
         remote=remote,
         store=store,
+        ai=ai,
+        logging=logging_cfg,
+        telemetry=telemetry_cfg,
     )
 
 
@@ -166,7 +222,7 @@ def _tk(s: str) -> str:
 
 
 def save_config(config: Config) -> None:
-    """Write config back to .civex/config.toml with backup/restore on failure."""
+    """Write config back to _civex/config.toml with backup/restore on failure."""
     lines: list[str] = [
         "[db]\n",
         f'url = "{_ts(config.db.url)}"\n',
@@ -182,11 +238,19 @@ def save_config(config: Config) -> None:
         if config.remote.last_pulled_at:
             lines.append(f'last_pulled_at = "{config.remote.last_pulled_at.isoformat()}"\n')
 
+    if config.ai and not config.ai.from_env:
+        lines += ["\n[ai]\n", f'api_key = "{_ts(config.ai.api_key)}"\n']
+        lines.append(f'model = "{config.ai.model}"\n')
+        if config.ai.provider != "anthropic":
+            lines.append(f'provider = "{config.ai.provider}"\n')
+        if config.ai.base_url:
+            lines.append(f'base_url = "{_ts(config.ai.base_url)}"\n')
+
     sc = config.store
     if sc is not None:
         is_default = (
             list(sc.volumes.keys()) == ["default"]
-            and sc.volumes["default"].path == ".civex/objects"
+            and sc.volumes["default"].path == "_civex/objects"
             and sc.volumes["default"].allocated_gb is None
             and sc.volume_queue == ["default"]
             and sc.warn_below_pct == 10.0

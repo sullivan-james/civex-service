@@ -164,8 +164,12 @@ def _base_query(
             doc = json.dumps({key: _coerce_json_value(value)})
             q = q.filter(Record.data.op("@>")(cast(literal(doc), PG_JSONB)))
         else:
-            # cast(data[key], String) compiles to CAST(json_extract(data, '$.key') AS VARCHAR) on SQLite.
-            q = q.filter(cast(Record.data[key], String) == value)
+            # SQLite: json_extract (via .as_string()) returns the *unquoted* scalar
+            # but preserves its storage class, so a numeric field would compare as
+            # INTEGER 30 != TEXT '30'. Casting the extracted value to TEXT normalises
+            # both strings and numbers to match the string filter value.
+            # (Plain cast(data[key], String) would instead yield the JSON form '"S02"'.)
+            q = q.filter(cast(Record.data[key].as_string(), String) == value)
     if search:
         if is_postgres:
             q = q.filter(

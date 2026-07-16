@@ -3,12 +3,12 @@ import typer
 from typing import Annotated, Optional
 
 from civex import __version__
-from civex.cli import auth, dataset, db, plugin, record, remote, schema, store, workflow, worker
+from civex.cli import ai as ai_cli, auth, dataset, db, plugin, record, remote, schema, store, workflow, worker
 from civex.cli.shell import run_shell
 from civex.cli.clone import clone
+from civex.cli.demo import demo
 from civex.cli.dump import dump, restore
 from civex.cli.init import init
-from civex.cli.log import commit, log
 from civex.cli.plumbing import get_object, head_seq, put_object, receive_pack, transfer_pack
 from civex.cli.resolve import resolve
 from civex.cli.status import status
@@ -41,25 +41,24 @@ def _main(
 
 _START = "Start a working area"
 _WORK = "Work on the current change"
-_HISTORY = "Examine the history and state"
 _COLLAB = "Collaborate"
 
 app.command("init", rich_help_panel=_START)(init)
 app.command("clone", rich_help_panel=_START)(clone)
+app.command("demo", rich_help_panel=_START)(demo)
 app.add_typer(db.app, name="db", rich_help_panel=_START)
 
+app.add_typer(ai_cli.app, name="ai", rich_help_panel=_WORK)
 app.add_typer(schema.app, name="schema", rich_help_panel=_WORK)
-app.add_typer(dataset.app, name="dataset", rich_help_panel=_WORK)
+app.add_typer(dataset.app, name="collection", rich_help_panel=_WORK)
 app.add_typer(record.app, name="record", rich_help_panel=_WORK)
 app.add_typer(store.app, name="store", rich_help_panel=_WORK)
 app.add_typer(workflow.app, name="workflow", rich_help_panel=_WORK)
 app.add_typer(plugin.app, name="plugin", rich_help_panel=_WORK)
-app.add_typer(worker.app, name="worker", rich_help_panel=_WORK)
-app.command("commit", rich_help_panel=_WORK)(commit)
+app.add_typer(worker.app, name="automation", rich_help_panel=_WORK)
 app.command("resolve", rich_help_panel=_WORK)(resolve)
 
-app.command("status", rich_help_panel=_HISTORY)(status)
-app.command("log", rich_help_panel=_HISTORY)(log)
+app.command("status", rich_help_panel=_COLLAB)(status)
 
 app.add_typer(remote.app, name="remote", rich_help_panel=_COLLAB)
 app.add_typer(auth.app, name="auth", rich_help_panel=_COLLAB)
@@ -76,11 +75,31 @@ app.command("get-object", hidden=True)(get_object)
 app.command("put-object", hidden=True)(put_object)
 
 
+def _is_loopback_host(host: str) -> bool:
+    """True if binding to *host* keeps the server reachable only from this machine."""
+    import ipaddress
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 @app.command("serve", rich_help_panel=_COLLAB)
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address"),
     port: int = typer.Option(8000, "--port", "-p", help="Port"),
     reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes (dev mode)"),
+    allow_remote: bool = typer.Option(
+        False, "--allow-remote",
+        help="Permit binding to a non-loopback address. The server has NO authentication — "
+             "only use this on a trusted network behind a reverse proxy or firewall.",
+    ),
+    log_level: str = typer.Option(
+        "INFO", "--log-level",
+        help="Log level: DEBUG | INFO | WARNING | ERROR. Overrides [logging] in config.toml.",
+    ),
 ) -> None:
     """Start the civex HTTP API server."""
     try:
@@ -89,6 +108,33 @@ def serve(
         typer.echo("uvicorn is required: pip install 'civex[server]'", err=True)
         raise typer.Exit(1)
 
+    import os
+
+    # Passed to the app (and inherited by uvicorn's --reload subprocess) so logging
+    # is configured inside the worker that actually serves requests.
+    os.environ["CIVEX_LOG_LEVEL"] = log_level.upper()
+
+    if not _is_loopback_host(host):
+        if not allow_remote:
+            typer.secho(
+                f"Refusing to bind to non-loopback address '{host}': the civex server has no "
+                "authentication and would be reachable by other machines.\n"
+                "Re-run with --allow-remote if this is intentional (and put it behind a "
+                "reverse proxy / firewall).",
+                err=True, fg=typer.colors.RED, bold=True,
+            )
+            raise typer.Exit(1)
+        typer.secho(
+            f"WARNING: binding to '{host}' — the server is reachable by other machines and has "
+            "NO authentication. Anyone who can reach it can read/write your data and run code.",
+            err=True, fg=typer.colors.YELLOW, bold=True,
+        )
+
+    # Signal the LocalGuardMiddleware to stand down when the operator has opted
+    # into remote exposure. Inherited by uvicorn's reload subprocesses.
+    if allow_remote:
+        os.environ["CIVEX_ALLOW_REMOTE"] = "1"
+
     typer.echo(f"Starting civex server at http://{host}:{port}")
     typer.echo(f"API docs: http://{host}:{port}/docs")
     if reload:
@@ -96,7 +142,9 @@ def serve(
             "Dev mode: for frontend HMR run `cd frontend && npm run dev` "
             "and browse to http://localhost:5173"
         )
-    uvicorn.run("civex.server.app:app", host=host, port=port, reload=reload)
+    # log_config=None: defer all logging to civex's own structlog pipeline
+    # (configured in create_app) so uvicorn's records flow through the same sinks.
+    uvicorn.run("civex.server.app:app", host=host, port=port, reload=reload, log_config=None)
 
 
 @app.command("shell")

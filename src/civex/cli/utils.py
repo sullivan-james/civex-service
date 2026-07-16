@@ -37,7 +37,7 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[None, str]:
 
     wf_def = ctx.job_svc.find_workflow(job.workflow_name)
     if wf_def is None:
-        raise ValueError(f"Workflow '{job.workflow_name}' not found in .civex/workflows/")
+        raise ValueError(f"Workflow '{job.workflow_name}' not found in _civex/workflows/")
 
     record = ctx.record_svc.get(str(job.record_id))
     dataset = ctx.dataset_svc._datasets.get_by_id(record.dataset_id)

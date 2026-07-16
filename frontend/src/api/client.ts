@@ -1,12 +1,15 @@
 const BASE = '/api'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  console.log("Making a request on", BASE, path, "with init", init)
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
     ...init,
   })
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
+    console.log("Response received", res, body)
     throw new Error(body.detail ?? `HTTP ${res.status}`)
   }
   if (res.status === 204) return undefined as T

@@ -34,12 +34,13 @@ class WorkflowContext:
     record: RecordDTO
     dataset: DatasetDTO
     _app_ctx: "AppContext"
+    job_depth: int = 0
 
     def get_file(self, sha256: str) -> bytes:
         return self._app_ctx.file_svc.retrieve(sha256)
 
     def update_record(self, data: dict[str, Any]) -> None:
-        self._app_ctx.record_svc.update(str(self.record.id), data)
+        self._app_ctx.record_svc.update(str(self.record.id), data, _job_depth=self.job_depth + 1)
 
     def create_record(
         self,
@@ -48,7 +49,7 @@ class WorkflowContext:
         data: dict[str, Any],
         parent_record_id: str | None = None,
     ) -> RecordDTO:
-        return self._app_ctx.record_svc.add(dataset_name, schema_name, data, parent_record_id=parent_record_id)
+        return self._app_ctx.record_svc.add(dataset_name, schema_name, data, parent_record_id=parent_record_id, _job_depth=self.job_depth + 1)
 
     def commit(self) -> None:
         self._app_ctx.commit()

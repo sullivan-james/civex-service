@@ -85,7 +85,7 @@ def _resolve_inputs(
 
 @app.command("list")
 def workflow_list() -> None:
-    """List all workflow definitions in .civex/workflows/."""
+    """List all workflow definitions in _civex/workflows/."""
     config = cli_load_config()
     workflows_dir = config.civex_dir / "workflows"
     if not workflows_dir.exists():
@@ -94,7 +94,7 @@ def workflow_list() -> None:
 
     yamls = sorted(workflows_dir.glob("*.yaml")) + sorted(workflows_dir.glob("*.yml"))
     if not yamls:
-        console.print("[info]No workflows defined. Add a YAML file to .civex/workflows/.[/info]")
+        console.print("[info]No workflows defined. Add a YAML file to _civex/workflows/.[/info]")
         return
 
     table = Table("Name", "Description", "Steps", "Inputs", "File")

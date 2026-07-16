@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useSchemas, useCreateSchema } from '../hooks/useSchemas'
-import { Badge, Button, EmptyState, ErrorState, LoadingState, MonoId, PageHeader, Table, Tbody, Td, Th, Thead, Tr } from '../components/ui'
+import { Badge, Button, ErrorState, LoadingState, MonoId, PageHeader, Table, Tbody, Td, Th, Thead, Tr } from '../components/ui'
 import { pluralise } from '../lib/utils'
 
 function CreateSchemaModal({ onClose }: { onClose: () => void }) {
@@ -89,7 +89,17 @@ export default function SchemasPage() {
       {error && <ErrorState message={String(error)} />}
 
       {data?.length === 0 && (
-        <EmptyState title="No schemas yet" message="Create one with the button above." />
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <svg width="40" height="40" viewBox="0 0 16 16" fill="none" className="mb-4 text-[#d0d7de]" aria-hidden>
+            <rect x="2" y="1" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M5 5h6M5 8h6M5 11h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+          <h2 className="text-lg font-semibold text-[#1f2328] mb-2">No schemas yet</h2>
+          <p className="text-sm text-[#656d76] mb-6 max-w-sm">
+            Schemas define the structure of your data — field names, types, and rules. Create a schema before adding records.
+          </p>
+          <Button variant="primary" onClick={() => setShowCreate(true)}>Create schema</Button>
+        </div>
       )}
 
       {data && data.length > 0 && (

@@ -55,59 +55,15 @@ class AppContext:
         self._session.close()
 
 
-def _apply_migrations(session: Session, engine: Engine) -> None:
-    """Create any missing tables and apply idempotent column additions for existing databases."""
-    from civex.db.models import Base
-    Base.metadata.create_all(engine, checkfirst=True)
-
-    from sqlalchemy import text
-    migrations = [
-        "ALTER TABLE workflow_jobs ADD COLUMN log TEXT",
-        "ALTER TABLE records ADD COLUMN search_vector TSVECTOR",
-        "CREATE INDEX IF NOT EXISTS ix_records_search_vector ON records USING gin(search_vector)",
-        (
-            "UPDATE records "
-            "SET search_vector = to_tsvector('simple', ("
-            "  SELECT coalesce(string_agg(value, ' '), '') "
-            "  FROM jsonb_each_text(data) "
-            "  WHERE value IS NOT NULL "
-            "    AND value NOT IN ('true', 'false') "
-            "    AND value NOT LIKE '{%'"
-            "))"
-        ),
-        "ALTER TABLE commits ADD COLUMN seq INTEGER",
-        "ALTER TABLE schemas ADD COLUMN display_field VARCHAR(255)",
-    ]
-    for sql in migrations:
-        try:
-            session.execute(text(sql))
-            session.commit()
-        except Exception:
-            session.rollback()
-
-    # Backfill seq for any commits that predate the column.
-    from civex.db.models import Commit as _Commit
-    unsequenced = (
-        session.query(_Commit)
-        .filter(_Commit.seq.is_(None))
-        .order_by(_Commit.created_at)
-        .all()
-    )
-    if unsequenced:
-        from sqlalchemy import func as _func
-        max_seq = session.query(_func.max(_Commit.seq)).scalar() or 0
-        for i, row in enumerate(unsequenced, start=max_seq + 1):
-            row.seq = i
-        session.commit()
-
-
 def build_local_context(
     config: Config,
     file_store: FileObjectStore | None = None,
 ) -> AppContext:
+    from civex.db.migrate import ensure_schema_current
+
     engine = _get_engine(config.db.url)
+    ensure_schema_current(engine)
     session = Session(engine)
-    _apply_migrations(session, engine)
     schema_repo = LocalSchemaRepository(session)
     dataset_repo = LocalDatasetRepository(session)
     record_repo = LocalRecordRepository(session, is_postgres=engine.dialect.name == "postgresql")

@@ -35,7 +35,7 @@ export function useCreateRecord(datasetName: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['records', datasetName] })
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
-      qc.invalidateQueries({ queryKey: ['datasets'] })
+      qc.invalidateQueries({ queryKey: ['collections'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
     },
   })
@@ -60,7 +60,7 @@ export function useDeleteRecord(datasetName: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['records', datasetName] })
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
-      qc.invalidateQueries({ queryKey: ['datasets'] })
+      qc.invalidateQueries({ queryKey: ['collections'] })
     },
   })
 }
@@ -72,7 +72,7 @@ export function useDeleteManyRecords(datasetName: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['records', datasetName] })
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
-      qc.invalidateQueries({ queryKey: ['datasets'] })
+      qc.invalidateQueries({ queryKey: ['collections'] })
     },
   })
 }
@@ -84,7 +84,7 @@ export function useDeleteAllRecords(datasetName: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['records', datasetName] })
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
-      qc.invalidateQueries({ queryKey: ['datasets'] })
+      qc.invalidateQueries({ queryKey: ['collections'] })
     },
   })
 }

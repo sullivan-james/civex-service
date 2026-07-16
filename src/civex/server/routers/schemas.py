@@ -5,12 +5,13 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 
 from civex.context import AppContext
-from civex.domain.exceptions import AlreadyExistsError, NotFoundError
+from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.server.deps import get_ctx
 from civex.server.models import (
     AddFieldRequest,
     CreateSchemaRequest,
     FieldResponse,
+    ReorderFieldsRequest,
     SchemaResponse,
     UpdateFieldRequest,
     UpdateSchemaRequest,
@@ -26,12 +27,17 @@ def list_schemas(ctx: AppContext = Depends(get_ctx)):
 
 @router.post("", response_model=SchemaResponse, status_code=201)
 def create_schema(body: CreateSchemaRequest, ctx: AppContext = Depends(get_ctx)):
+    fields = [f.model_dump() for f in body.fields] if body.fields else None
     try:
-        dto = ctx.schema_svc.create(body.name, description=body.description, parent=body.parent)
+        dto = ctx.schema_svc.create_with_fields(
+            body.name, description=body.description, parent=body.parent, fields=fields,
+        )
     except AlreadyExistsError as e:
         raise HTTPException(409, detail=str(e))
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(422, detail=str(e))
     return SchemaResponse.from_dto(dto)
 
 
@@ -79,13 +85,25 @@ def delete_schema(name: str, ctx: AppContext = Depends(get_ctx)):
 @router.post("/{name}/fields", response_model=FieldResponse, status_code=201)
 def add_field(name: str, body: AddFieldRequest, ctx: AppContext = Depends(get_ctx)):
     try:
-        field = ctx.schema_svc.add_field(name, body.name, body.type, required=body.required, restrictions=body.restrictions)
+        field = ctx.schema_svc.add_field(
+            name, body.name, body.type,
+            required=body.required,
+            restrictions=body.restrictions,
+            default_value=body.default,
+        )
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except (AlreadyExistsError, ValueError) as e:
         raise HTTPException(422, detail=str(e))
-    return FieldResponse(id=str(field.id), name=field.name, type=field.dtype, required=field.required, restrictions=field.restrictions)
+    return FieldResponse(
+        id=str(field.id),
+        name=field.name,
+        type=field.dtype,
+        required=field.required,
+        restrictions=field.restrictions,
+        default=field.default_value,
+    )
 
 
 @router.delete("/{name}/fields/{field_name}", status_code=204)
@@ -99,18 +117,48 @@ def delete_field(name: str, field_name: str, ctx: AppContext = Depends(get_ctx))
 
 @router.patch("/{name}/fields/{field_name}", response_model=FieldResponse)
 def update_field(name: str, field_name: str, body: UpdateFieldRequest, ctx: AppContext = Depends(get_ctx)):
-    if body.rename is None and body.required is None and body.restrictions is None:
-        raise HTTPException(422, detail="Provide at least one of: rename, required, restrictions")
+    if (
+        body.rename is None
+        and body.required is None
+        and body.restrictions is None
+        and "default" not in body.model_fields_set
+    ):
+        raise HTTPException(422, detail="Provide at least one of: rename, required, restrictions, default")
+    # Pass default_value only if explicitly included in the request
+    default_kwarg: dict = {}
+    if "default" in body.model_fields_set:
+        default_kwarg["default_value"] = body.default
     try:
         field = ctx.schema_svc.update_field(
             name, field_name,
             new_name=body.rename,
             required=body.required,
             restrictions=body.restrictions,
+            **default_kwarg,
         )
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except AlreadyExistsError as e:
         raise HTTPException(409, detail=str(e))
-    return FieldResponse(id=str(field.id), name=field.name, type=field.dtype, required=field.required, restrictions=field.restrictions)
+    return FieldResponse(
+        id=str(field.id),
+        name=field.name,
+        type=field.dtype,
+        required=field.required,
+        restrictions=field.restrictions,
+        default=field.default_value,
+    )
+
+
+@router.put("/{name}/fields/reorder", response_model=SchemaResponse)
+def reorder_fields(name: str, body: ReorderFieldsRequest, ctx: AppContext = Depends(get_ctx)):
+    try:
+        ctx.schema_svc.reorder_fields(name, [uuid.UUID(i) for i in body.order])
+        ctx.commit()
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    schema = ctx.schema_svc.get(name)
+    return SchemaResponse.from_dto(schema)

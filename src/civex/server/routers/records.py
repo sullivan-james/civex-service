@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import csv
+import io
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from civex.context import AppContext
 from civex.domain.exceptions import NotFoundError, ValidationError
@@ -32,7 +35,7 @@ def search_records_global(
     return [RecordResponse.from_dto(r) for r in items]
 
 
-@router.get("/datasets/{dataset_name}/records", response_model=PaginatedRecordResponse)
+@router.get("/collections/{dataset_name}/records", response_model=PaginatedRecordResponse)
 def list_records(
     dataset_name: str,
     schema: Optional[str] = Query(default=None),
@@ -70,7 +73,7 @@ def list_records(
     )
 
 
-@router.post("/datasets/{dataset_name}/records", response_model=RecordResponse, status_code=201)
+@router.post("/collections/{dataset_name}/records", response_model=RecordResponse, status_code=201)
 def create_record(
     dataset_name: str,
     body: CreateRecordRequest,
@@ -134,7 +137,7 @@ def bulk_delete_records(
     return {"deleted": deleted}
 
 
-@router.delete("/datasets/{dataset_name}/records")
+@router.delete("/collections/{dataset_name}/records")
 def delete_all_records(
     dataset_name: str,
     schema: Optional[str] = Query(default=None),
@@ -146,5 +149,53 @@ def delete_all_records(
         raise HTTPException(404, detail=str(e))
     ctx.commit()
     return {"deleted": deleted}
+
+
+@router.get("/collections/{collection_name}/export.csv")
+def export_records_csv(
+    collection_name: str,
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Export all records in a collection as a CSV file."""
+    try:
+        records = ctx.record_svc.find(collection_name, limit=100_000)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+
+    # Gather unique field names in encounter order across all records
+    field_names: list[str] = []
+    seen: set[str] = set()
+    for r in records:
+        for k in r.data:
+            if k not in seen:
+                seen.add(k)
+                field_names.append(k)
+
+    columns = ["id", "schema", "created_at", "updated_at"] + field_names
+
+    def generate():
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        yield buf.getvalue()
+        for r in records:
+            buf = io.StringIO()
+            writer = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
+            row: dict = {
+                "id": str(r.id),
+                "schema": r.schema_name,
+                "created_at": r.created_at.isoformat(),
+                "updated_at": r.updated_at.isoformat(),
+            }
+            for k, v in r.data.items():
+                row[k] = v if not isinstance(v, (list, dict)) else str(v)
+            writer.writerow(row)
+            yield buf.getvalue()
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{collection_name}.csv"'},
+    )
 
 

@@ -37,16 +37,16 @@ export const recordsApi = {
     if (params?.limit != null) qs.set('limit', String(params.limit))
     if (params?.offset != null) qs.set('offset', String(params.offset))
     const query = qs.toString() ? `?${qs}` : ''
-    return api.get<PaginatedRecords>(`/datasets/${encodeURIComponent(datasetName)}/records${query}`)
+    return api.get<PaginatedRecords>(`/collections/${encodeURIComponent(datasetName)}/records${query}`)
   },
 
   counts: (datasetName: string) =>
-    api.get<Record<string, number>>(`/datasets/${encodeURIComponent(datasetName)}/record-counts`),
+    api.get<Record<string, number>>(`/collections/${encodeURIComponent(datasetName)}/record-counts`),
 
   get:    (id: string) => api.get<CivexRecord>(`/records/${id}`),
 
   create: (datasetName: string, body: { schema_name: string; data: object; parent_record_id?: string }) =>
-    api.post<CivexRecord>(`/datasets/${encodeURIComponent(datasetName)}/records`, body),
+    api.post<CivexRecord>(`/collections/${encodeURIComponent(datasetName)}/records`, body),
 
   update: (id: string, body: { data: object }) => api.patch<CivexRecord>(`/records/${id}`, body),
 
@@ -57,7 +57,7 @@ export const recordsApi = {
 
   deleteAll: (datasetName: string, schema?: string) => {
     const qs = schema ? `?schema=${encodeURIComponent(schema)}` : ''
-    return api.delete<{ deleted: number }>(`/datasets/${encodeURIComponent(datasetName)}/records${qs}`)
+    return api.delete<{ deleted: number }>(`/collections/${encodeURIComponent(datasetName)}/records${qs}`)
   },
 
   searchBySchema: (schemaName: string, search?: string, limit = 20) => {

@@ -9,7 +9,7 @@ from civex.domain.exceptions import AlreadyExistsError, NotFoundError
 from civex.server.deps import get_ctx
 from civex.server.models import CreateDatasetRequest, DatasetResponse, UpdateDatasetRequest
 
-router = APIRouter(prefix="/datasets", tags=["datasets"])
+router = APIRouter(prefix="/collections", tags=["collections"])
 
 
 @router.get("", response_model=list[DatasetResponse])

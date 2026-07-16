@@ -24,6 +24,7 @@ class LocalWorkflowJobRepository:
         schema_name: str,
         trigger: str,
         input_data: dict | None = None,
+        depth: int = 0,
     ) -> WorkflowJobDTO:
         row = WorkflowJob(
             workflow_name=workflow_name,
@@ -32,6 +33,7 @@ class LocalWorkflowJobRepository:
             trigger=trigger,
             status="pending",
             input_data=input_data,
+            depth=depth,
         )
         self._s.add(row)
         self._s.flush()
@@ -119,4 +121,5 @@ def _to_dto(row: WorkflowJob) -> WorkflowJobDTO:
         created_at=row.created_at,
         started_at=row.started_at,
         finished_at=row.finished_at,
+        depth=row.depth,
     )

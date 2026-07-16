@@ -10,7 +10,7 @@ from civex.cli.utils import drain_jobs, get_ctx, run_job
 from civex.console import console
 from civex.domain.exceptions import NotFoundError
 
-app = typer.Typer(help="Process queued workflow jobs")
+app = typer.Typer(help="Manage automated workflow processing")
 
 
 @app.command("run")

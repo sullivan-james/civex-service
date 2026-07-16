@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useJobsPaged, useRerunJob } from '../../hooks/useWorkflows'
 import { type WorkflowJob } from '../../api/workflows'
-import { LoadingState, ErrorState, EmptyState, Badge, Button } from '../ui'
+import { LoadingState, ErrorState, Badge, Button } from '../ui'
 
 const PAGE_SIZES = [25, 50, 100]
 
@@ -102,7 +102,18 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
   if (error)     return <ErrorState message={error.message} />
 
   if (!jobs.data?.length) {
-    return <EmptyState title="No jobs yet" message="Run a workflow from the Workflows page." />
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <svg width="40" height="40" viewBox="0 0 16 16" fill="none" className="mb-4 text-[#d0d7de]" aria-hidden>
+          <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5"/>
+          <path d="M5.5 8l2 2 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        <h2 className="text-lg font-semibold text-[#1f2328] mb-2">No runs yet</h2>
+        <p className="text-sm text-[#656d76] max-w-sm">
+          Workflow runs appear here when a workflow is triggered. Trigger a workflow manually from the Workflows tab.
+        </p>
+      </div>
+    )
   }
 
   return (
@@ -110,7 +121,7 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
       <table className="w-full text-sm border-collapse">
         <thead>
           <tr className="border-b border-[#d0d7de]">
-            <th className="text-left py-2 px-3 font-medium text-[#1f2328]">Job</th>
+            <th className="text-left py-2 px-3 font-medium text-[#1f2328]">Run</th>
             <th className="text-left py-2 px-3 font-medium text-[#1f2328]">Workflow</th>
             {!recordId && <th className="text-left py-2 px-3 font-medium text-[#1f2328]">Record</th>}
             <th className="text-left py-2 px-3 font-medium text-[#1f2328]">Schema</th>
@@ -126,7 +137,7 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
             <>
               <tr key={job.id} className="border-b border-[#d0d7de] hover:bg-[#f6f8fa]">
                 <td className="py-2 px-3">
-                  <Link to={`/jobs/${job.id}`} className="font-mono text-xs text-[#0969da] hover:underline">
+                  <Link to={`/runs/${job.id}`} className="font-mono text-xs text-[#0969da] hover:underline">
                     {job.id.slice(0, 8)}…
                   </Link>
                 </td>

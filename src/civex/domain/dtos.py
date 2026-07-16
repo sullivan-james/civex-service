@@ -22,10 +22,12 @@ class FieldDTO:
     id: uuid.UUID
     schema_id: uuid.UUID
     name: str
-    dtype: str          # "integer" | "float" | "string" | "boolean" | "file" | "reference"
+    dtype: str          # "integer" | "float" | "string" | "boolean" | "file" | "reference" | "enum" | "url" | "reference_list" | "tags"
     required: bool
     restrictions: dict[str, Any]
     created_at: datetime
+    default_value: Any | None = None
+    position: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -35,6 +37,8 @@ class FieldDTO:
             "dtype": self.dtype,
             "required": self.required,
             "restrictions": self.restrictions,
+            "default_value": self.default_value,
+            "position": self.position,
             "created_at": self.created_at.isoformat(),
         }
 
@@ -47,6 +51,8 @@ class FieldDTO:
             dtype=d["dtype"],
             required=d["required"],
             restrictions=d.get("restrictions") or {},
+            default_value=d.get("default_value"),
+            position=d.get("position"),
             created_at=datetime.fromisoformat(d["created_at"]),
         )
 
@@ -267,3 +273,4 @@ class WorkflowJobDTO:
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+    depth: int = 0            # trigger chain depth; jobs enqueued at MAX_JOB_DEPTH are refused

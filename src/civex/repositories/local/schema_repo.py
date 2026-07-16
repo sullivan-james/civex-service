@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from sqlalchemy import nulls_last
 from sqlalchemy.orm import Session
 
 from civex.db.models import Field, Schema
@@ -32,7 +33,7 @@ class LocalSchemaRepository:
         rows = (
             self._s.query(Field)
             .filter_by(schema_id=schema_id)
-            .order_by(Field.created_at)
+            .order_by(nulls_last(Field.position), Field.created_at)
             .all()
         )
         return [_field_to_dto(r) for r in rows]
@@ -78,6 +79,8 @@ class LocalSchemaRepository:
         dtype: str,
         required: bool,
         restrictions: dict[str, Any],
+        default_value: Any = None,
+        position: int | None = None,
     ) -> FieldDTO:
         row = Field(
             schema_id=schema_id,
@@ -85,12 +88,22 @@ class LocalSchemaRepository:
             dtype=dtype,
             required=required,
             restrictions=restrictions,
+            default_value=default_value,
+            position=position,
         )
         self._s.add(row)
         self._s.flush()
         return _field_to_dto(row)
 
-    def update_field(self, field_id: uuid.UUID, *, name: str | None = None, required: bool | None = None, restrictions: dict | None = None) -> FieldDTO:
+    def update_field(
+        self,
+        field_id: uuid.UUID,
+        *,
+        name: str | None = None,
+        required: bool | None = None,
+        restrictions: dict | None = None,
+        default_value: Any = _SENTINEL,
+    ) -> FieldDTO:
         row = self._s.query(Field).filter_by(id=field_id).first()
         if name is not None:
             row.name = name
@@ -98,6 +111,8 @@ class LocalSchemaRepository:
             row.required = required
         if restrictions is not None:
             row.restrictions = restrictions
+        if default_value is not self._SENTINEL:
+            row.default_value = default_value  # None clears it; a value sets it
         self._s.flush()
         return _field_to_dto(row)
 
@@ -106,6 +121,14 @@ class LocalSchemaRepository:
         if row:
             self._s.delete(row)
             self._s.flush()
+
+    def reorder_fields(self, schema_id: uuid.UUID, field_ids: list[uuid.UUID]) -> list[FieldDTO]:
+        for i, fid in enumerate(field_ids):
+            row = self._s.query(Field).filter_by(id=fid, schema_id=schema_id).first()
+            if row:
+                row.position = i
+        self._s.flush()
+        return self.get_fields(schema_id)
 
 
 # ------------------------------------------------------------------
@@ -120,6 +143,8 @@ def _field_to_dto(row: Field) -> FieldDTO:
         dtype=row.dtype,
         required=row.required,
         restrictions=row.restrictions or {},
+        default_value=row.default_value,
+        position=row.position,
         created_at=row.created_at,
     )
 

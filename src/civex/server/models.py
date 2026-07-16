@@ -20,6 +20,7 @@ class FieldResponse(BaseModel):
     type: str
     required: bool
     restrictions: dict[str, Any] = {}
+    default: Any | None = None
 
 
 class SchemaResponse(BaseModel):
@@ -39,16 +40,17 @@ class SchemaResponse(BaseModel):
             parent_id=str(dto.parent_id) if dto.parent_id else None,
             display_field=dto.display_field,
             fields=[
-                FieldResponse(id=str(f.id), name=f.name, type=f.dtype, required=f.required, restrictions=f.restrictions)
+                FieldResponse(
+                    id=str(f.id),
+                    name=f.name,
+                    type=f.dtype,
+                    required=f.required,
+                    restrictions=f.restrictions,
+                    default=f.default_value,
+                )
                 for f in dto.fields
             ],
         )
-
-
-class CreateSchemaRequest(BaseModel):
-    name: str
-    description: str | None = None
-    parent: str | None = None
 
 
 class AddFieldRequest(BaseModel):
@@ -56,6 +58,14 @@ class AddFieldRequest(BaseModel):
     type: str
     required: bool = False
     restrictions: dict[str, Any] | None = None
+    default: Any | None = None
+
+
+class CreateSchemaRequest(BaseModel):
+    name: str
+    description: str | None = None
+    parent: str | None = None
+    fields: list[AddFieldRequest] | None = None
 
 
 class UpdateSchemaRequest(BaseModel):
@@ -68,6 +78,11 @@ class UpdateFieldRequest(BaseModel):
     rename: str | None = None
     required: bool | None = None
     restrictions: dict[str, Any] | None = None
+    default: Any | None = None
+
+
+class ReorderFieldsRequest(BaseModel):
+    order: list[str]  # list of field UUIDs as strings
 
 
 # --- Datasets ---
@@ -96,6 +111,12 @@ class CreateDatasetRequest(BaseModel):
 class UpdateDatasetRequest(BaseModel):
     rename: str | None = None
     description: str | None = None
+
+
+# Collection aliases (user-facing rename of Dataset → Collection)
+CollectionResponse = DatasetResponse
+CreateCollectionRequest = CreateDatasetRequest
+UpdateCollectionRequest = UpdateDatasetRequest
 
 
 # --- Records ---

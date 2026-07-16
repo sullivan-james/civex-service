@@ -20,11 +20,11 @@ export default function JobsPage() {
   return (
     <>
       <PageHeader
-        title="Jobs"
+        title="Runs"
         description={
           hasActive
             ? <span className="text-xs text-[#0969da] flex items-center gap-1"><span className="animate-spin inline-block">↻</span> live</span>
-            : 'Workflow job history'
+            : 'Workflow run history'
         }
         action={
           <Button
@@ -33,7 +33,7 @@ export default function JobsPage() {
             onClick={() => drain.mutate()}
             disabled={drain.isPending}
           >
-            {drain.isPending ? '↻ Running…' : 'Run worker'}
+            {drain.isPending ? '↻ Running…' : 'Run automation'}
           </Button>
         }
       />

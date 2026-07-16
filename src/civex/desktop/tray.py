@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -42,7 +43,7 @@ def _load_recent() -> list[dict]:
     try:
         items = json.loads(_RECENT_FILE.read_text())
         # Drop entries whose project directory no longer exists.
-        return [i for i in items if (Path(i["path"]) / ".civex").exists()]
+        return [i for i in items if (Path(i["path"]) / "_civex").exists()]
     except Exception:
         return []
 
@@ -65,11 +66,37 @@ def _remove_from_recent(path_str: str) -> None:
 # ── Project initialisation ────────────────────────────────────────────────────
 
 def _init_project(path: Path) -> None:
-    """Create a .civex/ directory inside path, initialising the SQLite DB."""
+    """Create a _civex/ directory inside path, initialising the SQLite DB."""
     try:
         scaffold_project(path)
     except FileExistsError:
         pass  # already initialised — open it as-is
+
+
+def _resolve_data_dir() -> Path:
+    """Directory to reveal for 'open data folder' — the SQLite file's folder if
+    local, otherwise the project's _civex/ directory (config, objects, logs)."""
+    from civex.config import load_config
+    config = load_config()
+    prefix = "sqlite:///"
+    if config.db.url.startswith(prefix):
+        db_path = Path(config.db.url[len(prefix):])
+        if not db_path.is_absolute():
+            db_path = config.project_root / db_path
+        return db_path.parent
+    return config.civex_dir
+
+
+def _reveal_in_file_manager(path: Path) -> None:
+    path = path.resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Directory not found: {path}")
+    if sys.platform == "win32":
+        os.startfile(str(path))  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.run(["open", str(path)], check=True)
+    else:
+        subprocess.run(["xdg-open", str(path)], check=True)
 
 
 # ── Server ────────────────────────────────────────────────────────────────────
@@ -149,7 +176,7 @@ class _Api:
         if not result:
             return None
         path = Path(result[0])
-        if not (path / ".civex").exists():
+        if not (path / "_civex").exists():
             return {"error": f"'{path.name}' is not a civex project — use Create project to initialise it."}
         return _launch_project(path)
 
@@ -163,7 +190,7 @@ class _Api:
 
     def open_recent(self, path_str: str) -> dict:
         path = Path(path_str)
-        if not path.exists() or not (path / ".civex").exists():
+        if not path.exists() or not (path / "_civex").exists():
             _remove_from_recent(path_str)
             return {"error": f"Project not found: {path_str}"}
         return _launch_project(path)
@@ -179,6 +206,15 @@ class _Api:
         if not result:
             return {"path": None}
         return {"path": str(result[0]).replace("\\", "/")}
+
+    def open_data_dir(self) -> dict:
+        """Reveal the current project's database directory in Explorer/Finder/the file manager."""
+        try:
+            _reveal_in_file_manager(_resolve_data_dir())
+            return {"ok": True}
+        except Exception as e:
+            _log.exception("Failed to open data directory")
+            return {"error": str(e)}
 
 
 # ── Welcome screen HTML ───────────────────────────────────────────────────────

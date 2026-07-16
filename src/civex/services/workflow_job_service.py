@@ -8,6 +8,9 @@ from civex.repositories.protocols import WorkflowJobRepository
 from civex.workflows.definition import WorkflowDef, load_workflow
 
 
+MAX_JOB_DEPTH = 10
+
+
 class WorkflowJobService:
     def __init__(self, repo: WorkflowJobRepository, civex_dir: Path) -> None:
         self._repo = repo
@@ -43,12 +46,24 @@ class WorkflowJobService:
         record: RecordDTO,
         event: str,
         changed_fields: set[str] | None = None,
+        depth: int = 0,
     ) -> list[WorkflowJobDTO]:
         """Enqueue jobs for every workflow whose trigger matches this event + schema.
 
         For record_updated, if the trigger declares a fields list and changed_fields is
         provided, only enqueue if at least one watched field actually changed.
+
+        depth tracks how many workflow-triggered-by-workflow hops deep this call is.
+        Jobs at or above MAX_JOB_DEPTH are silently dropped to break runaway chains.
         """
+        if depth >= MAX_JOB_DEPTH:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Workflow loop detected: refusing to enqueue jobs at depth %d "
+                "(record %s, event %s). Add `fields:` filter to your trigger to prevent this.",
+                depth, record.id, event,
+            )
+            return []
         jobs: list[WorkflowJobDTO] = []
         for wf in self._load_workflows():
             if wf.triggers is None:
@@ -59,7 +74,7 @@ class WorkflowJobService:
             if trigger_def.fields and changed_fields is not None:
                 if not any(f in changed_fields for f in trigger_def.fields):
                     continue
-            job = self._repo.enqueue(wf.name, record.id, record.schema_name, event)
+            job = self._repo.enqueue(wf.name, record.id, record.schema_name, event, depth=depth)
             jobs.append(job)
         return jobs
 

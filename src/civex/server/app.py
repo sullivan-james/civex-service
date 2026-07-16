@@ -3,12 +3,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from civex.domain.exceptions import CivexError
-from civex.server.routers import datasets, dump, files, jobs, plugins, records, remote, schemas, store, terminal, workflows
+from civex.server.errors import RequestContextMiddleware, register_error_handlers
+from civex.server.routers import ai, datasets, dump, files, jobs, plugins, records, remote, schemas, store, terminal, workflows
+from civex.server.security import LocalGuardMiddleware
 
 
 def _find_dist() -> Path:
@@ -28,7 +29,42 @@ def _find_dist() -> Path:
 _DIST = _find_dist()
 
 
+def _init_observability() -> None:
+    """Configure logging + telemetry from env vars and (best-effort) project config.
+
+    Runs at app creation so it takes effect inside uvicorn's --reload worker too.
+    Falls back to sane defaults when no civex project is present (e.g. under tests).
+    """
+    import os
+
+    from civex.observability import configure_logging, init_telemetry
+
+    level = os.environ.get("CIVEX_LOG_LEVEL", "INFO")
+    json_env = os.environ.get("CIVEX_LOG_JSON")
+    json_console = None if json_env is None else json_env == "1"
+    log_file = None
+    dsn = None
+    environment = "local"
+
+    try:
+        from civex.config import load_config
+        cfg = load_config()
+        level = os.environ.get("CIVEX_LOG_LEVEL", cfg.logging.level)
+        if json_env is None:
+            json_console = cfg.logging.json_console
+        if cfg.logging.to_file:
+            log_file = cfg.civex_dir / "logs" / "civex.log"
+        dsn = cfg.telemetry.dsn
+        environment = cfg.telemetry.environment
+    except Exception:
+        pass  # No project / unreadable config — console logging with defaults.
+
+    configure_logging(level=level, json_console=json_console, log_file=log_file)
+    init_telemetry(dsn, environment=environment)
+
+
 def create_app() -> FastAPI:
+    _init_observability()
     from civex import __version__
     app = FastAPI(
         title="civex",
@@ -36,19 +72,16 @@ def create_app() -> FastAPI:
         version=__version__,
     )
 
-    @app.exception_handler(CivexError)
-    async def civex_error_handler(request: Request, exc: CivexError) -> JSONResponse:
-        from civex.domain.exceptions import NotFoundError, AlreadyExistsError, ValidationError
-        if isinstance(exc, NotFoundError):
-            status = 404
-        elif isinstance(exc, AlreadyExistsError):
-            status = 409
-        elif isinstance(exc, ValidationError):
-            status = 422
-        else:
-            status = 500
-        return JSONResponse(status_code=status, content={"detail": str(exc)})
+    # Local-only guard: blocks DNS-rebinding and cross-origin (CSRF) attacks
+    # against the loopback server. No-op when CIVEX_ALLOW_REMOTE=1.
+    app.add_middleware(LocalGuardMiddleware)
+    # Added last → outermost: every request gets a correlation id before any
+    # other layer runs, and it stays bound through the exception handlers.
+    app.add_middleware(RequestContextMiddleware)
 
+    register_error_handlers(app)
+
+    app.include_router(ai.router, prefix="/api")
     app.include_router(schemas.router, prefix="/api")
     app.include_router(datasets.router, prefix="/api")
     app.include_router(dump.router, prefix="/api")

@@ -2,6 +2,7 @@ import { type ReactNode, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { remoteApi, type SyncResult } from '../api/remote'
+import AiPanel from './ai/AiPanel'
 
 declare global {
   interface Window {
@@ -9,19 +10,29 @@ declare global {
       open_project: () => Promise<{ ok?: boolean; error?: string } | null>
       create_project: () => Promise<{ ok?: boolean; error?: string } | null>
       browse_folder: () => Promise<{ path: string | null }>
+      open_data_dir: () => Promise<{ ok?: boolean; error?: string }>
     } }
   }
 }
 
 const isDesktop = typeof window !== 'undefined' && !!window.pywebview
 
+// pywebview runs inside a native shell, so navigator.platform reflects the
+// host OS reliably enough to pick the right verb for each platform's file manager.
+function fileManagerLabel(): string {
+  const platform = typeof navigator !== 'undefined' ? navigator.platform : ''
+  if (/Mac/i.test(platform)) return 'Reveal in Finder'
+  if (/Win/i.test(platform)) return 'Show in Explorer'
+  return 'Open data folder'
+}
+
 const tabs = [
-  { to: '/datasets',  label: 'Datasets' },
-  { to: '/schemas',   label: 'Schemas' },
-  { to: '/workflows', label: 'Workflows' },
-  { to: '/jobs',      label: 'Jobs' },
-  { to: '/terminal',  label: 'Terminal' },
-  { to: '/storage',   label: 'Storage' },
+  { to: '/collections', label: 'Collections' },
+  { to: '/schemas',     label: 'Schemas' },
+  { to: '/workflows',   label: 'Workflows' },
+  { to: '/runs',        label: 'Runs' },
+  { to: '/terminal',    label: 'Terminal' },
+  { to: '/storage',     label: 'Storage' },
 ]
 
 function SyncMessage({ result, error, op }: { result: SyncResult | null; error: string | null; op: 'push' | 'pull' }) {
@@ -40,6 +51,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
   const [lastOp, setLastOp] = useState<'push' | 'pull'>('push')
+  const [aiOpen, setAiOpen] = useState(false)
 
   const { data: remote } = useQuery({
     queryKey: ['remote-status'],
@@ -84,6 +96,18 @@ export default function Layout({ children }: { children: ReactNode }) {
           Refresh
         </button>
 
+        <button
+          onClick={() => setAiOpen(o => !o)}
+          title="Open AI assistant"
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
+            aiOpen
+              ? 'border-[#0969da] bg-[#0969da] text-white'
+              : 'border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3]'
+          }`}
+        >
+          ✦ Ask AI
+        </button>
+
         {isDesktop && (
           <div className="flex items-center gap-1 ml-2">
             <button
@@ -105,6 +129,19 @@ export default function Layout({ children }: { children: ReactNode }) {
                 <path d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2z"/>
               </svg>
               New project
+            </button>
+            <button
+              onClick={async () => {
+                const r = await window.pywebview!.api.open_data_dir()
+                if (r?.error) window.alert(r.error)
+              }}
+              title={`${fileManagerLabel()} — open this project's database directory`}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+                <path d="M1.75 3A1.75 1.75 0 0 0 0 4.75v6.5C0 12.216.784 13 1.75 13h12.5A1.75 1.75 0 0 0 16 11.25v-5.5A1.75 1.75 0 0 0 14.25 4H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 2.26 5.55 2 5 2H1.75z"/>
+              </svg>
+              {fileManagerLabel()}
             </button>
           </div>
         )}
@@ -185,6 +222,8 @@ export default function Layout({ children }: { children: ReactNode }) {
       <main className="flex-1 px-6 py-6 max-w-5xl w-full mx-auto">
         {children}
       </main>
+
+      <AiPanel open={aiOpen} onClose={() => setAiOpen(false)} />
     </div>
   )
 }

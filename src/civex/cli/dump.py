@@ -113,7 +113,7 @@ def dump(
     console.print(f"  Plugins    {len(plugins_out)}")
     if file_refs:
         console.print(
-            f"  [warning]File references: {file_refs} — copy .civex/objects/ to restore file content.[/warning]"
+            f"  [warning]File references: {file_refs} — copy _civex/objects/ to restore file content.[/warning]"
         )
 
 
@@ -199,7 +199,7 @@ def restore(
     if file_field_count:
         console.print(
             f"  [warning]{file_field_count} file reference(s) restored. "
-            f"Copy .civex/objects/ to make file content accessible.[/warning]"
+            f"Copy _civex/objects/ to make file content accessible.[/warning]"
         )
 
     # --- workflows ---

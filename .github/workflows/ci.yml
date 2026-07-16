@@ -40,4 +40,4 @@ jobs:
         run: pip install -e ".[server,workflows,dev]"
 
       - name: Run tests
-        run: pytest tests/ -x -q --ignore=tests/bench_indexes.py
+        run: pytest tests/ -x -q --cov=civex --cov-report=term-missing --cov-fail-under=30

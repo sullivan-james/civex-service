@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
-import DatasetsPage from './pages/DatasetsPage'
-import DatasetDetailPage from './pages/DatasetDetailPage'
+import CollectionsPage from './pages/CollectionsPage'
+import CollectionDetailPage from './pages/CollectionDetailPage'
 import SchemasPage from './pages/SchemasPage'
 import SchemaDetailPage from './pages/SchemaDetailPage'
 import RecordDetailPage from './pages/RecordDetailPage'
@@ -15,15 +15,21 @@ export default function App() {
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<Navigate to="/datasets" replace />} />
-        <Route path="/datasets" element={<DatasetsPage />} />
-        <Route path="/datasets/:id" element={<DatasetDetailPage />} />
+        <Route path="/" element={<Navigate to="/collections" replace />} />
+        <Route path="/collections" element={<CollectionsPage />} />
+        <Route path="/collections/:id" element={<CollectionDetailPage />} />
+        {/* Legacy redirects */}
+        <Route path="/datasets" element={<Navigate to="/collections" replace />} />
+        <Route path="/datasets/:id" element={<Navigate to="/collections" replace />} />
         <Route path="/schemas" element={<SchemasPage />} />
         <Route path="/schemas/:id" element={<SchemaDetailPage />} />
         <Route path="/records/:id" element={<RecordDetailPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
-        <Route path="/jobs" element={<JobsPage />} />
-        <Route path="/jobs/:id" element={<JobDetailPage />} />
+        <Route path="/runs" element={<JobsPage />} />
+        <Route path="/runs/:id" element={<JobDetailPage />} />
+        {/* Legacy redirects */}
+        <Route path="/jobs" element={<Navigate to="/runs" replace />} />
+        <Route path="/jobs/:id" element={<Navigate to="/runs" replace />} />
         <Route path="/terminal" element={<TerminalPage />} />
         <Route path="/storage" element={<StorePage />} />
       </Routes>

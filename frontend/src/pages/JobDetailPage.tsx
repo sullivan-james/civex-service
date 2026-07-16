@@ -31,7 +31,7 @@ export default function JobDetailPage() {
 
   if (isLoading) return <LoadingState />
   if (error)     return <ErrorState message={error.message} />
-  if (!job)      return <ErrorState message="Job not found" />
+  if (!job)      return <ErrorState message="Run not found" />
 
   const isActive = job.status === 'pending' || job.status === 'running'
 
@@ -39,7 +39,7 @@ export default function JobDetailPage() {
     <div className="space-y-6">
       {/* Breadcrumb */}
       <nav className="text-sm text-[#656d76]">
-        <Link to="/jobs" className="text-[#0969da] hover:underline">Jobs</Link>
+        <Link to="/runs" className="text-[#0969da] hover:underline">Runs</Link>
         <span className="mx-2">/</span>
         <span className="font-mono">{job.id.slice(0, 8)}…</span>
       </nav>
@@ -57,7 +57,7 @@ export default function JobDetailPage() {
             size="sm"
             disabled={rerun.isPending}
             onClick={() =>
-              rerun.mutateAsync(job.id).then(newJob => navigate(`/jobs/${newJob.id}`))
+              rerun.mutateAsync(job.id).then(newJob => navigate(`/runs/${newJob.id}`))
             }
           >
             {rerun.isPending ? '↻ Re-running…' : '↻ Re-run'}

@@ -21,7 +21,7 @@ pip install -e ".[postgres,workflows,server]" # everything
 ```bash
 # CLI
 civex --help
-civex init                    # create a .civex/ project in the current directory
+civex init                    # create a _civex/ project in the current directory
 civex serve                   # start HTTP API (requires [server] extra)
 civex serve --reload          # dev mode with auto-reload
 
@@ -51,7 +51,7 @@ src/civex/
     session.py   # Engine factory; engine is cached, session is per-request
   plugins/
     base.py      # BasePlugin ABC + WorkflowContext dataclass
-    registry.py  # Discovers built-ins and user plugins from .civex/plugins/
+    registry.py  # Discovers built-ins and user plugins from _civex/plugins/
     builtins/    # Built-in plugins (see Built-in plugins section below)
   workflows/
     definition.py  # Pydantic models for YAML workflow files
@@ -59,7 +59,7 @@ src/civex/
   server/
     app.py       # FastAPI app factory
     routers/     # One router per resource: schemas, datasets, records, files, workflows, ui
-  config.py      # find_project_root() walks up from cwd; load_config() reads .civex/config.toml
+  config.py      # find_project_root() walks up from cwd; load_config() reads _civex/config.toml
   context.py     # AppContext dataclass + build_local_context() factory
   console.py     # Rich Console instance used across CLI
 ```
@@ -80,7 +80,7 @@ src/civex/
 
 Record `data` is stored as a JSON/JSONB dict (no EAV). Field types: `integer | float | string | boolean | date | datetime | file | file_list | reference`.
 
-- `file` / `file_list`: record stores `FileRef` dict(s) `{sha256, filename, size}`; bytes live in `.civex/objects/<sha256[:2]>/<sha256[2:]>` (git object store layout).
+- `file` / `file_list`: record stores `FileRef` dict(s) `{sha256, filename, size}`; bytes live in `_civex/objects/<sha256[:2]>/<sha256[2:]>` (git object store layout).
 - `date`: stored as ISO date string (`YYYY-MM-DD`). `datetime`: stored as UTC ISO string. Naive datetimes are assumed UTC on ingest (`_parse_datetime` in `record_service.py`).
 - `reference`: stores the UUID of another record as a string. The target schema is enforced via a `schema` restriction.
 - `file_list`: stores a list of `FileRef` dicts.
@@ -103,7 +103,7 @@ Each field carries a `restrictions: dict[str, Any]` validated at write time by `
 
 ### Workflow execution
 
-`executor.run()` topologically sorts steps (Kahn's algorithm), resolves `step_id.output_name` input references, and calls each plugin's `run()` in order. `ctx.commit()` is called once at the end. Custom plugins are discovered from `.civex/plugins/*.py` and must define a class named `Plugin` subclassing `BasePlugin`.
+`executor.run()` topologically sorts steps (Kahn's algorithm), resolves `step_id.output_name` input references, and calls each plugin's `run()` in order. `ctx.commit()` is called once at the end. Custom plugins are discovered from `_civex/plugins/*.py` and must define a class named `Plugin` subclassing `BasePlugin`.
 
 Workflow triggers fire via `trigger_for_record()` in `WorkflowJobService`. When a record is **created**, both `record_created` and `record_updated` are fired — but `record_updated` only includes fields with non-null values in `changed_fields`, so field-restricted triggers (`fields: [some_field]`) do not fire unless that field was actually set to a non-null value on creation.
 

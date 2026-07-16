@@ -15,6 +15,7 @@ A command-line research data management system. Define schemas, collect records 
 - [Workflows](#workflows)
 - [Plugins](#plugins)
 - [Web UI & server](#web-ui--server)
+- [Logging & telemetry](#logging--telemetry)
 - [Remote sync & CivexHub](#remote-sync--civexhub)
 - [PostgreSQL](#postgresql)
 - [Architecture](#architecture)
@@ -73,10 +74,10 @@ civex serve                                         # open http://localhost:8000
 civex init [PATH]
 ```
 
-Creates a `.civex/` directory at `PATH` (default: current directory):
+Creates a `_civex/` directory at `PATH` (default: current directory):
 
 ```
-.civex/
+_civex/
   config.toml     # database URL and optional remote config
   civex.db        # SQLite database (default)
   objects/        # content-addressed file storage (git-style)
@@ -84,7 +85,7 @@ Creates a `.civex/` directory at `PATH` (default: current directory):
   plugins/        # user-written custom plugins
 ```
 
-All other commands walk up from the current directory to find `.civex/`, the same way `git` finds `.git/`.
+All other commands walk up from the current directory to find `_civex/`, the same way `git` finds `.git/`.
 
 ---
 
@@ -189,7 +190,7 @@ civex record update 0c45e37f
 civex record delete 0c45e37f --yes
 ```
 
-**File fields:** for fields of type `file`, provide a local file path when prompted. The file is read, hashed (SHA-256), and stored content-addressed in `.civex/objects/`. Identical files are stored once.
+**File fields:** for fields of type `file`, provide a local file path when prompted. The file is read, hashed (SHA-256), and stored content-addressed in `_civex/objects/`. Identical files are stored once.
 
 ```bash
 civex schema add-field trial raw_data --type file
@@ -201,13 +202,13 @@ civex record add --to pilot-study --schema trial
 #   subject (string) [required]: S04
 ```
 
-The record stores a reference `{sha256, filename, size}` — the bytes live in `.civex/objects/<sha256[:2]>/<sha256[2:]>`.
+The record stores a reference `{sha256, filename, size}` — the bytes live in `_civex/objects/<sha256[:2]>/<sha256[2:]>`.
 
 ---
 
 ## Workflows
 
-A workflow is a YAML file in `.civex/workflows/` that defines a pipeline of plugin steps. Workflows are version-controllable, portable, and local-first — they run on your machine against your data.
+A workflow is a YAML file in `_civex/workflows/` that defines a pipeline of plugin steps. Workflows are version-controllable, portable, and local-first — they run on your machine against your data.
 
 ```bash
 civex workflow list
@@ -262,7 +263,7 @@ civex record add --to study --schema experiment
 #   raw_data (file) []: /path/to/data.csv
 
 # 3. Create the workflow
-cat > .civex/workflows/import-rows.yaml << 'EOF'
+cat > _civex/workflows/import-rows.yaml << 'EOF'
 name: import-rows
 description: Create one record per CSV row
 steps:
@@ -309,10 +310,10 @@ Plugins are the individual steps within a workflow. Each plugin takes named inpu
 
 ### Writing a custom plugin
 
-Create a Python file in `.civex/plugins/`. It must define a class named `Plugin` that subclasses `BasePlugin`:
+Create a Python file in `_civex/plugins/`. It must define a class named `Plugin` that subclasses `BasePlugin`:
 
 ```python
-# .civex/plugins/normalise.py
+# _civex/plugins/normalise.py
 from typing import Any
 from pydantic import BaseModel
 from civex.plugins.base import BasePlugin, WorkflowContext
@@ -351,7 +352,7 @@ steps:
       factor: 0.001
 ```
 
-Custom plugins are discovered automatically from `.civex/plugins/*.py` when `civex workflow run` executes. They are never sent to a server.
+Custom plugins are discovered automatically from `_civex/plugins/*.py` when `civex workflow run` executes. They are never sent to a server.
 
 ### WorkflowContext
 
@@ -382,6 +383,91 @@ Starts a local HTTP server (default `http://127.0.0.1:8000`) with:
 
 The server requires the `[server]` extra (included in the `pipx install` command above).
 
+### Security model
+
+`civex serve` is **local-first, like `git`** — it runs for a single trusted user on your own machine and has **no authentication**. By default it binds to loopback (`127.0.0.1`) and a middleware guards the two attack classes that still apply to a localhost server open in a browser:
+
+- **DNS rebinding** — requests whose `Host` header isn't a loopback name are rejected.
+- **CSRF** — state-changing requests (`POST`/`PUT`/`PATCH`/`DELETE`) carrying a non-loopback `Origin` are rejected.
+
+To expose the server to other machines you must opt in explicitly:
+
+```bash
+civex serve --host 0.0.0.0 --allow-remote
+```
+
+`--allow-remote` stands the guard down and prints a warning. Because there is still no authentication, only do this on a trusted network **behind a reverse proxy or firewall**.
+
+---
+
+## Logging & telemetry
+
+civex writes **structured logs** locally and can optionally send **crash reports** to an error-tracking service. The two are separate:
+
+- **Logging** — a local record of what happened. On by default. Stays on your machine.
+- **Telemetry** — crash reports sent off your machine so the maintainer can see errors across installs. **Off by default**, opt-in only.
+
+### Logging (default)
+
+When you run `civex serve`, logs go to two places:
+
+- **Console** — human-readable, colored output when attached to a terminal; single-line JSON when piped or captured.
+- **File** — rotating JSON lines at `_civex/logs/civex.log` (5 MB × 3 backups), ideal for grepping or shipping to a log tool.
+
+Every HTTP request gets a correlation id (returned in the `X-Request-ID` response header and attached to every log line for that request). Values that look like credentials (`api_key`, `token`, `authorization`, `password`, …) are automatically redacted to `***` before anything is written. The `_civex/logs/` directory is git-ignored.
+
+Set the level from the CLI (overrides config):
+
+```bash
+civex serve --log-level DEBUG      # DEBUG | INFO | WARNING | ERROR
+```
+
+Or configure it in `_civex/config.toml`:
+
+```toml
+[logging]
+level = "INFO"          # default INFO
+json_console = false    # omit for auto (color on a TTY, JSON otherwise)
+to_file = true          # write _civex/logs/civex.log
+```
+
+Inspect the log file directly:
+
+```bash
+tail -f _civex/logs/civex.log
+cat _civex/logs/civex.log | jq 'select(.level == "error")'   # errors only
+```
+
+### Error responses
+
+Expected errors (not found, validation, conflicts) return a clear message and the right HTTP status. Unexpected server errors return a **generic** `500 {"detail": "Internal server error", "request_id": "..."}` — the full traceback is written to the logs only, never leaked to the client. Quote the `request_id` when reporting a problem to find the matching log line.
+
+### Telemetry (opt-in crash reporting)
+
+Nothing is sent off your machine unless you turn this on. It uses [Sentry](https://sentry.io) and reports only exception stack traces (no request bodies, `send_default_pii=False`, no performance tracing).
+
+1. Install the extra:
+
+   ```bash
+   pip install "civex[telemetry]"        # or: pipx inject civex sentry-sdk
+   ```
+
+2. Provide a DSN — either in `_civex/config.toml`:
+
+   ```toml
+   [telemetry]
+   dsn = "https://<key>@<org>.ingest.sentry.io/<project>"
+   environment = "local"
+   ```
+
+   or via an environment variable (takes effect without editing config):
+
+   ```bash
+   export CIVEX_SENTRY_DSN="https://<key>@<org>.ingest.sentry.io/<project>"
+   ```
+
+With no DSN (the default), telemetry is a no-op even if the extra is installed.
+
 ---
 
 ## Remote sync & CivexHub
@@ -404,7 +490,7 @@ civex push    # send local commits to the hub
 civex pull    # fetch hub commits into the local project
 ```
 
-The remote URL is stored in `.civex/config.toml` and is read by every push/pull.
+The remote URL is stored in `_civex/config.toml` and is read by every push/pull.
 
 ---
 
@@ -521,7 +607,7 @@ docker stop civex-pg && docker rm civex-pg
 
 ### Connecting civex to it
 
-Edit `.civex/config.toml`:
+Edit `_civex/config.toml`:
 
 ```toml
 [db]
@@ -575,9 +661,9 @@ civex-service/
 - `repositories/local` → `db/models`. The only layer that touches SQLAlchemy models.
 - `domain` has no imports from the rest of civex — it is always safe to import anywhere.
 
-**File storage** mirrors the git object store: `.civex/objects/<sha256[:2]>/<sha256[2:]>`. Content-addressed and idempotent — the same file uploaded twice is stored once.
+**File storage** mirrors the git object store: `_civex/objects/<sha256[:2]>/<sha256[2:]>`. Content-addressed and idempotent — the same file uploaded twice is stored once.
 
-**Workflow execution** is git-hook-like: definitions are YAML files in `.civex/workflows/`, checked into version control alongside your data config. The executor runs a topological sort of steps, resolves `step_id.output_name` input references, and calls each plugin's `run()` in order.
+**Workflow execution** is git-hook-like: definitions are YAML files in `_civex/workflows/`, checked into version control alongside your data config. The executor runs a topological sort of steps, resolves `step_id.output_name` input references, and calls each plugin's `run()` in order.
 
 ---
 

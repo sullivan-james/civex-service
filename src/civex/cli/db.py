@@ -240,12 +240,12 @@ def setup_docker() -> None:
     """Set up a Docker-managed PostgreSQL container for this civex project.
 
     Starts (or reuses) a named postgres:16 container, then updates
-    .civex/config.toml with the new URL and creates all tables.
+    _civex/config.toml with the new URL and creates all tables.
     Useful for migrating an existing SQLite project to PostgreSQL.
     """
     from civex.cli._docker import docker_available, setup_docker_postgres
     from civex.config import Config, DBConfig, find_project_root, save_config
-    from civex.db.models import Base
+    from civex.db.migrate import ensure_schema_current
     from sqlalchemy import create_engine
 
     # Ensure Docker is running
@@ -280,18 +280,18 @@ def setup_docker() -> None:
         raise typer.Exit(1)
     console.print("[success]OK[/success]")
 
-    # Write config (create .civex structure if this is a new project)
+    # Write config (create _civex structure if this is a new project)
     is_new = root is None
     if is_new:
         root = Path.cwd()
-        civex_dir = root / ".civex"
+        civex_dir = root / "_civex"
         civex_dir.mkdir(parents=True)
         (civex_dir / "objects").mkdir()
         (civex_dir / "workflows").mkdir()
         (civex_dir / "plugins").mkdir()
         console.print(f"\nInitialized civex project at [bold]{root}[/bold]")
     else:
-        civex_dir = root / ".civex"
+        civex_dir = root / "_civex"
 
     try:
         from civex.config import load_config
@@ -306,7 +306,7 @@ def setup_docker() -> None:
     console.print("Creating tables...", end="    ")
     try:
         engine = create_engine(db_url)
-        Base.metadata.create_all(engine)
+        ensure_schema_current(engine)
         engine.dispose()
         console.print("[success]OK[/success]")
     except Exception as exc:
@@ -338,11 +338,11 @@ def setup_postgres(
     """Configure civex to use a PostgreSQL database.
 
     Auto-detects a local PostgreSQL server, creates the database and user role
-    if needed, then writes the URL to .civex/config.toml and creates all tables.
+    if needed, then writes the URL to _civex/config.toml and creates all tables.
     Pass [bold]--url[/bold] to skip interactive prompts (useful in scripts/CI).
     """
     from civex.config import Config, DBConfig, find_project_root, save_config
-    from civex.db.models import Base
+    from civex.db.migrate import ensure_schema_current
     from sqlalchemy import create_engine
 
     # ---- Phase 1: Ensure a Python driver ------------------------------------
@@ -402,14 +402,14 @@ def setup_postgres(
     is_new = root is None
     if is_new:
         root = Path.cwd()
-        civex_dir = root / ".civex"
+        civex_dir = root / "_civex"
         civex_dir.mkdir(parents=True)
         (civex_dir / "objects").mkdir()
         (civex_dir / "workflows").mkdir()
         (civex_dir / "plugins").mkdir()
         console.print(f"\nInitialized civex project at [bold]{root}[/bold]")
     else:
-        civex_dir = root / ".civex"
+        civex_dir = root / "_civex"
 
     try:
         from civex.config import load_config
@@ -424,7 +424,7 @@ def setup_postgres(
     console.print("Creating tables...", end="    ")
     try:
         engine = create_engine(db_url)
-        Base.metadata.create_all(engine)
+        ensure_schema_current(engine)
         engine.dispose()
         console.print("[success]OK[/success]")
     except Exception as exc:
@@ -440,7 +440,7 @@ def setup_postgres(
         console.print(f"  Objects    {civex_dir / 'objects'}")
         console.print(f"  Workflows  {civex_dir / 'workflows'}")
         console.print(f"  Plugins    {civex_dir / 'plugins'}")
-    console.print("\n[dim]Note: credentials are stored in plaintext in .civex/config.toml.[/dim]")
+    console.print("\n[dim]Note: credentials are stored in plaintext in _civex/config.toml.[/dim]")
 
 
 def _run_wizard(driver: str) -> tuple[str, str]:
@@ -509,3 +509,62 @@ def _prompt_manual(
     user = typer.prompt("  User", default=default_user)
     password = typer.prompt("  Password (blank for passwordless)", default="", hide_input=True)
     return _tcp_url(driver, user, password, host, port, dbname), f"{host}:{port}/{dbname}"
+
+
+# ---------------------------------------------------------------------------
+# Migrations
+# ---------------------------------------------------------------------------
+#
+# civex applies pending migrations automatically the first time each process
+# connects (see civex.db.migrate.ensure_schema_current, called from
+# build_local_context). These commands are an explicit escape hatch: check
+# status without touching the DB, or force the upgrade before a deploy
+# instead of letting it happen implicitly on next connect.
+
+@app.command("current")
+def current() -> None:
+    """Show the database's current migration revision and whether it's up to date."""
+    from alembic.script import ScriptDirectory
+    from sqlalchemy import create_engine, inspect
+
+    from civex.config import load_config
+    from civex.db.migrate import _MIGRATIONS_DIR
+
+    config = load_config()
+    engine = create_engine(config.db.url)
+
+    script = ScriptDirectory(str(_MIGRATIONS_DIR))
+    head = script.get_current_head()
+
+    with engine.connect() as connection:
+        tables = inspect(connection).get_table_names()
+        if "alembic_version" not in tables:
+            console.print("[warning]Not yet migrated[/warning] — will be created/stamped on next connect.")
+            raise typer.Exit(0)
+        row = connection.exec_driver_sql("SELECT version_num FROM alembic_version").fetchone()
+        current_rev = row[0] if row else None
+
+    if current_rev == head:
+        console.print(f"[success]Up to date[/success] at revision {current_rev}")
+    else:
+        console.print(f"[warning]Pending migrations[/warning]: at {current_rev}, head is {head}")
+
+
+@app.command("migrate")
+def migrate() -> None:
+    """Apply any pending migrations now, instead of waiting for the next connect."""
+    from sqlalchemy import create_engine
+
+    from civex.config import load_config
+    from civex.db.migrate import ensure_schema_current
+
+    config = load_config()
+    engine = create_engine(config.db.url)
+    console.print("Applying migrations...", end="    ")
+    try:
+        ensure_schema_current(engine)
+    except Exception as exc:
+        console.print("[error]FAILED[/error]")
+        console.print(f"[error]{exc}[/error]")
+        raise typer.Exit(1)
+    console.print("[success]OK[/success]")

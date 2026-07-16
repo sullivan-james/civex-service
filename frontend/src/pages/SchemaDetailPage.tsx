@@ -1,14 +1,16 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { utcToDatetimeLocal, datetimeLocalToUTC } from '../utils/dates'
-import { useSchema, useUpdateSchema, useAddField, useUpdateField, useDeleteSchema, useDeleteField, useSchemas } from '../hooks/useSchemas'
+import { useSchema, useUpdateSchema, useAddField, useUpdateField, useDeleteSchema, useDeleteField, useSchemas, useReorderFields } from '../hooks/useSchemas'
 import {
   Button, Badge,
   Table, Thead, Th, Tbody, Tr, Td,
   LoadingState, ErrorState,
 } from '../components/ui'
 
-const FIELD_TYPES = ['string', 'integer', 'float', 'boolean', 'date', 'datetime', 'file', 'reference']
+const FIELD_TYPES = ['string', 'integer', 'float', 'boolean', 'date', 'datetime', 'file', 'file_list', 'reference', 'enum', 'url', 'reference_list', 'tags']
+
+const NON_DEFAULT_TYPES = new Set(['file', 'file_list', 'reference', 'reference_list'])
 
 // --- Inline metadata editor ---
 
@@ -72,7 +74,7 @@ function RestrictionsSummary({ restrictions, type }: { restrictions: Record<stri
     if (restrictions.min !== undefined) parts.push(`min ${restrictions.min}`)
     if (restrictions.max !== undefined) parts.push(`max ${restrictions.max}`)
   }
-  if (type === 'string') {
+  if (type === 'string' || type === 'enum') {
     if (Array.isArray(restrictions.choices)) parts.push(`choices: ${(restrictions.choices as string[]).join(', ')}`)
     if (restrictions.max_length !== undefined) parts.push(`max ${restrictions.max_length} chars`)
   }
@@ -99,12 +101,13 @@ function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () =
   const [fieldName, setFieldName] = useState('')
   const [type, setType] = useState('string')
   const [required, setRequired] = useState(false)
+  const [defaultVal, setDefaultVal] = useState('')
   // reference
   const [refSchema, setRefSchema] = useState('')
   // integer/float
   const [minVal, setMinVal] = useState('')
   const [maxVal, setMaxVal] = useState('')
-  // string
+  // string/enum
   const [choices, setChoices] = useState('')
   const [maxLength, setMaxLength] = useState('')
   // file/file_list
@@ -118,9 +121,11 @@ function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () =
   const { data: allSchemas } = useSchemas()
 
   const canAdd = !!fieldName.trim() && (type !== 'reference' || !!refSchema)
+  const showDefault = !NON_DEFAULT_TYPES.has(type)
 
   function handleTypeChange(t: string) {
     setType(t)
+    setDefaultVal('')
     setRefSchema(''); setMinVal(''); setMaxVal(''); setChoices(''); setMaxLength(''); setAccept(''); setMaxSize(''); setMinDate(''); setMaxDate('')
   }
 
@@ -131,7 +136,7 @@ function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () =
       if (minVal !== '') r.min = type === 'integer' ? parseInt(minVal) : parseFloat(minVal)
       if (maxVal !== '') r.max = type === 'integer' ? parseInt(maxVal) : parseFloat(maxVal)
     }
-    if (type === 'string') {
+    if (type === 'string' || type === 'enum') {
       if (choices.trim()) r.choices = choices.split(',').map(c => c.trim()).filter(Boolean)
       if (maxLength !== '') r.max_length = parseInt(maxLength)
     }
@@ -152,8 +157,17 @@ function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () =
 
   function handleAdd() {
     if (!canAdd) return
+    const body: Parameters<typeof addField.mutate>[0] = {
+      name: fieldName.trim(),
+      type,
+      required,
+      restrictions: buildRestrictions(),
+    }
+    if (showDefault && defaultVal !== '') {
+      body.default = defaultVal
+    }
     addField.mutate(
-      { name: fieldName.trim(), type, required, restrictions: buildRestrictions() },
+      body,
       { onSuccess: () => { setFieldName(''); handleTypeChange('string'); setRequired(false); onDone() } },
     )
   }
@@ -201,6 +215,21 @@ function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () =
         </div>
       </div>
 
+      {/* Default value */}
+      {showDefault && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            Default value
+            <input
+              value={defaultVal}
+              onChange={e => setDefaultVal(e.target.value)}
+              placeholder="none"
+              className={`${inputSm} w-40`}
+            />
+          </label>
+        </div>
+      )}
+
       {/* Row 2: type-specific restrictions */}
       {(type === 'integer' || type === 'float') && (
         <div className="flex items-center gap-3 flex-wrap">
@@ -215,17 +244,19 @@ function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () =
           </label>
         </div>
       )}
-      {type === 'string' && (
+      {(type === 'string' || type === 'enum') && (
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Choices (comma-separated)
             <input value={choices} onChange={e => setChoices(e.target.value)} placeholder="e.g. left,right,bilateral" className={`${inputSm} w-52`} />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
-            Max length
-            <input type="number" step="1" min="1" value={maxLength} onChange={e => setMaxLength(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
-          </label>
+          {type === 'string' && (
+            <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+              Max length
+              <input type="number" step="1" min="1" value={maxLength} onChange={e => setMaxLength(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
+            </label>
+          )}
         </div>
       )}
       {(type === 'file' || type === 'file_list') && (
@@ -292,7 +323,7 @@ function FieldEditForm({ field, schemaName, onDone }: { field: { id: string; nam
       if (minVal !== '') r.min = field.type === 'integer' ? parseInt(minVal) : parseFloat(minVal)
       if (maxVal !== '') r.max = field.type === 'integer' ? parseInt(maxVal) : parseFloat(maxVal)
     }
-    if (field.type === 'string') {
+    if (field.type === 'string' || field.type === 'enum') {
       if (choices.trim()) r.choices = choices.split(',').map(c => c.trim()).filter(Boolean)
       if (maxLength !== '') r.max_length = parseInt(maxLength)
     }
@@ -362,17 +393,19 @@ function FieldEditForm({ field, schemaName, onDone }: { field: { id: string; nam
           </label>
         </div>
       )}
-      {dtype === 'string' && (
+      {(dtype === 'string' || dtype === 'enum') && (
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Choices (comma-separated)
             <input value={choices} onChange={e => setChoices(e.target.value)} placeholder="none" className={`${inputSm} w-52`} />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
-            Max length
-            <input type="number" step="1" min="1" value={maxLength} onChange={e => setMaxLength(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
-          </label>
+          {dtype === 'string' && (
+            <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+              Max length
+              <input type="number" step="1" min="1" value={maxLength} onChange={e => setMaxLength(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
+            </label>
+          )}
         </div>
       )}
       {(dtype === 'file' || dtype === 'file_list') && (
@@ -414,6 +447,8 @@ export default function SchemaDetailPage() {
   const [editing, setEditing] = useState(false)
   const [addingField, setAddingField] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [dragSrcIndex, setDragSrcIndex] = useState<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
   // Fetch by UUID — name changes don't affect the URL
   const { data: schema, isLoading, error } = useSchema(id!)
@@ -422,11 +457,49 @@ export default function SchemaDetailPage() {
   const deleteField = useDeleteField(schema?.name ?? '')
   const deleteSchema = useDeleteSchema()
   const updateSchema = useUpdateSchema(schema?.name ?? '')
+  const reorderFields = useReorderFields(schema?.name ?? '')
   const [editingField, setEditingField] = useState<string | null>(null)
   const [confirmDeleteField, setConfirmDeleteField] = useState<string | null>(null)
 
   function setDisplayField(fieldName: string | null) {
     updateSchema.mutate({ display_field: fieldName })
+  }
+
+  const handleDragStart = useCallback((index: number) => {
+    setDragSrcIndex(index)
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
+    e.preventDefault()
+    setDragOverIndex(index)
+  }, [])
+
+  const handleDrop = useCallback((index: number) => {
+    if (dragSrcIndex === null || dragSrcIndex === index || !schema) {
+      setDragSrcIndex(null)
+      setDragOverIndex(null)
+      return
+    }
+    const newOrder = [...schema.fields]
+    const [moved] = newOrder.splice(dragSrcIndex, 1)
+    newOrder.splice(index, 0, moved)
+    reorderFields.mutate(newOrder.map(f => f.id))
+    setDragSrcIndex(null)
+    setDragOverIndex(null)
+  }, [dragSrcIndex, schema, reorderFields])
+
+  const handleDragEnd = useCallback(() => {
+    setDragSrcIndex(null)
+    setDragOverIndex(null)
+  }, [])
+
+  function moveField(index: number, direction: 'up' | 'down') {
+    if (!schema) return
+    const newOrder = [...schema.fields]
+    const targetIndex = direction === 'up' ? index - 1 : index + 1
+    if (targetIndex < 0 || targetIndex >= newOrder.length) return
+    ;[newOrder[index], newOrder[targetIndex]] = [newOrder[targetIndex], newOrder[index]]
+    reorderFields.mutate(newOrder.map(f => f.id))
   }
 
   if (isLoading) return <LoadingState />
@@ -487,36 +560,80 @@ export default function SchemaDetailPage() {
         <Table>
           <Thead>
             <tr>
+              <Th className="w-8" />
               <Th>Name</Th>
               <Th>Type</Th>
               <Th>Required</Th>
-              <Th className="w-20" />
+              <Th className="w-24" />
             </tr>
           </Thead>
           <Tbody>
             {schema.fields.length === 0 && !addingField && (
-              <Tr><td colSpan={4} className="px-4 py-3 text-sm text-[#656d76] italic">No fields yet.</td></Tr>
+              <Tr><td colSpan={5} className="px-4 py-3 text-sm text-[#656d76] italic">No fields yet.</td></Tr>
             )}
-            {schema.fields.map(field => (
+            {schema.fields.map((field, index) => (
               editingField === field.name ? (
-                <Tr key={field.id}>
-                  <td colSpan={4} className="p-0">
+                <tr key={field.id} className="bg-white">
+                  <td colSpan={5} className="p-0">
                     <FieldEditForm
                       field={field}
                       schemaName={schema.name}
                       onDone={() => setEditingField(null)}
                     />
                   </td>
-                </Tr>
+                </tr>
               ) : (
-                <Tr key={field.id}>
+                <tr
+                  key={field.id}
+                  draggable
+                  onDragStart={() => handleDragStart(index)}
+                  onDragOver={(e: React.DragEvent) => handleDragOver(e, index)}
+                  onDrop={() => handleDrop(index)}
+                  onDragEnd={handleDragEnd}
+                  className={`bg-white transition-colors ${
+                    dragOverIndex === index && dragSrcIndex !== index
+                      ? 'bg-[#ddf4ff] outline outline-2 outline-[#0969da]'
+                      : dragSrcIndex === index
+                      ? 'opacity-50'
+                      : ''
+                  }`}
+                >
+                  {/* Drag handle + reorder buttons */}
+                  <Td className="w-8 cursor-grab text-[#d0d7de] hover:text-[#656d76] select-none">
+                    <div className="flex flex-col items-center gap-0.5">
+                      <button
+                        type="button"
+                        title="Move up"
+                        disabled={index === 0 || reorderFields.isPending}
+                        onClick={() => moveField(index, 'up')}
+                        className="text-[10px] text-[#d0d7de] hover:text-[#1f2328] disabled:opacity-30 leading-none"
+                      >
+                        ▲
+                      </button>
+                      <span className="text-xs" title="Drag to reorder">⠿</span>
+                      <button
+                        type="button"
+                        title="Move down"
+                        disabled={index === schema.fields.length - 1 || reorderFields.isPending}
+                        onClick={() => moveField(index, 'down')}
+                        className="text-[10px] text-[#d0d7de] hover:text-[#1f2328] disabled:opacity-30 leading-none"
+                      >
+                        ▼
+                      </button>
+                    </div>
+                  </Td>
                   <Td>
-                    <span className="flex items-center gap-1.5">
-                      <span className="font-mono text-sm">{field.name}</span>
-                      {schema.display_field === field.name && (
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]" title="Display field — used as record name">
-                          display
-                        </span>
+                    <span className="flex flex-col gap-0.5">
+                      <span className="flex items-center gap-1.5">
+                        <span className="font-mono text-sm">{field.name}</span>
+                        {schema.display_field === field.name && (
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]" title="Display field — used as record name">
+                            display
+                          </span>
+                        )}
+                      </span>
+                      {field.default !== null && field.default !== undefined && (
+                        <span className="text-[11px] text-[#9a6700]">default: {String(field.default)}</span>
                       )}
                     </span>
                   </Td>
@@ -596,14 +713,14 @@ export default function SchemaDetailPage() {
                       )}
                     </span>
                   </Td>
-                </Tr>
+                </tr>
               )
             ))}
           </Tbody>
           {addingField && (
             <tfoot>
               <tr>
-                <td colSpan={4} className="p-0">
+                <td colSpan={5} className="p-0">
                   <AddFieldForm schemaName={schema.name} onDone={() => setAddingField(false)} />
                 </td>
               </tr>

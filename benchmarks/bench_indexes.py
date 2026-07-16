@@ -8,7 +8,7 @@ Measures the same queries before and after adding:
   - ix_records_data_gin        USING GIN (data)
 
 Usage:
-    PG_URL=postgresql://user:pass@localhost/mydb python tests/bench_indexes.py [--records N]
+    PG_URL=postgresql://user:pass@localhost/mydb python benchmarks/bench_indexes.py [--records N]
 
 The script drops and recreates its own tables, so the target DB must exist but
 can be empty. It cleans up after itself.

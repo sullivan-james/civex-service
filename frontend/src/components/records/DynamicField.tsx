@@ -332,6 +332,70 @@ export function DynamicField({ field, value, onChange }: Props) {
         </label>
       )
 
+    case 'enum': {
+      const enumChoices = field.restrictions?.choices
+      return (
+        <select
+          value={(value as string) ?? ''}
+          onChange={e => onChange(e.target.value)}
+          className={inputClass}
+        >
+          {!field.required && <option value="">— optional —</option>}
+          {Array.isArray(enumChoices)
+            ? (enumChoices as string[]).map(c => <option key={c} value={c}>{c}</option>)
+            : null
+          }
+        </select>
+      )
+    }
+
+    case 'url':
+      return (
+        <input
+          type="url"
+          value={(value as string) ?? ''}
+          onChange={e => onChange(e.target.value)}
+          placeholder={field.required ? 'https://example.com' : 'Optional URL'}
+          className={inputClass}
+        />
+      )
+
+    case 'reference_list': {
+      const listVal = Array.isArray(value)
+        ? (value as string[]).join(', ')
+        : ((value as string) ?? '')
+      return (
+        <input
+          type="text"
+          value={listVal}
+          onChange={e => {
+            const raw = e.target.value
+            onChange(raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : [])
+          }}
+          placeholder="Record IDs, comma-separated"
+          className={inputClass}
+        />
+      )
+    }
+
+    case 'tags': {
+      const tagsVal = Array.isArray(value)
+        ? (value as string[]).join(', ')
+        : ((value as string) ?? '')
+      return (
+        <input
+          type="text"
+          value={tagsVal}
+          onChange={e => {
+            const raw = e.target.value
+            onChange(raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : [])
+          }}
+          placeholder="Tags, comma-separated"
+          className={inputClass}
+        />
+      )
+    }
+
     case 'file':
       return <FileField field={field} value={value} onChange={onChange} />
 

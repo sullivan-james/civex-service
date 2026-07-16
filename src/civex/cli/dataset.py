@@ -13,7 +13,7 @@ from civex.console import console
 from civex.domain.dtos import SchemaDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError
 
-app = typer.Typer(help="Manage datasets (named containers for studies or investigations)")
+app = typer.Typer(help="Manage collections (named containers for studies or investigations)")
 
 
 @app.command("create")
@@ -21,12 +21,12 @@ def dataset_create(
     name: str = typer.Argument(...),
     description: Optional[str] = typer.Option(None, "--description", "-d"),
 ) -> None:
-    """Create a new dataset."""
+    """Create a new collection."""
     ctx = _ctx()
     try:
         dataset = ctx.dataset_svc.create(name, description=description)
         ctx.commit()
-        console.print(f"[success]Created dataset '{dataset.name}'.[/success]")
+        console.print(f"[success]Created collection '{dataset.name}'.[/success]")
     except AlreadyExistsError as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
@@ -34,11 +34,11 @@ def dataset_create(
 
 @app.command("list")
 def dataset_list() -> None:
-    """List all datasets."""
+    """List all collections."""
     ctx = _ctx()
     datasets = ctx.dataset_svc.list_all()
     if not datasets:
-        console.print("[info]No datasets yet. Use `civex dataset create` to add one.[/info]")
+        console.print("[info]No collections yet. Use `civex collection create` to add one.[/info]")
         return
 
     table = Table("Name", "Records", "Description")
@@ -49,7 +49,7 @@ def dataset_list() -> None:
 
 @app.command("show")
 def dataset_show(name: str = typer.Argument(...)) -> None:
-    """Show a dataset summary with record counts per schema."""
+    """Show a collection summary with record counts per schema."""
     ctx = _ctx()
     try:
         d = ctx.dataset_svc.get(name)
@@ -74,10 +74,10 @@ def dataset_show(name: str = typer.Argument(...)) -> None:
 @app.command("update")
 def dataset_update(
     name: str = typer.Argument(...),
-    rename: Optional[str] = typer.Option(None, "--rename", help="New name for the dataset"),
+    rename: Optional[str] = typer.Option(None, "--rename", help="New name for the collection"),
     description: Optional[str] = typer.Option(None, "--description", "-d"),
 ) -> None:
-    """Update a dataset's name or description."""
+    """Update a collection's name or description."""
     if rename is None and description is None:
         console.print("[error]Provide at least one of --rename or --description.[/error]")
         raise typer.Exit(1)
@@ -89,7 +89,7 @@ def dataset_update(
             console.print(
                 f"[warning]Workflow configs that reference '{name}' by name will need updating.[/warning]"
             )
-        console.print(f"[success]Updated dataset '{dataset.name}'.[/success]")
+        console.print(f"[success]Updated collection '{dataset.name}'.[/success]")
     except (NotFoundError, AlreadyExistsError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
@@ -100,9 +100,9 @@ def dataset_delete(
     name: str = typer.Argument(...),
     yes: bool = typer.Option(False, "--yes", "-y"),
 ) -> None:
-    """Delete a dataset and all its records."""
+    """Delete a collection and all its records."""
     if not yes:
-        typer.confirm(f"Delete dataset '{name}' and all its records?", abort=True)
+        typer.confirm(f"Delete collection '{name}' and all its records?", abort=True)
     ctx = _ctx()
     try:
         ctx.dataset_svc.delete(name)
@@ -115,7 +115,7 @@ def dataset_delete(
 
 @app.command("graph")
 def dataset_graph(name: str = typer.Argument(...)) -> None:
-    """Show the schema hierarchy for schemas present in a dataset."""
+    """Show the schema hierarchy for schemas present in a collection."""
     ctx = _ctx()
     try:
         ctx.dataset_svc.get(name)
@@ -125,7 +125,7 @@ def dataset_graph(name: str = typer.Argument(...)) -> None:
 
     records = ctx.record_svc.find(name, schema_name=None, filters=[], limit=100_000)
     if not records:
-        console.print("[info]Dataset has no records yet.[/info]")
+        console.print("[info]Collection has no records yet.[/info]")
         return
 
     schema_counts: Counter[uuid.UUID] = Counter(r.schema_id for r in records)

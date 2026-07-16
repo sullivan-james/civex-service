@@ -4,7 +4,7 @@ import {
   useWorkflows, useWorkflow, useSaveWorkflow,
   useDeleteWorkflow,
 } from '../hooks/useWorkflows'
-import { PageHeader, Button, Badge, LoadingState, ErrorState, EmptyState } from '../components/ui'
+import { PageHeader, Button, Badge, LoadingState, ErrorState } from '../components/ui'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import type { Workflow } from '../api/workflows'
 import { api } from '../api/client'
@@ -245,7 +245,18 @@ export default function WorkflowsPage() {
       />
 
       {!workflows?.length ? (
-        <EmptyState title="No workflows yet" message="Click '+ New workflow' to create one." />
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <svg width="40" height="40" viewBox="0 0 16 16" fill="none" className="mb-4 text-[#d0d7de]" aria-hidden>
+            <circle cx="3" cy="3" r="2" stroke="currentColor" strokeWidth="1.5"/>
+            <circle cx="13" cy="3" r="2" stroke="currentColor" strokeWidth="1.5"/>
+            <circle cx="8" cy="13" r="2" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M5 3h6M10.5 4.5l-2 7M5.5 4.5l2 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+          <h2 className="text-lg font-semibold text-[#1f2328] mb-2">No workflows yet</h2>
+          <p className="text-sm text-[#656d76] mb-6 max-w-sm">
+            Workflows automate data processing — they run when records are created or updated. Create a .yaml file in .civex/workflows/ to get started.
+          </p>
+        </div>
       ) : (
         <table className="w-full text-sm border-collapse">
           <thead>

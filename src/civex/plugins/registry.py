@@ -38,7 +38,7 @@ def discover_plugins(package) -> None:
 
 
 def discover_user_plugins(plugins_dir: Path) -> None:
-    """Load .py files from a user's .civex/plugins/ directory."""
+    """Load .py files from a user's _civex/plugins/ directory."""
     if not plugins_dir.exists():
         return
     for path in sorted(plugins_dir.glob("*.py")):

@@ -6,7 +6,7 @@ import typer
 from sqlalchemy import create_engine
 
 from civex.console import console
-from civex.db.models import Base
+from civex.db.migrate import ensure_schema_current
 from civex.project import scaffold_project
 
 
@@ -23,7 +23,7 @@ def init(
 
 
 def _init_working(target: Path, use_sqlite: bool = False) -> None:
-    civex_dir = target / ".civex"
+    civex_dir = target / "_civex"
 
     if civex_dir.exists():
         console.print("[warning]Already initialized.[/warning]")
@@ -118,7 +118,7 @@ def _init_bare(target: Path) -> None:
     marker.write_text("")
 
     engine = create_engine(db_url)
-    Base.metadata.create_all(engine)
+    ensure_schema_current(engine)
     engine.dispose()
 
     console.print(f"[success]Initialized bare civex repository at {target}[/success]")

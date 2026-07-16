@@ -36,7 +36,7 @@ export function useUpdateSchema(name: string) {
 export function useAddField(schemaName: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { name: string; type: string; required?: boolean; restrictions?: Record<string, unknown> }) =>
+    mutationFn: (body: { name: string; type: string; required?: boolean; restrictions?: Record<string, unknown>; default?: unknown }) =>
       schemasApi.addField(schemaName, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
   })
@@ -63,6 +63,14 @@ export function useDeleteField(schemaName: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (fieldName: string) => schemasApi.deleteField(schemaName, fieldName),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
+  })
+}
+
+export function useReorderFields(schemaName: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (order: string[]) => schemasApi.reorderFields(schemaName, order),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
   })
 }

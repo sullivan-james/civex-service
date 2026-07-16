@@ -17,7 +17,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from civex.console import console
-from civex.db.models import Base
+from civex.db.migrate import ensure_schema_current
 from civex.sync.importer import apply_bundle
 from civex.sync.transport import SyncError, get_transport
 
@@ -41,12 +41,12 @@ def clone(
     # Derive local directory name from the URL if not specified.
     if local_dir is None:
         last = url.rstrip("/").rsplit("/", 1)[-1]
-        if last.endswith(".civex"):
-            last = last[: -len(".civex")]
+        if last.endswith("_civex"):
+            last = last[: -len("_civex")]
         local_dir = Path(last or "civex-repo")
 
     local_dir = local_dir.resolve()
-    civex_dir = local_dir / ".civex"
+    civex_dir = local_dir / "_civex"
 
     if civex_dir.exists():
         console.print(f"[error]Directory {local_dir} is already a civex project.[/error]")
@@ -71,7 +71,7 @@ def clone(
     (civex_dir / "plugins").mkdir()
 
     engine = create_engine(db_url)
-    Base.metadata.create_all(engine)
+    ensure_schema_current(engine)
 
     with Session(engine) as session:
         apply_bundle(session, bundle)

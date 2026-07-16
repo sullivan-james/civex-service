@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, TypeDecorator, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, TypeDecorator, UniqueConstraint, nulls_last
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -71,7 +71,8 @@ class Schema(Base):
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
     fields: Mapped[list[Field]] = relationship(
-        "Field", back_populates="schema", cascade="all, delete-orphan", order_by="Field.created_at"
+        "Field", back_populates="schema", cascade="all, delete-orphan",
+        order_by=lambda: [nulls_last(Field.position), Field.created_at],
     )
     parent: Mapped[Schema | None] = relationship(
         "Schema", remote_side="Schema.id", back_populates="children"
@@ -94,6 +95,8 @@ class Field(Base):
     dtype: Mapped[str] = mapped_column(String(50), nullable=False)
     required: Mapped[bool] = mapped_column(Boolean, default=False)
     restrictions: Mapped[dict[str, Any]] = mapped_column(_JSON, default=dict)
+    default_value: Mapped[Any | None] = mapped_column(_JSON, nullable=True)
+    position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
     schema: Mapped[Schema] = relationship("Schema", back_populates="fields")
@@ -200,6 +203,7 @@ class WorkflowJob(Base):
     error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     log: Mapped[str | None] = mapped_column(String, nullable=True)
     input_data: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
     started_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)

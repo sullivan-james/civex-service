@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { useRecord, useRecords, useUpdateRecord, useCreateRecord, useDeleteRecord } from '../hooks/useRecords'
-import { useDataset } from '../hooks/useDatasets'
+import { useCollection } from '../hooks/useCollections'
 import { useSchemas } from '../hooks/useSchemas'
 import { useWorkflows, useJobs } from '../hooks/useWorkflows'
 import type { WorkflowJob } from '../api/workflows'
@@ -155,18 +155,18 @@ export default function RecordDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   const { data: record, isLoading, error } = useRecord(id, 3000)
-  const { data: dataset } = useDataset(record?.dataset_id ?? '')
+  const { data: collection } = useCollection(record?.dataset_id ?? '')
   const { data: schemas } = useSchemas()
   const { data: workflows } = useWorkflows()
   const { data: parent } = useRecord(record?.parent_record_id)
   const { data: recordJobs } = useJobs(undefined, id)
   const updateRecord = useUpdateRecord()
-  const createRecord = useCreateRecord(dataset?.name ?? '')
-  const deleteRecord = useDeleteRecord(dataset?.name ?? '')
+  const createRecord = useCreateRecord(collection?.name ?? '')
+  const deleteRecord = useDeleteRecord(collection?.name ?? '')
 
   // All children of this record — poll faster while jobs are active
   const hasActiveJobs = (recordJobs ?? []).some(j => j.status === 'pending' || j.status === 'running')
-  const { data: childPage } = useRecords(dataset?.name ?? '', {
+  const { data: childPage } = useRecords(collection?.name ?? '', {
     parent_record_id: id,
     limit: 500,
   }, hasActiveJobs ? 2000 : 5000)
@@ -220,12 +220,12 @@ export default function RecordDetailPage() {
     <div className="space-y-6">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-sm text-[#656d76] flex-wrap">
-        <Link to="/datasets" className="hover:text-[#0969da]">Datasets</Link>
+        <Link to="/collections" className="hover:text-[#0969da]">Collections</Link>
         <span>/</span>
-        {dataset && (
+        {collection && (
           <>
-            <Link to={`/datasets/${record.dataset_id}`} className="hover:text-[#0969da]">
-              {dataset.name}
+            <Link to={`/collections/${record.dataset_id}`} className="hover:text-[#0969da]">
+              {collection.name}
             </Link>
             <span>/</span>
           </>
@@ -340,10 +340,10 @@ export default function RecordDetailPage() {
             )}
           </div>
 
-          {addingChild && dataset && schemas && (
+          {addingChild && collection && schemas && (
             <RecordForm
               schemas={schemas}
-              datasetName={dataset.name}
+              datasetName={collection.name}
               selectableSchemaIds={childSchemas.map(s => s.id)}
               lockedParentRecordId={record.id}
               onSubmit={handleAddChild}
@@ -415,7 +415,7 @@ export default function RecordDetailPage() {
               <Button
                 variant="danger" size="sm"
                 onClick={() => deleteRecord.mutate(record.id, {
-                  onSuccess: () => navigate(dataset ? `/datasets/${record.dataset_id}` : '/datasets'),
+                  onSuccess: () => navigate(collection ? `/collections/${record.dataset_id}` : '/collections'),
                 })}
                 disabled={deleteRecord.isPending}
               >
