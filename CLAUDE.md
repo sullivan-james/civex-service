@@ -4,34 +4,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Setup
 
-```bash
-python -m venv venv
-source venv/bin/activate
+Dependencies and the venv are managed by [uv](https://docs.astral.sh/uv/) — it reads `pyproject.toml`, resolves against the committed `uv.lock`, and provisions a matching Python 3.12 itself (see `.python-version`) if the system doesn't have one.
 
-pip install -e .                              # SQLite (default)
-pip install -e ".[postgres]"                  # add PostgreSQL driver
-pip install -e ".[workflows]"                 # add pandas (required by load_csv / rows_to_records)
-pip install -e ".[server]"                    # add FastAPI + uvicorn
-pip install -e ".[dev]"                       # add pytest + httpx for tests
-pip install -e ".[postgres,workflows,server]" # everything
+```bash
+uv sync --extra server --extra workflows --extra dev  # standard dev setup (== `make install`)
+uv sync --all-extras                                   # every optional extra (== `make install-all`)
+uv sync                                                 # base install only, SQLite, no extras
+
+uv lock                                                 # re-resolve after editing pyproject.toml deps
+uv run civex --help                                     # run inside the synced env without activating it
 ```
+
+`uv sync` creates `.venv/`. There's no separate activation step required for `uv run ...`; activate `.venv/bin/activate` directly if you want a persistent shell.
 
 ## Commands
 
+Common tasks are wrapped in the `Makefile` — `make help`-style targets: `install`, `lint`, `format`, `format-check`, `typecheck`, `test`, `check` (everything CI runs), `pre-commit`, `serve`, `dev`, `clean`.
+
 ```bash
 # CLI
-civex --help
-civex init                    # create a _civex/ project in the current directory
-civex serve                   # start HTTP API (requires [server] extra)
-civex serve --reload          # dev mode with auto-reload
+uv run civex --help
+uv run civex init                 # create a _civex/ project in the current directory
+uv run civex serve                # start HTTP API (requires the server extra)
+uv run civex serve --reload       # dev mode with auto-reload  (== `make serve`)
 
 # Tests
-pytest tests/                 # run all smoke tests
-pytest tests/test_smoke.py::test_init_creates_civex_dir  # single test
+uv run pytest tests/              # run all smoke tests            (== `make test`)
+uv run pytest tests/test_smoke.py::test_init_creates_civex_dir  # single test
+
+# Lint / format / typecheck
+make check                        # ruff format --check, ruff check, mypy, pytest — what CI runs
+make lint                         # ruff check --fix
+make format                       # ruff format
 
 # Frontend (cd frontend/ first)
-npm run dev                   # Vite dev server (proxies /api to localhost:8000)
-npm run build                 # tsc + Vite production build (outputs to frontend/dist/)
+npm run dev                       # Vite dev server (proxies /api to localhost:8000)  (== `make dev`)
+npm run build                     # tsc + Vite production build (outputs to frontend/dist/)
 ```
 
 The server serves the built frontend from `frontend/dist/` via the `ui` router. During development run `civex serve --reload` and `npm run dev` in parallel — Vite proxies API calls.
