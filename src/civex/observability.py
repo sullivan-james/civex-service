@@ -12,6 +12,7 @@ Design goals (local-first, like git):
 
 Use `get_logger(__name__)` for new structured logging; old stdlib calls are fine too.
 """
+
 from __future__ import annotations
 
 import logging
@@ -28,11 +29,24 @@ import structlog
 request_id_var: ContextVar[str | None] = ContextVar("civex_request_id", default=None)
 
 # Keys whose values must never be logged, matched case-insensitively.
-_SENSITIVE_KEYS = frozenset({
-    "api_key", "apikey", "authorization", "auth", "password", "passwd",
-    "secret", "token", "access_token", "refresh_token", "cookie",
-    "set-cookie", "x-api-key", "dsn",
-})
+_SENSITIVE_KEYS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "authorization",
+        "auth",
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "access_token",
+        "refresh_token",
+        "cookie",
+        "set-cookie",
+        "x-api-key",
+        "dsn",
+    }
+)
 
 _configured = False
 
@@ -67,7 +81,7 @@ def configure_logging(
     global _configured
 
     shared_processors = [
-        structlog.contextvars.merge_contextvars,   # pulls in request_id etc.
+        structlog.contextvars.merge_contextvars,  # pulls in request_id etc.
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
         _scrub_sensitive,
@@ -76,13 +90,18 @@ def configure_logging(
     ]
 
     structlog.configure(
-        processors=[*shared_processors, structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
+        processors=[
+            *shared_processors,
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+        ],
         logger_factory=structlog.stdlib.LoggerFactory(),
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
 
-    use_json_console = json_console if json_console is not None else not sys.stderr.isatty()
+    use_json_console = (
+        json_console if json_console is not None else not sys.stderr.isatty()
+    )
     if use_json_console:
         console_renderer: Any = structlog.processors.JSONRenderer()
         console_exc = structlog.processors.format_exc_info
@@ -122,7 +141,10 @@ def configure_logging(
             ],
         )
         file_handler = logging.handlers.RotatingFileHandler(
-            log_path, maxBytes=5_000_000, backupCount=3, encoding="utf-8",
+            log_path,
+            maxBytes=5_000_000,
+            backupCount=3,
+            encoding="utf-8",
         )
         file_handler.setFormatter(file_formatter)
         file_handler._civex = True  # type: ignore[attr-defined]
@@ -168,6 +190,7 @@ def init_telemetry(
     if release is None:
         try:
             from civex import __version__
+
             release = f"civex@{__version__}"
         except Exception:
             release = None

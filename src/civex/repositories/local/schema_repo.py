@@ -27,7 +27,10 @@ class LocalSchemaRepository:
         return _schema_to_dto(row) if row else None
 
     def list_all(self) -> list[SchemaDTO]:
-        return [_schema_to_dto(r) for r in self._s.query(Schema).order_by(Schema.created_at).all()]
+        return [
+            _schema_to_dto(r)
+            for r in self._s.query(Schema).order_by(Schema.created_at).all()
+        ]
 
     def get_fields(self, schema_id: uuid.UUID) -> list[FieldDTO]:
         rows = (
@@ -55,7 +58,13 @@ class LocalSchemaRepository:
 
     _SENTINEL = object()
 
-    def update(self, id: uuid.UUID, name: str | None, description: str | None, display_field=_SENTINEL) -> SchemaDTO:
+    def update(
+        self,
+        id: uuid.UUID,
+        name: str | None,
+        description: str | None,
+        display_field=_SENTINEL,
+    ) -> SchemaDTO:
         row = self._s.query(Schema).filter_by(id=id).first()
         if name is not None:
             row.name = name
@@ -122,7 +131,9 @@ class LocalSchemaRepository:
             self._s.delete(row)
             self._s.flush()
 
-    def reorder_fields(self, schema_id: uuid.UUID, field_ids: list[uuid.UUID]) -> list[FieldDTO]:
+    def reorder_fields(
+        self, schema_id: uuid.UUID, field_ids: list[uuid.UUID]
+    ) -> list[FieldDTO]:
         for i, fid in enumerate(field_ids):
             row = self._s.query(Field).filter_by(id=fid, schema_id=schema_id).first()
             if row:
@@ -134,6 +145,7 @@ class LocalSchemaRepository:
 # ------------------------------------------------------------------
 # DTO converters (private to this module)
 # ------------------------------------------------------------------
+
 
 def _field_to_dto(row: Field) -> FieldDTO:
     return FieldDTO(

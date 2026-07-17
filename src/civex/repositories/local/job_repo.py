@@ -62,7 +62,9 @@ class LocalWorkflowJobRepository:
             row.log = log
             self._s.flush()
 
-    def mark_failed(self, job_id: uuid.UUID, error: str, log: str | None = None) -> None:
+    def mark_failed(
+        self, job_id: uuid.UUID, error: str, log: str | None = None
+    ) -> None:
         row = self._s.query(WorkflowJob).filter_by(id=job_id).first()
         if row:
             row.status = "failed"

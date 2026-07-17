@@ -6,7 +6,7 @@ import re
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 
-_SAFE_NAME = re.compile(r'^[a-z][a-z0-9_]*$')
+_SAFE_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
 router = APIRouter(prefix="/plugins", tags=["plugins"])
 
@@ -57,6 +57,7 @@ async def upload_plugin(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Invalid filename")
 
     from civex.config import load_config, ConfigError
+
     try:
         config = load_config()
     except ConfigError as e:
@@ -71,12 +72,17 @@ async def upload_plugin(file: UploadFile = File(...)):
 
     # Register immediately in the running process so it's available without restart.
     from civex.plugins.registry import discover_user_plugins, all_plugins
+
     discover_user_plugins(plugins_dir)
 
     # Find the plugin ID that was just registered (the one from this file's stem).
     stem = filename[:-3]
     plugin_id = next(
-        (pid for pid in all_plugins() if pid == stem or all_plugins()[pid].__module__ == stem),
+        (
+            pid
+            for pid in all_plugins()
+            if pid == stem or all_plugins()[pid].__module__ == stem
+        ),
         stem,
     )
 
@@ -92,15 +98,21 @@ class PluginSaveRequest(BaseModel):
 def save_plugin_json(body: PluginSaveRequest):
     """Save a plugin from JSON source (used by the AI confirmation UI)."""
     if not _SAFE_NAME.match(body.name):
-        raise HTTPException(400, detail="name must be lowercase letters, digits, and underscores only, starting with a letter")
+        raise HTTPException(
+            400,
+            detail="name must be lowercase letters, digits, and underscores only, starting with a letter",
+        )
     try:
         tree = ast.parse(body.code)
     except SyntaxError as e:
         raise HTTPException(422, detail=f"Syntax error: {e}")
-    if not any(isinstance(n, ast.ClassDef) and n.name == "Plugin" for n in ast.walk(tree)):
+    if not any(
+        isinstance(n, ast.ClassDef) and n.name == "Plugin" for n in ast.walk(tree)
+    ):
         raise HTTPException(422, detail="Code must define a class named 'Plugin'")
 
     from civex.config import load_config, ConfigError
+
     try:
         config = load_config()
     except ConfigError as e:
@@ -111,6 +123,7 @@ def save_plugin_json(body: PluginSaveRequest):
     (plugins_dir / f"{body.name}.py").write_text(body.code, encoding="utf-8")
 
     from civex.plugins.registry import discover_user_plugins
+
     discover_user_plugins(plugins_dir)
 
     return {"filename": f"{body.name}.py"}

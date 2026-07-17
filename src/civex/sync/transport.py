@@ -14,6 +14,7 @@ Usage:
   data = transport.get_object("sha256hex")         # lazy object fetch
   transport.put_object("sha256hex", data)          # push object
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -102,11 +103,22 @@ class SSHTransport:
         return result.stdout
 
     def transfer_pack(self, since_seq: int = 0) -> SyncBundle:
-        raw = self._ssh(self._civex, "transfer-pack", self._remote_path, "--since-seq", str(since_seq))
+        raw = self._ssh(
+            self._civex,
+            "transfer-pack",
+            self._remote_path,
+            "--since-seq",
+            str(since_seq),
+        )
         return SyncBundle.from_json(raw.decode())
 
     def receive_pack(self, bundle: SyncBundle) -> None:
-        self._ssh(self._civex, "receive-pack", self._remote_path, stdin=bundle.to_json().encode())
+        self._ssh(
+            self._civex,
+            "receive-pack",
+            self._remote_path,
+            stdin=bundle.to_json().encode(),
+        )
 
     def get_head_seq(self) -> int:
         raw = self._ssh(self._civex, "head-seq", self._remote_path)
@@ -136,12 +148,17 @@ class HttpTransport:
 
     def _request(self, method: str, url: str, data: bytes | None = None) -> bytes:
         import urllib.request
-        req = urllib.request.Request(url, data=data, headers=self._headers(), method=method)
+
+        req = urllib.request.Request(
+            url, data=data, headers=self._headers(), method=method
+        )
         try:
             with urllib.request.urlopen(req) as resp:
                 return resp.read()
         except urllib.error.HTTPError as e:
-            raise SyncError(f"HTTP {e.code} from {url}: {e.read().decode(errors='replace')}")
+            raise SyncError(
+                f"HTTP {e.code} from {url}: {e.read().decode(errors='replace')}"
+            )
 
     def transfer_pack(self, since_seq: int = 0) -> SyncBundle:
         raw = self._request("GET", self._url(f"transfer-pack?since_seq={since_seq}"))
@@ -170,6 +187,7 @@ def _load_token(base_url: str) -> str:
         )
     try:
         import tomllib
+
         with open(tokens_path, "rb") as f:
             data = tomllib.load(f)
     except Exception as e:
@@ -184,7 +202,9 @@ def _load_token(base_url: str) -> str:
     return token
 
 
-def get_transport(url: str, remote_civex: str = "civex") -> tuple[LocalTransport | SSHTransport | HttpTransport, str]:
+def get_transport(
+    url: str, remote_civex: str = "civex"
+) -> tuple[LocalTransport | SSHTransport | HttpTransport, str]:
     """
     Parse a remote URL and return (transport, remote_path).
 
@@ -216,7 +236,7 @@ def get_transport(url: str, remote_civex: str = "civex") -> tuple[LocalTransport
 
     if parsed.scheme == "ssh":
         netloc = parsed.netloc  # "user@host" or "host" or "user@host:port"
-        path = parsed.path      # "/path/to/repo" or "/~/home-relative"
+        path = parsed.path  # "/path/to/repo" or "/~/home-relative"
         user: str | None = None
         host: str = netloc
         port: int | None = None
@@ -236,6 +256,10 @@ def get_transport(url: str, remote_civex: str = "civex") -> tuple[LocalTransport
         if path.startswith("/~"):
             path = path[1:]
 
-        return SSHTransport(host=host, remote_path=path, user=user, port=port, civex_cmd=remote_civex), path
+        return SSHTransport(
+            host=host, remote_path=path, user=user, port=port, civex_cmd=remote_civex
+        ), path
 
-    raise SyncError(f"Unsupported remote URL scheme '{parsed.scheme}'. Use https://, ssh://, or file://")
+    raise SyncError(
+        f"Unsupported remote URL scheme '{parsed.scheme}'. Use https://, ssh://, or file://"
+    )

@@ -29,18 +29,24 @@ def search_records_global(
     ctx: AppContext = Depends(get_ctx),
 ):
     try:
-        items = ctx.record_svc.find_by_schema(schema, search=search or None, limit=limit)
+        items = ctx.record_svc.find_by_schema(
+            schema, search=search or None, limit=limit
+        )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     return [RecordResponse.from_dto(r) for r in items]
 
 
-@router.get("/collections/{dataset_name}/records", response_model=PaginatedRecordResponse)
+@router.get(
+    "/collections/{dataset_name}/records", response_model=PaginatedRecordResponse
+)
 def list_records(
     dataset_name: str,
     schema: Optional[str] = Query(default=None),
     parent_record_id: Optional[str] = Query(default=None),
-    search: Optional[str] = Query(default=None, description="Full-text search across all field values"),
+    search: Optional[str] = Query(
+        default=None, description="Full-text search across all field values"
+    ),
     where: list[str] = Query(default=[]),
     limit: int = Query(default=50, le=1000),
     offset: int = Query(default=0, ge=0),
@@ -73,7 +79,11 @@ def list_records(
     )
 
 
-@router.post("/collections/{dataset_name}/records", response_model=RecordResponse, status_code=201)
+@router.post(
+    "/collections/{dataset_name}/records",
+    response_model=RecordResponse,
+    status_code=201,
+)
 def create_record(
     dataset_name: str,
     body: CreateRecordRequest,
@@ -82,7 +92,9 @@ def create_record(
 ):
     try:
         dto = ctx.record_svc.add(
-            dataset_name, body.schema_name, body.data,
+            dataset_name,
+            body.schema_name,
+            body.data,
             parent_record_id=body.parent_record_id,
         )
     except NotFoundError as e:
@@ -195,7 +207,7 @@ def export_records_csv(
     return StreamingResponse(
         generate(),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{collection_name}.csv"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{collection_name}.csv"'
+        },
     )
-
-

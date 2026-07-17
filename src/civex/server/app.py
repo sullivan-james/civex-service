@@ -8,7 +8,20 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from civex.server.errors import RequestContextMiddleware, register_error_handlers
-from civex.server.routers import ai, datasets, dump, files, jobs, plugins, records, remote, schemas, store, terminal, workflows
+from civex.server.routers import (
+    ai,
+    datasets,
+    dump,
+    files,
+    jobs,
+    plugins,
+    records,
+    remote,
+    schemas,
+    store,
+    terminal,
+    workflows,
+)
 from civex.server.security import LocalGuardMiddleware
 
 
@@ -48,6 +61,7 @@ def _init_observability() -> None:
 
     try:
         from civex.config import load_config
+
         cfg = load_config()
         level = os.environ.get("CIVEX_LOG_LEVEL", cfg.logging.level)
         if json_env is None:
@@ -66,6 +80,7 @@ def _init_observability() -> None:
 def create_app() -> FastAPI:
     _init_observability()
     from civex import __version__
+
     app = FastAPI(
         title="civex",
         description="Research data management API",
@@ -99,12 +114,15 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     if (_DIST / "index.html").exists():
-        app.mount("/assets", StaticFiles(directory=str(_DIST / "assets")), name="assets")
+        app.mount(
+            "/assets", StaticFiles(directory=str(_DIST / "assets")), name="assets"
+        )
 
         @app.get("/{full_path:path}", include_in_schema=False)
         def spa_fallback(full_path: str):
             return FileResponse(str(_DIST / "index.html"))
     else:
+
         @app.get("/", include_in_schema=False)
         def root():
             return {

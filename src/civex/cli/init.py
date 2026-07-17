@@ -12,8 +12,14 @@ from civex.project import scaffold_project
 
 def init(
     path: Path = typer.Argument(Path("."), help="Directory to initialize"),
-    bare: bool = typer.Option(False, "--bare", help="Create a bare repository (remote storage, no working directory)"),
-    sqlite: bool = typer.Option(False, "--sqlite", help="Force SQLite instead of Docker PostgreSQL"),
+    bare: bool = typer.Option(
+        False,
+        "--bare",
+        help="Create a bare repository (remote storage, no working directory)",
+    ),
+    sqlite: bool = typer.Option(
+        False, "--sqlite", help="Force SQLite instead of Docker PostgreSQL"
+    ),
 ) -> None:
     """Initialize a new civex project in the given directory."""
     if bare:
@@ -43,7 +49,12 @@ def _init_working(target: Path, use_sqlite: bool = False) -> None:
 def _resolve_db_url(target: Path, civex_dir: Path, use_sqlite: bool) -> str:
     """Return the database URL to use, starting Docker postgres if available."""
     if not use_sqlite:
-        from civex.cli._docker import docker_available, docker_error_hint, setup_docker_postgres
+        from civex.cli._docker import (
+            docker_available,
+            docker_error_hint,
+            setup_docker_postgres,
+        )
+
         if docker_available():
             db_url = setup_docker_postgres(target.name)
             if db_url:
@@ -69,16 +80,19 @@ def _ensure_psycopg2() -> None:
     """Install psycopg2-binary if no postgres driver is present."""
     try:
         import psycopg2  # noqa: F401
+
         return
     except ImportError:
         pass
     try:
         import psycopg  # noqa: F401
+
         return
     except ImportError:
         pass
     import subprocess
     import sys
+
     console.print("  Installing psycopg2-binary...", end="  ")
     result = subprocess.run(
         [sys.executable, "-m", "pip", "install", "psycopg2-binary"],
@@ -94,6 +108,7 @@ def _ensure_psycopg2() -> None:
 def _display_url(db_url: str) -> str:
     """Redact password and driver prefix for display."""
     import urllib.parse
+
     try:
         parsed = urllib.parse.urlparse(db_url)
         if parsed.scheme.startswith("postgresql"):

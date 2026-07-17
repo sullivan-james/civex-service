@@ -46,7 +46,9 @@ def discover_user_plugins(plugins_dir: Path) -> None:
         if spec is None or spec.loader is None:
             continue
         module = importlib.util.module_from_spec(spec)
-        sys.modules[path.stem] = module   # required before exec so @dataclass can resolve __module__
+        sys.modules[path.stem] = (
+            module  # required before exec so @dataclass can resolve __module__
+        )
         spec.loader.exec_module(module)
         if hasattr(module, "Plugin"):
             register_plugin(module.Plugin)
@@ -62,4 +64,5 @@ def all_plugins() -> dict[str, type[BasePlugin]]:
 
 # Auto-register built-ins on import.
 from civex.plugins import builtins as _builtins_pkg  # noqa: E402
+
 discover_plugins(_builtins_pkg)

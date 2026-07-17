@@ -2,6 +2,7 @@
 Plain Python dataclasses that travel between every layer: CLI, services, repos, server.
 No SQLAlchemy, no Pydantic — just data.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -22,7 +23,7 @@ class FieldDTO:
     id: uuid.UUID
     schema_id: uuid.UUID
     name: str
-    dtype: str          # "integer" | "float" | "string" | "boolean" | "file" | "reference" | "enum" | "url" | "reference_list" | "tags"
+    dtype: str  # "integer" | "float" | "string" | "boolean" | "file" | "reference" | "enum" | "url" | "reference_list" | "tags"
     required: bool
     restrictions: dict[str, Any]
     created_at: datetime
@@ -96,6 +97,7 @@ class ResolvedField:
     A field together with the name of the schema it was defined on.
     Used by SchemaService.collect_fields() to show field inheritance.
     """
+
     field: FieldDTO
     source_schema_name: str
 
@@ -134,17 +136,28 @@ class FileRef:
     Stored as a dict in record.data for 'file' dtype fields.
     The actual bytes live in <volume_path>/<sha256[:2]>/<sha256[2:]>.
     """
+
     sha256: str
-    filename: str           # original user-facing filename
-    size: int               # bytes
-    volume: str = "default" # which named volume holds this object
+    filename: str  # original user-facing filename
+    size: int  # bytes
+    volume: str = "default"  # which named volume holds this object
 
     def to_dict(self) -> dict[str, Any]:
-        return {"sha256": self.sha256, "filename": self.filename, "size": self.size, "volume": self.volume}
+        return {
+            "sha256": self.sha256,
+            "filename": self.filename,
+            "size": self.size,
+            "volume": self.volume,
+        }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> FileRef:
-        return cls(sha256=d["sha256"], filename=d["filename"], size=d["size"], volume=d.get("volume", "default"))
+        return cls(
+            sha256=d["sha256"],
+            filename=d["filename"],
+            size=d["size"],
+            volume=d.get("volume", "default"),
+        )
 
 
 @dataclass
@@ -152,12 +165,14 @@ class RecordDTO:
     id: uuid.UUID
     dataset_id: uuid.UUID
     schema_id: uuid.UUID
-    schema_name: str         # denormalised for display
+    schema_name: str  # denormalised for display
     parent_record_id: uuid.UUID | None  # set for child-schema records
-    data: dict[str, Any]    # field_name → coerced value or FileRef.to_dict()
+    data: dict[str, Any]  # field_name → coerced value or FileRef.to_dict()
     created_at: datetime
     updated_at: datetime
-    natural_name: str | None = None  # first meaningful field value; computed by RecordService
+    natural_name: str | None = (
+        None  # first meaningful field value; computed by RecordService
+    )
 
     def to_dict(self) -> dict[str, Any]:
         # schema_name excluded — denormalized display field, not stored on the entity
@@ -165,7 +180,9 @@ class RecordDTO:
             "id": str(self.id),
             "dataset_id": str(self.dataset_id),
             "schema_id": str(self.schema_id),
-            "parent_record_id": str(self.parent_record_id) if self.parent_record_id else None,
+            "parent_record_id": str(self.parent_record_id)
+            if self.parent_record_id
+            else None,
             "data": self.data,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
@@ -178,7 +195,9 @@ class RecordDTO:
             dataset_id=uuid.UUID(d["dataset_id"]),
             schema_id=uuid.UUID(d["schema_id"]),
             schema_name="",
-            parent_record_id=uuid.UUID(d["parent_record_id"]) if d.get("parent_record_id") else None,
+            parent_record_id=uuid.UUID(d["parent_record_id"])
+            if d.get("parent_record_id")
+            else None,
             data=d.get("data") or {},
             created_at=datetime.fromisoformat(d["created_at"]),
             updated_at=datetime.fromisoformat(d["updated_at"]),
@@ -218,7 +237,9 @@ class CommitDTO:
             record_count=d.get("record_count", 0),
             schema_count=d.get("schema_count", 0),
             dataset_count=d.get("dataset_count", 0),
-            pushed_at=datetime.fromisoformat(d["pushed_at"]) if d.get("pushed_at") else None,
+            pushed_at=datetime.fromisoformat(d["pushed_at"])
+            if d.get("pushed_at")
+            else None,
         )
 
 
@@ -226,8 +247,8 @@ class CommitDTO:
 class AuditLogDTO:
     id: uuid.UUID
     commit_id: uuid.UUID | None
-    action: str              # "create" | "update" | "delete"
-    entity_type: str         # "record" | "schema" | "field" | "dataset"
+    action: str  # "create" | "update" | "delete"
+    entity_type: str  # "record" | "schema" | "field" | "dataset"
     entity_id: uuid.UUID
     old_data: dict[str, Any] | None
     new_data: dict[str, Any] | None
@@ -265,12 +286,14 @@ class WorkflowJobDTO:
     workflow_name: str
     record_id: uuid.UUID
     schema_name: str
-    trigger: str             # record_created | record_updated | manual
-    status: str              # pending | running | completed | failed
+    trigger: str  # record_created | record_updated | manual
+    status: str  # pending | running | completed | failed
     error: str | None
-    log: str | None          # captured stdout/stderr from execution
-    input_data: dict[str, Any] | None  # pre-seeded __input__ step outputs for manual+batch runs
+    log: str | None  # captured stdout/stderr from execution
+    input_data: (
+        dict[str, Any] | None
+    )  # pre-seeded __input__ step outputs for manual+batch runs
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
-    depth: int = 0            # trigger chain depth; jobs enqueued at MAX_JOB_DEPTH are refused
+    depth: int = 0  # trigger chain depth; jobs enqueued at MAX_JOB_DEPTH are refused

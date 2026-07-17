@@ -16,7 +16,9 @@ app = typer.Typer(help="Manage schemas (data structure definitions)")
 def schema_create(
     name: str = typer.Argument(...),
     description: Optional[str] = typer.Option(None, "--description", "-d"),
-    parent: Optional[str] = typer.Option(None, "--parent", "-p", help="Inherit fields from this schema"),
+    parent: Optional[str] = typer.Option(
+        None, "--parent", "-p", help="Inherit fields from this schema"
+    ),
 ) -> None:
     """Define a new schema."""
     ctx = _ctx()
@@ -35,7 +37,9 @@ def schema_list() -> None:
     ctx = _ctx()
     schemas = ctx.schema_svc.list_all()
     if not schemas:
-        console.print("[info]No schemas yet. Use `civex schema create <name>` to add one.[/info]")
+        console.print(
+            "[info]No schemas yet. Use `civex schema create <name>` to add one.[/info]"
+        )
         return
 
     table = Table("Name", "Parent", "Fields", "Description")
@@ -78,7 +82,9 @@ def schema_show(name: str = typer.Argument(...)) -> None:
             rf.field.name,
             rf.field.dtype,
             "yes" if rf.field.required else "",
-            schema.name if rf.source_schema_name == schema.name else f"↑ {rf.source_schema_name}",
+            schema.name
+            if rf.source_schema_name == schema.name
+            else f"↑ {rf.source_schema_name}",
         )
     console.print(table)
 
@@ -90,16 +96,30 @@ def schema_add_field(
     dtype: str = typer.Option(..., "--type", "-t"),
     required: bool = typer.Option(False, "--required/--optional"),
     # reference
-    references: Optional[str] = typer.Option(None, "--references", help="Target schema (--type reference)"),
+    references: Optional[str] = typer.Option(
+        None, "--references", help="Target schema (--type reference)"
+    ),
     # integer / float
-    min_val: Optional[float] = typer.Option(None, "--min", help="Minimum value (integer/float)"),
-    max_val: Optional[float] = typer.Option(None, "--max", help="Maximum value (integer/float)"),
+    min_val: Optional[float] = typer.Option(
+        None, "--min", help="Minimum value (integer/float)"
+    ),
+    max_val: Optional[float] = typer.Option(
+        None, "--max", help="Maximum value (integer/float)"
+    ),
     # string
-    choices: Optional[str] = typer.Option(None, "--choices", help="Comma-separated allowed values (string)"),
-    max_length: Optional[int] = typer.Option(None, "--max-length", help="Maximum character length (string)"),
+    choices: Optional[str] = typer.Option(
+        None, "--choices", help="Comma-separated allowed values (string)"
+    ),
+    max_length: Optional[int] = typer.Option(
+        None, "--max-length", help="Maximum character length (string)"
+    ),
     # file / file_list
-    accept: Optional[str] = typer.Option(None, "--accept", help="Allowed extensions e.g. '.csv,.txt' (file/file_list)"),
-    max_size: Optional[int] = typer.Option(None, "--max-size", help="Maximum file size in bytes (file/file_list)"),
+    accept: Optional[str] = typer.Option(
+        None, "--accept", help="Allowed extensions e.g. '.csv,.txt' (file/file_list)"
+    ),
+    max_size: Optional[int] = typer.Option(
+        None, "--max-size", help="Maximum file size in bytes (file/file_list)"
+    ),
 ) -> None:
     """Add a field to a schema.
 
@@ -113,7 +133,9 @@ def schema_add_field(
 
     if dtype == "reference":
         if not references:
-            console.print("[error]--references SCHEMA is required when --type is reference.[/error]")
+            console.print(
+                "[error]--references SCHEMA is required when --type is reference.[/error]"
+            )
             raise typer.Exit(1)
         restrictions["schema"] = references
     elif references:
@@ -126,16 +148,22 @@ def schema_add_field(
         if max_val is not None:
             restrictions["max"] = int(max_val) if dtype == "integer" else max_val
     elif min_val is not None or max_val is not None:
-        console.print("[error]--min/--max are only valid for --type integer or float.[/error]")
+        console.print(
+            "[error]--min/--max are only valid for --type integer or float.[/error]"
+        )
         raise typer.Exit(1)
 
     if dtype == "string":
         if choices:
-            restrictions["choices"] = [c.strip() for c in choices.split(",") if c.strip()]
+            restrictions["choices"] = [
+                c.strip() for c in choices.split(",") if c.strip()
+            ]
         if max_length is not None:
             restrictions["max_length"] = max_length
     elif choices or max_length is not None:
-        console.print("[error]--choices/--max-length are only valid for --type string.[/error]")
+        console.print(
+            "[error]--choices/--max-length are only valid for --type string.[/error]"
+        )
         raise typer.Exit(1)
 
     if dtype in ("file", "file_list"):
@@ -144,17 +172,27 @@ def schema_add_field(
         if max_size is not None:
             restrictions["max_size"] = max_size
     elif accept or max_size is not None:
-        console.print("[error]--accept/--max-size are only valid for --type file or file_list.[/error]")
+        console.print(
+            "[error]--accept/--max-size are only valid for --type file or file_list.[/error]"
+        )
         raise typer.Exit(1)
 
     ctx = _ctx()
     try:
-        field = ctx.schema_svc.add_field(schema_name, field_name, dtype, required=required, restrictions=restrictions or None)
+        field = ctx.schema_svc.add_field(
+            schema_name,
+            field_name,
+            dtype,
+            required=required,
+            restrictions=restrictions or None,
+        )
         ctx.commit()
         req = " (required)" if field.required else ""
         ref = f" → {references}" if dtype == "reference" else ""
         restr = f" {field.restrictions}" if field.restrictions else ""
-        console.print(f"[success]Added '{field.name}' ({field.dtype}{ref}{req}){restr} to schema '{schema_name}'.[/success]")
+        console.print(
+            f"[success]Added '{field.name}' ({field.dtype}{ref}{req}){restr} to schema '{schema_name}'.[/success]"
+        )
     except (NotFoundError, AlreadyExistsError, ValueError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
@@ -163,14 +201,27 @@ def schema_add_field(
 @app.command("update")
 def schema_update(
     name: str = typer.Argument(...),
-    rename: Optional[str] = typer.Option(None, "--rename", help="New name for the schema"),
+    rename: Optional[str] = typer.Option(
+        None, "--rename", help="New name for the schema"
+    ),
     description: Optional[str] = typer.Option(None, "--description", "-d"),
-    display_field: Optional[str] = typer.Option(None, "--display-field", help="Field name to use as the record's natural name"),
-    clear_display_field: bool = typer.Option(False, "--clear-display-field", help="Remove the display field (revert to auto)"),
+    display_field: Optional[str] = typer.Option(
+        None, "--display-field", help="Field name to use as the record's natural name"
+    ),
+    clear_display_field: bool = typer.Option(
+        False, "--clear-display-field", help="Remove the display field (revert to auto)"
+    ),
 ) -> None:
     """Update a schema's name, description, or display field."""
-    if rename is None and description is None and display_field is None and not clear_display_field:
-        console.print("[error]Provide at least one of --rename, --description, --display-field, or --clear-display-field.[/error]")
+    if (
+        rename is None
+        and description is None
+        and display_field is None
+        and not clear_display_field
+    ):
+        console.print(
+            "[error]Provide at least one of --rename, --description, --display-field, or --clear-display-field.[/error]"
+        )
         raise typer.Exit(1)
     df = ...
     if display_field is not None:
@@ -179,7 +230,9 @@ def schema_update(
         df = None
     ctx = _ctx()
     try:
-        schema = ctx.schema_svc.update(name, new_name=rename, description=description, display_field=df)
+        schema = ctx.schema_svc.update(
+            name, new_name=rename, description=description, display_field=df
+        )
         ctx.commit()
         console.print(f"[success]Updated schema '{schema.name}'.[/success]")
     except (NotFoundError, AlreadyExistsError) as e:
@@ -191,24 +244,51 @@ def schema_update(
 def schema_update_field(
     schema_name: str = typer.Argument(...),
     field_name: str = typer.Argument(...),
-    rename: Optional[str] = typer.Option(None, "--rename", help="New name for the field"),
-    required: Optional[bool] = typer.Option(None, "--required/--optional", help="Set required/optional"),
+    rename: Optional[str] = typer.Option(
+        None, "--rename", help="New name for the field"
+    ),
+    required: Optional[bool] = typer.Option(
+        None, "--required/--optional", help="Set required/optional"
+    ),
     # integer / float
-    min_val: Optional[float] = typer.Option(None, "--min", help="Minimum value (integer/float)"),
-    max_val: Optional[float] = typer.Option(None, "--max", help="Maximum value (integer/float)"),
+    min_val: Optional[float] = typer.Option(
+        None, "--min", help="Minimum value (integer/float)"
+    ),
+    max_val: Optional[float] = typer.Option(
+        None, "--max", help="Maximum value (integer/float)"
+    ),
     # string
-    choices: Optional[str] = typer.Option(None, "--choices", help="Comma-separated allowed values (string)"),
-    max_length: Optional[int] = typer.Option(None, "--max-length", help="Maximum character length (string)"),
+    choices: Optional[str] = typer.Option(
+        None, "--choices", help="Comma-separated allowed values (string)"
+    ),
+    max_length: Optional[int] = typer.Option(
+        None, "--max-length", help="Maximum character length (string)"
+    ),
     # file / file_list
-    accept: Optional[str] = typer.Option(None, "--accept", help="Allowed extensions e.g. '.csv,.txt'"),
-    max_size: Optional[int] = typer.Option(None, "--max-size", help="Maximum file size in bytes"),
-    clear_restrictions: bool = typer.Option(False, "--clear-restrictions", help="Remove all restrictions"),
+    accept: Optional[str] = typer.Option(
+        None, "--accept", help="Allowed extensions e.g. '.csv,.txt'"
+    ),
+    max_size: Optional[int] = typer.Option(
+        None, "--max-size", help="Maximum file size in bytes"
+    ),
+    clear_restrictions: bool = typer.Option(
+        False, "--clear-restrictions", help="Remove all restrictions"
+    ),
 ) -> None:
     """Update a field's name, required flag, or restrictions."""
-    has_restriction_flags = any(v is not None for v in [min_val, max_val, choices, max_length, accept, max_size])
+    has_restriction_flags = any(
+        v is not None for v in [min_val, max_val, choices, max_length, accept, max_size]
+    )
 
-    if rename is None and required is None and not has_restriction_flags and not clear_restrictions:
-        console.print("[error]Provide at least one of: --rename, --required/--optional, restriction flags, --clear-restrictions.[/error]")
+    if (
+        rename is None
+        and required is None
+        and not has_restriction_flags
+        and not clear_restrictions
+    ):
+        console.print(
+            "[error]Provide at least one of: --rename, --required/--optional, restriction flags, --clear-restrictions.[/error]"
+        )
         raise typer.Exit(1)
 
     ctx = _ctx()
@@ -218,6 +298,7 @@ def schema_update_field(
         field = next((f for f in schema.fields if f.name == field_name), None)
         if field is None:
             from civex.domain.exceptions import NotFoundError as _NF
+
             raise _NF(f"Field '{field_name}' not found on schema '{schema_name}'")
 
         # Warn if making required but existing records are missing this field.
@@ -226,7 +307,10 @@ def schema_update_field(
             affected = []
             for d in all_datasets:
                 missing = [
-                    r for r in ctx.record_svc.find(d.name, schema_name=schema_name, filters=[], limit=100_000)
+                    r
+                    for r in ctx.record_svc.find(
+                        d.name, schema_name=schema_name, filters=[], limit=100_000
+                    )
                     if field_name not in r.data
                 ]
                 if missing:
@@ -247,12 +331,18 @@ def schema_update_field(
             dtype = field.dtype
             if dtype in ("integer", "float"):
                 if min_val is not None:
-                    new_restrictions["min"] = int(min_val) if dtype == "integer" else min_val
+                    new_restrictions["min"] = (
+                        int(min_val) if dtype == "integer" else min_val
+                    )
                 if max_val is not None:
-                    new_restrictions["max"] = int(max_val) if dtype == "integer" else max_val
+                    new_restrictions["max"] = (
+                        int(max_val) if dtype == "integer" else max_val
+                    )
             if dtype == "string":
                 if choices:
-                    new_restrictions["choices"] = [c.strip() for c in choices.split(",") if c.strip()]
+                    new_restrictions["choices"] = [
+                        c.strip() for c in choices.split(",") if c.strip()
+                    ]
                 if max_length is not None:
                     new_restrictions["max_length"] = max_length
             if dtype in ("file", "file_list"):
@@ -262,7 +352,8 @@ def schema_update_field(
                     new_restrictions["max_size"] = max_size
 
         updated = ctx.schema_svc.update_field(
-            schema_name, field_name,
+            schema_name,
+            field_name,
             new_name=rename,
             required=required,
             restrictions=new_restrictions,
@@ -286,12 +377,16 @@ def schema_remove_field(
 ) -> None:
     """Remove a field from a schema."""
     if not yes:
-        typer.confirm(f"Remove field '{field_name}' from schema '{schema_name}'?", abort=True)
+        typer.confirm(
+            f"Remove field '{field_name}' from schema '{schema_name}'?", abort=True
+        )
     ctx = _ctx()
     try:
         ctx.schema_svc.delete_field(schema_name, field_name)
         ctx.commit()
-        console.print(f"[success]Removed field '{field_name}' from '{schema_name}'.[/success]")
+        console.print(
+            f"[success]Removed field '{field_name}' from '{schema_name}'.[/success]"
+        )
     except NotFoundError as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)

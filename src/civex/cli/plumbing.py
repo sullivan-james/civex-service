@@ -10,6 +10,7 @@ commands on the remote machine and communicates over stdin/stdout.
   civex get-object    <bare-path> <sha256>
   civex put-object    <bare-path> <sha256>
 """
+
 from __future__ import annotations
 
 import sys
@@ -27,7 +28,9 @@ from sqlalchemy.orm import Session
 
 def transfer_pack(
     bare_path: Path = typer.Argument(..., help="Path to the bare repository directory"),
-    since_seq: int = typer.Option(0, "--since-seq", help="Export only commits with seq > this value"),
+    since_seq: int = typer.Option(
+        0, "--since-seq", help="Export only commits with seq > this value"
+    ),
 ) -> None:
     """[Plumbing] Export repository data to stdout as JSON (called by SSH client)."""
     bare_path = bare_path.resolve()
@@ -67,6 +70,7 @@ def head_seq(
     _require_bare(bare_path)
 
     from civex.db.models import Commit
+
     engine = create_engine(f"sqlite:///{bare_path / 'civex.db'}")
     with Session(engine) as session:
         seq = session.query(func.max(Commit.seq)).scalar() or 0
@@ -110,5 +114,8 @@ def put_object(
 
 def _require_bare(path: Path) -> None:
     if not (path / "CIVEX_BARE").exists():
-        typer.echo(f"{path} is not a bare civex repository (missing CIVEX_BARE marker)", err=True)
+        typer.echo(
+            f"{path} is not a bare civex repository (missing CIVEX_BARE marker)",
+            err=True,
+        )
         raise typer.Exit(1)

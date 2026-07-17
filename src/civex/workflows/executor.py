@@ -11,7 +11,9 @@ from civex.workflows.definition import StepDef, WorkflowDef
 log = logging.getLogger(__name__)
 
 
-def _topological_sort(steps: list[StepDef], virtual_ids: set[str] | None = None) -> list[StepDef]:
+def _topological_sort(
+    steps: list[StepDef], virtual_ids: set[str] | None = None
+) -> list[StepDef]:
     """Kahn's algorithm — returns steps in execution order.
 
     virtual_ids: step-like ids (e.g. "__input__") that may be referenced in inputs
@@ -27,7 +29,9 @@ def _topological_sort(steps: list[StepDef], virtual_ids: set[str] | None = None)
         for ref in step.inputs.values():
             source_id = ref.split(".")[0]
             if source_id not in known_ids:
-                raise ValueError(f"Step '{step.id}' references unknown step '{source_id}'")
+                raise ValueError(
+                    f"Step '{step.id}' references unknown step '{source_id}'"
+                )
             if source_id in ids:  # virtual ids carry no real deps
                 deps[step.id].add(source_id)
 
@@ -83,7 +87,12 @@ def run(
     log.info("Execution order: %s", [s.id for s in order])
     step_outputs: dict[str, dict[str, Any]] = dict(initial_outputs or {})
 
-    log.info("▶ workflow '%s' | record %s | %d step(s)", wf.name, str(ctx.record.id)[:8], len(order))
+    log.info(
+        "▶ workflow '%s' | record %s | %d step(s)",
+        wf.name,
+        str(ctx.record.id)[:8],
+        len(order),
+    )
     wf_start = time.perf_counter()
 
     for step in order:

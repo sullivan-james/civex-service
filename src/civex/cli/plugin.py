@@ -2,6 +2,7 @@
 Plugin commands — stub.
 Plugins are the individual steps within a workflow (data sources, transformations, outputs).
 """
+
 import typer
 
 app = typer.Typer(help="Inspect available workflow plugins")

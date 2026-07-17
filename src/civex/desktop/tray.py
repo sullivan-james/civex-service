@@ -1,4 +1,5 @@
 """Desktop launcher: project picker welcome screen + per-project native window."""
+
 from __future__ import annotations
 
 import json
@@ -39,6 +40,7 @@ _log = logging.getLogger("civex.desktop")
 
 # ── Recent-projects list ──────────────────────────────────────────────────────
 
+
 def _load_recent() -> list[dict]:
     try:
         items = json.loads(_RECENT_FILE.read_text())
@@ -60,10 +62,13 @@ def _save_recent(path: Path) -> None:
 def _remove_from_recent(path_str: str) -> None:
     items = _load_recent()
     _RECENT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _RECENT_FILE.write_text(json.dumps([i for i in items if i["path"] != path_str], indent=2))
+    _RECENT_FILE.write_text(
+        json.dumps([i for i in items if i["path"] != path_str], indent=2)
+    )
 
 
 # ── Project initialisation ────────────────────────────────────────────────────
+
 
 def _init_project(path: Path) -> None:
     """Create a _civex/ directory inside path, initialising the SQLite DB."""
@@ -77,10 +82,11 @@ def _resolve_data_dir() -> Path:
     """Directory to reveal for 'open data folder' — the SQLite file's folder if
     local, otherwise the project's _civex/ directory (config, objects, logs)."""
     from civex.config import load_config
+
     config = load_config()
     prefix = "sqlite:///"
     if config.db.url.startswith(prefix):
-        db_path = Path(config.db.url[len(prefix):])
+        db_path = Path(config.db.url[len(prefix) :])
         if not db_path.is_absolute():
             db_path = config.project_root / db_path
         return db_path.parent
@@ -101,6 +107,7 @@ def _reveal_in_file_manager(path: Path) -> None:
 
 # ── Server ────────────────────────────────────────────────────────────────────
 
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
@@ -110,13 +117,16 @@ def _free_port() -> int:
 def _run_server(port: int, errors: list[str]) -> None:
     import asyncio
     import uvicorn
+
     # On Windows the default ProactorEventLoop must be set explicitly in a
     # non-main thread; without this uvicorn.run() can silently fail.
     if sys.platform == "win32":
         asyncio.set_event_loop(asyncio.ProactorEventLoop())
     _log.info("Starting uvicorn on port %d", port)
     try:
-        uvicorn.run("civex.server.app:app", host="127.0.0.1", port=port, log_level="warning")
+        uvicorn.run(
+            "civex.server.app:app", host="127.0.0.1", port=port, log_level="warning"
+        )
     except Exception as exc:
         _log.exception("Server failed to start on port %d", port)
         errors.append(str(exc))
@@ -156,7 +166,7 @@ def _launch_project(path: Path) -> dict:
                 f"<pre style='white-space:pre-wrap;font-size:13px'>{detail}</pre>"
                 "<p style='margin-top:1rem;color:#57606a;font-size:13px'>"
                 "Check that all civex dependencies are installed: "
-                "<code>pip install -e \".[server]\"</code></p>"
+                '<code>pip install -e ".[server]"</code></p>'
                 "</body>"
             )
 
@@ -166,22 +176,27 @@ def _launch_project(path: Path) -> dict:
 
 # ── JS bridge ─────────────────────────────────────────────────────────────────
 
+
 class _Api:
     def get_recent(self) -> list[dict]:
         return _load_recent()
 
     def open_project(self) -> dict | None:
         import webview
+
         result = _window.create_file_dialog(webview.FOLDER_DIALOG, allow_multiple=False)
         if not result:
             return None
         path = Path(result[0])
         if not (path / "_civex").exists():
-            return {"error": f"'{path.name}' is not a civex project — use Create project to initialise it."}
+            return {
+                "error": f"'{path.name}' is not a civex project — use Create project to initialise it."
+            }
         return _launch_project(path)
 
     def create_project(self) -> dict | None:
         import webview
+
         result = _window.create_file_dialog(webview.FOLDER_DIALOG, allow_multiple=False)
         if not result:
             return None
@@ -202,6 +217,7 @@ class _Api:
     def browse_folder(self) -> dict:
         """Open a native folder picker and return the selected path (forward slashes)."""
         import webview
+
         result = _window.create_file_dialog(webview.FOLDER_DIALOG, allow_multiple=False)
         if not result:
             return {"path": None}
@@ -483,6 +499,7 @@ _WELCOME_HTML = """<!DOCTYPE html>
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
+
 
 def main() -> None:
     global _window

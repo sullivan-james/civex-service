@@ -21,7 +21,10 @@ class LocalDatasetRepository:
         return _to_dto(row) if row else None
 
     def list_all(self) -> list[DatasetDTO]:
-        return [_to_dto(r) for r in self._s.query(Dataset).order_by(Dataset.created_at).all()]
+        return [
+            _to_dto(r)
+            for r in self._s.query(Dataset).order_by(Dataset.created_at).all()
+        ]
 
     def create(self, name: str, description: str | None) -> DatasetDTO:
         row = Dataset(name=name, description=description)
@@ -29,7 +32,9 @@ class LocalDatasetRepository:
         self._s.flush()
         return _to_dto(row)
 
-    def update(self, id: uuid.UUID, name: str | None, description: str | None) -> DatasetDTO:
+    def update(
+        self, id: uuid.UUID, name: str | None, description: str | None
+    ) -> DatasetDTO:
         row = self._s.query(Dataset).filter_by(id=id).first()
         if name is not None:
             row.name = name
@@ -42,7 +47,9 @@ class LocalDatasetRepository:
         # Bulk-delete dependents first so SQLAlchemy doesn't load every record into
         # memory and issue per-row DELETEs via ORM cascade.
         record_ids = self._s.query(Record.id).filter_by(dataset_id=id).subquery()
-        self._s.query(WorkflowJob).filter(WorkflowJob.record_id.in_(record_ids)).delete(synchronize_session=False)
+        self._s.query(WorkflowJob).filter(WorkflowJob.record_id.in_(record_ids)).delete(
+            synchronize_session=False
+        )
         # Clear parent_record_id before bulk-deleting records to satisfy the
         # self-referential FK on PostgreSQL (SQLite ignores it without PRAGMA).
         self._s.query(Record).filter_by(dataset_id=id).update(

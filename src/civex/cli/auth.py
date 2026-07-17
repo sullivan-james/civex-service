@@ -32,9 +32,13 @@ def _write_tokens(data: dict) -> None:
 
 @app.command("login")
 def login(
-    hub_url: str = typer.Argument(..., help="civex-hub base URL (e.g. https://civexhub.example.com)"),
+    hub_url: str = typer.Argument(
+        ..., help="civex-hub base URL (e.g. https://civexhub.example.com)"
+    ),
     username: str = typer.Option(None, "--username", "-u", help="Your username"),
-    token_name: str = typer.Option("default", "--token-name", help="Label for this token"),
+    token_name: str = typer.Option(
+        "default", "--token-name", help="Label for this token"
+    ),
 ) -> None:
     """Log in to a civex-hub server and store an API token."""
     import urllib.request
@@ -47,7 +51,9 @@ def login(
         username = typer.prompt("Username")
     password = typer.prompt("Password", hide_input=True)
 
-    payload = json.dumps({"username": username, "password": password, "name": token_name}).encode()
+    payload = json.dumps(
+        {"username": username, "password": password, "name": token_name}
+    ).encode()
     req = urllib.request.Request(
         f"{hub_url}/auth/tokens",
         data=payload,
@@ -80,7 +86,9 @@ def login(
 
 @app.command("logout")
 def logout(
-    hub_url: str = typer.Argument(None, help="Hub URL to log out from (omit to log out of all)"),
+    hub_url: str = typer.Argument(
+        None, help="Hub URL to log out from (omit to log out of all)"
+    ),
 ) -> None:
     """Remove stored credentials for a civex-hub server."""
     tokens = _read_tokens()

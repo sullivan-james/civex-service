@@ -15,6 +15,8 @@ class Plugin(BasePlugin):
     class Config(BaseModel):
         field: str
 
-    def run(self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext) -> dict[str, Any]:
+    def run(
+        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+    ) -> dict[str, Any]:
         value = ctx.record.data.get(config.field)
         return {"value": value}

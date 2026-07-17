@@ -1,4 +1,5 @@
 """Shared project-initialisation logic used by both the CLI and the desktop launcher."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -58,6 +59,7 @@ def scaffold_project(path: Path, db_url: str | None = None) -> str:
 
     from sqlalchemy import create_engine
     from civex.db.migrate import ensure_schema_current
+
     engine = create_engine(db_url)
     ensure_schema_current(engine)
     engine.dispose()

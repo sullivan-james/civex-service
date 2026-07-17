@@ -8,13 +8,26 @@ application code against the schema's field definitions, not at the DB layer.
 On PostgreSQL the JSON columns become JSONB (via with_variant), giving GIN index
 support for field-level queries. On SQLite they are stored as text.
 """
+
 from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, TypeDecorator, UniqueConstraint, nulls_last
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    TypeDecorator,
+    UniqueConstraint,
+    nulls_last,
+)
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -37,7 +50,9 @@ class _UTCDateTime(TypeDecorator):
     impl = DateTime(timezone=True)
     cache_ok = True
 
-    def process_result_value(self, value: datetime | None, dialect: Any) -> datetime | None:
+    def process_result_value(
+        self, value: datetime | None, dialect: Any
+    ) -> datetime | None:
         if value is not None and value.tzinfo is None:
             value = value.replace(tzinfo=timezone.utc)
         return value
@@ -61,17 +76,22 @@ class Schema(Base):
     A schema can inherit fields from a parent schema.
     Multiple datasets can share a schema.
     """
+
     __tablename__ = "schemas"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(String(1000))
-    parent_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("schemas.id"), nullable=True)
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("schemas.id"), nullable=True
+    )
     display_field: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
     fields: Mapped[list[Field]] = relationship(
-        "Field", back_populates="schema", cascade="all, delete-orphan",
+        "Field",
+        back_populates="schema",
+        cascade="all, delete-orphan",
         order_by=lambda: [nulls_last(Field.position), Field.created_at],
     )
     parent: Mapped[Schema | None] = relationship(
@@ -86,11 +106,14 @@ class Field(Base):
     dtype is one of: integer, float, string, boolean, file, reference.
     restrictions is a freeform JSON dict (e.g. min/max for numbers, regex for strings).
     """
+
     __tablename__ = "fields"
     __table_args__ = (UniqueConstraint("schema_id", "name"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
-    schema_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("schemas.id"), nullable=False)
+    schema_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("schemas.id"), nullable=False
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     dtype: Mapped[str] = mapped_column(String(50), nullable=False)
     required: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -108,6 +131,7 @@ class Dataset(Base):
     Records within a dataset may use any schema; the schema hierarchy
     and parent_record_id links express the structure.
     """
+
     __tablename__ = "datasets"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
@@ -129,6 +153,7 @@ class Record(Base):
     parent_record_id links child-schema records to the parent record they extend
     (e.g. a Recording record referencing its Encounter record within the same dataset).
     """
+
     __tablename__ = "records"
     __table_args__ = (
         Index("ix_records_dataset_schema", "dataset_id", "schema_id"),
@@ -140,13 +165,23 @@ class Record(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
-    dataset_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("datasets.id"), nullable=False)
-    schema_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("schemas.id"), nullable=False)
-    parent_record_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("records.id"), nullable=True)
+    dataset_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("datasets.id"), nullable=False
+    )
+    schema_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("schemas.id"), nullable=False
+    )
+    parent_record_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("records.id"), nullable=True
+    )
     data: Mapped[dict[str, Any]] = mapped_column(_JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
-    updated_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now, onupdate=_now)
-    search_vector: Mapped[str | None] = mapped_column(_TSVECTOR, nullable=True, default=None)
+    updated_at: Mapped[datetime] = mapped_column(
+        _UTCDateTime(), default=_now, onupdate=_now
+    )
+    search_vector: Mapped[str | None] = mapped_column(
+        _TSVECTOR, nullable=True, default=None
+    )
 
     dataset: Mapped[Dataset] = relationship("Dataset", back_populates="records")
     schema: Mapped[Schema] = relationship("Schema")
@@ -154,6 +189,7 @@ class Record(Base):
 
 class Commit(Base):
     """A named snapshot grouping a set of audit log entries (uncommitted changes)."""
+
     __tablename__ = "commits"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
@@ -170,12 +206,19 @@ class Commit(Base):
 
 class AuditLog(Base):
     """One row per entity write — create, update, or delete — from any source."""
+
     __tablename__ = "audit_log"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
-    commit_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("commits.id"), nullable=True)
-    action: Mapped[str] = mapped_column(String(20), nullable=False)   # create | update | delete
-    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)  # record | schema | field | dataset
+    commit_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("commits.id"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # create | update | delete
+    entity_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # record | schema | field | dataset
     entity_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     old_data: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     new_data: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
@@ -192,18 +235,23 @@ class WorkflowJob(Base):
     status: pending → running → completed | failed
     trigger: record_created | record_updated | manual
     """
+
     __tablename__ = "workflow_jobs"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    record_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("records.id"), nullable=False)
+    record_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("records.id"), nullable=False
+    )
     schema_name: Mapped[str] = mapped_column(String(255), nullable=False)
     trigger: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     log: Mapped[str | None] = mapped_column(String, nullable=True)
     input_data: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
-    depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    depth: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
     started_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)

@@ -71,7 +71,15 @@ class LocalRecordRepository:
         offset: int,
         limit: int,
     ) -> list[RecordDTO]:
-        q = _base_query(self._s, dataset_id, schema_id, parent_record_id, field_filters, search, self._pg)
+        q = _base_query(
+            self._s,
+            dataset_id,
+            schema_id,
+            parent_record_id,
+            field_filters,
+            search,
+            self._pg,
+        )
         rows = q.order_by(Record.created_at).offset(offset).limit(limit).all()
         return [_to_dto(r) for r in rows]
 
@@ -83,16 +91,28 @@ class LocalRecordRepository:
         field_filters: list[tuple[str, str]],
         search: str | None,
     ) -> int:
-        q = _base_query(self._s, dataset_id, schema_id, parent_record_id, field_filters, search, self._pg)
+        q = _base_query(
+            self._s,
+            dataset_id,
+            schema_id,
+            parent_record_id,
+            field_filters,
+            search,
+            self._pg,
+        )
         return q.count()
 
-    def list_by_schema(self, schema_id: uuid.UUID, search: str | None = None, limit: int = 20) -> list[RecordDTO]:
+    def list_by_schema(
+        self, schema_id: uuid.UUID, search: str | None = None, limit: int = 20
+    ) -> list[RecordDTO]:
         q = self._s.query(Record).filter(Record.schema_id == schema_id)
         if search:
-            q = q.filter(or_(
-                cast(Record.data, String).ilike(f"%{search}%"),
-                cast(Record.id, String).ilike(f"{search}%"),
-            ))
+            q = q.filter(
+                or_(
+                    cast(Record.data, String).ilike(f"%{search}%"),
+                    cast(Record.id, String).ilike(f"{search}%"),
+                )
+            )
         rows = q.order_by(Record.created_at.desc()).limit(limit).all()
         return [_to_dto(r) for r in rows]
 
@@ -132,7 +152,9 @@ class LocalRecordRepository:
     def update(self, id: uuid.UUID, data: dict[str, Any]) -> RecordDTO:
         row = self._s.query(Record).filter_by(id=id).first()
         row.data = data
-        row.search_vector = func.to_tsvector("simple", _search_text(data)) if self._pg else None
+        row.search_vector = (
+            func.to_tsvector("simple", _search_text(data)) if self._pg else None
+        )
         self._s.flush()
         return _to_dto(row)
 

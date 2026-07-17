@@ -37,20 +37,41 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[None, str]:
 
     wf_def = ctx.job_svc.find_workflow(job.workflow_name)
     if wf_def is None:
-        raise ValueError(f"Workflow '{job.workflow_name}' not found in _civex/workflows/")
+        raise ValueError(
+            f"Workflow '{job.workflow_name}' not found in _civex/workflows/"
+        )
 
     record = ctx.record_svc.get(str(job.record_id))
     dataset = ctx.dataset_svc._datasets.get_by_id(record.dataset_id)
     if dataset is None:
         raise ValueError(f"Dataset for record '{job.record_id}' not found")
 
-    _NOISY = ("sqlalchemy", "uvicorn", "fastapi", "httpx", "asyncio", "urllib3", "watchfiles", "h11")
+    _NOISY = (
+        "sqlalchemy",
+        "uvicorn",
+        "fastapi",
+        "httpx",
+        "asyncio",
+        "urllib3",
+        "watchfiles",
+        "h11",
+    )
 
     buf = io.StringIO()
     handler = _logging.StreamHandler(buf)
     handler.setLevel(_logging.DEBUG)
     handler.setFormatter(_logging.Formatter("%(levelname)-8s %(name)s: %(message)s"))
-    handler.addFilter(type("F", (_logging.Filter,), {"filter": staticmethod(lambda r: not any(r.name.startswith(p) for p in _NOISY))})())
+    handler.addFilter(
+        type(
+            "F",
+            (_logging.Filter,),
+            {
+                "filter": staticmethod(
+                    lambda r: not any(r.name.startswith(p) for p in _NOISY)
+                )
+            },
+        )()
+    )
     root = _logging.getLogger()
     prev_level = root.level
     root.addHandler(handler)
@@ -58,7 +79,9 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[None, str]:
     try:
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             wf_ctx = WorkflowContext(record=record, dataset=dataset, _app_ctx=ctx)
-            executor.run(wf_def, wf_ctx, plugins, initial_outputs=job.input_data or None)
+            executor.run(
+                wf_def, wf_ctx, plugins, initial_outputs=job.input_data or None
+            )
     finally:
         root.removeHandler(handler)
         root.setLevel(prev_level)
@@ -72,7 +95,9 @@ def drain_jobs(ctx: AppContext) -> None:
         job = ctx.job_svc.claim_pending()
         if job is None:
             break
-        console.print(f"  [dim]→ workflow '{job.workflow_name}' (trigger: {job.trigger})[/dim]")
+        console.print(
+            f"  [dim]→ workflow '{job.workflow_name}' (trigger: {job.trigger})[/dim]"
+        )
         try:
             _, log = run_job(job, ctx)
             ctx.job_svc.mark_completed(job.id, log=log or None)

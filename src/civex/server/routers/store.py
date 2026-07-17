@@ -3,7 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from civex.context import AppContext
-from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError, VolumeUnavailableError
+from civex.domain.exceptions import (
+    AlreadyExistsError,
+    NotFoundError,
+    ValidationError,
+    VolumeUnavailableError,
+)
 from civex.server.deps import get_ctx
 from civex.server.models import (
     AddVolumeRequest,
@@ -37,7 +42,9 @@ def add_volume(body: AddVolumeRequest, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.patch("/volumes/{name}", response_model=VolumeStatsResponse)
-def update_volume(name: str, body: UpdateVolumeRequest, ctx: AppContext = Depends(get_ctx)):
+def update_volume(
+    name: str, body: UpdateVolumeRequest, ctx: AppContext = Depends(get_ctx)
+):
     alloc = _UNSET
     if body.allocated_gb is not None:
         alloc = body.allocated_gb

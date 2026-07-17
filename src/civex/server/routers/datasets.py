@@ -7,7 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError
 from civex.server.deps import get_ctx
-from civex.server.models import CreateDatasetRequest, DatasetResponse, UpdateDatasetRequest
+from civex.server.models import (
+    CreateDatasetRequest,
+    DatasetResponse,
+    UpdateDatasetRequest,
+)
 
 router = APIRouter(prefix="/collections", tags=["collections"])
 
@@ -59,7 +63,9 @@ def record_counts(name_or_id: str, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.patch("/{name_or_id}", response_model=DatasetResponse)
-def update_dataset(name_or_id: str, body: UpdateDatasetRequest, ctx: AppContext = Depends(get_ctx)):
+def update_dataset(
+    name_or_id: str, body: UpdateDatasetRequest, ctx: AppContext = Depends(get_ctx)
+):
     # Resolve by UUID or name
     dataset = None
     try:
@@ -73,7 +79,9 @@ def update_dataset(name_or_id: str, body: UpdateDatasetRequest, ctx: AppContext 
         except NotFoundError as e:
             raise HTTPException(404, detail=str(e))
     try:
-        updated = ctx.dataset_svc.update(dataset.name, new_name=body.rename, description=body.description)
+        updated = ctx.dataset_svc.update(
+            dataset.name, new_name=body.rename, description=body.description
+        )
         ctx.commit()
     except AlreadyExistsError as e:
         raise HTTPException(409, detail=str(e))

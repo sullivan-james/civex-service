@@ -15,7 +15,9 @@ class Plugin(BasePlugin):
     class Config(BaseModel):
         field: str  # field name on the trigger record to write to
 
-    def run(self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext) -> dict[str, Any]:
+    def run(
+        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+    ) -> dict[str, Any]:
         value = inputs["value"]
         updated = dict(ctx.record.data)
         updated[config.field] = value

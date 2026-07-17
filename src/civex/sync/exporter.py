@@ -8,6 +8,7 @@ Records are exported commit-driven: only records that appear in audit log entrie
 belonging to commits with seq > since_seq are included.  Deleted records are sent
 as IDs only (the row is gone) in deleted_record_ids.
 """
+
 from __future__ import annotations
 
 import math
@@ -32,33 +33,40 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
 
     schemas = [
         SchemaDTO(
-            id=r.id, name=r.name, description=r.description,
-            parent_id=r.parent_id, created_at=r.created_at or now,
+            id=r.id,
+            name=r.name,
+            description=r.description,
+            parent_id=r.parent_id,
+            created_at=r.created_at or now,
         ).to_dict()
         for r in session.query(Schema).order_by(Schema.created_at).all()
     ]
     fields = [
         FieldDTO(
-            id=r.id, schema_id=r.schema_id, name=r.name, dtype=r.dtype,
-            required=r.required, restrictions=r.restrictions or {},
+            id=r.id,
+            schema_id=r.schema_id,
+            name=r.name,
+            dtype=r.dtype,
+            required=r.required,
+            restrictions=r.restrictions or {},
             created_at=r.created_at or now,
         ).to_dict()
         for r in session.query(Field).order_by(Field.created_at).all()
     ]
     datasets = [
         DatasetDTO(
-            id=r.id, name=r.name, description=r.description,
-            record_count=0, created_at=r.created_at or now,
+            id=r.id,
+            name=r.name,
+            description=r.description,
+            record_count=0,
+            created_at=r.created_at or now,
         ).to_dict()
         for r in session.query(Dataset).order_by(Dataset.created_at).all()
     ]
 
     # Commits not yet seen by the receiver.
     new_commits = (
-        session.query(Commit)
-        .filter(Commit.seq > since_seq)
-        .order_by(Commit.seq)
-        .all()
+        session.query(Commit).filter(Commit.seq > since_seq).order_by(Commit.seq).all()
     )
     commit_ids = [c.id for c in new_commits]
     to_seq = new_commits[-1].seq if new_commits else since_seq
@@ -69,7 +77,8 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
         .filter(AuditLog.commit_id.in_(commit_ids))
         .order_by(AuditLog.timestamp)
         .all()
-        if commit_ids else []
+        if commit_ids
+        else []
     )
 
     # Split record audit entries into live (create/update) and deleted.
@@ -85,14 +94,19 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
 
     records = [
         RecordDTO(
-            id=r.id, dataset_id=r.dataset_id, schema_id=r.schema_id,
-            schema_name="", parent_record_id=r.parent_record_id,
-            data=_sanitize_nan(r.data or {}), created_at=r.created_at or now,
+            id=r.id,
+            dataset_id=r.dataset_id,
+            schema_id=r.schema_id,
+            schema_name="",
+            parent_record_id=r.parent_record_id,
+            data=_sanitize_nan(r.data or {}),
+            created_at=r.created_at or now,
             updated_at=r.updated_at or now,
         ).to_dict()
         for r in (
             session.query(Record).filter(Record.id.in_(live_record_ids)).all()
-            if live_record_ids else []
+            if live_record_ids
+            else []
         )
     ]
 
@@ -109,17 +123,24 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
         object_refs=_collect_object_refs(records),
         commits=[
             CommitDTO(
-                id=c.id, seq=c.seq, message=c.message,
+                id=c.id,
+                seq=c.seq,
+                message=c.message,
                 created_at=c.created_at or now,
-                record_count=c.record_count, schema_count=c.schema_count,
-                dataset_count=c.dataset_count, pushed_at=c.pushed_at,
+                record_count=c.record_count,
+                schema_count=c.schema_count,
+                dataset_count=c.dataset_count,
+                pushed_at=c.pushed_at,
             ).to_dict()
             for c in new_commits
         ],
         audit_log=[
             AuditLogDTO(
-                id=e.id, commit_id=e.commit_id, action=e.action,
-                entity_type=e.entity_type, entity_id=e.entity_id,
+                id=e.id,
+                commit_id=e.commit_id,
+                action=e.action,
+                entity_type=e.entity_type,
+                entity_id=e.entity_id,
                 old_data=_sanitize_nan(e.old_data),
                 new_data=_sanitize_nan(e.new_data),
                 timestamp=e.timestamp or now,

@@ -23,12 +23,19 @@ class Plugin(BasePlugin):
         dataset: str = ""
         parent_record_id: str = ""
 
-    def run(self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext) -> dict[str, Any]:
+    def run(
+        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+    ) -> dict[str, Any]:
         files: list[dict[str, Any]] = inputs["files"]
         dataset_name = config.dataset or ctx.dataset.name
         parent_id = config.parent_record_id or str(ctx.record.id)
 
-        log.info("Creating %d %s record(s) in dataset '%s'", len(files), config.schema_name, dataset_name)
+        log.info(
+            "Creating %d %s record(s) in dataset '%s'",
+            len(files),
+            config.schema_name,
+            dataset_name,
+        )
 
         created = skipped = 0
         for ref in files:
@@ -39,7 +46,11 @@ class Plugin(BasePlugin):
                     {config.file_field: ref},
                     parent_record_id=parent_id,
                 )
-                log.info("  ✓ created %s from '%s'", config.schema_name, ref.get("filename", "?"))
+                log.info(
+                    "  ✓ created %s from '%s'",
+                    config.schema_name,
+                    ref.get("filename", "?"),
+                )
                 created += 1
             except ValidationError as e:
                 log.warning("  ✗ skipped '%s': %s", ref.get("filename", "?"), e)

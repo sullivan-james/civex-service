@@ -13,7 +13,9 @@ from civex.console import console
 from civex.domain.dtos import SchemaDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError
 
-app = typer.Typer(help="Manage collections (named containers for studies or investigations)")
+app = typer.Typer(
+    help="Manage collections (named containers for studies or investigations)"
+)
 
 
 @app.command("create")
@@ -38,7 +40,9 @@ def dataset_list() -> None:
     ctx = _ctx()
     datasets = ctx.dataset_svc.list_all()
     if not datasets:
-        console.print("[info]No collections yet. Use `civex collection create` to add one.[/info]")
+        console.print(
+            "[info]No collections yet. Use `civex collection create` to add one.[/info]"
+        )
         return
 
     table = Table("Name", "Records", "Description")
@@ -74,12 +78,16 @@ def dataset_show(name: str = typer.Argument(...)) -> None:
 @app.command("update")
 def dataset_update(
     name: str = typer.Argument(...),
-    rename: Optional[str] = typer.Option(None, "--rename", help="New name for the collection"),
+    rename: Optional[str] = typer.Option(
+        None, "--rename", help="New name for the collection"
+    ),
     description: Optional[str] = typer.Option(None, "--description", "-d"),
 ) -> None:
     """Update a collection's name or description."""
     if rename is None and description is None:
-        console.print("[error]Provide at least one of --rename or --description.[/error]")
+        console.print(
+            "[error]Provide at least one of --rename or --description.[/error]"
+        )
         raise typer.Exit(1)
     ctx = _ctx()
     try:

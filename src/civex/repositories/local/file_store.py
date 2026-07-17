@@ -12,6 +12,7 @@ passes both gates:
 On read, volumes are searched in definition order. The `volume` field in
 FileRef is a fast hint but resolution always falls back to scanning.
 """
+
 from __future__ import annotations
 
 import errno
@@ -42,7 +43,9 @@ class VolumeAwareFileObjectStore:
         existing = self._find_object(sha256)
         if existing is not None:
             vol_name = self._volume_of(sha256) or self._cfg.volume_queue[0]
-            return FileRef(sha256=sha256, filename=original_filename, size=size, volume=vol_name)
+            return FileRef(
+                sha256=sha256, filename=original_filename, size=size, volume=vol_name
+            )
 
         reasons: list[str] = []
         for vol_name in self._cfg.volume_queue:
@@ -55,12 +58,19 @@ class VolumeAwareFileObjectStore:
             try:
                 dest.write_bytes(data)
                 self._used_cache.pop(vol_name, None)
-                return FileRef(sha256=sha256, filename=original_filename, size=size, volume=vol_name)
+                return FileRef(
+                    sha256=sha256,
+                    filename=original_filename,
+                    size=size,
+                    volume=vol_name,
+                )
             except OSError as e:
                 if e.errno == errno.ENOSPC:
                     reasons.append(f"{vol_name}: no space left on device")
                     continue
-                raise VolumeUnavailableError(f"Cannot write to volume '{vol_name}': {e}") from e
+                raise VolumeUnavailableError(
+                    f"Cannot write to volume '{vol_name}': {e}"
+                ) from e
 
         raise AllVolumesFull(
             f"No volume in queue has space for {size / 1_048_576:.1f} MB. "
@@ -86,7 +96,9 @@ class VolumeAwareFileObjectStore:
     # Stats (for CLI / UI)
     # ------------------------------------------------------------------
 
-    def _stat_volume(self, name: str, vc: VolumeConfig, warn_pct: float, *, in_queue: bool) -> dict:
+    def _stat_volume(
+        self, name: str, vc: VolumeConfig, warn_pct: float, *, in_queue: bool
+    ) -> dict:
         path = self._resolve_path(vc)
         available = path.exists()
         disk_free = disk_total = None
@@ -99,7 +111,9 @@ class VolumeAwareFileObjectStore:
                 available = False
 
         civex_used = self._civex_used(name) if available else None
-        allocated_bytes = int(vc.allocated_gb * 1024 ** 3) if vc.allocated_gb is not None else None
+        allocated_bytes = (
+            int(vc.allocated_gb * 1024**3) if vc.allocated_gb is not None else None
+        )
 
         warning = False
         if available:
@@ -189,7 +203,7 @@ class VolumeAwareFileObjectStore:
                 return False, f"path unavailable: {e}"
 
         if vc.allocated_gb is not None:
-            allocated = int(vc.allocated_gb * 1024 ** 3)
+            allocated = int(vc.allocated_gb * 1024**3)
             used = self._civex_used(volume)
             if used + incoming_size > allocated:
                 remaining = max(0, allocated - used)
@@ -202,7 +216,7 @@ class VolumeAwareFileObjectStore:
             disk = shutil.disk_usage(path)
         except OSError as e:
             return False, f"cannot check disk space: {e}"
-        full_bytes = int(self._cfg.full_below_gb * 1024 ** 3)
+        full_bytes = int(self._cfg.full_below_gb * 1024**3)
         if disk.free < full_bytes + incoming_size:
             return False, (
                 f"disk too full ({disk.free / 1_048_576:.0f} MB free, "

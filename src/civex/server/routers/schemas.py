@@ -30,7 +30,10 @@ def create_schema(body: CreateSchemaRequest, ctx: AppContext = Depends(get_ctx))
     fields = [f.model_dump() for f in body.fields] if body.fields else None
     try:
         dto = ctx.schema_svc.create_with_fields(
-            body.name, description=body.description, parent=body.parent, fields=fields,
+            body.name,
+            description=body.description,
+            parent=body.parent,
+            fields=fields,
         )
     except AlreadyExistsError as e:
         raise HTTPException(409, detail=str(e))
@@ -57,8 +60,12 @@ def get_schema(name_or_id: str, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.patch("/{name}", response_model=SchemaResponse)
-def update_schema(name: str, body: UpdateSchemaRequest, ctx: AppContext = Depends(get_ctx)):
-    display_field = body.display_field if "display_field" in body.model_fields_set else ...
+def update_schema(
+    name: str, body: UpdateSchemaRequest, ctx: AppContext = Depends(get_ctx)
+):
+    display_field = (
+        body.display_field if "display_field" in body.model_fields_set else ...
+    )
     try:
         dto = ctx.schema_svc.update(
             name,
@@ -86,7 +93,9 @@ def delete_schema(name: str, ctx: AppContext = Depends(get_ctx)):
 def add_field(name: str, body: AddFieldRequest, ctx: AppContext = Depends(get_ctx)):
     try:
         field = ctx.schema_svc.add_field(
-            name, body.name, body.type,
+            name,
+            body.name,
+            body.type,
             required=body.required,
             restrictions=body.restrictions,
             default_value=body.default,
@@ -116,21 +125,30 @@ def delete_field(name: str, field_name: str, ctx: AppContext = Depends(get_ctx))
 
 
 @router.patch("/{name}/fields/{field_name}", response_model=FieldResponse)
-def update_field(name: str, field_name: str, body: UpdateFieldRequest, ctx: AppContext = Depends(get_ctx)):
+def update_field(
+    name: str,
+    field_name: str,
+    body: UpdateFieldRequest,
+    ctx: AppContext = Depends(get_ctx),
+):
     if (
         body.rename is None
         and body.required is None
         and body.restrictions is None
         and "default" not in body.model_fields_set
     ):
-        raise HTTPException(422, detail="Provide at least one of: rename, required, restrictions, default")
+        raise HTTPException(
+            422,
+            detail="Provide at least one of: rename, required, restrictions, default",
+        )
     # Pass default_value only if explicitly included in the request
     default_kwarg: dict = {}
     if "default" in body.model_fields_set:
         default_kwarg["default_value"] = body.default
     try:
         field = ctx.schema_svc.update_field(
-            name, field_name,
+            name,
+            field_name,
             new_name=body.rename,
             required=body.required,
             restrictions=body.restrictions,
@@ -152,7 +170,9 @@ def update_field(name: str, field_name: str, body: UpdateFieldRequest, ctx: AppC
 
 
 @router.put("/{name}/fields/reorder", response_model=SchemaResponse)
-def reorder_fields(name: str, body: ReorderFieldsRequest, ctx: AppContext = Depends(get_ctx)):
+def reorder_fields(
+    name: str, body: ReorderFieldsRequest, ctx: AppContext = Depends(get_ctx)
+):
     try:
         ctx.schema_svc.reorder_fields(name, [uuid.UUID(i) for i in body.order])
         ctx.commit()

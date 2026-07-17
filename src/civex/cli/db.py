@@ -21,14 +21,17 @@ _SOCKET_DIRS = ["/var/run/postgresql", "/run/postgresql", "/tmp"]
 # Driver helpers
 # ---------------------------------------------------------------------------
 
+
 def _detect_pg_driver() -> str | None:
     try:
         import psycopg  # noqa: F401
+
         return "psycopg"
     except ImportError:
         pass
     try:
         import psycopg2  # noqa: F401
+
         return "psycopg2"
     except ImportError:
         pass
@@ -57,6 +60,7 @@ def _install_driver() -> str | None:
 # ---------------------------------------------------------------------------
 # Local server detection
 # ---------------------------------------------------------------------------
+
 
 def _pg_port_open(host: str, port: int, timeout: float = 2.0) -> bool:
     try:
@@ -96,7 +100,10 @@ def _find_socket_dir(port: int) -> str | None:
 # URL builders
 # ---------------------------------------------------------------------------
 
-def _tcp_url(driver: str, user: str, password: str, host: str, port: int, dbname: str) -> str:
+
+def _tcp_url(
+    driver: str, user: str, password: str, host: str, port: int, dbname: str
+) -> str:
     dialect = "postgresql+psycopg" if driver == "psycopg" else "postgresql+psycopg2"
     enc_user = urllib.parse.quote(user, safe="")
     if password:
@@ -116,9 +123,11 @@ def _socket_url(driver: str, user: str, socket_dir: str, port: int, dbname: str)
 # Connection testing
 # ---------------------------------------------------------------------------
 
+
 def _test_connection(url: str) -> str | None:
     """Return None on success, or an error message string."""
     from sqlalchemy import create_engine, text
+
     try:
         engine = create_engine(url)
         with engine.connect() as conn:
@@ -132,6 +141,7 @@ def _test_connection(url: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Database / user provisioning via CLI tools
 # ---------------------------------------------------------------------------
+
 
 def _createdb(dbname: str, port: int, owner: str) -> tuple[bool, str]:
     result = subprocess.run(
@@ -177,10 +187,14 @@ def _maybe_fix_and_connect(
         # Fall through — user now exists, may still need the DB
 
     # ---- database doesn't exist → createdb ------------------------------
-    if "database" in err_lower and "does not exist" in err_lower or (
-        "role" in err_lower and "does not exist" in err_lower
+    if (
+        "database" in err_lower
+        and "does not exist" in err_lower
+        or ("role" in err_lower and "does not exist" in err_lower)
     ):
-        console.print(f"  Database [bold]{dbname}[/bold] not found. Creating it...", end="  ")
+        console.print(
+            f"  Database [bold]{dbname}[/bold] not found. Creating it...", end="  "
+        )
         ok, msg = _createdb(dbname, port, owner=user)
         if not ok:
             console.print("[error]FAILED[/error]")
@@ -203,8 +217,10 @@ def _maybe_fix_and_connect(
 # OS-level installation hints
 # ---------------------------------------------------------------------------
 
+
 def _pg_install_hint() -> str:
     import platform
+
     system = platform.system()
     if system == "Linux":
         try:
@@ -216,7 +232,11 @@ def _pg_install_hint() -> str:
                 "  sudo apt-get install -y postgresql\n"
                 "  sudo systemctl start postgresql"
             )
-        if "fedora" in os_release.lower() or "rhel" in os_release.lower() or "centos" in os_release.lower():
+        if (
+            "fedora" in os_release.lower()
+            or "rhel" in os_release.lower()
+            or "centos" in os_release.lower()
+        ):
             return (
                 "  sudo dnf install -y postgresql-server\n"
                 "  sudo postgresql-setup --initdb\n"
@@ -224,16 +244,14 @@ def _pg_install_hint() -> str:
             )
         return "  sudo apt-get install -y postgresql"
     if system == "Darwin":
-        return (
-            "  brew install postgresql@16\n"
-            "  brew services start postgresql@16"
-        )
+        return "  brew install postgresql@16\n  brew services start postgresql@16"
     return "  https://www.postgresql.org/download/"
 
 
 # ---------------------------------------------------------------------------
 # Command
 # ---------------------------------------------------------------------------
+
 
 @app.command("setup-docker")
 def setup_docker() -> None:
@@ -251,6 +269,7 @@ def setup_docker() -> None:
     # Ensure Docker is running
     if not docker_available():
         from civex.cli._docker import docker_error_hint
+
         console.print("[error]Docker is not usable.[/error]")
         console.print(f"  {docker_error_hint()}")
         raise typer.Exit(1)
@@ -295,8 +314,11 @@ def setup_docker() -> None:
 
     try:
         from civex.config import load_config
+
         existing = load_config()
-        config = Config(project_root=root, db=DBConfig(url=db_url), remote=existing.remote)
+        config = Config(
+            project_root=root, db=DBConfig(url=db_url), remote=existing.remote
+        )
     except Exception:
         config = Config(project_root=root, db=DBConfig(url=db_url), remote=None)
 
@@ -315,9 +337,12 @@ def setup_docker() -> None:
         raise typer.Exit(1)
 
     import urllib.parse
+
     parsed = urllib.parse.urlparse(db_url)
     console.print("\n[success]Docker PostgreSQL setup complete.[/success]")
-    console.print(f"  Database   postgresql://{parsed.hostname}:{parsed.port or 5432}{parsed.path}")
+    console.print(
+        f"  Database   postgresql://{parsed.hostname}:{parsed.port or 5432}{parsed.path}"
+    )
     console.print(f"  Config     {civex_dir / 'config.toml'}")
     if is_new:
         console.print(f"  Objects    {civex_dir / 'objects'}")
@@ -331,7 +356,7 @@ def setup_postgres(
         None,
         "--url",
         help="Full PostgreSQL URL — skips all prompts. "
-             "Example: postgresql+psycopg2://user:pass@host:5432/dbname",
+        "Example: postgresql+psycopg2://user:pass@host:5432/dbname",
         envvar="CIVEX_DB_URL",
     ),
 ) -> None:
@@ -379,7 +404,9 @@ def setup_postgres(
             f_socket = _find_socket_dir(f_port)
         except Exception:
             f_user, f_port, f_dbname, f_socket = getpass.getuser(), 5432, "civex", None
-        db_url_fixed = _maybe_fix_and_connect(driver, f_user, f_port, f_dbname, f_socket, err)
+        db_url_fixed = _maybe_fix_and_connect(
+            driver, f_user, f_port, f_dbname, f_socket, err
+        )
         if db_url_fixed:
             db_url = db_url_fixed
             display = f"localhost:{f_port}/{f_dbname}"
@@ -413,8 +440,11 @@ def setup_postgres(
 
     try:
         from civex.config import load_config
+
         existing = load_config()
-        config = Config(project_root=root, db=DBConfig(url=db_url), remote=existing.remote)
+        config = Config(
+            project_root=root, db=DBConfig(url=db_url), remote=existing.remote
+        )
     except Exception:
         config = Config(project_root=root, db=DBConfig(url=db_url), remote=None)
 
@@ -440,7 +470,9 @@ def setup_postgres(
         console.print(f"  Objects    {civex_dir / 'objects'}")
         console.print(f"  Workflows  {civex_dir / 'workflows'}")
         console.print(f"  Plugins    {civex_dir / 'plugins'}")
-    console.print("\n[dim]Note: credentials are stored in plaintext in _civex/config.toml.[/dim]")
+    console.print(
+        "\n[dim]Note: credentials are stored in plaintext in _civex/config.toml.[/dim]"
+    )
 
 
 def _run_wizard(driver: str) -> tuple[str, str]:
@@ -483,11 +515,15 @@ def _run_wizard(driver: str) -> tuple[str, str]:
         console.print(
             f"  [dim]Server found but could not auto-connect as [bold]{current_user}[/bold].[/dim]"
         )
-        return _prompt_manual(driver, default_host=host, default_port=port, default_user=current_user)
+        return _prompt_manual(
+            driver, default_host=host, default_port=port, default_user=current_user
+        )
     else:
         console.print("[dim]not found[/dim]")
         hint = _pg_install_hint()
-        console.print(f"\n  [dim]No PostgreSQL server detected on ports {_COMMON_PORTS}.[/dim]")
+        console.print(
+            f"\n  [dim]No PostgreSQL server detected on ports {_COMMON_PORTS}.[/dim]"
+        )
         console.print(f"  [dim]To install PostgreSQL:[/dim]\n{hint}\n")
         console.print("  Or enter details for an existing server:")
         return _prompt_manual(driver)
@@ -507,8 +543,12 @@ def _prompt_manual(
     port = typer.prompt("  Port", default=default_port, type=int)
     dbname = typer.prompt("  Database name", default=Path.cwd().name)
     user = typer.prompt("  User", default=default_user)
-    password = typer.prompt("  Password (blank for passwordless)", default="", hide_input=True)
-    return _tcp_url(driver, user, password, host, port, dbname), f"{host}:{port}/{dbname}"
+    password = typer.prompt(
+        "  Password (blank for passwordless)", default="", hide_input=True
+    )
+    return _tcp_url(
+        driver, user, password, host, port, dbname
+    ), f"{host}:{port}/{dbname}"
 
 
 # ---------------------------------------------------------------------------
@@ -520,6 +560,7 @@ def _prompt_manual(
 # build_local_context). These commands are an explicit escape hatch: check
 # status without touching the DB, or force the upgrade before a deploy
 # instead of letting it happen implicitly on next connect.
+
 
 @app.command("current")
 def current() -> None:
@@ -539,15 +580,21 @@ def current() -> None:
     with engine.connect() as connection:
         tables = inspect(connection).get_table_names()
         if "alembic_version" not in tables:
-            console.print("[warning]Not yet migrated[/warning] — will be created/stamped on next connect.")
+            console.print(
+                "[warning]Not yet migrated[/warning] — will be created/stamped on next connect."
+            )
             raise typer.Exit(0)
-        row = connection.exec_driver_sql("SELECT version_num FROM alembic_version").fetchone()
+        row = connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone()
         current_rev = row[0] if row else None
 
     if current_rev == head:
         console.print(f"[success]Up to date[/success] at revision {current_rev}")
     else:
-        console.print(f"[warning]Pending migrations[/warning]: at {current_rev}, head is {head}")
+        console.print(
+            f"[warning]Pending migrations[/warning]: at {current_rev}, head is {head}"
+        )
 
 
 @app.command("migrate")

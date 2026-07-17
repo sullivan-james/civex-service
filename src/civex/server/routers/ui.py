@@ -16,9 +16,7 @@ from civex.workflows.definition import load_workflow
 
 router = APIRouter(prefix="/ui", include_in_schema=False)
 
-_templates = Jinja2Templates(
-    directory=str(Path(__file__).parent.parent / "templates")
-)
+_templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 
 def _r(url: str, flash_ok: str = "", flash_error: str = "") -> RedirectResponse:
@@ -31,7 +29,7 @@ def _r(url: str, flash_ok: str = "", flash_error: str = "") -> RedirectResponse:
 
 
 def _tmpl(request: Request, name: str, **ctx):
-    flash_ok    = request.query_params.get("flash_ok", "")
+    flash_ok = request.query_params.get("flash_ok", "")
     flash_error = request.query_params.get("flash_error", "")
     return _templates.TemplateResponse(
         request, name, {"flash_ok": flash_ok, "flash_error": flash_error, **ctx}
@@ -40,25 +38,35 @@ def _tmpl(request: Request, name: str, **ctx):
 
 # --- Dashboard ---
 
+
 @router.get("")
 def index(request: Request, ctx: AppContext = Depends(get_ctx)):
-    schemas  = ctx.schema_svc.list_all()
+    schemas = ctx.schema_svc.list_all()
     datasets = ctx.dataset_svc.list_all()
     record_count = sum(d.record_count for d in datasets)
     try:
         from civex.config import load_config
+
         wf_dir = load_config().civex_dir / "workflows"
-        workflow_count = len(list(wf_dir.glob("*.yaml")) + list(wf_dir.glob("*.yml"))) if wf_dir.exists() else 0
+        workflow_count = (
+            len(list(wf_dir.glob("*.yaml")) + list(wf_dir.glob("*.yml")))
+            if wf_dir.exists()
+            else 0
+        )
     except Exception:
         workflow_count = 0
-    return _tmpl(request, "index.html",
-                 schema_count=len(schemas),
-                 dataset_count=len(datasets),
-                 record_count=record_count,
-                 workflow_count=workflow_count)
+    return _tmpl(
+        request,
+        "index.html",
+        schema_count=len(schemas),
+        dataset_count=len(datasets),
+        record_count=record_count,
+        workflow_count=workflow_count,
+    )
 
 
 # --- Schemas ---
+
 
 @router.get("/schemas")
 def schemas_list(request: Request, ctx: AppContext = Depends(get_ctx)):
@@ -70,10 +78,14 @@ def schemas_list(request: Request, ctx: AppContext = Depends(get_ctx)):
             p = ctx.schema_svc._repo.get_by_id(s.parent_id)
             parent_name = p.name if p else None
         all_fields = ctx.schema_svc.collect_fields(s)
-        schemas.append({
-            "name": s.name, "description": s.description,
-            "parent_name": parent_name, "field_count": len(all_fields),
-        })
+        schemas.append(
+            {
+                "name": s.name,
+                "description": s.description,
+                "parent_name": parent_name,
+                "field_count": len(all_fields),
+            }
+        )
     return _tmpl(request, "schemas.html", schemas=schemas)
 
 
@@ -86,7 +98,9 @@ def schemas_create(
     ctx: AppContext = Depends(get_ctx),
 ):
     try:
-        ctx.schema_svc.create(name, description=description or None, parent=parent or None)
+        ctx.schema_svc.create(
+            name, description=description or None, parent=parent or None
+        )
     except (AlreadyExistsError, NotFoundError) as e:
         return _r("/ui/schemas", flash_error=str(e))
     return _r(f"/ui/schemas/{name}", flash_ok=f"Schema '{name}' created.")
@@ -103,11 +117,26 @@ def schema_detail(name: str, request: Request, ctx: AppContext = Depends(get_ctx
         p = ctx.schema_svc._repo.get_by_id(schema.parent_id)
         parent_name = p.name if p else None
     resolved = ctx.schema_svc.collect_fields(schema)
-    fields = [{"field": {"name": rf.field.name, "type": rf.field.dtype, "required": rf.field.required},
-               "source": rf.source_schema_name} for rf in resolved]
+    fields = [
+        {
+            "field": {
+                "name": rf.field.name,
+                "type": rf.field.dtype,
+                "required": rf.field.required,
+            },
+            "source": rf.source_schema_name,
+        }
+        for rf in resolved
+    ]
     datasets = [d for d in ctx.dataset_svc.list_all() if d.schema_name == name]
-    return _tmpl(request, "schema_detail.html",
-                 schema=schema, parent_name=parent_name, fields=fields, datasets=datasets)
+    return _tmpl(
+        request,
+        "schema_detail.html",
+        schema=schema,
+        parent_name=parent_name,
+        fields=fields,
+        datasets=datasets,
+    )
 
 
 @router.post("/schemas/{name}/fields")
@@ -136,11 +165,15 @@ def schema_delete(name: str, ctx: AppContext = Depends(get_ctx)):
 
 # --- Datasets ---
 
+
 @router.get("/datasets")
 def datasets_list(request: Request, ctx: AppContext = Depends(get_ctx)):
-    return _tmpl(request, "datasets.html",
-                 datasets=ctx.dataset_svc.list_all(),
-                 schemas=ctx.schema_svc.list_all())
+    return _tmpl(
+        request,
+        "datasets.html",
+        datasets=ctx.dataset_svc.list_all(),
+        schemas=ctx.schema_svc.list_all(),
+    )
 
 
 @router.post("/datasets")
@@ -151,7 +184,9 @@ def datasets_create(
     ctx: AppContext = Depends(get_ctx),
 ):
     try:
-        ctx.dataset_svc.create(name, schema_name=schema_name, description=description or None)
+        ctx.dataset_svc.create(
+            name, schema_name=schema_name, description=description or None
+        )
     except (AlreadyExistsError, NotFoundError) as e:
         return _r("/ui/datasets", flash_error=str(e))
     return _r(f"/ui/datasets/{name}", flash_ok=f"Dataset '{name}' created.")
@@ -163,14 +198,29 @@ def dataset_detail(name: str, request: Request, ctx: AppContext = Depends(get_ct
         dataset = ctx.dataset_svc.get(name)
     except NotFoundError:
         return _r("/ui/datasets", flash_error=f"Dataset '{name}' not found.")
-    schema  = ctx.schema_svc.get(dataset.schema_name)
+    schema = ctx.schema_svc.get(dataset.schema_name)
     resolved = ctx.schema_svc.collect_fields(schema)
-    fields = [{"field": {"name": rf.field.name, "type": rf.field.dtype, "required": rf.field.required},
-               "source": rf.source_schema_name} for rf in resolved]
+    fields = [
+        {
+            "field": {
+                "name": rf.field.name,
+                "type": rf.field.dtype,
+                "required": rf.field.required,
+            },
+            "source": rf.source_schema_name,
+        }
+        for rf in resolved
+    ]
     field_names = [rf.field.name for rf in resolved]
     records = ctx.record_svc.find(name, filters=[], limit=200)
-    return _tmpl(request, "dataset_detail.html",
-                 dataset=dataset, fields=fields, field_names=field_names, records=records)
+    return _tmpl(
+        request,
+        "dataset_detail.html",
+        dataset=dataset,
+        fields=fields,
+        field_names=field_names,
+        records=records,
+    )
 
 
 @router.post("/datasets/{name}/records")
@@ -181,7 +231,7 @@ async def dataset_add_record(
 ):
     form = await request.form()
     dataset = ctx.dataset_svc.get(name)
-    schema  = ctx.schema_svc.get(dataset.schema_name)
+    schema = ctx.schema_svc.get(dataset.schema_name)
     resolved = ctx.schema_svc.collect_fields(schema)
 
     data: dict[str, Any] = {}
@@ -222,6 +272,7 @@ def dataset_delete(name: str, ctx: AppContext = Depends(get_ctx)):
 
 # --- Records ---
 
+
 @router.get("/records/{record_id}")
 def record_detail(record_id: str, request: Request, ctx: AppContext = Depends(get_ctx)):
     try:
@@ -234,8 +285,13 @@ def record_detail(record_id: str, request: Request, ctx: AppContext = Depends(ge
         fields = ctx.record_svc.get_resolved_fields(record.schema_name)
     except Exception:
         fields = []
-    return _tmpl(request, "record_detail.html",
-                 record=record, dataset_name=dataset_name, fields=fields)
+    return _tmpl(
+        request,
+        "record_detail.html",
+        record=record,
+        dataset_name=dataset_name,
+        fields=fields,
+    )
 
 
 @router.post("/records/{record_id}/update")
@@ -306,19 +362,27 @@ def record_delete(record_id: str, ctx: AppContext = Depends(get_ctx)):
 
 # --- Workflows ---
 
+
 @router.get("/workflows")
 def workflows_list(request: Request):
     workflows = []
     try:
         from civex.config import load_config
+
         config = load_config()
         wf_dir = config.civex_dir / "workflows"
         if wf_dir.exists():
             for path in sorted(wf_dir.glob("*.yaml")) + sorted(wf_dir.glob("*.yml")):
                 try:
                     wf = load_workflow(path)
-                    workflows.append({"name": wf.name, "description": wf.description,
-                                      "steps": len(wf.steps), "filename": path.name})
+                    workflows.append(
+                        {
+                            "name": wf.name,
+                            "description": wf.description,
+                            "steps": len(wf.steps),
+                            "filename": path.name,
+                        }
+                    )
                 except Exception:
                     pass
     except Exception:
@@ -345,6 +409,7 @@ def workflow_run(
 
 
 # --- Jobs ---
+
 
 @router.get("/jobs")
 def jobs_list(request: Request, ctx: AppContext = Depends(get_ctx)):

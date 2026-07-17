@@ -6,7 +6,9 @@ from civex.repositories.protocols import AuditRepository, DatasetRepository
 
 
 class DatasetService:
-    def __init__(self, dataset_repo: DatasetRepository, audit_repo: AuditRepository | None = None) -> None:
+    def __init__(
+        self, dataset_repo: DatasetRepository, audit_repo: AuditRepository | None = None
+    ) -> None:
         self._datasets = dataset_repo
         self._audit = audit_repo
 
@@ -38,13 +40,19 @@ class DatasetService:
             if self._datasets.get_by_name(new_name):
                 raise AlreadyExistsError(f"Dataset '{new_name}' already exists")
         old_dict = dataset.to_dict()
-        updated = self._datasets.update(dataset.id, name=new_name, description=description)
+        updated = self._datasets.update(
+            dataset.id, name=new_name, description=description
+        )
         if self._audit:
-            self._audit.log_change("update", "dataset", updated.id, old_dict, updated.to_dict())
+            self._audit.log_change(
+                "update", "dataset", updated.id, old_dict, updated.to_dict()
+            )
         return updated
 
     def delete(self, name: str) -> None:
         dataset = self.get(name)
         if self._audit:
-            self._audit.log_change("delete", "dataset", dataset.id, dataset.to_dict(), None)
+            self._audit.log_change(
+                "delete", "dataset", dataset.id, dataset.to_dict(), None
+            )
         self._datasets.delete(dataset.id)

@@ -39,7 +39,11 @@ else:
             try:
                 os.execvpe(
                     sys.executable,
-                    [sys.executable, "-c", "from civex.cli.shell import run_shell; run_shell()"],
+                    [
+                        sys.executable,
+                        "-c",
+                        "from civex.cli.shell import run_shell; run_shell()",
+                    ],
                     env,
                 )
             finally:
@@ -52,7 +56,9 @@ else:
             try:
                 while True:
                     try:
-                        data = await loop.run_in_executor(None, os.read, master_fd, 4096)
+                        data = await loop.run_in_executor(
+                            None, os.read, master_fd, 4096
+                        )
                     except OSError:
                         break
                     if not data:
