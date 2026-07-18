@@ -23,6 +23,7 @@ from civex.repositories.local.file_store import VolumeAwareFileObjectStore
 from civex.repositories.local.job_repo import LocalWorkflowJobRepository
 from civex.repositories.local.record_repo import LocalRecordRepository
 from civex.repositories.local.schema_repo import LocalSchemaRepository
+from civex.services.ai.service import AiService
 from civex.services.dataset_service import DatasetService
 from civex.services.file_service import FileService
 from civex.services.record_service import RecordService
@@ -46,6 +47,7 @@ class AppContext:
     job_svc: WorkflowJobService
     store_svc: StoreService
     audit_svc: LocalAuditRepository
+    ai_svc: AiService
     _session: Session
 
     def commit(self) -> None:
@@ -92,6 +94,7 @@ def build_local_context(
     )
     file_svc = FileService(file_store, remote_transport=remote_transport)
     store_svc = StoreService(config, file_store)
+    ai_svc = AiService(schema_svc, dataset_svc, record_svc, job_svc)
 
     return AppContext(
         schema_svc=schema_svc,
@@ -101,5 +104,6 @@ def build_local_context(
         job_svc=job_svc,
         store_svc=store_svc,
         audit_svc=audit_repo,
+        ai_svc=ai_svc,
         _session=session,
     )

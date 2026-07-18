@@ -10,7 +10,7 @@ from civex.config import AIConfig, load_config, save_config
 from civex.context import build_local_context
 from civex.domain.exceptions import ConfigError
 from civex.services.ai.config import ANTHROPIC_MODELS, DEFAULT_MODEL
-from civex.services.ai.service import _sse, _stream_chat
+from civex.services.ai.service import _sse
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -220,7 +220,7 @@ async def chat(body: ChatRequest):
 
     async def gen():
         try:
-            async for chunk in _stream_chat(body.messages, ctx, config.ai):
+            async for chunk in ctx.ai_svc.stream_chat(body.messages, config.ai):
                 yield chunk
         except Exception as e:
             yield _sse({"type": "error", "message": f"Unexpected error: {e}"})
