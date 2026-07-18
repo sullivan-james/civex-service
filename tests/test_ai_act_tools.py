@@ -38,7 +38,7 @@ def ctx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def _call(name: str, args: dict, ctx) -> dict:
-    return json.loads(ai_service._dispatch_tool(name, args, ctx))
+    return json.loads(ctx.ai_svc.dispatch_tool(name, args))
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +411,7 @@ def test_openai_stream_halts_after_a_proposed_tool(ctx, monkeypatch) -> None:
     async def collect():
         out = []
         history = [ai.UserMessage(content="add a record")]
-        async for sse in ai_service._stream_chat_openai(history, ctx, cfg):
+        async for sse in ctx.ai_svc.stream_chat(history, cfg):
             out.append(_json.loads(sse[len("data: ") :]))
         return out
 
@@ -529,7 +529,7 @@ def test_anthropic_stream_halts_after_a_proposed_tool(ctx, monkeypatch) -> None:
     async def collect():
         out = []
         history = [ai.UserMessage(content="add a record")]
-        async for sse in ai_service._stream_chat_anthropic(history, ctx, cfg):
+        async for sse in ctx.ai_svc.stream_chat(history, cfg):
             out.append(_json.loads(sse[len("data: ") :]))
         return out
 

@@ -3,9 +3,12 @@ proposal building, system-prompt construction, and both provider streaming
 loops.
 
 Mechanically relocated from server/routers/ai.py (CIVEX-47a) -- byte-identical
-bodies, no behavior change. The router still owns HTTP request/response
-models, the /ai/config endpoints, and the OpenRouter/Ollama proxy endpoints;
-everything that was actually AI business logic now lives here.
+bodies, no behavior change. AiService (CIVEX-47b) is the class the rest of the
+app (AppContext) talks to; it's a thin wrapper delegating to the free
+functions below, which is where the actual logic lives. The router still owns
+HTTP request/response models, the /ai/config endpoints, and the
+OpenRouter/Ollama proxy endpoints; everything that was actually AI business
+logic now lives here.
 """
 
 from __future__ import annotations
@@ -13,12 +16,19 @@ from __future__ import annotations
 import ast
 import json
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from civex.config import load_config
 from civex.domain.exceptions import NotFoundError
 from civex.services.ai.history import _history_to_anthropic, _history_to_openai
 from civex.services.schema_service import VALID_DTYPES, VALID_RESTRICTION_KEYS
+
+if TYPE_CHECKING:
+    from civex.config import AIConfig
+    from civex.services.dataset_service import DatasetService
+    from civex.services.record_service import RecordService
+    from civex.services.schema_service import SchemaService
+    from civex.services.workflow_job_service import WorkflowJobService
 
 MAX_TOOL_ROUNDS = 10
 _SAFE_PLUGIN_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -48,6 +58,37 @@ def _is_ollama(ai_cfg) -> bool:
 
 def _sse(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
+
+
+# ---------------------------------------------------------------------------
+# AiService — the public entry point AppContext wires up. A thin wrapper: it
+# holds the same four services _dispatch_tool/_dispatch_act_tool/
+# _build_system_prompt already expect on a "ctx"-shaped object (schema_svc,
+# dataset_svc, record_svc, job_svc) and passes itself as that ctx, so none of
+# the free functions above needed to change shape for this to slot in.
+# ---------------------------------------------------------------------------
+
+
+class AiService:
+    def __init__(
+        self,
+        schema_svc: SchemaService,
+        dataset_svc: DatasetService,
+        record_svc: RecordService,
+        job_svc: WorkflowJobService,
+    ) -> None:
+        self.schema_svc = schema_svc
+        self.dataset_svc = dataset_svc
+        self.record_svc = record_svc
+        self.job_svc = job_svc
+
+    def dispatch_tool(self, tool_name: str, tool_input: dict) -> str:
+        return _dispatch_tool(tool_name, tool_input, self)
+
+    def stream_chat(self, history: list, ai_cfg: AIConfig):
+        """Async generator of SSE-frame strings (router.chat() consumes this
+        directly, wrapping any pre-provider errors of its own in _sse())."""
+        return _stream_chat(history, self, ai_cfg)
 
 
 # ---------------------------------------------------------------------------
