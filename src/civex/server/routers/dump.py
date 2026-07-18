@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from civex import __version__
 from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.server.deps import get_ctx
@@ -97,7 +98,7 @@ def export_dump(
         plugins_out = []
 
     dump_doc = {
-        "civex_version": "0.1.0",
+        "civex_version": __version__,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "schemas": schemas_out,
         "datasets": datasets_out,
