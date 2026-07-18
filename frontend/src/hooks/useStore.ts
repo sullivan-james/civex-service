@@ -4,7 +4,11 @@ import { storeApi } from '../api/store'
 const KEY = ['store', 'volumes']
 
 export function useVolumes() {
-  return useQuery({ queryKey: KEY, queryFn: storeApi.listVolumes, refetchInterval: 30_000 })
+  return useQuery({
+    queryKey: KEY,
+    queryFn: storeApi.listVolumes,
+    refetchInterval: 30_000,
+  })
 }
 
 export function useAddVolume() {
@@ -18,8 +22,13 @@ export function useAddVolume() {
 export function useUpdateVolume() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ name, body }: { name: string; body: Parameters<typeof storeApi.updateVolume>[1] }) =>
-      storeApi.updateVolume(name, body),
+    mutationFn: ({
+      name,
+      body,
+    }: {
+      name: string
+      body: Parameters<typeof storeApi.updateVolume>[1]
+    }) => storeApi.updateVolume(name, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   })
 }

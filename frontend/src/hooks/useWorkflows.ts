@@ -42,8 +42,15 @@ export function useRunWorkflow() {
 export function useRunWorkflowWithFiles() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ name, recordId, fileInputs }: { name: string; recordId: string; fileInputs: Record<string, File[]> }) =>
-      workflowsApi.runWithFiles(name, recordId, fileInputs),
+    mutationFn: ({
+      name,
+      recordId,
+      fileInputs,
+    }: {
+      name: string
+      recordId: string
+      fileInputs: Record<string, File[]>
+    }) => workflowsApi.runWithFiles(name, recordId, fileInputs),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['jobs'] }),
   })
 }
@@ -56,19 +63,28 @@ export function useJobs(status?: string, recordId?: string) {
       const jobs = query.state.data as WorkflowJob[] | undefined
       // Fast poll while jobs are active; slow baseline so newly-triggered
       // jobs (e.g. from record create/update hooks) appear without a manual refresh.
-      return jobs?.some(j => j.status === 'pending' || j.status === 'running') ? 2000 : 5000
+      return jobs?.some((j) => j.status === 'pending' || j.status === 'running')
+        ? 2000
+        : 5000
     },
   })
 }
 
-export function useJobsPaged(page: number, pageSize: number, status?: string, recordId?: string) {
+export function useJobsPaged(
+  page: number,
+  pageSize: number,
+  status?: string,
+  recordId?: string,
+) {
   const offset = page * pageSize
   const jobs = useQuery({
     queryKey: ['jobs', 'paged', page, pageSize, status, recordId],
     queryFn: () => jobsApi.list(status, recordId, offset, pageSize),
     refetchInterval: (query) => {
       const data = query.state.data as WorkflowJob[] | undefined
-      return data?.some(j => j.status === 'pending' || j.status === 'running') ? 2000 : 5000
+      return data?.some((j) => j.status === 'pending' || j.status === 'running')
+        ? 2000
+        : 5000
     },
   })
   const total = useQuery({
@@ -76,14 +92,22 @@ export function useJobsPaged(page: number, pageSize: number, status?: string, re
     queryFn: () => jobsApi.count(status, recordId),
     refetchInterval: 5000,
   })
-  return { jobs, total: total.data?.total ?? 0, isLoading: jobs.isLoading || total.isLoading, error: jobs.error }
+  return {
+    jobs,
+    total: total.data?.total ?? 0,
+    isLoading: jobs.isLoading || total.isLoading,
+    error: jobs.error,
+  }
 }
 
 export function useActiveJobCount() {
   return useQuery({
     queryKey: ['jobs', 'count', 'active'],
     queryFn: async () => {
-      const [r, p] = await Promise.all([jobsApi.count('running'), jobsApi.count('pending')])
+      const [r, p] = await Promise.all([
+        jobsApi.count('running'),
+        jobsApi.count('pending'),
+      ])
       return { running: r.total, pending: p.total }
     },
     refetchInterval: 3000,
@@ -113,7 +137,9 @@ export function useJob(id: string) {
     enabled: !!id,
     refetchInterval: (query) => {
       const job = query.state.data as WorkflowJob | undefined
-      return job && (job.status === 'pending' || job.status === 'running') ? 2000 : false
+      return job && (job.status === 'pending' || job.status === 'running')
+        ? 2000
+        : false
     },
   })
 }

@@ -1,16 +1,51 @@
 import { useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { utcToDatetimeLocal, datetimeLocalToUTC } from '../utils/dates'
-import { useSchema, useUpdateSchema, useAddField, useUpdateField, useDeleteSchema, useDeleteField, useSchemas, useReorderFields } from '../hooks/useSchemas'
 import {
-  Button, Badge,
-  Table, Thead, Th, Tbody, Tr, Td,
-  LoadingState, ErrorState,
+  useSchema,
+  useUpdateSchema,
+  useAddField,
+  useUpdateField,
+  useDeleteSchema,
+  useDeleteField,
+  useSchemas,
+  useReorderFields,
+} from '../hooks/useSchemas'
+import {
+  Button,
+  Badge,
+  Table,
+  Thead,
+  Th,
+  Tbody,
+  Tr,
+  Td,
+  LoadingState,
+  ErrorState,
 } from '../components/ui'
 
-const FIELD_TYPES = ['string', 'integer', 'float', 'boolean', 'date', 'datetime', 'file', 'file_list', 'reference', 'enum', 'url', 'reference_list', 'tags']
+const FIELD_TYPES = [
+  'string',
+  'integer',
+  'float',
+  'boolean',
+  'date',
+  'datetime',
+  'file',
+  'file_list',
+  'reference',
+  'enum',
+  'url',
+  'reference_list',
+  'tags',
+]
 
-const NON_DEFAULT_TYPES = new Set(['file', 'file_list', 'reference', 'reference_list'])
+const NON_DEFAULT_TYPES = new Set([
+  'file',
+  'file_list',
+  'reference',
+  'reference_list',
+])
 
 // --- Inline metadata editor ---
 
@@ -28,26 +63,34 @@ function MetaEditor({
   function handleSave() {
     const body: { rename?: string; description?: string } = {}
     if (name !== schema.name) body.rename = name
-    if (description !== (schema.description ?? '')) body.description = description
-    if (!Object.keys(body).length) { onDone(); return }
+    if (description !== (schema.description ?? ''))
+      body.description = description
+    if (!Object.keys(body).length) {
+      onDone()
+      return
+    }
     updateSchema.mutate(body, { onSuccess: onDone })
   }
 
   return (
     <div className="border border-[#d0d7de] rounded-md p-4 bg-[#f6f8fa] mb-4 flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <label className="text-xs font-semibold text-[#656d76] uppercase tracking-wide">Name</label>
+        <label className="text-xs font-semibold text-[#656d76] uppercase tracking-wide">
+          Name
+        </label>
         <input
           value={name}
-          onChange={e => setName(e.target.value)}
+          onChange={(e) => setName(e.target.value)}
           className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
         />
       </div>
       <div className="flex flex-col gap-1">
-        <label className="text-xs font-semibold text-[#656d76] uppercase tracking-wide">Description</label>
+        <label className="text-xs font-semibold text-[#656d76] uppercase tracking-wide">
+          Description
+        </label>
         <input
           value={description}
-          onChange={e => setDescription(e.target.value)}
+          onChange={(e) => setDescription(e.target.value)}
           placeholder="No description"
           className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
         />
@@ -56,10 +99,17 @@ function MetaEditor({
         <p className="text-xs text-[#d1242f]">{String(updateSchema.error)}</p>
       )}
       <div className="flex gap-2">
-        <Button variant="primary" size="sm" onClick={handleSave} disabled={updateSchema.isPending}>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={handleSave}
+          disabled={updateSchema.isPending}
+        >
           {updateSchema.isPending ? 'Saving…' : 'Save'}
         </Button>
-        <Button size="sm" onClick={onDone}>Cancel</Button>
+        <Button size="sm" onClick={onDone}>
+          Cancel
+        </Button>
       </div>
     </div>
   )
@@ -67,7 +117,13 @@ function MetaEditor({
 
 // --- Restrictions summary chip ---
 
-function RestrictionsSummary({ restrictions, type }: { restrictions: Record<string, unknown>; type: string }) {
+function RestrictionsSummary({
+  restrictions,
+  type,
+}: {
+  restrictions: Record<string, unknown>
+  type: string
+}) {
   if (!restrictions || !Object.keys(restrictions).length) return null
   const parts: string[] = []
   if (type === 'integer' || type === 'float') {
@@ -75,14 +131,18 @@ function RestrictionsSummary({ restrictions, type }: { restrictions: Record<stri
     if (restrictions.max !== undefined) parts.push(`max ${restrictions.max}`)
   }
   if (type === 'string' || type === 'enum') {
-    if (Array.isArray(restrictions.choices)) parts.push(`choices: ${(restrictions.choices as string[]).join(', ')}`)
-    if (restrictions.max_length !== undefined) parts.push(`max ${restrictions.max_length} chars`)
+    if (Array.isArray(restrictions.choices))
+      parts.push(`choices: ${(restrictions.choices as string[]).join(', ')}`)
+    if (restrictions.max_length !== undefined)
+      parts.push(`max ${restrictions.max_length} chars`)
   }
   if (type === 'file' || type === 'file_list') {
     if (restrictions.accept) parts.push(`accept ${restrictions.accept}`)
     if (restrictions.max_size !== undefined) {
       const bytes = Number(restrictions.max_size)
-      parts.push(`max ${bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : bytes >= 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${bytes} B`}`)
+      parts.push(
+        `max ${bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : bytes >= 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${bytes} B`}`,
+      )
     }
   }
   if (type === 'date' || type === 'datetime') {
@@ -90,14 +150,25 @@ function RestrictionsSummary({ restrictions, type }: { restrictions: Record<stri
     if (restrictions.max !== undefined) parts.push(`until ${restrictions.max}`)
   }
   if (!parts.length) return null
-  return <span className="text-[10px] text-[#656d76] leading-tight">{parts.join(' · ')}</span>
+  return (
+    <span className="text-[10px] text-[#656d76] leading-tight">
+      {parts.join(' · ')}
+    </span>
+  )
 }
 
 // --- Add field form ---
 
-const inputSm = 'border border-[#d0d7de] rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]'
+const inputSm =
+  'border border-[#d0d7de] rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]'
 
-function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () => void }) {
+function AddFieldForm({
+  schemaName,
+  onDone,
+}: {
+  schemaName: string
+  onDone: () => void
+}) {
   const [fieldName, setFieldName] = useState('')
   const [type, setType] = useState('string')
   const [required, setRequired] = useState(false)
@@ -126,18 +197,32 @@ function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () =
   function handleTypeChange(t: string) {
     setType(t)
     setDefaultVal('')
-    setRefSchema(''); setMinVal(''); setMaxVal(''); setChoices(''); setMaxLength(''); setAccept(''); setMaxSize(''); setMinDate(''); setMaxDate('')
+    setRefSchema('')
+    setMinVal('')
+    setMaxVal('')
+    setChoices('')
+    setMaxLength('')
+    setAccept('')
+    setMaxSize('')
+    setMinDate('')
+    setMaxDate('')
   }
 
   function buildRestrictions(): Record<string, unknown> | undefined {
     const r: Record<string, unknown> = {}
     if (type === 'reference' && refSchema) r.schema = refSchema
     if (type === 'integer' || type === 'float') {
-      if (minVal !== '') r.min = type === 'integer' ? parseInt(minVal) : parseFloat(minVal)
-      if (maxVal !== '') r.max = type === 'integer' ? parseInt(maxVal) : parseFloat(maxVal)
+      if (minVal !== '')
+        r.min = type === 'integer' ? parseInt(minVal) : parseFloat(minVal)
+      if (maxVal !== '')
+        r.max = type === 'integer' ? parseInt(maxVal) : parseFloat(maxVal)
     }
     if (type === 'string' || type === 'enum') {
-      if (choices.trim()) r.choices = choices.split(',').map(c => c.trim()).filter(Boolean)
+      if (choices.trim())
+        r.choices = choices
+          .split(',')
+          .map((c) => c.trim())
+          .filter(Boolean)
       if (maxLength !== '') r.max_length = parseInt(maxLength)
     }
     if (type === 'file' || type === 'file_list') {
@@ -166,10 +251,14 @@ function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () =
     if (showDefault && defaultVal !== '') {
       body.default = defaultVal
     }
-    addField.mutate(
-      body,
-      { onSuccess: () => { setFieldName(''); handleTypeChange('string'); setRequired(false); onDone() } },
-    )
+    addField.mutate(body, {
+      onSuccess: () => {
+        setFieldName('')
+        handleTypeChange('string')
+        setRequired(false)
+        onDone()
+      },
+    })
   }
 
   return (
@@ -178,40 +267,57 @@ function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () =
       <div className="flex items-center gap-3 flex-wrap">
         <input
           value={fieldName}
-          onChange={e => setFieldName(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleAdd()}
+          onChange={(e) => setFieldName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
           placeholder="Field name"
           autoFocus
           className={`${inputSm} w-40`}
         />
         <select
           value={type}
-          onChange={e => handleTypeChange(e.target.value)}
+          onChange={(e) => handleTypeChange(e.target.value)}
           className={inputSm}
         >
-          {FIELD_TYPES.map(t => <option key={t}>{t}</option>)}
+          {FIELD_TYPES.map((t) => (
+            <option key={t}>{t}</option>
+          ))}
         </select>
         {type === 'reference' && (
           <select
             value={refSchema}
-            onChange={e => setRefSchema(e.target.value)}
+            onChange={(e) => setRefSchema(e.target.value)}
             className={inputSm}
           >
             <option value="">— target schema —</option>
-            {allSchemas?.filter(s => s.name !== schemaName).map(s => (
-              <option key={s.id} value={s.name}>{s.name}</option>
-            ))}
+            {allSchemas
+              ?.filter((s) => s.name !== schemaName)
+              .map((s) => (
+                <option key={s.id} value={s.name}>
+                  {s.name}
+                </option>
+              ))}
           </select>
         )}
         <label className="flex items-center gap-1.5 text-sm text-[#1f2328] cursor-pointer select-none">
-          <input type="checkbox" checked={required} onChange={e => setRequired(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={required}
+            onChange={(e) => setRequired(e.target.checked)}
+          />
           Required
         </label>
         <div className="flex gap-2 ml-auto">
-          <Button variant="primary" size="sm" onClick={handleAdd} disabled={addField.isPending || !canAdd}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleAdd}
+            disabled={addField.isPending || !canAdd}
+          >
             {addField.isPending ? 'Adding…' : 'Add field'}
           </Button>
-          <Button size="sm" onClick={onDone}>Cancel</Button>
+          <Button size="sm" onClick={onDone}>
+            Cancel
+          </Button>
         </div>
       </div>
 
@@ -222,7 +328,7 @@ function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () =
             Default value
             <input
               value={defaultVal}
-              onChange={e => setDefaultVal(e.target.value)}
+              onChange={(e) => setDefaultVal(e.target.value)}
               placeholder="none"
               className={`${inputSm} w-40`}
             />
@@ -233,98 +339,203 @@ function AddFieldForm({ schemaName, onDone }: { schemaName: string; onDone: () =
       {/* Row 2: type-specific restrictions */}
       {(type === 'integer' || type === 'float') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <span className="text-xs text-[#656d76] font-medium">
+            Restrictions:
+          </span>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Min
-            <input type="number" step={type === 'integer' ? '1' : 'any'} value={minVal} onChange={e => setMinVal(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
+            <input
+              type="number"
+              step={type === 'integer' ? '1' : 'any'}
+              value={minVal}
+              onChange={(e) => setMinVal(e.target.value)}
+              placeholder="none"
+              className={`${inputSm} w-24`}
+            />
           </label>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Max
-            <input type="number" step={type === 'integer' ? '1' : 'any'} value={maxVal} onChange={e => setMaxVal(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
+            <input
+              type="number"
+              step={type === 'integer' ? '1' : 'any'}
+              value={maxVal}
+              onChange={(e) => setMaxVal(e.target.value)}
+              placeholder="none"
+              className={`${inputSm} w-24`}
+            />
           </label>
         </div>
       )}
       {(type === 'string' || type === 'enum') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <span className="text-xs text-[#656d76] font-medium">
+            Restrictions:
+          </span>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Choices (comma-separated)
-            <input value={choices} onChange={e => setChoices(e.target.value)} placeholder="e.g. left,right,bilateral" className={`${inputSm} w-52`} />
+            <input
+              value={choices}
+              onChange={(e) => setChoices(e.target.value)}
+              placeholder="e.g. left,right,bilateral"
+              className={`${inputSm} w-52`}
+            />
           </label>
           {type === 'string' && (
             <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
               Max length
-              <input type="number" step="1" min="1" value={maxLength} onChange={e => setMaxLength(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
+              <input
+                type="number"
+                step="1"
+                min="1"
+                value={maxLength}
+                onChange={(e) => setMaxLength(e.target.value)}
+                placeholder="none"
+                className={`${inputSm} w-24`}
+              />
             </label>
           )}
         </div>
       )}
       {(type === 'file' || type === 'file_list') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <span className="text-xs text-[#656d76] font-medium">
+            Restrictions:
+          </span>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Accept
-            <input value={accept} onChange={e => setAccept(e.target.value)} placeholder=".csv,.txt" className={`${inputSm} w-36`} />
+            <input
+              value={accept}
+              onChange={(e) => setAccept(e.target.value)}
+              placeholder=".csv,.txt"
+              className={`${inputSm} w-36`}
+            />
           </label>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Max size (bytes)
-            <input type="number" step="1" min="1" value={maxSize} onChange={e => setMaxSize(e.target.value)} placeholder="none" className={`${inputSm} w-28`} />
+            <input
+              type="number"
+              step="1"
+              min="1"
+              value={maxSize}
+              onChange={(e) => setMaxSize(e.target.value)}
+              placeholder="none"
+              className={`${inputSm} w-28`}
+            />
           </label>
         </div>
       )}
       {(type === 'date' || type === 'datetime') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <span className="text-xs text-[#656d76] font-medium">
+            Restrictions:
+          </span>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Not before
-            <input type={type === 'date' ? 'date' : 'datetime-local'} value={minDate} onChange={e => setMinDate(e.target.value)} className={inputSm} />
+            <input
+              type={type === 'date' ? 'date' : 'datetime-local'}
+              value={minDate}
+              onChange={(e) => setMinDate(e.target.value)}
+              className={inputSm}
+            />
           </label>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Not after
-            <input type={type === 'date' ? 'date' : 'datetime-local'} value={maxDate} onChange={e => setMaxDate(e.target.value)} className={inputSm} />
+            <input
+              type={type === 'date' ? 'date' : 'datetime-local'}
+              value={maxDate}
+              onChange={(e) => setMaxDate(e.target.value)}
+              className={inputSm}
+            />
           </label>
         </div>
       )}
 
-      {addField.error && <span className="text-xs text-[#d1242f]">{String(addField.error)}</span>}
+      {addField.error && (
+        <span className="text-xs text-[#d1242f]">{String(addField.error)}</span>
+      )}
     </div>
   )
 }
 
 // --- Inline field editor ---
 
-function FieldEditForm({ field, schemaName, onDone }: { field: { id: string; name: string; type: string; required: boolean; restrictions: Record<string, unknown> }; schemaName: string; onDone: () => void }) {
+function FieldEditForm({
+  field,
+  schemaName,
+  onDone,
+}: {
+  field: {
+    id: string
+    name: string
+    type: string
+    required: boolean
+    restrictions: Record<string, unknown>
+  }
+  schemaName: string
+  onDone: () => void
+}) {
   const [name, setName] = useState(field.name)
   const [required, setRequired] = useState(field.required)
-  const [minVal, setMinVal] = useState(field.restrictions?.min !== undefined ? String(field.restrictions.min) : '')
-  const [maxVal, setMaxVal] = useState(field.restrictions?.max !== undefined ? String(field.restrictions.max) : '')
-  const [choices, setChoices] = useState(Array.isArray(field.restrictions?.choices) ? (field.restrictions.choices as string[]).join(', ') : '')
-  const [maxLength, setMaxLength] = useState(field.restrictions?.max_length !== undefined ? String(field.restrictions.max_length) : '')
-  const [accept, setAccept] = useState(typeof field.restrictions?.accept === 'string' ? field.restrictions.accept : '')
-  const [maxSize, setMaxSize] = useState(field.restrictions?.max_size !== undefined ? String(field.restrictions.max_size) : '')
+  const [minVal, setMinVal] = useState(
+    field.restrictions?.min !== undefined ? String(field.restrictions.min) : '',
+  )
+  const [maxVal, setMaxVal] = useState(
+    field.restrictions?.max !== undefined ? String(field.restrictions.max) : '',
+  )
+  const [choices, setChoices] = useState(
+    Array.isArray(field.restrictions?.choices)
+      ? (field.restrictions.choices as string[]).join(', ')
+      : '',
+  )
+  const [maxLength, setMaxLength] = useState(
+    field.restrictions?.max_length !== undefined
+      ? String(field.restrictions.max_length)
+      : '',
+  )
+  const [accept, setAccept] = useState(
+    typeof field.restrictions?.accept === 'string'
+      ? field.restrictions.accept
+      : '',
+  )
+  const [maxSize, setMaxSize] = useState(
+    field.restrictions?.max_size !== undefined
+      ? String(field.restrictions.max_size)
+      : '',
+  )
   // date/datetime — stored as UTC ISO; display in datetime-local format
   const [minDate, setMinDate] = useState(
     field.restrictions?.min !== undefined
-      ? (field.type === 'datetime' ? utcToDatetimeLocal(String(field.restrictions.min)) : String(field.restrictions.min))
-      : ''
+      ? field.type === 'datetime'
+        ? utcToDatetimeLocal(String(field.restrictions.min))
+        : String(field.restrictions.min)
+      : '',
   )
   const [maxDate, setMaxDate] = useState(
     field.restrictions?.max !== undefined
-      ? (field.type === 'datetime' ? utcToDatetimeLocal(String(field.restrictions.max)) : String(field.restrictions.max))
-      : ''
+      ? field.type === 'datetime'
+        ? utcToDatetimeLocal(String(field.restrictions.max))
+        : String(field.restrictions.max)
+      : '',
   )
 
   const updateField = useUpdateField(schemaName)
 
   function buildRestrictions(): Record<string, unknown> {
     const r: Record<string, unknown> = {}
-    if (field.type === 'reference' && field.restrictions?.schema) r.schema = field.restrictions.schema
+    if (field.type === 'reference' && field.restrictions?.schema)
+      r.schema = field.restrictions.schema
     if (field.type === 'integer' || field.type === 'float') {
-      if (minVal !== '') r.min = field.type === 'integer' ? parseInt(minVal) : parseFloat(minVal)
-      if (maxVal !== '') r.max = field.type === 'integer' ? parseInt(maxVal) : parseFloat(maxVal)
+      if (minVal !== '')
+        r.min = field.type === 'integer' ? parseInt(minVal) : parseFloat(minVal)
+      if (maxVal !== '')
+        r.max = field.type === 'integer' ? parseInt(maxVal) : parseFloat(maxVal)
     }
     if (field.type === 'string' || field.type === 'enum') {
-      if (choices.trim()) r.choices = choices.split(',').map(c => c.trim()).filter(Boolean)
+      if (choices.trim())
+        r.choices = choices
+          .split(',')
+          .map((c) => c.trim())
+          .filter(Boolean)
       if (maxLength !== '') r.max_length = parseInt(maxLength)
     }
     if (field.type === 'file' || field.type === 'file_list') {
@@ -362,79 +573,152 @@ function FieldEditForm({ field, schemaName, onDone }: { field: { id: string; nam
       <div className="flex items-center gap-3 flex-wrap">
         <input
           value={name}
-          onChange={e => setName(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSave()}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSave()}
           autoFocus
           className={`${inputSm} w-40`}
         />
         <Badge variant="accent">{dtype}</Badge>
         <label className="flex items-center gap-1.5 text-sm text-[#1f2328] cursor-pointer select-none">
-          <input type="checkbox" checked={required} onChange={e => setRequired(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={required}
+            onChange={(e) => setRequired(e.target.checked)}
+          />
           Required
         </label>
         <div className="flex gap-2 ml-auto">
-          <Button variant="primary" size="sm" onClick={handleSave} disabled={updateField.isPending || !name.trim()}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleSave}
+            disabled={updateField.isPending || !name.trim()}
+          >
             {updateField.isPending ? 'Saving…' : 'Save'}
           </Button>
-          <Button size="sm" onClick={onDone}>Cancel</Button>
+          <Button size="sm" onClick={onDone}>
+            Cancel
+          </Button>
         </div>
       </div>
 
       {(dtype === 'integer' || dtype === 'float') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <span className="text-xs text-[#656d76] font-medium">
+            Restrictions:
+          </span>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Min
-            <input type="number" step={dtype === 'integer' ? '1' : 'any'} value={minVal} onChange={e => setMinVal(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
+            <input
+              type="number"
+              step={dtype === 'integer' ? '1' : 'any'}
+              value={minVal}
+              onChange={(e) => setMinVal(e.target.value)}
+              placeholder="none"
+              className={`${inputSm} w-24`}
+            />
           </label>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Max
-            <input type="number" step={dtype === 'integer' ? '1' : 'any'} value={maxVal} onChange={e => setMaxVal(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
+            <input
+              type="number"
+              step={dtype === 'integer' ? '1' : 'any'}
+              value={maxVal}
+              onChange={(e) => setMaxVal(e.target.value)}
+              placeholder="none"
+              className={`${inputSm} w-24`}
+            />
           </label>
         </div>
       )}
       {(dtype === 'string' || dtype === 'enum') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <span className="text-xs text-[#656d76] font-medium">
+            Restrictions:
+          </span>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Choices (comma-separated)
-            <input value={choices} onChange={e => setChoices(e.target.value)} placeholder="none" className={`${inputSm} w-52`} />
+            <input
+              value={choices}
+              onChange={(e) => setChoices(e.target.value)}
+              placeholder="none"
+              className={`${inputSm} w-52`}
+            />
           </label>
           {dtype === 'string' && (
             <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
               Max length
-              <input type="number" step="1" min="1" value={maxLength} onChange={e => setMaxLength(e.target.value)} placeholder="none" className={`${inputSm} w-24`} />
+              <input
+                type="number"
+                step="1"
+                min="1"
+                value={maxLength}
+                onChange={(e) => setMaxLength(e.target.value)}
+                placeholder="none"
+                className={`${inputSm} w-24`}
+              />
             </label>
           )}
         </div>
       )}
       {(dtype === 'file' || dtype === 'file_list') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <span className="text-xs text-[#656d76] font-medium">
+            Restrictions:
+          </span>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Accept
-            <input value={accept} onChange={e => setAccept(e.target.value)} placeholder=".csv,.txt" className={`${inputSm} w-36`} />
+            <input
+              value={accept}
+              onChange={(e) => setAccept(e.target.value)}
+              placeholder=".csv,.txt"
+              className={`${inputSm} w-36`}
+            />
           </label>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Max size (bytes)
-            <input type="number" step="1" min="1" value={maxSize} onChange={e => setMaxSize(e.target.value)} placeholder="none" className={`${inputSm} w-28`} />
+            <input
+              type="number"
+              step="1"
+              min="1"
+              value={maxSize}
+              onChange={(e) => setMaxSize(e.target.value)}
+              placeholder="none"
+              className={`${inputSm} w-28`}
+            />
           </label>
         </div>
       )}
       {(dtype === 'date' || dtype === 'datetime') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">Restrictions:</span>
+          <span className="text-xs text-[#656d76] font-medium">
+            Restrictions:
+          </span>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Not before
-            <input type={dtype === 'date' ? 'date' : 'datetime-local'} value={minDate} onChange={e => setMinDate(e.target.value)} className={inputSm} />
+            <input
+              type={dtype === 'date' ? 'date' : 'datetime-local'}
+              value={minDate}
+              onChange={(e) => setMinDate(e.target.value)}
+              className={inputSm}
+            />
           </label>
           <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
             Not after
-            <input type={dtype === 'date' ? 'date' : 'datetime-local'} value={maxDate} onChange={e => setMaxDate(e.target.value)} className={inputSm} />
+            <input
+              type={dtype === 'date' ? 'date' : 'datetime-local'}
+              value={maxDate}
+              onChange={(e) => setMaxDate(e.target.value)}
+              className={inputSm}
+            />
           </label>
         </div>
       )}
-      {updateField.error && <span className="text-xs text-[#d1242f]">{String(updateField.error)}</span>}
+      {updateField.error && (
+        <span className="text-xs text-[#d1242f]">
+          {String(updateField.error)}
+        </span>
+      )}
     </div>
   )
 }
@@ -459,7 +743,9 @@ export default function SchemaDetailPage() {
   const updateSchema = useUpdateSchema(schema?.name ?? '')
   const reorderFields = useReorderFields(schema?.name ?? '')
   const [editingField, setEditingField] = useState<string | null>(null)
-  const [confirmDeleteField, setConfirmDeleteField] = useState<string | null>(null)
+  const [confirmDeleteField, setConfirmDeleteField] = useState<string | null>(
+    null,
+  )
 
   function setDisplayField(fieldName: string | null) {
     updateSchema.mutate({ display_field: fieldName })
@@ -474,19 +760,22 @@ export default function SchemaDetailPage() {
     setDragOverIndex(index)
   }, [])
 
-  const handleDrop = useCallback((index: number) => {
-    if (dragSrcIndex === null || dragSrcIndex === index || !schema) {
+  const handleDrop = useCallback(
+    (index: number) => {
+      if (dragSrcIndex === null || dragSrcIndex === index || !schema) {
+        setDragSrcIndex(null)
+        setDragOverIndex(null)
+        return
+      }
+      const newOrder = [...schema.fields]
+      const [moved] = newOrder.splice(dragSrcIndex, 1)
+      newOrder.splice(index, 0, moved)
+      reorderFields.mutate(newOrder.map((f) => f.id))
       setDragSrcIndex(null)
       setDragOverIndex(null)
-      return
-    }
-    const newOrder = [...schema.fields]
-    const [moved] = newOrder.splice(dragSrcIndex, 1)
-    newOrder.splice(index, 0, moved)
-    reorderFields.mutate(newOrder.map(f => f.id))
-    setDragSrcIndex(null)
-    setDragOverIndex(null)
-  }, [dragSrcIndex, schema, reorderFields])
+    },
+    [dragSrcIndex, schema, reorderFields],
+  )
 
   const handleDragEnd = useCallback(() => {
     setDragSrcIndex(null)
@@ -498,22 +787,28 @@ export default function SchemaDetailPage() {
     const newOrder = [...schema.fields]
     const targetIndex = direction === 'up' ? index - 1 : index + 1
     if (targetIndex < 0 || targetIndex >= newOrder.length) return
-    ;[newOrder[index], newOrder[targetIndex]] = [newOrder[targetIndex], newOrder[index]]
-    reorderFields.mutate(newOrder.map(f => f.id))
+    ;[newOrder[index], newOrder[targetIndex]] = [
+      newOrder[targetIndex],
+      newOrder[index],
+    ]
+    reorderFields.mutate(newOrder.map((f) => f.id))
   }
 
   if (isLoading) return <LoadingState />
-  if (error || !schema) return <ErrorState message={error ? String(error) : 'Schema not found'} />
+  if (error || !schema)
+    return <ErrorState message={error ? String(error) : 'Schema not found'} />
 
   const parentSchema = schema.parent_id
-    ? allSchemas?.find(s => s.id === schema.parent_id)
+    ? allSchemas?.find((s) => s.id === schema.parent_id)
     : null
 
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-sm text-[#656d76]">
-        <Link to="/schemas" className="hover:text-[#0969da]">Schemas</Link>
+        <Link to="/schemas" className="hover:text-[#0969da]">
+          Schemas
+        </Link>
         <span>/</span>
         <span className="text-[#1f2328] font-medium">{schema.name}</span>
       </nav>
@@ -525,20 +820,29 @@ export default function SchemaDetailPage() {
         ) : (
           <div className="flex items-start justify-between">
             <div>
-              <h1 className="text-xl font-semibold text-[#1f2328]">{schema.name}</h1>
+              <h1 className="text-xl font-semibold text-[#1f2328]">
+                {schema.name}
+              </h1>
               <p className="mt-0.5 text-sm text-[#656d76]">
-                {schema.description ?? <span className="italic">No description</span>}
+                {schema.description ?? (
+                  <span className="italic">No description</span>
+                )}
               </p>
               {parentSchema && (
                 <p className="mt-1 text-sm text-[#656d76]">
                   Inherits from{' '}
-                  <Link to={`/schemas/${parentSchema.id}`} className="text-[#0969da] hover:underline">
+                  <Link
+                    to={`/schemas/${parentSchema.id}`}
+                    className="text-[#0969da] hover:underline"
+                  >
                     {parentSchema.name}
                   </Link>
                 </p>
               )}
             </div>
-            <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>
+            <Button size="sm" onClick={() => setEditing(true)}>
+              Edit
+            </Button>
           </div>
         )}
       </div>
@@ -553,7 +857,9 @@ export default function SchemaDetailPage() {
             </span>
           </h2>
           {!addingField && (
-            <Button size="sm" onClick={() => setAddingField(true)}>+ Add field</Button>
+            <Button size="sm" onClick={() => setAddingField(true)}>
+              + Add field
+            </Button>
           )}
         </div>
 
@@ -569,9 +875,16 @@ export default function SchemaDetailPage() {
           </Thead>
           <Tbody>
             {schema.fields.length === 0 && !addingField && (
-              <Tr><td colSpan={5} className="px-4 py-3 text-sm text-[#656d76] italic">No fields yet.</td></Tr>
+              <Tr>
+                <td
+                  colSpan={5}
+                  className="px-4 py-3 text-sm text-[#656d76] italic"
+                >
+                  No fields yet.
+                </td>
+              </Tr>
             )}
-            {schema.fields.map((field, index) => (
+            {schema.fields.map((field, index) =>
               editingField === field.name ? (
                 <tr key={field.id} className="bg-white">
                   <td colSpan={5} className="p-0">
@@ -594,8 +907,8 @@ export default function SchemaDetailPage() {
                     dragOverIndex === index && dragSrcIndex !== index
                       ? 'bg-[#ddf4ff] outline outline-2 outline-[#0969da]'
                       : dragSrcIndex === index
-                      ? 'opacity-50'
-                      : ''
+                        ? 'opacity-50'
+                        : ''
                   }`}
                 >
                   {/* Drag handle + reorder buttons */}
@@ -610,11 +923,16 @@ export default function SchemaDetailPage() {
                       >
                         ▲
                       </button>
-                      <span className="text-xs" title="Drag to reorder">⠿</span>
+                      <span className="text-xs" title="Drag to reorder">
+                        ⠿
+                      </span>
                       <button
                         type="button"
                         title="Move down"
-                        disabled={index === schema.fields.length - 1 || reorderFields.isPending}
+                        disabled={
+                          index === schema.fields.length - 1 ||
+                          reorderFields.isPending
+                        }
                         onClick={() => moveField(index, 'down')}
                         className="text-[10px] text-[#d0d7de] hover:text-[#1f2328] disabled:opacity-30 leading-none"
                       >
@@ -627,38 +945,53 @@ export default function SchemaDetailPage() {
                       <span className="flex items-center gap-1.5">
                         <span className="font-mono text-sm">{field.name}</span>
                         {schema.display_field === field.name && (
-                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]" title="Display field — used as record name">
+                          <span
+                            className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]"
+                            title="Display field — used as record name"
+                          >
                             display
                           </span>
                         )}
                       </span>
-                      {field.default !== null && field.default !== undefined && (
-                        <span className="text-[11px] text-[#9a6700]">default: {String(field.default)}</span>
-                      )}
+                      {field.default !== null &&
+                        field.default !== undefined && (
+                          <span className="text-[11px] text-[#9a6700]">
+                            default: {String(field.default)}
+                          </span>
+                        )}
                     </span>
                   </Td>
                   <Td>
                     <div className="flex flex-col gap-0.5">
                       <div className="flex items-center gap-1.5">
                         <Badge variant="accent">{field.type}</Badge>
-                        {field.type === 'reference' && !!field.restrictions?.schema && (
-                          <span className="text-xs text-[#656d76]">
-                            {'→ '}
-                            <Link
-                              to={`/schemas/${allSchemas?.find(s => s.name === String(field.restrictions.schema))?.id ?? String(field.restrictions.schema)}`}
-                              className="text-[#0969da] hover:underline"
-                            >
-                              {String(field.restrictions.schema)}
-                            </Link>
-                          </span>
-                        )}
+                        {field.type === 'reference' &&
+                          !!field.restrictions?.schema && (
+                            <span className="text-xs text-[#656d76]">
+                              {'→ '}
+                              <Link
+                                to={`/schemas/${allSchemas?.find((s) => s.name === String(field.restrictions.schema))?.id ?? String(field.restrictions.schema)}`}
+                                className="text-[#0969da] hover:underline"
+                              >
+                                {String(field.restrictions.schema)}
+                              </Link>
+                            </span>
+                          )}
                       </div>
-                      <RestrictionsSummary restrictions={field.restrictions} type={field.type} />
+                      <RestrictionsSummary
+                        restrictions={field.restrictions}
+                        type={field.type}
+                      />
                     </div>
                   </Td>
                   <Td>
                     <button
-                      onClick={() => updateField.mutate({ fieldName: field.name, required: !field.required })}
+                      onClick={() =>
+                        updateField.mutate({
+                          fieldName: field.name,
+                          required: !field.required,
+                        })
+                      }
                       className={`text-xs font-medium px-2 py-0.5 rounded-full border cursor-pointer transition-colors ${
                         field.required
                           ? 'bg-[#dafbe1] text-[#1a7f37] border-[#4ac26b66] hover:bg-[#aceebb]'
@@ -673,7 +1006,11 @@ export default function SchemaDetailPage() {
                       {confirmDeleteField === field.name ? (
                         <>
                           <button
-                            onClick={() => deleteField.mutate(field.name, { onSuccess: () => setConfirmDeleteField(null) })}
+                            onClick={() =>
+                              deleteField.mutate(field.name, {
+                                onSuccess: () => setConfirmDeleteField(null),
+                              })
+                            }
                             disabled={deleteField.isPending}
                             className="text-xs text-[#d1242f] font-medium hover:underline disabled:opacity-50"
                           >
@@ -689,21 +1026,37 @@ export default function SchemaDetailPage() {
                       ) : (
                         <>
                           <button
-                            onClick={() => setDisplayField(schema.display_field === field.name ? null : field.name)}
+                            onClick={() =>
+                              setDisplayField(
+                                schema.display_field === field.name
+                                  ? null
+                                  : field.name,
+                              )
+                            }
                             className={`text-xs transition-colors ${schema.display_field === field.name ? 'text-[#9a6700]' : 'text-[#d0d7de] hover:text-[#9a6700]'}`}
-                            title={schema.display_field === field.name ? 'Clear display field' : 'Set as display field'}
+                            title={
+                              schema.display_field === field.name
+                                ? 'Clear display field'
+                                : 'Set as display field'
+                            }
                           >
                             ★
                           </button>
                           <button
-                            onClick={() => { setConfirmDeleteField(null); setEditingField(field.name) }}
+                            onClick={() => {
+                              setConfirmDeleteField(null)
+                              setEditingField(field.name)
+                            }}
                             className="text-xs text-[#656d76] hover:text-[#0969da] transition-colors"
                             title="Edit field"
                           >
                             ✎
                           </button>
                           <button
-                            onClick={() => { setEditingField(null); setConfirmDeleteField(field.name) }}
+                            onClick={() => {
+                              setEditingField(null)
+                              setConfirmDeleteField(field.name)
+                            }}
                             className="text-xs text-[#656d76] hover:text-[#d1242f] transition-colors"
                             title="Remove field"
                           >
@@ -714,14 +1067,17 @@ export default function SchemaDetailPage() {
                     </span>
                   </Td>
                 </tr>
-              )
-            ))}
+              ),
+            )}
           </Tbody>
           {addingField && (
             <tfoot>
               <tr>
                 <td colSpan={5} className="p-0">
-                  <AddFieldForm schemaName={schema.name} onDone={() => setAddingField(false)} />
+                  <AddFieldForm
+                    schemaName={schema.name}
+                    onDone={() => setAddingField(false)}
+                  />
                 </td>
               </tr>
             </tfoot>
@@ -736,19 +1092,38 @@ export default function SchemaDetailPage() {
         </div>
         <div className="px-4 py-3 flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-[#1f2328]">Delete this schema</p>
-            <p className="text-xs text-[#656d76]">This cannot be undone. All field definitions will be removed.</p>
+            <p className="text-sm font-medium text-[#1f2328]">
+              Delete this schema
+            </p>
+            <p className="text-xs text-[#656d76]">
+              This cannot be undone. All field definitions will be removed.
+            </p>
           </div>
           {confirmDelete ? (
             <div className="flex items-center gap-2">
               <span className="text-xs text-[#656d76]">Are you sure?</span>
-              <Button variant="danger" size="sm" onClick={() => deleteSchema.mutate(schema.name, { onSuccess: () => navigate('/schemas') })} disabled={deleteSchema.isPending}>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() =>
+                  deleteSchema.mutate(schema.name, {
+                    onSuccess: () => navigate('/schemas'),
+                  })
+                }
+                disabled={deleteSchema.isPending}
+              >
                 {deleteSchema.isPending ? 'Deleting…' : 'Confirm delete'}
               </Button>
-              <Button size="sm" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+              <Button size="sm" onClick={() => setConfirmDelete(false)}>
+                Cancel
+              </Button>
             </div>
           ) : (
-            <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => setConfirmDelete(true)}
+            >
               Delete schema
             </Button>
           )}

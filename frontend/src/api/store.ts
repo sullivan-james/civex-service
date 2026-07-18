@@ -14,10 +14,19 @@ export interface VolumeStats {
 
 export const storeApi = {
   listVolumes: () => api.get<VolumeStats[]>('/store/volumes'),
-  addVolume: (body: { name: string; path: string; allocated_gb?: number | null }) =>
-    api.post<VolumeStats>('/store/volumes', body),
-  updateVolume: (name: string, body: { path?: string; allocated_gb?: number | null; clear_allocation?: boolean }) =>
-    api.patch<VolumeStats>(`/store/volumes/${name}`, body),
+  addVolume: (body: {
+    name: string
+    path: string
+    allocated_gb?: number | null
+  }) => api.post<VolumeStats>('/store/volumes', body),
+  updateVolume: (
+    name: string,
+    body: {
+      path?: string
+      allocated_gb?: number | null
+      clear_allocation?: boolean
+    },
+  ) => api.patch<VolumeStats>(`/store/volumes/${name}`, body),
   removeVolume: (name: string) => api.delete<void>(`/store/volumes/${name}`),
   setQueue: (queue: string[]) => api.put<string[]>('/store/queue', { queue }),
 }

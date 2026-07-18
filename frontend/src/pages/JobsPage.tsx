@@ -3,14 +3,22 @@ import { useActiveJobCount, useDrainJobs } from '../hooks/useWorkflows'
 import { PageHeader, Button } from '../components/ui'
 import JobsTable from '../components/jobs/JobsTable'
 
-const STATUS_OPTIONS = ['', 'pending', 'running', 'completed', 'failed'] as const
+const STATUS_OPTIONS = [
+  '',
+  'pending',
+  'running',
+  'completed',
+  'failed',
+] as const
 
 export default function JobsPage() {
-  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
+  const [statusFilter, setStatusFilter] = useState<string | undefined>(
+    undefined,
+  )
   const { data: activeJobs } = useActiveJobCount()
   const drain = useDrainJobs()
 
-  const hasActive  = (activeJobs?.running ?? 0) + (activeJobs?.pending ?? 0) > 0
+  const hasActive = (activeJobs?.running ?? 0) + (activeJobs?.pending ?? 0) > 0
   const hasPending = (activeJobs?.pending ?? 0) > 0
 
   function handleStatusFilter(s: string) {
@@ -22,9 +30,13 @@ export default function JobsPage() {
       <PageHeader
         title="Runs"
         description={
-          hasActive
-            ? <span className="text-xs text-[#0969da] flex items-center gap-1"><span className="animate-spin inline-block">↻</span> live</span>
-            : 'Workflow run history'
+          hasActive ? (
+            <span className="text-xs text-[#0969da] flex items-center gap-1">
+              <span className="animate-spin inline-block">↻</span> live
+            </span>
+          ) : (
+            'Workflow run history'
+          )
         }
         action={
           <Button
@@ -39,7 +51,7 @@ export default function JobsPage() {
       />
 
       <div className="flex items-center gap-2 mb-3">
-        {STATUS_OPTIONS.map(s => (
+        {STATUS_OPTIONS.map((s) => (
           <button
             key={s || 'all'}
             onClick={() => handleStatusFilter(s)}

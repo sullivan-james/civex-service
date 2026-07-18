@@ -1,5 +1,7 @@
 export function LoadingState({ message = 'Loading…' }: { message?: string }) {
-  return <div className="text-sm text-[#656d76] py-12 text-center">{message}</div>
+  return (
+    <div className="text-sm text-[#656d76] py-12 text-center">{message}</div>
+  )
 }
 
 export function ErrorState({ message }: { message: string }) {
@@ -10,7 +12,13 @@ export function ErrorState({ message }: { message: string }) {
   )
 }
 
-export function EmptyState({ title, message }: { title: string; message?: string }) {
+export function EmptyState({
+  title,
+  message,
+}: {
+  title: string
+  message?: string
+}) {
   return (
     <div className="border border-dashed border-[#d0d7de] rounded-md px-6 py-16 text-center">
       <p className="text-sm font-medium text-[#1f2328]">{title}</p>

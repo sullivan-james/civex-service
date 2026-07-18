@@ -8,13 +8,19 @@ export default function TerminalPage() {
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const term = new Terminal({ cursorBlink: true, fontSize: 13, fontFamily: 'monospace' })
+    const term = new Terminal({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: 'monospace',
+    })
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
     term.open(containerRef.current!)
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/terminal/ws`)
+    const ws = new WebSocket(
+      `${protocol}//${window.location.host}/api/terminal/ws`,
+    )
     ws.binaryType = 'arraybuffer'
 
     ws.onmessage = (e) => {
@@ -27,7 +33,9 @@ export default function TerminalPage() {
 
     const sendResize = () => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
+        ws.send(
+          JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }),
+        )
       }
     }
 
@@ -39,7 +47,8 @@ export default function TerminalPage() {
 
     // Sent as binary so the backend can tell raw keystrokes apart from JSON resize control messages.
     term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data))
+      if (ws.readyState === WebSocket.OPEN)
+        ws.send(new TextEncoder().encode(data))
     })
 
     term.onResize(sendResize)
@@ -56,8 +65,15 @@ export default function TerminalPage() {
 
   return (
     <>
-      <PageHeader title="Terminal" description="Shell running in the civex server process" />
-      <div ref={containerRef} className="rounded border border-[#d0d7de] overflow-hidden" style={{ height: 'calc(100vh - 220px)' }} />
+      <PageHeader
+        title="Terminal"
+        description="Shell running in the civex server process"
+      />
+      <div
+        ref={containerRef}
+        className="rounded border border-[#d0d7de] overflow-hidden"
+        style={{ height: 'calc(100vh - 220px)' }}
+      />
     </>
   )
 }

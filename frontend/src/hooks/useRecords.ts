@@ -1,7 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { recordsApi, type ListParams } from '../api/records'
 
-export function useRecords(datasetName: string, params?: ListParams, refetchInterval?: number | false) {
+export function useRecords(
+  datasetName: string,
+  params?: ListParams,
+  refetchInterval?: number | false,
+) {
   return useQuery({
     queryKey: ['records', datasetName, params],
     queryFn: () => recordsApi.list(datasetName, params),
@@ -18,7 +22,10 @@ export function useRecordCounts(datasetName: string) {
   })
 }
 
-export function useRecord(id: string | null | undefined, refetchInterval?: number | false) {
+export function useRecord(
+  id: string | null | undefined,
+  refetchInterval?: number | false,
+) {
   return useQuery({
     queryKey: ['record', id],
     queryFn: () => recordsApi.get(id!),

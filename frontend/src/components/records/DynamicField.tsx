@@ -19,19 +19,31 @@ interface Props {
 const inputClass =
   'w-full border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]'
 
-function fileAccept(restrictions: Record<string, unknown> | undefined): string | undefined {
+function fileAccept(
+  restrictions: Record<string, unknown> | undefined,
+): string | undefined {
   const acc = restrictions?.accept
   return typeof acc === 'string' ? acc : undefined
 }
 
-function fileMaxSize(restrictions: Record<string, unknown> | undefined): number | undefined {
+function fileMaxSize(
+  restrictions: Record<string, unknown> | undefined,
+): number | undefined {
   const ms = restrictions?.max_size
   return ms !== undefined ? Number(ms) : undefined
 }
 
-function validateFileSize(file: File, maxSize: number | undefined): string | null {
+function validateFileSize(
+  file: File,
+  maxSize: number | undefined,
+): string | null {
   if (maxSize !== undefined && file.size > maxSize) {
-    const limit = maxSize >= 1_048_576 ? `${(maxSize / 1_048_576).toFixed(1)} MB` : maxSize >= 1024 ? `${(maxSize / 1024).toFixed(0)} KB` : `${maxSize} B`
+    const limit =
+      maxSize >= 1_048_576
+        ? `${(maxSize / 1_048_576).toFixed(1)} MB`
+        : maxSize >= 1024
+          ? `${(maxSize / 1024).toFixed(0)} KB`
+          : `${maxSize} B`
     return `File too large (${(file.size / 1024).toFixed(0)} KB) — max ${limit}`
   }
   return null
@@ -48,7 +60,10 @@ function FileField({ field, value, onChange }: Props) {
     const file = e.target.files?.[0]
     if (!file) return
     const sizeErr = validateFileSize(file, maxSize)
-    if (sizeErr) { setError(sizeErr); return }
+    if (sizeErr) {
+      setError(sizeErr)
+      return
+    }
     setUploading(true)
     setError(null)
     try {
@@ -86,7 +101,7 @@ function FileField({ field, value, onChange }: Props) {
         className="block w-full text-sm text-[#1f2328] file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-[#f6f8fa] file:text-[#1f2328] hover:file:bg-[#eaeef2] cursor-pointer disabled:opacity-50"
       />
       {uploading && <p className="text-xs text-[#656d76]">Uploading…</p>}
-      {error   && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   )
 }
@@ -103,7 +118,10 @@ function FileListField({ field, value, onChange }: Props) {
     if (!files.length) return
     for (const file of files) {
       const sizeErr = validateFileSize(file, maxSize)
-      if (sizeErr) { setError(sizeErr); return }
+      if (sizeErr) {
+        setError(sizeErr)
+        return
+      }
     }
     setUploading(true)
     setError(null)
@@ -124,15 +142,26 @@ function FileListField({ field, value, onChange }: Props) {
   }
 
   function remove(sha256: string) {
-    onChange(existing.filter(r => r.sha256 !== sha256))
+    onChange(existing.filter((r) => r.sha256 !== sha256))
   }
 
   return (
     <div className="space-y-1.5">
-      {existing.map(ref => (
-        <div key={ref.sha256} className="flex items-center gap-2 text-xs text-[#656d76]">
-          <span className="truncate">{ref.filename} ({(ref.size / 1024).toFixed(1)} KB)</span>
-          <button type="button" onClick={() => remove(ref.sha256)} className="text-[#d1242f] hover:underline shrink-0">✕</button>
+      {existing.map((ref) => (
+        <div
+          key={ref.sha256}
+          className="flex items-center gap-2 text-xs text-[#656d76]"
+        >
+          <span className="truncate">
+            {ref.filename} ({(ref.size / 1024).toFixed(1)} KB)
+          </span>
+          <button
+            type="button"
+            onClick={() => remove(ref.sha256)}
+            className="text-[#d1242f] hover:underline shrink-0"
+          >
+            ✕
+          </button>
         </div>
       ))}
       <input
@@ -144,7 +173,7 @@ function FileListField({ field, value, onChange }: Props) {
         className="block w-full text-sm text-[#1f2328] file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-[#f6f8fa] file:text-[#1f2328] hover:file:bg-[#eaeef2] cursor-pointer disabled:opacity-50"
       />
       {uploading && <p className="text-xs text-[#656d76]">Uploading…</p>}
-      {error   && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   )
 }
@@ -165,13 +194,18 @@ function ReferenceField({ field, value, onChange }: Props) {
     timerRef.current = setTimeout(async () => {
       setLoading(true)
       try {
-        const records = await recordsApi.searchBySchema(targetSchema, search || undefined)
+        const records = await recordsApi.searchBySchema(
+          targetSchema,
+          search || undefined,
+        )
         setResults(records)
       } finally {
         setLoading(false)
       }
     }, 250)
-    return () => { if (timerRef.current) clearTimeout(timerRef.current) }
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
   }, [search, targetSchema])
 
   function handleFocus() {
@@ -195,28 +229,46 @@ function ReferenceField({ field, value, onChange }: Props) {
     <div className="relative">
       <input
         type="text"
-        value={selectedId ? (results.find(r => r.id === selectedId) ? labelFor(results.find(r => r.id === selectedId)!) : selectedId.slice(0, 8)) : search}
-        onChange={e => { setSearch(e.target.value); onChange(undefined); setOpen(true) }}
+        value={
+          selectedId
+            ? results.find((r) => r.id === selectedId)
+              ? labelFor(results.find((r) => r.id === selectedId)!)
+              : selectedId.slice(0, 8)
+            : search
+        }
+        onChange={(e) => {
+          setSearch(e.target.value)
+          onChange(undefined)
+          setOpen(true)
+        }}
         onFocus={handleFocus}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
-        placeholder={targetSchema ? `Search ${targetSchema} records…` : 'Record ID'}
+        placeholder={
+          targetSchema ? `Search ${targetSchema} records…` : 'Record ID'
+        }
         className={inputClass}
       />
       {open && (
         <div className="absolute z-10 mt-1 w-full bg-white border border-[#d0d7de] rounded-md shadow-sm max-h-48 overflow-y-auto text-sm">
           {loading && <div className="px-3 py-2 text-[#656d76]">Loading…</div>}
           {!loading && results.length === 0 && (
-            <div className="px-3 py-2 text-[#656d76] italic">No records found</div>
+            <div className="px-3 py-2 text-[#656d76] italic">
+              No records found
+            </div>
           )}
-          {results.map(record => (
+          {results.map((record) => (
             <button
               key={record.id}
               onMouseDown={() => handleSelect(record)}
               className="w-full text-left px-3 py-1.5 hover:bg-[#f6f8fa] truncate"
             >
-              <span className="font-mono text-xs text-[#656d76]">{record.id.slice(0, 8)}</span>
+              <span className="font-mono text-xs text-[#656d76]">
+                {record.id.slice(0, 8)}
+              </span>
               {record.natural_name && (
-                <span className="ml-2 text-[#1f2328]">{record.natural_name}</span>
+                <span className="ml-2 text-[#1f2328]">
+                  {record.natural_name}
+                </span>
               )}
             </button>
           ))}
@@ -234,20 +286,27 @@ export function DynamicField({ field, value, onChange }: Props) {
         return (
           <select
             value={(value as string) ?? ''}
-            onChange={e => onChange(e.target.value)}
+            onChange={(e) => onChange(e.target.value)}
             className={inputClass}
           >
             {!field.required && <option value="">— optional —</option>}
-            {(choices as string[]).map(c => <option key={c} value={c}>{c}</option>)}
+            {(choices as string[]).map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
           </select>
         )
       }
-      const maxLength = field.restrictions?.max_length !== undefined ? Number(field.restrictions.max_length) : undefined
+      const maxLength =
+        field.restrictions?.max_length !== undefined
+          ? Number(field.restrictions.max_length)
+          : undefined
       return (
         <input
           type="text"
           value={(value as string) ?? ''}
-          onChange={e => onChange(e.target.value)}
+          onChange={(e) => onChange(e.target.value)}
           placeholder={field.required ? 'Required' : 'Optional'}
           maxLength={maxLength}
           className={inputClass}
@@ -256,8 +315,14 @@ export function DynamicField({ field, value, onChange }: Props) {
     }
 
     case 'integer': {
-      const rMin = field.restrictions?.min !== undefined ? Number(field.restrictions.min) : undefined
-      const rMax = field.restrictions?.max !== undefined ? Number(field.restrictions.max) : undefined
+      const rMin =
+        field.restrictions?.min !== undefined
+          ? Number(field.restrictions.min)
+          : undefined
+      const rMax =
+        field.restrictions?.max !== undefined
+          ? Number(field.restrictions.max)
+          : undefined
       return (
         <input
           type="number"
@@ -265,7 +330,7 @@ export function DynamicField({ field, value, onChange }: Props) {
           min={rMin}
           max={rMax}
           value={(value as string) ?? ''}
-          onChange={e => onChange(e.target.value)}
+          onChange={(e) => onChange(e.target.value)}
           placeholder={field.required ? 'Required' : 'Optional'}
           className={inputClass}
         />
@@ -273,8 +338,14 @@ export function DynamicField({ field, value, onChange }: Props) {
     }
 
     case 'float': {
-      const rMin = field.restrictions?.min !== undefined ? Number(field.restrictions.min) : undefined
-      const rMax = field.restrictions?.max !== undefined ? Number(field.restrictions.max) : undefined
+      const rMin =
+        field.restrictions?.min !== undefined
+          ? Number(field.restrictions.min)
+          : undefined
+      const rMax =
+        field.restrictions?.max !== undefined
+          ? Number(field.restrictions.max)
+          : undefined
       return (
         <input
           type="number"
@@ -282,7 +353,7 @@ export function DynamicField({ field, value, onChange }: Props) {
           min={rMin}
           max={rMax}
           value={(value as string) ?? ''}
-          onChange={e => onChange(e.target.value)}
+          onChange={(e) => onChange(e.target.value)}
           placeholder={field.required ? 'Required' : 'Optional'}
           className={inputClass}
         />
@@ -294,23 +365,39 @@ export function DynamicField({ field, value, onChange }: Props) {
         <input
           type="date"
           value={(value as string) ?? ''}
-          min={field.restrictions?.min !== undefined ? String(field.restrictions.min) : undefined}
-          max={field.restrictions?.max !== undefined ? String(field.restrictions.max) : undefined}
-          onChange={e => onChange(e.target.value)}
+          min={
+            field.restrictions?.min !== undefined
+              ? String(field.restrictions.min)
+              : undefined
+          }
+          max={
+            field.restrictions?.max !== undefined
+              ? String(field.restrictions.max)
+              : undefined
+          }
+          onChange={(e) => onChange(e.target.value)}
           className={inputClass}
         />
       )
 
     case 'datetime': {
-      const rMin = field.restrictions?.min !== undefined ? utcToDatetimeLocal(String(field.restrictions.min)) : undefined
-      const rMax = field.restrictions?.max !== undefined ? utcToDatetimeLocal(String(field.restrictions.max)) : undefined
+      const rMin =
+        field.restrictions?.min !== undefined
+          ? utcToDatetimeLocal(String(field.restrictions.min))
+          : undefined
+      const rMax =
+        field.restrictions?.max !== undefined
+          ? utcToDatetimeLocal(String(field.restrictions.max))
+          : undefined
       return (
         <input
           type="datetime-local"
           value={value ? utcToDatetimeLocal(value as string) : ''}
           min={rMin}
           max={rMax}
-          onChange={e => onChange(e.target.value ? datetimeLocalToUTC(e.target.value) : '')}
+          onChange={(e) =>
+            onChange(e.target.value ? datetimeLocalToUTC(e.target.value) : '')
+          }
           className={inputClass}
         />
       )
@@ -322,13 +409,14 @@ export function DynamicField({ field, value, onChange }: Props) {
           <input
             type="checkbox"
             checked={(value as boolean) ?? false}
-            onChange={e => onChange(e.target.checked)}
+            onChange={(e) => onChange(e.target.checked)}
             className="rounded"
           />
-          {field.required
-            ? <span>Required</span>
-            : <span className="text-[#656d76]">Optional</span>
-          }
+          {field.required ? (
+            <span>Required</span>
+          ) : (
+            <span className="text-[#656d76]">Optional</span>
+          )}
         </label>
       )
 
@@ -337,14 +425,17 @@ export function DynamicField({ field, value, onChange }: Props) {
       return (
         <select
           value={(value as string) ?? ''}
-          onChange={e => onChange(e.target.value)}
+          onChange={(e) => onChange(e.target.value)}
           className={inputClass}
         >
           {!field.required && <option value="">— optional —</option>}
           {Array.isArray(enumChoices)
-            ? (enumChoices as string[]).map(c => <option key={c} value={c}>{c}</option>)
-            : null
-          }
+            ? (enumChoices as string[]).map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))
+            : null}
         </select>
       )
     }
@@ -354,7 +445,7 @@ export function DynamicField({ field, value, onChange }: Props) {
         <input
           type="url"
           value={(value as string) ?? ''}
-          onChange={e => onChange(e.target.value)}
+          onChange={(e) => onChange(e.target.value)}
           placeholder={field.required ? 'https://example.com' : 'Optional URL'}
           className={inputClass}
         />
@@ -368,9 +459,16 @@ export function DynamicField({ field, value, onChange }: Props) {
         <input
           type="text"
           value={listVal}
-          onChange={e => {
+          onChange={(e) => {
             const raw = e.target.value
-            onChange(raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : [])
+            onChange(
+              raw
+                ? raw
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                : [],
+            )
           }}
           placeholder="Record IDs, comma-separated"
           className={inputClass}
@@ -386,9 +484,16 @@ export function DynamicField({ field, value, onChange }: Props) {
         <input
           type="text"
           value={tagsVal}
-          onChange={e => {
+          onChange={(e) => {
             const raw = e.target.value
-            onChange(raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : [])
+            onChange(
+              raw
+                ? raw
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                : [],
+            )
           }}
           placeholder="Tags, comma-separated"
           className={inputClass}
@@ -410,7 +515,7 @@ export function DynamicField({ field, value, onChange }: Props) {
         <input
           type="text"
           value={(value as string) ?? ''}
-          onChange={e => onChange(e.target.value)}
+          onChange={(e) => onChange(e.target.value)}
           className={inputClass}
         />
       )

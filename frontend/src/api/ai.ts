@@ -9,8 +9,8 @@ export interface AiConfig {
 
 export const ANTHROPIC_MODELS = [
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' },
-  { id: 'claude-sonnet-4-6',         label: 'Sonnet (balanced)' },
-  { id: 'claude-opus-4-8',           label: 'Opus (most capable)' },
+  { id: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' },
+  { id: 'claude-opus-4-8', label: 'Opus (most capable)' },
 ]
 
 export const PRESET_PROVIDERS = [
@@ -19,7 +19,7 @@ export const PRESET_PROVIDERS = [
     label: 'Anthropic (Claude)',
     base_url: null,
     key_placeholder: 'sk-ant-...',
-    models: ANTHROPIC_MODELS.map(m => ({ id: m.id, label: m.label })),
+    models: ANTHROPIC_MODELS.map((m) => ({ id: m.id, label: m.label })),
     docs: null,
   },
   {
@@ -29,8 +29,8 @@ export const PRESET_PROVIDERS = [
     key_placeholder: 'gsk_...',
     models: [
       { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B (recommended)' },
-      { id: 'llama-3.1-8b-instant',    label: 'Llama 3.1 8B (fastest)' },
-      { id: 'mixtral-8x7b-32768',      label: 'Mixtral 8x7B' },
+      { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B (fastest)' },
+      { id: 'mixtral-8x7b-32768', label: 'Mixtral 8x7B' },
     ],
     docs: 'https://console.groq.com/keys',
   },
@@ -40,9 +40,9 @@ export const PRESET_PROVIDERS = [
     base_url: 'https://generativelanguage.googleapis.com/v1beta/openai/',
     key_placeholder: 'AIza...',
     models: [
-      { id: 'gemini-1.5-flash',   label: 'Gemini 1.5 Flash (recommended)' },
-      { id: 'gemini-1.5-pro',     label: 'Gemini 1.5 Pro' },
-      { id: 'gemini-2.0-flash',   label: 'Gemini 2.0 Flash' },
+      { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash (recommended)' },
+      { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+      { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
     ],
     docs: 'https://aistudio.google.com/app/apikey',
   },
@@ -52,10 +52,13 @@ export const PRESET_PROVIDERS = [
     base_url: 'https://openrouter.ai/api/v1',
     key_placeholder: 'sk-or-...',
     models: [
-      { id: 'meta-llama/llama-3.1-8b-instruct:free', label: 'Llama 3.1 8B (free)' },
-      { id: 'qwen/qwen3-8b:free',                    label: 'Qwen3 8B (free)' },
-      { id: 'google/gemma-3-12b-it:free',             label: 'Gemma 3 12B (free)' },
-      { id: 'mistralai/mistral-7b-instruct:free',     label: 'Mistral 7B (free)' },
+      {
+        id: 'meta-llama/llama-3.1-8b-instruct:free',
+        label: 'Llama 3.1 8B (free)',
+      },
+      { id: 'qwen/qwen3-8b:free', label: 'Qwen3 8B (free)' },
+      { id: 'google/gemma-3-12b-it:free', label: 'Gemma 3 12B (free)' },
+      { id: 'mistralai/mistral-7b-instruct:free', label: 'Mistral 7B (free)' },
     ],
     docs: null,
     note: '50 free requests/day. No card required.',
@@ -80,7 +83,7 @@ export const PRESET_PROVIDERS = [
   },
 ] as const
 
-export type PresetProviderId = typeof PRESET_PROVIDERS[number]['id']
+export type PresetProviderId = (typeof PRESET_PROVIDERS)[number]['id']
 
 export async function getAiConfig(): Promise<AiConfig> {
   const res = await fetch('/api/ai/config')
@@ -100,7 +103,7 @@ export async function updateAiConfig(patch: {
     body: JSON.stringify(patch),
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as Record<string, unknown>
+    const err = (await res.json().catch(() => ({}))) as Record<string, unknown>
     throw new Error((err.detail as string) ?? `HTTP ${res.status}`)
   }
   return res.json()
@@ -108,16 +111,20 @@ export async function updateAiConfig(patch: {
 
 export interface OllamaModel {
   name: string
-  size: number  // bytes
+  size: number // bytes
 }
 
-export async function getOllamaModels(baseUrl: string = 'http://localhost:11434/v1'): Promise<OllamaModel[]> {
-  const res = await fetch(`/api/ai/ollama/models?base_url=${encodeURIComponent(baseUrl)}`)
+export async function getOllamaModels(
+  baseUrl: string = 'http://localhost:11434/v1',
+): Promise<OllamaModel[]> {
+  const res = await fetch(
+    `/api/ai/ollama/models?base_url=${encodeURIComponent(baseUrl)}`,
+  )
   if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as Record<string, unknown>
+    const err = (await res.json().catch(() => ({}))) as Record<string, unknown>
     throw new Error((err.detail as string) ?? `HTTP ${res.status}`)
   }
-  const { models } = await res.json() as { models: OllamaModel[] }
+  const { models } = (await res.json()) as { models: OllamaModel[] }
   return models
 }
 
@@ -134,7 +141,7 @@ export interface OpenRouterLimits {
 export async function getOpenRouterAuthUrl(): Promise<string> {
   const res = await fetch('/api/ai/openrouter/auth-url')
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const { url } = await res.json() as { url: string }
+  const { url } = (await res.json()) as { url: string }
   return url
 }
 
@@ -152,23 +159,36 @@ export async function getOpenRouterLimits(): Promise<OpenRouterLimits> {
 export type ChatMessage =
   | { role: 'user'; content: string }
   | { role: 'assistant'; content: string }
-  | { role: 'tool_call'; id: string; name: string; input: Record<string, unknown>; result: string }
+  | {
+      role: 'tool_call'
+      id: string
+      name: string
+      input: Record<string, unknown>
+      result: string
+    }
 
 export type AiEvent =
   | { type: 'text_delta'; delta: string }
-  | { type: 'tool_use_start'; id: string; name: string; input: Record<string, unknown> }
+  | {
+      type: 'tool_use_start'
+      id: string
+      name: string
+      input: Record<string, unknown>
+    }
   | { type: 'tool_result'; tool_use_id: string; content: string }
   | { type: 'done' }
   | { type: 'error'; message: string }
 
-export async function* streamChat(messages: ChatMessage[]): AsyncGenerator<AiEvent> {
+export async function* streamChat(
+  messages: ChatMessage[],
+): AsyncGenerator<AiEvent> {
   const res = await fetch('/api/ai/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages }),
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as Record<string, unknown>
+    const err = (await res.json().catch(() => ({}))) as Record<string, unknown>
     throw new Error((err.detail as string) ?? `HTTP ${res.status}`)
   }
   const reader = res.body!.getReader()

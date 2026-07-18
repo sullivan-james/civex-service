@@ -6,7 +6,11 @@ export function useCollections() {
 }
 
 export function useCollection(name: string) {
-  return useQuery({ queryKey: ['collections', name], queryFn: () => collectionsApi.get(name), enabled: !!name })
+  return useQuery({
+    queryKey: ['collections', name],
+    queryFn: () => collectionsApi.get(name),
+    enabled: !!name,
+  })
 }
 
 export function useCreateCollection() {
@@ -20,8 +24,13 @@ export function useCreateCollection() {
 export function useUpdateCollection() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ name, body }: { name: string; body: { rename?: string; description?: string } }) =>
-      collectionsApi.update(name, body),
+    mutationFn: ({
+      name,
+      body,
+    }: {
+      name: string
+      body: { rename?: string; description?: string }
+    }) => collectionsApi.update(name, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['collections'] }),
   })
 }
