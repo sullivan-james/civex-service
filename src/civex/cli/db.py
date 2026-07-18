@@ -350,6 +350,59 @@ def setup_docker() -> None:
         console.print(f"  Plugins    {civex_dir / 'plugins'}")
 
 
+@app.command("teardown")
+def teardown(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt"),
+) -> None:
+    """Stop and remove this project's Docker-managed PostgreSQL container and its data.
+
+    civex init / civex db setup-docker create a per-project container that
+    keeps running (--restart unless-stopped) even after the project
+    directory is deleted. Run this before abandoning a project to avoid
+    leaving it behind. Does nothing to a manually-managed PostgreSQL server.
+    """
+    from civex.cli._docker import (
+        container_exists,
+        docker_available,
+        teardown_pg_container,
+    )
+    from civex.cli._docker import container_name as _container_name
+    from civex.config import find_project_root
+
+    if not docker_available():
+        console.print("[error]Docker is not usable.[/error]")
+        raise typer.Exit(1)
+
+    root = find_project_root()
+    project_name = root.name if root else Path.cwd().name
+    name = _container_name(project_name)
+
+    if not container_exists(name):
+        console.print(
+            f"No Docker container named [bold]{name}[/bold] found — nothing to do."
+        )
+        return
+
+    if not yes:
+        console.print(
+            f"[warning]This will permanently delete the [bold]{name}[/bold] "
+            "container and its data volume.[/warning]"
+        )
+        typer.confirm("Proceed?", abort=True)
+
+    console.print(f"Removing [bold]{name}[/bold]...", end="  ")
+    ok, err = teardown_pg_container(name)
+    if not ok:
+        console.print("[error]FAILED[/error]")
+        console.print(f"[error]{err}[/error]")
+        raise typer.Exit(1)
+    console.print("[success]OK[/success]")
+    console.print(
+        "[dim]_civex/config.toml still points at this container — run "
+        "`civex db setup-docker` or `--sqlite` if you want to keep using this project.[/dim]"
+    )
+
+
 @app.command("setup-postgres")
 def setup_postgres(
     url: str | None = typer.Option(
