@@ -19,6 +19,22 @@ import civex.services.ai.service as ai_service
 from civex.config import load_config
 from civex.context import build_local_context
 from civex.main import app as cli_app
+from civex.services.ai.tools.registry import TOOL_REGISTRY
+
+_ACT_TOOL_NAMES = {
+    "create_record",
+    "update_record",
+    "delete_record",
+    "create_schema",
+    "update_schema",
+    "delete_schema",
+    "add_schema_field",
+    "update_schema_field",
+    "delete_schema_field",
+    "create_collection",
+    "update_collection",
+    "delete_collection",
+}
 
 runner = CliRunner()
 
@@ -48,10 +64,19 @@ def _call(name: str, args: dict, ctx) -> dict:
 
 def test_all_act_tools_registered() -> None:
     names = {t["name"] for t in ai_service.TOOLS}
-    assert ai_service._ACT_TOOL_NAMES.issubset(names)
+    assert _ACT_TOOL_NAMES.issubset(names)
     assert len(ai_service.TOOLS_OPENAI) == len(
         ai_service.TOOLS
     )  # OpenAI mirror stays in sync
+
+
+def test_act_tools_are_flagged_mutating_in_the_registry() -> None:
+    for name in _ACT_TOOL_NAMES:
+        assert TOOL_REGISTRY[name].mutating is True
+    non_act_names = set(TOOL_REGISTRY) - _ACT_TOOL_NAMES
+    assert non_act_names  # sanity: there are non-act tools too
+    for name in non_act_names:
+        assert TOOL_REGISTRY[name].mutating is False
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +271,36 @@ def test_list_records_respects_limit(ctx) -> None:
 
 def test_list_records_unknown_collection(ctx) -> None:
     assert _call("list_records", {"collection": "ghost"}, ctx)["status"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# get_job_log -- no prior test coverage existed for this tool at all. Also
+# covers a real bug caught by mypy during the CIVEX-54 tool-registry
+# migration: job_svc.get_job() returns None (not a raised NotFoundError) for
+# an unknown UUID, so the old code (job.status on a None job) would have
+# raised AttributeError instead of returning the intended "job not found".
+# ---------------------------------------------------------------------------
+
+
+def test_get_job_log_unknown_uuid_returns_not_found(ctx) -> None:
+    import uuid
+
+    result = _call("get_job_log", {"job_id": str(uuid.uuid4())}, ctx)
+    assert result == {"error": "job not found"}
+
+
+def test_get_job_log_malformed_uuid_returns_not_found(ctx) -> None:
+    result = _call("get_job_log", {"job_id": "not-a-uuid"}, ctx)
+    assert result == {"error": "job not found"}
+
+
+def test_get_job_log_returns_real_job_status(ctx) -> None:
+    rec = ctx.record_svc.add("study", "trial", {"subject": "S1"})
+    ctx.commit()
+    job = ctx.job_svc.enqueue_manual("some-workflow", rec)
+    ctx.commit()
+    result = _call("get_job_log", {"job_id": str(job.id)}, ctx)
+    assert result == {"status": "pending", "error": None, "log": None}
 
 
 # ---------------------------------------------------------------------------
