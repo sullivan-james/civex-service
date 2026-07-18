@@ -322,6 +322,122 @@ def test_update_schema_field_rejects_unknown_restriction_key(ctx) -> None:
     assert "bogus" in result["message"]
 
 
+# ---------------------------------------------------------------------------
+# CIVEX-49: act tools now validate by calling the real service method inside
+# a rolled-back SAVEPOINT (AppContext.validation_scope()), instead of a
+# hand-maintained duplicate of a subset of the real validation rules. This
+# closes real gaps that existed before -- value-level restrictions were never
+# checked at propose time, and several existence/uniqueness checks were
+# either missing or only ran conditionally.
+# ---------------------------------------------------------------------------
+
+
+def test_create_record_validates_field_restrictions_at_propose_time(ctx) -> None:
+    """Regression: create_record's proposal used to check only collection/schema
+    existence -- an out-of-range value would show status "proposed" and only
+    fail later when the user clicked Approve."""
+    ctx.schema_svc.add_field(
+        "trial", "age", "integer", restrictions={"min": 0, "max": 120}
+    )
+    ctx.commit()
+    result = _call(
+        "create_record",
+        {"collection": "study", "schema": "trial", "data": {"age": 999}},
+        ctx,
+    )
+    assert result["status"] == "error"
+    assert "999" in result["message"]
+    assert "maximum" in result["message"]
+
+
+def test_create_record_rollback_is_immediate_within_the_same_turn(ctx) -> None:
+    """The SAVEPOINT used to validate an invalid create_record must be rolled
+    back before dispatch_tool() returns, not deferred to end-of-request:
+    /ai/chat allows up to MAX_TOOL_ROUNDS calls on one session, so a later
+    list_records call in the SAME turn must not see the rejected record."""
+    ctx.schema_svc.add_field(
+        "trial", "age", "integer", restrictions={"min": 0, "max": 120}
+    )
+    ctx.commit()
+    before_total = _call("list_records", {"collection": "study"}, ctx)["total"]
+
+    result = _call(
+        "create_record",
+        {"collection": "study", "schema": "trial", "data": {"age": 999}},
+        ctx,
+    )
+    assert result["status"] == "error"
+
+    after_total = _call("list_records", {"collection": "study"}, ctx)["total"]
+    assert after_total == before_total  # proves the rollback actually happened
+
+
+def test_update_record_validates_field_restrictions_at_propose_time(ctx) -> None:
+    ctx.schema_svc.add_field(
+        "trial", "age", "integer", restrictions={"min": 0, "max": 120}
+    )
+    ctx.commit()
+    rec = ctx.record_svc.add("study", "trial", {"subject": "S1", "age": 30})
+    ctx.commit()
+    result = _call(
+        "update_record", {"record_id": str(rec.id), "data": {"age": -5}}, ctx
+    )
+    assert result["status"] == "error"
+    assert "minimum" in result["message"]
+    assert ctx.record_svc.get(str(rec.id)).data["age"] == 30  # untouched
+
+
+def test_add_schema_field_rejects_duplicate_field_name(ctx) -> None:
+    """Regression: add_schema_field never checked whether the field name
+    already existed on the schema before proposing -- only apply-time did."""
+    result = _call(
+        "add_schema_field",
+        {"schema": "trial", "name": "subject", "type": "string"},
+        ctx,
+    )
+    assert result["status"] == "error"
+    assert "subject" in result["message"]
+
+
+def test_update_schema_field_rejects_rename_to_existing_name(ctx) -> None:
+    """Regression: renaming a field to a name already used by another field on
+    the same schema used to be proposed successfully."""
+    ctx.schema_svc.add_field("trial", "email", "string")
+    ctx.commit()
+    result = _call(
+        "update_schema_field",
+        {"schema": "trial", "field": "email", "rename": "subject"},
+        ctx,
+    )
+    assert result["status"] == "error"
+
+
+def test_update_schema_field_rejects_unknown_field_without_restrictions(ctx) -> None:
+    """Regression: field existence used to be checked only when restrictions
+    were also being changed -- renaming a nonexistent field (with no
+    restrictions in the call) used to be proposed successfully."""
+    result = _call(
+        "update_schema_field", {"schema": "trial", "field": "ghost", "rename": "x"}, ctx
+    )
+    assert result["status"] == "error"
+
+
+def test_update_schema_rejects_unknown_display_field(ctx) -> None:
+    """Regression: update_schema never validated that display_field actually
+    names a field on the schema before proposing."""
+    result = _call("update_schema", {"name": "trial", "display_field": "ghost"}, ctx)
+    assert result["status"] == "error"
+
+
+def test_update_collection_rejects_rename_to_existing_name(ctx) -> None:
+    """Regression: renaming a collection to a name already in use used to be
+    proposed successfully and only fail at apply time."""
+    ctx.dataset_svc.create("other")
+    ctx.commit()
+    result = _call("update_collection", {"name": "study", "rename": "other"}, ctx)
+    assert result["status"] == "error"
+
+
 def test_is_proposal_helper() -> None:
     assert (
         ai_service._is_proposal('{"status": "proposed", "action": "create_record"}')

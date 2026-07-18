@@ -16,15 +16,17 @@ from __future__ import annotations
 import ast
 import json
 import re
-from typing import TYPE_CHECKING, Any
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any, Iterator
 
 from civex.config import load_config
-from civex.domain.exceptions import NotFoundError
+from civex.domain.exceptions import CivexError, NotFoundError
 from civex.services.ai.history import _history_to_anthropic, _history_to_openai
-from civex.services.schema_service import VALID_DTYPES, VALID_RESTRICTION_KEYS
+from civex.services.schema_service import VALID_DTYPES
 
 if TYPE_CHECKING:
     from civex.config import AIConfig
+    from civex.context import AppContext
     from civex.services.dataset_service import DatasetService
     from civex.services.record_service import RecordService
     from civex.services.schema_service import SchemaService
@@ -81,6 +83,11 @@ class AiService:
         self.dataset_svc = dataset_svc
         self.record_svc = record_svc
         self.job_svc = job_svc
+        # Bound by build_local_context() right after construction (AppContext
+        # itself needs a fully-built AiService to exist first) -- gives act-tool
+        # proposal builders a validation_scope() without AiService needing to
+        # hold a second copy of every service AppContext already has.
+        self._app_ctx: AppContext | None = None
 
     def dispatch_tool(self, tool_name: str, tool_input: dict) -> str:
         return _dispatch_tool(tool_name, tool_input, self)
@@ -89,6 +96,14 @@ class AiService:
         """Async generator of SSE-frame strings (router.chat() consumes this
         directly, wrapping any pre-provider errors of its own in _sse())."""
         return _stream_chat(history, self, ai_cfg)
+
+    @contextmanager
+    def validation_scope(self) -> Iterator[None]:
+        assert self._app_ctx is not None, (
+            "AiService used before build_local_context() bound it to an AppContext"
+        )
+        with self._app_ctx.validation_scope():
+            yield
 
 
 # ---------------------------------------------------------------------------
@@ -500,18 +515,22 @@ def _tool_error(message: str) -> str:
     return json.dumps({"status": "error", "message": message})
 
 
-def _restriction_error(dtype: str, restrictions: dict[str, Any] | None) -> str | None:
-    """None if restrictions are valid for dtype, else a _tool_error() string."""
-    if not restrictions:
-        return None
-    allowed = VALID_RESTRICTION_KEYS.get(dtype, frozenset())
-    unknown = sorted(set(restrictions) - allowed)
-    if not unknown:
-        return None
-    valid = ", ".join(sorted(allowed)) if allowed else "(none)"
-    return _tool_error(
-        f"Unknown restriction key(s) {unknown} for type '{dtype}'. Valid keys: {valid}"
-    )
+def _validate_via(ctx, fn, *args, **kwargs) -> str | None:
+    """Call a real service method (record_svc.add, schema_svc.create_with_fields,
+    etc.) inside ctx.validation_scope() -- a SQL SAVEPOINT that's always rolled
+    back on exit, success or failure. This validates an act-tool proposal against
+    the exact same rules (existence, dtype, restriction-key, and value-level
+    restriction checks) the real REST endpoint enforces at apply time, instead of
+    a hand-maintained duplicate of a subset of those rules -- so a rule change in
+    the service layer applies to AI proposals automatically. Nothing persists
+    either way. Returns a _tool_error() string on failure, None on success.
+    """
+    try:
+        with ctx.validation_scope():
+            fn(*args, **kwargs)
+    except (CivexError, ValueError) as e:
+        return _tool_error(str(e))
+    return None
 
 
 def _record_summary(r) -> dict:
@@ -583,6 +602,9 @@ def _dispatch_act_tool(tool_name: str, ti: dict, ctx) -> str | None:
             return _tool_error(f"Collection '{collection}' does not exist.")
         if schema not in schema_names:
             return _tool_error(f"Schema '{schema}' does not exist.")
+        err = _validate_via(ctx, ctx.record_svc.add, collection, schema, data)
+        if err:
+            return err
         return _propose(
             "create_record",
             f"Create a new '{schema}' record in collection '{collection}'.",
@@ -600,6 +622,9 @@ def _dispatch_act_tool(tool_name: str, ti: dict, ctx) -> str | None:
             return _tool_error(f"Record '{rid}' not found.")
         if not data:
             return _tool_error("No fields provided to update.")
+        err = _validate_via(ctx, ctx.record_svc.update, str(rec.id), data)
+        if err:
+            return err
         return _propose(
             "update_record",
             f"Update record {str(rec.id)[:8]} ({rec.schema_name}) — set {', '.join(data.keys())}.",
@@ -639,21 +664,19 @@ def _dispatch_act_tool(tool_name: str, ti: dict, ctx) -> str | None:
             )
         if parent and parent not in schema_names:
             return _tool_error(f"Parent schema '{parent}' does not exist.")
-        seen_fields: set[str] = set()
         for f in fields:
-            fname, ftype = f.get("name"), f.get("type")
-            if not fname or not ftype:
+            if not f.get("name") or not f.get("type"):
                 return _tool_error("Each field needs a 'name' and 'type'.")
-            if fname in seen_fields:
-                return _tool_error(f"Duplicate field name '{fname}'.")
-            if ftype not in VALID_DTYPES:
-                return _tool_error(
-                    f"Unknown type '{ftype}' for field '{fname}'. Valid types: {', '.join(sorted(VALID_DTYPES))}"
-                )
-            err = _restriction_error(ftype, f.get("restrictions"))
-            if err:
-                return err
-            seen_fields.add(fname)
+        err = _validate_via(
+            ctx,
+            ctx.schema_svc.create_with_fields,
+            name,
+            ti.get("description"),
+            parent,
+            fields,
+        )
+        if err:
+            return err
         body: dict[str, Any] = {"name": name}
         if ti.get("description"):
             body["description"] = ti["description"]
@@ -689,6 +712,16 @@ def _dispatch_act_tool(tool_name: str, ti: dict, ctx) -> str | None:
             return _tool_error(
                 "Nothing to change (provide rename, description, or display_field)."
             )
+        update_kwargs: dict[str, Any] = {}
+        if "rename" in body:
+            update_kwargs["new_name"] = body["rename"]
+        if "description" in body:
+            update_kwargs["description"] = body["description"]
+        if "display_field" in body:
+            update_kwargs["display_field"] = body["display_field"]
+        err = _validate_via(ctx, ctx.schema_svc.update, name, **update_kwargs)
+        if err:
+            return err
         return _propose(
             "update_schema",
             f"Update schema '{name}'.",
@@ -702,6 +735,9 @@ def _dispatch_act_tool(tool_name: str, ti: dict, ctx) -> str | None:
         name = ti["name"]
         if name not in schema_names:
             return _tool_error(f"Schema '{name}' does not exist.")
+        err = _validate_via(ctx, ctx.schema_svc.delete, name)
+        if err:
+            return err
         return _propose(
             "delete_schema",
             f"Delete schema '{name}'. This cannot be undone.",
@@ -715,11 +751,16 @@ def _dispatch_act_tool(tool_name: str, ti: dict, ctx) -> str | None:
         schema, fname, ftype = ti["schema"], ti["name"], ti["type"]
         if schema not in schema_names:
             return _tool_error(f"Schema '{schema}' does not exist.")
-        if ftype not in VALID_DTYPES:
-            return _tool_error(
-                f"Unknown type '{ftype}' for field '{fname}'. Valid types: {', '.join(sorted(VALID_DTYPES))}"
-            )
-        err = _restriction_error(ftype, ti.get("restrictions"))
+        err = _validate_via(
+            ctx,
+            ctx.schema_svc.add_field,
+            schema,
+            fname,
+            ftype,
+            required=bool(ti.get("required", False)),
+            restrictions=ti.get("restrictions"),
+            default_value=ti.get("default"),
+        )
         if err:
             return err
         body = {
@@ -744,15 +785,6 @@ def _dispatch_act_tool(tool_name: str, ti: dict, ctx) -> str | None:
         schema, field = ti["schema"], ti["field"]
         if schema not in schema_names:
             return _tool_error(f"Schema '{schema}' does not exist.")
-        if ti.get("restrictions"):
-            existing = next(
-                (f for f in ctx.schema_svc.get(schema).fields if f.name == field), None
-            )
-            if existing is None:
-                return _tool_error(f"Field '{field}' not found on schema '{schema}'.")
-            err = _restriction_error(existing.dtype, ti["restrictions"])
-            if err:
-                return err
         body = {
             k: ti[k]
             for k in ("rename", "required", "restrictions", "default")
@@ -760,6 +792,20 @@ def _dispatch_act_tool(tool_name: str, ti: dict, ctx) -> str | None:
         }
         if not body:
             return _tool_error("Nothing to change on the field.")
+        update_field_kwargs: dict[str, Any] = {}
+        if "rename" in body:
+            update_field_kwargs["new_name"] = body["rename"]
+        if "required" in body:
+            update_field_kwargs["required"] = body["required"]
+        if "restrictions" in body:
+            update_field_kwargs["restrictions"] = body["restrictions"]
+        if "default" in body:
+            update_field_kwargs["default_value"] = body["default"]
+        err = _validate_via(
+            ctx, ctx.schema_svc.update_field, schema, field, **update_field_kwargs
+        )
+        if err:
+            return err
         return _propose(
             "update_schema_field",
             f"Update field '{field}' on schema '{schema}'.",
@@ -773,6 +819,9 @@ def _dispatch_act_tool(tool_name: str, ti: dict, ctx) -> str | None:
         schema, field = ti["schema"], ti["field"]
         if schema not in schema_names:
             return _tool_error(f"Schema '{schema}' does not exist.")
+        err = _validate_via(ctx, ctx.schema_svc.delete_field, schema, field)
+        if err:
+            return err
         return _propose(
             "delete_schema_field",
             f"Remove field '{field}' from schema '{schema}'. This cannot be undone.",
@@ -789,6 +838,9 @@ def _dispatch_act_tool(tool_name: str, ti: dict, ctx) -> str | None:
                 f"Collection '{name}' already exists — do not retry create_collection for it. "
                 "To change it, use update_collection instead."
             )
+        err = _validate_via(ctx, ctx.dataset_svc.create, name, ti.get("description"))
+        if err:
+            return err
         body = {"name": name}
         if ti.get("description"):
             body["description"] = ti["description"]
@@ -808,6 +860,15 @@ def _dispatch_act_tool(tool_name: str, ti: dict, ctx) -> str | None:
         body = {k: ti[k] for k in ("rename", "description") if ti.get(k) is not None}
         if not body:
             return _tool_error("Nothing to change (provide rename or description).")
+        err = _validate_via(
+            ctx,
+            ctx.dataset_svc.update,
+            name,
+            new_name=body.get("rename"),
+            description=body.get("description"),
+        )
+        if err:
+            return err
         return _propose(
             "update_collection",
             f"Update collection '{name}'.",
@@ -821,6 +882,9 @@ def _dispatch_act_tool(tool_name: str, ti: dict, ctx) -> str | None:
         name = ti["name"]
         if name not in collection_names:
             return _tool_error(f"Collection '{name}' does not exist.")
+        err = _validate_via(ctx, ctx.dataset_svc.delete, name)
+        if err:
+            return err
         return _propose(
             "delete_collection",
             f"Delete collection '{name}' and its records. This cannot be undone.",
