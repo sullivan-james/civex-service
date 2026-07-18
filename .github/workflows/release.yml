@@ -17,6 +17,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify CHANGELOG entry exists for this tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if ! grep -qE "^## ${TAG}([[:space:]]|\$)" CHANGELOG.md; then
+            echo "::error::No CHANGELOG.md entry found for ${TAG}. Add a '## ${TAG} — <label> (YYYY-MM-DD)' section before pushing this tag (see PRODUCTION_READINESS.md §4a)."
+            exit 1
+          fi
+
       - name: Set up Node
         uses: actions/setup-node@v7
         with:

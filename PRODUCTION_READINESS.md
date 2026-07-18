@@ -1,31 +1,32 @@
 # Production readiness
 
-This tracks what's left before civex (the local tool) and civex-hub (the
-optional self-hosted server) are ready to run somewhere that matters. It
-covers two different risk profiles:
+This tracks what's left before `civex` (the local tool, this repo) is ready
+to call itself 1.0/stable. Its production risk is mostly about *not
+corrupting or losing the user's local data across upgrades*, not network
+security — it runs on the user's own machine, loopback-only by default
+(`src/civex/server/security.py`).
 
-- **`civex` core** — runs on the user's own machine, loopback-only by
-  default (`src/civex/server/security.py`). Its production risk is mostly
-  about *not corrupting or losing the user's local data across upgrades*,
-  not network security.
-- **`civex-hub`** — a network-facing, multi-tenant Postgres service people
-  deploy with Docker. It has real auth, real attacker exposure, and needs a
-  normal web-service security review.
+**Scope note:** `civex-hub` (the optional self-hosted, multi-tenant Postgres
+server) was removed from this repo in CIVEX-13 and now lives in its own
+repo. Its readiness — auth hardening, per-tenant migrations, Postgres
+backup/restore — is tracked there, not here. It is **not** a blocker for
+this repo's 1.0.
 
 Check items off as they land; keep this current rather than historical.
 
 ## Status
 
-- [x] 1. Database migrations for `civex` core (see below) — `civex-hub` still open
-- [ ] 1a. Database migrations for civex-hub's per-repo Postgres schemas
-- [ ] 2. civex-hub auth hardening (rate limiting, password hashing cost)
-- [ ] 3. Backup/restore story for both SQLite and civex-hub's Postgres
-- [ ] 4. Release process (versioning, CHANGELOG discipline, alpha → beta gate)
+- [x] 1. Database migrations for `civex` core (see below)
+- [ ] 3. Backup/restore story for SQLite (`_civex/` local data)
+- [ ] 4. Release process (versioning, CHANGELOG discipline, alpha → beta gate) — see below
 - [ ] 5. Repo hygiene (stray `requirements.txt`, `build/`/`dist/` in git status)
-- [ ] 6. CI hardening (dependency/security scanning, hub Docker build check)
+- [ ] 6. CI hardening (dependency/security scanning, frontend build check)
 - [x] 7. Test coverage baseline — see `tests/README.md` (~32%, steps 4-7 pending there)
 - [x] 7a. Structured logging + secret redaction — already solid, see notes below
 - [x] 7b. Opt-in error telemetry (Sentry) — already solid, see notes below
+
+Numbering is kept stable against historical references (CIVEX-13 removed
+items 1a/2 along with civex-hub itself).
 
 ## 1. Database migrations
 
@@ -58,57 +59,89 @@ adapted (same models-diffing approach, `env.py` iterating
 `search_path`/schema names instead of a single connection), but that's a
 separate pass.
 
-## 2. civex-hub auth hardening
-
-civex-hub is the one component that's actually exposed to a network with
-untrusted callers, so it deserves a normal web-app security pass:
-
-- **Password hashing**: `pbkdf2_hmac("sha256", ..., 260_000)` iterations
-  (`civex-hub/src/civexhub/services/user_service.py:16`). Workable, but
-  OWASP's current guidance for PBKDF2-SHA256 is 600k+ iterations, or switch
-  to argon2id. Raise the iteration count at minimum before a production
-  deploy; migrating hash schemes later needs a re-hash-on-login path.
-- **No rate limiting found** on `/auth/tokens` (login) or `/auth/register`
-  (`civex-hub/src/civexhub/server/routers/auth.py`) — nothing stops
-  password brute-forcing or registration spam. Needs per-IP/per-account
-  throttling before this sits on the open internet.
-- **`CIVEXHUB_SECRET_KEY`** is required and documented
-  (`civex-hub/README.md`), but there's no startup check that rejects a
-  default/empty/weak value — worth a hard fail on boot if unset or short.
-- No CORS configuration was found in the hub app — confirm the deployed
-  topology (same-origin frontend + reverse proxy) actually makes this a
-  non-issue, and document the assumption if so.
-
 ## 3. Backup / restore
 
-Neither `civex` nor `civex-hub` documents a backup procedure:
-
-- **civex core**: a project's state is `_civex/` (SQLite DB + content-
-  addressed `objects/`). Losing this is losing all local data — there's no
-  documented `civex backup` / restore flow, and no guidance for the
-  PostgreSQL-backed configuration either.
-- **civex-hub**: relies entirely on the operator backing up Postgres and
-  the object store (filesystem or S3) independently, with no restore
-  runbook or consistency guarantee between "DB says this file exists" and
-  "object store actually has it."
+`civex` doesn't document a backup procedure. A project's state is
+`_civex/` (SQLite DB + content-addressed `objects/`, or a PostgreSQL
+connection for that configuration). Losing this is losing all local data —
+there's no documented `civex backup` / restore flow, and no guidance for
+the PostgreSQL-backed configuration either.
 
 Document (or automate) a restore procedure and verify it actually works —
 an untested backup is not a backup.
 
 ## 4. Release process
 
-Currently: `pyproject.toml` classifies civex as `Development Status :: 3 -
-Alpha`, versioned via `dynamic = ["version"]` (git-tag-driven, per recent
-commits "Add version tag" / "Add PyPI release"). `CHANGELOG.md` has one
-entry (v0.0.3). Before calling this production:
+**Where this stands:** `pyproject.toml` classifies civex as
+`Development Status :: 3 - Alpha`, versioned via `dynamic = ["version"]`
+(setuptools-scm, driven entirely off `v*` git tags — this is already the
+single source of truth for the package version; nothing else should
+hardcode a version number, see "Consolidating version references" below).
 
-- Decide what "1.0" / "stable" means for this project and what's blocking
-  it — the items in this doc are reasonable candidates.
-- Keep `CHANGELOG.md` current per release (it's already started — just
-  needs discipline going forward), and treat item 1 (migrations) as a
-  changelog-worthy breaking-change category of its own.
-- Bump the `Development Status` classifier off Alpha once the above lands,
-  so `pip install civex` accurately signals maturity to new users.
+Git tags currently run to v1.0.4 (several tags landed same-day in batches,
+including a stray duplicate `V0.0.9`/`v0.0.9`), and until CIVEX-35, no
+discipline tied a tag to a changelog entry — `CHANGELOG.md` sat frozen at
+v0.0.3 while nineteen more tags shipped past it on PyPI. That's now fixed
+with a single retroactive `CHANGELOG.md` entry consolidating everything
+since v0.0.3 under v1.0.4 (see §4a). **The v1.0.x tag numbers should not be
+read as a stability claim** — they reflect ad hoc tagging while exercising
+the release pipeline, not a deliberate "this is stable" decision. Treat the
+classifier and the criteria below, not the tag number, as the source of
+truth for what "1.0" means.
+
+### Definition of 1.0 / stable
+
+Scoped to civex core only (civex-hub is a separate repo now, see the scope
+note above). 1.0 means all of the following are true:
+
+- [x] Migrations are handled safely across upgrades (item 1, done).
+- [ ] A documented, verified backup/restore procedure exists (item 3).
+- [ ] Every tagged release has a corresponding `CHANGELOG.md` entry, going
+      forward, enforced in CI (item 4a below — this is CIVEX-35).
+- [ ] Repo hygiene is clean — no stray dependency files or build artifacts
+      in git status (item 5).
+- [ ] CI has dependency/vulnerability scanning and a frontend build check
+      (item 6).
+- [x] A test coverage baseline exists and is CI-gated (item 7, done).
+
+Once every box above is checked, bump the `Development Status` classifier
+off Alpha (CIVEX-36) as part of the release that closes the last item —
+not before, since `pip install civex` should only signal stability once it
+is actually true.
+
+### 4a. CHANGELOG discipline (CIVEX-35)
+
+Going forward:
+
+- Every `v*` tag must have a matching `## vX.Y.Z` entry in `CHANGELOG.md`
+  before the tag is pushed. `.github/workflows/release.yml` enforces this —
+  the release job fails fast (before building/publishing) if the pushed
+  tag has no matching heading.
+- Treat breaking changes — schema/migration changes (item 1) foremost among
+  them — as their own changelog category so they're easy to scan for when
+  upgrading, not buried in a generic "Changes" bullet list.
+- Historical gap: v0.0.4 through v1.0.3 were never individually documented
+  in `CHANGELOG.md` and are not being backfilled tag-by-tag (those releases
+  predate any process, and reconstructing accurate per-tag notes now isn't
+  worth the archaeology). Instead, everything that shipped across that
+  range is folded into a single retroactive `v1.0.4` entry. Discipline
+  applies starting from the next tag forward.
+
+### Consolidating version references
+
+The package version has exactly one source of truth: the `v*` git tag,
+resolved by setuptools-scm into `civex.__version__`
+(`src/civex/__init__.py`). Anything that needs "the current civex version"
+at runtime should import `__version__` rather than hardcoding a literal —
+two call sites (`src/civex/cli/dump.py`, `src/civex/server/routers/dump.py`)
+were found hardcoding a stale `"0.1.0"` in exported dump files and have
+been fixed to import `__version__` instead.
+
+`frontend/package.json` has its own independent `"version"` field. It's
+required by the `package.json` schema but isn't consumed anywhere (not
+published to npm, not read by the app) — it's inert boilerplate, not a
+second definition of the civex version, so it's left as-is rather than
+wired up to something that doesn't need it.
 
 ## 5. Repo hygiene
 
@@ -136,9 +169,6 @@ coverage gate — solid baseline. Not yet covered:
 
 - No dependency/vulnerability scanning (`pip-audit` or `safety` for civex,
   `npm audit` for the frontend).
-- No CI job builds or smoke-tests the `civex-hub` Docker image, so a broken
-  `Dockerfile`/`docker-compose.yml` wouldn't be caught until someone tries
-  to deploy it.
 - No frontend build check in CI (`npm run build` isn't run) — a TypeScript
   break in `frontend/` currently wouldn't fail CI. This overlaps with step 6
   of `tests/README.md` (frontend test setup) — the build check is cheaper

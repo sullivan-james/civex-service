@@ -6,6 +6,7 @@ from pathlib import Path
 import typer
 import yaml
 
+from civex import __version__
 from civex.cli.utils import cli_load_config, get_ctx
 from civex.console import console
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
@@ -107,7 +108,7 @@ def dump(
                 plugins_out.append({"filename": path.name, "content": path.read_text()})
 
     dump_doc = {
-        "civex_version": "0.1.0",
+        "civex_version": __version__,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "schemas": schemas_out,
         "datasets": datasets_out,
