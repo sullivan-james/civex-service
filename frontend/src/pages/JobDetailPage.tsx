@@ -5,14 +5,18 @@ import { Badge, Button, LoadingState, ErrorState } from '../components/ui'
 
 function StatusBadge({ status }: { status: WorkflowJob['status'] }) {
   switch (status) {
-    case 'completed': return <Badge variant="success">✓ completed</Badge>
-    case 'failed':    return <Badge variant="danger">✗ failed</Badge>
-    case 'running':   return (
-      <span className="inline-flex items-center gap-1 text-sm font-medium text-[#0969da]">
-        <span className="animate-spin">↻</span> running
-      </span>
-    )
-    default: return <Badge variant="default">· pending</Badge>
+    case 'completed':
+      return <Badge variant="success">✓ completed</Badge>
+    case 'failed':
+      return <Badge variant="danger">✗ failed</Badge>
+    case 'running':
+      return (
+        <span className="inline-flex items-center gap-1 text-sm font-medium text-[#0969da]">
+          <span className="animate-spin">↻</span> running
+        </span>
+      )
+    default:
+      return <Badge variant="default">· pending</Badge>
   }
 }
 
@@ -30,8 +34,8 @@ export default function JobDetailPage() {
   const rerun = useRerunJob()
 
   if (isLoading) return <LoadingState />
-  if (error)     return <ErrorState message={error.message} />
-  if (!job)      return <ErrorState message="Run not found" />
+  if (error) return <ErrorState message={error.message} />
+  if (!job) return <ErrorState message="Run not found" />
 
   const isActive = job.status === 'pending' || job.status === 'running'
 
@@ -39,7 +43,9 @@ export default function JobDetailPage() {
     <div className="space-y-6">
       {/* Breadcrumb */}
       <nav className="text-sm text-[#656d76]">
-        <Link to="/runs" className="text-[#0969da] hover:underline">Runs</Link>
+        <Link to="/runs" className="text-[#0969da] hover:underline">
+          Runs
+        </Link>
         <span className="mx-2">/</span>
         <span className="font-mono">{job.id.slice(0, 8)}…</span>
       </nav>
@@ -47,17 +53,23 @@ export default function JobDetailPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-[#1f2328]">{job.workflow_name}</h1>
+          <h1 className="text-xl font-semibold text-[#1f2328]">
+            {job.workflow_name}
+          </h1>
           <p className="text-sm text-[#656d76] mt-0.5 font-mono">{job.id}</p>
         </div>
         <div className="flex items-center gap-2">
-          {isActive && <span className="text-xs text-[#0969da] animate-pulse">live</span>}
+          {isActive && (
+            <span className="text-xs text-[#0969da] animate-pulse">live</span>
+          )}
           <StatusBadge status={job.status} />
           <Button
             size="sm"
             disabled={rerun.isPending}
             onClick={() =>
-              rerun.mutateAsync(job.id).then(newJob => navigate(`/runs/${newJob.id}`))
+              rerun
+                .mutateAsync(job.id)
+                .then((newJob) => navigate(`/runs/${newJob.id}`))
             }
           >
             {rerun.isPending ? '↻ Re-running…' : '↻ Re-run'}
@@ -70,7 +82,10 @@ export default function JobDetailPage() {
         <div>
           <dt className="text-[#656d76] font-medium">Record</dt>
           <dd>
-            <Link to={`/records/${job.record_id}`} className="font-mono text-[#0969da] hover:underline text-xs">
+            <Link
+              to={`/records/${job.record_id}`}
+              className="font-mono text-[#0969da] hover:underline text-xs"
+            >
               {job.record_id.slice(0, 8)}…
             </Link>
           </dd>
@@ -81,7 +96,9 @@ export default function JobDetailPage() {
         </div>
         <div>
           <dt className="text-[#656d76] font-medium">Trigger</dt>
-          <dd><Badge variant="default">{job.trigger}</Badge></dd>
+          <dd>
+            <Badge variant="default">{job.trigger}</Badge>
+          </dd>
         </div>
         <div>
           <dt className="text-[#656d76] font-medium">Duration</dt>
@@ -89,12 +106,16 @@ export default function JobDetailPage() {
         </div>
         <div>
           <dt className="text-[#656d76] font-medium">Created</dt>
-          <dd className="text-[#1f2328]">{new Date(job.created_at).toLocaleString()}</dd>
+          <dd className="text-[#1f2328]">
+            {new Date(job.created_at).toLocaleString()}
+          </dd>
         </div>
         {job.finished_at && (
           <div>
             <dt className="text-[#656d76] font-medium">Finished</dt>
-            <dd className="text-[#1f2328]">{new Date(job.finished_at).toLocaleString()}</dd>
+            <dd className="text-[#1f2328]">
+              {new Date(job.finished_at).toLocaleString()}
+            </dd>
           </div>
         )}
       </dl>
@@ -103,7 +124,9 @@ export default function JobDetailPage() {
       {job.error && (
         <div className="border border-red-200 rounded-md bg-red-50 p-4">
           <h2 className="text-sm font-semibold text-red-700 mb-1">Error</h2>
-          <pre className="text-xs text-red-700 whitespace-pre-wrap font-mono">{job.error}</pre>
+          <pre className="text-xs text-red-700 whitespace-pre-wrap font-mono">
+            {job.error}
+          </pre>
         </div>
       )}
 
@@ -111,7 +134,11 @@ export default function JobDetailPage() {
       <div>
         <h2 className="text-sm font-semibold text-[#1f2328] mb-2">
           Output log
-          {isActive && <span className="ml-2 text-xs font-normal text-[#0969da] animate-pulse">updating…</span>}
+          {isActive && (
+            <span className="ml-2 text-xs font-normal text-[#0969da] animate-pulse">
+              updating…
+            </span>
+          )}
         </h2>
         {job.log ? (
           <pre className="text-xs font-mono bg-[#1c2128] text-[#adbac7] rounded-md p-4 overflow-auto max-h-[60vh] whitespace-pre-wrap leading-relaxed">

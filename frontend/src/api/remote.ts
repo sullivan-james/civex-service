@@ -15,6 +15,6 @@ export interface SyncResult {
 
 export const remoteApi = {
   status: () => api.get<RemoteStatus>('/remote'),
-  push:   () => api.post<SyncResult>('/remote/push', {}),
-  pull:   () => api.post<SyncResult>('/remote/pull', {}),
+  push: () => api.post<SyncResult>('/remote/push', {}),
+  pull: () => api.post<SyncResult>('/remote/pull', {}),
 }

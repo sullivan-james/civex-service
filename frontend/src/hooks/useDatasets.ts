@@ -6,7 +6,11 @@ export function useDatasets() {
 }
 
 export function useDataset(name: string) {
-  return useQuery({ queryKey: ['datasets', name], queryFn: () => datasetsApi.get(name), enabled: !!name })
+  return useQuery({
+    queryKey: ['datasets', name],
+    queryFn: () => datasetsApi.get(name),
+    enabled: !!name,
+  })
 }
 
 export function useCreateDataset() {
@@ -20,8 +24,13 @@ export function useCreateDataset() {
 export function useUpdateDataset() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ name, body }: { name: string; body: { rename?: string; description?: string } }) =>
-      datasetsApi.update(name, body),
+    mutationFn: ({
+      name,
+      body,
+    }: {
+      name: string
+      body: { rename?: string; description?: string }
+    }) => datasetsApi.update(name, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['datasets'] }),
   })
 }
