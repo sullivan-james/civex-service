@@ -1,63 +1,26 @@
 from __future__ import annotations
 
-import re
 import socket
 import subprocess
 import time
 
+import typer
+
 from civex.console import console
 
-
-def docker_available() -> bool:
-    """Return True if Docker is installed and the current user can reach the socket."""
-    try:
-        result = subprocess.run(
-            ["docker", "info"],
-            capture_output=True,
-            timeout=15,
-        )
-        return result.returncode == 0
-    except FileNotFoundError:
-        return False
-    except subprocess.TimeoutExpired:
-        return False
-
-
-def docker_error_hint() -> str:
-    """Return a human-readable reason why Docker isn't usable."""
-    try:
-        result = subprocess.run(
-            ["docker", "info"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if result.returncode == 0:
-            return ""
-        combined = (result.stdout + result.stderr).lower()
-        if "permission denied" in combined and "docker.sock" in combined:
-            import getpass
-
-            user = getpass.getuser()
-            return (
-                f"Permission denied on the Docker socket.\n"
-                f"  Fix:  sudo usermod -aG docker {user}\n"
-                f"  Then: newgrp docker    (or log out and back in)"
-            )
-        if "cannot connect" in combined or "is the docker daemon running" in combined:
-            return "Docker daemon is not running. Start Docker Desktop or run: sudo systemctl start docker"
-        return result.stderr.strip() or "docker info returned a non-zero exit code"
-    except FileNotFoundError:
-        return "Docker is not installed. See https://www.docker.com/products/docker-desktop"
-    except subprocess.TimeoutExpired:
-        return (
-            "docker info timed out — Docker may be starting up, try again in a moment"
-        )
-
-
-def container_name(project_name: str) -> str:
-    safe = re.sub(r"[^a-zA-Z0-9_-]", "-", project_name).strip("-")
-    return f"civex-{safe or 'project'}"
+# container_exists/container_name/etc. re-exported here (unused-import ok)
+# for cli/db.py and cli/init.py, which import Docker helpers from this module.
+from civex.docker_manager import (  # noqa: F401
+    ContainerRecoveryOutcome,
+    container_exists,
+    container_name,
+    container_status,
+    docker_available,
+    docker_error_hint,
+    ensure_container_running,
+    volume_exists,
+    wait_for_container_postgres,
+)
 
 
 def find_free_port(preferred: int = 5432) -> int:
@@ -77,13 +40,8 @@ def find_free_port(preferred: int = 5432) -> int:
 def start_pg_container(name: str, port: int) -> tuple[bool, str]:
     """Start or create the civex postgres container. Returns (ok, error_message)."""
     # Reuse existing container if it already exists
-    inspect = subprocess.run(
-        ["docker", "inspect", "--format", "{{.State.Status}}", name],
-        capture_output=True,
-        text=True,
-    )
-    if inspect.returncode == 0:
-        status = inspect.stdout.strip()
+    status = container_status(name)
+    if status is not None:
         if status != "running":
             subprocess.run(["docker", "start", name], capture_output=True)
         return True, ""
@@ -113,15 +71,6 @@ def start_pg_container(name: str, port: int) -> tuple[bool, str]:
     if result.returncode != 0:
         return False, result.stderr.strip()
     return True, ""
-
-
-def container_exists(name: str) -> bool:
-    inspect = subprocess.run(
-        ["docker", "inspect", "--format", "{{.State.Status}}", name],
-        capture_output=True,
-        text=True,
-    )
-    return inspect.returncode == 0
 
 
 def teardown_pg_container(name: str) -> tuple[bool, str]:
@@ -192,3 +141,48 @@ def setup_docker_postgres(project_name: str) -> str | None:
     console.print("[success]OK[/success]")
 
     return f"postgresql+psycopg2://postgres@localhost:{port}/civex"
+
+
+def ensure_container_ready(project_name: str) -> None:
+    """
+    Pre-flight check for docker-managed projects, called before any CLI
+    command that needs a working DB connection. Auto-starts a stopped
+    container; prints a clear, actionable message and exits if the
+    container — or worse, its data volume — is gone.
+    """
+    result = ensure_container_running(project_name)
+    name = result.container_name
+
+    if result.outcome in (
+        ContainerRecoveryOutcome.READY,
+        ContainerRecoveryOutcome.DOCKER_UNAVAILABLE,
+    ):
+        # READY: nothing to do. DOCKER_UNAVAILABLE: let the normal connection
+        # attempt surface its own error rather than guessing why.
+        return
+
+    if result.outcome == ContainerRecoveryOutcome.START_FAILED:
+        console.print(f"[error]Failed to start container '{name}'.[/error]")
+        console.print(f"  [error]{result.detail}[/error]")
+        raise typer.Exit(1)
+
+    console.print(f"[error]PostgreSQL container '{name}' not found.[/error]")
+    if result.outcome == ContainerRecoveryOutcome.MISSING_VOLUME_PRESENT:
+        console.print("  Its data volume is still present, though.")
+        console.print(
+            "  Run [bold]civex db setup-docker[/bold] to recreate the container "
+            "— your data will be reattached."
+        )
+    else:
+        console.print(
+            "  [bold]Its data volume is gone too — any data in this project's "
+            "database is likely unrecoverable.[/bold]"
+        )
+        console.print(
+            "  If you have a separate backup/dump, restore from that instead."
+        )
+        console.print(
+            "  Otherwise, [bold]civex db setup-docker[/bold] will create a "
+            "brand-new, EMPTY database at the same settings."
+        )
+    raise typer.Exit(1)

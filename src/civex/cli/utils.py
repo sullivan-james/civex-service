@@ -11,10 +11,17 @@ from civex.domain.exceptions import ConfigError
 
 def cli_load_config() -> Config:
     try:
-        return load_config()
+        config = load_config()
     except ConfigError as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
+
+    if config.db.docker_managed:
+        from civex.cli._docker import ensure_container_ready
+
+        ensure_container_ready(config.project_root.name)
+
+    return config
 
 
 def get_ctx() -> AppContext:

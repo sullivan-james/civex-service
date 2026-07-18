@@ -35,8 +35,8 @@ def _init_working(target: Path, use_sqlite: bool = False) -> None:
         console.print("[warning]Already initialized.[/warning]")
         raise typer.Exit(0)
 
-    db_url = _resolve_db_url(target, civex_dir, use_sqlite)
-    scaffold_project(target, db_url=db_url)
+    db_url, docker_managed = _resolve_db_url(target, civex_dir, use_sqlite)
+    scaffold_project(target, db_url=db_url, docker_managed=docker_managed)
 
     console.print(f"\n[success]Initialized civex project at {target}[/success]")
     console.print(f"  Database   {_display_url(db_url)}")
@@ -46,20 +46,27 @@ def _init_working(target: Path, use_sqlite: bool = False) -> None:
     console.print(f"  Config     {civex_dir / 'config.toml'}")
 
 
-def _resolve_db_url(target: Path, civex_dir: Path, use_sqlite: bool) -> str:
-    """Return the database URL to use, starting Docker postgres if available."""
+def _resolve_db_url(
+    target: Path, civex_dir: Path, use_sqlite: bool
+) -> tuple[str, bool]:
+    """Return (db_url, docker_managed), starting Docker postgres if available."""
     if not use_sqlite:
         from civex.cli._docker import (
             docker_available,
             docker_error_hint,
             setup_docker_postgres,
         )
+        from civex.cli._pgdriver import detect_pg_driver, driver_install_hint
 
-        if docker_available():
+        if detect_pg_driver() is None:
+            console.print(
+                "[dim]No PostgreSQL driver found (psycopg2 / psycopg) — using SQLite.[/dim]"
+            )
+            console.print(driver_install_hint())
+        elif docker_available():
             db_url = setup_docker_postgres(target.name)
             if db_url:
-                _ensure_psycopg2()
-                return db_url
+                return db_url, True
             console.print(
                 "  [warning]Docker postgres setup failed — falling back to SQLite.[/warning]"
             )
@@ -73,36 +80,7 @@ def _resolve_db_url(target: Path, civex_dir: Path, use_sqlite: bool) -> str:
             )
 
     db_path = civex_dir / "civex.db"
-    return f"sqlite:///{db_path.as_posix()}"
-
-
-def _ensure_psycopg2() -> None:
-    """Install psycopg2-binary if no postgres driver is present."""
-    try:
-        import psycopg2  # noqa: F401
-
-        return
-    except ImportError:
-        pass
-    try:
-        import psycopg  # noqa: F401
-
-        return
-    except ImportError:
-        pass
-    import subprocess
-    import sys
-
-    console.print("  Installing psycopg2-binary...", end="  ")
-    result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "psycopg2-binary"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        console.print("[success]OK[/success]")
-    else:
-        console.print("[warning]FAILED — you may need to install it manually[/warning]")
+    return f"sqlite:///{db_path.as_posix()}", False
 
 
 def _display_url(db_url: str) -> str:

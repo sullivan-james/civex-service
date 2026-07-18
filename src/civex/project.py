@@ -29,11 +29,16 @@ logs/
 """
 
 
-def scaffold_project(path: Path, db_url: str | None = None) -> str:
+def scaffold_project(
+    path: Path, db_url: str | None = None, docker_managed: bool = False
+) -> str:
     """
     Create a _civex/ directory tree inside *path* and initialise the database.
 
     If *db_url* is not supplied, a SQLite database at _civex/civex.db is used.
+    *docker_managed* records whether *db_url* points at a container civex
+    itself provisioned (see civex.cli._docker) — used later to decide
+    whether to run container-recovery checks before a command connects.
     Returns the db_url that was written to config.toml.
 
     Raises FileExistsError if _civex/ already exists — callers decide how to
@@ -55,7 +60,10 @@ def scaffold_project(path: Path, db_url: str | None = None) -> str:
         db_path = civex_dir / "civex.db"
         db_url = f"sqlite:///{db_path.as_posix()}"
 
-    (civex_dir / "config.toml").write_text(f'[db]\nurl = "{db_url}"\n')
+    config_toml = f'[db]\nurl = "{db_url}"\n'
+    if docker_managed:
+        config_toml += "docker_managed = true\n"
+    (civex_dir / "config.toml").write_text(config_toml)
 
     from sqlalchemy import create_engine
     from civex.db.migrate import ensure_schema_current

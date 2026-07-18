@@ -271,3 +271,10 @@ class WorkflowJobResponse(BaseModel):
             started_at=dto.started_at,
             finished_at=dto.finished_at,
         )
+
+
+# --- Status ---
+
+
+class DBStatusResponse(BaseModel):
+    ok: bool = True

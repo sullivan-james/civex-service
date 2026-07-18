@@ -3,58 +3,18 @@ from __future__ import annotations
 import getpass
 import socket
 import subprocess
-import sys
 import urllib.parse
 from pathlib import Path
 
 import typer
 
+from civex.cli._pgdriver import detect_pg_driver, driver_install_hint
 from civex.console import console
 
 app = typer.Typer(help="Database management commands.")
 
 _COMMON_PORTS = [5432, 5433]
 _SOCKET_DIRS = ["/var/run/postgresql", "/run/postgresql", "/tmp"]
-
-
-# ---------------------------------------------------------------------------
-# Driver helpers
-# ---------------------------------------------------------------------------
-
-
-def _detect_pg_driver() -> str | None:
-    try:
-        import psycopg  # noqa: F401
-
-        return "psycopg"
-    except ImportError:
-        pass
-    try:
-        import psycopg2  # noqa: F401
-
-        return "psycopg2"
-    except ImportError:
-        pass
-    return None
-
-
-def _install_driver() -> str | None:
-    """Offer to pip-install psycopg2-binary. Returns driver name on success."""
-    console.print("[warning]No PostgreSQL driver found (psycopg2 / psycopg).[/warning]")
-    if not typer.confirm("  Install psycopg2-binary now?", default=True):
-        return None
-    console.print("  Installing psycopg2-binary...", end="  ")
-    result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "psycopg2-binary"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        console.print("[error]FAILED[/error]")
-        console.print(result.stderr.strip())
-        return None
-    console.print("[success]OK[/success]")
-    return _detect_pg_driver()
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +221,13 @@ def setup_docker() -> None:
     _civex/config.toml with the new URL and creates all tables.
     Useful for migrating an existing SQLite project to PostgreSQL.
     """
-    from civex.cli._docker import docker_available, setup_docker_postgres
+    from civex.cli._docker import (
+        container_exists,
+        container_name,
+        docker_available,
+        setup_docker_postgres,
+        volume_exists,
+    )
     from civex.config import Config, DBConfig, find_project_root, save_config
     from civex.db.migrate import ensure_schema_current
     from sqlalchemy import create_engine
@@ -275,16 +241,37 @@ def setup_docker() -> None:
         raise typer.Exit(1)
 
     # Ensure a postgres driver is installed
-    driver = _detect_pg_driver()
+    driver = detect_pg_driver()
     if driver is None:
-        driver = _install_driver()
-        if driver is None:
-            console.print("[error]Cannot proceed without a PostgreSQL driver.[/error]")
-            raise typer.Exit(1)
+        console.print("[error]No PostgreSQL driver found (psycopg2 / psycopg).[/error]")
+        console.print(driver_install_hint())
+        raise typer.Exit(1)
 
     # Determine project name for the container
     root = find_project_root()
     project_name = root.name if root else Path.cwd().name
+
+    # If neither the container nor its data volume exist, but this project
+    # was previously docker-managed, we're about to create a brand-new,
+    # EMPTY database — confirm before silently doing that.
+    name = container_name(project_name)
+    if (
+        root is not None
+        and not container_exists(name)
+        and not volume_exists(f"{name}-pgdata")
+    ):
+        try:
+            from civex.config import load_config
+
+            was_docker_managed = load_config().db.docker_managed
+        except Exception:
+            was_docker_managed = False
+        if was_docker_managed:
+            console.print(
+                f"[warning]No existing container or data volume found for "
+                f"'{name}' — this will create a brand-new, EMPTY database.[/warning]"
+            )
+            typer.confirm("Continue?", abort=True)
 
     db_url = setup_docker_postgres(project_name)
     if db_url is None:
@@ -317,10 +304,14 @@ def setup_docker() -> None:
 
         existing = load_config()
         config = Config(
-            project_root=root, db=DBConfig(url=db_url), remote=existing.remote
+            project_root=root,
+            db=DBConfig(url=db_url, docker_managed=True),
+            remote=existing.remote,
         )
     except Exception:
-        config = Config(project_root=root, db=DBConfig(url=db_url), remote=None)
+        config = Config(
+            project_root=root, db=DBConfig(url=db_url, docker_managed=True), remote=None
+        )
 
     save_config(config)
 
@@ -424,12 +415,11 @@ def setup_postgres(
     from sqlalchemy import create_engine
 
     # ---- Phase 1: Ensure a Python driver ------------------------------------
-    driver = _detect_pg_driver()
+    driver = detect_pg_driver()
     if driver is None:
-        driver = _install_driver()
-        if driver is None:
-            console.print("[error]Cannot proceed without a PostgreSQL driver.[/error]")
-            raise typer.Exit(1)
+        console.print("[error]No PostgreSQL driver found (psycopg2 / psycopg).[/error]")
+        console.print(driver_install_hint())
+        raise typer.Exit(1)
 
     # ---- Phase 2: Resolve a working DB URL ----------------------------------
     if url:

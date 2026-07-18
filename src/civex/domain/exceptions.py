@@ -25,6 +25,10 @@ class VolumeUnavailableError(CivexError):
     pass
 
 
+class DatabaseUnavailableError(CivexError):
+    """Raised when a docker-managed project's database can't be reached/recovered."""
+
+
 class VolumeFullError(CivexError):
     pass
 
