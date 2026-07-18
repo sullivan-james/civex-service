@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from civex.config import AIConfig, load_config, save_config
 from civex.context import build_local_context
 from civex.domain.exceptions import ConfigError, NotFoundError
+from civex.services.ai.config import ANTHROPIC_MODELS, DEFAULT_MODEL
 from civex.services.ai.history import _history_to_anthropic, _history_to_openai
 from civex.services.schema_service import VALID_DTYPES, VALID_RESTRICTION_KEYS
 
@@ -1642,13 +1643,6 @@ class AiConfigUpdate(BaseModel):
     base_url: str | None = None
 
 
-ANTHROPIC_MODELS = [
-    "claude-haiku-4-5-20251001",
-    "claude-sonnet-4-6",
-    "claude-opus-4-8",
-]
-
-
 @router.get("/config", response_model=AiConfigResponse)
 def get_ai_config():
     try:
@@ -1659,7 +1653,7 @@ def get_ai_config():
         return AiConfigResponse(
             configured=False,
             source="none",
-            model="claude-sonnet-4-6",
+            model=DEFAULT_MODEL,
             provider="anthropic",
             base_url=None,
             key_hint=None,
@@ -1707,7 +1701,7 @@ def update_ai_config(body: AiConfigUpdate):
     new_model = (
         body.model
         if body.model is not None
-        else (current.model if current else "claude-sonnet-4-6")
+        else (current.model if current else DEFAULT_MODEL)
     )
     if new_provider == "anthropic" and new_model not in ANTHROPIC_MODELS:
         raise HTTPException(

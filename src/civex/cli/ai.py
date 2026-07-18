@@ -7,18 +7,9 @@ import typer
 from civex.cli.utils import cli_load_config
 from civex.config import AIConfig, save_config
 from civex.console import console
+from civex.services.ai.config import ANTHROPIC_MODELS, resolve_preset
 
 app = typer.Typer(help="Configure the AI assistant")
-
-ANTHROPIC_MODELS = [
-    "claude-haiku-4-5-20251001",
-    "claude-sonnet-4-6",
-    "claude-opus-4-8",
-]
-
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
 
 @app.command("status")
@@ -78,39 +69,20 @@ def ai_set_key(
     config = cli_load_config()
 
     # Resolve preset providers
-    resolved_provider = "anthropic"
-    resolved_base_url: str | None = None
-    default_model = "claude-sonnet-4-6"
-
-    if provider == "anthropic":
-        resolved_provider = "anthropic"
-        default_model = "claude-sonnet-4-6"
-    elif provider == "groq":
-        resolved_provider = "openai-compat"
-        resolved_base_url = GROQ_BASE_URL
-        default_model = "llama-3.3-70b-versatile"
-    elif provider == "gemini":
-        resolved_provider = "openai-compat"
-        resolved_base_url = GEMINI_BASE_URL
-        default_model = "gemini-1.5-flash"
-    elif provider == "ollama":
-        resolved_provider = "openai-compat"
-        resolved_base_url = base_url or OLLAMA_BASE_URL
-        default_model = "qwen2.5:7b"
-    elif provider == "openai-compat":
-        resolved_provider = "openai-compat"
-        resolved_base_url = base_url
+    preset = resolve_preset(provider, base_url)
+    if preset is None:
+        console.print(
+            f"[error]Unknown provider '{provider}'. Use: anthropic, groq, gemini, or openai-compat.[/error]"
+        )
+        raise typer.Exit(1)
+    resolved_provider, resolved_base_url, default_model = preset
+    if provider == "openai-compat":
         if not resolved_base_url:
             console.print(
                 "[error]--base-url is required for openai-compat provider.[/error]"
             )
             raise typer.Exit(1)
         default_model = model or ""
-    else:
-        console.print(
-            f"[error]Unknown provider '{provider}'. Use: anthropic, groq, gemini, or openai-compat.[/error]"
-        )
-        raise typer.Exit(1)
 
     current_model = config.ai.model if config.ai else default_model
     final_model = model or current_model if config.ai else model or default_model
