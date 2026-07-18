@@ -28,10 +28,12 @@ from civex.repositories.local.schema_repo import LocalSchemaRepository
 from civex.services.ai.service import AiService
 from civex.services.dataset_service import DatasetService
 from civex.services.file_service import FileService
+from civex.services.plugin_service import PluginService
 from civex.services.record_service import RecordService
 from civex.services.schema_service import SchemaService
 from civex.services.store_service import StoreService
 from civex.services.workflow_job_service import WorkflowJobService
+from civex.services.workflow_service import WorkflowService
 
 
 @lru_cache(maxsize=None)
@@ -50,6 +52,8 @@ class AppContext:
     store_svc: StoreService
     audit_svc: LocalAuditRepository
     ai_svc: AiService
+    workflow_svc: WorkflowService
+    plugin_svc: PluginService
     _session: Session
 
     def commit(self) -> None:
@@ -113,6 +117,8 @@ def build_local_context(
     file_svc = FileService(file_store, remote_transport=remote_transport)
     store_svc = StoreService(config, file_store)
     ai_svc = AiService(schema_svc, dataset_svc, record_svc, job_svc)
+    workflow_svc = WorkflowService(config.civex_dir)
+    plugin_svc = PluginService(config.civex_dir)
 
     ctx = AppContext(
         schema_svc=schema_svc,
@@ -123,6 +129,8 @@ def build_local_context(
         store_svc=store_svc,
         audit_svc=audit_repo,
         ai_svc=ai_svc,
+        workflow_svc=workflow_svc,
+        plugin_svc=plugin_svc,
         _session=session,
     )
     ai_svc._app_ctx = ctx

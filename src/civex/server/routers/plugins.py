@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import ast
-import re
-
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-_SAFE_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+from civex.context import AppContext
+from civex.domain.exceptions import ValidationError
+from civex.server.deps import get_ctx
 
 router = APIRouter(prefix="/plugins", tags=["plugins"])
 
@@ -23,30 +22,15 @@ class UploadResult(BaseModel):
 
 
 @router.get("", response_model=list[PluginInfo])
-def list_plugins():
+def list_plugins(ctx: AppContext = Depends(get_ctx)):
     """List all registered plugins (built-ins + user plugins from _civex/plugins/)."""
-    from civex.plugins.registry import all_plugins, discover_user_plugins
-    from civex.config import load_config, ConfigError
-
-    try:
-        config = load_config()
-        discover_user_plugins(config.civex_dir / "plugins")
-    except ConfigError:
-        pass
-
-    builtin_prefix = "civex."
-    return [
-        PluginInfo(
-            id=plugin_id,
-            description=getattr(cls, "description", "") or "",
-            builtin=plugin_id.startswith(builtin_prefix),
-        )
-        for plugin_id, cls in sorted(all_plugins().items())
-    ]
+    return [PluginInfo(**p) for p in ctx.plugin_svc.list_registered()]
 
 
 @router.post("/upload", response_model=UploadResult)
-async def upload_plugin(file: UploadFile = File(...)):
+async def upload_plugin(
+    file: UploadFile = File(...), ctx: AppContext = Depends(get_ctx)
+):
     """Upload a .py plugin file into _civex/plugins/ and register it immediately."""
     if not (file.filename or "").endswith(".py"):
         raise HTTPException(status_code=400, detail="File must be a .py Python file")
@@ -56,36 +40,8 @@ async def upload_plugin(file: UploadFile = File(...)):
     if "/" in filename or "\\" in filename or filename.startswith("."):
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    from civex.config import load_config, ConfigError
-
-    try:
-        config = load_config()
-    except ConfigError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    plugins_dir = config.civex_dir / "plugins"
-    plugins_dir.mkdir(exist_ok=True)
-
     content = await file.read()
-    dest = plugins_dir / filename
-    dest.write_bytes(content)
-
-    # Register immediately in the running process so it's available without restart.
-    from civex.plugins.registry import discover_user_plugins, all_plugins
-
-    discover_user_plugins(plugins_dir)
-
-    # Find the plugin ID that was just registered (the one from this file's stem).
-    stem = filename[:-3]
-    plugin_id = next(
-        (
-            pid
-            for pid in all_plugins()
-            if pid == stem or all_plugins()[pid].__module__ == stem
-        ),
-        stem,
-    )
-
+    plugin_id = ctx.plugin_svc.save_uploaded(filename, content)
     return UploadResult(filename=filename, plugin_id=plugin_id)
 
 
@@ -95,35 +51,10 @@ class PluginSaveRequest(BaseModel):
 
 
 @router.post("", status_code=201)
-def save_plugin_json(body: PluginSaveRequest):
+def save_plugin_json(body: PluginSaveRequest, ctx: AppContext = Depends(get_ctx)):
     """Save a plugin from JSON source (used by the AI confirmation UI)."""
-    if not _SAFE_NAME.match(body.name):
-        raise HTTPException(
-            400,
-            detail="name must be lowercase letters, digits, and underscores only, starting with a letter",
-        )
     try:
-        tree = ast.parse(body.code)
-    except SyntaxError as e:
-        raise HTTPException(422, detail=f"Syntax error: {e}")
-    if not any(
-        isinstance(n, ast.ClassDef) and n.name == "Plugin" for n in ast.walk(tree)
-    ):
-        raise HTTPException(422, detail="Code must define a class named 'Plugin'")
-
-    from civex.config import load_config, ConfigError
-
-    try:
-        config = load_config()
-    except ConfigError as e:
-        raise HTTPException(500, detail=str(e))
-
-    plugins_dir = config.civex_dir / "plugins"
-    plugins_dir.mkdir(exist_ok=True)
-    (plugins_dir / f"{body.name}.py").write_text(body.code, encoding="utf-8")
-
-    from civex.plugins.registry import discover_user_plugins
-
-    discover_user_plugins(plugins_dir)
-
+        ctx.plugin_svc.save(body.name, body.code)
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
     return {"filename": f"{body.name}.py"}
