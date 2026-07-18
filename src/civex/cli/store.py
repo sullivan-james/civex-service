@@ -33,6 +33,7 @@ def store_list() -> None:
         return
 
     from rich.table import Table
+
     table = Table(show_header=True, header_style="bold", box=None, pad_edge=False)
     table.add_column("Name", style="bold")
     table.add_column("Path")
@@ -45,7 +46,11 @@ def store_list() -> None:
     for v in stats:
         in_queue = "✓" if v["in_queue"] else ""
         used = _fmt_bytes(v["civex_used_bytes"])
-        alloc = _fmt_bytes(int(v["allocated_gb"] * 1_073_741_824)) if v["allocated_gb"] else "unlimited"
+        alloc = (
+            _fmt_bytes(int(v["allocated_gb"] * 1_073_741_824))
+            if v["allocated_gb"]
+            else "unlimited"
+        )
         free = _fmt_bytes(v["disk_free_bytes"])
         if not v["available"]:
             status = "[dim]unavailable[/dim]"
@@ -61,8 +66,12 @@ def store_list() -> None:
 @app.command("add")
 def store_add(
     name: str = typer.Argument(..., help="Volume name"),
-    path: str = typer.Option(..., "--path", "-p", help="Directory path for this volume"),
-    allocated_gb: Optional[float] = typer.Option(None, "--allocated-gb", help="Max GB civex may use (omit for unlimited)"),
+    path: str = typer.Option(
+        ..., "--path", "-p", help="Directory path for this volume"
+    ),
+    allocated_gb: Optional[float] = typer.Option(
+        None, "--allocated-gb", help="Max GB civex may use (omit for unlimited)"
+    ),
 ) -> None:
     """Add a new storage volume."""
     ctx = get_ctx()
@@ -71,7 +80,9 @@ def store_add(
         console.print(f"[green]Added volume '{name}' at {path}.[/green]")
         if allocated_gb:
             console.print(f"  Allocation: {allocated_gb:.1f} GB")
-        console.print("  Add it to the write queue with: [bold]civex store queue set[/bold]")
+        console.print(
+            "  Add it to the write queue with: [bold]civex store queue set[/bold]"
+        )
     except AlreadyExistsError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)
@@ -83,12 +94,17 @@ def store_add(
 def store_update(
     name: str = typer.Argument(..., help="Volume name"),
     path: Optional[str] = typer.Option(None, "--path", "-p", help="New directory path"),
-    allocated_gb: Optional[float] = typer.Option(None, "--allocated-gb", help="New allocation limit in GB"),
-    clear_allocation: bool = typer.Option(False, "--clear-allocation", help="Remove allocation limit"),
+    allocated_gb: Optional[float] = typer.Option(
+        None, "--allocated-gb", help="New allocation limit in GB"
+    ),
+    clear_allocation: bool = typer.Option(
+        False, "--clear-allocation", help="Remove allocation limit"
+    ),
 ) -> None:
     """Update a volume's path or allocation."""
     ctx = get_ctx()
     from civex.services.store_service import _UNSET
+
     alloc = _UNSET
     if allocated_gb is not None:
         alloc = allocated_gb
@@ -107,7 +123,11 @@ def store_update(
 @app.command("remove")
 def store_remove(
     name: str = typer.Argument(..., help="Volume name"),
-    force: bool = typer.Option(False, "--force", help="Remove even if the volume contains objects (existing file references will become unresolvable)"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Remove even if the volume contains objects (existing file references will become unresolvable)",
+    ),
 ) -> None:
     """Remove a volume from the configuration (does not delete files)."""
     ctx = get_ctx()

@@ -37,6 +37,7 @@ def docker_error_hint() -> str:
         combined = (result.stdout + result.stderr).lower()
         if "permission denied" in combined and "docker.sock" in combined:
             import getpass
+
             user = getpass.getuser()
             return (
                 f"Permission denied on the Docker socket.\n"
@@ -49,7 +50,9 @@ def docker_error_hint() -> str:
     except FileNotFoundError:
         return "Docker is not installed. See https://www.docker.com/products/docker-desktop"
     except subprocess.TimeoutExpired:
-        return "docker info timed out — Docker may be starting up, try again in a moment"
+        return (
+            "docker info timed out — Docker may be starting up, try again in a moment"
+        )
 
 
 def container_name(project_name: str) -> str:
@@ -87,13 +90,21 @@ def start_pg_container(name: str, port: int) -> tuple[bool, str]:
 
     result = subprocess.run(
         [
-            "docker", "run", "-d",
-            "--name", name,
-            "-p", f"{port}:5432",
-            "-e", "POSTGRES_HOST_AUTH_METHOD=trust",
-            "-e", "POSTGRES_DB=civex",
-            "-v", f"{name}-pgdata:/var/lib/postgresql/data",
-            "--restart", "unless-stopped",
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            name,
+            "-p",
+            f"{port}:5432",
+            "-e",
+            "POSTGRES_HOST_AUTH_METHOD=trust",
+            "-e",
+            "POSTGRES_DB=civex",
+            "-v",
+            f"{name}-pgdata:/var/lib/postgresql/data",
+            "--restart",
+            "unless-stopped",
             "postgres:16",
         ],
         capture_output=True,

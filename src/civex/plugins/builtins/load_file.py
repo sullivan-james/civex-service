@@ -19,7 +19,9 @@ class Plugin(BasePlugin):
     class Config(BaseModel):
         field: str  # field name on the trigger record containing a FileRef
 
-    def run(self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext) -> dict[str, Any]:
+    def run(
+        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+    ) -> dict[str, Any]:
         raw = ctx.record.data.get(config.field)
         if raw is None:
             raise ValueError(f"Field '{config.field}' not found on record")
@@ -27,5 +29,10 @@ class Plugin(BasePlugin):
             raise ValueError(f"Field '{config.field}' is not a file reference")
         ref = FileRef.from_dict(raw)
         data = ctx.get_file(ref.sha256)
-        log.info("Loaded '%s' from field '%s' (%d bytes)", ref.filename, config.field, len(data))
+        log.info(
+            "Loaded '%s' from field '%s' (%d bytes)",
+            ref.filename,
+            config.field,
+            len(data),
+        )
         return {"bytes": data, "filename": ref.filename, "sha256": ref.sha256}

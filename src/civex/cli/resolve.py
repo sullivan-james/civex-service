@@ -7,7 +7,9 @@ from civex.console import console
 from civex.domain.exceptions import NotFoundError
 
 
-def resolve(id: str = typer.Argument(..., help="UUID or UUID prefix to look up")) -> None:
+def resolve(
+    id: str = typer.Argument(..., help="UUID or UUID prefix to look up"),
+) -> None:
     """Identify a resource (schema, dataset, or record) by UUID or prefix."""
     ctx = _ctx()
     prefix = id.lower()
@@ -19,7 +21,7 @@ def resolve(id: str = typer.Argument(..., help="UUID or UUID prefix to look up")
 
     for d in ctx.dataset_svc.list_all():
         if str(d.id).startswith(prefix):
-            console.print(f"dataset  [bold]{d.name}[/bold]   schema: {d.schema_name}")
+            console.print(f"dataset  [bold]{d.name}[/bold]   records: {d.record_count}")
             return
 
     try:

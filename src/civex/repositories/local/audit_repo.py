@@ -27,14 +27,16 @@ class LocalAuditRepository:
         old_data: dict[str, Any] | None,
         new_data: dict[str, Any] | None,
     ) -> None:
-        self._s.add(AuditLog(
-            action=action,
-            entity_type=entity_type,
-            entity_id=entity_id,
-            old_data=old_data,
-            new_data=new_data,
-            timestamp=datetime.now(timezone.utc),
-        ))
+        self._s.add(
+            AuditLog(
+                action=action,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                old_data=old_data,
+                new_data=new_data,
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
 
     # ------------------------------------------------------------------
     # Commit management (used by AuditService / CLI)
@@ -127,15 +129,18 @@ class LocalAuditRepository:
         existing = self._s.get(Commit, uid)
         pushed_at = _parse_dt(d.get("pushed_at"))
         if existing is None:
-            self._s.add(Commit(
-                id=uid,
-                message=d.get("message"),
-                created_at=_parse_dt(d.get("created_at")) or datetime.now(timezone.utc),
-                record_count=d.get("record_count", 0),
-                schema_count=d.get("schema_count", 0),
-                dataset_count=d.get("dataset_count", 0),
-                pushed_at=pushed_at,
-            ))
+            self._s.add(
+                Commit(
+                    id=uid,
+                    message=d.get("message"),
+                    created_at=_parse_dt(d.get("created_at"))
+                    or datetime.now(timezone.utc),
+                    record_count=d.get("record_count", 0),
+                    schema_count=d.get("schema_count", 0),
+                    dataset_count=d.get("dataset_count", 0),
+                    pushed_at=pushed_at,
+                )
+            )
         else:
             existing.message = d.get("message")
             if pushed_at and not existing.pushed_at:
@@ -144,16 +149,19 @@ class LocalAuditRepository:
     def upsert_audit_entry(self, d: dict) -> None:
         uid = uuid.UUID(d["id"])
         if self._s.get(AuditLog, uid) is None:
-            self._s.add(AuditLog(
-                id=uid,
-                commit_id=uuid.UUID(d["commit_id"]) if d.get("commit_id") else None,
-                action=d["action"],
-                entity_type=d["entity_type"],
-                entity_id=uuid.UUID(d["entity_id"]),
-                old_data=d.get("old_data"),
-                new_data=d.get("new_data"),
-                timestamp=_parse_dt(d.get("timestamp")) or datetime.now(timezone.utc),
-            ))
+            self._s.add(
+                AuditLog(
+                    id=uid,
+                    commit_id=uuid.UUID(d["commit_id"]) if d.get("commit_id") else None,
+                    action=d["action"],
+                    entity_type=d["entity_type"],
+                    entity_id=uuid.UUID(d["entity_id"]),
+                    old_data=d.get("old_data"),
+                    new_data=d.get("new_data"),
+                    timestamp=_parse_dt(d.get("timestamp"))
+                    or datetime.now(timezone.utc),
+                )
+            )
 
     def mark_pushed(self, commit_ids: list[uuid.UUID]) -> None:
         now = datetime.now(timezone.utc)
@@ -163,11 +171,7 @@ class LocalAuditRepository:
                 row.pushed_at = now
 
     def _staged_entries(self) -> list[AuditLog]:
-        return (
-            self._s.query(AuditLog)
-            .filter(AuditLog.commit_id.is_(None))
-            .all()
-        )
+        return self._s.query(AuditLog).filter(AuditLog.commit_id.is_(None)).all()
 
 
 def _commit_dto(r: Commit) -> CommitDTO:

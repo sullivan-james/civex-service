@@ -34,7 +34,9 @@ class AllVolumesFull(CivexError):
 
 
 class CoercionError(ValidationError):
-    def __init__(self, field_name: str, dtype: str, raw: str, extra: str | None = None) -> None:
+    def __init__(
+        self, field_name: str, dtype: str, raw: str, extra: str | None = None
+    ) -> None:
         self.field_name = field_name
         self.dtype = dtype
         self.raw = raw

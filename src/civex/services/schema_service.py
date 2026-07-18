@@ -7,11 +7,23 @@ from civex.domain.dtos import FieldDTO, ResolvedField, SchemaDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.repositories.protocols import AuditRepository, SchemaRepository
 
-VALID_DTYPES = frozenset([
-    "integer", "float", "string", "boolean",
-    "file", "file_list", "reference", "date", "datetime",
-    "enum", "url", "reference_list", "tags",
-])
+VALID_DTYPES = frozenset(
+    [
+        "integer",
+        "float",
+        "string",
+        "boolean",
+        "file",
+        "file_list",
+        "reference",
+        "date",
+        "datetime",
+        "enum",
+        "url",
+        "reference_list",
+        "tags",
+    ]
+)
 
 # Valid `restrictions` keys per dtype — the single source of truth for what
 # RecordService._check_restrictions() actually reads. Anything else is
@@ -47,7 +59,9 @@ def _validate_restriction_keys(dtype: str, restrictions: dict[str, Any] | None) 
 
 
 class SchemaService:
-    def __init__(self, repo: SchemaRepository, audit_repo: AuditRepository | None = None) -> None:
+    def __init__(
+        self, repo: SchemaRepository, audit_repo: AuditRepository | None = None
+    ) -> None:
         self._repo = repo
         self._audit = audit_repo
 
@@ -115,13 +129,17 @@ class SchemaService:
         default_value: Any = None,
     ) -> FieldDTO:
         if dtype not in VALID_DTYPES:
-            raise ValueError(f"Unknown dtype '{dtype}'. Choose from: {', '.join(sorted(VALID_DTYPES))}")
+            raise ValueError(
+                f"Unknown dtype '{dtype}'. Choose from: {', '.join(sorted(VALID_DTYPES))}"
+            )
         _validate_restriction_keys(dtype, restrictions)
 
         schema = self.get(schema_name)
 
         if any(f.name == field_name for f in schema.fields):
-            raise AlreadyExistsError(f"Field '{field_name}' already exists on schema '{schema_name}'")
+            raise AlreadyExistsError(
+                f"Field '{field_name}' already exists on schema '{schema_name}'"
+            )
 
         field = self._repo.add_field(
             schema_id=schema.id,
@@ -150,19 +168,27 @@ class SchemaService:
             all_fields = self.collect_fields(schema)
             names = {rf.field.name for rf in all_fields}
             if display_field not in names:
-                raise NotFoundError(f"Field '{display_field}' not found on schema '{name}'")
+                raise NotFoundError(
+                    f"Field '{display_field}' not found on schema '{name}'"
+                )
         old_dict = schema.to_dict()
         extra = {} if display_field is ... else {"display_field": display_field}
-        updated = self._repo.update(schema.id, name=new_name, description=description, **extra)
+        updated = self._repo.update(
+            schema.id, name=new_name, description=description, **extra
+        )
         if self._audit:
-            self._audit.log_change("update", "schema", updated.id, old_dict, updated.to_dict())
+            self._audit.log_change(
+                "update", "schema", updated.id, old_dict, updated.to_dict()
+            )
         return updated
 
     def delete_field(self, schema_name: str, field_name: str) -> None:
         schema = self.get(schema_name)
         field = next((f for f in schema.fields if f.name == field_name), None)
         if field is None:
-            raise NotFoundError(f"Field '{field_name}' not found on schema '{schema_name}'")
+            raise NotFoundError(
+                f"Field '{field_name}' not found on schema '{schema_name}'"
+            )
         if self._audit:
             self._audit.log_change("delete", "field", field.id, field.to_dict(), None)
         self._repo.delete_field(field.id)
@@ -180,22 +206,32 @@ class SchemaService:
         schema = self.get(schema_name)
         field = next((f for f in schema.fields if f.name == field_name), None)
         if field is None:
-            raise NotFoundError(f"Field '{field_name}' not found on schema '{schema_name}'")
+            raise NotFoundError(
+                f"Field '{field_name}' not found on schema '{schema_name}'"
+            )
         if new_name and new_name != field_name:
             if any(f.name == new_name for f in schema.fields):
-                raise AlreadyExistsError(f"Field '{new_name}' already exists on schema '{schema_name}'")
+                raise AlreadyExistsError(
+                    f"Field '{new_name}' already exists on schema '{schema_name}'"
+                )
         if restrictions is not None:
             _validate_restriction_keys(field.dtype, restrictions)
         old_dict = field.to_dict()
-        kwargs: dict[str, Any] = dict(name=new_name, required=required, restrictions=restrictions)
+        kwargs: dict[str, Any] = dict(
+            name=new_name, required=required, restrictions=restrictions
+        )
         if default_value is not ...:
             kwargs["default_value"] = default_value
         updated = self._repo.update_field(field.id, **kwargs)
         if self._audit:
-            self._audit.log_change("update", "field", updated.id, old_dict, updated.to_dict())
+            self._audit.log_change(
+                "update", "field", updated.id, old_dict, updated.to_dict()
+            )
         return updated
 
-    def reorder_fields(self, schema_name: str, field_ids: list[uuid.UUID]) -> list[FieldDTO]:
+    def reorder_fields(
+        self, schema_name: str, field_ids: list[uuid.UUID]
+    ) -> list[FieldDTO]:
         schema = self.get(schema_name)
         own_field_ids = {f.id for f in schema.fields}
         invalid = [fid for fid in field_ids if fid not in own_field_ids]
@@ -209,7 +245,9 @@ class SchemaService:
     def delete(self, name: str) -> None:
         schema = self.get(name)
         if self._audit:
-            self._audit.log_change("delete", "schema", schema.id, schema.to_dict(), None)
+            self._audit.log_change(
+                "delete", "schema", schema.id, schema.to_dict(), None
+            )
         self._repo.delete(schema.id)
 
     def name_to_id_map(self, schema: SchemaDTO) -> dict[str, str]:
@@ -226,7 +264,10 @@ class SchemaService:
         Own fields come first; parent fields follow (depth-first).
         Own fields shadow parent fields with the same name.
         """
-        own = [ResolvedField(field=f, source_schema_name=schema.name) for f in schema.fields]
+        own = [
+            ResolvedField(field=f, source_schema_name=schema.name)
+            for f in schema.fields
+        ]
         seen_names = {f.field.name for f in own}
 
         inherited: list[ResolvedField] = []

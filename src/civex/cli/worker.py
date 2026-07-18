@@ -15,8 +15,12 @@ app = typer.Typer(help="Manage automated workflow processing")
 
 @app.command("run")
 def worker_run(
-    watch: bool = typer.Option(False, "--watch", "-w", help="Keep polling for new jobs"),
-    interval: int = typer.Option(5, "--interval", help="Seconds between polls (--watch only)"),
+    watch: bool = typer.Option(
+        False, "--watch", "-w", help="Keep polling for new jobs"
+    ),
+    interval: int = typer.Option(
+        5, "--interval", help="Seconds between polls (--watch only)"
+    ),
 ) -> None:
     """Process all pending workflow jobs. Use --watch to keep polling."""
     ctx = get_ctx()
@@ -31,7 +35,9 @@ def worker_run(
         if job is None:
             time.sleep(interval)
             continue
-        console.print(f"  [dim]→ workflow '{job.workflow_name}' (trigger: {job.trigger})[/dim]")
+        console.print(
+            f"  [dim]→ workflow '{job.workflow_name}' (trigger: {job.trigger})[/dim]"
+        )
         try:
             run_job(job, ctx)
             ctx.job_svc.mark_completed(job.id)
@@ -45,7 +51,9 @@ def worker_run(
 
 @app.command("jobs")
 def worker_jobs(
-    status: Optional[str] = typer.Option(None, "--status", "-s", help="Filter: pending, running, completed, failed"),
+    status: Optional[str] = typer.Option(
+        None, "--status", "-s", help="Filter: pending, running, completed, failed"
+    ),
 ) -> None:
     """List workflow jobs."""
     ctx = get_ctx()
@@ -85,7 +93,9 @@ def worker_logs(
         console.print(f"[error]Job '{job_id}' not found.[/error]")
         raise typer.Exit(1)
 
-    console.print(f"[bold]Job {str(job.id)[:8]}…[/bold]  {job.workflow_name}  [{job.status}]")
+    console.print(
+        f"[bold]Job {str(job.id)[:8]}…[/bold]  {job.workflow_name}  [{job.status}]"
+    )
     console.print(f"  Record   {str(job.record_id)[:8]}…  Schema: {job.schema_name}")
     console.print(f"  Trigger  {job.trigger}")
     if job.started_at:
@@ -105,7 +115,9 @@ def worker_logs(
 @app.command("enqueue")
 def worker_enqueue(
     workflow: str = typer.Option(..., "--workflow", "-w", help="Workflow name"),
-    record_id: str = typer.Option(..., "--record", "-r", help="Record ID or short prefix"),
+    record_id: str = typer.Option(
+        ..., "--record", "-r", help="Record ID or short prefix"
+    ),
 ) -> None:
     """Manually enqueue a workflow job for a specific record."""
     ctx = get_ctx()
@@ -117,4 +129,6 @@ def worker_enqueue(
 
     job = ctx.job_svc.enqueue_manual(workflow, record)
     ctx.commit()
-    console.print(f"[success]Enqueued '{workflow}' for record {str(record.id)[:8]}… (job {str(job.id)[:8]}…)[/success]")
+    console.print(
+        f"[success]Enqueued '{workflow}' for record {str(record.id)[:8]}… (job {str(job.id)[:8]}…)[/success]"
+    )

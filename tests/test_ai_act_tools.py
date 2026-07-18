@@ -329,6 +329,7 @@ def test_is_proposal_helper() -> None:
 def test_openai_stream_halts_after_a_proposed_tool(ctx, monkeypatch) -> None:
     """When a tool proposes a change, the loop must stop that round — it must not
     feed the result back to the model or stream any further text."""
+    pytest.importorskip("openai")
     import asyncio
     import json as _json
 

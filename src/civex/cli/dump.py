@@ -32,9 +32,15 @@ def _sort_schemas(schemas: list[dict]) -> list[dict]:
 
 
 def dump(
-    output: Path = typer.Option(Path("civex-dump.yaml"), "--output", "-o", help="Destination file"),
-    no_data: bool = typer.Option(False, "--no-data", help="Omit records from the export"),
-    no_workflows: bool = typer.Option(False, "--no-workflows", help="Omit workflows and plugins from the export"),
+    output: Path = typer.Option(
+        Path("civex-dump.yaml"), "--output", "-o", help="Destination file"
+    ),
+    no_data: bool = typer.Option(
+        False, "--no-data", help="Omit records from the export"
+    ),
+    no_workflows: bool = typer.Option(
+        False, "--no-workflows", help="Omit workflows and plugins from the export"
+    ),
 ) -> None:
     """Export all schemas, datasets, records, and workflows to a YAML file."""
     config = cli_load_config()
@@ -47,15 +53,17 @@ def dump(
         if schema.parent_id:
             parent_dto = ctx.schema_svc._repo.get_by_id(schema.parent_id)
             parent_name = parent_dto.name if parent_dto else None
-        schemas_out.append({
-            "name": schema.name,
-            "description": schema.description,
-            "parent": parent_name,
-            "fields": [
-                {"name": f.name, "type": f.dtype, "required": f.required}
-                for f in schema.fields
-            ],
-        })
+        schemas_out.append(
+            {
+                "name": schema.name,
+                "description": schema.description,
+                "parent": parent_name,
+                "fields": [
+                    {"name": f.name, "type": f.dtype, "required": f.required}
+                    for f in schema.fields
+                ],
+            }
+        )
     schemas_out = _sort_schemas(schemas_out)
 
     # --- datasets + records ---
@@ -63,9 +71,17 @@ def dump(
     records_out = []
     if not no_data:
         for dataset in ctx.dataset_svc.list_all():
-            datasets_out.append({"name": dataset.name, "description": dataset.description})
-            for record in ctx.record_svc.find(dataset.name, schema_name=None, filters=[], limit=100_000):
-                rec: dict = {"dataset": dataset.name, "schema": record.schema_name, "data": record.data}
+            datasets_out.append(
+                {"name": dataset.name, "description": dataset.description}
+            )
+            for record in ctx.record_svc.find(
+                dataset.name, schema_name=None, filters=[], limit=100_000
+            ):
+                rec: dict = {
+                    "dataset": dataset.name,
+                    "schema": record.schema_name,
+                    "data": record.data,
+                }
                 if record.parent_record_id:
                     rec["parent_record_id"] = str(record.parent_record_id)
                 records_out.append(rec)
@@ -75,8 +91,12 @@ def dump(
     if not no_workflows:
         workflows_dir = config.civex_dir / "workflows"
         if workflows_dir.exists():
-            for path in sorted(workflows_dir.glob("*.yaml")) + sorted(workflows_dir.glob("*.yml")):
-                workflows_out.append({"filename": path.name, "content": path.read_text()})
+            for path in sorted(workflows_dir.glob("*.yaml")) + sorted(
+                workflows_dir.glob("*.yml")
+            ):
+                workflows_out.append(
+                    {"filename": path.name, "content": path.read_text()}
+                )
 
     # --- plugins ---
     plugins_out = []
@@ -96,7 +116,11 @@ def dump(
         "plugins": plugins_out,
     }
 
-    output.write_text(yaml.dump(dump_doc, default_flow_style=False, allow_unicode=True, sort_keys=False))
+    output.write_text(
+        yaml.dump(
+            dump_doc, default_flow_style=False, allow_unicode=True, sort_keys=False
+        )
+    )
 
     total_records = len(records_out)
     file_refs = sum(
@@ -128,11 +152,11 @@ def restore(
 
     doc = yaml.safe_load(dump_file.read_text())
 
-    n_schemas   = len(doc.get("schemas", []))
-    n_datasets  = len(doc.get("datasets", []))
-    n_records   = len(doc.get("records", []))
+    n_schemas = len(doc.get("schemas", []))
+    n_datasets = len(doc.get("datasets", []))
+    n_records = len(doc.get("records", []))
     n_workflows = len(doc.get("workflows", []))
-    n_plugins   = len(doc.get("plugins", []))
+    n_plugins = len(doc.get("plugins", []))
 
     console.print(f"Restoring from [bold]{dump_file}[/bold]")
     console.print(f"  Exported   {doc.get('exported_at', 'unknown')}")
@@ -151,15 +175,21 @@ def restore(
     # --- schemas (parents-first order guaranteed by dump) ---
     for s in doc.get("schemas", []):
         try:
-            ctx.schema_svc.create(s["name"], description=s.get("description"), parent=s.get("parent"))
+            ctx.schema_svc.create(
+                s["name"], description=s.get("description"), parent=s.get("parent")
+            )
             ctx.commit()
         except AlreadyExistsError:
-            console.print(f"  [warning]Schema '{s['name']}' already exists — skipped.[/warning]")
+            console.print(
+                f"  [warning]Schema '{s['name']}' already exists — skipped.[/warning]"
+            )
             continue
 
         for f in s.get("fields", []):
             try:
-                ctx.schema_svc.add_field(s["name"], f["name"], f["type"], required=f.get("required", False))
+                ctx.schema_svc.add_field(
+                    s["name"], f["name"], f["type"], required=f.get("required", False)
+                )
                 ctx.commit()
             except AlreadyExistsError:
                 pass
@@ -181,7 +211,9 @@ def restore(
     failed = 0
     for r in doc.get("records", []):
         data = r["data"] or {}
-        file_field_count += sum(1 for v in data.values() if isinstance(v, dict) and "sha256" in v)
+        file_field_count += sum(
+            1 for v in data.values() if isinstance(v, dict) and "sha256" in v
+        )
         try:
             ctx.record_svc.add(
                 r["dataset"],
@@ -217,8 +249,15 @@ def restore(
     plugins_restored = 0
     for p in doc.get("plugins", []):
         filename = p["filename"]
-        if "/" in filename or "\\" in filename or filename.startswith(".") or not filename.endswith(".py"):
-            console.print(f"  [warning]Plugin '{filename}': invalid filename — skipped.[/warning]")
+        if (
+            "/" in filename
+            or "\\" in filename
+            or filename.startswith(".")
+            or not filename.endswith(".py")
+        ):
+            console.print(
+                f"  [warning]Plugin '{filename}': invalid filename — skipped.[/warning]"
+            )
             continue
         (plugins_dir / filename).write_text(p["content"])
         plugins_restored += 1

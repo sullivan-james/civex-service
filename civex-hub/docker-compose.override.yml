@@ -1,7 +1,0 @@
-services:
-  hub:
-    volumes:
-      - ../src:/civex-service/src
-      - ./src:/civexhub/src
-    environment:
-      - CIVEXHUB_RELOAD=true

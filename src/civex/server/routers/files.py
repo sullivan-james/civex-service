@@ -14,7 +14,9 @@ router = APIRouter(prefix="/files", tags=["files"])
 async def upload_file(file: UploadFile, ctx: AppContext = Depends(get_ctx)):
     data = await file.read()
     ref = ctx.file_svc.store_bytes(data, file.filename or "upload")
-    return FileRefResponse(sha256=ref.sha256, filename=ref.filename, size=ref.size, volume=ref.volume)
+    return FileRefResponse(
+        sha256=ref.sha256, filename=ref.filename, size=ref.size, volume=ref.volume
+    )
 
 
 @router.get("/{sha256}")
@@ -22,8 +24,12 @@ def download_file(sha256: str, filename: str = "", ctx: AppContext = Depends(get
     try:
         data = ctx.file_svc.retrieve(sha256)
     except Exception:
-        raise HTTPException(404, detail=f"Object {sha256} not found locally or on remote")
+        raise HTTPException(
+            404, detail=f"Object {sha256} not found locally or on remote"
+        )
     headers = {}
     if filename:
         headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-    return Response(content=data, media_type="application/octet-stream", headers=headers)
+    return Response(
+        content=data, media_type="application/octet-stream", headers=headers
+    )

@@ -101,7 +101,7 @@ Create one record per file in a file list. No key matching — pure insert. Trig
     files: __input__.files
 ```
 
-**Inputs:** `files` — list of FileRef dicts.  
+**Inputs:** `files` — list of FileRef dicts.
 **Outputs:** `created`, `skipped`.
 
 ---
@@ -120,7 +120,7 @@ Match each file to an existing child record by extracting a key value from the f
     pattern: 'sel_(\d+)'          # regex; capture group 1 is the key value
 ```
 
-**Inputs:** `files` — list of FileRef dicts.  
+**Inputs:** `files` — list of FileRef dicts.
 **Outputs:** `created`, `updated`, `unmatched`.
 
 ---
@@ -129,7 +129,7 @@ Match each file to an existing child record by extracting a key value from the f
 
 Load a CSV file (from a `file` field) into a pandas DataFrame.
 
-**Outputs:** `table` (DataFrame).  
+**Outputs:** `table` (DataFrame).
 **Requires:** `pip install 'civex[workflows]'`
 
 ---
@@ -138,7 +138,7 @@ Load a CSV file (from a `file` field) into a pandas DataFrame.
 
 Convert DataFrame rows to records, or upsert records matched by a key field.
 
-**Inputs:** `table` (DataFrame).  
+**Inputs:** `table` (DataFrame).
 **Requires:** `pip install 'civex[workflows]'`
 
 ---

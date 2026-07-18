@@ -6,6 +6,7 @@ Records use LWW: incoming row replaces local only when its updated_at is newer.
 Deleted record IDs are removed from the local DB.
 Objects are never transferred here — only their sha256 hashes in object_refs.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -40,6 +41,7 @@ def apply_bundle(session: Session, bundle: SyncBundle) -> None:
 # Upsert helpers
 # ---------------------------------------------------------------------------
 
+
 def _upsert_schemas(session: Session, rows: list[dict]) -> None:
     for d in rows:
         dto = SchemaDTO.from_dict(d)
@@ -48,13 +50,15 @@ def _upsert_schemas(session: Session, rows: list[dict]) -> None:
             # Fall back to name lookup — handles re-created schemas with new UUIDs.
             existing = session.query(Schema).filter_by(name=dto.name).first()
         if existing is None:
-            session.add(Schema(
-                id=dto.id,
-                name=dto.name,
-                description=dto.description,
-                parent_id=dto.parent_id,
-                created_at=dto.created_at,
-            ))
+            session.add(
+                Schema(
+                    id=dto.id,
+                    name=dto.name,
+                    description=dto.description,
+                    parent_id=dto.parent_id,
+                    created_at=dto.created_at,
+                )
+            )
         else:
             existing.description = dto.description
             existing.parent_id = dto.parent_id
@@ -72,15 +76,17 @@ def _upsert_fields(session: Session, rows: list[dict]) -> None:
                 .first()
             )
         if existing is None:
-            session.add(Field(
-                id=dto.id,
-                schema_id=dto.schema_id,
-                name=dto.name,
-                dtype=dto.dtype,
-                required=dto.required,
-                restrictions=dto.restrictions,
-                created_at=dto.created_at,
-            ))
+            session.add(
+                Field(
+                    id=dto.id,
+                    schema_id=dto.schema_id,
+                    name=dto.name,
+                    dtype=dto.dtype,
+                    required=dto.required,
+                    restrictions=dto.restrictions,
+                    created_at=dto.created_at,
+                )
+            )
         else:
             existing.dtype = dto.dtype
             existing.required = dto.required
@@ -94,12 +100,14 @@ def _upsert_datasets(session: Session, rows: list[dict]) -> None:
         if existing is None:
             existing = session.query(Dataset).filter_by(name=dto.name).first()
         if existing is None:
-            session.add(Dataset(
-                id=dto.id,
-                name=dto.name,
-                description=dto.description,
-                created_at=dto.created_at,
-            ))
+            session.add(
+                Dataset(
+                    id=dto.id,
+                    name=dto.name,
+                    description=dto.description,
+                    created_at=dto.created_at,
+                )
+            )
         else:
             existing.name = dto.name
             existing.description = dto.description
@@ -107,26 +115,36 @@ def _upsert_datasets(session: Session, rows: list[dict]) -> None:
 
 def _upsert_records(session: Session, rows: list[dict]) -> None:
     # Sort: null parent_record_id first so FK-enforcing DBs don't choke.
-    sorted_rows = sorted(rows, key=lambda r: (r.get("parent_record_id") is not None, r.get("created_at") or ""))
+    sorted_rows = sorted(
+        rows,
+        key=lambda r: (
+            r.get("parent_record_id") is not None,
+            r.get("created_at") or "",
+        ),
+    )
     for d in sorted_rows:
         dto = RecordDTO.from_dict(d)
         existing = session.get(Record, dto.id)
         if existing is None:
-            session.add(Record(
-                id=dto.id,
-                dataset_id=dto.dataset_id,
-                schema_id=dto.schema_id,
-                parent_record_id=dto.parent_record_id,
-                data=dto.data,
-                created_at=dto.created_at,
-                updated_at=dto.updated_at,
-            ))
+            session.add(
+                Record(
+                    id=dto.id,
+                    dataset_id=dto.dataset_id,
+                    schema_id=dto.schema_id,
+                    parent_record_id=dto.parent_record_id,
+                    data=dto.data,
+                    created_at=dto.created_at,
+                    updated_at=dto.updated_at,
+                )
+            )
         else:
             local_updated = existing.updated_at
             if local_updated and local_updated.tzinfo is None:
                 local_updated = local_updated.replace(tzinfo=timezone.utc)
             incoming_updated = dto.updated_at
-            if incoming_updated and (local_updated is None or incoming_updated > local_updated):
+            if incoming_updated and (
+                local_updated is None or incoming_updated > local_updated
+            ):
                 existing.data = dto.data
                 existing.updated_at = incoming_updated
 
@@ -140,21 +158,24 @@ def _delete_records(session: Session, record_ids: list[str]) -> None:
 
 def _upsert_commits(session: Session, rows: list[dict]) -> None:
     from datetime import datetime, timezone
+
     now = datetime.now(timezone.utc)
     for d in rows:
         dto = CommitDTO.from_dict(d)
         existing = session.get(Commit, dto.id)
         if existing is None:
-            session.add(Commit(
-                id=dto.id,
-                seq=dto.seq,
-                message=dto.message,
-                created_at=dto.created_at,
-                record_count=dto.record_count,
-                schema_count=dto.schema_count,
-                dataset_count=dto.dataset_count,
-                pushed_at=now,
-            ))
+            session.add(
+                Commit(
+                    id=dto.id,
+                    seq=dto.seq,
+                    message=dto.message,
+                    created_at=dto.created_at,
+                    record_count=dto.record_count,
+                    schema_count=dto.schema_count,
+                    dataset_count=dto.dataset_count,
+                    pushed_at=now,
+                )
+            )
         else:
             if not existing.pushed_at:
                 existing.pushed_at = now
@@ -164,13 +185,15 @@ def _upsert_audit_log(session: Session, rows: list[dict]) -> None:
     for d in rows:
         dto = AuditLogDTO.from_dict(d)
         if session.get(AuditLog, dto.id) is None:
-            session.add(AuditLog(
-                id=dto.id,
-                commit_id=dto.commit_id,
-                action=dto.action,
-                entity_type=dto.entity_type,
-                entity_id=dto.entity_id,
-                old_data=dto.old_data,
-                new_data=dto.new_data,
-                timestamp=dto.timestamp,
-            ))
+            session.add(
+                AuditLog(
+                    id=dto.id,
+                    commit_id=dto.commit_id,
+                    action=dto.action,
+                    entity_type=dto.entity_type,
+                    entity_id=dto.entity_id,
+                    old_data=dto.old_data,
+                    new_data=dto.new_data,
+                    timestamp=dto.timestamp,
+                )
+            )

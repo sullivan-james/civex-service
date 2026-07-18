@@ -16,7 +16,9 @@ class StepDef(BaseModel):
 class RecordEventTrigger(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     schema_name: str = Field(alias="schema")
-    fields: list[str] | None = None  # record_updated only: trigger only if one of these fields changed
+    fields: list[str] | None = (
+        None  # record_updated only: trigger only if one of these fields changed
+    )
 
 
 class Triggers(BaseModel):
@@ -30,6 +32,7 @@ class WorkflowInput(BaseModel):
     type: "files"  → list of FileRef dicts (resolved from paths/globs by the caller)
           "value"  → arbitrary scalar passed through as-is
     """
+
     type: str  # "files" | "value"
     label: str | None = None
     description: str | None = None
@@ -39,7 +42,9 @@ class WorkflowDef(BaseModel):
     name: str
     description: str | None = None
     triggers: Triggers | None = None
-    record_schema: str | None = None  # schema the anchor record must have; enforced on manual runs
+    record_schema: str | None = (
+        None  # schema the anchor record must have; enforced on manual runs
+    )
     inputs: dict[str, WorkflowInput] | None = None
     steps: list[StepDef]
 

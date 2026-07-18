@@ -68,8 +68,14 @@ class SyncService:
         unpushed_ids = [c.id for c in self._audit_repo.list_unpushed_commits()]
 
         if bundle.to_seq == remote.last_pushed_seq:
-            return SyncResult(schemas=0, datasets=0, records=0, objects=0,
-                              from_seq=remote.last_pushed_seq, to_seq=remote.last_pushed_seq)
+            return SyncResult(
+                schemas=0,
+                datasets=0,
+                records=0,
+                objects=0,
+                from_seq=remote.last_pushed_seq,
+                to_seq=remote.last_pushed_seq,
+            )
 
         # Push objects before the DB bundle so the receiver can access them immediately.
         pushed_objects = 0
@@ -110,8 +116,14 @@ class SyncService:
         bundle = transport.transfer_pack(since_seq=remote.last_pulled_seq)
 
         if bundle.to_seq == remote.last_pulled_seq:
-            return SyncResult(schemas=0, datasets=0, records=0, objects=0,
-                              from_seq=remote.last_pulled_seq, to_seq=remote.last_pulled_seq)
+            return SyncResult(
+                schemas=0,
+                datasets=0,
+                records=0,
+                objects=0,
+                from_seq=remote.last_pulled_seq,
+                to_seq=remote.last_pulled_seq,
+            )
 
         apply_bundle(self._session, bundle)
         self._session.commit()

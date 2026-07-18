@@ -35,15 +35,17 @@ def export_dump(
         if schema.parent_id:
             parent_dto = ctx.schema_svc._repo.get_by_id(schema.parent_id)
             parent_name = parent_dto.name if parent_dto else None
-        schemas_out.append({
-            "name": schema.name,
-            "description": schema.description,
-            "parent": parent_name,
-            "fields": [
-                {"name": f.name, "type": f.dtype, "required": f.required}
-                for f in schema.fields
-            ],
-        })
+        schemas_out.append(
+            {
+                "name": schema.name,
+                "description": schema.description,
+                "parent": parent_name,
+                "fields": [
+                    {"name": f.name, "type": f.dtype, "required": f.required}
+                    for f in schema.fields
+                ],
+            }
+        )
     schemas_out = _sort_schemas(schemas_out)
 
     datasets_out = [
@@ -54,20 +56,31 @@ def export_dump(
     records_out = []
     if not no_data:
         for dataset in ctx.dataset_svc.list_all():
-            for record in ctx.record_svc.find(dataset.name, schema_name=None, filters=[], limit=100_000):
-                rec: dict = {"dataset": dataset.name, "schema": record.schema_name, "data": record.data}
+            for record in ctx.record_svc.find(
+                dataset.name, schema_name=None, filters=[], limit=100_000
+            ):
+                rec: dict = {
+                    "dataset": dataset.name,
+                    "schema": record.schema_name,
+                    "data": record.data,
+                }
                 if record.parent_record_id:
                     rec["parent_record_id"] = str(record.parent_record_id)
                 records_out.append(rec)
 
     from civex.config import load_config
+
     try:
         config = load_config()
         workflows_out = []
         workflows_dir = config.civex_dir / "workflows"
         if workflows_dir.exists():
-            for path in sorted(workflows_dir.glob("*.yaml")) + sorted(workflows_dir.glob("*.yml")):
-                workflows_out.append({"filename": path.name, "content": path.read_text(encoding="utf-8")})
+            for path in sorted(workflows_dir.glob("*.yaml")) + sorted(
+                workflows_dir.glob("*.yml")
+            ):
+                workflows_out.append(
+                    {"filename": path.name, "content": path.read_text(encoding="utf-8")}
+                )
     except Exception:
         workflows_out = []
 
@@ -77,7 +90,9 @@ def export_dump(
         plugins_dir = config.civex_dir / "plugins"
         if plugins_dir.exists():
             for path in sorted(plugins_dir.glob("*.py")):
-                plugins_out.append({"filename": path.name, "content": path.read_text(encoding="utf-8")})
+                plugins_out.append(
+                    {"filename": path.name, "content": path.read_text(encoding="utf-8")}
+                )
     except Exception:
         plugins_out = []
 
@@ -91,7 +106,9 @@ def export_dump(
         "plugins": plugins_out,
     }
 
-    content = yaml.dump(dump_doc, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    content = yaml.dump(
+        dump_doc, default_flow_style=False, allow_unicode=True, sort_keys=False
+    )
     return Response(
         content=content,
         media_type="application/yaml",
@@ -117,7 +134,9 @@ async def import_dump(
     schemas_restored = 0
     for s in doc.get("schemas", []):
         try:
-            ctx.schema_svc.create(s["name"], description=s.get("description"), parent=s.get("parent"))
+            ctx.schema_svc.create(
+                s["name"], description=s.get("description"), parent=s.get("parent")
+            )
             ctx.commit()
             schemas_restored += 1
         except AlreadyExistsError:
@@ -125,7 +144,9 @@ async def import_dump(
 
         for f in s.get("fields", []):
             try:
-                ctx.schema_svc.add_field(s["name"], f["name"], f["type"], required=f.get("required", False))
+                ctx.schema_svc.add_field(
+                    s["name"], f["name"], f["type"], required=f.get("required", False)
+                )
                 ctx.commit()
             except AlreadyExistsError:
                 pass
@@ -155,6 +176,7 @@ async def import_dump(
             pass
 
     from civex.config import load_config
+
     config = load_config()
 
     workflows_restored = 0
@@ -169,12 +191,18 @@ async def import_dump(
     plugins_dir.mkdir(exist_ok=True)
     for p in doc.get("plugins", []):
         filename = p["filename"]
-        if "/" in filename or "\\" in filename or filename.startswith(".") or not filename.endswith(".py"):
+        if (
+            "/" in filename
+            or "\\" in filename
+            or filename.startswith(".")
+            or not filename.endswith(".py")
+        ):
             continue
         (plugins_dir / filename).write_text(p["content"], encoding="utf-8")
         plugins_restored += 1
     if plugins_restored:
         from civex.plugins.registry import discover_user_plugins
+
         discover_user_plugins(plugins_dir)
 
     return RestoreResult(

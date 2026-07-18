@@ -8,6 +8,7 @@ immediately — they are fetched on demand when accessed (lazy).
 Use --remote-civex when civex is not on PATH on the remote (e.g. installed in a venv):
     civex clone ssh://js521/~/civex-test-repo --remote-civex ~/venv/bin/civex
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,8 +24,12 @@ from civex.sync.transport import SyncError, get_transport
 
 
 def clone(
-    url: str = typer.Argument(..., help="Remote URL (ssh://user@host/path or file:///path)"),
-    local_dir: Path = typer.Argument(None, help="Destination directory (default: derived from URL)"),
+    url: str = typer.Argument(
+        ..., help="Remote URL (ssh://user@host/path or file:///path)"
+    ),
+    local_dir: Path = typer.Argument(
+        None, help="Destination directory (default: derived from URL)"
+    ),
     remote_civex: str = typer.Option(
         "civex",
         "--remote-civex",
@@ -49,7 +54,9 @@ def clone(
     civex_dir = local_dir / "_civex"
 
     if civex_dir.exists():
-        console.print(f"[error]Directory {local_dir} is already a civex project.[/error]")
+        console.print(
+            f"[error]Directory {local_dir} is already a civex project.[/error]"
+        )
         raise typer.Exit(1)
 
     console.print(f"Cloning from [bold]{url}[/bold] into [bold]{local_dir}[/bold] ...")
@@ -81,13 +88,15 @@ def clone(
     remote_lines = f'[db]\nurl = "{db_url}"\n\n[remote]\nurl = "{url}"\n'
     if remote_civex != "civex":
         remote_lines += f'remote_civex = "{remote_civex}"\n'
-    remote_lines += f'last_pulled_seq = {bundle.to_seq}\n'
-    remote_lines += 'last_pushed_seq = 0\n'
+    remote_lines += f"last_pulled_seq = {bundle.to_seq}\n"
+    remote_lines += "last_pushed_seq = 0\n"
     (civex_dir / "config.toml").write_text(remote_lines)
 
     console.print("[success]Cloned successfully.[/success]")
     console.print(f"  Schemas    {len(bundle.schemas)}")
     console.print(f"  Datasets   {len(bundle.datasets)}")
     console.print(f"  Records    {len(bundle.records)}")
-    console.print(f"  Objects    {len(bundle.object_refs)} available remotely (fetched on demand)")
+    console.print(
+        f"  Objects    {len(bundle.object_refs)} available remotely (fetched on demand)"
+    )
     console.print(f"  Local dir  {local_dir}")

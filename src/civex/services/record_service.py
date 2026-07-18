@@ -8,15 +8,23 @@ from typing import Any
 
 from civex.domain.dtos import RecordDTO, ResolvedField
 from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
-from civex.repositories.protocols import AuditRepository, DatasetRepository, FileObjectStore, RecordRepository
+from civex.repositories.protocols import (
+    AuditRepository,
+    DatasetRepository,
+    FileObjectStore,
+    RecordRepository,
+)
 from civex.services.schema_service import SchemaService
 
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from civex.services.workflow_job_service import WorkflowJobService
 
+
 def _parse_date(v: str) -> str:
     return _date.fromisoformat(v.strip()).isoformat()
+
 
 def _parse_datetime(v: str) -> str:
     s = v.strip()
@@ -28,20 +36,27 @@ def _parse_datetime(v: str) -> str:
         dt = dt.replace(tzinfo=_tz.utc)
     return dt.astimezone(_tz.utc).isoformat()
 
+
 _COERCE: dict[str, Any] = {
     "integer": int,
     "float": float,
     "string": str,
-    "boolean": lambda v: v.strip().lower() in ("true", "yes", "1") if isinstance(v, str) else bool(v),
+    "boolean": lambda v: (
+        v.strip().lower() in ("true", "yes", "1") if isinstance(v, str) else bool(v)
+    ),
     "date": _parse_date,
     "datetime": _parse_datetime,
     "enum": str,
     "url": str,
-    "tags": lambda v: [t.strip() for t in v.split(",")] if isinstance(v, str) else [str(t) for t in v],
+    "tags": lambda v: (
+        [t.strip() for t in v.split(",")] if isinstance(v, str) else [str(t) for t in v]
+    ),
 }
 
 
-def _check_restrictions(value: Any, dtype: str, restrictions: dict[str, Any], field_name: str) -> None:
+def _check_restrictions(
+    value: Any, dtype: str, restrictions: dict[str, Any], field_name: str
+) -> None:
     """Raise ValidationError if value violates field restrictions. Single source of truth."""
     if value is None:
         return
@@ -62,9 +77,13 @@ def _check_restrictions(value: Any, dtype: str, restrictions: dict[str, Any], fi
         mn = restrictions.get("min")
         mx = restrictions.get("max")
         if mn is not None and value < mn:
-            raise ValidationError(f"Field '{field_name}': {value} is below minimum ({mn})")
+            raise ValidationError(
+                f"Field '{field_name}': {value} is below minimum ({mn})"
+            )
         if mx is not None and value > mx:
-            raise ValidationError(f"Field '{field_name}': {value} exceeds maximum ({mx})")
+            raise ValidationError(
+                f"Field '{field_name}': {value} exceeds maximum ({mx})"
+            )
 
     elif dtype == "string":
         choices = restrictions.get("choices")
@@ -99,9 +118,13 @@ def _check_restrictions(value: Any, dtype: str, restrictions: dict[str, Any], fi
                 mn_cmp = _dt.fromisoformat(str(mn)) if mn is not None else None
                 mx_cmp = _dt.fromisoformat(str(mx)) if mx is not None else None
             if mn_cmp is not None and v_cmp < mn_cmp:
-                raise ValidationError(f"Field '{field_name}': {value} is before minimum ({mn})")
+                raise ValidationError(
+                    f"Field '{field_name}': {value} is before minimum ({mn})"
+                )
             if mx_cmp is not None and v_cmp > mx_cmp:
-                raise ValidationError(f"Field '{field_name}': {value} is after maximum ({mx})")
+                raise ValidationError(
+                    f"Field '{field_name}': {value} is after maximum ({mx})"
+                )
         except (ValueError, TypeError):
             pass  # malformed restriction — let it through; the value was already normalised
 
@@ -110,8 +133,13 @@ def _check_restrictions(value: Any, dtype: str, restrictions: dict[str, Any], fi
         accept = restrictions.get("accept")
         max_size = restrictions.get("max_size")
         allowed_exts = (
-            {e.strip().lower().lstrip(".") for e in accept.split(",") if e.strip().startswith(".")}
-            if accept else set()
+            {
+                e.strip().lower().lstrip(".")
+                for e in accept.split(",")
+                if e.strip().startswith(".")
+            }
+            if accept
+            else set()
         )
         for ref in refs:
             if not isinstance(ref, dict):
@@ -132,10 +160,12 @@ def _check_restrictions(value: Any, dtype: str, restrictions: dict[str, Any], fi
 
 # Types that skip the generic _COERCE path (handled explicitly in coerce_value)
 # and are also excluded from natural-name computation (they're collection/blob types).
-_SKIP_TYPES = {'reference', 'reference_list', 'file', 'file_list', 'tags'}
+_SKIP_TYPES = {"reference", "reference_list", "file", "file_list", "tags"}
 
 
-def _natural_name(data: dict[str, Any], fields: list, display_field: str | None = None) -> str | None:
+def _natural_name(
+    data: dict[str, Any], fields: list, display_field: str | None = None
+) -> str | None:
     if display_field:
         val = data.get(display_field)
         if val is not None and str(val).strip():
@@ -172,14 +202,18 @@ class RecordService:
     # Field ID translation (name-keyed ↔ UUID-keyed record data)
     # ------------------------------------------------------------------
 
-    def _names_to_ids(self, data: dict[str, Any], schema_id: uuid.UUID) -> dict[str, Any]:
+    def _names_to_ids(
+        self, data: dict[str, Any], schema_id: uuid.UUID
+    ) -> dict[str, Any]:
         schema = self._schema_svc._repo.get_by_id(schema_id)
         if schema is None:
             return data
         name_map = self._schema_svc.name_to_id_map(schema)
         return {name_map.get(k, k): v for k, v in data.items()}
 
-    def _ids_to_names(self, data: dict[str, Any], schema_id: uuid.UUID) -> dict[str, Any]:
+    def _ids_to_names(
+        self, data: dict[str, Any], schema_id: uuid.UUID
+    ) -> dict[str, Any]:
         schema = self._schema_svc._repo.get_by_id(schema_id)
         if schema is None:
             return data
@@ -196,7 +230,9 @@ class RecordService:
         natural_name = _natural_name(named_data, fields, schema.display_field)
         return dataclasses.replace(dto, data=named_data, natural_name=natural_name)
 
-    def _apply_defaults(self, data: dict[str, Any], schema_id: uuid.UUID) -> dict[str, Any]:
+    def _apply_defaults(
+        self, data: dict[str, Any], schema_id: uuid.UUID
+    ) -> dict[str, Any]:
         """For any field with a default_value that is absent from data, insert the default."""
         schema = self._schema_svc._repo.get_by_id(schema_id)
         if schema is None:
@@ -209,7 +245,13 @@ class RecordService:
                 result[f.name] = f.default_value
         return result
 
-    def coerce_value(self, raw: str, dtype: str, field_name: str, restrictions: dict[str, Any] | None = None) -> Any:
+    def coerce_value(
+        self,
+        raw: str,
+        dtype: str,
+        field_name: str,
+        restrictions: dict[str, Any] | None = None,
+    ) -> Any:
         if dtype == "file":
             path = Path(raw)
             if not path.exists():
@@ -224,9 +266,9 @@ class RecordService:
             if not path.exists():
                 raise CoercionError(field_name, dtype, raw)
             file_ref = self._files.put(path.read_bytes(), path.name)
-            value = [file_ref.to_dict()]
-            _check_restrictions(value, dtype, restrictions or {}, field_name)
-            return value
+            file_list_value = [file_ref.to_dict()]
+            _check_restrictions(file_list_value, dtype, restrictions or {}, field_name)
+            return file_list_value
 
         if dtype == "reference":
             record = self._records.get_by_prefix(raw)
@@ -235,7 +277,9 @@ class RecordService:
             target_schema = (restrictions or {}).get("schema")
             if target_schema and record.schema_name != target_schema:
                 raise CoercionError(
-                    field_name, dtype, raw,
+                    field_name,
+                    dtype,
+                    raw,
                     extra=f"record has schema '{record.schema_name}', expected '{target_schema}'",
                 )
             return str(record.id)
@@ -250,10 +294,14 @@ class RecordService:
             for item in items:
                 record = self._records.get_by_prefix(str(item))
                 if not record:
-                    raise CoercionError(field_name, dtype, str(item), extra="record not found")
+                    raise CoercionError(
+                        field_name, dtype, str(item), extra="record not found"
+                    )
                 if target_schema and record.schema_name != target_schema:
                     raise CoercionError(
-                        field_name, dtype, str(item),
+                        field_name,
+                        dtype,
+                        str(item),
                         extra=f"record has schema '{record.schema_name}', expected '{target_schema}'",
                     )
                 result.append(str(record.id))
@@ -274,7 +322,9 @@ class RecordService:
         schema = self._schema_svc._repo.get_by_id(schema_id)
         if schema is None:
             return
-        fields_by_name = {rf.field.name: rf.field for rf in self._schema_svc.collect_fields(schema)}
+        fields_by_name = {
+            rf.field.name: rf.field for rf in self._schema_svc.collect_fields(schema)
+        }
         for name, value in data.items():
             field = fields_by_name.get(name)
             if field is None or value is None:
@@ -298,7 +348,10 @@ class RecordService:
         """
         schema = self._schema_svc.get(schema_name)
         if schema.parent_id:
-            return [ResolvedField(field=f, source_schema_name=schema.name) for f in schema.fields]
+            return [
+                ResolvedField(field=f, source_schema_name=schema.name)
+                for f in schema.fields
+            ]
         return self._schema_svc.collect_fields(schema)
 
     def add(
@@ -338,7 +391,10 @@ class RecordService:
                     f"expected '{expected_parent.name if expected_parent else schema.parent_id}'"
                 )
             resolved_parent_id = parent_record.id
-            own_fields = [ResolvedField(field=f, source_schema_name=schema.name) for f in schema.fields]
+            own_fields = [
+                ResolvedField(field=f, source_schema_name=schema.name)
+                for f in schema.fields
+            ]
             self.validate(data, own_fields)
         else:
             self.validate(data, self._schema_svc.collect_fields(schema))
@@ -361,7 +417,12 @@ class RecordService:
                 # a particular field being set) fire even when the record is first created.
                 set_fields = {k for k, v in named.data.items() if v is not None}
                 if set_fields:
-                    self._job_svc.trigger_for_record(named, "record_updated", changed_fields=set_fields, depth=_job_depth)
+                    self._job_svc.trigger_for_record(
+                        named,
+                        "record_updated",
+                        changed_fields=set_fields,
+                        depth=_job_depth,
+                    )
         return named
 
     def get(self, record_id: str) -> RecordDTO:
@@ -370,7 +431,9 @@ class RecordService:
             raise NotFoundError(f"Record '{record_id}' not found")
         return self._with_names(record)
 
-    def update(self, record_id: str, data: dict[str, Any], _job_depth: int = 0) -> RecordDTO:
+    def update(
+        self, record_id: str, data: dict[str, Any], _job_depth: int = 0
+    ) -> RecordDTO:
         raw = self._records.get_by_prefix(record_id)
         if not raw:
             raise NotFoundError(f"Record '{record_id}' not found")
@@ -382,11 +445,21 @@ class RecordService:
         dto = self._records.update(id=raw.id, data=id_data)
         named = self._with_names(dto)
         if self._audit:
-            old_named = dataclasses.replace(raw, data=old_data, schema_name=named.schema_name)
-            self._audit.log_change("update", "record", raw.id, old_named.to_dict(), named.to_dict())
+            old_named = dataclasses.replace(
+                raw, data=old_data, schema_name=named.schema_name
+            )
+            self._audit.log_change(
+                "update", "record", raw.id, old_named.to_dict(), named.to_dict()
+            )
         if self._job_svc:
-            changed = {k for k in set(old_data) | set(named.data) if old_data.get(k) != named.data.get(k)}
-            self._job_svc.trigger_for_record(named, "record_updated", changed_fields=changed, depth=_job_depth)
+            changed = {
+                k
+                for k in set(old_data) | set(named.data)
+                if old_data.get(k) != named.data.get(k)
+            }
+            self._job_svc.trigger_for_record(
+                named, "record_updated", changed_fields=changed, depth=_job_depth
+            )
         return named
 
     def find(

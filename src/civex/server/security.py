@@ -17,6 +17,7 @@ Both checks are skipped when CIVEX_ALLOW_REMOTE=1 — the operator has explicitl
 opted into remote exposure via `civex serve --allow-remote` and is responsible
 for network-level protection (reverse proxy, firewall, VPN).
 """
+
 from __future__ import annotations
 
 import json
@@ -75,7 +76,9 @@ class LocalGuardMiddleware:
         if scope.get("method", "GET") in _MUTATING_METHODS:
             origin = headers.get("origin")
             if origin and _hostname(origin) not in _LOOPBACK_HOSTS:
-                await self._deny(send, "Cross-origin request blocked by civex local guard.")
+                await self._deny(
+                    send, "Cross-origin request blocked by civex local guard."
+                )
                 return
 
         await self.app(scope, receive, send)
@@ -83,9 +86,11 @@ class LocalGuardMiddleware:
     @staticmethod
     async def _deny(send, detail: str) -> None:
         body = json.dumps({"detail": detail}).encode()
-        await send({
-            "type": "http.response.start",
-            "status": 403,
-            "headers": [(b"content-type", b"application/json")],
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 403,
+                "headers": [(b"content-type", b"application/json")],
+            }
+        )
         await send({"type": "http.response.body", "body": body})

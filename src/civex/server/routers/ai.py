@@ -820,7 +820,7 @@ def _dispatch_act_tool(tool_name: str, ti: dict, ctx) -> str | None:
         err = _restriction_error(ftype, ti.get("restrictions"))
         if err:
             return err
-        body: dict[str, Any] = {
+        body = {
             "name": fname,
             "type": ftype,
             "required": bool(ti.get("required", False)),
@@ -962,7 +962,7 @@ def _dispatch_tool(tool_name: str, tool_input: dict, ctx) -> str:
 
         if tool_name == "list_schemas":
             schemas = ctx.schema_svc.list_all()
-            result = []
+            schema_results = []
             for s in schemas:
                 fields = [
                     {
@@ -976,8 +976,8 @@ def _dispatch_tool(tool_name: str, tool_input: dict, ctx) -> str:
                     }
                     for f in s.fields
                 ]
-                result.append({"name": s.name, "fields": fields})
-            return json.dumps(result)
+                schema_results.append({"name": s.name, "fields": fields})
+            return json.dumps(schema_results)
 
         if tool_name == "list_collections":
             datasets = ctx.dataset_svc.list_all()
@@ -1920,7 +1920,7 @@ async def openrouter_auth_url(request: Request):
 @router.get("/openrouter/callback")
 async def openrouter_callback(code: str):
     """Receive OAuth code from OpenRouter, exchange for key, save to config."""
-    import httpx
+    import httpx2 as httpx
 
     try:
         async with httpx.AsyncClient(timeout=15) as http:
@@ -1978,7 +1978,7 @@ async def openrouter_callback(code: str):
 @router.get("/ollama/models")
 async def ollama_models(base_url: str = "http://localhost:11434/v1"):
     """List models installed in a running Ollama instance."""
-    import httpx
+    import httpx2 as httpx
     from urllib.parse import urlparse
 
     # SSRF guard: this endpoint fetches base_url server-side, so restrict it to a
@@ -2022,7 +2022,7 @@ async def openrouter_limits():
     if not config.ai or "openrouter.ai" not in (config.ai.base_url or ""):
         raise HTTPException(400, detail="Not configured for OpenRouter")
 
-    import httpx
+    import httpx2 as httpx
 
     async with httpx.AsyncClient(timeout=10) as http:
         resp = await http.get(

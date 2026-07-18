@@ -39,7 +39,11 @@ def ai_status() -> None:
     ai = config.ai
     key = ai.api_key
     hint = f"...{key[-6:]}" if len(key) >= 6 else "***"
-    source = "environment variable (ANTHROPIC_API_KEY)" if ai.from_env else "_civex/config.toml"
+    source = (
+        "environment variable (ANTHROPIC_API_KEY)"
+        if ai.from_env
+        else "_civex/config.toml"
+    )
 
     console.print("[bold]AI Configuration[/bold]")
     console.print("  Status   [success]configured[/success]")
@@ -53,10 +57,22 @@ def ai_status() -> None:
 
 @app.command("set-key")
 def ai_set_key(
-    api_key: str = typer.Argument(..., help="API key. For Ollama, pass any value (e.g. 'ollama') — the key is ignored locally."),
-    provider: str = typer.Option("anthropic", "--provider", "-p", help="Provider: anthropic | groq | gemini | ollama | openai-compat"),
-    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name (uses provider default if not set)"),
-    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL (only needed for openai-compat provider)"),
+    api_key: str = typer.Argument(
+        ...,
+        help="API key. For Ollama, pass any value (e.g. 'ollama') — the key is ignored locally.",
+    ),
+    provider: str = typer.Option(
+        "anthropic",
+        "--provider",
+        "-p",
+        help="Provider: anthropic | groq | gemini | ollama | openai-compat",
+    ),
+    model: Optional[str] = typer.Option(
+        None, "--model", "-m", help="Model name (uses provider default if not set)"
+    ),
+    base_url: Optional[str] = typer.Option(
+        None, "--base-url", help="Base URL (only needed for openai-compat provider)"
+    ),
 ) -> None:
     """Set the AI API key and provider in _civex/config.toml."""
     config = cli_load_config()
@@ -85,11 +101,15 @@ def ai_set_key(
         resolved_provider = "openai-compat"
         resolved_base_url = base_url
         if not resolved_base_url:
-            console.print("[error]--base-url is required for openai-compat provider.[/error]")
+            console.print(
+                "[error]--base-url is required for openai-compat provider.[/error]"
+            )
             raise typer.Exit(1)
         default_model = model or ""
     else:
-        console.print(f"[error]Unknown provider '{provider}'. Use: anthropic, groq, gemini, or openai-compat.[/error]")
+        console.print(
+            f"[error]Unknown provider '{provider}'. Use: anthropic, groq, gemini, or openai-compat.[/error]"
+        )
         raise typer.Exit(1)
 
     current_model = config.ai.model if config.ai else default_model
@@ -104,8 +124,15 @@ def ai_set_key(
     )
     save_config(config)
     hint = f"...{api_key[-6:]}" if len(api_key) >= 6 else "***"
-    provider_label = {"anthropic": "Anthropic/Claude", "groq": "Groq", "gemini": "Gemini", "ollama": "Ollama (local)"}.get(provider, provider)
-    console.print(f"[success]API key saved ({hint}). Provider: {provider_label}. Model: {final_model}[/success]")
+    provider_label = {
+        "anthropic": "Anthropic/Claude",
+        "groq": "Groq",
+        "gemini": "Gemini",
+        "ollama": "Ollama (local)",
+    }.get(provider, provider)
+    console.print(
+        f"[success]API key saved ({hint}). Provider: {provider_label}. Model: {final_model}[/success]"
+    )
 
 
 @app.command("set-model")
@@ -115,10 +142,14 @@ def ai_set_model(
     """Set the model used by the AI assistant."""
     config = cli_load_config()
     if not config.ai:
-        console.print("[error]No API key configured. Run `civex ai set-key` first.[/error]")
+        console.print(
+            "[error]No API key configured. Run `civex ai set-key` first.[/error]"
+        )
         raise typer.Exit(1)
     if config.ai.provider == "anthropic" and model not in ANTHROPIC_MODELS:
-        console.print(f"[warning]Warning: '{model}' is not a known Anthropic model.[/warning]")
+        console.print(
+            f"[warning]Warning: '{model}' is not a known Anthropic model.[/warning]"
+        )
         console.print(f"Known Anthropic models: {', '.join(ANTHROPIC_MODELS)}")
     config.ai = AIConfig(
         api_key=config.ai.api_key,

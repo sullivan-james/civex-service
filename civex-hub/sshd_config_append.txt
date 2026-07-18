@@ -1,6 +1,0 @@
-AuthorizedKeysCommand /usr/local/bin/civexhub-keys %u
-AuthorizedKeysCommandUser nobody
-PasswordAuthentication no
-PermitEmptyPasswords no
-X11Forwarding no
-AllowTcpForwarding no

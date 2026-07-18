@@ -2,6 +2,7 @@
 civex commit — group staged audit log entries into a named commit.
 civex log    — list commits and optionally show audit history for an entity.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -16,7 +17,9 @@ from civex.console import console
 
 
 def commit(
-    message: Optional[str] = typer.Option(None, "-m", "--message", help="Commit message"),
+    message: Optional[str] = typer.Option(
+        None, "-m", "--message", help="Commit message"
+    ),
 ) -> None:
     """Group staged changes into a named commit."""
     ctx = get_ctx()
@@ -46,7 +49,9 @@ def commit(
         ctx.close()
         raise typer.Exit(1)
 
-    console.print(f"[success]Committed[/success] [dim]{str(commit_dto.id)[:8]}[/dim] {commit_dto.message or ''}")
+    console.print(
+        f"[success]Committed[/success] [dim]{str(commit_dto.id)[:8]}[/dim] {commit_dto.message or ''}"
+    )
     console.print(f"  Records  {commit_dto.record_count}")
     console.print(f"  Schemas  {commit_dto.schema_count}")
     console.print(f"  Datasets {commit_dto.dataset_count}")
@@ -54,7 +59,9 @@ def commit(
 
 
 def log(
-    record_id: Optional[str] = typer.Option(None, "--record", help="Show audit history for a specific record ID"),
+    record_id: Optional[str] = typer.Option(
+        None, "--record", help="Show audit history for a specific record ID"
+    ),
     limit: int = typer.Option(20, "--limit", "-n", help="Maximum entries to show"),
 ) -> None:
     """Show commit history, or audit history for a specific entity."""
@@ -62,6 +69,7 @@ def log(
 
     if record_id:
         import uuid
+
         try:
             uid = uuid.UUID(record_id)
         except ValueError:
@@ -90,7 +98,9 @@ def log(
     ctx.close()
 
     if not commits and staged["total"] == 0:
-        console.print("[dim]No commits yet. Make some changes then run `civex commit -m 'message'`.[/dim]")
+        console.print(
+            "[dim]No commits yet. Make some changes then run `civex commit -m 'message'`.[/dim]"
+        )
         return
 
     if staged["total"] > 0:
@@ -129,12 +139,15 @@ def log(
 
 def _get_editor() -> str | None:
     import os
+
     return os.environ.get("EDITOR") or os.environ.get("VISUAL")
 
 
 def _open_editor(editor: str) -> str:
     with tempfile.NamedTemporaryFile(suffix=".txt", mode="w", delete=False) as f:
-        f.write("\n# Write your commit message above. Lines starting with # are ignored.\n")
+        f.write(
+            "\n# Write your commit message above. Lines starting with # are ignored.\n"
+        )
         tmpfile = f.name
     subprocess.run([editor, tmpfile], check=False)
     content = open(tmpfile).read()

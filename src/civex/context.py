@@ -6,6 +6,7 @@ If a [remote] is configured, a transport is passed to FileService for lazy objec
 An optional file_store parameter lets callers (e.g. civex-hub) inject a custom object
 store instead of the default LocalFileObjectStore.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,7 +23,6 @@ from civex.repositories.local.file_store import VolumeAwareFileObjectStore
 from civex.repositories.local.job_repo import LocalWorkflowJobRepository
 from civex.repositories.local.record_repo import LocalRecordRepository
 from civex.repositories.local.schema_repo import LocalSchemaRepository
-from civex.repositories.protocols import FileObjectStore
 from civex.services.dataset_service import DatasetService
 from civex.services.file_service import FileService
 from civex.services.record_service import RecordService
@@ -57,7 +57,7 @@ class AppContext:
 
 def build_local_context(
     config: Config,
-    file_store: FileObjectStore | None = None,
+    file_store: VolumeAwareFileObjectStore | None = None,
 ) -> AppContext:
     from civex.db.migrate import ensure_schema_current
 
@@ -66,21 +66,30 @@ def build_local_context(
     session = Session(engine)
     schema_repo = LocalSchemaRepository(session)
     dataset_repo = LocalDatasetRepository(session)
-    record_repo = LocalRecordRepository(session, is_postgres=engine.dialect.name == "postgresql")
+    record_repo = LocalRecordRepository(
+        session, is_postgres=engine.dialect.name == "postgresql"
+    )
     job_repo = LocalWorkflowJobRepository(session)
     audit_repo = LocalAuditRepository(session)
     if file_store is None:
-        file_store = VolumeAwareFileObjectStore(config.store_config, config.project_root)
+        file_store = VolumeAwareFileObjectStore(
+            config.store_config, config.project_root
+        )
 
     remote_transport = None
     if config.remote:
         from civex.sync.transport import get_transport
-        remote_transport, _path = get_transport(config.remote.url, remote_civex=config.remote.remote_civex)
+
+        remote_transport, _path = get_transport(
+            config.remote.url, remote_civex=config.remote.remote_civex
+        )
 
     schema_svc = SchemaService(schema_repo, audit_repo)
     dataset_svc = DatasetService(dataset_repo, audit_repo)
     job_svc = WorkflowJobService(job_repo, config.civex_dir)
-    record_svc = RecordService(schema_svc, dataset_repo, record_repo, file_store, job_svc, audit_repo)
+    record_svc = RecordService(
+        schema_svc, dataset_repo, record_repo, file_store, job_svc, audit_repo
+    )
     file_svc = FileService(file_store, remote_transport=remote_transport)
     store_svc = StoreService(config, file_store)
 

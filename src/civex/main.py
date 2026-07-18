@@ -1,15 +1,32 @@
-
 import typer
 from typing import Annotated, Optional
 
 from civex import __version__
-from civex.cli import ai as ai_cli, auth, dataset, db, plugin, record, remote, schema, store, workflow, worker
+from civex.cli import (
+    ai as ai_cli,
+    auth,
+    dataset,
+    db,
+    plugin,
+    record,
+    remote,
+    schema,
+    store,
+    workflow,
+    worker,
+)
 from civex.cli.shell import run_shell
 from civex.cli.clone import clone
 from civex.cli.demo import demo
 from civex.cli.dump import dump, restore
 from civex.cli.init import init
-from civex.cli.plumbing import get_object, head_seq, put_object, receive_pack, transfer_pack
+from civex.cli.plumbing import (
+    get_object,
+    head_seq,
+    put_object,
+    receive_pack,
+    transfer_pack,
+)
 from civex.cli.resolve import resolve
 from civex.cli.status import status
 from civex.cli.sync import pull, push
@@ -30,14 +47,19 @@ def _version_callback(value: bool) -> None:
 
 @app.callback()
 def _main(
-    version: Annotated[Optional[bool], typer.Option(
-        "--version", "-v",
-        help="Show version and exit.",
-        callback=_version_callback,
-        is_eager=True,
-    )] = None,
+    version: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--version",
+            "-v",
+            help="Show version and exit.",
+            callback=_version_callback,
+            is_eager=True,
+        ),
+    ] = None,
 ) -> None:
     pass
+
 
 _START = "Start a working area"
 _WORK = "Work on the current change"
@@ -78,6 +100,7 @@ app.command("put-object", hidden=True)(put_object)
 def _is_loopback_host(host: str) -> bool:
     """True if binding to *host* keeps the server reachable only from this machine."""
     import ipaddress
+
     if host == "localhost":
         return True
     try:
@@ -90,14 +113,18 @@ def _is_loopback_host(host: str) -> bool:
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address"),
     port: int = typer.Option(8000, "--port", "-p", help="Port"),
-    reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes (dev mode)"),
+    reload: bool = typer.Option(
+        False, "--reload", help="Auto-reload on code changes (dev mode)"
+    ),
     allow_remote: bool = typer.Option(
-        False, "--allow-remote",
+        False,
+        "--allow-remote",
         help="Permit binding to a non-loopback address. The server has NO authentication — "
-             "only use this on a trusted network behind a reverse proxy or firewall.",
+        "only use this on a trusted network behind a reverse proxy or firewall.",
     ),
     log_level: str = typer.Option(
-        "INFO", "--log-level",
+        "INFO",
+        "--log-level",
         help="Log level: DEBUG | INFO | WARNING | ERROR. Overrides [logging] in config.toml.",
     ),
 ) -> None:
@@ -121,13 +148,17 @@ def serve(
                 "authentication and would be reachable by other machines.\n"
                 "Re-run with --allow-remote if this is intentional (and put it behind a "
                 "reverse proxy / firewall).",
-                err=True, fg=typer.colors.RED, bold=True,
+                err=True,
+                fg=typer.colors.RED,
+                bold=True,
             )
             raise typer.Exit(1)
         typer.secho(
             f"WARNING: binding to '{host}' — the server is reachable by other machines and has "
             "NO authentication. Anyone who can reach it can read/write your data and run code.",
-            err=True, fg=typer.colors.YELLOW, bold=True,
+            err=True,
+            fg=typer.colors.YELLOW,
+            bold=True,
         )
 
     # Signal the LocalGuardMiddleware to stand down when the operator has opted
@@ -144,7 +175,9 @@ def serve(
         )
     # log_config=None: defer all logging to civex's own structlog pipeline
     # (configured in create_app) so uvicorn's records flow through the same sinks.
-    uvicorn.run("civex.server.app:app", host=host, port=port, reload=reload, log_config=None)
+    uvicorn.run(
+        "civex.server.app:app", host=host, port=port, reload=reload, log_config=None
+    )
 
 
 @app.command("shell")

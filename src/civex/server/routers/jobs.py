@@ -30,7 +30,9 @@ def list_jobs(
     limit: int | None = None,
     ctx: AppContext = Depends(get_ctx),
 ):
-    jobs = ctx.job_svc.list_jobs(status=status, record_id=record_id, offset=offset, limit=limit)
+    jobs = ctx.job_svc.list_jobs(
+        status=status, record_id=record_id, offset=offset, limit=limit
+    )
     return [WorkflowJobResponse.from_dto(j) for j in jobs]
 
 

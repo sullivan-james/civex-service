@@ -20,13 +20,17 @@ class Plugin(BasePlugin):
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
         schema_name: str = Field(alias="schema")
-        key_field: str        # field on child records to match against (e.g. selection_number)
-        file_field: str       # field on child records to set (e.g. contour_file)
-        pattern: str          # regex with one capture group for the key value
-        dataset: str = ""     # defaults to ctx.dataset.name
+        key_field: (
+            str  # field on child records to match against (e.g. selection_number)
+        )
+        file_field: str  # field on child records to set (e.g. contour_file)
+        pattern: str  # regex with one capture group for the key value
+        dataset: str = ""  # defaults to ctx.dataset.name
         parent_record_id: str = ""  # defaults to ctx.record.id
 
-    def run(self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext) -> dict[str, Any]:
+    def run(
+        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+    ) -> dict[str, Any]:
         files: list[dict[str, Any]] = inputs["files"]  # list of FileRef dicts
         dataset_name = config.dataset or ctx.dataset.name
         parent_id = config.parent_record_id or str(ctx.record.id)
@@ -37,8 +41,13 @@ class Plugin(BasePlugin):
         except re.error as e:
             raise ValueError(f"Invalid regex pattern '{config.pattern}': {e}")
 
-        log.info("Matching %d file(s) → %s.%s using pattern '%s'",
-                 len(files), config.schema_name, config.file_field, config.pattern)
+        log.info(
+            "Matching %d file(s) → %s.%s using pattern '%s'",
+            len(files),
+            config.schema_name,
+            config.file_field,
+            config.pattern,
+        )
 
         created = updated = 0
         unmatched: list[str] = []
@@ -69,8 +78,13 @@ class Plugin(BasePlugin):
             if existing:
                 child = existing[0]
                 record_svc.update(str(child.id), {**child.data, config.file_field: ref})
-                log.info("  ✓ updated  '%s' → %s %s (key=%s)",
-                         filename, config.schema_name, str(child.id)[:8], key_value)
+                log.info(
+                    "  ✓ updated  '%s' → %s %s (key=%s)",
+                    filename,
+                    config.schema_name,
+                    str(child.id)[:8],
+                    key_value,
+                )
                 updated += 1
             else:
                 try:
@@ -84,14 +98,29 @@ class Plugin(BasePlugin):
                         {config.key_field: typed_key, config.file_field: ref},
                         parent_record_id=parent_id,
                     )
-                    log.info("  ✓ created  '%s' → %s %s (key=%s)",
-                             filename, config.schema_name, str(child.id)[:8], key_value)
+                    log.info(
+                        "  ✓ created  '%s' → %s %s (key=%s)",
+                        filename,
+                        config.schema_name,
+                        str(child.id)[:8],
+                        key_value,
+                    )
                     created += 1
                 except ValidationError as e:
-                    log.warning("  ✗ cannot create %s (key=%s): %s", config.schema_name, key_value, e)
+                    log.warning(
+                        "  ✗ cannot create %s (key=%s): %s",
+                        config.schema_name,
+                        key_value,
+                        e,
+                    )
                     unmatched.append(f"{filename} (missing required fields: {e})")
 
-        log.info("Done: %d created, %d updated, %d unmatched", created, updated, len(unmatched))
+        log.info(
+            "Done: %d created, %d updated, %d unmatched",
+            created,
+            updated,
+            len(unmatched),
+        )
         if unmatched:
             log.warning("Unmatched files: %s", unmatched)
 

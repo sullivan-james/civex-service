@@ -1,4 +1,5 @@
 """civex status — show uncommitted changes and unpushed commits."""
+
 from __future__ import annotations
 
 
@@ -29,7 +30,7 @@ def status() -> None:
         if staged["datasets"]:
             console.print(f"  [cyan]datasets[/cyan]  {staged['datasets']} change(s)")
         console.print("")
-        console.print('  (use "civex commit -m \'<message>\'" to commit)')
+        console.print("  (use \"civex commit -m '<message>'\" to commit)")
         console.print("")
 
     if has_unpushed:

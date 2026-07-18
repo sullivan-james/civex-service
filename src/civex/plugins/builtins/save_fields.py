@@ -18,11 +18,17 @@ class Plugin(BasePlugin):
     class Config(BaseModel):
         pass
 
-    def run(self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext) -> dict[str, Any]:
+    def run(
+        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+    ) -> dict[str, Any]:
         updates: dict[str, Any] = inputs["updates"]
         data = dict(ctx.record.data)
         data.update({k: v for k, v in updates.items() if v is not None})
-        log.info("Saving %d field(s) to record %s: %s",
-                 len(updates), str(ctx.record.id)[:8], list(updates.keys()))
+        log.info(
+            "Saving %d field(s) to record %s: %s",
+            len(updates),
+            str(ctx.record.id)[:8],
+            list(updates.keys()),
+        )
         ctx.update_record(data)
         return {}

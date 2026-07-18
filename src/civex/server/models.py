@@ -2,6 +2,7 @@
 Pydantic models for the HTTP boundary only.
 DTOs (domain/dtos.py) stay as plain dataclasses throughout the service layer.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -13,6 +14,7 @@ from civex.domain.dtos import DatasetDTO, RecordDTO, SchemaDTO, WorkflowJobDTO
 
 
 # --- Schemas ---
+
 
 class FieldResponse(BaseModel):
     id: str
@@ -87,6 +89,7 @@ class ReorderFieldsRequest(BaseModel):
 
 # --- Datasets ---
 
+
 class DatasetResponse(BaseModel):
     id: str
     name: str
@@ -121,6 +124,7 @@ UpdateCollectionRequest = UpdateDatasetRequest
 
 # --- Records ---
 
+
 class RecordResponse(BaseModel):
     id: str
     dataset_id: str
@@ -137,7 +141,9 @@ class RecordResponse(BaseModel):
             id=str(dto.id),
             dataset_id=str(dto.dataset_id),
             schema_name=dto.schema_name,
-            parent_record_id=str(dto.parent_record_id) if dto.parent_record_id else None,
+            parent_record_id=str(dto.parent_record_id)
+            if dto.parent_record_id
+            else None,
             data=dto.data,
             natural_name=dto.natural_name,
             created_at=dto.created_at,
@@ -163,6 +169,7 @@ class UpdateRecordRequest(BaseModel):
 
 
 # --- Files ---
+
 
 class FileRefResponse(BaseModel):
     sha256: str
@@ -201,6 +208,7 @@ class SetQueueRequest(BaseModel):
 
 # --- Workflows ---
 
+
 class WorkflowInputResponse(BaseModel):
     type: str
     label: str | None
@@ -233,6 +241,7 @@ class WorkflowSaveRequest(BaseModel):
 
 
 # --- Jobs ---
+
 
 class WorkflowJobResponse(BaseModel):
     id: str

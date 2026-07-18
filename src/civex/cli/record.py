@@ -16,7 +16,9 @@ app = typer.Typer(help="Manage records")
 @app.command("add")
 def record_add(
     dataset_name: str = typer.Option(..., "--to", help="Dataset to add the record to"),
-    schema_name: str = typer.Option(..., "--schema", "-s", help="Schema for this record"),
+    schema_name: str = typer.Option(
+        ..., "--schema", "-s", help="Schema for this record"
+    ),
 ) -> None:
     """Add a record, prompting for each field defined on the schema."""
     ctx = _ctx()
@@ -38,13 +40,17 @@ def record_add(
             try:
                 parent_record = ctx.record_svc.get(raw_id)
                 if parent_record.dataset_id != dataset.id:
-                    console.print(f"[error]  Parent record must be in dataset '{dataset_name}'.[/error]")
+                    console.print(
+                        f"[error]  Parent record must be in dataset '{dataset_name}'.[/error]"
+                    )
                     continue
                 console.print(f"  [dim]↑ {parent_schema_name} record[/dim]")
                 parent_record_id = raw_id
                 break
             except NotFoundError:
-                console.print(f"[error]  Record '{raw_id}' not found — try again.[/error]")
+                console.print(
+                    f"[error]  Record '{raw_id}' not found — try again.[/error]"
+                )
 
     if not fields:
         console.print("[warning]Schema has no own fields.[/warning]")
@@ -63,13 +69,17 @@ def record_add(
             if raw == "" and not rf.field.required:
                 break
             try:
-                data[rf.field.name] = ctx.record_svc.coerce_value(raw, rf.field.dtype, rf.field.name, rf.field.restrictions)
+                data[rf.field.name] = ctx.record_svc.coerce_value(
+                    raw, rf.field.dtype, rf.field.name, rf.field.restrictions
+                )
                 break
             except CoercionError as e:
                 console.print(f"[error]  {e}[/error]")
 
     try:
-        record = ctx.record_svc.add(dataset_name, schema_name, data, parent_record_id=parent_record_id)
+        record = ctx.record_svc.add(
+            dataset_name, schema_name, data, parent_record_id=parent_record_id
+        )
         ctx.commit()
         console.print(f"[success]Added record {record.id}.[/success]")
         drain_jobs(ctx)
@@ -100,7 +110,9 @@ def record_show(record_id: str = typer.Argument(...)) -> None:
         for k, v in record.data.items():
             if isinstance(v, dict) and "sha256" in v:
                 ref = FileRef.from_dict(v)
-                display = f"{ref.filename} ({ref.size} bytes, sha256:{ref.sha256[:12]}…)"
+                display = (
+                    f"{ref.filename} ({ref.size} bytes, sha256:{ref.sha256[:12]}…)"
+                )
             else:
                 display = str(v)
             table.add_row(k, display)
@@ -136,7 +148,9 @@ def record_update(record_id: str = typer.Argument(...)) -> None:
                 data.pop(rf.field.name, None)
                 break
             try:
-                data[rf.field.name] = ctx.record_svc.coerce_value(raw, rf.field.dtype, rf.field.name, rf.field.restrictions)
+                data[rf.field.name] = ctx.record_svc.coerce_value(
+                    raw, rf.field.dtype, rf.field.name, rf.field.restrictions
+                )
                 break
             except CoercionError as e:
                 console.print(f"[error]  {e}[/error]")
@@ -150,7 +164,9 @@ def record_update(record_id: str = typer.Argument(...)) -> None:
 @app.command("find")
 def record_find(
     dataset_name: str = typer.Option(..., "--in"),
-    schema_name: Optional[str] = typer.Option(None, "--schema", "-s", help="Filter by schema"),
+    schema_name: Optional[str] = typer.Option(
+        None, "--schema", "-s", help="Filter by schema"
+    ),
     where: Optional[list[str]] = typer.Option(
         None, "--where", help="field=value filter (repeatable)"
     ),
@@ -159,7 +175,9 @@ def record_find(
     """List records in a dataset. Use --schema to filter by type and show field columns."""
     ctx = _ctx()
     try:
-        records = ctx.record_svc.find(dataset_name, schema_name=schema_name, filters=where or [], limit=limit)
+        records = ctx.record_svc.find(
+            dataset_name, schema_name=schema_name, filters=where or [], limit=limit
+        )
     except (NotFoundError, ValueError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
@@ -180,11 +198,15 @@ def record_find(
                     row_vals.append(FileRef.from_dict(v).filename)
                 else:
                     row_vals.append(str(v))
-            table.add_row(str(r.id)[:8] + "…", *row_vals, r.created_at.strftime("%Y-%m-%d"))
+            table.add_row(
+                str(r.id)[:8] + "…", *row_vals, r.created_at.strftime("%Y-%m-%d")
+            )
     else:
         table = Table("ID", "Schema", "Created")
         for r in records:
-            table.add_row(str(r.id)[:8] + "…", r.schema_name, r.created_at.strftime("%Y-%m-%d"))
+            table.add_row(
+                str(r.id)[:8] + "…", r.schema_name, r.created_at.strftime("%Y-%m-%d")
+            )
 
     console.print(table)
 
@@ -210,7 +232,9 @@ def record_delete(
 @app.command("delete-all")
 def record_delete_all(
     dataset_name: str = typer.Argument(..., help="Dataset to delete records from"),
-    schema: Optional[str] = typer.Option(None, "--schema", "-s", help="Limit to this schema"),
+    schema: Optional[str] = typer.Option(
+        None, "--schema", "-s", help="Limit to this schema"
+    ),
     yes: bool = typer.Option(False, "--yes", "-y"),
 ) -> None:
     """Delete all records in a dataset (optionally filtered by schema)."""
@@ -221,7 +245,9 @@ def record_delete_all(
     try:
         deleted = ctx.record_svc.delete_all(dataset_name, schema_name=schema)
         ctx.commit()
-        console.print(f"[success]Deleted {deleted} record(s) from '{dataset_name}'.[/success]")
+        console.print(
+            f"[success]Deleted {deleted} record(s) from '{dataset_name}'.[/success]"
+        )
     except NotFoundError as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)

@@ -5,13 +5,21 @@ Both LocalRepository (SQLAlchemy) and a future RemoteRepository (HTTP client)
 satisfy these interfaces via structural subtyping — no inheritance required.
 Services only import from here, never from civex.db.
 """
+
 from __future__ import annotations
 
 import uuid
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from civex.domain.dtos import DatasetDTO, FieldDTO, FileRef, RecordDTO, SchemaDTO, WorkflowJobDTO
+from civex.domain.dtos import (
+    DatasetDTO,
+    FieldDTO,
+    FileRef,
+    RecordDTO,
+    SchemaDTO,
+    WorkflowJobDTO,
+)
 
 
 @runtime_checkable
@@ -25,7 +33,13 @@ class SchemaRepository(Protocol):
         description: str | None,
         parent_id: uuid.UUID | None,
     ) -> SchemaDTO: ...
-    def update(self, id: uuid.UUID, name: str | None, description: str | None, display_field: str | None = ...) -> SchemaDTO: ...
+    def update(
+        self,
+        id: uuid.UUID,
+        name: str | None,
+        description: str | None,
+        display_field: str | None = ...,
+    ) -> SchemaDTO: ...
     def delete(self, id: uuid.UUID) -> None: ...
     def add_field(
         self,
@@ -37,10 +51,20 @@ class SchemaRepository(Protocol):
         default_value: Any = None,
         position: int | None = None,
     ) -> FieldDTO: ...
-    def update_field(self, field_id: uuid.UUID, *, name: str | None = None, required: bool | None = None, restrictions: dict | None = None, default_value: Any = ...) -> FieldDTO: ...
+    def update_field(
+        self,
+        field_id: uuid.UUID,
+        *,
+        name: str | None = None,
+        required: bool | None = None,
+        restrictions: dict | None = None,
+        default_value: Any = ...,
+    ) -> FieldDTO: ...
     def delete_field(self, field_id: uuid.UUID) -> None: ...
     def get_fields(self, schema_id: uuid.UUID) -> list[FieldDTO]: ...
-    def reorder_fields(self, schema_id: uuid.UUID, field_ids: list[uuid.UUID]) -> list[FieldDTO]: ...
+    def reorder_fields(
+        self, schema_id: uuid.UUID, field_ids: list[uuid.UUID]
+    ) -> list[FieldDTO]: ...
 
 
 @runtime_checkable
@@ -49,7 +73,9 @@ class DatasetRepository(Protocol):
     def get_by_id(self, id: uuid.UUID) -> DatasetDTO | None: ...
     def list_all(self) -> list[DatasetDTO]: ...
     def create(self, name: str, description: str | None) -> DatasetDTO: ...
-    def update(self, id: uuid.UUID, name: str | None, description: str | None) -> DatasetDTO: ...
+    def update(
+        self, id: uuid.UUID, name: str | None, description: str | None
+    ) -> DatasetDTO: ...
     def delete(self, id: uuid.UUID) -> None: ...
 
 
@@ -77,9 +103,17 @@ class RecordRepository(Protocol):
         search: str | None,
     ) -> int: ...
     def count_by_schema(self, dataset_id: uuid.UUID) -> dict[str, int]: ...
-    def list_by_schema(self, schema_id: uuid.UUID, search: str | None = None, limit: int = 20) -> list[RecordDTO]: ...
+    def list_by_schema(
+        self, schema_id: uuid.UUID, search: str | None = None, limit: int = 20
+    ) -> list[RecordDTO]: ...
     def list_children(self, parent_id: uuid.UUID) -> list[RecordDTO]: ...
-    def create(self, dataset_id: uuid.UUID, schema_id: uuid.UUID, data: dict[str, Any], parent_record_id: uuid.UUID | None = None) -> RecordDTO: ...
+    def create(
+        self,
+        dataset_id: uuid.UUID,
+        schema_id: uuid.UUID,
+        data: dict[str, Any],
+        parent_record_id: uuid.UUID | None = None,
+    ) -> RecordDTO: ...
     def update(self, id: uuid.UUID, data: dict[str, Any]) -> RecordDTO: ...
     def delete(self, id: uuid.UUID) -> None: ...
 
@@ -97,8 +131,16 @@ class WorkflowJobRepository(Protocol):
     ) -> WorkflowJobDTO: ...
     def claim_pending(self) -> WorkflowJobDTO | None: ...
     def mark_completed(self, job_id: uuid.UUID, log: str | None = None) -> None: ...
-    def mark_failed(self, job_id: uuid.UUID, error: str, log: str | None = None) -> None: ...
-    def list_all(self, status: str | None = None, record_id: str | None = None, offset: int = 0, limit: int | None = None) -> list[WorkflowJobDTO]: ...
+    def mark_failed(
+        self, job_id: uuid.UUID, error: str, log: str | None = None
+    ) -> None: ...
+    def list_all(
+        self,
+        status: str | None = None,
+        record_id: str | None = None,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> list[WorkflowJobDTO]: ...
     def count(self, status: str | None = None, record_id: str | None = None) -> int: ...
     def get_by_id(self, job_id: uuid.UUID) -> WorkflowJobDTO | None: ...
 
@@ -106,6 +148,7 @@ class WorkflowJobRepository(Protocol):
 @runtime_checkable
 class AuditRepository(Protocol):
     """Write-side audit interface used by services to record changes."""
+
     def log_change(
         self,
         action: str,
@@ -122,6 +165,7 @@ class FileObjectStore(Protocol):
     Content-addressed blob store.
     Implementations: LocalFileObjectStore (_civex/objects/), future S3Store.
     """
+
     def put(self, data: bytes, original_filename: str) -> FileRef: ...
     def get(self, sha256: str) -> bytes: ...
     def exists(self, sha256: str) -> bool: ...

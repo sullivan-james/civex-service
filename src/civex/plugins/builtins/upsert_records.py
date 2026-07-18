@@ -18,23 +18,32 @@ class Plugin(BasePlugin):
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
         schema_name: str = Field(alias="schema")
-        key_field: str           # field used to match existing records
-        dataset: str = ""        # defaults to ctx.dataset.name
+        key_field: str  # field used to match existing records
+        dataset: str = ""  # defaults to ctx.dataset.name
         parent_record_id: str = ""  # defaults to ctx.record.id
 
-    def run(self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext) -> dict[str, Any]:
+    def run(
+        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+    ) -> dict[str, Any]:
         try:
             import pandas as pd
         except ImportError:
-            raise ImportError("civex.upsert_records requires pandas: pip install 'civex[workflows]'")
+            raise ImportError(
+                "civex.upsert_records requires pandas: pip install 'civex[workflows]'"
+            )
 
         df: pd.DataFrame = inputs["table"]
         dataset_name = config.dataset or ctx.dataset.name
         parent_id = config.parent_record_id or str(ctx.record.id)
         record_svc = ctx._app_ctx.record_svc
 
-        log.info("Upserting %d rows → dataset '%s', schema '%s', key '%s'",
-                 len(df), dataset_name, config.schema_name, config.key_field)
+        log.info(
+            "Upserting %d rows → dataset '%s', schema '%s', key '%s'",
+            len(df),
+            dataset_name,
+            config.schema_name,
+            config.key_field,
+        )
         created = updated = 0
 
         for _, row in df.iterrows():
@@ -61,7 +70,9 @@ class Plugin(BasePlugin):
                 record_svc.update(str(existing[0].id), data)
                 updated += 1
             else:
-                record_svc.add(dataset_name, config.schema_name, data, parent_record_id=parent_id)
+                record_svc.add(
+                    dataset_name, config.schema_name, data, parent_record_id=parent_id
+                )
                 created += 1
 
         log.info("Upsert done: %d created, %d updated", created, updated)
