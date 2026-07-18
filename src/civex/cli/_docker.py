@@ -115,6 +115,32 @@ def start_pg_container(name: str, port: int) -> tuple[bool, str]:
     return True, ""
 
 
+def container_exists(name: str) -> bool:
+    inspect = subprocess.run(
+        ["docker", "inspect", "--format", "{{.State.Status}}", name],
+        capture_output=True,
+        text=True,
+    )
+    return inspect.returncode == 0
+
+
+def teardown_pg_container(name: str) -> tuple[bool, str]:
+    """Stop, remove, and delete the volume for a civex-managed postgres container.
+
+    Returns (ok, error_message). Not an error if the container is already gone.
+    """
+    if not container_exists(name):
+        return True, ""
+
+    subprocess.run(["docker", "stop", name], capture_output=True)
+    result = subprocess.run(["docker", "rm", name], capture_output=True, text=True)
+    if result.returncode != 0:
+        return False, result.stderr.strip()
+
+    subprocess.run(["docker", "volume", "rm", f"{name}-pgdata"], capture_output=True)
+    return True, ""
+
+
 def wait_for_postgres(port: int, timeout: int = 60) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
