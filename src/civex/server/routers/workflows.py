@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from fastapi import (
@@ -13,57 +12,22 @@ from fastapi import (
 )
 
 from civex.context import AppContext
-from civex.domain.exceptions import ConfigError, NotFoundError
+from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.server.background import run_pending_jobs
 from civex.server.deps import get_ctx
 from civex.server.models import (
     WorkflowDetailResponse,
+    WorkflowInputResponse,
     WorkflowJobResponse,
     WorkflowResponse,
     WorkflowSaveRequest,
 )
-from civex.workflows.definition import load_workflow
-from civex.config import load_config
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
-_SAFE_STEM = re.compile(r"^[\w-]+$")
-
-
-def _list_workflow_defs():
-    try:
-        config = load_config()
-    except ConfigError:
-        return []
-    workflows_dir = config.civex_dir / "workflows"
-    if not workflows_dir.exists():
-        return []
-    results = []
-    for path in sorted(workflows_dir.glob("*.yaml")) + sorted(
-        workflows_dir.glob("*.yml")
-    ):
-        try:
-            results.append((path, load_workflow(path)))
-        except Exception:
-            continue
-    return results
-
-
-def _find_path(stem: str):
-    """Return the Path for a workflow stem, or None if not found."""
-    try:
-        config = load_config()
-    except ConfigError:
-        return None
-    for ext in ("yaml", "yml"):
-        p = config.civex_dir / "workflows" / f"{stem}.{ext}"
-        if p.exists():
-            return p
-    return None
-
 
 @router.get("", response_model=list[WorkflowResponse])
-def list_workflows():
+def list_workflows(ctx: AppContext = Depends(get_ctx)):
     return [
         WorkflowResponse(
             name=wf.name,
@@ -73,25 +37,25 @@ def list_workflows():
             stem=path.stem,
             record_schema=wf.record_schema,
             inputs={
-                k: {"type": v.type, "label": v.label, "description": v.description}
+                k: WorkflowInputResponse(
+                    type=v.type, label=v.label, description=v.description
+                )
                 for k, v in (wf.inputs or {}).items()
             }
             or None,
         )
-        for path, wf in _list_workflow_defs()
+        for path, wf in ctx.workflow_svc.list_defs()
     ]
 
 
 @router.get("/{stem}", response_model=WorkflowDetailResponse)
-def get_workflow(stem: str):
-    path = _find_path(stem)
-    if path is None:
-        raise HTTPException(404, detail=f"Workflow '{stem}' not found")
-    content = path.read_text()
+def get_workflow(stem: str, ctx: AppContext = Depends(get_ctx)):
     try:
-        wf = load_workflow(path)
-    except Exception as e:
-        raise HTTPException(422, detail=f"Invalid workflow YAML: {e}")
+        path, wf, content = ctx.workflow_svc.get(stem)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
     return WorkflowDetailResponse(
         name=wf.name,
         description=wf.description,
@@ -103,31 +67,13 @@ def get_workflow(stem: str):
 
 
 @router.put("/{stem}", response_model=WorkflowDetailResponse)
-def save_workflow(stem: str, body: WorkflowSaveRequest):
-    if not _SAFE_STEM.match(stem):
-        raise HTTPException(
-            400,
-            detail="Stem must contain only letters, numbers, hyphens, and underscores",
-        )
+def save_workflow(
+    stem: str, body: WorkflowSaveRequest, ctx: AppContext = Depends(get_ctx)
+):
     try:
-        config = load_config()
-    except ConfigError as e:
-        raise HTTPException(500, detail=str(e))
-
-    # Validate YAML before writing
-    try:
-        import yaml as _yaml
-
-        raw = _yaml.safe_load(body.content)
-        from civex.workflows.definition import WorkflowDef
-
-        wf = WorkflowDef.model_validate(raw)
-    except Exception as e:
-        raise HTTPException(422, detail=f"Invalid workflow YAML: {e}")
-
-    path = config.civex_dir / "workflows" / f"{stem}.yaml"
-    path.write_text(body.content, encoding="utf-8")
-
+        path, wf = ctx.workflow_svc.save(stem, body.content)
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
     return WorkflowDetailResponse(
         name=wf.name,
         description=wf.description,
@@ -139,11 +85,11 @@ def save_workflow(stem: str, body: WorkflowSaveRequest):
 
 
 @router.delete("/{stem}", status_code=204)
-def delete_workflow(stem: str):
-    path = _find_path(stem)
-    if path is None:
-        raise HTTPException(404, detail=f"Workflow '{stem}' not found")
-    path.unlink()
+def delete_workflow(stem: str, ctx: AppContext = Depends(get_ctx)):
+    try:
+        ctx.workflow_svc.delete(stem)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
 
 
 @router.post("/{name}/run", response_model=WorkflowJobResponse, status_code=202)
@@ -153,14 +99,7 @@ async def run_workflow(
     request: Request,
     ctx: AppContext = Depends(get_ctx),
 ):
-    wf_def = next(
-        (
-            wf
-            for path, wf in _list_workflow_defs()
-            if wf.name == name or path.stem == name
-        ),
-        None,
-    )
+    wf_def = ctx.workflow_svc.find_by_name(name)
     if wf_def is None:
         raise HTTPException(404, detail=f"Workflow '{name}' not found")
 
