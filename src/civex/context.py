@@ -9,8 +9,10 @@ store instead of the default LocalFileObjectStore.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Iterator
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
@@ -56,6 +58,22 @@ class AppContext:
     def close(self) -> None:
         self._session.close()
 
+    @contextmanager
+    def validation_scope(self) -> Iterator[None]:
+        """Run code inside a SQL SAVEPOINT that is always rolled back on exit,
+        even on success -- for validating a real service call's side effects
+        (existence checks, dtype/restriction rules) without persisting them.
+
+        This is the only sanctioned place outside AppContext itself that a
+        caller (currently AiService's act-tool proposal builders) may reach
+        into _session; everywhere else, go through a service.
+        """
+        nested = self._session.begin_nested()
+        try:
+            yield
+        finally:
+            nested.rollback()
+
 
 def build_local_context(
     config: Config,
@@ -96,7 +114,7 @@ def build_local_context(
     store_svc = StoreService(config, file_store)
     ai_svc = AiService(schema_svc, dataset_svc, record_svc, job_svc)
 
-    return AppContext(
+    ctx = AppContext(
         schema_svc=schema_svc,
         dataset_svc=dataset_svc,
         record_svc=record_svc,
@@ -107,3 +125,5 @@ def build_local_context(
         ai_svc=ai_svc,
         _session=session,
     )
+    ai_svc._app_ctx = ctx
+    return ctx
