@@ -15,6 +15,7 @@ import pytest
 from typer.testing import CliRunner
 
 import civex.server.routers.ai as ai
+import civex.services.ai.service as ai_service
 from civex.config import load_config
 from civex.context import build_local_context
 from civex.main import app as cli_app
@@ -37,7 +38,7 @@ def ctx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def _call(name: str, args: dict, ctx) -> dict:
-    return json.loads(ai._dispatch_tool(name, args, ctx))
+    return json.loads(ai_service._dispatch_tool(name, args, ctx))
 
 
 # ---------------------------------------------------------------------------
@@ -46,9 +47,11 @@ def _call(name: str, args: dict, ctx) -> dict:
 
 
 def test_all_act_tools_registered() -> None:
-    names = {t["name"] for t in ai.TOOLS}
-    assert ai._ACT_TOOL_NAMES.issubset(names)
-    assert len(ai.TOOLS_OPENAI) == len(ai.TOOLS)  # OpenAI mirror stays in sync
+    names = {t["name"] for t in ai_service.TOOLS}
+    assert ai_service._ACT_TOOL_NAMES.issubset(names)
+    assert len(ai_service.TOOLS_OPENAI) == len(
+        ai_service.TOOLS
+    )  # OpenAI mirror stays in sync
 
 
 # ---------------------------------------------------------------------------
@@ -320,10 +323,13 @@ def test_update_schema_field_rejects_unknown_restriction_key(ctx) -> None:
 
 
 def test_is_proposal_helper() -> None:
-    assert ai._is_proposal('{"status": "proposed", "action": "create_record"}') is True
-    assert ai._is_proposal('{"status": "error"}') is False
-    assert ai._is_proposal("[]") is False
-    assert ai._is_proposal("not json") is False
+    assert (
+        ai_service._is_proposal('{"status": "proposed", "action": "create_record"}')
+        is True
+    )
+    assert ai_service._is_proposal('{"status": "error"}') is False
+    assert ai_service._is_proposal("[]") is False
+    assert ai_service._is_proposal("not json") is False
 
 
 def test_openai_stream_halts_after_a_proposed_tool(ctx, monkeypatch) -> None:
@@ -405,7 +411,7 @@ def test_openai_stream_halts_after_a_proposed_tool(ctx, monkeypatch) -> None:
     async def collect():
         out = []
         history = [ai.UserMessage(content="add a record")]
-        async for sse in ai._stream_chat_openai(history, ctx, cfg):
+        async for sse in ai_service._stream_chat_openai(history, ctx, cfg):
             out.append(_json.loads(sse[len("data: ") :]))
         return out
 
@@ -523,7 +529,7 @@ def test_anthropic_stream_halts_after_a_proposed_tool(ctx, monkeypatch) -> None:
     async def collect():
         out = []
         history = [ai.UserMessage(content="add a record")]
-        async for sse in ai._stream_chat_anthropic(history, ctx, cfg):
+        async for sse in ai_service._stream_chat_anthropic(history, ctx, cfg):
             out.append(_json.loads(sse[len("data: ") :]))
         return out
 
