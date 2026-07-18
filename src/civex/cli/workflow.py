@@ -7,29 +7,14 @@ from typing import Any
 import typer
 from rich.table import Table
 
-from civex.cli.utils import cli_load_config, drain_jobs, get_ctx
+from civex.cli.utils import drain_jobs, get_ctx
 from civex.console import console
 from civex.domain.exceptions import NotFoundError
-from civex.workflows.definition import WorkflowDef, load_workflow
+from civex.workflows.definition import WorkflowDef
 
 app = typer.Typer(help="Manage and run data processing workflows")
 
 _INPUT_STEP = "__input__"
-
-
-def _find_workflow(name: str, workflows_dir: Path) -> WorkflowDef | None:
-    if not workflows_dir.exists():
-        return None
-    for path in sorted(workflows_dir.glob("*.yaml")) + sorted(
-        workflows_dir.glob("*.yml")
-    ):
-        try:
-            candidate = load_workflow(path)
-            if candidate.name == name or path.stem == name:
-                return candidate
-        except Exception:
-            continue
-    return None
 
 
 def _resolve_inputs(
@@ -92,36 +77,26 @@ def _resolve_inputs(
 @app.command("list")
 def workflow_list() -> None:
     """List all workflow definitions in _civex/workflows/."""
-    config = cli_load_config()
-    workflows_dir = config.civex_dir / "workflows"
-    if not workflows_dir.exists():
-        console.print("[info]No workflows directory. Run `civex init` first.[/info]")
-        return
-
-    yamls = sorted(workflows_dir.glob("*.yaml")) + sorted(workflows_dir.glob("*.yml"))
-    if not yamls:
+    ctx = get_ctx()
+    defs = ctx.workflow_svc.list_defs()
+    if not defs:
         console.print(
             "[info]No workflows defined. Add a YAML file to _civex/workflows/.[/info]"
         )
         return
 
     table = Table("Name", "Description", "Steps", "Inputs", "File")
-    for path in yamls:
-        try:
-            wf = load_workflow(path)
-            inputs_summary = (
-                ", ".join(f"{k} ({v.type})" for k, v in (wf.inputs or {}).items())
-                or "—"
-            )
-            table.add_row(
-                wf.name,
-                wf.description or "",
-                str(len(wf.steps)),
-                inputs_summary,
-                path.name,
-            )
-        except Exception as e:
-            table.add_row(path.stem, f"[error]{e}[/error]", "-", "-", path.name)
+    for path, wf in defs:
+        inputs_summary = (
+            ", ".join(f"{k} ({v.type})" for k, v in (wf.inputs or {}).items()) or "—"
+        )
+        table.add_row(
+            wf.name,
+            wf.description or "",
+            str(len(wf.steps)),
+            inputs_summary,
+            path.name,
+        )
     console.print(table)
 
 
@@ -145,15 +120,13 @@ def workflow_run(
     Supplied values are pre-seeded as __input__.<name> and can be referenced in
     step inputs like: files: __input__.files
     """
-    config = cli_load_config()
-    wf_def = _find_workflow(name, config.civex_dir / "workflows")
+    app_ctx = get_ctx()
+    wf_def = app_ctx.workflow_svc.find_by_name(name)
     if wf_def is None:
         console.print(
-            f"[error]Workflow '{name}' not found in {config.civex_dir / 'workflows'}[/error]"
+            f"[error]Workflow '{name}' not found in {app_ctx.workflow_svc.workflows_dir}[/error]"
         )
         raise typer.Exit(1)
-
-    app_ctx = get_ctx()
 
     try:
         record = app_ctx.record_svc.get(record_id)

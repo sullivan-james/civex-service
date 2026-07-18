@@ -110,15 +110,15 @@ def build_local_context(
 
     schema_svc = SchemaService(schema_repo, audit_repo)
     dataset_svc = DatasetService(dataset_repo, audit_repo)
-    job_svc = WorkflowJobService(job_repo, config.civex_dir)
+    workflow_svc = WorkflowService(config.civex_dir)
+    plugin_svc = PluginService(config.civex_dir)
+    job_svc = WorkflowJobService(job_repo, workflow_svc)
     record_svc = RecordService(
         schema_svc, dataset_repo, record_repo, file_store, job_svc, audit_repo
     )
     file_svc = FileService(file_store, remote_transport=remote_transport)
     store_svc = StoreService(config, file_store)
     ai_svc = AiService(schema_svc, dataset_svc, record_svc, job_svc)
-    workflow_svc = WorkflowService(config.civex_dir)
-    plugin_svc = PluginService(config.civex_dir)
 
     ctx = AppContext(
         schema_svc=schema_svc,

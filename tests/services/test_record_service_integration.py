@@ -44,7 +44,7 @@ def test_field_restricted_trigger_only_fires_when_field_set_on_create(
     make_schema("trial", fields=[("subject", "string"), ("status", "string")])
     make_collection("study")
 
-    workflows_dir = ctx.job_svc._civex_dir / "workflows"
+    workflows_dir = ctx.workflow_svc.workflows_dir
     workflows_dir.mkdir(parents=True, exist_ok=True)
     (workflows_dir / "on_status.yaml").write_text(
         """

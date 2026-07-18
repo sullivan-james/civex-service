@@ -36,7 +36,7 @@ def test_save_then_list_defs_returns_it(ctx: AppContext) -> None:
 
 
 def test_list_defs_skips_unparseable_files(ctx: AppContext) -> None:
-    wf_dir = ctx.workflow_svc._dir
+    wf_dir = ctx.workflow_svc.workflows_dir
     wf_dir.mkdir(parents=True, exist_ok=True)
     (wf_dir / "broken.yaml").write_text("not: [valid, workflow", encoding="utf-8")
     assert ctx.workflow_svc.list_defs() == []
@@ -63,7 +63,7 @@ def test_get_unknown_stem_raises_not_found(ctx: AppContext) -> None:
 
 
 def test_get_invalid_yaml_raises_validation_error(ctx: AppContext) -> None:
-    wf_dir = ctx.workflow_svc._dir
+    wf_dir = ctx.workflow_svc.workflows_dir
     wf_dir.mkdir(parents=True, exist_ok=True)
     (wf_dir / "broken.yaml").write_text("not: [valid, workflow", encoding="utf-8")
     with pytest.raises(ValidationError, match="Invalid workflow YAML"):
