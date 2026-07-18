@@ -96,7 +96,7 @@ def start_pg_container(name: str, port: int) -> tuple[bool, str]:
             "--name",
             name,
             "-p",
-            f"{port}:5432",
+            f"127.0.0.1:{port}:5432",
             "-e",
             "POSTGRES_HOST_AUTH_METHOD=trust",
             "-e",
