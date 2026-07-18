@@ -1,42 +1,27 @@
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 
 from civex.domain.dtos import RecordDTO, WorkflowJobDTO
 from civex.repositories.protocols import WorkflowJobRepository
-from civex.workflows.definition import WorkflowDef, load_workflow
+from civex.services.workflow_service import WorkflowService
+from civex.workflows.definition import WorkflowDef
 
 
 MAX_JOB_DEPTH = 10
 
 
 class WorkflowJobService:
-    def __init__(self, repo: WorkflowJobRepository, civex_dir: Path) -> None:
+    def __init__(
+        self, repo: WorkflowJobRepository, workflow_svc: WorkflowService
+    ) -> None:
         self._repo = repo
-        self._civex_dir = civex_dir
-
-    def _load_workflows(self) -> list[WorkflowDef]:
-        wf_dir = self._civex_dir / "workflows"
-        if not wf_dir.exists():
-            return []
-        result: list[WorkflowDef] = []
-        for path in sorted(wf_dir.glob("*.yaml")) + sorted(wf_dir.glob("*.yml")):
-            try:
-                result.append(load_workflow(path))
-            except Exception:
-                pass
-        return result
+        self._workflow_svc = workflow_svc
 
     def find_workflow(self, name: str) -> WorkflowDef | None:
         """Match by workflow name or filename stem (with or without .yaml/.yml extension)."""
         stem = name.removesuffix(".yml").removesuffix(".yaml")
-        wf_dir = self._civex_dir / "workflows"
-        for path in sorted(wf_dir.glob("*.yaml")) + sorted(wf_dir.glob("*.yml")):
-            try:
-                wf = load_workflow(path)
-            except Exception:
-                continue
+        for path, wf in self._workflow_svc.list_defs():
             if (
                 wf.name == name
                 or wf.name == stem
@@ -73,7 +58,7 @@ class WorkflowJobService:
             )
             return []
         jobs: list[WorkflowJobDTO] = []
-        for wf in self._load_workflows():
+        for _path, wf in self._workflow_svc.list_defs():
             if wf.triggers is None:
                 continue
             trigger_def = getattr(wf.triggers, event, None)

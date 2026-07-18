@@ -22,6 +22,10 @@ class WorkflowService:
     def __init__(self, civex_dir: Path) -> None:
         self._dir = civex_dir / "workflows"
 
+    @property
+    def workflows_dir(self) -> Path:
+        return self._dir
+
     def list_defs(self) -> list[tuple[Path, WorkflowDef]]:
         """Every parseable workflow file as (path, parsed def). Files that
         fail to parse are silently skipped -- matches the pre-existing
