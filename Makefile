@@ -1,4 +1,4 @@
-.PHONY: install install-all lock lint format format-check typecheck test check pre-commit serve dev clean frontend-lint frontend-format frontend-format-check
+.PHONY: install install-all lock lint format format-check typecheck test secrets check pre-commit serve dev clean frontend-lint frontend-format frontend-format-check
 
 install: ## Sync the dev environment (server + workflows + dev extras)
 	uv sync --extra server --extra workflows --extra dev
@@ -24,10 +24,15 @@ typecheck: ## Mypy
 test: ## Run the test suite with coverage
 	uv run pytest tests/ -q --cov=civex --cov-report=term-missing
 
+secrets: ## Scan the repo (working tree + history) for leaked secrets
+	@command -v gitleaks >/dev/null 2>&1 || { echo "gitleaks not found — install via 'brew install gitleaks' or https://github.com/gitleaks/gitleaks#installing"; exit 1; }
+	gitleaks git --redact -v
+
 check: format-check ## Everything CI checks, in one shot
 	uv run ruff check src/
 	$(MAKE) typecheck
 	$(MAKE) test
+	$(MAKE) secrets
 
 pre-commit: ## Run all pre-commit hooks against the whole tree
 	uv run pre-commit run --all-files
