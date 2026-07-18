@@ -417,3 +417,121 @@ def test_openai_stream_halts_after_a_proposed_tool(ctx, monkeypatch) -> None:
     assert not any("SECOND ROUND" in _json.dumps(e) for e in events)
     tr = next(e for e in events if e["type"] == "tool_result")
     assert _json.loads(tr["content"])["status"] == "proposed"
+
+
+def test_anthropic_stream_halts_after_a_proposed_tool(ctx, monkeypatch) -> None:
+    """Anthropic-provider mirror of test_openai_stream_halts_after_a_proposed_tool
+    above -- same guarantee (the round-loop stops immediately after a proposed
+    tool, never asks the model again), pinned before the CIVEX-51 ChatProvider
+    unification so the merge can be checked against this exact event sequence."""
+    pytest.importorskip("anthropic")
+    import asyncio
+    import json as _json
+
+    from civex.config import AIConfig
+
+    served = {"rounds": 0}
+
+    def _text_block(text):
+        return type(
+            "TextBlock",
+            (),
+            {
+                "type": "text",
+                "text": text,
+                "model_dump": lambda self: {"type": "text", "text": text},
+            },
+        )()
+
+    def _tool_block(id_, name, input_):
+        return type(
+            "ToolBlock",
+            (),
+            {
+                "type": "tool_use",
+                "id": id_,
+                "name": name,
+                "input": input_,
+                "model_dump": lambda self: {
+                    "type": "tool_use",
+                    "id": id_,
+                    "name": name,
+                    "input": input_,
+                },
+            },
+        )()
+
+    class FakeMessageStream:
+        def __init__(self, deltas, final):
+            self._deltas = deltas
+            self._final = final
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        @property
+        def text_stream(self):
+            async def gen():
+                for d in self._deltas:
+                    yield d
+
+            return gen()
+
+        async def get_final_message(self):
+            return self._final
+
+    class FakeMessages:
+        def stream(self, **_kw):
+            served["rounds"] += 1
+            if served["rounds"] == 1:
+                final = type(
+                    "Final",
+                    (),
+                    {
+                        "stop_reason": "tool_use",
+                        "content": [
+                            _text_block("ok "),
+                            _tool_block(
+                                "call_1",
+                                "create_record",
+                                {"collection": "study", "schema": "trial", "data": {}},
+                            ),
+                        ],
+                    },
+                )()
+                return FakeMessageStream(["ok "], final)
+            final = type(
+                "Final",
+                (),
+                {"stop_reason": "end_turn", "content": [_text_block("SECOND ROUND")]},
+            )()
+            return FakeMessageStream(["SECOND ROUND"], final)
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            self.messages = FakeMessages()
+
+    import anthropic
+
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", FakeClient)
+
+    cfg = AIConfig(api_key="x", model="m", provider="anthropic")
+
+    async def collect():
+        out = []
+        history = [ai.UserMessage(content="add a record")]
+        async for sse in ai._stream_chat_anthropic(history, ctx, cfg):
+            out.append(_json.loads(sse[len("data: ") :]))
+        return out
+
+    events = asyncio.run(collect())
+    types = [e["type"] for e in events]
+
+    assert served["rounds"] == 1  # never asked the model a 2nd time
+    assert types[-1] == "done"  # cleanly ended
+    assert not any("SECOND ROUND" in _json.dumps(e) for e in events)
+    tr = next(e for e in events if e["type"] == "tool_result")
+    assert _json.loads(tr["content"])["status"] == "proposed"
