@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from civex.db.models import Record, Schema
 from civex.domain.dtos import RecordDTO
+from civex.domain.exceptions import NotFoundError
 
 
 def _coerce_json_value(v: str) -> Any:
@@ -151,6 +152,8 @@ class LocalRecordRepository:
 
     def update(self, id: uuid.UUID, data: dict[str, Any]) -> RecordDTO:
         row = self._s.query(Record).filter_by(id=id).first()
+        if row is None:
+            raise NotFoundError(f"Record '{id}' not found")
         row.data = data
         row.search_vector = (
             func.to_tsvector("simple", _search_text(data)) if self._pg else None

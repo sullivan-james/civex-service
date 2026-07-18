@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from civex.db.models import Dataset, Record, WorkflowJob
 from civex.domain.dtos import DatasetDTO
+from civex.domain.exceptions import NotFoundError
 
 
 class LocalDatasetRepository:
@@ -36,6 +37,8 @@ class LocalDatasetRepository:
         self, id: uuid.UUID, name: str | None, description: str | None
     ) -> DatasetDTO:
         row = self._s.query(Dataset).filter_by(id=id).first()
+        if row is None:
+            raise NotFoundError(f"Dataset '{id}' not found")
         if name is not None:
             row.name = name
         if description is not None:
@@ -46,7 +49,7 @@ class LocalDatasetRepository:
     def delete(self, id: uuid.UUID) -> None:
         # Bulk-delete dependents first so SQLAlchemy doesn't load every record into
         # memory and issue per-row DELETEs via ORM cascade.
-        record_ids = self._s.query(Record.id).filter_by(dataset_id=id).subquery()
+        record_ids = self._s.query(Record.id).filter_by(dataset_id=id).scalar_subquery()
         self._s.query(WorkflowJob).filter(WorkflowJob.record_id.in_(record_ids)).delete(
             synchronize_session=False
         )

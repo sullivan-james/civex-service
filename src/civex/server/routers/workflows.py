@@ -3,7 +3,14 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 
 from civex.context import AppContext
 from civex.domain.exceptions import ConfigError, NotFoundError
@@ -174,7 +181,7 @@ async def run_workflow(
                 uploads = form.getlist(input_name)
                 refs = []
                 for upload in uploads:
-                    if hasattr(upload, "read"):
+                    if isinstance(upload, UploadFile):
                         data = await upload.read()
                         ref = ctx.file_svc.store_bytes(
                             data, upload.filename or "upload"

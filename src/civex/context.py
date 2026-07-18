@@ -23,7 +23,6 @@ from civex.repositories.local.file_store import VolumeAwareFileObjectStore
 from civex.repositories.local.job_repo import LocalWorkflowJobRepository
 from civex.repositories.local.record_repo import LocalRecordRepository
 from civex.repositories.local.schema_repo import LocalSchemaRepository
-from civex.repositories.protocols import FileObjectStore
 from civex.services.dataset_service import DatasetService
 from civex.services.file_service import FileService
 from civex.services.record_service import RecordService
@@ -58,7 +57,7 @@ class AppContext:
 
 def build_local_context(
     config: Config,
-    file_store: FileObjectStore | None = None,
+    file_store: VolumeAwareFileObjectStore | None = None,
 ) -> AppContext:
     from civex.db.migrate import ensure_schema_current
 

@@ -24,7 +24,7 @@ class BasePlugin(ABC):
     def run(
         self,
         inputs: dict[str, Any],
-        config: "BasePlugin.Config",
+        config: Any,
         ctx: "WorkflowContext",
     ) -> dict[str, Any]: ...
 

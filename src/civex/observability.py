@@ -51,7 +51,9 @@ _SENSITIVE_KEYS = frozenset(
 _configured = False
 
 
-def _scrub_sensitive(_logger: Any, _method: str, event_dict: dict) -> dict:
+def _scrub_sensitive(
+    _logger: Any, _method: str, event_dict: structlog.typing.EventDict
+) -> structlog.typing.EventDict:
     """Redact values whose key looks like a credential."""
     for key in list(event_dict.keys()):
         if key.lower() in _SENSITIVE_KEYS:
@@ -80,7 +82,7 @@ def configure_logging(
     """
     global _configured
 
-    shared_processors = [
+    shared_processors: list[structlog.typing.Processor] = [
         structlog.contextvars.merge_contextvars,  # pulls in request_id etc.
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
@@ -102,6 +104,7 @@ def configure_logging(
     use_json_console = (
         json_console if json_console is not None else not sys.stderr.isatty()
     )
+    console_exc: structlog.typing.Processor
     if use_json_console:
         console_renderer: Any = structlog.processors.JSONRenderer()
         console_exc = structlog.processors.format_exc_info
@@ -160,7 +163,9 @@ def configure_logging(
     _configured = True
 
 
-def _passthrough(_logger: Any, _method: str, event_dict: dict) -> dict:
+def _passthrough(
+    _logger: Any, _method: str, event_dict: structlog.typing.EventDict
+) -> structlog.typing.EventDict:
     return event_dict
 
 

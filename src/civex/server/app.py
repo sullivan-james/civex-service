@@ -32,7 +32,7 @@ def _find_dist() -> Path:
         return p
     # 2. PyInstaller one-file bundle — sys._MEIPASS is the temp extraction root
     if getattr(sys, "frozen", False):
-        p = Path(sys._MEIPASS) / "frontend_dist"  # noqa: SLF001
+        p = Path(getattr(sys, "_MEIPASS")) / "frontend_dist"  # noqa: SLF001
         if (p / "index.html").exists():
             return p
     # 3. Development source tree

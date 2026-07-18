@@ -21,7 +21,7 @@ def resolve(
 
     for d in ctx.dataset_svc.list_all():
         if str(d.id).startswith(prefix):
-            console.print(f"dataset  [bold]{d.name}[/bold]   schema: {d.schema_name}")
+            console.print(f"dataset  [bold]{d.name}[/bold]   records: {d.record_count}")
             return
 
     try:

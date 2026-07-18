@@ -85,6 +85,7 @@ class Plugin(BasePlugin):
             )
         extracted = m.group(1) if m.lastindex and m.lastindex >= 1 else m.group(0)
 
+        value: Any
         if config.output_type == "integer":
             value = int(extracted)
         elif config.output_type == "float":

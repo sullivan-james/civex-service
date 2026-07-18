@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from civex.db.models import Field, Schema
 from civex.domain.dtos import FieldDTO, SchemaDTO
+from civex.domain.exceptions import NotFoundError
 
 
 class LocalSchemaRepository:
@@ -66,6 +67,8 @@ class LocalSchemaRepository:
         display_field=_SENTINEL,
     ) -> SchemaDTO:
         row = self._s.query(Schema).filter_by(id=id).first()
+        if row is None:
+            raise NotFoundError(f"Schema '{id}' not found")
         if name is not None:
             row.name = name
         if description is not None:
@@ -114,6 +117,8 @@ class LocalSchemaRepository:
         default_value: Any = _SENTINEL,
     ) -> FieldDTO:
         row = self._s.query(Field).filter_by(id=field_id).first()
+        if row is None:
+            raise NotFoundError(f"Field '{field_id}' not found")
         if name is not None:
             row.name = name
         if required is not None:

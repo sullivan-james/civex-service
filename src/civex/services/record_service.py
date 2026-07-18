@@ -266,9 +266,9 @@ class RecordService:
             if not path.exists():
                 raise CoercionError(field_name, dtype, raw)
             file_ref = self._files.put(path.read_bytes(), path.name)
-            value = [file_ref.to_dict()]
-            _check_restrictions(value, dtype, restrictions or {}, field_name)
-            return value
+            file_list_value = [file_ref.to_dict()]
+            _check_restrictions(file_list_value, dtype, restrictions or {}, field_name)
+            return file_list_value
 
         if dtype == "reference":
             record = self._records.get_by_prefix(raw)

@@ -301,7 +301,7 @@ def setup_docker() -> None:
 
     # Write config (create _civex structure if this is a new project)
     is_new = root is None
-    if is_new:
+    if root is None:
         root = Path.cwd()
         civex_dir = root / "_civex"
         civex_dir.mkdir(parents=True)
@@ -427,7 +427,7 @@ def setup_postgres(
     # ---- Phase 4: Write config ----------------------------------------------
     root = find_project_root()
     is_new = root is None
-    if is_new:
+    if root is None:
         root = Path.cwd()
         civex_dir = root / "_civex"
         civex_dir.mkdir(parents=True)

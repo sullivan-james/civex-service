@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from sqlalchemy.orm import Session
 
@@ -69,7 +70,8 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
         session.query(Commit).filter(Commit.seq > since_seq).order_by(Commit.seq).all()
     )
     commit_ids = [c.id for c in new_commits]
-    to_seq = new_commits[-1].seq if new_commits else since_seq
+    last_seq = new_commits[-1].seq if new_commits else since_seq
+    to_seq = last_seq if last_seq is not None else since_seq
 
     # Audit entries that belong to those commits.
     audit_entries = (
@@ -99,7 +101,7 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
             schema_id=r.schema_id,
             schema_name="",
             parent_record_id=r.parent_record_id,
-            data=_sanitize_nan(r.data or {}),
+            data=cast(dict[str, Any], _sanitize_nan(r.data or {})),
             created_at=r.created_at or now,
             updated_at=r.updated_at or now,
         ).to_dict()
@@ -141,8 +143,8 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
                 action=e.action,
                 entity_type=e.entity_type,
                 entity_id=e.entity_id,
-                old_data=_sanitize_nan(e.old_data),
-                new_data=_sanitize_nan(e.new_data),
+                old_data=cast("dict[str, Any] | None", _sanitize_nan(e.old_data)),
+                new_data=cast("dict[str, Any] | None", _sanitize_nan(e.new_data)),
                 timestamp=e.timestamp or now,
             ).to_dict()
             for e in audit_entries

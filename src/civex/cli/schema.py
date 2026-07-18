@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 from rich.table import Table
@@ -223,7 +223,7 @@ def schema_update(
             "[error]Provide at least one of --rename, --description, --display-field, or --clear-display-field.[/error]"
         )
         raise typer.Exit(1)
-    df = ...
+    df: Any = ...
     if display_field is not None:
         df = display_field
     elif clear_display_field:

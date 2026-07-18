@@ -12,15 +12,19 @@ import threading
 import time
 import urllib.request
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from civex.project import scaffold_project
+
+if TYPE_CHECKING:
+    import webview
 
 # Stored alongside other per-user config, outside any project directory.
 _RECENT_FILE = Path.home() / ".config" / "civex" / "recent.json"
 _LOG_FILE = Path.home() / ".config" / "civex" / "civex.log"
 
 # Set in main() before webview.start() so Api methods can reference it.
-_window = None
+_window: "webview.Window | None" = None
 
 
 def _setup_logging() -> None:
@@ -155,6 +159,7 @@ def _launch_project(path: Path) -> dict:
     threading.Thread(target=_run_server, args=(port, errors), daemon=True).start()
 
     def _navigate() -> None:
+        assert _window is not None
         if _wait_for_server(url):
             _window.resize(1280, 800)
             _window.load_url(url)
@@ -184,6 +189,7 @@ class _Api:
     def open_project(self) -> dict | None:
         import webview
 
+        assert _window is not None
         result = _window.create_file_dialog(webview.FOLDER_DIALOG, allow_multiple=False)
         if not result:
             return None
@@ -197,6 +203,7 @@ class _Api:
     def create_project(self) -> dict | None:
         import webview
 
+        assert _window is not None
         result = _window.create_file_dialog(webview.FOLDER_DIALOG, allow_multiple=False)
         if not result:
             return None
@@ -218,6 +225,7 @@ class _Api:
         """Open a native folder picker and return the selected path (forward slashes)."""
         import webview
 
+        assert _window is not None
         result = _window.create_file_dialog(webview.FOLDER_DIALOG, allow_multiple=False)
         if not result:
             return {"path": None}
