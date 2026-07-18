@@ -17,9 +17,11 @@ uv run civex --help                                     # run inside the synced 
 
 `uv sync` creates `.venv/`. There's no separate activation step required for `uv run ...`; activate `.venv/bin/activate` directly if you want a persistent shell.
 
+`make check`/`make secrets` also require the [gitleaks](https://github.com/gitleaks/gitleaks#installing) binary on `PATH` — it's not a `uv`/`npm` dependency. Install via `brew install gitleaks`, `go install github.com/gitleaks/gitleaks/v8@latest`, or download a release binary.
+
 ## Commands
 
-Common tasks are wrapped in the `Makefile` — `make help`-style targets: `install`, `lint`, `format`, `format-check`, `typecheck`, `test`, `check` (everything CI runs), `pre-commit`, `serve`, `dev`, `clean`.
+Common tasks are wrapped in the `Makefile` — `make help`-style targets: `install`, `lint`, `format`, `format-check`, `typecheck`, `test`, `secrets`, `check` (everything CI runs), `pre-commit`, `serve`, `dev`, `clean`.
 
 ```bash
 # CLI
