@@ -18,6 +18,7 @@ from civex.server.routers import (
     records,
     remote,
     schemas,
+    status,
     store,
     terminal,
     workflows,
@@ -107,6 +108,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router, prefix="/api")
     app.include_router(remote.router, prefix="/api")
     app.include_router(store.router, prefix="/api")
+    app.include_router(status.router, prefix="/api")
     app.include_router(terminal.router, prefix="/api")
 
     @app.get("/health", include_in_schema=False)

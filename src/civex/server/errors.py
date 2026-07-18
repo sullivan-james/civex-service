@@ -22,6 +22,7 @@ from civex.domain.exceptions import (
     AlreadyExistsError,
     CivexError,
     ConfigError,
+    DatabaseUnavailableError,
     NotFoundError,
     ValidationError,
 )
@@ -113,6 +114,8 @@ def _status_for(exc: CivexError) -> int:
         return 422
     if isinstance(exc, ConfigError):
         return 400
+    if isinstance(exc, DatabaseUnavailableError):
+        return 503
     return 500
 
 

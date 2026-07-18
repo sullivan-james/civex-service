@@ -50,6 +50,7 @@ class TelemetryConfig:
 @dataclass
 class DBConfig:
     url: str
+    docker_managed: bool = False
 
 
 @dataclass
@@ -212,7 +213,10 @@ def load_config() -> Config:
 
     return Config(
         project_root=root,
-        db=DBConfig(url=data["db"]["url"]),
+        db=DBConfig(
+            url=data["db"]["url"],
+            docker_managed=bool(data["db"].get("docker_managed", False)),
+        ),
         remote=remote,
         store=store,
         ai=ai,
@@ -241,6 +245,8 @@ def save_config(config: Config) -> None:
         "[db]\n",
         f'url = "{_ts(config.db.url)}"\n',
     ]
+    if config.db.docker_managed:
+        lines.append("docker_managed = true\n")
     if config.remote:
         lines += ["\n[remote]\n", f'url = "{_ts(config.remote.url)}"\n']
         if config.remote.remote_civex != "civex":
