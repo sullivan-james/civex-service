@@ -27,7 +27,6 @@ from civex.services.ai.providers import (
     TextDelta,
     get_chat_provider,
 )
-from civex.services.ai.providers.openai_provider import _is_ollama
 from civex.services.ai.tools.registry import all_tools
 from civex.services.ai.tools.registry import dispatch as _registry_dispatch
 
@@ -149,10 +148,8 @@ def _dispatch_tool(tool_name: str, tool_input: dict, ctx) -> str:
 # System prompt
 # ---------------------------------------------------------------------------
 
-_OPENROUTER_FREE_DAILY_LIMIT = 50
 
-
-def _build_system_prompt(ctx, ai_cfg=None) -> str:
+def _build_system_prompt(ctx, prompt_fragment: str = "") -> str:
     schemas = ctx.schema_svc.list_all()
     collections = ctx.dataset_svc.list_all()
 
@@ -185,46 +182,6 @@ def _build_system_prompt(ctx, ai_cfg=None) -> str:
         schema_compact.append(entry)
 
     collections_csv = ", ".join(d.name for d in collections) or "(none yet)"
-
-    is_openrouter = ai_cfg is not None and "openrouter.ai" in (ai_cfg.base_url or "")
-    openrouter_note = (
-        f"""
-
-## REQUEST BUDGET — READ CAREFULLY
-You are running on OpenRouter free tier: {_OPENROUTER_FREE_DAILY_LIMIT} requests per day TOTAL.
-Every tool call costs 1 additional API request on top of the base conversation request.
-A single user message that triggers 3 tool calls uses 4 requests.
-
-STRICT rules to conserve budget:
-- Answer from the schemas/collections already in this system prompt — do NOT call list_schemas unless the user explicitly asks to refresh or mentions a schema not listed above.
-- Do NOT call list_workflows or list_plugins unless the user directly references a specific workflow or plugin by name and you need its content to answer correctly.
-- Do NOT call query_records for general questions — only when the user explicitly asks about their data.
-- If multiple tool calls are unavoidable, make them all in a SINGLE response (parallel), never sequentially across multiple rounds.
-- Prefer concise answers over exhaustive ones to reduce follow-up questions.
-- Re-reading rules 1-3 above: do not ask for confirmation before act/save tools, do not preview schema/field/record
-  changes as YAML, and put every field into create_schema's `fields` array in one call. Smaller free models tend to
-  skip these — follow them exactly."""
-        if is_openrouter
-        else ""
-    )
-
-    is_local_model = _is_ollama(ai_cfg)
-    local_model_note = (
-        """
-
-## RUNNING ON A SMALL LOCAL MODEL — READ CAREFULLY
-You are running as a small (~7B) locally-hosted model via Ollama, not a large hosted model. You are more
-prone to two specific mistakes than a larger model — watch for them explicitly:
-1. Inventing field type strings. The `type` field on create_schema/add_schema_field is a closed set of
-   exact values (see that tool's schema) — copy one value verbatim. Never combine two types, add
-   brackets, or invent generic-looking syntax like "reference_list[tags]". If unsure which type fits,
-   use "string" and say so in your reply — do not guess a fancier-looking type name.
-2. Abandoning the task after a tool error. If a call returns status "error", the error message names the
-   exact problem — fix only that, and retry with the SAME schema/field name the user asked for. Never
-   switch to a different, new, or invented name to work around an error."""
-        if is_local_model
-        else ""
-    )
 
     return f"""You are an AI assistant embedded in civex, a local-first research data management tool.
 You help with five things: (1) explaining how civex works, (2) querying data, (3) building workflow
@@ -334,7 +291,7 @@ Available collections: {collections_csv}
 - Use descriptive kebab-case stems: "parse-audio-dates", not "workflow1".
 - Ask for clarification if schema name, trigger type, or plugin logic is ambiguous.
 - For civex how-to questions, answer from your knowledge of this system prompt — no tool calls needed.
-- Keep responses concise.{openrouter_note}{local_model_note}"""
+- Keep responses concise.{prompt_fragment}"""
 
 
 # ---------------------------------------------------------------------------
@@ -348,11 +305,13 @@ Available collections: {collections_csv}
 
 def _stream_chat(history: list, ctx, ai_cfg):
     provider = get_chat_provider(ai_cfg)
-    return _run_stream(history, ctx, ai_cfg, provider)
+    return _run_stream(history, ctx, provider)
 
 
-async def _run_stream(history: list, ctx, ai_cfg, provider):
-    system = provider.render_system(_build_system_prompt(ctx, ai_cfg=ai_cfg))
+async def _run_stream(history: list, ctx, provider):
+    system = provider.render_system(
+        _build_system_prompt(ctx, prompt_fragment=provider.prompt_fragment())
+    )
     tools = provider.render_tools(all_tools().values())
     # Reconstructs any tool calls/results from earlier turns into this
     # provider's native multi-turn shape, so the model still has them in
