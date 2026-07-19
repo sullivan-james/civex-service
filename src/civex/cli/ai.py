@@ -7,9 +7,13 @@ import typer
 from civex.cli.utils import cli_load_config
 from civex.config import AIConfig, save_config
 from civex.console import console
-from civex.services.ai.config import ANTHROPIC_MODELS, resolve_preset
+from civex.services.ai.config import resolve_preset
+from civex.services.ai.providers import AnthropicProvider
 
 app = typer.Typer(help="Configure the AI assistant")
+
+# Flat id list, derived from the structured catalog (CIVEX-53).
+ANTHROPIC_MODELS = [m.id for m in AnthropicProvider().known_models()]
 
 
 @app.command("status")

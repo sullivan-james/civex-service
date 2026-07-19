@@ -15,6 +15,7 @@ from civex.services.ai.history import _history_to_anthropic
 from civex.services.ai.providers.base import (
     ChatProvider,
     ErrorEvent,
+    ModelInfo,
     ProviderEvent,
     RoundEnd,
     TextDelta,
@@ -24,8 +25,20 @@ from civex.services.ai.providers.base import (
 if TYPE_CHECKING:
     from civex.services.ai.tools.base import AiTool
 
+# Static catalog, not live /v1/models discovery (CIVEX-53) -- same three
+# models/labels the frontend's own copy (frontend/src/api/ai.ts) already
+# hardcodes, kept here as the one backend-side source of truth.
+_KNOWN_MODELS = [
+    ModelInfo(id="claude-haiku-4-5-20251001", label="Haiku (fast, cheap)"),
+    ModelInfo(id="claude-sonnet-4-6", label="Sonnet (balanced)"),
+    ModelInfo(id="claude-opus-4-8", label="Opus (most capable)"),
+]
+
 
 class AnthropicProvider(ChatProvider):
+    def known_models(self) -> list[ModelInfo]:
+        return _KNOWN_MODELS
+
     def parse_history(self, history: list) -> list[Any]:
         return _history_to_anthropic(history)
 

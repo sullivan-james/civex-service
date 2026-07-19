@@ -9,10 +9,16 @@ from pydantic import BaseModel, Field
 from civex.config import AIConfig, load_config, save_config
 from civex.context import build_local_context
 from civex.domain.exceptions import ConfigError
-from civex.services.ai.config import ANTHROPIC_MODELS, DEFAULT_MODEL
+from civex.services.ai.config import DEFAULT_MODEL
+from civex.services.ai.providers import AnthropicProvider
 from civex.services.ai.service import _sse
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+
+# Flat id list, derived from the structured catalog (CIVEX-53) -- kept as a
+# plain list of strings since that's the shape this module's 422 check and
+# error message need.
+ANTHROPIC_MODELS = [m.id for m in AnthropicProvider().known_models()]
 
 
 # ---------------------------------------------------------------------------

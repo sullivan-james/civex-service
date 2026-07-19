@@ -1,15 +1,13 @@
 """AI provider/model presets shared by the CLI (cli/ai.py) and the HTTP
 config endpoint (server/routers/ai.py) -- previously each defined its own
-copy of ANTHROPIC_MODELS independently, which could silently drift (CIVEX-50).
+copy of this data independently, which could silently drift (CIVEX-50). The
+known-Anthropic-models catalog itself now lives on AnthropicProvider
+(services/ai/providers/anthropic_provider.py, CIVEX-53) rather than here,
+since it's provider-specific structured data (ModelInfo objects), not a
+provider/base_url preset.
 """
 
 from __future__ import annotations
-
-ANTHROPIC_MODELS = [
-    "claude-haiku-4-5-20251001",
-    "claude-sonnet-4-6",
-    "claude-opus-4-8",
-]
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 

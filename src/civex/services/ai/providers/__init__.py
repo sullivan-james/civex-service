@@ -13,6 +13,7 @@ from civex.services.ai.providers.anthropic_provider import AnthropicProvider
 from civex.services.ai.providers.base import (
     ChatProvider,
     ErrorEvent,
+    ModelInfo,
     ProviderEvent,
     RoundEnd,
     TextDelta,
@@ -23,6 +24,7 @@ from civex.services.ai.providers.openai_provider import OpenAIProvider
 __all__ = [
     "ChatProvider",
     "ErrorEvent",
+    "ModelInfo",
     "ProviderEvent",
     "RoundEnd",
     "TextDelta",
