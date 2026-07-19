@@ -128,9 +128,20 @@ function applyEvent(prev: ChatEntry[], event: AiEvent): ChatEntry[] {
  * return the final entries array once the stream settles so the caller can
  * act on it (e.g. AiPanel persists the session), since React state can't be
  * read back synchronously from here. */
+export interface SessionUsage {
+  inputTokens: number
+  outputTokens: number
+}
+
+const ZERO_USAGE: SessionUsage = { inputTokens: 0, outputTokens: 0 }
+
 export function useAiChat(initialEntries: ChatEntry[] = []) {
   const [entries, setEntries] = useState<ChatEntry[]>(initialEntries)
   const [busy, setBusy] = useState(false)
+  // Running token count for the current conversation only (not persisted) --
+  // the all-time total lives server-side, fetched via aiApi.getUsage().
+  const [sessionUsage, setSessionUsage] = useState<SessionUsage>(ZERO_USAGE)
+  const resetSessionUsage = () => setSessionUsage(ZERO_USAGE)
 
   // Streams one assistant turn from `msgs` and applies the resulting events.
   // Shared by sendMessage (a new user message) and resolveAndContinue (an
@@ -147,6 +158,13 @@ export function useAiChat(initialEntries: ChatEntry[] = []) {
     })
     try {
       for await (const event of streamChat(msgs)) {
+        if (event.type === 'usage') {
+          setSessionUsage((prev) => ({
+            inputTokens: prev.inputTokens + event.input_tokens,
+            outputTokens: prev.outputTokens + event.output_tokens,
+          }))
+          continue
+        }
         setEntries((prev) => {
           current = applyEvent(prev, event)
           return current
@@ -195,5 +213,13 @@ export function useAiChat(initialEntries: ChatEntry[] = []) {
     return runStream(toApiMessages(updated))
   }
 
-  return { entries, setEntries, busy, sendMessage, resolveAndContinue }
+  return {
+    entries,
+    setEntries,
+    busy,
+    sendMessage,
+    resolveAndContinue,
+    sessionUsage,
+    resetSessionUsage,
+  }
 }

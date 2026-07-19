@@ -38,6 +38,10 @@ function saveSessions(sessions: StoredSession[]): void {
   }
 }
 
+function formatTokenCount(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
+}
+
 // ---------------------------------------------------------------------------
 // Main panel
 // ---------------------------------------------------------------------------
@@ -64,8 +68,15 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
         )
       : []
   })
-  const { entries, setEntries, busy, sendMessage, resolveAndContinue } =
-    useAiChat(initialEntries)
+  const {
+    entries,
+    setEntries,
+    busy,
+    sendMessage,
+    resolveAndContinue,
+    sessionUsage,
+    resetSessionUsage,
+  } = useAiChat(initialEntries)
   const [input, setInput] = useState('')
   const [showSettings, setShowSettings] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
@@ -88,6 +99,7 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
     setInput('')
     setSessionId(`${Date.now()}`)
     setShowHistory(false)
+    resetSessionUsage()
   }
 
   function restoreSession(session: StoredSession) {
@@ -98,6 +110,10 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
     )
     setSessionId(session.id)
     setShowHistory(false)
+    // A restored session's own token usage was never tracked (it happened in
+    // an earlier, separate load of the app) -- reset rather than show a
+    // stale or misleading count carried over from whatever chat preceded it.
+    resetSessionUsage()
   }
 
   function deleteSession(id: string, e: React.MouseEvent) {
@@ -188,6 +204,17 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
         >
           <span className="text-[#0969da]">✦</span>
           <span className="text-sm font-semibold text-[#1f2328]">civex AI</span>
+          {(sessionUsage.inputTokens > 0 || sessionUsage.outputTokens > 0) && (
+            <span
+              className="text-[10px] text-[#adbac7]"
+              title={`This conversation: ${sessionUsage.inputTokens.toLocaleString()} input / ${sessionUsage.outputTokens.toLocaleString()} output tokens`}
+            >
+              {formatTokenCount(
+                sessionUsage.inputTokens + sessionUsage.outputTokens,
+              )}{' '}
+              tokens
+            </span>
+          )}
           <div className="flex-1" />
           {/* History button */}
           <button
