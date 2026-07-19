@@ -1,3 +1,6 @@
+import { api } from './client'
+import { parseSSE } from '../lib/sse'
+
 export interface AiConfig {
   configured: boolean
   source: 'config' | 'env' | 'none'
@@ -85,47 +88,9 @@ export const PRESET_PROVIDERS = [
 
 export type PresetProviderId = (typeof PRESET_PROVIDERS)[number]['id']
 
-export async function getAiConfig(): Promise<AiConfig> {
-  const res = await fetch('/api/ai/config')
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
-}
-
-export async function updateAiConfig(patch: {
-  api_key?: string
-  model?: string
-  provider?: string
-  base_url?: string | null
-}): Promise<AiConfig> {
-  const res = await fetch('/api/ai/config', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(patch),
-  })
-  if (!res.ok) {
-    const err = (await res.json().catch(() => ({}))) as Record<string, unknown>
-    throw new Error((err.detail as string) ?? `HTTP ${res.status}`)
-  }
-  return res.json()
-}
-
 export interface OllamaModel {
   name: string
   size: number // bytes
-}
-
-export async function getOllamaModels(
-  baseUrl: string = 'http://localhost:11434/v1',
-): Promise<OllamaModel[]> {
-  const res = await fetch(
-    `/api/ai/ollama/models?base_url=${encodeURIComponent(baseUrl)}`,
-  )
-  if (!res.ok) {
-    const err = (await res.json().catch(() => ({}))) as Record<string, unknown>
-    throw new Error((err.detail as string) ?? `HTTP ${res.status}`)
-  }
-  const { models } = (await res.json()) as { models: OllamaModel[] }
-  return models
 }
 
 export interface OpenRouterLimits {
@@ -138,17 +103,27 @@ export interface OpenRouterLimits {
   }
 }
 
-export async function getOpenRouterAuthUrl(): Promise<string> {
-  const res = await fetch('/api/ai/openrouter/auth-url')
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const { url } = (await res.json()) as { url: string }
-  return url
-}
-
-export async function getOpenRouterLimits(): Promise<OpenRouterLimits> {
-  const res = await fetch('/api/ai/openrouter/limits')
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
+export const aiApi = {
+  getConfig: () => api.get<AiConfig>('/ai/config'),
+  updateConfig: (patch: {
+    api_key?: string
+    model?: string
+    provider?: string
+    base_url?: string | null
+  }) => api.patch<AiConfig>('/ai/config', patch),
+  getOllamaModels: async (
+    baseUrl: string = 'http://localhost:11434/v1',
+  ): Promise<OllamaModel[]> => {
+    const { models } = await api.get<{ models: OllamaModel[] }>(
+      `/ai/ollama/models?base_url=${encodeURIComponent(baseUrl)}`,
+    )
+    return models
+  },
+  getOpenRouterAuthUrl: async (): Promise<string> => {
+    const { url } = await api.get<{ url: string }>('/ai/openrouter/auth-url')
+    return url
+  },
+  getOpenRouterLimits: () => api.get<OpenRouterLimits>('/ai/openrouter/limits'),
 }
 
 // Mirrors civex.server.routers.ai's UserMessage/AssistantMessage/ToolCallMessage
@@ -191,23 +166,11 @@ export async function* streamChat(
     const err = (await res.json().catch(() => ({}))) as Record<string, unknown>
     throw new Error((err.detail as string) ?? `HTTP ${res.status}`)
   }
-  const reader = res.body!.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const lines = buf.split('\n')
-    buf = lines.pop() ?? ''
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        try {
-          yield JSON.parse(line.slice(6)) as AiEvent
-        } catch {
-          // skip malformed lines
-        }
-      }
+  for await (const data of parseSSE(res.body!.getReader())) {
+    try {
+      yield JSON.parse(data) as AiEvent
+    } catch {
+      // skip malformed lines
     }
   }
 }

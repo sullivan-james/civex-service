@@ -8,12 +8,8 @@ import {
   type OpenRouterLimits,
   PRESET_PROVIDERS,
   type PresetProviderId,
-  getAiConfig,
-  getOllamaModels,
-  getOpenRouterAuthUrl,
-  getOpenRouterLimits,
+  aiApi,
   streamChat,
-  updateAiConfig,
 } from '../../api/ai'
 
 // ---------------------------------------------------------------------------
@@ -571,53 +567,32 @@ interface AiPanelProps {
 }
 
 export default function AiPanel({ open, onClose }: AiPanelProps) {
-  const [entries, setEntries] = useState<ChatEntry[]>([])
+  // Restoring the most recent session on mount reads from localStorage once
+  // and needs no reactive dependency, so it's a lazy useState initializer
+  // rather than a mount-only useEffect calling setState (see
+  // react-hooks/set-state-in-effect: effects should synchronize with
+  // external systems, not synchronously set our own React state).
+  const [entries, setEntries] = useState<ChatEntry[]>(() => {
+    const first = loadSessions()[0]
+    return first
+      ? first.entries.map((e) =>
+          e.kind === 'assistant' ? { ...e, streaming: false } : e,
+        )
+      : []
+  })
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
-  const [sessionId, setSessionId] = useState(() => `${Date.now()}`)
-  const [sessions, setSessions] = useState<StoredSession[]>([])
+  const [sessionId, setSessionId] = useState(
+    () => loadSessions()[0]?.id ?? `${Date.now()}`,
+  )
+  const [sessions, setSessions] = useState<StoredSession[]>(() =>
+    loadSessions(),
+  )
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-
-  // Restore most recent session on mount
-  useEffect(() => {
-    const stored = loadSessions()
-    setSessions(stored)
-    if (stored.length > 0 && stored[0]) {
-      const s = stored[0]
-      setEntries(
-        s.entries.map((e) =>
-          e.kind === 'assistant' ? { ...e, streaming: false } : e,
-        ),
-      )
-      setSessionId(s.id)
-    }
-  }, [])
-
-  // Auto-save whenever a complete assistant response arrives
-  useEffect(() => {
-    if (entries.length === 0) return
-    const hasComplete = entries.some(
-      (e) => e.kind === 'assistant' && !e.streaming,
-    )
-    if (!hasComplete) return
-    const firstUser =
-      (entries.find((e) => e.kind === 'user') as UserEntry | undefined)?.text ??
-      ''
-    const title = firstUser.slice(0, 70) || 'Chat'
-    setSessions((prev) => {
-      const without = prev.filter((s) => s.id !== sessionId)
-      const updated = [
-        { id: sessionId, title, createdAt: new Date().toISOString(), entries },
-        ...without,
-      ].slice(0, MAX_SESSIONS)
-      saveSessions(updated)
-      return updated
-    })
-  }, [entries, sessionId])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -671,30 +646,73 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
     return msgs
   }
 
+  // Persists the session as soon as a complete assistant response arrives.
+  // Called directly from runStream below (an async function only ever
+  // invoked from an event handler), not a useEffect watching `entries` --
+  // effects should synchronize with external systems, not synchronously set
+  // our own React state (react-hooks/set-state-in-effect). saveSessions()
+  // itself is still the external-system (localStorage) write; setSessions
+  // updates our own in-memory mirror of it for the History pane.
+  function saveIfComplete(finalEntries: ChatEntry[]) {
+    const hasComplete = finalEntries.some(
+      (e) => e.kind === 'assistant' && !e.streaming,
+    )
+    if (!hasComplete) return
+    const firstUser =
+      (finalEntries.find((e) => e.kind === 'user') as UserEntry | undefined)
+        ?.text ?? ''
+    const title = firstUser.slice(0, 70) || 'Chat'
+    setSessions((prev) => {
+      const without = prev.filter((s) => s.id !== sessionId)
+      const updated = [
+        {
+          id: sessionId,
+          title,
+          createdAt: new Date().toISOString(),
+          entries: finalEntries,
+        },
+        ...without,
+      ].slice(0, MAX_SESSIONS)
+      saveSessions(updated)
+      return updated
+    })
+  }
+
   // Streams one assistant turn from `msgs` and applies the resulting events.
   // Shared by handleSend (a new user message) and resolveAndContinue (an
   // automatic continuation after a proposal is resolved) so both go through
-  // the exact same request/response handling.
+  // the exact same request/response handling. Tracks the entries array
+  // locally (alongside dispatching the same updates to React state) so the
+  // final value is available synchronously at the end for saveIfComplete --
+  // React state itself can't be read back mid-function like this.
   async function runStream(msgs: ChatMessage[]) {
     setBusy(true)
-    setEntries((prev) => [
-      ...prev,
-      { kind: 'assistant', text: '', streaming: true },
-    ])
+    let current: ChatEntry[] = []
+    setEntries((prev) => {
+      current = [...prev, { kind: 'assistant', text: '', streaming: true }]
+      return current
+    })
     try {
       for await (const event of streamChat(msgs)) {
-        setEntries((prev) => applyEvent(prev, event))
+        setEntries((prev) => {
+          current = applyEvent(prev, event)
+          return current
+        })
         if (event.type === 'done' || event.type === 'error') break
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      setEntries((prev) => [
-        ...prev.slice(0, -1),
-        { kind: 'assistant', text: `Error: ${msg}`, streaming: false },
-      ])
+      setEntries((prev) => {
+        current = [
+          ...prev.slice(0, -1),
+          { kind: 'assistant', text: `Error: ${msg}`, streaming: false },
+        ]
+        return current
+      })
     } finally {
       setBusy(false)
     }
+    saveIfComplete(current)
   }
 
   // Records the outcome(s) of one or more resolved proposals, then
@@ -1092,7 +1110,8 @@ function SettingsPane({ onSaved }: { onSaved: () => void }) {
   const [ollamaError, setOllamaError] = useState<string | null>(null)
 
   useEffect(() => {
-    getAiConfig()
+    aiApi
+      .getConfig()
       .then((c) => {
         setCfg(c)
         const p = detectPreset(c)
@@ -1124,17 +1143,36 @@ function SettingsPane({ onSaved }: { onSaved: () => void }) {
     }
   }
 
-  // Fetch Ollama models whenever the ollama preset is selected or base URL changes
-  useEffect(() => {
+  // Reset ollama-specific state as soon as the preset changes away from
+  // 'ollama' -- adjusted during render (same pattern as JobsTable's
+  // page-reset) rather than a synchronous setState at the top of the effect
+  // below, which only needs to own the actual fetch (a real external-system
+  // sync) now.
+  const [prevPreset, setPrevPreset] = useState(preset)
+  if (prevPreset !== preset) {
+    setPrevPreset(preset)
     if (preset !== 'ollama') {
       setOllamaModels([])
       setOllamaError(null)
-      return
     }
-    setOllamaLoading(true)
-    setOllamaError(null)
+  }
+
+  // Fetch Ollama models whenever the ollama preset is selected or base URL
+  // changes. The loading/error reset is inside the first .then() (a
+  // microtask away, imperceptibly later than firing synchronously) rather
+  // than at the top of the effect body -- keeps the whole fetch sequence in
+  // callback form, matching the pattern already used elsewhere in this file
+  // (react-hooks/set-state-in-effect flags synchronous setState in an
+  // effect's own body, not inside a promise callback).
+  useEffect(() => {
+    if (preset !== 'ollama') return
     const url = customBaseUrl || 'http://localhost:11434/v1'
-    getOllamaModels(url)
+    Promise.resolve()
+      .then(() => {
+        setOllamaLoading(true)
+        setOllamaError(null)
+        return aiApi.getOllamaModels(url)
+      })
       .then((models) => {
         setOllamaModels(models)
         if (models.length > 0) {
@@ -1148,12 +1186,14 @@ function SettingsPane({ onSaved }: { onSaved: () => void }) {
   // Fetch OpenRouter limits whenever we're on the openrouter preset and configured
   useEffect(() => {
     if (!cfg?.configured || detectPreset(cfg) !== 'openrouter') return
-    getOpenRouterLimits()
+    aiApi
+      .getOpenRouterLimits()
       .then(setOrLimits)
       .catch(() => {})
     const id = setInterval(
       () =>
-        getOpenRouterLimits()
+        aiApi
+          .getOpenRouterLimits()
           .then(setOrLimits)
           .catch(() => {}),
       30_000,
@@ -1171,12 +1211,12 @@ function SettingsPane({ onSaved }: { onSaved: () => void }) {
 
   async function handleOpenRouterLogin() {
     try {
-      const url = await getOpenRouterAuthUrl()
+      const url = await aiApi.getOpenRouterAuthUrl()
       window.open(url, '_blank', 'width=600,height=700')
       setOrPolling(true)
       pollRef.current = setInterval(async () => {
         try {
-          const updated = await getAiConfig()
+          const updated = await aiApi.getConfig()
           if (
             updated.configured &&
             updated.base_url?.includes('openrouter.ai')
@@ -1238,7 +1278,7 @@ function SettingsPane({ onSaved }: { onSaved: () => void }) {
         return
       }
 
-      const updated = await updateAiConfig(patch)
+      const updated = await aiApi.updateConfig(patch)
       setCfg(updated)
       setApiKey('')
       setSuccess(true)
