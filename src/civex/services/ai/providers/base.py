@@ -81,6 +81,17 @@ class ChatProvider(ABC):
         class -- no intermediate ToolSchema object."""
         ...
 
+    def prompt_fragment(self) -> str:
+        """Optional provider/backend-specific text appended to the shared
+        system prompt (e.g. OpenRouter's free-tier budget warning, a
+        small-local-model note) -- request-shaping like extra_body/
+        extra_headers stays inside stream_round() as an implementation
+        detail, not surfaced here. Defaults to no fragment; only
+        OpenAIProvider overrides this today, since neither existing note is
+        reachable on the Anthropic path (both gate on base_url, which that
+        path never sets)."""
+        return ""
+
     @abstractmethod
     def stream_round(
         self, *, system: Any, tools: Any, messages: list[Any]
