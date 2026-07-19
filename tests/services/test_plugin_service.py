@@ -29,6 +29,19 @@ def test_list_registered_includes_builtins(ctx: AppContext) -> None:
     assert all(p["builtin"] for p in registered if p["id"].startswith("civex."))
 
 
+def test_list_registered_includes_category_and_config_schema(
+    ctx: AppContext,
+) -> None:
+    """category/config_schema are introspected off each plugin's own class
+    (BasePlugin.category, BasePlugin.Config) rather than hand-maintained,
+    so they can't silently drift from the real plugin (CIVEX-56)."""
+    registered = {p["id"]: p for p in ctx.plugin_svc.list_registered()}
+    builtin = next(p for pid, p in registered.items() if pid.startswith("civex."))
+    assert isinstance(builtin["category"], str) and builtin["category"]
+    assert builtin["config_schema"]["type"] == "object"
+    assert "properties" in builtin["config_schema"]
+
+
 def test_list_raw_empty_when_no_plugins_dir_populated(ctx: AppContext) -> None:
     assert ctx.plugin_svc.list_raw() == []
 
