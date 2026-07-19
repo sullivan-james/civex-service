@@ -56,6 +56,12 @@ class ErrorEvent:
 ProviderEvent = TextDelta | RoundEnd | ErrorEvent
 
 
+@dataclass(frozen=True)
+class ModelInfo:
+    id: str
+    label: str
+
+
 class ChatProvider(ABC):
     def __init__(self, ai_cfg: AIConfig | None = None) -> None:
         # Optional: TOOLS/TOOLS_OPENAI-style module constants build a
@@ -80,6 +86,16 @@ class ChatProvider(ABC):
         schema, reading name/description/input_schema straight off each
         class -- no intermediate ToolSchema object."""
         ...
+
+    def known_models(self) -> list[ModelInfo]:
+        """Static catalog of well-known model ids for this provider (e.g. for
+        a config-form dropdown or an "unsupported model" validation message).
+        Empty by default -- most openai-compat backends have no fixed catalog
+        worth hardcoding (Ollama's installed-model list is already served
+        live via /ai/ollama/models). Only AnthropicProvider overrides this
+        today. Deliberately a static list, not live /v1/models discovery --
+        no new network dependency in the config-save path."""
+        return []
 
     def prompt_fragment(self) -> str:
         """Optional provider/backend-specific text appended to the shared
