@@ -596,6 +596,112 @@ def test_openai_stream_halts_after_a_proposed_tool(ctx, monkeypatch) -> None:
     assert _json.loads(tr["content"])["status"] == "proposed"
 
 
+def test_repeated_identical_tool_call_is_short_circuited(ctx, monkeypatch) -> None:
+    """Regression: a weak model that responds to an error by blindly repeating
+    the exact same tool call (same name, same args) instead of fixing it used
+    to burn every remaining round re-dispatching an identical, deterministically
+    -failing call. The 2nd+ identical call must be short-circuited with a
+    distinct "stop repeating" message rather than re-invoking the real tool."""
+    pytest.importorskip("openai")
+    import asyncio
+    import json as _json
+
+    from civex.config import AIConfig
+
+    served = {"rounds": 0}
+    dispatch_calls = {"count": 0}
+    real_dispatch = ai_service._dispatch_tool
+
+    def counting_dispatch(name, tool_input, ctx_):
+        dispatch_calls["count"] += 1
+        return real_dispatch(name, tool_input, ctx_)
+
+    monkeypatch.setattr(ai_service, "_dispatch_tool", counting_dispatch)
+
+    def _chunk(*, content=None, tool_calls=None, finish=None):
+        delta = type("D", (), {"content": content, "tool_calls": tool_calls})()
+        choice = type("C", (), {"delta": delta, "finish_reason": finish})()
+        return type("Chunk", (), {"choices": [choice]})()
+
+    class FakeStream:
+        def __init__(self, chunks):
+            self._chunks = chunks
+
+        def __aiter__(self):
+            async def gen():
+                for c in self._chunks:
+                    yield c
+
+            return gen()
+
+    def _tc(call_id):
+        return type(
+            "TC",
+            (),
+            {
+                "index": 0,
+                "id": call_id,
+                "function": type(
+                    "F",
+                    (),
+                    {
+                        "name": "list_records",
+                        "arguments": _json.dumps({"collection": "ghost"}),
+                    },
+                )(),
+            },
+        )()
+
+    class FakeCompletions:
+        async def create(self, **_kw):
+            served["rounds"] += 1
+            if served["rounds"] <= 3:
+                return FakeStream(
+                    [
+                        _chunk(
+                            tool_calls=[_tc(f"call_{served['rounds']}")],
+                            finish="tool_calls",
+                        )
+                    ]
+                )
+            return FakeStream([_chunk(content="done", finish="stop")])
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            self.chat = type("Chat", (), {"completions": FakeCompletions()})()
+
+    import openai
+
+    monkeypatch.setattr(openai, "AsyncOpenAI", FakeClient)
+
+    cfg = AIConfig(
+        api_key="x",
+        model="m",
+        provider="openai-compat",
+        base_url="http://localhost:1/v1",
+    )
+
+    async def collect():
+        out = []
+        history = [ai.UserMessage(content="find something in ghost")]
+        async for sse in ctx.ai_svc.stream_chat(history, cfg):
+            out.append(_json.loads(sse[len("data: ") :]))
+        return out
+
+    events = asyncio.run(collect())
+    tool_results = [
+        _json.loads(e["content"]) for e in events if e["type"] == "tool_result"
+    ]
+
+    assert len(tool_results) == 3
+    assert dispatch_calls["count"] == 1  # only the first identical call actually ran
+    assert tool_results[0]["status"] == "error"
+    assert "does not exist" in tool_results[0]["message"]
+    for repeat in tool_results[1:]:
+        assert repeat["status"] == "error"
+        assert "already called" in repeat["message"]
+
+
 def test_anthropic_stream_halts_after_a_proposed_tool(ctx, monkeypatch) -> None:
     """Anthropic-provider mirror of test_openai_stream_halts_after_a_proposed_tool
     above -- same guarantee (the round-loop stops immediately after a proposed
