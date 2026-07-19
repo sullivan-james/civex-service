@@ -26,8 +26,12 @@ class PluginService:
         self._dir = civex_dir / "plugins"
 
     def list_registered(self) -> list[dict]:
-        """[{"id", "description", "builtin"}] for every registered plugin
-        (built-ins + user plugins discovered from _civex/plugins/)."""
+        """[{"id", "description", "builtin", "category", "config_schema"}]
+        for every registered plugin (built-ins + user plugins discovered
+        from _civex/plugins/). config_schema is each plugin's Config
+        (a pydantic model) rendered as JSON schema -- introspected straight
+        off the class rather than hand-maintained (CIVEX-56), so it can't
+        drift the way the old hardcoded plugin-reference table could."""
         from civex.plugins.registry import all_plugins, discover_user_plugins
 
         discover_user_plugins(self._dir)
@@ -37,6 +41,8 @@ class PluginService:
                 "id": plugin_id,
                 "description": getattr(cls, "description", "") or "",
                 "builtin": plugin_id.startswith(builtin_prefix),
+                "category": getattr(cls, "category", "general"),
+                "config_schema": cls.Config.model_json_schema(),
             }
             for plugin_id, cls in sorted(all_plugins().items())
         ]

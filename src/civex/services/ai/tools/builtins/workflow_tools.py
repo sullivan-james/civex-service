@@ -28,11 +28,20 @@ class ListWorkflowsTool(AiTool):
 
 class ListPluginsTool(AiTool):
     name = "list_plugins"
-    description = "List all custom plugin Python files in _civex/plugins/, including their full source code."
+    description = (
+        "List every available plugin (built-ins and custom). 'registered' covers all of them with "
+        "structured metadata -- id, category, and config_schema (the plugin's Config fields as JSON "
+        "schema) -- useful for picking the right plugin and its config keys without guessing. "
+        "'custom_source' has the full Python source of custom plugin files in _civex/plugins/, for "
+        "reading or editing existing custom plugin code."
+    )
     input_schema = {"type": "object", "properties": {}}
 
     def run(self, tool_input: dict, ctx: AiToolContext) -> Any:
-        return ctx.plugin_svc.list_raw()
+        return {
+            "registered": ctx.plugin_svc.list_registered(),
+            "custom_source": ctx.plugin_svc.list_raw(),
+        }
 
 
 class GetWorkflowAuthoringGuideTool(AiTool):

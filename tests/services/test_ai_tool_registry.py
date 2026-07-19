@@ -103,6 +103,9 @@ def test_list_workflows_tool_reads_via_workflow_service(ctx: AppContext) -> None
 
 
 def test_list_plugins_tool_reads_via_plugin_service(ctx: AppContext) -> None:
+    """list_plugins returns both structured metadata for every registered
+    plugin (built-ins + custom, incl. category/config_schema -- CIVEX-56)
+    and full source for custom plugin files."""
     code = (
         "from civex.plugins.base import BasePlugin, WorkflowContext\n\n"
         "class Plugin(BasePlugin):\n"
@@ -113,7 +116,22 @@ def test_list_plugins_tool_reads_via_plugin_service(ctx: AppContext) -> None:
     )
     ctx.plugin_svc.save("demo", code)
     result = json.loads(dispatch("list_plugins", {}, _tool_ctx(ctx)))
-    assert result == [{"filename": "demo.py", "code": code}]
+
+    assert result["custom_source"] == [{"filename": "demo.py", "code": code}]
+
+    registered = {p["id"]: p for p in result["registered"]}
+    assert registered["project.demo"]["builtin"] is False
+    assert registered["project.demo"]["category"] == "general"
+    assert registered["project.demo"]["config_schema"] == {
+        "title": "Config",
+        "type": "object",
+        "properties": {},
+    }
+    assert any(pid.startswith("civex.") for pid in registered)
+    builtin = next(p for pid, p in registered.items() if pid.startswith("civex."))
+    assert builtin["builtin"] is True
+    assert isinstance(builtin["category"], str) and builtin["category"]
+    assert "properties" in builtin["config_schema"]
 
 
 def test_save_workflow_tool_validates_without_writing(ctx: AppContext) -> None:
@@ -130,7 +148,9 @@ def test_save_workflow_tool_validates_without_writing(ctx: AppContext) -> None:
 
 def test_save_workflow_tool_rejects_invalid_yaml(ctx: AppContext) -> None:
     result = json.loads(
-        dispatch("save_workflow", {"stem": "my-wf", "content": "not: [valid"}, _tool_ctx(ctx))
+        dispatch(
+            "save_workflow", {"stem": "my-wf", "content": "not: [valid"}, _tool_ctx(ctx)
+        )
     )
     assert result["status"] == "error"
     assert "Invalid workflow YAML" in result["message"]
