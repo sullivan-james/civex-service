@@ -16,7 +16,12 @@ export const ANTHROPIC_MODELS = [
   { id: 'claude-opus-4-8', label: 'Opus (most capable)' },
 ]
 
+// Only Ollama + OpenRouter are offered as selectable providers -- fewer
+// options, less confusion. Anthropic/Groq/Gemini are disabled (not deleted)
+// below so re-enabling one later is a matter of moving it back into the
+// array, not re-deriving it from scratch.
 export const PRESET_PROVIDERS = [
+  /*
   {
     id: 'anthropic',
     label: 'Anthropic (Claude)',
@@ -49,22 +54,54 @@ export const PRESET_PROVIDERS = [
     ],
     docs: 'https://aistudio.google.com/app/apikey',
   },
+  */
   {
     id: 'openrouter',
     label: 'OpenRouter',
     base_url: 'https://openrouter.ai/api/v1',
     key_placeholder: 'sk-or-...',
+    // Quick-pick suggestions only -- the model field is free-text, so any
+    // OpenRouter slug works even if it's not in this list. Kept broad
+    // across providers/price points; verify against
+    // https://openrouter.ai/api/v1/models if entries here start 404ing
+    // (OpenRouter deprecates/renames slugs over time).
     models: [
+      // Free tier
+      { id: 'tencent/hy3:free', label: 'Tencent Hy3 (free)' },
+      { id: 'poolside/laguna-m.1:free', label: 'Poolside Laguna M.1 (free)' },
       {
-        id: 'meta-llama/llama-3.1-8b-instruct:free',
-        label: 'Llama 3.1 8B (free)',
+        id: 'poolside/laguna-xs-2.1:free',
+        label: 'Poolside Laguna XS 2.1 (free)',
       },
-      { id: 'qwen/qwen3-8b:free', label: 'Qwen3 8B (free)' },
-      { id: 'google/gemma-3-12b-it:free', label: 'Gemma 3 12B (free)' },
-      { id: 'mistralai/mistral-7b-instruct:free', label: 'Mistral 7B (free)' },
+      {
+        id: 'cohere/north-mini-code:free',
+        label: 'Cohere North Mini Code (free)',
+      },
+      {
+        id: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+        label: 'NVIDIA Nemotron 3 Ultra 550B (free)',
+      },
+      // Paid — Anthropic
+      { id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5' },
+      { id: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8' },
+      { id: 'anthropic/claude-fable-5', label: 'Claude Fable 5' },
+      // Paid — OpenAI
+      { id: 'openai/gpt-5.6-sol', label: 'GPT-5.6 Sol (frontier reasoning)' },
+      { id: 'openai/gpt-5.6-terra', label: 'GPT-5.6 Terra (balanced)' },
+      { id: 'openai/gpt-5.6-luna', label: 'GPT-5.6 Luna (fast, cheap)' },
+      // Paid — Google
+      { id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+      { id: 'google/gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite' },
+      // Paid — Meta / Mistral / xAI / Qwen / others
+      { id: 'meta/muse-spark-1.1', label: 'Meta Muse Spark 1.1' },
+      { id: 'mistralai/mistral-medium-3.5', label: 'Mistral Medium 3.5' },
+      { id: 'x-ai/grok-4.5', label: 'Grok 4.5' },
+      { id: 'qwen/qwen3.7-max', label: 'Qwen3.7 Max' },
+      { id: 'qwen/qwen3.7-plus', label: 'Qwen3.7 Plus' },
+      { id: 'z-ai/glm-5.2', label: 'GLM-5.2' },
     ],
     docs: null,
-    note: 'Type any OpenRouter model slug — the four above are free (50 req/day); anything else uses your OpenRouter credits.',
+    note: 'Type any OpenRouter model slug — the free ones above are rate-limited (50 req/day); anything else uses your OpenRouter credits.',
   },
   {
     id: 'ollama',
@@ -103,6 +140,23 @@ export interface OpenRouterLimits {
   }
 }
 
+export interface UsageTotals {
+  requests: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+}
+
+export interface ModelUsage extends UsageTotals {
+  provider: string
+  model: string
+}
+
+export interface AiUsageResponse {
+  total: UsageTotals
+  by_model: ModelUsage[]
+}
+
 export const aiApi = {
   getConfig: () => api.get<AiConfig>('/ai/config'),
   updateConfig: (patch: {
@@ -124,6 +178,7 @@ export const aiApi = {
     return url
   },
   getOpenRouterLimits: () => api.get<OpenRouterLimits>('/ai/openrouter/limits'),
+  getUsage: () => api.get<AiUsageResponse>('/ai/usage'),
 }
 
 // Mirrors civex.server.routers.ai's UserMessage/AssistantMessage/ToolCallMessage
@@ -151,6 +206,7 @@ export type AiEvent =
       input: Record<string, unknown>
     }
   | { type: 'tool_result'; tool_use_id: string; content: string }
+  | { type: 'usage'; input_tokens: number; output_tokens: number }
   | { type: 'done' }
   | { type: 'error'; message: string }
 

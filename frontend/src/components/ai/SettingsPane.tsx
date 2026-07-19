@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   type AiConfig,
+  type AiUsageResponse,
   type OllamaModel,
   type OpenRouterLimits,
   PRESET_PROVIDERS,
@@ -8,28 +9,30 @@ import {
   aiApi,
 } from '../../api/ai'
 
+function formatTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
+}
+
 function detectPreset(cfg: AiConfig | null): PresetProviderId {
-  if (!cfg?.configured) return 'groq'
-  if (cfg.provider === 'anthropic') return 'anthropic'
-  const groq = PRESET_PROVIDERS.find((p) => p.id === 'groq')!
-  const gemini = PRESET_PROVIDERS.find((p) => p.id === 'gemini')!
+  if (!cfg?.configured) return 'openrouter'
   const ollama = PRESET_PROVIDERS.find((p) => p.id === 'ollama')!
   const openrouter = PRESET_PROVIDERS.find((p) => p.id === 'openrouter')!
-  if (cfg.base_url === groq.base_url) return 'groq'
-  if (cfg.base_url === gemini.base_url) return 'gemini'
   if (cfg.base_url === openrouter.base_url) return 'openrouter'
   if (
     cfg.base_url?.startsWith('http://localhost:11434') ||
     cfg.base_url === ollama.base_url
   )
     return 'ollama'
+  // Anthropic/Groq/Gemini presets are disabled (see PRESET_PROVIDERS) -- a
+  // config left over from before that change, or set via env var, falls
+  // back to 'custom' rather than crashing on a missing preset lookup.
   return 'custom'
 }
 
 export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
   const [cfg, setCfg] = useState<AiConfig | null>(null)
   const [loading, setLoading] = useState(true)
-  const [preset, setPreset] = useState<PresetProviderId>('groq')
+  const [preset, setPreset] = useState<PresetProviderId>('openrouter')
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState('')
   const [customBaseUrl, setCustomBaseUrl] = useState('')
@@ -43,6 +46,14 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([])
   const [ollamaLoading, setOllamaLoading] = useState(false)
   const [ollamaError, setOllamaError] = useState<string | null>(null)
+  const [usage, setUsage] = useState<AiUsageResponse | null>(null)
+
+  useEffect(() => {
+    aiApi
+      .getUsage()
+      .then(setUsage)
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     aiApi
@@ -187,11 +198,11 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
       const isCustom = preset === 'custom'
       const isOllama = preset === 'ollama'
       const isOpenRouter = preset === 'openrouter'
-      const isAnthropic = preset === 'anthropic'
-      const provider = isAnthropic ? 'anthropic' : 'openai-compat'
-      const base_url = isAnthropic
-        ? null
-        : isCustom || isOllama
+      // Anthropic preset is disabled (see PRESET_PROVIDERS) -- every
+      // selectable preset now speaks the openai-compat protocol.
+      const provider = 'openai-compat'
+      const base_url =
+        isCustom || isOllama
           ? customBaseUrl.trim()
           : (presetObj.base_url as string)
       const resolvedModel =
@@ -241,7 +252,6 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
   const isOllama = preset === 'ollama'
   const isOpenRouter = preset === 'openrouter'
   const isFreeText = isCustom || isOllama || isOpenRouter
-  const isAnthropic = preset === 'anthropic'
   const effectiveModel = isFreeText ? customModel : model
 
   return (
@@ -277,6 +287,42 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           <p className="text-xs text-[#f85149]">Not configured</p>
         )}
       </div>
+
+      {/* All-time token usage, regardless of provider/model */}
+      {usage && usage.total.requests > 0 && (
+        <div className="rounded-md border border-[#d0d7de] bg-[#f6f8fa] px-3 py-2 text-xs space-y-1">
+          <div className="flex justify-between text-[#1f2328] font-medium">
+            <span>Token usage (all-time)</span>
+            <span>{formatTokens(usage.total.total_tokens)} tokens</span>
+          </div>
+          <div className="flex justify-between text-[#656d76]">
+            <span>Input / Output</span>
+            <span>
+              {formatTokens(usage.total.input_tokens)} /{' '}
+              {formatTokens(usage.total.output_tokens)}
+            </span>
+          </div>
+          <div className="flex justify-between text-[#656d76]">
+            <span>Requests</span>
+            <span>{usage.total.requests}</span>
+          </div>
+          {usage.by_model.length > 0 && (
+            <div className="pt-1 border-t border-[#d0d7de] space-y-0.5">
+              {usage.by_model.slice(0, 3).map((m) => (
+                <div
+                  key={`${m.provider}/${m.model}`}
+                  className="flex justify-between text-[#656d76]"
+                >
+                  <span className="truncate max-w-[180px]" title={m.model}>
+                    {m.model}
+                  </span>
+                  <span>{formatTokens(m.total_tokens)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Provider */}
       <div>
@@ -516,11 +562,9 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
               value={customModel}
               onChange={(e) => setCustomModel(e.target.value)}
               placeholder={
-                isAnthropic
-                  ? 'claude-sonnet-4-6'
-                  : isOpenRouter
-                    ? 'e.g. anthropic/claude-3.5-sonnet (paid) or the free options below'
-                    : 'model name'
+                isOpenRouter
+                  ? 'e.g. anthropic/claude-sonnet-5 (paid) or the free options below'
+                  : 'model name'
               }
               list={isOpenRouter ? 'openrouter-model-suggestions' : undefined}
               className="w-full rounded-md border border-[#d0d7de] px-3 py-1.5 text-sm text-[#1f2328] placeholder:text-[#adbac7] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
