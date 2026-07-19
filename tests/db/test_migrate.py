@@ -32,8 +32,9 @@ def test_fresh_project_ends_at_head_with_all_tables(tmp_path: Path) -> None:
         "commits",
         "audit_log",
         "workflow_jobs",
+        "ai_usage_events",
     } <= tables
-    assert _alembic_revision(engine) == "0001"
+    assert _alembic_revision(engine) == "ac425ae391c7"
 
 
 def test_legacy_db_is_stamped_not_replayed(tmp_path: Path) -> None:
@@ -55,7 +56,7 @@ def test_legacy_db_is_stamped_not_replayed(tmp_path: Path) -> None:
 
     ensure_schema_current(engine)
 
-    assert _alembic_revision(engine) == "0001"
+    assert _alembic_revision(engine) == "ac425ae391c7"
     with engine.connect() as c:
         names = c.execute(text("select name from schemas")).fetchall()
     assert names == [("patient",)]
@@ -67,11 +68,11 @@ def test_already_migrated_db_is_a_noop(tmp_path: Path) -> None:
     ensure_schema_current(
         create_engine(f"sqlite:///{tmp_path / 'twice.db'}")
     )  # fresh engine object, cache miss
-    assert _alembic_revision(engine) == "0001"
+    assert _alembic_revision(engine) == "ac425ae391c7"
 
 
 def test_repeated_call_on_same_engine_object_is_cached_noop(tmp_path: Path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'cached.db'}")
     ensure_schema_current(engine)
     ensure_schema_current(engine)  # in-process cache hit -- must not re-run and error
-    assert _alembic_revision(engine) == "0001"
+    assert _alembic_revision(engine) == "ac425ae391c7"

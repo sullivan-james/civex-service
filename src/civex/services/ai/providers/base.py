@@ -30,6 +30,12 @@ class ToolCallRequest:
 
 
 @dataclass
+class TokenUsage:
+    input_tokens: int
+    output_tokens: int
+
+
+@dataclass
 class RoundEnd:
     """Terminal event for one stream_round() call.
 
@@ -41,11 +47,17 @@ class RoundEnd:
     exactly. `raw` is the provider-native representation of this round's
     assistant turn (an Anthropic Message / an OpenAI-shaped dict), opaque to
     the caller, and is threaded back into append_tool_results() unchanged.
+
+    `usage` is None when the backend didn't report token counts for this
+    round (not every openai-compat backend supports `stream_options:
+    {include_usage: true}`) -- callers must treat a missing usage as "not
+    available", not "zero tokens used".
     """
 
     tool_calls: list[ToolCallRequest]
     is_final: bool
     raw: Any
+    usage: TokenUsage | None = None
 
 
 @dataclass

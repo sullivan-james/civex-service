@@ -257,3 +257,19 @@ class WorkflowJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
 
     record: Mapped[Record] = relationship("Record")
+
+
+class AiUsageEvent(Base):
+    """One AI provider API call's token usage, recorded regardless of which
+    provider/model was used -- powers `civex ai usage` and the AI panel's
+    usage counter. Not tied to a record/session; a flat append-only log.
+    """
+
+    __tablename__ = "ai_usage_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)

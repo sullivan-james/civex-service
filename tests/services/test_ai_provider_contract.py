@@ -22,7 +22,7 @@ import pytest
 
 from civex.config import AIConfig
 from civex.services.ai.providers import AnthropicProvider, OpenAIProvider
-from civex.services.ai.providers.base import RoundEnd, TextDelta
+from civex.services.ai.providers.base import RoundEnd, TextDelta, TokenUsage
 from civex.services.ai.tools.registry import all_tools
 
 
@@ -49,7 +49,20 @@ def _patch_openai_sdk(monkeypatch: pytest.MonkeyPatch, *, tool_call: bool) -> No
     def _chunk(*, content=None, tool_calls=None, finish=None):
         delta = type("D", (), {"content": content, "tool_calls": tool_calls})()
         choice = type("C", (), {"delta": delta, "finish_reason": finish})()
-        return type("Chunk", (), {"choices": [choice]})()
+        return type("Chunk", (), {"choices": [choice], "usage": None})()
+
+    # Final usage-only chunk, per the OpenAI streaming `include_usage` shape:
+    # empty `choices`, a top-level `usage`.
+    usage_chunk = type(
+        "Chunk",
+        (),
+        {
+            "choices": [],
+            "usage": type(
+                "Usage", (), {"prompt_tokens": 12, "completion_tokens": 34}
+            )(),
+        },
+    )()
 
     if tool_call:
         tc = type(
@@ -65,9 +78,9 @@ def _patch_openai_sdk(monkeypatch: pytest.MonkeyPatch, *, tool_call: bool) -> No
                 )(),
             },
         )()
-        chunks = [_chunk(tool_calls=[tc], finish="tool_calls")]
+        chunks = [_chunk(tool_calls=[tc], finish="tool_calls"), usage_chunk]
     else:
-        chunks = [_chunk(content="hi", finish="stop")]
+        chunks = [_chunk(content="hi", finish="stop"), usage_chunk]
 
     class FakeStream:
         def __aiter__(self):
@@ -121,6 +134,8 @@ def _patch_anthropic_sdk(monkeypatch: pytest.MonkeyPatch, *, tool_call: bool) ->
             },
         )()
 
+    fake_usage = type("Usage", (), {"input_tokens": 12, "output_tokens": 34})()
+
     if tool_call:
         deltas: list[str] = []
         final = type(
@@ -129,12 +144,19 @@ def _patch_anthropic_sdk(monkeypatch: pytest.MonkeyPatch, *, tool_call: bool) ->
             {
                 "stop_reason": "tool_use",
                 "content": [_tool_block("call_1", "list_collections", {"x": 1})],
+                "usage": fake_usage,
             },
         )()
     else:
         deltas = ["hi"]
         final = type(
-            "Final", (), {"stop_reason": "end_turn", "content": [_text_block("hi")]}
+            "Final",
+            (),
+            {
+                "stop_reason": "end_turn",
+                "content": [_text_block("hi")],
+                "usage": fake_usage,
+            },
         )()
 
     class FakeMessageStream:
@@ -219,6 +241,7 @@ def test_stream_round_text_only_ends_final_with_no_tool_calls(
     assert isinstance(round_end, RoundEnd)
     assert round_end.is_final is True
     assert round_end.tool_calls == []
+    assert round_end.usage == TokenUsage(input_tokens=12, output_tokens=34)
 
 
 def test_stream_round_with_a_tool_call_ends_non_final_with_parsed_input(
@@ -234,6 +257,7 @@ def test_stream_round_with_a_tool_call_ends_non_final_with_parsed_input(
     tc = round_end.tool_calls[0]
     assert tc.name == "list_collections"
     assert tc.input == {"x": 1}
+    assert round_end.usage == TokenUsage(input_tokens=12, output_tokens=34)
 
 
 def test_append_tool_results_grows_the_message_list(
@@ -266,7 +290,7 @@ def test_openrouter_free_tier_note_only_fires_for_free_model_slug() -> None:
 
     paid_cfg = AIConfig(
         api_key="x",
-        model="anthropic/claude-3.5-sonnet",
+        model="anthropic/claude-sonnet-5",
         provider="openai-compat",
         base_url="https://openrouter.ai/api/v1",
     )
@@ -279,3 +303,53 @@ def test_openrouter_free_tier_note_only_fires_for_free_model_slug() -> None:
         base_url="https://api.groq.com/openai/v1",
     )
     assert "REQUEST BUDGET" not in OpenAIProvider(non_openrouter_cfg).prompt_fragment()
+
+
+# ---------------------------------------------------------------------------
+# OpenAIProvider-specific: stream_options include_usage must degrade
+# gracefully, never break the turn, on a backend that rejects it.
+# ---------------------------------------------------------------------------
+
+
+def test_openai_falls_back_when_backend_rejects_stream_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("openai")
+    import openai
+
+    def _chunk(*, content=None, finish=None):
+        delta = type("D", (), {"content": content, "tool_calls": None})()
+        choice = type("C", (), {"delta": delta, "finish_reason": finish})()
+        return type("Chunk", (), {"choices": [choice], "usage": None})()
+
+    class FakeStream:
+        def __aiter__(self):
+            async def gen():
+                yield _chunk(content="hi", finish="stop")
+
+            return gen()
+
+    calls: list[dict] = []
+
+    class FakeCompletions:
+        async def create(self, **kw):
+            calls.append(kw)
+            if "stream_options" in kw:
+                raise TypeError("stream_options is not supported by this backend")
+            return FakeStream()
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            self.chat = type("Chat", (), {"completions": FakeCompletions()})()
+
+    monkeypatch.setattr(openai, "AsyncOpenAI", FakeClient)
+
+    provider = OpenAIProvider(_ai_cfg(OpenAIProvider))
+    events = asyncio.run(_collect(provider))
+
+    round_end = events[-1]
+    assert isinstance(round_end, RoundEnd)
+    assert round_end.is_final is True
+    assert round_end.usage is None  # backend never reported usage
+    assert len(calls) == 2  # first attempt (rejected) + fallback retry
+    assert "stream_options" not in calls[1]
