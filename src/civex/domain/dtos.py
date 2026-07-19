@@ -297,3 +297,13 @@ class WorkflowJobDTO:
     started_at: datetime | None
     finished_at: datetime | None
     depth: int = 0  # trigger chain depth; jobs enqueued at MAX_JOB_DEPTH are refused
+
+
+@dataclass
+class AiUsageEventDTO:
+    id: uuid.UUID
+    provider: str  # "anthropic" | "openai-compat"
+    model: str
+    input_tokens: int
+    output_tokens: int
+    created_at: datetime

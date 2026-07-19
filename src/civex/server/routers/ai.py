@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Union
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from civex.config import AIConfig, load_config, save_config
-from civex.context import build_local_context
+from civex.context import AppContext, build_local_context
 from civex.domain.exceptions import ConfigError
+from civex.server.deps import get_ctx
 from civex.services.ai.config import DEFAULT_MODEL
 from civex.services.ai.providers import AnthropicProvider
 from civex.services.ai.service import _sse
@@ -370,3 +371,56 @@ async def openrouter_limits():
     if not resp.is_success:
         raise HTTPException(resp.status_code, detail=f"OpenRouter: {resp.text[:200]}")
     return resp.json()
+
+
+# ---------------------------------------------------------------------------
+# Token usage
+# ---------------------------------------------------------------------------
+
+
+class UsageTotalsResponse(BaseModel):
+    requests: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+
+class ModelUsageResponse(BaseModel):
+    provider: str
+    model: str
+    requests: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+
+class AiUsageResponse(BaseModel):
+    total: UsageTotalsResponse
+    by_model: list[ModelUsageResponse]
+
+
+@router.get("/usage", response_model=AiUsageResponse)
+def get_ai_usage(ctx: AppContext = Depends(get_ctx)):
+    """All-time token usage, regardless of provider/model -- backs both the
+    AI panel's usage display and `civex ai usage`."""
+    total = ctx.ai_usage_svc.totals()
+    by_model = ctx.ai_usage_svc.by_model()
+    return AiUsageResponse(
+        total=UsageTotalsResponse(
+            requests=total.requests,
+            input_tokens=total.input_tokens,
+            output_tokens=total.output_tokens,
+            total_tokens=total.total_tokens,
+        ),
+        by_model=[
+            ModelUsageResponse(
+                provider=m.provider,
+                model=m.model,
+                requests=m.totals.requests,
+                input_tokens=m.totals.input_tokens,
+                output_tokens=m.totals.output_tokens,
+                total_tokens=m.totals.total_tokens,
+            )
+            for m in by_model
+        ],
+    )

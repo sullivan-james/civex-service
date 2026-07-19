@@ -20,6 +20,7 @@ from civex.services.ai.providers.base import (
     ProviderEvent,
     RoundEnd,
     TextDelta,
+    TokenUsage,
     ToolCallRequest,
 )
 
@@ -153,20 +154,37 @@ prone to two specific mistakes than a larger model — watch for them explicitly
             {"options": {"num_ctx": OLLAMA_NUM_CTX}} if _is_ollama(ai_cfg) else None
         )
 
-        stream = await client.chat.completions.create(
-            model=ai_cfg.model,
-            messages=api_msgs,  # type: ignore[arg-type]
-            tools=tools,
-            stream=True,
-            extra_body=extra_body,
-        )
+        create_kwargs: dict[str, Any] = {
+            "model": ai_cfg.model,
+            "messages": api_msgs,
+            "tools": tools,
+            "stream": True,
+            "extra_body": extra_body,
+        }
+        try:
+            # include_usage asks the backend to emit a final usage-only chunk
+            # so token counts can be tracked regardless of provider (see
+            # AiUsageService). Not every openai-compat backend understands
+            # this option -- fall back to a plain request rather than
+            # failing the whole turn just to get usage numbers.
+            stream = await client.chat.completions.create(
+                **create_kwargs, stream_options={"include_usage": True}
+            )
+        except Exception:
+            stream = await client.chat.completions.create(**create_kwargs)
 
         finish_reason: str | None = None
         assistant_text = ""
         tool_calls_acc: dict[int, dict] = {}
+        usage: TokenUsage | None = None
 
         try:
             async for chunk in stream:  # type: ignore[union-attr]
+                if getattr(chunk, "usage", None):
+                    usage = TokenUsage(
+                        input_tokens=chunk.usage.prompt_tokens,
+                        output_tokens=chunk.usage.completion_tokens,
+                    )
                 choice = chunk.choices[0] if chunk.choices else None
                 if not choice:
                     continue
@@ -199,7 +217,7 @@ prone to two specific mistakes than a larger model — watch for them explicitly
             return
 
         if finish_reason != "tool_calls" or not tool_calls_acc:
-            yield RoundEnd(tool_calls=[], is_final=True, raw=None)
+            yield RoundEnd(tool_calls=[], is_final=True, raw=None, usage=usage)
             return
 
         tool_calls = []
@@ -226,7 +244,9 @@ prone to two specific mistakes than a larger model — watch for them explicitly
                 for tc in tool_calls_acc.values()
             ],
         }
-        yield RoundEnd(tool_calls=tool_calls, is_final=False, raw=assistant_msg)
+        yield RoundEnd(
+            tool_calls=tool_calls, is_final=False, raw=assistant_msg, usage=usage
+        )
 
     def append_tool_results(
         self,

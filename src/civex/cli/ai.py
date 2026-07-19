@@ -3,8 +3,9 @@ from __future__ import annotations
 from typing import Optional
 
 import typer
+from rich.table import Table
 
-from civex.cli.utils import cli_load_config
+from civex.cli.utils import cli_load_config, get_ctx
 from civex.config import AIConfig, save_config
 from civex.console import console
 from civex.services.ai.config import resolve_preset
@@ -136,6 +137,37 @@ def ai_set_model(
     )
     save_config(config)
     console.print(f"[success]Model set to {model}.[/success]")
+
+
+@app.command("usage")
+def ai_usage() -> None:
+    """Show all-time AI token usage, broken down by provider/model."""
+    ctx = get_ctx()
+    total = ctx.ai_usage_svc.totals()
+    by_model = ctx.ai_usage_svc.by_model()
+
+    if total.requests == 0:
+        console.print("[info]No AI usage recorded yet.[/info]")
+        return
+
+    console.print("[bold]AI Token Usage (all-time)[/bold]")
+    console.print(f"  Requests  {total.requests}")
+    console.print(f"  Input     {total.input_tokens:,} tokens")
+    console.print(f"  Output    {total.output_tokens:,} tokens")
+    console.print(f"  Total     {total.total_tokens:,} tokens")
+    console.print()
+
+    table = Table("Provider", "Model", "Requests", "Input", "Output", "Total")
+    for m in by_model:
+        table.add_row(
+            m.provider,
+            m.model,
+            str(m.totals.requests),
+            f"{m.totals.input_tokens:,}",
+            f"{m.totals.output_tokens:,}",
+            f"{m.totals.total_tokens:,}",
+        )
+    console.print(table)
 
 
 @app.command("clear")

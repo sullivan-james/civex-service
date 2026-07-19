@@ -19,6 +19,7 @@ from civex.services.ai.providers.base import (
     ProviderEvent,
     RoundEnd,
     TextDelta,
+    TokenUsage,
     ToolCallRequest,
 )
 
@@ -107,6 +108,10 @@ class AnthropicProvider(ChatProvider):
             tool_calls=tool_calls,
             is_final=final.stop_reason == "end_turn",
             raw=final,
+            usage=TokenUsage(
+                input_tokens=final.usage.input_tokens,
+                output_tokens=final.usage.output_tokens,
+            ),
         )
 
     def append_tool_results(

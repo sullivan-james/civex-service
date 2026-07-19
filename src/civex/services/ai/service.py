@@ -355,6 +355,21 @@ async def _run_stream(history: list, ctx, provider):
                 round_end = event
 
         assert round_end is not None
+        if round_end.usage is not None and ctx._app_ctx is not None:
+            usage_cfg = provider.ai_cfg
+            ctx._app_ctx.ai_usage_svc.record(
+                usage_cfg.provider if usage_cfg else "unknown",
+                usage_cfg.model if usage_cfg else "unknown",
+                round_end.usage.input_tokens,
+                round_end.usage.output_tokens,
+            )
+            yield _sse(
+                {
+                    "type": "usage",
+                    "input_tokens": round_end.usage.input_tokens,
+                    "output_tokens": round_end.usage.output_tokens,
+                }
+            )
         if round_end.is_final:
             break
 

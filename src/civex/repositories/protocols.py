@@ -9,10 +9,12 @@ Services only import from here, never from civex.db.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from civex.domain.dtos import (
+    AiUsageEventDTO,
     DatasetDTO,
     FieldDTO,
     FileRef,
@@ -143,6 +145,14 @@ class WorkflowJobRepository(Protocol):
     ) -> list[WorkflowJobDTO]: ...
     def count(self, status: str | None = None, record_id: str | None = None) -> int: ...
     def get_by_id(self, job_id: uuid.UUID) -> WorkflowJobDTO | None: ...
+
+
+@runtime_checkable
+class AiUsageRepository(Protocol):
+    def add(
+        self, provider: str, model: str, input_tokens: int, output_tokens: int
+    ) -> AiUsageEventDTO: ...
+    def list_all(self, since: datetime | None = None) -> list[AiUsageEventDTO]: ...
 
 
 @runtime_checkable

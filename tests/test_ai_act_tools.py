@@ -493,6 +493,24 @@ def test_update_collection_rejects_rename_to_existing_name(ctx) -> None:
     assert result["status"] == "error"
 
 
+def test_cli_ai_usage_shows_totals_and_per_model_breakdown(ctx) -> None:
+    ctx.ai_usage_svc.record("anthropic", "claude-sonnet-5", 100, 50)
+    ctx.ai_usage_svc.record("openai-compat", "qwen2.5:7b", 20, 5)
+
+    result = runner.invoke(cli_app, ["ai", "usage"])
+    assert result.exit_code == 0
+    assert "120" in result.output  # total input tokens (100 + 20)
+    assert "55" in result.output  # total output tokens (50 + 5)
+    assert "claude-sonnet-5" in result.output
+    assert "qwen2.5:7b" in result.output
+
+
+def test_cli_ai_usage_with_no_events_prints_a_friendly_message(ctx) -> None:
+    result = runner.invoke(cli_app, ["ai", "usage"])
+    assert result.exit_code == 0
+    assert "No AI usage recorded" in result.output
+
+
 def test_is_proposal_helper() -> None:
     assert (
         ai_service._is_proposal('{"status": "proposed", "action": "create_record"}')
@@ -702,6 +720,74 @@ def test_repeated_identical_tool_call_is_short_circuited(ctx, monkeypatch) -> No
         assert "already called" in repeat["message"]
 
 
+def test_stream_chat_records_and_emits_token_usage(ctx, monkeypatch) -> None:
+    """Every round's token usage must both be persisted via ai_usage_svc and
+    streamed as a 'usage' SSE event, regardless of provider (CIVEX token
+    usage tracking)."""
+    pytest.importorskip("openai")
+    import asyncio
+    import json as _json
+
+    from civex.config import AIConfig
+
+    def _text_chunk(content, finish=None):
+        delta = type("D", (), {"content": content, "tool_calls": None})()
+        choice = type("C", (), {"delta": delta, "finish_reason": finish})()
+        return type("Chunk", (), {"choices": [choice], "usage": None})()
+
+    def _usage_chunk():
+        usage = type("Usage", (), {"prompt_tokens": 111, "completion_tokens": 22})()
+        return type("Chunk", (), {"choices": [], "usage": usage})()
+
+    class FakeStream:
+        def __aiter__(self):
+            async def gen():
+                yield _text_chunk("hi", finish="stop")
+                yield _usage_chunk()
+
+            return gen()
+
+    class FakeCompletions:
+        async def create(self, **_kw):
+            return FakeStream()
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            self.chat = type("Chat", (), {"completions": FakeCompletions()})()
+
+    import openai
+
+    monkeypatch.setattr(openai, "AsyncOpenAI", FakeClient)
+
+    cfg = AIConfig(
+        api_key="x",
+        model="my-model",
+        provider="openai-compat",
+        base_url="http://localhost:1/v1",
+    )
+
+    async def collect():
+        out = []
+        history = [ai.UserMessage(content="hi")]
+        async for sse in ctx.ai_svc.stream_chat(history, cfg):
+            out.append(_json.loads(sse[len("data: ") :]))
+        return out
+
+    events = asyncio.run(collect())
+    usage_events = [e for e in events if e["type"] == "usage"]
+    assert usage_events == [{"type": "usage", "input_tokens": 111, "output_tokens": 22}]
+
+    totals = ctx.ai_usage_svc.totals()
+    assert totals.requests == 1
+    assert totals.input_tokens == 111
+    assert totals.output_tokens == 22
+
+    by_model = ctx.ai_usage_svc.by_model()
+    assert len(by_model) == 1
+    assert by_model[0].provider == "openai-compat"
+    assert by_model[0].model == "my-model"
+
+
 def test_anthropic_stream_halts_after_a_proposed_tool(ctx, monkeypatch) -> None:
     """Anthropic-provider mirror of test_openai_stream_halts_after_a_proposed_tool
     above -- same guarantee (the round-loop stops immediately after a proposed
@@ -769,6 +855,7 @@ def test_anthropic_stream_halts_after_a_proposed_tool(ctx, monkeypatch) -> None:
     class FakeMessages:
         def stream(self, **_kw):
             served["rounds"] += 1
+            fake_usage = type("Usage", (), {"input_tokens": 12, "output_tokens": 34})()
             if served["rounds"] == 1:
                 final = type(
                     "Final",
@@ -783,13 +870,18 @@ def test_anthropic_stream_halts_after_a_proposed_tool(ctx, monkeypatch) -> None:
                                 {"collection": "study", "schema": "trial", "data": {}},
                             ),
                         ],
+                        "usage": fake_usage,
                     },
                 )()
                 return FakeMessageStream(["ok "], final)
             final = type(
                 "Final",
                 (),
-                {"stop_reason": "end_turn", "content": [_text_block("SECOND ROUND")]},
+                {
+                    "stop_reason": "end_turn",
+                    "content": [_text_block("SECOND ROUND")],
+                    "usage": fake_usage,
+                },
             )()
             return FakeMessageStream(["SECOND ROUND"], final)
 
