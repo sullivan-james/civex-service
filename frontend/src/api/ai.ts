@@ -51,7 +51,7 @@ export const PRESET_PROVIDERS = [
   },
   {
     id: 'openrouter',
-    label: 'OpenRouter — free models',
+    label: 'OpenRouter',
     base_url: 'https://openrouter.ai/api/v1',
     key_placeholder: 'sk-or-...',
     models: [
@@ -64,7 +64,7 @@ export const PRESET_PROVIDERS = [
       { id: 'mistralai/mistral-7b-instruct:free', label: 'Mistral 7B (free)' },
     ],
     docs: null,
-    note: '50 free requests/day. No card required.',
+    note: 'Type any OpenRouter model slug — the four above are free (50 req/day); anything else uses your OpenRouter credits.',
   },
   {
     id: 'ollama',

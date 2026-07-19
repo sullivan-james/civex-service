@@ -246,3 +246,36 @@ def test_append_tool_results_grows_the_message_list(
     provider.append_tool_results(messages, round_end, [(round_end.tool_calls[0], "{}")])
     # Assistant turn + tool result, in whatever native shape this provider uses.
     assert len(messages) == 2
+
+
+# ---------------------------------------------------------------------------
+# OpenAIProvider.prompt_fragment -- the OpenRouter free-tier budget note must
+# only fire for an actual ":free" model slug, not for every OpenRouter
+# request regardless of whether the user is on a paid model.
+# ---------------------------------------------------------------------------
+
+
+def test_openrouter_free_tier_note_only_fires_for_free_model_slug() -> None:
+    free_cfg = AIConfig(
+        api_key="x",
+        model="meta-llama/llama-3.1-8b-instruct:free",
+        provider="openai-compat",
+        base_url="https://openrouter.ai/api/v1",
+    )
+    assert "REQUEST BUDGET" in OpenAIProvider(free_cfg).prompt_fragment()
+
+    paid_cfg = AIConfig(
+        api_key="x",
+        model="anthropic/claude-3.5-sonnet",
+        provider="openai-compat",
+        base_url="https://openrouter.ai/api/v1",
+    )
+    assert "REQUEST BUDGET" not in OpenAIProvider(paid_cfg).prompt_fragment()
+
+    non_openrouter_cfg = AIConfig(
+        api_key="x",
+        model="llama-3.3-70b-versatile",
+        provider="openai-compat",
+        base_url="https://api.groq.com/openai/v1",
+    )
+    assert "REQUEST BUDGET" not in OpenAIProvider(non_openrouter_cfg).prompt_fragment()
