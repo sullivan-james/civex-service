@@ -1,13 +1,15 @@
-"""AiService: system-prompt construction and both provider streaming loops.
+"""AiService: system-prompt construction and the provider-agnostic tool-round loop.
 
 AiService is the class the rest of the app (AppContext) talks to; it's a
 thin wrapper delegating to the free functions below. Individual tool
 definitions/behavior live in services/ai/tools/ (CIVEX-54, one AiTool
-subclass per tool, TOOL_REGISTRY is the single source of truth) -- this
-module only owns what's still shared across every tool call: dispatching by
-name (_dispatch_tool, a thin adapter onto the registry), and the two
-provider-specific streaming loops that call it repeatedly within one chat
-turn. The router still owns HTTP request/response models, the /ai/config
+subclass per tool, TOOL_REGISTRY is the single source of truth). Per-provider
+API shape (Anthropic vs. OpenAI-compatible) lives in services/ai/providers/
+(CIVEX-51, one ChatProvider subclass per API shape) -- this module owns what's
+shared across every provider: dispatching a tool call by name (_dispatch_tool,
+a thin adapter onto the registry), the system prompt, and the single
+MAX_TOOL_ROUNDS loop that drives whichever ChatProvider get_chat_provider()
+returns. The router still owns HTTP request/response models, the /ai/config
 endpoints, and the OpenRouter/Ollama proxy endpoints.
 """
 
@@ -17,7 +19,15 @@ import json
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Iterator
 
-from civex.services.ai.history import _history_to_anthropic, _history_to_openai
+from civex.services.ai.providers import (
+    AnthropicProvider,
+    ErrorEvent,
+    OpenAIProvider,
+    RoundEnd,
+    TextDelta,
+    get_chat_provider,
+)
+from civex.services.ai.providers.openai_provider import _is_ollama
 from civex.services.ai.tools.registry import all_tools
 from civex.services.ai.tools.registry import dispatch as _registry_dispatch
 
@@ -31,23 +41,6 @@ if TYPE_CHECKING:
 
 MAX_TOOL_ROUNDS = 10
 
-# Ollama's default context window (2048-4096 tokens depending on version/model) is
-# easily blown past by system prompt (~2-3k tokens with real schemas) + a single
-# large tool result (get_workflow_authoring_guide alone is ~1.4k tokens) + the
-# actual conversation. Ollama silently truncates from the front rather than
-# erroring, which can drop the task or instructions right as the model needs them
-# most -- producing a blank/degenerate reply instead of a visible failure. Request
-# a larger window explicitly rather than relying on the per-install default.
-OLLAMA_NUM_CTX = 8192
-
-
-def _is_ollama(ai_cfg) -> bool:
-    return (
-        ai_cfg is not None
-        and ai_cfg.provider == "openai-compat"
-        and ":11434" in (ai_cfg.base_url or "")
-    )
-
 
 # ---------------------------------------------------------------------------
 # SSE helpers
@@ -60,10 +53,10 @@ def _sse(data: dict) -> str:
 
 # ---------------------------------------------------------------------------
 # AiService — the public entry point AppContext wires up. A thin wrapper: it
-# holds the same four services _dispatch_tool/_dispatch_act_tool/
-# _build_system_prompt already expect on a "ctx"-shaped object (schema_svc,
-# dataset_svc, record_svc, job_svc) and passes itself as that ctx, so none of
-# the free functions above needed to change shape for this to slot in.
+# holds the same four services _dispatch_tool/_build_system_prompt already
+# expect on a "ctx"-shaped object (schema_svc, dataset_svc, record_svc,
+# job_svc) and passes itself as that ctx, so none of the free functions
+# above needed to change shape for this to slot in.
 # ---------------------------------------------------------------------------
 
 
@@ -103,29 +96,15 @@ class AiService:
 
 
 # ---------------------------------------------------------------------------
-# Tool definitions
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Tool definitions -- computed views over TOOL_REGISTRY (CIVEX-54). A tool's
+# Tool definitions -- computed views over TOOL_REGISTRY (CIVEX-54), shaped by
+# each ChatProvider's own render_tools() (CIVEX-51). A tool's
 # name/description/input_schema/mutating lives in exactly one place, its
 # AiTool subclass under services/ai/tools/builtins/; nothing here is
-# hand-maintained. cache_control goes on whichever tool ends up last in the
-# derived list below (not baked into a specific tool class), so this stays
-# correct regardless of registration order.
+# hand-maintained.
 # ---------------------------------------------------------------------------
 
-TOOLS = [
-    {"name": cls.name, "description": cls.description, "input_schema": cls.input_schema}
-    for cls in all_tools().values()
-]
-if TOOLS:
-    # Anthropic caches everything in `tools` up to and including whichever entry
-    # carries cache_control -- TOOLS is fully static, so marking the last one
-    # caches the entire tool-definitions block (Claude path only; ignored by
-    # TOOLS_OPENAI, which only copies name/description/input_schema out of
-    # each entry).
-    TOOLS[-1] = {**TOOLS[-1], "cache_control": {"type": "ephemeral"}}
+TOOLS = AnthropicProvider().render_tools(all_tools().values())
+TOOLS_OPENAI = OpenAIProvider().render_tools(all_tools().values())
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +129,7 @@ def _dispatch_tool(tool_name: str, tool_input: dict, ctx) -> str:
     """`ctx` is the AiService instance (or anything exposing the same
     schema_svc/dataset_svc/record_svc/job_svc attributes plus a bound
     _app_ctx) -- builds the narrower AiToolContext the tool registry expects
-    and delegates. Kept here rather than inlined at each call site so the two
-    streaming functions below (which call this with ctx=self, exactly as
-    before CIVEX-54) didn't need to change at all for this PR.
+    and delegates.
     """
     from civex.services.ai.tools.base import AiToolContext
 
@@ -361,99 +338,67 @@ Available collections: {collections_csv}
 
 
 # ---------------------------------------------------------------------------
-# Tool definitions in OpenAI format (for openai-compat providers)
-# ---------------------------------------------------------------------------
-
-TOOLS_OPENAI = [
-    {
-        "type": "function",
-        "function": {
-            "name": t["name"],
-            "description": t["description"],
-            "parameters": t["input_schema"],
-        },
-    }
-    for t in TOOLS
-]
-
-
-# ---------------------------------------------------------------------------
-# Streaming generator — Anthropic path
+# Streaming generator — provider-agnostic tool-round loop (CIVEX-51). Drives
+# whichever ChatProvider get_chat_provider() returns; the round-loop shape
+# (dispatch tool calls, stop immediately on a pending proposal, error out
+# past MAX_TOOL_ROUNDS) is identical for every provider, so it lives here
+# exactly once instead of once per provider as it used to.
 # ---------------------------------------------------------------------------
 
 
-async def _stream_chat_anthropic(history: list, ctx, ai_cfg):
-    try:
-        import anthropic
-    except ImportError:
-        yield _sse(
-            {
-                "type": "error",
-                "message": "anthropic package not installed. Run: pip install 'civex[ai]'",
-            }
-        )
-        return
+def _stream_chat(history: list, ctx, ai_cfg):
+    provider = get_chat_provider(ai_cfg)
+    return _run_stream(history, ctx, ai_cfg, provider)
 
-    client = anthropic.AsyncAnthropic(api_key=ai_cfg.api_key)
-    # cache_control on the system block caches the whole (static-per-project) prompt
-    # server-side for ~5 min, so every extra tool round in this turn — and every
-    # follow-up message in the conversation within that window — reuses it instead of
-    # re-processing ~1.7k tokens of instructions from scratch.
-    system = [
-        {
-            "type": "text",
-            "text": _build_system_prompt(ctx, ai_cfg=ai_cfg),
-            "cache_control": {"type": "ephemeral"},
-        }
-    ]
-    # Reconstructs any tool calls/results from earlier turns into Anthropic's
-    # native tool_use/tool_result shape, so the model still has them in view
-    # even though they were made in a previous, separate HTTP request.
-    api_msgs = _history_to_anthropic(history)
+
+async def _run_stream(history: list, ctx, ai_cfg, provider):
+    system = provider.render_system(_build_system_prompt(ctx, ai_cfg=ai_cfg))
+    tools = provider.render_tools(all_tools().values())
+    # Reconstructs any tool calls/results from earlier turns into this
+    # provider's native multi-turn shape, so the model still has them in
+    # view even though they were made in a previous, separate HTTP request.
+    messages = provider.parse_history(history)
     rounds = 0
 
     while rounds < MAX_TOOL_ROUNDS:
-        async with client.messages.stream(
-            model=ai_cfg.model,
-            system=system,
-            messages=api_msgs,
-            tools=TOOLS,
-            max_tokens=4096,
-        ) as stream:
-            async for delta in stream.text_stream:
-                yield _sse({"type": "text_delta", "delta": delta})
-            final = await stream.get_final_message()
+        round_end: RoundEnd | None = None
+        async for event in provider.stream_round(
+            system=system, tools=tools, messages=messages
+        ):
+            if isinstance(event, TextDelta):
+                yield _sse({"type": "text_delta", "delta": event.text})
+            elif isinstance(event, ErrorEvent):
+                yield _sse({"type": "error", "message": event.message})
+                return
+            elif isinstance(event, RoundEnd):
+                round_end = event
 
-        if final.stop_reason == "end_turn":
+        assert round_end is not None
+        if round_end.is_final:
             break
 
         rounds += 1
-        api_msgs.append(
-            {"role": "assistant", "content": [b.model_dump() for b in final.content]}
-        )
-        tool_results = []
+        results: list[tuple] = []
         proposal_pending = False
 
-        for block in final.content:
-            if block.type != "tool_use":
-                continue
+        for tc in round_end.tool_calls:
             yield _sse(
                 {
                     "type": "tool_use_start",
-                    "id": block.id,
-                    "name": block.name,
-                    "input": block.input,
+                    "id": tc.id,
+                    "name": tc.name,
+                    "input": tc.input,
                 }
             )
-            result_str = _dispatch_tool(block.name, block.input, ctx)
+            result_str = _dispatch_tool(tc.name, tc.input, ctx)
             yield _sse(
-                {"type": "tool_result", "tool_use_id": block.id, "content": result_str}
+                {"type": "tool_result", "tool_use_id": tc.id, "content": result_str}
             )
-            tool_results.append(
-                {"type": "tool_result", "tool_use_id": block.id, "content": result_str}
-            )
+            results.append((tc, result_str))
             if _is_proposal(result_str):
                 proposal_pending = True
+
+        provider.append_tool_results(messages, round_end, results)
 
         # A proposed change needs the user's approval in the UI. Stop streaming here
         # so the approval prompt is the last thing shown (chronological); the model
@@ -461,8 +406,6 @@ async def _stream_chat_anthropic(history: list, ctx, ai_cfg):
         if proposal_pending:
             break
 
-        api_msgs.append({"role": "user", "content": tool_results})
-
     if rounds >= MAX_TOOL_ROUNDS:
         yield _sse(
             {
@@ -473,164 +416,3 @@ async def _stream_chat_anthropic(history: list, ctx, ai_cfg):
         return
 
     yield _sse({"type": "done"})
-
-
-# ---------------------------------------------------------------------------
-# Streaming generator — OpenAI-compatible path (Groq, Gemini, Ollama, etc.)
-# ---------------------------------------------------------------------------
-
-
-async def _stream_chat_openai(history: list, ctx, ai_cfg):
-    try:
-        from openai import AsyncOpenAI
-    except ImportError:
-        yield _sse(
-            {
-                "type": "error",
-                "message": "openai package not installed. Run: pip install 'civex[ai]'",
-            }
-        )
-        return
-
-    is_openrouter = "openrouter.ai" in (ai_cfg.base_url or "")
-    extra_headers = (
-        {"HTTP-Referer": "http://localhost:8000", "X-Title": "civex"}
-        if is_openrouter
-        else {}
-    )
-    client = AsyncOpenAI(
-        api_key=ai_cfg.api_key, base_url=ai_cfg.base_url, default_headers=extra_headers
-    )
-    system = _build_system_prompt(ctx, ai_cfg=ai_cfg)
-    # Reconstructs any tool calls/results from earlier turns into OpenAI's
-    # native tool_calls/tool-role-message shape (see _stream_chat_anthropic).
-    api_msgs: list[dict] = [{"role": "system", "content": system}] + _history_to_openai(
-        history
-    )
-    # See OLLAMA_NUM_CTX above -- request a larger context window than Ollama's
-    # default so a big tool result (e.g. the workflow authoring guide) doesn't
-    # silently push the task/instructions out of the model's view mid-turn.
-    extra_body = (
-        {"options": {"num_ctx": OLLAMA_NUM_CTX}} if _is_ollama(ai_cfg) else None
-    )
-    rounds = 0
-
-    while rounds < MAX_TOOL_ROUNDS:
-        # Accumulate tool call chunks while streaming text
-        tool_calls_acc: dict[int, dict] = {}
-
-        stream = await client.chat.completions.create(
-            model=ai_cfg.model,
-            messages=api_msgs,  # type: ignore[arg-type]
-            tools=TOOLS_OPENAI,  # type: ignore[arg-type]
-            stream=True,
-            extra_body=extra_body,
-        )
-
-        finish_reason: str | None = None
-        assistant_text = ""
-
-        try:
-            async for chunk in stream:
-                choice = chunk.choices[0] if chunk.choices else None
-                if not choice:
-                    continue
-                if choice.finish_reason:
-                    finish_reason = choice.finish_reason
-                delta = choice.delta
-                if delta.content:
-                    assistant_text += delta.content
-                    yield _sse({"type": "text_delta", "delta": delta.content})
-                if delta.tool_calls:
-                    for tc in delta.tool_calls:
-                        idx = tc.index
-                        if idx not in tool_calls_acc:
-                            tool_calls_acc[idx] = {
-                                "id": "",
-                                "name": "",
-                                "arguments": "",
-                            }
-                        if tc.id:
-                            tool_calls_acc[idx]["id"] = tc.id
-                        if tc.function:
-                            if tc.function.name:
-                                tool_calls_acc[idx]["name"] = tc.function.name
-                            if tc.function.arguments:
-                                tool_calls_acc[idx]["arguments"] += (
-                                    tc.function.arguments
-                                )
-        except Exception as api_err:
-            yield _sse(
-                {
-                    "type": "error",
-                    "message": f"Provider error: {api_err}. Try rephrasing your request.",
-                }
-            )
-            return
-
-        if finish_reason != "tool_calls" or not tool_calls_acc:
-            break
-
-        rounds += 1
-
-        # Build assistant message with tool_calls for history
-        assistant_msg: dict = {
-            "role": "assistant",
-            "content": assistant_text or None,
-            "tool_calls": [
-                {
-                    "id": tc["id"],
-                    "type": "function",
-                    "function": {"name": tc["name"], "arguments": tc["arguments"]},
-                }
-                for tc in tool_calls_acc.values()
-            ],
-        }
-        api_msgs.append(assistant_msg)
-
-        proposal_pending = False
-        for tc in tool_calls_acc.values():
-            try:
-                tool_input = json.loads(tc["arguments"])
-                if not isinstance(tool_input, dict):
-                    tool_input = {}
-            except json.JSONDecodeError:
-                tool_input = {}
-            yield _sse(
-                {
-                    "type": "tool_use_start",
-                    "id": tc["id"],
-                    "name": tc["name"],
-                    "input": tool_input,
-                }
-            )
-            result_str = _dispatch_tool(tc["name"], tool_input, ctx)
-            yield _sse(
-                {"type": "tool_result", "tool_use_id": tc["id"], "content": result_str}
-            )
-            api_msgs.append(
-                {"role": "tool", "tool_call_id": tc["id"], "content": result_str}
-            )
-            if _is_proposal(result_str):
-                proposal_pending = True
-
-        # Stop at a proposed change so the approval prompt is the last thing shown.
-        if proposal_pending:
-            break
-
-    if rounds >= MAX_TOOL_ROUNDS:
-        yield _sse(
-            {
-                "type": "error",
-                "message": "Maximum tool rounds exceeded — please try a simpler request.",
-            }
-        )
-        return
-
-    yield _sse({"type": "done"})
-
-
-def _stream_chat(history: list, ctx, ai_cfg):
-    if ai_cfg.provider == "openai-compat":
-        return _stream_chat_openai(history, ctx, ai_cfg)
-    return _stream_chat_anthropic(history, ctx, ai_cfg)
