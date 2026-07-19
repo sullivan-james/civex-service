@@ -52,9 +52,11 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
         const p = detectPreset(c)
         setPreset(p)
         setModel(c.model)
+        if (p === 'custom' || p === 'ollama' || p === 'openrouter') {
+          setCustomModel(c.model)
+        }
         if (p === 'custom' || p === 'ollama') {
           setCustomBaseUrl(c.base_url ?? '')
-          setCustomModel(c.model)
         }
       })
       .catch(() => {})
@@ -67,12 +69,16 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
     setPreset(newPreset)
     setError(null)
     const p = PRESET_PROVIDERS.find((x) => x.id === newPreset)!
-    if (p.models.length > 0) {
-      setModel(p.models[0]?.id ?? '')
+    if (newPreset === 'openrouter') {
+      // Pre-fill with the first free model as a convenient starting point,
+      // but the field stays free-text so any paid OpenRouter slug works too.
+      setCustomModel(p.models[0]?.id ?? '')
     } else if (newPreset === 'ollama') {
       const ollamaPreset = p as typeof p & { defaultModel?: string }
       setCustomModel(ollamaPreset.defaultModel ?? 'qwen2.5:7b')
       setCustomBaseUrl(p.base_url as string)
+    } else if (p.models.length > 0) {
+      setModel(p.models[0]?.id ?? '')
     } else {
       setModel(customModel)
     }
@@ -188,7 +194,8 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
         : isCustom || isOllama
           ? customBaseUrl.trim()
           : (presetObj.base_url as string)
-      const resolvedModel = isCustom || isOllama ? customModel.trim() : model
+      const resolvedModel =
+        isCustom || isOllama || isOpenRouter ? customModel.trim() : model
 
       const patch: Record<string, unknown> = {
         provider,
@@ -233,7 +240,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
   const isCustom = preset === 'custom'
   const isOllama = preset === 'ollama'
   const isOpenRouter = preset === 'openrouter'
-  const isFreeText = isCustom || isOllama
+  const isFreeText = isCustom || isOllama || isOpenRouter
   const isAnthropic = preset === 'anthropic'
   const effectiveModel = isFreeText ? customModel : model
 
@@ -504,12 +511,30 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
             </div>
           )
         ) : isFreeText || presetObj.models.length === 0 ? (
-          <input
-            value={customModel}
-            onChange={(e) => setCustomModel(e.target.value)}
-            placeholder={isAnthropic ? 'claude-sonnet-4-6' : 'model name'}
-            className="w-full rounded-md border border-[#d0d7de] px-3 py-1.5 text-sm text-[#1f2328] placeholder:text-[#adbac7] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
-          />
+          <>
+            <input
+              value={customModel}
+              onChange={(e) => setCustomModel(e.target.value)}
+              placeholder={
+                isAnthropic
+                  ? 'claude-sonnet-4-6'
+                  : isOpenRouter
+                    ? 'e.g. anthropic/claude-3.5-sonnet (paid) or the free options below'
+                    : 'model name'
+              }
+              list={isOpenRouter ? 'openrouter-model-suggestions' : undefined}
+              className="w-full rounded-md border border-[#d0d7de] px-3 py-1.5 text-sm text-[#1f2328] placeholder:text-[#adbac7] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+            />
+            {isOpenRouter && (
+              <datalist id="openrouter-model-suggestions">
+                {presetObj.models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </datalist>
+            )}
+          </>
         ) : (
           <select
             value={effectiveModel || presetObj.models[0]?.id || ''}

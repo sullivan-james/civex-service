@@ -71,6 +71,15 @@ class OpenAIProvider(ChatProvider):
         is_openrouter = ai_cfg is not None and "openrouter.ai" in (
             ai_cfg.base_url or ""
         )
+        # The strict request-budget note only applies to OpenRouter's free-tier
+        # models (":free" model slugs, rate-limited to 50 req/day) -- a paid
+        # model on the same base_url has no such budget and telling the model
+        # to skip tool calls to conserve one would just make it worse.
+        is_openrouter_free = (
+            is_openrouter
+            and ai_cfg is not None
+            and (ai_cfg.model or "").endswith(":free")
+        )
         openrouter_note = (
             f"""
 
@@ -88,7 +97,7 @@ STRICT rules to conserve budget:
 - Re-reading rules 1-3 above: do not ask for confirmation before act/save tools, do not preview schema/field/record
   changes as YAML, and put every field into create_schema's `fields` array in one call. Smaller free models tend to
   skip these — follow them exactly."""
-            if is_openrouter
+            if is_openrouter_free
             else ""
         )
 
