@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useJobsPaged, useRerunJob } from '../../hooks/useWorkflows'
 import { type WorkflowJob } from '../../api/workflows'
@@ -117,10 +117,15 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(25)
 
-  // Reset to first page whenever filters change.
-  useEffect(() => {
+  // Reset to first page whenever filters change. Adjusted during render
+  // (see https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)
+  // rather than in an effect -- avoids an extra render pass and the
+  // react-hooks/set-state-in-effect lint rule.
+  const [prevFilters, setPrevFilters] = useState([statusFilter, recordId])
+  if (prevFilters[0] !== statusFilter || prevFilters[1] !== recordId) {
+    setPrevFilters([statusFilter, recordId])
     setPage(0)
-  }, [statusFilter, recordId])
+  }
 
   const { jobs, total, isLoading, error } = useJobsPaged(
     page,
