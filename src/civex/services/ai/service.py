@@ -281,6 +281,15 @@ Available collections: {collections_csv}
    - If a tool call returns status "error", fix the SPECIFIC problem named in the message and retry the SAME
      call — same schema name, same field name, same intent. Never respond to an error by inventing a
      different, new, or unrelated schema/field name; that abandons what the user actually asked for.
+   - NEVER call create_record/update_record/delete_record with a record_id you did not just receive from
+     an actual list_records/query_records/get_job_log result in this conversation — never a made-up,
+     placeholder, or all-zero UUID. If you don't have a real UUID in view, call list_records or
+     query_records first; if that also fails, stop and tell the user instead of guessing an ID.
+
+6. STOP once the user's request is fully answered. Do not chain additional tool calls (checking other
+   collections/schemas, or proposing changes) that the user did not ask for. A "find"/"look up"/"how many"
+   question is answered by reporting the result — it is not an invitation to also verify, clean up, or
+   modify anything else.
 
 ## Other guidelines
 - For count/aggregate questions about ONE schema, use query_records with count_only: true.
@@ -308,6 +317,10 @@ def _stream_chat(history: list, ctx, ai_cfg):
     return _run_stream(history, ctx, provider)
 
 
+def _tool_call_key(name: str, tool_input: dict) -> str:
+    return f"{name}:{json.dumps(tool_input, sort_keys=True, default=str)}"
+
+
 async def _run_stream(history: list, ctx, provider):
     system = provider.render_system(
         _build_system_prompt(ctx, prompt_fragment=provider.prompt_fragment())
@@ -318,6 +331,15 @@ async def _run_stream(history: list, ctx, provider):
     # view even though they were made in a previous, separate HTTP request.
     messages = provider.parse_history(history)
     rounds = 0
+    # Weaker models (small local/Ollama models especially) sometimes respond
+    # to an error by blindly repeating the exact same call instead of fixing
+    # it, burning every remaining round on an identical, deterministically-
+    # failing dispatch. State can't change mid-turn (mutations only ever
+    # happen via the user's separate approve-time REST call), so a repeat
+    # call with byte-identical arguments would just return the same result
+    # again -- short-circuit it with an explicit "stop repeating" signal
+    # instead of re-dispatching.
+    seen_calls: dict[str, str] = {}
 
     while rounds < MAX_TOOL_ROUNDS:
         round_end: RoundEnd | None = None
@@ -349,7 +371,24 @@ async def _run_stream(history: list, ctx, provider):
                     "input": tc.input,
                 }
             )
-            result_str = _dispatch_tool(tc.name, tc.input, ctx)
+            key = _tool_call_key(tc.name, tc.input)
+            if key in seen_calls:
+                result_str = json.dumps(
+                    {
+                        "status": "error",
+                        "message": (
+                            f"You already called {tc.name} with these exact same "
+                            "arguments earlier in this conversation and got the same "
+                            "result. Calling it again will not produce a different "
+                            "outcome. Stop repeating this call -- either use different "
+                            "arguments based on what you've already learned, or tell "
+                            "the user you're unable to complete this."
+                        ),
+                    }
+                )
+            else:
+                result_str = _dispatch_tool(tc.name, tc.input, ctx)
+                seen_calls[key] = result_str
             yield _sse(
                 {"type": "tool_result", "tool_use_id": tc.id, "content": result_str}
             )

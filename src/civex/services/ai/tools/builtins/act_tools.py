@@ -286,9 +286,14 @@ class UpdateSchemaTool(AiTool):
         err = validate_via(ctx, ctx.schema_svc.update, name, **update_kwargs)
         if err:
             return err
+        summary = (
+            f"Rename schema '{name}' to '{body['rename']}'."
+            if "rename" in body
+            else f"Update schema '{name}'."
+        )
         return propose(
             "update_schema",
-            f"Update schema '{name}'.",
+            summary,
             "PATCH",
             f"/api/schemas/{q(name)}",
             body=body,
@@ -441,9 +446,14 @@ class UpdateSchemaFieldTool(AiTool):
         )
         if err:
             return err
+        summary = (
+            f"Rename field '{field}' to '{body['rename']}' on schema '{schema}'."
+            if "rename" in body
+            else f"Update field '{field}' on schema '{schema}'."
+        )
         return propose(
             "update_schema_field",
-            f"Update field '{field}' on schema '{schema}'.",
+            summary,
             "PATCH",
             f"/api/schemas/{q(schema)}/fields/{q(field)}",
             body=body,
@@ -553,9 +563,14 @@ class UpdateCollectionTool(AiTool):
         )
         if err:
             return err
+        summary = (
+            f"Rename collection '{name}' to '{body['rename']}'."
+            if "rename" in body
+            else f"Update collection '{name}'."
+        )
         return propose(
             "update_collection",
-            f"Update collection '{name}'.",
+            summary,
             "PATCH",
             f"/api/collections/{q(name)}",
             body=body,
