@@ -1,162 +1,164 @@
-CIVEX SOFTWARE LICENSE AGREEMENT
+# PolyForm Shield License 1.0.0
 
-Copyright (c) 2026 James Sullivan. All rights reserved.
+<https://polyformproject.org/licenses/shield/1.0.0>
 
-PLEASE READ THIS LICENSE AGREEMENT CAREFULLY BEFORE INSTALLING OR USING THIS
-SOFTWARE. BY INSTALLING, COPYING, OR OTHERWISE USING CIVEX, YOU AGREE TO BE
-BOUND BY THE TERMS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT INSTALL OR
-USE THE SOFTWARE.
+## Acceptance
 
-────────────────────────────────────────────────────────────────────────────────
+In order to get any license under these terms, you must agree
+to them as both strict obligations and conditions to all
+your licenses.
 
-1. DEFINITIONS
+## Copyright License
 
-   "Software" means the civex application, including all source code, object
-   code, documentation, configuration files, and any updates or patches
-   provided by the Licensor.
+The licensor grants you a copyright license for the
+software to do everything you might do with the software
+that would otherwise infringe the licensor's copyright
+in it for any permitted purpose.  However, you may
+only distribute the software according to [Distribution
+License](#distribution-license) and make changes or new works
+based on the software according to [Changes and New Works
+License](#changes-and-new-works-license).
 
-   "Licensor" means James Sullivan, the copyright holder of the Software.
+## Distribution License
 
-   "You" (or "Your") means the individual or legal entity exercising rights
-   under this Agreement.
+The licensor grants you an additional copyright license
+to distribute copies of the software.  Your license
+to distribute covers distributing the software with
+changes and new works permitted by [Changes and New Works
+License](#changes-and-new-works-license).
 
-   "Commercial Use" means use of the Software in a professional, business,
-   government, or revenue-generating context, including internal use within
-   an organisation.
+## Notices
 
-────────────────────────────────────────────────────────────────────────────────
+You must ensure that anyone who gets a copy of any part of
+the software from you also gets a copy of these terms or the
+URL for them above, as well as copies of any plain-text lines
+beginning with `Required Notice:` that the licensor provided
+with the software.  For example:
 
-2. GRANT OF LICENSE
+> Required Notice: Copyright Yoyodyne, Inc. (http://example.com)
 
-   Subject to the terms and conditions of this Agreement, the Licensor hereby
-   grants You a non-exclusive, non-transferable, royalty-free license to:
+## Changes and New Works License
 
-   (a) install and use the Software on any number of devices You own or
-       control, for any purpose including Commercial Use; and
+The licensor grants you an additional copyright license to
+make changes and new works based on the software for any
+permitted purpose.
 
-   (b) make a reasonable number of copies of the Software solely for backup
-       or archival purposes.
+## Patent License
 
-────────────────────────────────────────────────────────────────────────────────
+The licensor grants you a patent license for the software that
+covers patent claims the licensor can license, or becomes able
+to license, that you would infringe by using the software.
 
-3. RESTRICTIONS
+## Noncompete
 
-   You may not, and you may not permit others to:
+Any purpose is a permitted purpose, except for providing any
+product that competes with the software or any product the
+licensor or any of its affiliates provides using the software.
 
-   (a) redistribute, sell, rent, lease, sublicense, or otherwise transfer the
-       Software or any portion of it to any third party, whether for payment
-       or free of charge;
+## Competition
 
-   (b) modify, adapt, translate, reverse engineer (except to the extent
-       expressly permitted by applicable law), decompile, or disassemble the
-       Software;
+Goods and services compete even when they provide functionality
+through different kinds of interfaces or for different technical
+platforms.  Applications can compete with services, libraries
+with plugins, frameworks with development tools, and so on,
+even if they're written in different programming languages
+or for different computer architectures.  Goods and services
+compete even when provided free of charge.  If you market a
+product as a practical substitute for the software or another
+product, it definitely competes.
 
-   (c) create derivative works based on the Software;
+## New Products
 
-   (d) remove, obscure, or alter any copyright notice, trademark, or other
-       proprietary rights notice appearing in or on the Software;
+If you are using the software to provide a product that does
+not compete, but the licensor or any of its affiliates brings
+your product into competition by providing a new version of
+the software or another product using the software, you may
+continue using versions of the software available under these
+terms beforehand to provide your competing product, but not
+any later versions.
 
-   (e) use the Software to build a product or service that competes directly
-       with the Software or with any product offered by the Licensor.
+## Discontinued Products
 
-────────────────────────────────────────────────────────────────────────────────
+You may begin using the software to compete with a product
+or service that the licensor or any of its affiliates has
+stopped providing, unless the licensor includes a plain-text
+line beginning with `Licensor Line of Business:` with the
+software that mentions that line of business.  For example:
 
-4. SOURCE CODE
+> Licensor Line of Business: YoyodyneCMS Content Management
+System (http://example.com/cms)
 
-   The Software is distributed with or alongside its source code. The
-   availability of source code does not constitute an open-source or
-   free-software grant under any recognised open-source definition (including
-   those of the Open Source Initiative or the Free Software Foundation).
+## Sales of Business
 
-   Source code is made available for transparency and personal study only.
-   All restrictions in Section 3 apply equally to the source code.
+If the licensor or any of its affiliates sells a line of
+business developing the software or using the software
+to provide a product, the buyer can also enforce
+[Noncompete](#noncompete) for that product.
 
-────────────────────────────────────────────────────────────────────────────────
+## Fair Use
 
-5. INTELLECTUAL PROPERTY
+You may have "fair use" rights for the software under the
+law. These terms do not limit them.
 
-   The Software and all copies thereof are proprietary to the Licensor and
-   title thereto remains in the Licensor. All rights in the Software not
-   specifically granted in this Agreement are reserved to the Licensor. You
-   acknowledge that no title to the intellectual property in the Software is
-   transferred to You.
+## No Other Rights
 
-────────────────────────────────────────────────────────────────────────────────
+These terms do not allow you to sublicense or transfer any of
+your licenses to anyone else, or prevent the licensor from
+granting licenses to anyone else.  These terms do not imply
+any other licenses.
 
-6. THIRD-PARTY COMPONENTS
+## Patent Defense
 
-   The Software may include third-party open-source components. Those
-   components are licensed under their respective terms, which are not
-   affected by this Agreement. A list of third-party components and their
-   licenses is available via `pip show civex` or in the installed package
-   metadata.
+If you make any written claim that the software infringes or
+contributes to infringement of any patent, your patent license
+for the software granted under these terms ends immediately. If
+your company makes such a claim, your patent license ends
+immediately for work on behalf of your company.
 
-────────────────────────────────────────────────────────────────────────────────
+## Violations
 
-7. DISCLAIMER OF WARRANTIES
+The first time you are notified in writing that you have
+violated any of these terms, or done anything with the software
+not covered by your licenses, your licenses can nonetheless
+continue if you come into full compliance with these terms,
+and take practical steps to correct past violations, within
+32 days of receiving notice.  Otherwise, all your licenses
+end immediately.
 
-   THE SOFTWARE IS PROVIDED "AS IS" AND THE LICENSOR EXPRESSLY DISCLAIMS ALL
-   WARRANTIES, EXPRESS, IMPLIED, OR STATUTORY, INCLUDING BUT NOT LIMITED TO
-   THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
-   PURPOSE, TITLE, AND NON-INFRINGEMENT. THE LICENSOR DOES NOT WARRANT THAT
-   THE SOFTWARE WILL BE ERROR-FREE, THAT DEFECTS WILL BE CORRECTED, OR THAT
-   THE SOFTWARE IS FREE OF VIRUSES OR OTHER HARMFUL COMPONENTS.
+## No Liability
 
-   YOU ASSUME ALL RISK AS TO THE QUALITY AND PERFORMANCE OF THE SOFTWARE.
+***As far as the law allows, the software comes as is, without
+any warranty or condition, and the licensor will not be liable
+to you for any damages arising out of these terms or the use
+or nature of the software, under any kind of legal claim.***
 
-────────────────────────────────────────────────────────────────────────────────
+## Definitions
 
-8. LIMITATION OF LIABILITY
+The **licensor** is the individual or entity offering these
+terms, and the **software** is the software the licensor makes
+available under these terms.
 
-   TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE
-   LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL,
-   PUNITIVE, OR EXEMPLARY DAMAGES (INCLUDING BUT NOT LIMITED TO LOSS OF DATA,
-   LOSS OF PROFITS, OR BUSINESS INTERRUPTION) ARISING OUT OF OR IN CONNECTION
-   WITH THIS AGREEMENT OR THE USE OR INABILITY TO USE THE SOFTWARE, EVEN IF
-   THE LICENSOR HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+A **product** can be a good or service, or a combination
+of them.
 
-   TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSOR'S TOTAL
-   CUMULATIVE LIABILITY ARISING OUT OF OR RELATED TO THIS AGREEMENT SHALL
-   BE ZERO, AS THE SOFTWARE IS PROVIDED FREE OF CHARGE.
+**You** refers to the individual or entity agreeing to these
+terms.
 
-────────────────────────────────────────────────────────────────────────────────
+**Your company** is any legal entity, sole proprietorship,
+or other kind of organization that you work for, plus all
+its affiliates.
 
-9. TERMINATION
+**Affiliates** means the other organizations than an
+organization has control over, is under the control of, or is
+under common control with.
 
-   This Agreement is effective until terminated. Your rights under this
-   Agreement will terminate automatically and without notice from the Licensor
-   if You fail to comply with any term of this Agreement.
+**Control** means ownership of substantially all the assets of
+an entity, or the power to direct its management and policies
+by vote, contract, or otherwise.  Control can be direct or
+indirect.
 
-   Upon termination of this Agreement, You must cease all use of the Software
-   and destroy all copies, full or partial, in your possession or control.
+**Your licenses** are all the licenses granted to you for the
+software under these terms.
 
-   Sections 3, 4, 5, 7, 8, and 10 shall survive termination of this
-   Agreement.
-
-────────────────────────────────────────────────────────────────────────────────
-
-10. GENERAL
-
-   (a) Entire Agreement. This Agreement constitutes the entire agreement
-       between You and the Licensor concerning the Software and supersedes
-       all prior or contemporaneous understandings, negotiations, or
-       agreements relating to the Software.
-
-   (b) Governing Law. This Agreement shall be governed by and construed in
-       accordance with the laws of Ireland, without regard to its conflict
-       of law provisions.
-
-   (c) Severability. If any provision of this Agreement is held to be
-       unenforceable, that provision shall be modified to the minimum extent
-       necessary to make it enforceable, and the remaining provisions shall
-       continue in full force and effect.
-
-   (d) No Waiver. Failure by the Licensor to enforce any provision of this
-       Agreement shall not be deemed a waiver of future enforcement of that
-       or any other provision.
-
-   (e) Contact. For permissions beyond the scope of this license — including
-       redistribution rights, OEM licensing, or embedding in a commercial
-       product — contact: sullivanj041@gmail.com
-
-────────────────────────────────────────────────────────────────────────────────
+**Use** means anything you do with the software requiring one
+of your licenses.
