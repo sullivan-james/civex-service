@@ -9,6 +9,53 @@ from civex.domain.dtos import WorkflowJobDTO
 from civex.domain.exceptions import ConfigError
 
 
+def _ensure_container_ready(project_name: str) -> None:
+    """
+    Pre-flight check for docker-managed projects, called before any CLI
+    command that needs a working DB connection. Auto-starts a stopped
+    container; prints a clear, actionable message and exits if the
+    container — or worse, its data volume — is gone.
+    """
+    from civex.docker_manager import ContainerRecoveryOutcome, ensure_container_running
+
+    result = ensure_container_running(project_name)
+    name = result.container_name
+
+    if result.outcome in (
+        ContainerRecoveryOutcome.READY,
+        ContainerRecoveryOutcome.DOCKER_UNAVAILABLE,
+    ):
+        # READY: nothing to do. DOCKER_UNAVAILABLE: let the normal connection
+        # attempt surface its own error rather than guessing why.
+        return
+
+    if result.outcome == ContainerRecoveryOutcome.START_FAILED:
+        console.print(f"[error]Failed to start container '{name}'.[/error]")
+        console.print(f"  [error]{result.detail}[/error]")
+        raise typer.Exit(1)
+
+    console.print(f"[error]PostgreSQL container '{name}' not found.[/error]")
+    if result.outcome == ContainerRecoveryOutcome.MISSING_VOLUME_PRESENT:
+        console.print("  Its data volume is still present, though.")
+        console.print(
+            "  Run [bold]civex db setup-docker[/bold] to recreate the container "
+            "— your data will be reattached."
+        )
+    else:
+        console.print(
+            "  [bold]Its data volume is gone too — any data in this project's "
+            "database is likely unrecoverable.[/bold]"
+        )
+        console.print(
+            "  If you have a separate backup/dump, restore from that instead."
+        )
+        console.print(
+            "  Otherwise, [bold]civex db setup-docker[/bold] will create a "
+            "brand-new, EMPTY database at the same settings."
+        )
+    raise typer.Exit(1)
+
+
 def cli_load_config() -> Config:
     try:
         config = load_config()
@@ -17,9 +64,7 @@ def cli_load_config() -> Config:
         raise typer.Exit(1)
 
     if config.db.docker_managed:
-        from civex.cli._docker import ensure_container_ready
-
-        ensure_container_ready(config.project_root.name)
+        _ensure_container_ready(config.project_root.name)
 
     return config
 

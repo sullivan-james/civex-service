@@ -278,3 +278,32 @@ class WorkflowJobResponse(BaseModel):
 
 class DBStatusResponse(BaseModel):
     ok: bool = True
+
+
+# --- Database management ---
+
+
+class MigrationStatusResponse(BaseModel):
+    current_revision: str | None
+    head_revision: str | None
+    up_to_date: bool
+    error: str | None = None
+
+
+class DockerStatusResponse(BaseModel):
+    name: str
+    exists: bool
+    running: bool
+    volume_exists: bool
+
+
+class DbStatusResponse(BaseModel):
+    url: str
+    dialect: str
+    docker_managed: bool
+    migration: MigrationStatusResponse
+    docker: DockerStatusResponse | None
+
+
+class SetDbUrlRequest(BaseModel):
+    url: str
