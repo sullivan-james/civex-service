@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { type AiEvent, type ChatMessage, streamChat } from '../api/ai'
+import { isPendingApproval } from '../components/ai/proposals'
 import type {
   ChatEntry,
   ResolvedEntry,
@@ -192,6 +193,16 @@ export function useAiChat(initialEntries: ChatEntry[] = []) {
       return r ? { ...e, outcome: r.outcome, outcomeLabel: r.outcomeLabel } : e
     })
     setEntries(updated)
+    // A single turn can propose several changes at once, each rendered as its
+    // own card (see AiPanel's pendingEntries). Only auto-continue once every
+    // one of them has an outcome -- resolving just the first must not send a
+    // half-resolved turn to the model while the rest still await a click
+    // (the model would see them stuck at "proposed" forever and just move
+    // on, so those changes would never actually get applied).
+    const stillPending = updated.some(
+      (e): e is ToolCallEntry => e.kind === 'tool_call' && isPendingApproval(e),
+    )
+    if (stillPending) return updated
     return runStream(toApiMessages(updated))
   }
 
