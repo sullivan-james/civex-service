@@ -8,6 +8,7 @@ from civex.cli import (
     dataset,
     db,
     plugin,
+    policy,
     record,
     remote,
     schema,
@@ -20,6 +21,7 @@ from civex.cli.clone import clone
 from civex.cli.demo import demo
 from civex.cli.dump import dump, restore
 from civex.cli.init import init
+from civex.cli.license import license_cmd
 from civex.cli.plumbing import (
     get_object,
     head_seq,
@@ -69,6 +71,7 @@ app.command("init", rich_help_panel=_START)(init)
 app.command("clone", rich_help_panel=_START)(clone)
 app.command("demo", rich_help_panel=_START)(demo)
 app.add_typer(db.app, name="db", rich_help_panel=_START)
+app.command("license", rich_help_panel=_START)(license_cmd)
 
 app.add_typer(ai_cli.app, name="ai", rich_help_panel=_WORK)
 app.add_typer(schema.app, name="schema", rich_help_panel=_WORK)
@@ -77,6 +80,7 @@ app.add_typer(record.app, name="record", rich_help_panel=_WORK)
 app.add_typer(store.app, name="store", rich_help_panel=_WORK)
 app.add_typer(workflow.app, name="workflow", rich_help_panel=_WORK)
 app.add_typer(plugin.app, name="plugin", rich_help_panel=_WORK)
+app.add_typer(policy.app, name="policy", rich_help_panel=_WORK)
 app.add_typer(worker.app, name="automation", rich_help_panel=_WORK)
 app.command("resolve", rich_help_panel=_WORK)(resolve)
 

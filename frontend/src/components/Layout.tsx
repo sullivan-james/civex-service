@@ -2,7 +2,7 @@ import { type ReactNode, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { remoteApi, type SyncResult } from '../api/remote'
-import AiPanel from './ai/AiPanel'
+import AiAttestationGate from './ai/AiAttestationGate'
 
 declare global {
   interface Window {
@@ -296,7 +296,17 @@ export default function Layout({ children }: { children: ReactNode }) {
         {children}
       </main>
 
-      <AiPanel open={aiOpen} onClose={() => setAiOpen(false)} />
+      {/* Footer */}
+      <footer className="border-t border-[#d0d7de] bg-white px-6 py-3 text-center">
+        <NavLink
+          to="/legal"
+          className="text-xs text-[#656d76] hover:text-[#1f2328] hover:underline"
+        >
+          Licenses &amp; policies
+        </NavLink>
+      </footer>
+
+      <AiAttestationGate open={aiOpen} onClose={() => setAiOpen(false)} />
     </div>
   )
 }

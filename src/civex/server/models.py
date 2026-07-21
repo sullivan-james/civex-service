@@ -307,3 +307,16 @@ class DbStatusResponse(BaseModel):
 
 class SetDbUrlRequest(BaseModel):
     url: str
+
+
+# --- Legal ---
+
+
+class LicenseResponse(BaseModel):
+    text: str
+
+
+class PolicyResponse(BaseModel):
+    stem: str
+    title: str
+    content: str

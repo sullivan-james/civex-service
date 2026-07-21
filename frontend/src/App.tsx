@@ -10,6 +10,7 @@ import JobsPage from './pages/JobsPage'
 import JobDetailPage from './pages/JobDetailPage'
 import TerminalPage from './pages/TerminalPage'
 import SettingsPage from './pages/SettingsPage'
+import LegalPage from './pages/LegalPage'
 
 export default function App() {
   return (
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="/settings" element={<SettingsPage />} />
         {/* Legacy redirect — Storage moved into Settings */}
         <Route path="/storage" element={<Navigate to="/settings" replace />} />
+        <Route path="/legal" element={<LegalPage />} />
       </Routes>
     </Layout>
   )
