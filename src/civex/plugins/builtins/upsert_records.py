@@ -14,7 +14,7 @@ class Plugin(Tier0Plugin):
     id = "civex.upsert_records"
     name = "Upsert Records"
     category = "outputs"
-    capabilities: list[str] = ["create_record", "update_record"]
+    capabilities: list[str] = ["create_record", "update_record", "find_records"]
 
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
@@ -36,7 +36,6 @@ class Plugin(Tier0Plugin):
         df: pd.DataFrame = inputs["table"]
         dataset_name = config.dataset or ctx.dataset.name
         parent_id = config.parent_record_id or str(ctx.record.id)
-        record_svc = ctx._app_ctx.record_svc
 
         log.info(
             "Upserting %d rows → dataset '%s', schema '%s', key '%s'",
@@ -59,7 +58,7 @@ class Plugin(Tier0Plugin):
             if key_value is None:
                 continue
 
-            existing = record_svc.find(
+            existing = ctx.find_records(
                 dataset_name,
                 schema_name=config.schema_name,
                 parent_record_id=parent_id,
@@ -68,11 +67,11 @@ class Plugin(Tier0Plugin):
             )
 
             if existing:
-                record_svc.update(str(existing[0].id), data)
+                ctx.update_record(str(existing[0].id), data)
                 updated += 1
             else:
-                record_svc.add(
-                    dataset_name, config.schema_name, data, parent_record_id=parent_id
+                ctx.create_record(
+                    dataset_name, config.schema_name, data, context_record_id=parent_id
                 )
                 created += 1
 

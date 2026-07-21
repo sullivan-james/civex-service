@@ -31,5 +31,5 @@ class Plugin(Tier0Plugin):
             str(ctx.record.id)[:8],
             list(updates.keys()),
         )
-        ctx.update_record(data)
+        ctx.update_record(str(ctx.record.id), data)
         return {}

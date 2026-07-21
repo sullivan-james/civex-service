@@ -16,7 +16,7 @@ class Plugin(Tier0Plugin):
     id = "civex.match_files_to_records"
     name = "Match Files to Records"
     category = "outputs"
-    capabilities: list[str] = ["create_record", "update_record"]
+    capabilities: list[str] = ["create_record", "update_record", "find_records"]
 
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
@@ -35,7 +35,6 @@ class Plugin(Tier0Plugin):
         files: list[dict[str, Any]] = inputs["files"]  # list of FileRef dicts
         dataset_name = config.dataset or ctx.dataset.name
         parent_id = config.parent_record_id or str(ctx.record.id)
-        record_svc = ctx._app_ctx.record_svc
 
         try:
             pat = re.compile(config.pattern)
@@ -68,7 +67,7 @@ class Plugin(Tier0Plugin):
             except ValueError:
                 pass
 
-            existing = record_svc.find(
+            existing = ctx.find_records(
                 dataset_name,
                 schema_name=config.schema_name,
                 parent_record_id=parent_id,
@@ -78,7 +77,7 @@ class Plugin(Tier0Plugin):
 
             if existing:
                 child = existing[0]
-                record_svc.update(str(child.id), {**child.data, config.file_field: ref})
+                ctx.update_record(str(child.id), {**child.data, config.file_field: ref})
                 log.info(
                     "  ✓ updated  '%s' → %s %s (key=%s)",
                     filename,
@@ -93,11 +92,11 @@ class Plugin(Tier0Plugin):
                 except ValueError:
                     typed_key = key_value
                 try:
-                    child = record_svc.add(
+                    child = ctx.create_record(
                         dataset_name,
                         config.schema_name,
                         {config.key_field: typed_key, config.file_field: ref},
-                        parent_record_id=parent_id,
+                        context_record_id=parent_id,
                     )
                     log.info(
                         "  ✓ created  '%s' → %s %s (key=%s)",

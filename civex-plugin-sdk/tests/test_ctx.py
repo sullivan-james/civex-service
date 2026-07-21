@@ -43,13 +43,18 @@ def test_get_file_decodes_base64_result():
     }
 
 
-def test_update_record_sends_data_and_expects_no_return():
+def test_update_record_sends_explicit_record_id_and_data():
     ctx, sent = make_ctx(
-        lambda call: {"type": "rpc_result", "call_id": call["call_id"], "result": {}}
+        lambda call: {
+            "type": "rpc_result",
+            "call_id": call["call_id"],
+            "result": {"id": "r1", "data": {"field": "value"}},
+        }
     )
-    assert ctx.update_record({"field": "value"}) is None
+    result = ctx.update_record("r1", {"field": "value"})
+    assert result == {"id": "r1", "data": {"field": "value"}}
     assert sent[-1]["method"] == "update_record"
-    assert sent[-1]["params"] == {"data": {"field": "value"}}
+    assert sent[-1]["params"] == {"record_id": "r1", "data": {"field": "value"}}
 
 
 def test_create_record_returns_host_result():
@@ -60,13 +65,13 @@ def test_create_record_returns_host_result():
             "result": {"id": "new-record-id"},
         }
     )
-    result = ctx.create_record("ds", "schema", {"a": 1}, parent_record_id="parent-1")
+    result = ctx.create_record("ds", "schema", {"a": 1}, context_record_id="ctx-1")
     assert result == {"id": "new-record-id"}
     assert sent[-1]["params"] == {
         "dataset_name": "ds",
         "schema_name": "schema",
         "data": {"a": 1},
-        "parent_record_id": "parent-1",
+        "context_record_id": "ctx-1",
     }
 
 
@@ -107,3 +112,119 @@ def test_mismatched_call_id_raises_rpc_error():
     )
     with pytest.raises(RpcError):
         ctx.commit()
+
+
+def _tool_result(result: dict[str, Any]):
+    return lambda call: {
+        "type": "rpc_result",
+        "call_id": call["call_id"],
+        "result": result,
+    }
+
+
+def test_get_record_routes_through_call_tool():
+    ctx, sent = make_ctx(_tool_result({"record": {"id": "r1", "data": {"a": 1}}}))
+
+    result = ctx.get_record("r1")
+
+    assert result == {"id": "r1", "data": {"a": 1}}
+    assert sent[-1]["method"] == "call_tool"
+    assert sent[-1]["params"] == {"tool": "get_record", "args": {"record_id": "r1"}}
+
+
+def test_find_records_routes_through_call_tool_and_returns_list():
+    ctx, sent = make_ctx(_tool_result({"records": [{"id": "r1"}, {"id": "r2"}]}))
+
+    result = ctx.find_records("study", schema_name="subject", filters=["status=active"])
+
+    assert result == [{"id": "r1"}, {"id": "r2"}]
+    assert sent[-1]["params"] == {
+        "tool": "find_records",
+        "args": {
+            "dataset_name": "study",
+            "schema_name": "subject",
+            "parent_record_id": None,
+            "filters": ["status=active"],
+            "search": None,
+            "limit": 50,
+            "offset": 0,
+        },
+    }
+
+
+def test_delete_record_routes_through_call_tool():
+    ctx, sent = make_ctx(_tool_result({}))
+
+    assert ctx.delete_record("r1") is None
+    assert sent[-1]["params"] == {"tool": "delete_record", "args": {"record_id": "r1"}}
+
+
+def test_get_context_record_routes_through_call_tool_with_no_args():
+    ctx, sent = make_ctx(_tool_result({"record": {"id": "trigger-1", "data": {}}}))
+
+    result = ctx.get_context_record()
+
+    assert result == {"id": "trigger-1", "data": {}}
+    assert sent[-1]["params"] == {"tool": "get_context_record", "args": {}}
+
+
+def test_get_context_dataset_routes_through_call_tool_with_no_args():
+    ctx, sent = make_ctx(_tool_result({"dataset": {"name": "study"}}))
+
+    result = ctx.get_context_dataset()
+
+    assert result == {"name": "study"}
+    assert sent[-1]["params"] == {"tool": "get_context_dataset", "args": {}}
+
+
+def test_store_file_encodes_outbound_bytes_and_returns_file_ref():
+    ctx, sent = make_ctx(
+        _tool_result(
+            {"file": {"sha256": "abc123", "filename": "hello.txt", "size": 11}}
+        )
+    )
+
+    result = ctx.store_file(b"hello world", "hello.txt")
+
+    assert result == {"sha256": "abc123", "filename": "hello.txt", "size": 11}
+    call_args = sent[-1]["params"]["args"]
+    assert call_args["filename"] == "hello.txt"
+    assert call_args["data"] == encode_binary(b"hello world")
+
+
+def test_get_schema_routes_through_call_tool():
+    ctx, sent = make_ctx(
+        _tool_result({"schema": {"name": "subject", "fields": [{"name": "age"}]}})
+    )
+
+    result = ctx.get_schema("subject")
+
+    assert result == {"name": "subject", "fields": [{"name": "age"}]}
+    assert sent[-1]["params"] == {"tool": "get_schema", "args": {"name": "subject"}}
+
+
+def test_list_schemas_routes_through_call_tool_and_returns_list():
+    ctx, sent = make_ctx(_tool_result({"schemas": [{"name": "subject"}]}))
+
+    result = ctx.list_schemas()
+
+    assert result == [{"name": "subject"}]
+    assert sent[-1]["params"] == {"tool": "list_schemas", "args": {}}
+
+
+def test_get_collection_routes_through_call_tool():
+    ctx, sent = make_ctx(_tool_result({"collection": {"name": "study"}}))
+
+    result = ctx.get_collection("study")
+
+    assert result == {"name": "study"}
+    assert sent[-1]["params"] == {"tool": "get_collection", "args": {"name": "study"}}
+
+
+def test_list_collections_routes_through_call_tool_and_returns_list():
+    ctx, sent = make_ctx(_tool_result({"collections": [{"name": "study"}]}))
+
+    result = ctx.list_collections()
+
+    assert result == [{"name": "study"}]
+    assert sent[-1]["params"] == {"tool": "list_collections", "args": {}}

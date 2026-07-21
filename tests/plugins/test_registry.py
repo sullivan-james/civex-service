@@ -23,9 +23,9 @@ _ALL_BUILTIN_IDS_AND_CAPABILITIES = {
     "civex.extract_from_filename": [],
     "civex.load_csv": [],
     "civex.create_records_from_files": ["create_record"],
-    "civex.match_files_to_records": ["create_record", "update_record"],
+    "civex.match_files_to_records": ["create_record", "update_record", "find_records"],
     "civex.rows_to_records": ["create_record"],
-    "civex.upsert_records": ["create_record", "update_record"],
+    "civex.upsert_records": ["create_record", "update_record", "find_records"],
 }
 
 

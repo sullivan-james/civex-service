@@ -22,5 +22,5 @@ class Plugin(Tier0Plugin):
         value = inputs["value"]
         updated = dict(ctx.record.data)
         updated[config.field] = value
-        ctx.update_record(updated)
+        ctx.update_record(str(ctx.record.id), updated)
         return {}

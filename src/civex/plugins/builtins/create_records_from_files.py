@@ -22,14 +22,13 @@ class Plugin(Tier0Plugin):
         schema_name: str = Field(alias="schema")
         file_field: str
         dataset: str = ""
-        parent_record_id: str = ""
+        context_record_id: str = ""
 
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
     ) -> dict[str, Any]:
         files: list[dict[str, Any]] = inputs["files"]
         dataset_name = config.dataset or ctx.dataset.name
-        parent_id = config.parent_record_id or str(ctx.record.id)
 
         log.info(
             "Creating %d %s record(s) in dataset '%s'",
@@ -41,11 +40,11 @@ class Plugin(Tier0Plugin):
         created = skipped = 0
         for ref in files:
             try:
-                ctx._app_ctx.record_svc.add(
+                ctx.create_record(
                     dataset_name,
                     config.schema_name,
                     {config.file_field: ref},
-                    parent_record_id=parent_id,
+                    context_record_id=config.context_record_id or None,
                 )
                 log.info(
                     "  ✓ created %s from '%s'",

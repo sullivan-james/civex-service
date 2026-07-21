@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from civex.domain.dtos import DatasetDTO, RecordDTO
+from civex.domain.dtos import DatasetDTO, FileRef, RecordDTO, SchemaDTO
 from civex_plugin_sdk.plugin_base import PluginBase
 
 if TYPE_CHECKING:
@@ -87,17 +87,61 @@ class Tier0Plugin(PluginBase, ABC):
 
 @dataclass
 class WorkflowContext:
+    """Standard CRUD across the non-administrative data areas a plugin
+    actually works with (records, files) plus read access to the structural
+    ones a plugin needs to introspect (schemas, collections) — schema/
+    collection *writes* stay out of this surface; changing the shape of the
+    data model is an administrative action, not something a workflow step
+    does.
+
+    Every operation's *target* (the record/dataset/schema being read,
+    updated, or deleted) is an explicit argument — none of them special-case
+    "the record that triggered this workflow." `.record`/`.dataset` are
+    still plain fields for in-process code that wants to read the trigger
+    record directly (most built-ins do), but a plugin that wants to *write*
+    to it goes through the same `update_record(record_id, data)` as it
+    would for any other record — `get_context_record()`/
+    `get_context_dataset()` are how it gets that id in the first place, and
+    are the *only* way an out-of-process plugin (civex-plugin-sdk's `Ctx`,
+    which deliberately has no `.record`/`.dataset` fields at all) can learn
+    what triggered it.
+
+    `create_record`'s `context_record_id` is the one deliberate exception:
+    when omitted it defaults to the trigger record, because "usually a
+    workflow is run from a particular record and creates children of it" is
+    the overwhelmingly common case (4 of the 11 built-ins were each
+    independently re-deriving this exact default before it lived here). It's
+    deliberately *not* called `parent_record_id`, even though it's the value
+    that ends up in `RecordDTO.parent_record_id` when the target schema
+    declares one — not every create_record call creates a child record (a
+    flat schema just ignores it), so the parameter is named for what it
+    always is (a record providing default context) rather than what it
+    sometimes becomes (a parent link). This is safe rather than magic --
+    record_svc.add() already ignores `parent_record_id` entirely for a
+    schema that doesn't declare a parent, so the default can never attach an
+    unwanted relationship, only supply the one you'd almost always want when
+    it's actually needed."""
+
     record: RecordDTO
     dataset: DatasetDTO
     _app_ctx: "AppContext"
     job_depth: int = 0
 
+    def get_context_record(self) -> RecordDTO:
+        return self.record
+
+    def get_context_dataset(self) -> DatasetDTO:
+        return self.dataset
+
     def get_file(self, sha256: str) -> bytes:
         return self._app_ctx.file_svc.retrieve(sha256)
 
-    def update_record(self, data: dict[str, Any]) -> None:
-        self._app_ctx.record_svc.update(
-            str(self.record.id), data, _job_depth=self.job_depth + 1
+    def store_file(self, data: bytes, filename: str) -> FileRef:
+        return self._app_ctx.file_svc.store_bytes(data, filename)
+
+    def update_record(self, record_id: str, data: dict[str, Any]) -> RecordDTO:
+        return self._app_ctx.record_svc.update(
+            record_id, data, _job_depth=self.job_depth + 1
         )
 
     def create_record(
@@ -105,15 +149,53 @@ class WorkflowContext:
         dataset_name: str,
         schema_name: str,
         data: dict[str, Any],
-        parent_record_id: str | None = None,
+        context_record_id: str | None = None,
     ) -> RecordDTO:
         return self._app_ctx.record_svc.add(
             dataset_name,
             schema_name,
             data,
-            parent_record_id=parent_record_id,
+            parent_record_id=context_record_id or str(self.record.id),
             _job_depth=self.job_depth + 1,
         )
+
+    def get_record(self, record_id: str) -> RecordDTO:
+        return self._app_ctx.record_svc.get(record_id)
+
+    def find_records(
+        self,
+        dataset_name: str,
+        schema_name: str | None = None,
+        parent_record_id: str | None = None,
+        filters: list[str] | None = None,
+        search: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[RecordDTO]:
+        return self._app_ctx.record_svc.find(
+            dataset_name,
+            schema_name=schema_name,
+            parent_record_id=parent_record_id,
+            filters=filters,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+
+    def delete_record(self, record_id: str) -> None:
+        self._app_ctx.record_svc.delete(record_id)
+
+    def get_schema(self, name: str) -> SchemaDTO:
+        return self._app_ctx.schema_svc.get(name)
+
+    def list_schemas(self) -> list[SchemaDTO]:
+        return self._app_ctx.schema_svc.list_all()
+
+    def get_collection(self, name: str) -> DatasetDTO:
+        return self._app_ctx.dataset_svc.get(name)
+
+    def list_collections(self) -> list[DatasetDTO]:
+        return self._app_ctx.dataset_svc.list_all()
 
     def commit(self) -> None:
         self._app_ctx.commit()
