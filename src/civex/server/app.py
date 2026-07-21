@@ -15,6 +15,7 @@ from civex.server.routers import (
     dump,
     files,
     jobs,
+    legal,
     plugins,
     records,
     remote,
@@ -110,6 +111,7 @@ def create_app() -> FastAPI:
     app.include_router(remote.router, prefix="/api")
     app.include_router(store.router, prefix="/api")
     app.include_router(db.router, prefix="/api")
+    app.include_router(legal.router, prefix="/api")
     app.include_router(status.router, prefix="/api")
     app.include_router(terminal.router, prefix="/api")
 

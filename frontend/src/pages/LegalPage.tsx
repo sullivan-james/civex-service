@@ -1,0 +1,111 @@
+import { useState } from 'react'
+import { useLicense, usePolicies } from '../hooks/useLegal'
+import { LoadingState, ErrorState } from '../components/ui'
+
+function LicenseSection() {
+  const { data, isLoading, error } = useLicense()
+  const [expanded, setExpanded] = useState(false)
+
+  if (isLoading) return <LoadingState />
+  if (error || !data)
+    return (
+      <ErrorState message={error ? String(error) : 'Failed to load license'} />
+    )
+
+  return (
+    <div className="border border-[#d0d7de] rounded-md bg-white p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-[#1f2328]">Software license</p>
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          className="text-xs text-[#0969da] hover:underline"
+        >
+          {expanded ? 'Collapse' : 'Show full text'}
+        </button>
+      </div>
+      <pre
+        className={`text-xs font-mono text-[#656d76] whitespace-pre-wrap ${expanded ? '' : 'max-h-24 overflow-hidden'}`}
+      >
+        {data.text}
+      </pre>
+    </div>
+  )
+}
+
+function PoliciesSection() {
+  const { data: policies, isLoading, error } = usePolicies()
+  const [openStem, setOpenStem] = useState<string | null>(null)
+
+  if (isLoading) return <LoadingState />
+  if (error || !policies)
+    return (
+      <ErrorState message={error ? String(error) : 'Failed to load policies'} />
+    )
+
+  if (policies.length === 0) {
+    return (
+      <p className="text-sm text-[#656d76] italic">
+        No policy documents configured. Add markdown files to{' '}
+        <span className="font-mono text-xs">_civex/policies/</span> to have them
+        show up here.
+      </p>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {policies.map((p) => {
+        const open = openStem === p.stem
+        return (
+          <div
+            key={p.stem}
+            className="border border-[#d0d7de] rounded-md bg-white"
+          >
+            <button
+              onClick={() => setOpenStem(open ? null : p.stem)}
+              className="w-full flex items-center justify-between px-4 py-3 text-left"
+            >
+              <span className="text-sm font-medium text-[#1f2328]">
+                {p.title}
+              </span>
+              <span className="text-xs text-[#656d76]">{open ? '▲' : '▼'}</span>
+            </button>
+            {open && (
+              <div className="border-t border-[#d0d7de] px-4 py-3 bg-[#f6f8fa]">
+                <pre className="text-xs font-mono text-[#1f2328] whitespace-pre-wrap">
+                  {p.content}
+                </pre>
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+export default function LegalPage() {
+  return (
+    <div className="space-y-10">
+      <div>
+        <h1 className="text-xl font-semibold text-[#1f2328]">
+          Licenses &amp; Policies
+        </h1>
+        <p className="text-sm text-[#656d76] mt-0.5">
+          The software license for this build, plus any data/governance policies
+          this deployment has documented.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        <h2 className="text-lg font-semibold text-[#1f2328]">License</h2>
+        <LicenseSection />
+      </div>
+
+      <div className="space-y-3">
+        <h2 className="text-lg font-semibold text-[#1f2328]">Policies</h2>
+        <PoliciesSection />
+      </div>
+    </div>
+  )
+}

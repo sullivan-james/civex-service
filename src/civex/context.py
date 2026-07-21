@@ -30,6 +30,7 @@ from civex.services.ai_usage_service import AiUsageService
 from civex.services.dataset_service import DatasetService
 from civex.services.file_service import FileService
 from civex.services.plugin_service import PluginService
+from civex.services.policy_service import PolicyService
 from civex.services.record_service import RecordService
 from civex.services.schema_service import SchemaService
 from civex.services.store_service import StoreService
@@ -56,6 +57,7 @@ class AppContext:
     ai_usage_svc: AiUsageService
     workflow_svc: WorkflowService
     plugin_svc: PluginService
+    policy_svc: PolicyService
     _session: Session
 
     def commit(self) -> None:
@@ -122,6 +124,7 @@ def build_local_context(
     ai_usage_svc = AiUsageService(engine)
     workflow_svc = WorkflowService(config.civex_dir)
     plugin_svc = PluginService(config.civex_dir)
+    policy_svc = PolicyService(config.civex_dir)
 
     ctx = AppContext(
         schema_svc=schema_svc,
@@ -135,6 +138,7 @@ def build_local_context(
         ai_usage_svc=ai_usage_svc,
         workflow_svc=workflow_svc,
         plugin_svc=plugin_svc,
+        policy_svc=policy_svc,
         _session=session,
     )
     ai_svc._app_ctx = ctx
