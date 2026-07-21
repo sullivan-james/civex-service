@@ -9,7 +9,7 @@ import WorkflowsPage from './pages/WorkflowsPage'
 import JobsPage from './pages/JobsPage'
 import JobDetailPage from './pages/JobDetailPage'
 import TerminalPage from './pages/TerminalPage'
-import StorePage from './pages/StorePage'
+import SettingsPage from './pages/SettingsPage'
 
 export default function App() {
   return (
@@ -37,7 +37,9 @@ export default function App() {
         <Route path="/jobs" element={<Navigate to="/runs" replace />} />
         <Route path="/jobs/:id" element={<Navigate to="/runs" replace />} />
         <Route path="/terminal" element={<TerminalPage />} />
-        <Route path="/storage" element={<StorePage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        {/* Legacy redirect — Storage moved into Settings */}
+        <Route path="/storage" element={<Navigate to="/settings" replace />} />
       </Routes>
     </Layout>
   )

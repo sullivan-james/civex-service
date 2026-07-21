@@ -5,9 +5,9 @@ import {
   useUpdateVolume,
   useRemoveVolume,
   useSetQueue,
-} from '../hooks/useStore'
-import type { VolumeStats } from '../api/store'
-import { Button, LoadingState, ErrorState } from '../components/ui'
+} from '../../hooks/useStore'
+import type { VolumeStats } from '../../api/store'
+import { Button, LoadingState, ErrorState } from '../ui'
 
 const isDesktop = typeof window !== 'undefined' && !!window.pywebview
 
@@ -441,7 +441,7 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
   )
 }
 
-export default function StorePage() {
+export default function StorageSection() {
   const { data: volumes, isLoading, error } = useVolumes()
   const setQueue = useSetQueue()
   const [addingVolume, setAddingVolume] = useState(false)
@@ -482,7 +482,7 @@ export default function StorePage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-[#1f2328]">Storage</h1>
+          <h2 className="text-lg font-semibold text-[#1f2328]">Storage</h2>
           <p className="text-sm text-[#656d76] mt-0.5">
             Configure where civex stores files. New uploads go to the first
             available volume in the write queue.

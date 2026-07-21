@@ -7,7 +7,9 @@ from sqlalchemy import create_engine
 
 from civex.console import console
 from civex.db.migrate import ensure_schema_current
+from civex.domain.exceptions import ValidationError
 from civex.project import scaffold_project
+from civex.services import db_service
 
 
 def init(
@@ -51,27 +53,23 @@ def _resolve_db_url(
 ) -> tuple[str, bool]:
     """Return (db_url, docker_managed), starting Docker postgres if available."""
     if not use_sqlite:
-        from civex.cli._docker import (
-            docker_available,
-            docker_error_hint,
-            setup_docker_postgres,
-        )
-        from civex.cli._pgdriver import detect_pg_driver, driver_install_hint
-
-        if detect_pg_driver() is None:
+        if db_service.detect_pg_driver() is None:
             console.print(
                 "[dim]No PostgreSQL driver found (psycopg2 / psycopg) — using SQLite.[/dim]"
             )
-            console.print(driver_install_hint())
-        elif docker_available():
-            db_url = setup_docker_postgres(target.name)
-            if db_url:
+            console.print(db_service.driver_install_hint())
+        elif db_service.docker_available():
+            console.print("Setting up PostgreSQL via Docker...", end="  ")
+            try:
+                db_url = db_service.provision_docker_postgres(target.name)
+                console.print("[success]OK[/success]")
                 return db_url, True
-            console.print(
-                "  [warning]Docker postgres setup failed — falling back to SQLite.[/warning]"
-            )
+            except ValidationError as exc:
+                console.print("[warning]failed[/warning]")
+                console.print(f"  [warning]{exc}[/warning]")
+                console.print("  [warning]Falling back to SQLite.[/warning]")
         else:
-            hint = docker_error_hint()
+            hint = db_service.docker_error_hint()
             console.print("[dim]Docker not available — using SQLite.[/dim]")
             console.print(f"  [dim]{hint}[/dim]")
             console.print(

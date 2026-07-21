@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { remoteApi, type SyncResult } from '../api/remote'
 import AiPanel from './ai/AiPanel'
@@ -34,7 +34,6 @@ const tabs = [
   { to: '/workflows', label: 'Workflows' },
   { to: '/runs', label: 'Runs' },
   { to: '/terminal', label: 'Terminal' },
-  { to: '/storage', label: 'Storage' },
 ]
 
 function SyncMessage({
@@ -58,6 +57,9 @@ function SyncMessage({
 
 export default function Layout({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const settingsActive = location.pathname.startsWith('/settings')
   const [syncing, setSyncing] = useState<'push' | 'pull' | null>(null)
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -126,6 +128,27 @@ export default function Layout({ children }: { children: ReactNode }) {
           }`}
         >
           ✦ Ask AI
+        </button>
+
+        <button
+          onClick={() => navigate('/settings')}
+          title="Settings"
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
+            settingsActive
+              ? 'border-[#0969da] bg-[#0969da] text-white'
+              : 'border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3]'
+          }`}
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            aria-hidden
+          >
+            <path d="M8 0a8.2 8.2 0 0 1 .701.031C9.444.095 9.99.645 9.99 1.311v.171a6.946 6.946 0 0 1 1.524.625l.121-.12a1.311 1.311 0 0 1 1.855 0l.354.353a1.311 1.311 0 0 1 0 1.855l-.12.121c.247.473.43.98.524 1.524h.171c.666 0 1.216.546 1.28 1.29A8.2 8.2 0 0 1 16 8a8.2 8.2 0 0 1-.031.701c-.064.744-.614 1.29-1.28 1.29h-.171a6.946 6.946 0 0 1-.524 1.524l.12.121a1.311 1.311 0 0 1 0 1.855l-.353.354a1.311 1.311 0 0 1-1.855 0l-.121-.12a6.946 6.946 0 0 1-1.524.524v.171c0 .666-.546 1.216-1.29 1.28A8.2 8.2 0 0 1 8 16a8.2 8.2 0 0 1-.701-.031c-.744-.064-1.29-.614-1.29-1.28v-.171a6.946 6.946 0 0 1-1.524-.524l-.121.12a1.311 1.311 0 0 1-1.855 0l-.354-.353a1.311 1.311 0 0 1 0-1.855l.12-.121A6.946 6.946 0 0 1 2.25 10.7h-.171c-.666 0-1.216-.546-1.28-1.29A8.2 8.2 0 0 1 0 8a8.2 8.2 0 0 1 .031-.701C.095 6.556.645 6.01 1.311 6.01h.171a6.946 6.946 0 0 1 .524-1.524l-.12-.121a1.311 1.311 0 0 1 0-1.855l.353-.354a1.311 1.311 0 0 1 1.855 0l.121.12A6.946 6.946 0 0 1 5.74 1.77h-.17v-.17c0-.666.545-1.216 1.29-1.28A8.233 8.233 0 0 1 8 .001Zm-.5 4.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
+          </svg>
+          Settings
         </button>
 
         {isDesktop && (

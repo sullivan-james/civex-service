@@ -11,6 +11,7 @@ from civex.server.errors import RequestContextMiddleware, register_error_handler
 from civex.server.routers import (
     ai,
     datasets,
+    db,
     dump,
     files,
     jobs,
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router, prefix="/api")
     app.include_router(remote.router, prefix="/api")
     app.include_router(store.router, prefix="/api")
+    app.include_router(db.router, prefix="/api")
     app.include_router(status.router, prefix="/api")
     app.include_router(terminal.router, prefix="/api")
 

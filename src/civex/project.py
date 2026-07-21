@@ -37,7 +37,7 @@ def scaffold_project(
 
     If *db_url* is not supplied, a SQLite database at _civex/civex.db is used.
     *docker_managed* records whether *db_url* points at a container civex
-    itself provisioned (see civex.cli._docker) — used later to decide
+    itself provisioned (see civex.services.db_service) — used later to decide
     whether to run container-recovery checks before a command connects.
     Returns the db_url that was written to config.toml.
 

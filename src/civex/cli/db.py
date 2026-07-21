@@ -1,215 +1,131 @@
 from __future__ import annotations
 
 import getpass
-import socket
-import subprocess
 import urllib.parse
 from pathlib import Path
 
 import typer
 
-from civex.cli._pgdriver import detect_pg_driver, driver_install_hint
 from civex.console import console
+from civex.domain.exceptions import ValidationError
+from civex.services import db_service
 
 app = typer.Typer(help="Database management commands.")
 
-_COMMON_PORTS = [5432, 5433]
-_SOCKET_DIRS = ["/var/run/postgresql", "/run/postgresql", "/tmp"]
-
 
 # ---------------------------------------------------------------------------
-# Local server detection
-# ---------------------------------------------------------------------------
-
-
-def _pg_port_open(host: str, port: int, timeout: float = 2.0) -> bool:
-    try:
-        result = subprocess.run(
-            ["pg_isready", "-h", host, "-p", str(port)],
-            capture_output=True,
-            timeout=timeout,
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-    try:
-        s = socket.create_connection((host, port), timeout=timeout)
-        s.close()
-        return True
-    except OSError:
-        return False
-
-
-def _probe_local() -> tuple[str, int] | None:
-    """Return (host, port) of the first local Postgres found, checking common ports."""
-    for port in _COMMON_PORTS:
-        if _pg_port_open("localhost", port):
-            return "localhost", port
-    return None
-
-
-def _find_socket_dir(port: int) -> str | None:
-    """Return the Unix socket directory for the given port, or None."""
-    for d in _SOCKET_DIRS:
-        if (Path(d) / f".s.PGSQL.{port}").exists():
-            return d
-    return None
-
-
-# ---------------------------------------------------------------------------
-# URL builders
+# Interactive setup-postgres wizard — the prompting/decision-tree here is
+# inherently CLI-only; the connection/provisioning logic it calls into lives
+# in civex.services.db_service so the server's /api/db routes (which offer
+# the non-interactive "give me a URL directly" path instead) share it.
 # ---------------------------------------------------------------------------
 
 
-def _tcp_url(
-    driver: str, user: str, password: str, host: str, port: int, dbname: str
-) -> str:
-    dialect = "postgresql+psycopg" if driver == "psycopg" else "postgresql+psycopg2"
-    enc_user = urllib.parse.quote(user, safe="")
-    if password:
-        enc_pass = urllib.parse.quote(password, safe="")
-        return f"{dialect}://{enc_user}:{enc_pass}@{host}:{port}/{dbname}"
-    return f"{dialect}://{enc_user}@{host}:{port}/{dbname}"
+def _run_wizard(driver: str) -> str:
+    """Auto-detect a local Postgres server, try socket then TCP, auto-create
+    missing user/db. Returns the resolved db_url."""
+    current_user = getpass.getuser()
 
+    console.print("\n[bold]Detecting local PostgreSQL server...[/bold]", end="  ")
+    found = db_service.probe_local_postgres()
 
-def _socket_url(driver: str, user: str, socket_dir: str, port: int, dbname: str) -> str:
-    dialect = "postgresql+psycopg" if driver == "psycopg" else "postgresql+psycopg2"
-    enc_user = urllib.parse.quote(user, safe="")
-    enc_dir = urllib.parse.quote(socket_dir, safe="")
-    return f"{dialect}://{enc_user}@/{dbname}?host={enc_dir}&port={port}"
+    if found:
+        host, port = found
+        console.print(f"[success]found[/success] [dim](port {port})[/dim]")
+        socket_dir = db_service.find_socket_dir(port)
 
-
-# ---------------------------------------------------------------------------
-# Connection testing
-# ---------------------------------------------------------------------------
-
-
-def _test_connection(url: str) -> str | None:
-    """Return None on success, or an error message string."""
-    from sqlalchemy import create_engine, text
-
-    try:
-        engine = create_engine(url)
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        engine.dispose()
-        return None
-    except Exception as exc:
-        return str(exc)
-
-
-# ---------------------------------------------------------------------------
-# Database / user provisioning via CLI tools
-# ---------------------------------------------------------------------------
-
-
-def _createdb(dbname: str, port: int, owner: str) -> tuple[bool, str]:
-    result = subprocess.run(
-        ["createdb", dbname, "-p", str(port), "-O", owner],
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0, result.stderr.strip()
-
-
-def _createuser(user: str, port: int) -> tuple[bool, str]:
-    result = subprocess.run(
-        ["createuser", "--superuser", user, "-p", str(port)],
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0, result.stderr.strip()
-
-
-def _maybe_fix_and_connect(
-    driver: str,
-    user: str,
-    port: int,
-    dbname: str,
-    socket_dir: str | None,
-    err: str,
-) -> str | None:
-    """
-    Inspect the error, attempt to fix it (create user/db), and return a
-    working URL — or None if the problem can't be auto-fixed.
-    """
-    err_lower = err.lower()
-
-    # ---- role doesn't exist → createuser --------------------------------
-    if "role" in err_lower and "does not exist" in err_lower:
-        console.print(f"  Role [bold]{user}[/bold] not found. Creating it...", end="  ")
-        ok, msg = _createuser(user, port)
-        if not ok:
-            console.print("[error]FAILED[/error]")
-            console.print(f"  [dim]{msg}[/dim]")
-            return None
-        console.print("[success]OK[/success]")
-        # Fall through — user now exists, may still need the DB
-
-    # ---- database doesn't exist → createdb ------------------------------
-    if (
-        "database" in err_lower
-        and "does not exist" in err_lower
-        or ("role" in err_lower and "does not exist" in err_lower)
-    ):
-        console.print(
-            f"  Database [bold]{dbname}[/bold] not found. Creating it...", end="  "
-        )
-        ok, msg = _createdb(dbname, port, owner=user)
-        if not ok:
-            console.print("[error]FAILED[/error]")
-            console.print(f"  [dim]{msg}[/dim]")
-            return None
-        console.print("[success]OK[/success]")
-
-        # Retry via socket (peer auth) or TCP
         if socket_dir:
-            url = _socket_url(driver, user, socket_dir, port, dbname)
-            if _test_connection(url) is None:
-                return url
-        url = _tcp_url(driver, user, "", "localhost", port, dbname)
-        return url if _test_connection(url) is None else None
-
-    return None
-
-
-# ---------------------------------------------------------------------------
-# OS-level installation hints
-# ---------------------------------------------------------------------------
-
-
-def _pg_install_hint() -> str:
-    import platform
-
-    system = platform.system()
-    if system == "Linux":
-        try:
-            os_release = Path("/etc/os-release").read_text()
-        except OSError:
-            os_release = ""
-        if "ubuntu" in os_release.lower() or "debian" in os_release.lower():
-            return (
-                "  sudo apt-get install -y postgresql\n"
-                "  sudo systemctl start postgresql"
+            test_url = db_service.build_socket_url(
+                driver, current_user, socket_dir, port, "postgres"
             )
-        if (
-            "fedora" in os_release.lower()
-            or "rhel" in os_release.lower()
-            or "centos" in os_release.lower()
-        ):
-            return (
-                "  sudo dnf install -y postgresql-server\n"
-                "  sudo postgresql-setup --initdb\n"
-                "  sudo systemctl start postgresql"
+            if db_service.test_connection(test_url) is None:
+                dbname = typer.prompt(
+                    f"  Connected as [bold]{current_user}[/bold] via socket. Database name",
+                    default=Path.cwd().name,
+                )
+                return db_service.build_socket_url(
+                    driver, current_user, socket_dir, port, dbname
+                )
+
+        tcp_test = db_service.build_tcp_url(
+            driver, current_user, "", host, port, "postgres"
+        )
+        if db_service.test_connection(tcp_test) is None:
+            dbname = typer.prompt(
+                f"  Connected as [bold]{current_user}[/bold]. Database name",
+                default=Path.cwd().name,
             )
-        return "  sudo apt-get install -y postgresql"
-    if system == "Darwin":
-        return "  brew install postgresql@16\n  brew services start postgresql@16"
-    return "  https://www.postgresql.org/download/"
+            return db_service.build_tcp_url(
+                driver, current_user, "", host, port, dbname
+            )
+
+        console.print(
+            f"  [dim]Server found but could not auto-connect as [bold]{current_user}[/bold].[/dim]"
+        )
+        return _prompt_manual(
+            driver, default_host=host, default_port=port, default_user=current_user
+        )
+    else:
+        console.print("[dim]not found[/dim]")
+        hint = db_service.pg_install_hint()
+        console.print(
+            f"\n  [dim]No PostgreSQL server detected on ports {db_service.COMMON_PORTS}.[/dim]"
+        )
+        console.print(f"  [dim]To install PostgreSQL:[/dim]\n  {hint}\n")
+        console.print("  Or enter details for an existing server:")
+        return _prompt_manual(driver)
+
+
+def _prompt_manual(
+    driver: str,
+    default_host: str = "localhost",
+    default_port: int = 5432,
+    default_user: str = "",
+) -> str:
+    """Collect host/port/dbname/user/password interactively."""
+    if not default_user:
+        default_user = getpass.getuser()
+    console.print("")
+    host = typer.prompt("  Host", default=default_host)
+    port = typer.prompt("  Port", default=default_port, type=int)
+    dbname = typer.prompt("  Database name", default=Path.cwd().name)
+    user = typer.prompt("  User", default=default_user)
+    password = typer.prompt(
+        "  Password (blank for passwordless)", default="", hide_input=True
+    )
+    return db_service.build_tcp_url(driver, user, password, host, port, dbname)
+
+
+def _print_project_summary(civex_dir: Path, is_new: bool) -> None:
+    console.print(f"  Config     {civex_dir / 'config.toml'}")
+    if is_new:
+        console.print(f"  Objects    {civex_dir / 'objects'}")
+        console.print(f"  Workflows  {civex_dir / 'workflows'}")
+        console.print(f"  Plugins    {civex_dir / 'plugins'}")
+
+
+def _ensure_project_dirs(root: Path) -> Path:
+    civex_dir = root / "_civex"
+    civex_dir.mkdir(parents=True)
+    (civex_dir / "objects").mkdir()
+    (civex_dir / "workflows").mkdir()
+    (civex_dir / "plugins").mkdir()
+    return civex_dir
+
+
+def _load_or_new_config(root: Path, is_new: bool):
+    """Load the existing config so db_service can overwrite just `.db` without
+    losing remote/store/ai settings, or start a fresh minimal one for a
+    brand-new project (there's nothing to preserve yet)."""
+    from civex.config import Config, DBConfig, load_config
+
+    if is_new:
+        return Config(project_root=root, db=DBConfig(url=""), remote=None)
+    return load_config()
 
 
 # ---------------------------------------------------------------------------
-# Command
+# Commands
 # ---------------------------------------------------------------------------
 
 
@@ -221,124 +137,46 @@ def setup_docker() -> None:
     _civex/config.toml with the new URL and creates all tables.
     Useful for migrating an existing SQLite project to PostgreSQL.
     """
-    from civex.cli._docker import (
-        container_exists,
-        container_name,
-        docker_available,
-        setup_docker_postgres,
-        volume_exists,
-    )
-    from civex.config import Config, DBConfig, find_project_root, save_config
-    from civex.db.migrate import ensure_schema_current
-    from sqlalchemy import create_engine
+    from civex.config import find_project_root, load_config
 
-    # Ensure Docker is running
-    if not docker_available():
-        from civex.cli._docker import docker_error_hint
-
-        console.print("[error]Docker is not usable.[/error]")
-        console.print(f"  {docker_error_hint()}")
-        raise typer.Exit(1)
-
-    # Ensure a postgres driver is installed
-    driver = detect_pg_driver()
-    if driver is None:
-        console.print("[error]No PostgreSQL driver found (psycopg2 / psycopg).[/error]")
-        console.print(driver_install_hint())
-        raise typer.Exit(1)
-
-    # Determine project name for the container
     root = find_project_root()
     project_name = root.name if root else Path.cwd().name
 
     # If neither the container nor its data volume exist, but this project
     # was previously docker-managed, we're about to create a brand-new,
     # EMPTY database — confirm before silently doing that.
-    name = container_name(project_name)
-    if (
-        root is not None
-        and not container_exists(name)
-        and not volume_exists(f"{name}-pgdata")
-    ):
-        try:
-            from civex.config import load_config
+    if root is not None:
+        docker_status = db_service.docker_status(project_name)
+        if not docker_status.exists and not docker_status.volume_exists:
+            try:
+                was_docker_managed = load_config().db.docker_managed
+            except Exception:
+                was_docker_managed = False
+            if was_docker_managed:
+                console.print(
+                    f"[warning]No existing container or data volume found for "
+                    f"'{docker_status.name}' — this will create a brand-new, EMPTY database.[/warning]"
+                )
+                typer.confirm("Continue?", abort=True)
 
-            was_docker_managed = load_config().db.docker_managed
-        except Exception:
-            was_docker_managed = False
-        if was_docker_managed:
-            console.print(
-                f"[warning]No existing container or data volume found for "
-                f"'{name}' — this will create a brand-new, EMPTY database.[/warning]"
-            )
-            typer.confirm("Continue?", abort=True)
-
-    db_url = setup_docker_postgres(project_name)
-    if db_url is None:
-        raise typer.Exit(1)
-
-    # Test the connection
-    console.print("\nTesting connection...", end="  ")
-    err = _test_connection(db_url)
-    if err:
-        console.print("[error]FAILED[/error]")
-        console.print(f"[error]{err}[/error]")
-        raise typer.Exit(1)
-    console.print("[success]OK[/success]")
-
-    # Write config (create _civex structure if this is a new project)
     is_new = root is None
     if root is None:
         root = Path.cwd()
-        civex_dir = root / "_civex"
-        civex_dir.mkdir(parents=True)
-        (civex_dir / "objects").mkdir()
-        (civex_dir / "workflows").mkdir()
-        (civex_dir / "plugins").mkdir()
         console.print(f"\nInitialized civex project at [bold]{root}[/bold]")
-    else:
-        civex_dir = root / "_civex"
+    civex_dir = _ensure_project_dirs(root) if is_new else root / "_civex"
+    config = _load_or_new_config(root, is_new)
 
+    console.print("\nSetting up PostgreSQL via Docker...")
     try:
-        from civex.config import load_config
-
-        existing = load_config()
-        config = Config(
-            project_root=root,
-            db=DBConfig(url=db_url, docker_managed=True),
-            remote=existing.remote,
-        )
-    except Exception:
-        config = Config(
-            project_root=root, db=DBConfig(url=db_url, docker_managed=True), remote=None
-        )
-
-    save_config(config)
-
-    # Create / migrate tables
-    console.print("Creating tables...", end="    ")
-    try:
-        engine = create_engine(db_url)
-        ensure_schema_current(engine)
-        engine.dispose()
-        console.print("[success]OK[/success]")
-    except Exception as exc:
-        console.print("[error]FAILED[/error]")
+        status = db_service.setup_docker(config, project_name)
+    except ValidationError as exc:
         console.print(f"[error]{exc}[/error]")
         raise typer.Exit(1)
+    console.print("[success]OK[/success]")
 
-    import urllib.parse
-
-    parsed = urllib.parse.urlparse(db_url)
     console.print("\n[success]Docker PostgreSQL setup complete.[/success]")
-    console.print(
-        f"  Database   postgresql://{parsed.hostname}:{parsed.port or 5432}{parsed.path}"
-    )
-    console.print(f"  Config     {civex_dir / 'config.toml'}")
-    if is_new:
-        console.print(f"  Objects    {civex_dir / 'objects'}")
-        console.print(f"  Workflows  {civex_dir / 'workflows'}")
-        console.print(f"  Plugins    {civex_dir / 'plugins'}")
+    console.print(f"  Database   {status.url}")
+    _print_project_summary(civex_dir, is_new)
 
 
 @app.command("teardown")
@@ -352,37 +190,31 @@ def teardown(
     directory is deleted. Run this before abandoning a project to avoid
     leaving it behind. Does nothing to a manually-managed PostgreSQL server.
     """
-    from civex.cli._docker import (
-        container_exists,
-        docker_available,
-        teardown_pg_container,
-    )
-    from civex.cli._docker import container_name as _container_name
     from civex.config import find_project_root
 
-    if not docker_available():
+    if not db_service.docker_available():
         console.print("[error]Docker is not usable.[/error]")
         raise typer.Exit(1)
 
     root = find_project_root()
     project_name = root.name if root else Path.cwd().name
-    name = _container_name(project_name)
+    status = db_service.docker_status(project_name)
 
-    if not container_exists(name):
+    if not status.exists:
         console.print(
-            f"No Docker container named [bold]{name}[/bold] found — nothing to do."
+            f"No Docker container named [bold]{status.name}[/bold] found — nothing to do."
         )
         return
 
     if not yes:
         console.print(
-            f"[warning]This will permanently delete the [bold]{name}[/bold] "
+            f"[warning]This will permanently delete the [bold]{status.name}[/bold] "
             "container and its data volume.[/warning]"
         )
         typer.confirm("Proceed?", abort=True)
 
-    console.print(f"Removing [bold]{name}[/bold]...", end="  ")
-    ok, err = teardown_pg_container(name)
+    console.print(f"Removing [bold]{status.name}[/bold]...", end="  ")
+    ok, err = db_service.teardown_docker_container(status.name)
     if not ok:
         console.print("[error]FAILED[/error]")
         console.print(f"[error]{err}[/error]")
@@ -410,51 +242,39 @@ def setup_postgres(
     if needed, then writes the URL to _civex/config.toml and creates all tables.
     Pass [bold]--url[/bold] to skip interactive prompts (useful in scripts/CI).
     """
-    from civex.config import Config, DBConfig, find_project_root, save_config
-    from civex.db.migrate import ensure_schema_current
-    from sqlalchemy import create_engine
+    from civex.config import find_project_root
 
-    # ---- Phase 1: Ensure a Python driver ------------------------------------
-    driver = detect_pg_driver()
+    driver = db_service.detect_pg_driver()
     if driver is None:
         console.print("[error]No PostgreSQL driver found (psycopg2 / psycopg).[/error]")
-        console.print(driver_install_hint())
+        console.print(db_service.driver_install_hint())
         raise typer.Exit(1)
 
-    # ---- Phase 2: Resolve a working DB URL ----------------------------------
     if url:
         console.print(f"[dim]Using provided URL (driver: {driver})[/dim]")
         db_url = url
-        try:
-            parsed = urllib.parse.urlparse(url)
-            display = f"{parsed.hostname or '?'}:{parsed.port or 5432}/{(parsed.path or '').lstrip('/')}"
-        except Exception:
-            display = url
     else:
-        db_url, display = _run_wizard(driver)
+        db_url = _run_wizard(driver)
 
-    # ---- Phase 3: Final connection test + auto-fix if still broken ----------
     console.print("\nTesting connection...", end="  ")
-    err = _test_connection(db_url)
+    err = db_service.test_connection(db_url)
     if err:
         console.print("[warning]retrying[/warning]")
-        # Try to parse enough context to auto-fix
         try:
             parsed = urllib.parse.urlparse(db_url)
             f_user = urllib.parse.unquote(parsed.username or getpass.getuser())
             f_port = parsed.port or 5432
             f_dbname = (parsed.path or "").lstrip("/")
-            f_socket = _find_socket_dir(f_port)
+            f_socket = db_service.find_socket_dir(f_port)
         except Exception:
             f_user, f_port, f_dbname, f_socket = getpass.getuser(), 5432, "civex", None
-        db_url_fixed = _maybe_fix_and_connect(
+        db_url_fixed = db_service.maybe_fix_and_connect(
             driver, f_user, f_port, f_dbname, f_socket, err
         )
         if db_url_fixed:
             db_url = db_url_fixed
-            display = f"localhost:{f_port}/{f_dbname}"
             console.print("Testing connection...", end="  ")
-            err2 = _test_connection(db_url)
+            err2 = db_service.test_connection(db_url)
             if err2:
                 console.print("[error]FAILED[/error]")
                 console.print(f"[error]{err2}[/error]")
@@ -467,131 +287,29 @@ def setup_postgres(
     else:
         console.print("[success]OK[/success]")
 
-    # ---- Phase 4: Write config ----------------------------------------------
     root = find_project_root()
     is_new = root is None
     if root is None:
         root = Path.cwd()
-        civex_dir = root / "_civex"
-        civex_dir.mkdir(parents=True)
-        (civex_dir / "objects").mkdir()
-        (civex_dir / "workflows").mkdir()
-        (civex_dir / "plugins").mkdir()
         console.print(f"\nInitialized civex project at [bold]{root}[/bold]")
-    else:
-        civex_dir = root / "_civex"
+    civex_dir = _ensure_project_dirs(root) if is_new else root / "_civex"
+    config = _load_or_new_config(root, is_new)
 
-    try:
-        from civex.config import load_config
-
-        existing = load_config()
-        config = Config(
-            project_root=root, db=DBConfig(url=db_url), remote=existing.remote
-        )
-    except Exception:
-        config = Config(project_root=root, db=DBConfig(url=db_url), remote=None)
-
-    save_config(config)
-
-    # ---- Phase 5: Create tables ---------------------------------------------
     console.print("Creating tables...", end="    ")
     try:
-        engine = create_engine(db_url)
-        ensure_schema_current(engine)
-        engine.dispose()
-        console.print("[success]OK[/success]")
-    except Exception as exc:
+        status = db_service.set_url(config, db_url)
+    except ValidationError as exc:
         console.print("[error]FAILED[/error]")
         console.print(f"[error]{exc}[/error]")
         raise typer.Exit(1)
+    console.print("[success]OK[/success]")
 
-    # ---- Summary ------------------------------------------------------------
     console.print("\n[success]PostgreSQL setup complete.[/success]")
-    console.print(f"  Database   postgresql://{display}")
-    console.print(f"  Config     {civex_dir / 'config.toml'}")
-    if is_new:
-        console.print(f"  Objects    {civex_dir / 'objects'}")
-        console.print(f"  Workflows  {civex_dir / 'workflows'}")
-        console.print(f"  Plugins    {civex_dir / 'plugins'}")
+    console.print(f"  Database   {status.url}")
+    _print_project_summary(civex_dir, is_new)
     console.print(
         "\n[dim]Note: credentials are stored in plaintext in _civex/config.toml.[/dim]"
     )
-
-
-def _run_wizard(driver: str) -> tuple[str, str]:
-    """
-    Interactive path: auto-detect local Postgres, try socket then TCP,
-    auto-create missing user/db. Returns (db_url, display_string).
-    """
-    current_user = getpass.getuser()
-
-    console.print("\n[bold]Detecting local PostgreSQL server...[/bold]", end="  ")
-    found = _probe_local()
-
-    if found:
-        host, port = found
-        console.print(f"[success]found[/success] [dim](port {port})[/dim]")
-        socket_dir = _find_socket_dir(port)
-
-        # Prefer socket (peer auth → no password)
-        if socket_dir:
-            test_url = _socket_url(driver, current_user, socket_dir, port, "postgres")
-            if _test_connection(test_url) is None:
-                dbname = typer.prompt(
-                    f"  Connected as [bold]{current_user}[/bold] via socket. Database name",
-                    default=Path.cwd().name,
-                )
-                db_url = _socket_url(driver, current_user, socket_dir, port, dbname)
-                return db_url, f"localhost:{port}/{dbname}"
-
-        # Socket didn't work or doesn't exist — try TCP
-        tcp_test = _tcp_url(driver, current_user, "", host, port, "postgres")
-        if _test_connection(tcp_test) is None:
-            dbname = typer.prompt(
-                f"  Connected as [bold]{current_user}[/bold]. Database name",
-                default=Path.cwd().name,
-            )
-            db_url = _tcp_url(driver, current_user, "", host, port, dbname)
-            return db_url, f"{host}:{port}/{dbname}"
-
-        # Connected to server but auth needs credentials
-        console.print(
-            f"  [dim]Server found but could not auto-connect as [bold]{current_user}[/bold].[/dim]"
-        )
-        return _prompt_manual(
-            driver, default_host=host, default_port=port, default_user=current_user
-        )
-    else:
-        console.print("[dim]not found[/dim]")
-        hint = _pg_install_hint()
-        console.print(
-            f"\n  [dim]No PostgreSQL server detected on ports {_COMMON_PORTS}.[/dim]"
-        )
-        console.print(f"  [dim]To install PostgreSQL:[/dim]\n{hint}\n")
-        console.print("  Or enter details for an existing server:")
-        return _prompt_manual(driver)
-
-
-def _prompt_manual(
-    driver: str,
-    default_host: str = "localhost",
-    default_port: int = 5432,
-    default_user: str = "",
-) -> tuple[str, str]:
-    """Collect host/port/dbname/user/password interactively."""
-    if not default_user:
-        default_user = getpass.getuser()
-    console.print("")
-    host = typer.prompt("  Host", default=default_host)
-    port = typer.prompt("  Port", default=default_port, type=int)
-    dbname = typer.prompt("  Database name", default=Path.cwd().name)
-    user = typer.prompt("  User", default=default_user)
-    password = typer.prompt(
-        "  Password (blank for passwordless)", default="", hide_input=True
-    )
-    return _tcp_url(
-        driver, user, password, host, port, dbname
-    ), f"{host}:{port}/{dbname}"
 
 
 # ---------------------------------------------------------------------------
@@ -605,54 +323,92 @@ def _prompt_manual(
 # instead of letting it happen implicitly on next connect.
 
 
+@app.command("status")
+def status() -> None:
+    """Show the database's connection, migration, and (if applicable) Docker container status."""
+    from civex.config import load_config
+
+    config = load_config()
+    info = db_service.get_status(config)
+
+    console.print(f"[bold]Database[/bold]   {info.url}")
+    console.print(f"[bold]Dialect[/bold]    {info.dialect}")
+    console.print(
+        f"[bold]Managed by[/bold] {'civex (Docker)' if info.docker_managed else 'you'}"
+    )
+    if info.migration.error:
+        console.print(
+            f"[bold]Schema[/bold]     [error]unreachable[/error] — {info.migration.error}"
+        )
+    elif info.migration.up_to_date:
+        console.print(
+            f"[bold]Schema[/bold]     [success]up to date[/success] at revision {info.migration.current_revision}"
+        )
+    elif info.migration.current_revision is None:
+        console.print(
+            "[bold]Schema[/bold]     [warning]not yet migrated[/warning] — "
+            "will be created/stamped on next connect"
+        )
+    else:
+        console.print(
+            f"[bold]Schema[/bold]     [warning]pending migrations[/warning]: "
+            f"at {info.migration.current_revision}, head is {info.migration.head_revision}"
+        )
+
+    if info.docker is not None:
+        d = info.docker
+        if not d.exists:
+            state = (
+                "[warning]container missing (data volume present)[/warning]"
+                if d.volume_exists
+                else "[error]container and data volume both missing[/error]"
+            )
+        else:
+            state = (
+                "[success]running[/success]"
+                if d.running
+                else "[warning]stopped[/warning]"
+            )
+        console.print(f"[bold]Container[/bold]  {d.name} — {state}")
+
+
 @app.command("current")
 def current() -> None:
     """Show the database's current migration revision and whether it's up to date."""
-    from alembic.script import ScriptDirectory
-    from sqlalchemy import create_engine, inspect
-
     from civex.config import load_config
-    from civex.db.migrate import _MIGRATIONS_DIR
 
     config = load_config()
-    engine = create_engine(config.db.url)
+    info = db_service.migration_status(config.db.url)
 
-    script = ScriptDirectory(str(_MIGRATIONS_DIR))
-    head = script.get_current_head()
+    if info.error:
+        console.print(f"[error]Could not connect: {info.error}[/error]")
+        raise typer.Exit(1)
 
-    with engine.connect() as connection:
-        tables = inspect(connection).get_table_names()
-        if "alembic_version" not in tables:
-            console.print(
-                "[warning]Not yet migrated[/warning] — will be created/stamped on next connect."
-            )
-            raise typer.Exit(0)
-        row = connection.exec_driver_sql(
-            "SELECT version_num FROM alembic_version"
-        ).fetchone()
-        current_rev = row[0] if row else None
+    if info.current_revision is None:
+        console.print(
+            "[warning]Not yet migrated[/warning] — will be created/stamped on next connect."
+        )
+        raise typer.Exit(0)
 
-    if current_rev == head:
-        console.print(f"[success]Up to date[/success] at revision {current_rev}")
+    if info.up_to_date:
+        console.print(
+            f"[success]Up to date[/success] at revision {info.current_revision}"
+        )
     else:
         console.print(
-            f"[warning]Pending migrations[/warning]: at {current_rev}, head is {head}"
+            f"[warning]Pending migrations[/warning]: at {info.current_revision}, head is {info.head_revision}"
         )
 
 
 @app.command("migrate")
 def migrate() -> None:
     """Apply any pending migrations now, instead of waiting for the next connect."""
-    from sqlalchemy import create_engine
-
     from civex.config import load_config
-    from civex.db.migrate import ensure_schema_current
 
     config = load_config()
-    engine = create_engine(config.db.url)
     console.print("Applying migrations...", end="    ")
     try:
-        ensure_schema_current(engine)
+        db_service.apply_migrations(config.db.url)
     except Exception as exc:
         console.print("[error]FAILED[/error]")
         console.print(f"[error]{exc}[/error]")
