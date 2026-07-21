@@ -5,20 +5,21 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from civex.plugins.base import BasePlugin, WorkflowContext
+from civex.plugins.base import Tier0Plugin, WorkflowContext
 
 log = logging.getLogger(__name__)
 
 
-class Plugin(BasePlugin):
+class Plugin(Tier0Plugin):
     id = "civex.save_fields"
     name = "Save Fields"
     category = "outputs"
+    capabilities: list[str] = ["update_record"]
 
     class Config(BaseModel):
         pass
 
-    def run(
+    def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
     ) -> dict[str, Any]:
         updates: dict[str, Any] = inputs["updates"]

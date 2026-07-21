@@ -6,15 +6,16 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from civex.domain.exceptions import ValidationError
-from civex.plugins.base import BasePlugin, WorkflowContext
+from civex.plugins.base import Tier0Plugin, WorkflowContext
 
 log = logging.getLogger(__name__)
 
 
-class Plugin(BasePlugin):
+class Plugin(Tier0Plugin):
     id = "civex.create_records_from_files"
     name = "Create Records from Files"
     category = "outputs"
+    capabilities: list[str] = ["create_record"]
 
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
@@ -23,7 +24,7 @@ class Plugin(BasePlugin):
         dataset: str = ""
         parent_record_id: str = ""
 
-    def run(
+    def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
     ) -> dict[str, Any]:
         files: list[dict[str, Any]] = inputs["files"]

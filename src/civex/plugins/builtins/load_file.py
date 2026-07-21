@@ -6,20 +6,21 @@ from typing import Any
 from pydantic import BaseModel
 
 from civex.domain.dtos import FileRef
-from civex.plugins.base import BasePlugin, WorkflowContext
+from civex.plugins.base import Tier0Plugin, WorkflowContext
 
 log = logging.getLogger(__name__)
 
 
-class Plugin(BasePlugin):
+class Plugin(Tier0Plugin):
     id = "civex.load_file"
     name = "Load File"
     category = "data-sources"
+    capabilities: list[str] = ["get_file"]
 
     class Config(BaseModel):
         field: str  # field name on the trigger record containing a FileRef
 
-    def run(
+    def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
     ) -> dict[str, Any]:
         raw = ctx.record.data.get(config.field)

@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from civex.plugins.base import BasePlugin, WorkflowContext
+from civex.plugins.base import Tier0Plugin, WorkflowContext
 
 _TOKEN_RE = re.compile(r"(YYYY|MM|DD|HH|mm|SS)")
 _TOKEN_MAP = {
@@ -45,10 +45,11 @@ def _parse_by_format(raw: str, fmt: str, output_type: str) -> str:
         return _dt(year, month, day, hour, minute, second, tzinfo=_tz.utc).isoformat()
 
 
-class Plugin(BasePlugin):
+class Plugin(Tier0Plugin):
     id = "civex.extract_from_filename"
     name = "Extract from Filename"
     category = "data-access"
+    capabilities: list[str] = []
 
     class Config(BaseModel):
         field: str
@@ -58,7 +59,7 @@ class Plugin(BasePlugin):
             None  # e.g. "YYYYMMDD-HHmmSS"; required when output_type is date/datetime
         )
 
-    def run(
+    def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
     ) -> dict[str, Any]:
         raw_value = ctx.record.data.get(config.field)

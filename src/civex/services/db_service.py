@@ -124,12 +124,16 @@ def test_connection(url: str) -> str | None:
 
 def migration_status(url: str) -> MigrationStatus:
     """Never raises -- a status surface needs to keep working even when the
-    configured database is unreachable, so a connection failure is reported
-    as MigrationStatus.error rather than propagated."""
-    engine = create_engine(url)
+    configured database is unreachable or its driver isn't installed (e.g.
+    a postgres URL without the `postgres` extra), so any such failure is
+    reported as MigrationStatus.error rather than propagated. create_engine()
+    itself can raise (ModuleNotFoundError for a missing driver) in addition
+    to the connection attempt, so it has to be inside the try too."""
     script = ScriptDirectory(str(_MIGRATIONS_DIR))
     head = script.get_current_head()
+    engine = None
     try:
+        engine = create_engine(url)
         with engine.connect() as connection:
             tables = inspect(connection).get_table_names()
             if "alembic_version" not in tables:
@@ -141,7 +145,8 @@ def migration_status(url: str) -> MigrationStatus:
     except Exception as exc:
         return MigrationStatus(None, head, up_to_date=False, error=str(exc))
     finally:
-        engine.dispose()
+        if engine is not None:
+            engine.dispose()
     return MigrationStatus(current, head, up_to_date=current == head)
 
 

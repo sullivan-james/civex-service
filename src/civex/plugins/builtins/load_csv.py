@@ -6,21 +6,22 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from civex.plugins.base import BasePlugin, WorkflowContext
+from civex.plugins.base import Tier0Plugin, WorkflowContext
 
 log = logging.getLogger(__name__)
 
 
-class Plugin(BasePlugin):
+class Plugin(Tier0Plugin):
     id = "civex.load_csv"
     name = "Load CSV"
     category = "data-sources"
+    capabilities: list[str] = []
 
     class Config(BaseModel):
         delimiter: str = ","
         encoding: str = "utf-8"
 
-    def run(
+    def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
     ) -> dict[str, Any]:
         try:

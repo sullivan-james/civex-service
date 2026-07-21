@@ -5,15 +5,16 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from civex.plugins.base import BasePlugin, WorkflowContext
+from civex.plugins.base import Tier0Plugin, WorkflowContext
 
 log = logging.getLogger(__name__)
 
 
-class Plugin(BasePlugin):
+class Plugin(Tier0Plugin):
     id = "civex.rows_to_records"
     name = "Rows to Records"
     category = "outputs"
+    capabilities: list[str] = ["create_record"]
 
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
@@ -22,7 +23,7 @@ class Plugin(BasePlugin):
         field_mapping: dict[str, str] = {}  # csv_column → schema_field
         parent_record_id: str = ""  # "" = use ctx.record.id
 
-    def run(
+    def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
     ) -> dict[str, Any]:
         try:

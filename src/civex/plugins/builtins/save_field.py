@@ -4,18 +4,19 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from civex.plugins.base import BasePlugin, WorkflowContext
+from civex.plugins.base import Tier0Plugin, WorkflowContext
 
 
-class Plugin(BasePlugin):
+class Plugin(Tier0Plugin):
     id = "civex.save_field"
     name = "Save Field"
     category = "outputs"
+    capabilities: list[str] = ["update_record"]
 
     class Config(BaseModel):
         field: str  # field name on the trigger record to write to
 
-    def run(
+    def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
     ) -> dict[str, Any]:
         value = inputs["value"]
