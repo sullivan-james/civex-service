@@ -21,7 +21,7 @@ class Plugin(Tier0Plugin):
         schema_name: str = Field(alias="schema")
         dataset: str = ""  # "" = use ctx.dataset.name
         field_mapping: dict[str, str] = {}  # csv_column → schema_field
-        parent_record_id: str = ""  # "" = use ctx.record.id
+        context_record_id: str = ""  # "" = use ctx.get_context_record().id
 
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
@@ -35,7 +35,6 @@ class Plugin(Tier0Plugin):
 
         df = inputs["table"]
         dataset_name = config.dataset or ctx.dataset.name
-        parent_id = config.parent_record_id or str(ctx.record.id)
         log.info(
             "Creating %d records → dataset '%s', schema '%s'",
             len(df),
@@ -58,7 +57,10 @@ class Plugin(Tier0Plugin):
                 if not pd.isna(v)
             }
             ctx.create_record(
-                dataset_name, config.schema_name, data, parent_record_id=parent_id
+                dataset_name,
+                config.schema_name,
+                data,
+                context_record_id=config.context_record_id or None,
             )
             created += 1
 

@@ -20,14 +20,30 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-RpcMethod = Literal["get_file", "update_record", "create_record", "commit"]
+RpcMethod = Literal["get_file", "update_record", "create_record", "commit", "call_tool"]
 
 CAPABILITIES: tuple[RpcMethod, ...] = (
     "get_file",
     "update_record",
     "create_record",
     "commit",
+    "call_tool",
 )
+
+# `call_tool` is a generic RPC method rather than one literal RpcMethod per
+# capability, so the wire protocol doesn't need a new frame/method every
+# time a new named capability (get_record, find_records, get_schema, ...)
+# is added on the Ctx/WorkflowContext side -- new tools become available
+# host-side without another protocol change. Its `params` always have the
+# shape {"tool": <tool name>, "args": {...}}.
+#
+# Even so, a plugin's declared `capabilities` list (both here and on
+# civex-service's Tier0Plugin) names the *tool*, not the literal string
+# "call_tool" -- e.g. a plugin using Ctx.find_records() declares
+# capabilities = ["find_records"], not ["call_tool"]. Enforcement (not
+# wired yet -- there's no out-of-process executor to enforce it against;
+# see CIVEX-127) checks `params["tool"]` against the declared list for a
+# `call_tool` rpc_call, and the bare method name for the original four.
 
 
 class DescribeRequest(BaseModel):
