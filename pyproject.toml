@@ -30,6 +30,7 @@ dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0",
     "structlog>=24.1",
+    "civex-plugin-sdk",
 ]
 
 [project.scripts]
@@ -48,6 +49,12 @@ dev       = ["pytest>=8", "pytest-cov>=5", "httpx2>=0.28", "pre-commit>=3.7", "r
 [tool.setuptools_scm]
 version_scheme = "post-release"
 local_scheme = "no-local-version"
+
+[tool.uv.workspace]
+members = ["civex-plugin-sdk"]
+
+[tool.uv.sources]
+civex-plugin-sdk = { workspace = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]

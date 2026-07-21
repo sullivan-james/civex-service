@@ -39,12 +39,12 @@ class PluginService:
         return [
             {
                 "id": plugin_id,
-                "description": getattr(cls, "description", "") or "",
+                "description": registration.description,
                 "builtin": plugin_id.startswith(builtin_prefix),
-                "category": getattr(cls, "category", "general"),
-                "config_schema": cls.Config.model_json_schema(),
+                "category": registration.category,
+                "config_schema": registration.config_model.model_json_schema(),
             }
-            for plugin_id, cls in sorted(all_plugins().items())
+            for plugin_id, registration in sorted(all_plugins().items())
         ]
 
     def list_raw(self) -> list[dict]:
@@ -102,8 +102,8 @@ class PluginService:
         return next(
             (
                 pid
-                for pid, cls in registered.items()
-                if pid == stem or cls.__module__ == stem
+                for pid, registration in registered.items()
+                if pid == stem or registration.module_name == stem
             ),
             stem,
         )

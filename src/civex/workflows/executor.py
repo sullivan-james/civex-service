@@ -5,7 +5,8 @@ import time
 from collections import deque
 from typing import Any
 
-from civex.plugins.base import BasePlugin, WorkflowContext
+from civex.plugins.base import WorkflowContext
+from civex.plugins.registry import PluginRegistration
 from civex.workflows.definition import StepDef, WorkflowDef
 
 log = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ def _resolve_inputs(
 def run(
     wf: WorkflowDef,
     ctx: WorkflowContext,
-    plugins: dict[str, type[BasePlugin]],
+    plugins: dict[str, PluginRegistration],
     initial_outputs: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     log.info(wf)
@@ -96,20 +97,20 @@ def run(
     wf_start = time.perf_counter()
 
     for step in order:
-        plugin_cls = plugins.get(step.plugin)
-        if plugin_cls is None:
+        registration = plugins.get(step.plugin)
+        if registration is None:
             raise ValueError(f"Unknown plugin '{step.plugin}'")
 
         log.info("  [%s] → %s", step.id, step.plugin)
         t = time.perf_counter()
-        config = plugin_cls.Config(**step.config)
+        config = registration.config_model(**step.config)
         inputs = _resolve_inputs(step.inputs, step_outputs)
         try:
-            result = plugin_cls().run(inputs, config, ctx)
+            result = registration.invoke(inputs, config, ctx)
         except Exception as e:
             log.error("  [%s] ✗ %s: %s", step.id, type(e).__name__, e)
             raise
-        step_outputs[step.id] = result or {}
+        step_outputs[step.id] = result.outputs
         log.info("  [%s] ✓ %.3fs", step.id, time.perf_counter() - t)
 
     ctx.commit()

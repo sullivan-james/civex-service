@@ -5,15 +5,16 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from civex.plugins.base import BasePlugin, WorkflowContext
+from civex.plugins.base import Tier0Plugin, WorkflowContext
 
 log = logging.getLogger(__name__)
 
 
-class Plugin(BasePlugin):
+class Plugin(Tier0Plugin):
     id = "civex.upsert_records"
     name = "Upsert Records"
     category = "outputs"
+    capabilities: list[str] = ["create_record", "update_record"]
 
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
@@ -22,7 +23,7 @@ class Plugin(BasePlugin):
         dataset: str = ""  # defaults to ctx.dataset.name
         parent_record_id: str = ""  # defaults to ctx.record.id
 
-    def run(
+    def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
     ) -> dict[str, Any]:
         try:
