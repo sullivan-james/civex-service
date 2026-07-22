@@ -1,6 +1,6 @@
 site_name: Civex
 site_description: Research data management — schemas, records, files, and workflows.
-repo_url: https://github.com/sullivan-james/civex-service
+repo_url: https://github.com/CivexData/civex-service
 repo_name: civex
 
 theme:
@@ -44,6 +44,7 @@ nav:
   - Files: files.md
   - Workflows: workflows.md
   - Plugins: plugins.md
+  - Writing custom plugins: writing-custom-plugins.md
   - Server & UI: server-ui.md
   - Remote sync: remote-sync.md
   - CLI reference: cli-reference.md

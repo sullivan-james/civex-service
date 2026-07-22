@@ -104,10 +104,12 @@ civex schema add-field selection start_time --type float --required
 civex schema add-field selection end_time --type float --required
 ```
 
-When you add a `selection` record, civex prompts for the parent `encounter` record ID. The parent's fields are also visible when viewing a child record.
+When you add a `selection` record, civex prompts for the parent `encounter` record ID. The parent's fields are also visible when viewing a child record. Inheritance can be arbitrarily deep — grandchild schemas are supported.
 
 !!! note
     A child schema only stores its own fields. Parent fields live on the parent record. This keeps the data model clean and avoids duplication.
+
+In the UI, click the pencil icon on any field row to edit it inline.
 
 ## Deleting fields and schemas
 
