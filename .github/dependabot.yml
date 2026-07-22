@@ -34,6 +34,12 @@ updates:
     ignore:
       - dependency-name: "eslint"
         versions: [">=10.0.0"]
+      # typescript-eslint's peer range is ">=4.8.4 <6.1.0", so TS 7.x fails
+      # at npm install; forcing it just moves the crash to lint time
+      # (typescript-estree throws on `Cjs`, see typescript-eslint#12518,
+      # closed not-planned). Staying on the 5.x line for now rather than
+      # taking the 6.0.3 intermediate bump — revisit once TypeScript 7.1
+      # ships and typescript-eslint widens its peer range (CIVEX-66).
       - dependency-name: "typescript"
         versions: [">=7.0.0"]
     commit-message:
