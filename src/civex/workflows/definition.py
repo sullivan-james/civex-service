@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class StepDef(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str
     plugin: str
     config: dict = {}
@@ -15,6 +17,10 @@ class StepDef(BaseModel):
     # [plugins].default_timeout_seconds from config.toml when set. Only
     # consulted for subprocess/container-tier plugins.
     timeout: int | None = None
+    # Restricted boolean expression (see workflows/conditions.py) gating
+    # whether the executor dispatches this step at all. "if" is a Python
+    # keyword, hence the alias.
+    if_: str | None = Field(default=None, alias="if")
 
 
 class RecordEventTrigger(BaseModel):

@@ -241,6 +241,97 @@ steps:
     assert len(errors) == 3
 
 
+def test_valid_if_condition_has_no_errors():
+    assert (
+        _errors("""
+name: wf
+steps:
+  - id: one
+    plugin: civex.get_field
+    config: {field: a}
+  - id: two
+    plugin: civex.save_field
+    config: {field: b}
+    inputs: {value: __input__.v}
+    if: one.value == 'x'
+inputs:
+  v: {type: value}
+""")
+        == []
+    )
+
+
+def test_if_referencing_unknown_step_is_reported():
+    errors = _errors("""
+name: wf
+steps:
+  - id: one
+    plugin: civex.save_field
+    config: {field: a}
+    inputs: {value: __input__.v}
+    if: nope.value
+inputs:
+  v: {type: value}
+""")
+    assert errors == ["Step 'one' 'if' references unknown step 'nope'"]
+
+
+def test_if_referencing_undeclared_workflow_input_is_reported():
+    errors = _errors("""
+name: wf
+steps:
+  - id: one
+    plugin: civex.save_field
+    config: {field: a}
+    inputs: {value: __input__.v}
+    if: __input__.missing
+inputs:
+  v: {type: value}
+""")
+    assert errors == [
+        "Step 'one' 'if' references '__input__.missing', but the workflow "
+        "declares no input 'missing' (has: v)"
+    ]
+
+
+def test_if_referencing_an_output_the_upstream_step_does_not_produce():
+    errors = _errors("""
+name: wf
+steps:
+  - id: save
+    plugin: civex.save_field
+    config: {field: a}
+    inputs: {value: __input__.v}
+  - id: after
+    plugin: civex.save_field
+    config: {field: b}
+    inputs: {value: __input__.v}
+    if: save.result == 1
+inputs:
+  v: {type: value}
+""")
+    assert errors == [
+        "Step 'after' 'if' references 'save.result', but step 'save' "
+        "(civex.save_field) produces no output 'result' (produces: none)"
+    ]
+
+
+def test_unsafe_if_expression_is_rejected():
+    errors = _errors("""
+name: wf
+steps:
+  - id: one
+    plugin: civex.save_field
+    config: {field: a}
+    inputs: {value: __input__.v}
+    if: one.value + 1
+inputs:
+  v: {type: value}
+""")
+    assert len(errors) == 1
+    assert "Step 'one' 'if':" in errors[0]
+
+
 def test_plugin_declaring_no_input_contract_is_not_input_checked(monkeypatch):
     """A plugin that hasn't declared inputs/outputs (None, the PluginBase
     default) opts out of name checking rather than making every workflow

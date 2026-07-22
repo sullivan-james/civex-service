@@ -8,6 +8,11 @@ from typing import Any
 from civex.domain.dtos import ErrorEnvelope
 from civex.plugins.base import WorkflowContext
 from civex.plugins.registry import PluginRegistration
+from civex.workflows.conditions import (
+    SKIPPED_OUTPUTS,
+    condition_refs,
+    evaluate_condition,
+)
 from civex.workflows.contract_validation import validate_workflow_contracts
 from civex.workflows.definition import StepDef, WorkflowDef
 
@@ -37,6 +42,14 @@ def _topological_sort(
                 )
             if source_id in ids:  # virtual ids carry no real deps
                 deps[step.id].add(source_id)
+        if step.if_ is not None:
+            for source_id, _ in condition_refs(step.if_):
+                if source_id not in known_ids:
+                    raise ValueError(
+                        f"Step '{step.id}' 'if' references unknown step '{source_id}'"
+                    )
+                if source_id in ids:
+                    deps[step.id].add(source_id)
 
     # Kahn's
     in_degree = {sid: len(d) for sid, d in deps.items()}
@@ -125,6 +138,11 @@ def run(
         registration = plugins.get(step.plugin)
         if registration is None:
             raise ValueError(f"Unknown plugin '{step.plugin}'")
+
+        if step.if_ is not None and not evaluate_condition(step.if_, step_outputs):
+            log.info("  [%s] ⏭ skipped ('if' was false)", step.id)
+            step_outputs[step.id] = SKIPPED_OUTPUTS
+            continue
 
         log.info("  [%s] → %s", step.id, step.plugin)
         t = time.perf_counter()

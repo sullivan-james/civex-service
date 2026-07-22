@@ -1,15 +1,21 @@
 """workflows/executor.py's timeout resolution (CIVEX-137): a step's own
 `timeout:` overrides the workflow-run's default_timeout_seconds, which
 itself defaults to 60.0 when the caller doesn't pass one.
+
+Also covers conditional step execution (CIVEX-129): a step whose `if:`
+evaluates falsy is never dispatched, and produces a SKIPPED marker for any
+downstream step referencing its outputs.
 """
 
 from __future__ import annotations
 
+import pytest
 from pydantic import BaseModel
 
 from civex.plugins.base import PluginTier, StepResult
 from civex.plugins.registry import PluginRegistration
 from civex.workflows import executor
+from civex.workflows.conditions import SKIPPED
 from civex.workflows.definition import StepDef, WorkflowDef
 
 
@@ -38,8 +44,8 @@ def _recording_registration(seen_timeouts: list[float]) -> PluginRegistration:
         tier=PluginTier.SUBPROCESS,
         capabilities=[],
         description="",
-        inputs=[],
-        outputs=[],
+        inputs=None,
+        outputs=None,
         config_model=_EmptyConfig,
         module_name="test",
         invoke=invoke,
@@ -81,3 +87,72 @@ def test_default_timeout_seconds_falls_back_to_sixty() -> None:
     wf = WorkflowDef(name="wf", steps=[StepDef(id="s1", plugin="test.plugin")])
     executor.run(wf, _FakeCtx(), {"test.plugin": _recording_registration(seen)})
     assert seen == [60.0]
+
+
+def test_step_with_falsy_if_is_not_invoked() -> None:
+    seen: list[float] = []
+    wf = WorkflowDef(
+        name="wf",
+        steps=[StepDef(id="s1", plugin="test.plugin", **{"if": "1 == 2"})],
+    )
+    executor.run(wf, _FakeCtx(), {"test.plugin": _recording_registration(seen)})
+    assert seen == []
+
+
+def test_step_with_truthy_if_is_invoked() -> None:
+    seen: list[float] = []
+    wf = WorkflowDef(
+        name="wf",
+        steps=[StepDef(id="s1", plugin="test.plugin", **{"if": "1 == 1"})],
+    )
+    executor.run(wf, _FakeCtx(), {"test.plugin": _recording_registration(seen)})
+    assert seen == [60.0]
+
+
+def test_downstream_step_sees_skipped_marker_for_a_skipped_step() -> None:
+    seen: list[float] = []
+    captured: dict = {}
+
+    def invoke_capturing(inputs, config, ctx, timeout) -> StepResult:
+        captured.update(inputs)
+        return StepResult(outputs={})
+
+    registrations = {
+        "test.plugin": _recording_registration(seen),
+        "test.capture": PluginRegistration(
+            id="test.capture",
+            name="Capture",
+            category="general",
+            tier=PluginTier.SUBPROCESS,
+            capabilities=[],
+            description="",
+            inputs=None,
+            outputs=None,
+            config_model=_EmptyConfig,
+            module_name="test",
+            invoke=invoke_capturing,
+        ),
+    }
+    wf = WorkflowDef(
+        name="wf",
+        steps=[
+            StepDef(id="s1", plugin="test.plugin", **{"if": "1 == 2"}),
+            StepDef(
+                id="s2",
+                plugin="test.capture",
+                inputs={"value": "s1.ok"},
+            ),
+        ],
+    )
+    executor.run(wf, _FakeCtx(), registrations)
+    assert seen == []
+    assert captured == {"value": SKIPPED}
+
+
+def test_step_if_referencing_unrun_step_raises() -> None:
+    wf = WorkflowDef(
+        name="wf",
+        steps=[StepDef(id="s1", plugin="test.plugin", **{"if": "nope.value"})],
+    )
+    with pytest.raises(ValueError, match="unknown step 'nope'"):
+        executor.run(wf, _FakeCtx(), {"test.plugin": _recording_registration([])})
