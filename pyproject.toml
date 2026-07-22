@@ -30,6 +30,12 @@ dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0",
     "structlog>=24.1",
+    # Validates a workflow step's `config` against the JSON Schema its plugin
+    # declared in `describe` (CIVEX-142). A base dependency rather than an
+    # extra because workflow save/run validation is core, and it has to
+    # validate a schema that came from an arbitrary out-of-process plugin --
+    # not somewhere to hand-roll a subset of the spec.
+    "jsonschema>=4.0",
     "civex-plugin-sdk",
 ]
 

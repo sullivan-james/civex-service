@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import hashlib
 import importlib
+import json
+import os
 import pkgutil
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
-from pydantic import BaseModel, ConfigDict
+from civex_plugin_sdk.protocol import DescribeResult
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from civex.plugins.base import PluginTier, StepResult, Tier0Plugin, WorkflowContext
 
@@ -54,11 +59,19 @@ class PluginRegistration:
 
 REGISTRY: dict[str, PluginRegistration] = {}
 
-# Path (resolved) -> plugin id, so discover_user_plugins doesn't re-spawn a
-# `uv run` describe call for a file it's already registered within this
-# process's lifetime -- mirrors register_plugin's own "register once"
-# dedup-by-id behavior for the other tiers.
-_SUBPROCESS_DESCRIBED: dict[Path, str] = {}
+# Resolved path -> (content hash, plugin id) for every subprocess-tier file
+# this process has described, so discover_user_plugins doesn't re-spawn a
+# `uv run` describe call for a file it already knows -- while still noticing
+# when that file's *contents* changed.
+#
+# Keying on content rather than path is what makes CIVEX-142's revalidation
+# affordable: a workflow is revalidated against its plugins' contracts on
+# every save and every run, which would otherwise mean a subprocess spawn per
+# plugin per validation. An unchanged plugin is a dict lookup; a changed one
+# is described again, and the workflows using it fail their next validation
+# if its contract no longer fits. That's the lazy trigger -- no reverse index
+# of "which workflows use plugin X" is needed.
+_SUBPROCESS_DESCRIBED: dict[Path, tuple[str, str]] = {}
 
 
 def _registration_for_tier0(plugin_cls: type[Tier0Plugin]) -> PluginRegistration:
@@ -158,22 +171,89 @@ def discover_user_plugins(plugins_dir: Path) -> None:
     Tier 1 (subprocess) plugin: spawn it and ask it to describe itself,
     rather than exec_module-ing it in-process — a plugin file may declare
     arbitrary PEP 723 dependencies that must never be imported into
-    civex-service's own process (CIVEX-127). Files already registered from
-    this exact path are not re-described within this process's lifetime."""
+    civex-service's own process (CIVEX-127).
+
+    A file whose contents are unchanged since this process last described it
+    is skipped; an edited one is described again so its new contract takes
+    effect immediately (CIVEX-142). Describe results are also cached on disk
+    by content hash, so a restart doesn't re-spawn every plugin."""
     if not plugins_dir.exists():
         return
 
-    from civex.plugins.subprocess_runtime import describe_plugin
-
     for path in sorted(plugins_dir.glob("*.py")):
         resolved = path.resolve()
-        cached_id = _SUBPROCESS_DESCRIBED.get(resolved)
-        if cached_id is not None and cached_id in REGISTRY:
+        try:
+            content_hash = _content_hash(resolved)
+        except OSError:
+            continue  # unreadable or vanished mid-scan; nothing to register
+        cached = _SUBPROCESS_DESCRIBED.get(resolved)
+        if cached is not None and cached[0] == content_hash and cached[1] in REGISTRY:
             continue
-        describe_result = describe_plugin(path)
+        describe_result = _describe_with_disk_cache(path, content_hash)
         registration = _registration_for_subprocess(path, describe_result)
         REGISTRY[registration.id] = registration
-        _SUBPROCESS_DESCRIBED[resolved] = registration.id
+        _SUBPROCESS_DESCRIBED[resolved] = (content_hash, registration.id)
+
+
+def _content_hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _describe_cache_path(plugin_path: Path) -> Path:
+    """`_civex/.cache/plugin-describe.json`, alongside the plugins dir the
+    file was found in."""
+    return plugin_path.resolve().parent.parent / ".cache" / "plugin-describe.json"
+
+
+def _describe_with_disk_cache(plugin_path: Path, content_hash: str) -> DescribeResult:
+    """Describe `plugin_path`, reusing a previous result for identical file
+    contents. Any problem reading or writing the cache falls back to (or
+    proceeds after) a real describe — a corrupt cache must never be able to
+    stop a plugin from loading."""
+    cache_path = _describe_cache_path(plugin_path)
+    cache = _read_describe_cache(cache_path)
+    cached = cache.get(content_hash)
+    if cached is not None:
+        try:
+            return DescribeResult.model_validate(cached)
+        except ValidationError:
+            pass  # written by a different protocol version; re-describe below
+
+    from civex.plugins.subprocess_runtime import describe_plugin
+
+    describe_result = describe_plugin(plugin_path)
+    cache[content_hash] = describe_result.model_dump()
+    _write_describe_cache(cache_path, cache)
+    return describe_result
+
+
+def _read_describe_cache(cache_path: Path) -> dict[str, Any]:
+    try:
+        loaded = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _write_describe_cache(cache_path: Path, cache: dict[str, Any]) -> None:
+    """Write via a temp file in the same directory + os.replace, so a
+    concurrent reader (the server and a CLI command can both be describing
+    plugins in the same project) never sees a half-written file."""
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=cache_path.parent,
+            prefix=cache_path.name,
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            json.dump(cache, handle)
+            temp_path = Path(handle.name)
+        os.replace(temp_path, cache_path)
+    except OSError:
+        return  # a read-only or full project dir just means no caching
 
 
 def get_plugin(plugin_id: str) -> PluginRegistration | None:

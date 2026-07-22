@@ -8,19 +8,33 @@ save_workflow tools (CIVEX-54).
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
 from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.workflows.contract_validation import validate_workflow_contracts
 from civex.workflows.definition import WorkflowDef, load_workflow
+
+if TYPE_CHECKING:
+    from civex.plugins.registry import PluginRegistration
 
 _SAFE_STEM = re.compile(r"^[\w-]+$")
 
+PluginsProvider = Callable[[], Mapping[str, "PluginRegistration"]]
+
 
 class WorkflowService:
-    def __init__(self, civex_dir: Path) -> None:
+    def __init__(self, civex_dir: Path, plugins_provider: PluginsProvider) -> None:
+        """`plugins_provider` is called per validation rather than held as a
+        snapshot: a plugin edited (or added) since this service was built has
+        to be visible to the next save, which is what makes CIVEX-142's
+        revalidation lazy. It's cheap to call -- discovery re-describes only
+        plugin files whose contents actually changed."""
         self._dir = civex_dir / "workflows"
+        self._plugins_provider = plugins_provider
 
     def list_defs(self) -> list[tuple[Path, WorkflowDef]]:
         """Every parseable workflow file as (path, parsed def). Files that
@@ -83,7 +97,12 @@ class WorkflowService:
         return results
 
     def validate(self, stem: str, content: str) -> WorkflowDef:
-        """Check stem format and YAML validity without writing anything.
+        """Check stem format, YAML validity, and every step against the
+        contract its plugin declared, without writing anything.
+
+        Contract violations are reported together rather than one at a time
+        -- whoever is fixing them (often the AI's save_workflow tool) would
+        otherwise have to resubmit once per error.
 
         Raises ValidationError on failure.
         """
@@ -93,9 +112,14 @@ class WorkflowService:
             )
         try:
             raw = yaml.safe_load(content)
-            return WorkflowDef.model_validate(raw)
+            wf = WorkflowDef.model_validate(raw)
         except Exception as e:
             raise ValidationError(f"Invalid workflow YAML: {e}")
+
+        errors = validate_workflow_contracts(wf, self._plugins_provider())
+        if errors:
+            raise ValidationError("\n".join(errors))
+        return wf
 
     def save(self, stem: str, content: str) -> tuple[Path, WorkflowDef]:
         wf = self.validate(stem, content)
