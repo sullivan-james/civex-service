@@ -1,0 +1,11 @@
+# Example manifest for a Tier 2 (container) plugin.
+#
+# On-disk layout: this file lives alongside the plugin's Dockerfile and
+# source in the same directory -- the build context is just "this
+# directory", so there's no separate path field. Copy the whole
+# plugin-templates/java/ directory into _civex/plugins/<name>/ and edit the
+# values below (and Main.java) to match your plugin.
+id = "example.java_echo"          # unique; prefix with your project name
+name = "Java Echo"
+category = "example"              # informational only
+capabilities = ["commit"]         # every ctx/rpc method Main.java's invoke() calls
