@@ -8,6 +8,7 @@ from rich.table import Table
 
 from civex.cli.utils import drain_jobs, get_ctx, run_job
 from civex.console import console
+from civex.domain.dtos import ErrorEnvelope
 from civex.domain.exceptions import NotFoundError
 
 app = typer.Typer(help="Manage automated workflow processing")
@@ -44,9 +45,14 @@ def worker_run(
             ctx.commit()
             console.print("    [success]✓ done[/success]")
         except Exception as e:
-            ctx.job_svc.mark_failed(job.id, str(e))
+            envelope = getattr(e, "envelope", None) or ErrorEnvelope.from_exception(e)
+            ctx.job_svc.mark_failed(job.id, str(e), envelope=envelope)
             ctx.commit()
-            console.print(f"    [error]✗ {e}[/error]")
+            where = f" [{envelope.step}]" if envelope.step else ""
+            retry_hint = " [dim](retryable)[/dim]" if envelope.retryable else ""
+            console.print(
+                f"    [error]✗{where} {envelope.kind}: {e}[/error]{retry_hint}"
+            )
 
 
 @app.command("jobs")

@@ -46,6 +46,7 @@ def run_pending_jobs() -> None:
     """Drain the job queue. Safe to call as a FastAPI BackgroundTask."""
     from civex.config import ConfigError, load_config
     from civex.context import build_local_context
+    from civex.domain.dtos import ErrorEnvelope
     from civex.plugins import registry as plugin_registry
     from civex.plugins.base import WorkflowContext
     from civex.workflows import executor
@@ -90,7 +91,19 @@ def run_pending_jobs() -> None:
                 ctx.job_svc.mark_completed(job.id, log=log_buf.getvalue() or None)
                 ctx.commit()
             except Exception as e:
-                ctx.job_svc.mark_failed(job.id, str(e), log=log_buf.getvalue() or None)
+                # executor.run() attaches the envelope (with the failing step
+                # id) to whatever it re-raises; anything raised before the
+                # first step -- a missing workflow or record -- is classified
+                # here instead, where there's no step to name.
+                envelope = getattr(e, "envelope", None) or ErrorEnvelope.from_exception(
+                    e
+                )
+                ctx.job_svc.mark_failed(
+                    job.id,
+                    str(e),
+                    log=log_buf.getvalue() or None,
+                    envelope=envelope,
+                )
                 ctx.commit()
     finally:
         ctx.close()

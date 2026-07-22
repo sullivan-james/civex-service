@@ -247,6 +247,14 @@ class WorkflowJob(Base):
     trigger: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    # Structured form of `error` (CIVEX-143): {kind, message, retryable,
+    # step}, identical whether the step failed in-process, in a subprocess,
+    # or (later) in a container. `error` stays as the human-readable message
+    # so existing readers keep working; this is what anything wanting to
+    # *branch* on a failure reads. A JSON column rather than three typed
+    # ones so the per-step execution records in CIVEX-105/117 can extend the
+    # shape without another migration.
+    error_details: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     log: Mapped[str | None] = mapped_column(String, nullable=True)
     input_data: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     depth: Mapped[int] = mapped_column(

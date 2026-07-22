@@ -5,6 +5,7 @@ import time
 from collections import deque
 from typing import Any
 
+from civex.domain.dtos import ErrorEnvelope
 from civex.plugins.base import WorkflowContext
 from civex.plugins.registry import PluginRegistration
 from civex.workflows.contract_validation import validate_workflow_contracts
@@ -133,7 +134,18 @@ def run(
         try:
             result = registration.invoke(inputs, config, ctx, timeout)
         except Exception as e:
-            log.error("  [%s] ✗ %s: %s", step.id, type(e).__name__, e)
+            # Attach the step id and re-raise unchanged. The exception keeps
+            # its own type and kind -- this is the one place that knows which
+            # step was running, and a job error that doesn't name the failing
+            # step is close to useless in a multi-step workflow (CIVEX-143).
+            e.envelope = ErrorEnvelope.from_exception(e, step=step.id)  # type: ignore[attr-defined]
+            log.error(
+                "  [%s] ✗ %s (%s): %s",
+                step.id,
+                type(e).__name__,
+                e.envelope.kind,  # type: ignore[attr-defined]
+                e,
+            )
             raise
         step_outputs[step.id] = result.outputs
         log.info("  [%s] ✓ %.3fs", step.id, time.perf_counter() - t)

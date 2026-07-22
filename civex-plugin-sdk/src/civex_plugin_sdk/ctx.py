@@ -50,7 +50,13 @@ class Ctx:
         frame = parse_frame(raw)
         if getattr(frame, "type", None) == "error":
             payload = frame.error  # type: ignore[attr-defined]
-            raise RpcError(payload.message, code=payload.code)
+            # Carries the host's own classification through unchanged rather
+            # than flattening every failed rpc_call to "rpc_error" -- a
+            # capability_denied has to stay recognizable as one by the time
+            # it reaches the job record.
+            raise RpcError(
+                payload.message, kind=payload.kind, retryable=payload.retryable
+            )
         if not isinstance(frame, RpcResult) or frame.call_id != call_id:
             raise RpcError(f"unexpected response to rpc_call {method!r}: {raw!r}")
         return frame.result
