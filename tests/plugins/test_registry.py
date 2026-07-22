@@ -180,9 +180,9 @@ def test_user_plugin_registers_as_tier_subprocess(tmp_path: Path):
 
 
 def test_user_plugin_discovery_is_cached_within_process(tmp_path: Path, monkeypatch):
-    """Re-running discover_user_plugins against an already-registered file
-    shouldn't re-spawn `uv run` -- expensive, and unnecessary since nothing
-    about revalidating a changed file is in scope here (CIVEX-128)."""
+    """Re-running discover_user_plugins against an unchanged file shouldn't
+    re-spawn `uv run` -- expensive, and now on the hot path, since CIVEX-142
+    revalidates every workflow against its plugins on every save and run."""
     plugins_dir = tmp_path / "plugins"
     plugins_dir.mkdir()
     (plugins_dir / "cached_plugin.py").write_text(
@@ -201,3 +201,91 @@ def test_user_plugin_discovery_is_cached_within_process(tmp_path: Path, monkeypa
 
     monkeypatch.setattr(subprocess_runtime, "describe_plugin", _boom)
     discover_user_plugins(plugins_dir)  # must not raise
+
+
+def test_editing_a_plugin_re_describes_it_and_replaces_its_contract(tmp_path: Path):
+    """The cache is keyed on file *contents*, not path (CIVEX-142): an edited
+    plugin's new contract has to take effect on the next discovery, or a
+    workflow would keep being validated against a contract the plugin no
+    longer has."""
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    path = plugins_dir / "edited_plugin.py"
+    path.write_text(
+        _USER_PLUGIN_CODE.replace(
+            "project.registry_test_plugin", "project.edited_plugin"
+        )
+    )
+
+    discover_user_plugins(plugins_dir)
+    registration = get_plugin("project.edited_plugin")
+    assert registration is not None
+    assert [spec.name for spec in registration.outputs] == ["saw"]
+
+    path.write_text(
+        path.read_text().replace(
+            'outputs = [IOSpec(name="saw", type="any")]',
+            'outputs = [IOSpec(name="renamed", type="any")]',
+        )
+    )
+    discover_user_plugins(plugins_dir)
+
+    registration = get_plugin("project.edited_plugin")
+    assert registration is not None
+    assert [spec.name for spec in registration.outputs] == ["renamed"]
+
+
+def test_describe_result_is_cached_on_disk_across_processes(
+    tmp_path: Path, monkeypatch
+):
+    """Content-hash cache survives a restart. Without it, every server or CLI
+    start would re-spawn `uv run` once per plugin file before the first
+    workflow could be saved."""
+    from civex.plugins import registry, subprocess_runtime
+
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    (plugins_dir / "disk_cached_plugin.py").write_text(
+        _USER_PLUGIN_CODE.replace(
+            "project.registry_test_plugin", "project.disk_cached_plugin"
+        )
+    )
+
+    discover_user_plugins(plugins_dir)
+    assert (tmp_path / ".cache" / "plugin-describe.json").is_file()
+
+    # Simulate a fresh process: in-memory caches gone, disk cache intact.
+    monkeypatch.setattr(registry, "_SUBPROCESS_DESCRIBED", {})
+    registry.REGISTRY.pop("project.disk_cached_plugin", None)
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("describe_plugin should not be called again")
+
+    monkeypatch.setattr(subprocess_runtime, "describe_plugin", _boom)
+    discover_user_plugins(plugins_dir)
+
+    registration = get_plugin("project.disk_cached_plugin")
+    assert registration is not None
+    assert [spec.name for spec in registration.outputs] == ["saw"]
+
+
+def test_corrupt_disk_cache_is_ignored_rather_than_fatal(tmp_path: Path, monkeypatch):
+    """A cache is an optimization; a damaged one must never stop a plugin
+    from loading."""
+    from civex.plugins import registry
+
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    (plugins_dir / "corrupt_cache_plugin.py").write_text(
+        _USER_PLUGIN_CODE.replace(
+            "project.registry_test_plugin", "project.corrupt_cache_plugin"
+        )
+    )
+    cache_path = tmp_path / ".cache" / "plugin-describe.json"
+    cache_path.parent.mkdir()
+    cache_path.write_text("{not json at all")
+
+    monkeypatch.setattr(registry, "_SUBPROCESS_DESCRIBED", {})
+    discover_user_plugins(plugins_dir)
+
+    assert get_plugin("project.corrupt_cache_plugin") is not None

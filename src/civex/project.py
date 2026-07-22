@@ -26,6 +26,7 @@ civex.db-journal
 civex.db-wal
 objects/
 logs/
+.cache/
 """
 
 
