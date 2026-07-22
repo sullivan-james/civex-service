@@ -48,6 +48,13 @@ class TelemetryConfig:
 
 
 @dataclass
+class PluginsConfig:
+    # Wall-clock budget for a subprocess/container-tier plugin run, overridable
+    # per-step via StepDef.timeout. Not consulted for tier BUILTIN.
+    default_timeout_seconds: float = 60.0
+
+
+@dataclass
 class DBConfig:
     url: str
     docker_managed: bool = False
@@ -100,6 +107,7 @@ class Config:
     ai: AIConfig | None = None  # None when [ai] is absent and ANTHROPIC_API_KEY not set
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
+    plugins: PluginsConfig = field(default_factory=PluginsConfig)
 
     @property
     def civex_dir(self) -> Path:
@@ -211,6 +219,13 @@ def load_config() -> Config:
         environment=str(tel_data.get("environment", "local")),
     )
 
+    plugins_data = data.get("plugins", {})
+    plugins_cfg = PluginsConfig(
+        default_timeout_seconds=float(
+            plugins_data.get("default_timeout_seconds", 60.0)
+        ),
+    )
+
     return Config(
         project_root=root,
         db=DBConfig(
@@ -222,6 +237,7 @@ def load_config() -> Config:
         ai=ai,
         logging=logging_cfg,
         telemetry=telemetry_cfg,
+        plugins=plugins_cfg,
     )
 
 
@@ -294,6 +310,12 @@ def save_config(config: Config) -> None:
                 lines.append(f'path = "{_ts(vol.path)}"\n')
                 if vol.allocated_gb is not None:
                     lines.append(f"allocated_gb = {vol.allocated_gb}\n")
+
+    if config.plugins.default_timeout_seconds != 60.0:
+        lines += [
+            "\n[plugins]\n",
+            f"default_timeout_seconds = {config.plugins.default_timeout_seconds}\n",
+        ]
 
     config_path = config.civex_dir / "config.toml"
     content = "".join(lines)

@@ -42,7 +42,11 @@ class PluginService:
                 "description": registration.description,
                 "builtin": plugin_id.startswith(builtin_prefix),
                 "category": registration.category,
-                "config_schema": registration.config_model.model_json_schema(),
+                "config_schema": (
+                    registration.config_schema
+                    if registration.config_schema is not None
+                    else registration.config_model.model_json_schema()
+                ),
             }
             for plugin_id, registration in sorted(all_plugins().items())
         ]
@@ -93,17 +97,24 @@ class PluginService:
         """Write an uploaded plugin file verbatim and return its registered
         plugin_id. `filename` must already be sanitized by the caller (the
         router's own path-traversal/extension checks on the untrusted
-        multipart upload) -- this only handles the write + registration."""
+        multipart upload) -- this only handles the write + registration.
+
+        Subprocess-tier registrations set module_name to the plugin's full
+        source path (see registry._registration_for_subprocess), not a bare
+        stem -- match on that path directly rather than comparing stems."""
         self._dir.mkdir(exist_ok=True)
         dest = self._dir / filename
         dest.write_bytes(content)
         registered = self._register()
         stem = filename[:-3]
+        dest_resolved = dest.resolve()
         return next(
             (
                 pid
                 for pid, registration in registered.items()
-                if pid == stem or registration.module_name == stem
+                if pid == stem
+                or registration.module_name == stem
+                or Path(registration.module_name).resolve() == dest_resolved
             ),
             stem,
         )

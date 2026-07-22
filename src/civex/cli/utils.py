@@ -132,7 +132,11 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[None, str]:
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             wf_ctx = WorkflowContext(record=record, dataset=dataset, _app_ctx=ctx)
             executor.run(
-                wf_def, wf_ctx, plugins, initial_outputs=job.input_data or None
+                wf_def,
+                wf_ctx,
+                plugins,
+                initial_outputs=job.input_data or None,
+                default_timeout_seconds=config.plugins.default_timeout_seconds,
             )
     finally:
         root.removeHandler(handler)

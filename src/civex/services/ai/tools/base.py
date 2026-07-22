@@ -1,5 +1,5 @@
 """AiTool ABC + AiToolContext -- the tool registry's equivalent of
-plugins/base.py's BasePlugin/WorkflowContext, for AI-assistant tools.
+plugins/base.py's Tier0Plugin/WorkflowContext, for AI-assistant tools.
 
 A tool's run() body should read like a CLI command: unpack tool_input, call
 one or a few service methods, shape the result. Nothing else -- see CLAUDE.md

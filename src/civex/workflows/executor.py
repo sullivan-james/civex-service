@@ -80,6 +80,7 @@ def run(
     ctx: WorkflowContext,
     plugins: dict[str, PluginRegistration],
     initial_outputs: dict[str, dict[str, Any]] | None = None,
+    default_timeout_seconds: float = 60.0,
 ) -> None:
     log.info(wf)
     virtual_ids = set(initial_outputs.keys()) if initial_outputs else None
@@ -105,8 +106,9 @@ def run(
         t = time.perf_counter()
         config = registration.config_model(**step.config)
         inputs = _resolve_inputs(step.inputs, step_outputs)
+        timeout = step.timeout if step.timeout is not None else default_timeout_seconds
         try:
-            result = registration.invoke(inputs, config, ctx)
+            result = registration.invoke(inputs, config, ctx, timeout)
         except Exception as e:
             log.error("  [%s] ✗ %s: %s", step.id, type(e).__name__, e)
             raise
