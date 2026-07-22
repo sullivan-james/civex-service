@@ -4,6 +4,7 @@ import logging
 import re
 from typing import Any
 
+from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field
 
 from civex.domain.exceptions import ValidationError
@@ -15,8 +16,28 @@ log = logging.getLogger(__name__)
 class Plugin(Tier0Plugin):
     id = "civex.match_files_to_records"
     name = "Match Files to Records"
+    description = (
+        "Attach each file to an existing child record matched by a key "
+        "extracted from its filename, creating the record when none matches."
+    )
     category = "outputs"
     capabilities: list[str] = ["create_record", "update_record", "find_records"]
+    inputs = [IOSpec(name="files", type="files", description="FileRef dicts to match.")]
+    outputs = [
+        IOSpec(
+            name="created",
+            type="number",
+            description="Records created because no match was found.",
+        ),
+        IOSpec(
+            name="updated", type="number", description="Existing records given a file."
+        ),
+        IOSpec(
+            name="unmatched",
+            type="list",
+            description="Filenames the pattern missed, or whose record could not be created.",
+        ),
+    ]
 
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)

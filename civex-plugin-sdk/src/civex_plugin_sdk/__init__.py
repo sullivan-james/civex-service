@@ -6,11 +6,13 @@ from civex_plugin_sdk.errors import (
     RpcError,
 )
 from civex_plugin_sdk.plugin import Plugin
-from civex_plugin_sdk.plugin_base import PluginBase
+from civex_plugin_sdk.plugin_base import IO_TYPES, IOSpec, PluginBase
 from civex_plugin_sdk.serve import serve
 
 __all__ = [
     "Ctx",
+    "IOSpec",
+    "IO_TYPES",
     "Plugin",
     "PluginBase",
     "serve",

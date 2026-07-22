@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field
 
 from civex.plugins.base import Tier0Plugin, WorkflowContext
@@ -13,8 +14,23 @@ log = logging.getLogger(__name__)
 class Plugin(Tier0Plugin):
     id = "civex.upsert_records"
     name = "Upsert Records"
+    description = (
+        "Create or update one record per table row, matching existing records "
+        "on a key column."
+    )
     category = "outputs"
     capabilities: list[str] = ["create_record", "update_record", "find_records"]
+    inputs = [
+        IOSpec(
+            name="table",
+            type="table",
+            description="Rows to upsert; columns map to schema fields by name.",
+        )
+    ]
+    outputs = [
+        IOSpec(name="created", type="number", description="Rows that inserted."),
+        IOSpec(name="updated", type="number", description="Rows that matched."),
+    ]
 
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)

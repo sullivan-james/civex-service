@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel
 
 from civex.plugins.base import Tier0Plugin, WorkflowContext
@@ -13,8 +14,20 @@ log = logging.getLogger(__name__)
 class Plugin(Tier0Plugin):
     id = "civex.load_file_list"
     name = "Load File List"
+    description = (
+        "Read the file references held in a `file_list` field on the trigger "
+        "record. Yields an empty list when the field is unset."
+    )
     category = "data-sources"
     capabilities: list[str] = []
+    inputs: list[IOSpec] = []
+    outputs = [
+        IOSpec(
+            name="files",
+            type="files",
+            description="FileRef dicts ({sha256, filename, size}).",
+        )
+    ]
 
     class Config(BaseModel):
         field: str  # name of the file_list field on the trigger record

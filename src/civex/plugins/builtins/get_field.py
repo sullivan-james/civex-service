@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel
 
 from civex.plugins.base import Tier0Plugin, WorkflowContext
@@ -10,8 +11,17 @@ from civex.plugins.base import Tier0Plugin, WorkflowContext
 class Plugin(Tier0Plugin):
     id = "civex.get_field"
     name = "Get Field"
+    description = "Read a single field from the record that triggered the workflow."
     category = "data-access"
     capabilities: list[str] = []
+    inputs: list[IOSpec] = []
+    outputs = [
+        IOSpec(
+            name="value",
+            type="any",
+            description="The field's current value, or null if unset.",
+        )
+    ]
 
     class Config(BaseModel):
         field: str

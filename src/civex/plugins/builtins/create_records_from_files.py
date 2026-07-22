@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field
 
 from civex.domain.exceptions import ValidationError
@@ -14,8 +15,27 @@ log = logging.getLogger(__name__)
 class Plugin(Tier0Plugin):
     id = "civex.create_records_from_files"
     name = "Create Records from Files"
+    description = (
+        "Create one record per file in a list. Pure insert -- no key matching "
+        "against existing records; use Match Files to Records for that."
+    )
     category = "outputs"
     capabilities: list[str] = ["create_record"]
+    inputs = [
+        IOSpec(
+            name="files",
+            type="files",
+            description="FileRef dicts to create one record from each.",
+        )
+    ]
+    outputs = [
+        IOSpec(name="created", type="number", description="Records created."),
+        IOSpec(
+            name="skipped",
+            type="number",
+            description="Files whose record failed validation.",
+        ),
+    ]
 
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)

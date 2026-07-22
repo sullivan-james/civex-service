@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict
 
 from civex.plugins.base import PluginTier, StepResult, Tier0Plugin, WorkflowContext
@@ -24,6 +25,16 @@ class PluginRegistration:
     tier: PluginTier
     capabilities: list[str]
     description: str
+    # Declared step-wiring contract (CIVEX-141): which `inputs:` keys a step
+    # may supply and which output names downstream steps may reference. Comes
+    # from class attributes for tier BUILTIN and from the `describe` response
+    # for the out-of-process tiers -- both ultimately the same IOSpec
+    # declarations on civex_plugin_sdk.PluginBase, so no consumer needs a
+    # per-tier branch to read a plugin's contract. None means the plugin
+    # declares no contract in that direction (see PluginBase.inputs); [] means
+    # it declares it has none.
+    inputs: list[IOSpec] | None
+    outputs: list[IOSpec] | None
     config_model: type[BaseModel]
     module_name: str
     # invoke(inputs, config, ctx, timeout) -> StepResult. `timeout` is always
@@ -63,7 +74,9 @@ def _registration_for_tier0(plugin_cls: type[Tier0Plugin]) -> PluginRegistration
         category=plugin_cls.category,
         tier=PluginTier.BUILTIN,
         capabilities=list(plugin_cls.capabilities),
-        description=getattr(plugin_cls, "description", "") or "",
+        description=plugin_cls.description,
+        inputs=None if plugin_cls.inputs is None else list(plugin_cls.inputs),
+        outputs=None if plugin_cls.outputs is None else list(plugin_cls.outputs),
         config_model=plugin_cls.Config,
         module_name=plugin_cls.__module__,
         invoke=invoke,
@@ -104,7 +117,13 @@ def _registration_for_subprocess(
         category=describe_result.category,
         tier=PluginTier.SUBPROCESS,
         capabilities=capabilities,
-        description="",
+        description=describe_result.description,
+        inputs=(
+            None if describe_result.inputs is None else list(describe_result.inputs)
+        ),
+        outputs=(
+            None if describe_result.outputs is None else list(describe_result.outputs)
+        ),
         config_model=_PassthroughConfig,
         module_name=str(plugin_path),
         invoke=invoke,

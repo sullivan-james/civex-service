@@ -38,6 +38,8 @@ def _recording_registration(seen_timeouts: list[float]) -> PluginRegistration:
         tier=PluginTier.SUBPROCESS,
         capabilities=[],
         description="",
+        inputs=[],
+        outputs=[],
         config_model=_EmptyConfig,
         module_name="test",
         invoke=invoke,

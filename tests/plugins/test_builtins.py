@@ -8,7 +8,11 @@ deliberately preserved rather than fixed, per the "no behavior change" bar.
 
 from __future__ import annotations
 
+import dataclasses
+import sys
+
 import pandas as pd
+import pytest
 
 from civex.context import AppContext
 from civex.plugins.base import WorkflowContext
@@ -17,6 +21,52 @@ from civex.plugins.registry import get_plugin
 
 def _wf_ctx(app_ctx: AppContext, record, dataset) -> WorkflowContext:
     return WorkflowContext(record=record, dataset=dataset, _app_ctx=app_ctx)
+
+
+@pytest.fixture(autouse=True)
+def _enforce_declared_contract(monkeypatch):
+    """Make every behavior test below double as a contract-conformance test.
+
+    CIVEX-142 validates a workflow's step wiring against declared inputs/
+    outputs at save time and refuses anything undeclared, so a built-in whose
+    declaration drifts from what invoke() actually accepts and returns
+    doesn't produce a wrong plugin listing -- it makes correct workflows
+    unsaveable. Wrapping get_plugin() here, rather than adding an assertion
+    to each test, means a test added later is covered without remembering to
+    opt in.
+    """
+    real_get_plugin = get_plugin
+
+    def checked_get_plugin(plugin_id: str):
+        registration = real_get_plugin(plugin_id)
+        if registration is None:
+            return None
+        inner = registration.invoke
+
+        def invoke(inputs, config, ctx, timeout):
+            _assert_names_match(plugin_id, "input", registration.inputs, inputs)
+            result = inner(inputs, config, ctx, timeout)
+            _assert_names_match(
+                plugin_id, "output", registration.outputs, result.outputs
+            )
+            return result
+
+        return dataclasses.replace(registration, invoke=invoke)
+
+    monkeypatch.setattr(sys.modules[__name__], "get_plugin", checked_get_plugin)
+
+
+def _assert_names_match(plugin_id: str, kind: str, specs, actual: dict) -> None:
+    if specs is None:  # no contract declared in this direction; nothing to check
+        return
+    declared = {spec.name for spec in specs}
+    required = {spec.name for spec in specs if spec.required}
+    undeclared = set(actual) - declared
+    assert not undeclared, (
+        f"{plugin_id} used undeclared {kind}(s): {sorted(undeclared)}"
+    )
+    missing = required - set(actual)
+    assert not missing, f"{plugin_id} omitted required {kind}(s): {sorted(missing)}"
 
 
 def test_get_field_reads_record_data(ctx, make_collection, make_schema, make_record):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel
 
 from civex.plugins.base import Tier0Plugin, WorkflowContext
@@ -13,8 +14,20 @@ log = logging.getLogger(__name__)
 class Plugin(Tier0Plugin):
     id = "civex.save_fields"
     name = "Save Fields"
+    description = (
+        "Write several fields to the trigger record at once. Updates with a "
+        "null value are skipped rather than clearing the field."
+    )
     category = "outputs"
     capabilities: list[str] = ["update_record"]
+    inputs = [
+        IOSpec(
+            name="updates",
+            type="mapping",
+            description="field name → value. Null values are ignored.",
+        )
+    ]
+    outputs: list[IOSpec] = []
 
     class Config(BaseModel):
         pass
