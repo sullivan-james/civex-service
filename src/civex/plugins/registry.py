@@ -1,31 +1,22 @@
 from __future__ import annotations
 
 import importlib
-import importlib.util
 import pkgutil
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-from civex.plugins.base import (
-    BasePlugin,
-    PluginTier,
-    StepResult,
-    Tier0Plugin,
-    WorkflowContext,
-)
+from civex.plugins.base import PluginTier, StepResult, Tier0Plugin, WorkflowContext
 
 
 @dataclass
 class PluginRegistration:
     """Tier-aware registration wrapping any plugin (built-in or user/custom)
     behind one uniform invoke() -> StepResult, regardless of which tier it
-    actually resolves to. Only PluginTier.BUILTIN is populated today —
-    SUBPROCESS/CONTAINER dispatch lands in CIVEX-127+."""
+    actually resolves to."""
 
     id: str
     name: str
@@ -35,14 +26,34 @@ class PluginRegistration:
     description: str
     config_model: type[BaseModel]
     module_name: str
-    invoke: Callable[[dict[str, Any], Any, WorkflowContext], StepResult]
+    # invoke(inputs, config, ctx, timeout) -> StepResult. `timeout` is always
+    # supplied by executor.run() (resolved from StepDef.timeout or
+    # [plugins].default_timeout_seconds); tier BUILTIN closures accept and
+    # ignore it since in-process execution has no subprocess to bound.
+    invoke: Callable[[dict[str, Any], Any, WorkflowContext, float], StepResult]
+    # Real JSON schema for a subprocess/container-tier plugin's own Config,
+    # captured from its `describe` response -- config_model for those tiers
+    # is a permissive passthrough (real validation happens in the
+    # subprocess), so callers that want the *actual* schema (PluginService.
+    # list_registered) must prefer this over config_model.model_json_schema()
+    # when it's set. None for tier BUILTIN, where config_model already *is*
+    # the real schema.
+    config_schema: dict[str, Any] | None = None
 
 
 REGISTRY: dict[str, PluginRegistration] = {}
 
+# Path (resolved) -> plugin id, so discover_user_plugins doesn't re-spawn a
+# `uv run` describe call for a file it's already registered within this
+# process's lifetime -- mirrors register_plugin's own "register once"
+# dedup-by-id behavior for the other tiers.
+_SUBPROCESS_DESCRIBED: dict[Path, str] = {}
+
 
 def _registration_for_tier0(plugin_cls: type[Tier0Plugin]) -> PluginRegistration:
-    def invoke(inputs: dict[str, Any], config: Any, ctx: WorkflowContext) -> StepResult:
+    def invoke(
+        inputs: dict[str, Any], config: Any, ctx: WorkflowContext, timeout: float
+    ) -> StepResult:
         outputs = plugin_cls().invoke(inputs, config, ctx) or {}
         return StepResult(outputs=outputs)
 
@@ -59,38 +70,54 @@ def _registration_for_tier0(plugin_cls: type[Tier0Plugin]) -> PluginRegistration
     )
 
 
-def _registration_for_legacy(plugin_cls: type[BasePlugin]) -> PluginRegistration:
-    """Wraps today's user _civex/plugins/*.py contract (BasePlugin.run,
-    unchanged) so it registers uniformly alongside Tier0Plugin built-ins.
-    Still executes in-process today; moves to tier SUBPROCESS in CIVEX-127
-    without user plugin files needing to change."""
+class _PassthroughConfig(BaseModel):
+    """Placeholder config_model for subprocess/container-tier registrations —
+    real validation happens inside the plugin's own subprocess via its
+    Config.model_validate() (see civex_plugin_sdk.serve._handle_run); the
+    host only needs to pass step.config through untouched."""
 
-    def invoke(inputs: dict[str, Any], config: Any, ctx: WorkflowContext) -> StepResult:
-        outputs = plugin_cls().run(inputs, config, ctx) or {}
-        return StepResult(outputs=outputs)
+    model_config = ConfigDict(extra="allow")
+
+
+def _registration_for_subprocess(
+    plugin_path: Path, describe_result: Any
+) -> PluginRegistration:
+    """Wraps a Tier 1 (uv-managed subprocess) plugin. `describe_result` is
+    the DescribeResult obtained once at discovery time; the capabilities it
+    declares are closed over here and used to enforce the RPC allowlist at
+    run time — never re-derived from the run's own (separate) subprocess."""
+    capabilities = list(describe_result.capabilities)
+
+    def invoke(
+        inputs: dict[str, Any], config: Any, ctx: WorkflowContext, timeout: float
+    ) -> StepResult:
+        from civex.plugins.subprocess_runtime import run_plugin
+
+        config_dict = (
+            config.model_dump() if isinstance(config, BaseModel) else dict(config)
+        )
+        return run_plugin(plugin_path, inputs, config_dict, ctx, capabilities, timeout)
 
     return PluginRegistration(
-        id=plugin_cls.id,
-        name=plugin_cls.name,
-        category=plugin_cls.category,
-        tier=PluginTier.BUILTIN,
-        capabilities=list(getattr(plugin_cls, "capabilities", []) or []),
-        description=getattr(plugin_cls, "description", "") or "",
-        config_model=plugin_cls.Config,
-        module_name=plugin_cls.__module__,
+        id=describe_result.id,
+        name=describe_result.name,
+        category=describe_result.category,
+        tier=PluginTier.SUBPROCESS,
+        capabilities=capabilities,
+        description="",
+        config_model=_PassthroughConfig,
+        module_name=str(plugin_path),
         invoke=invoke,
+        config_schema=describe_result.config_schema,
     )
 
 
-def register_plugin(plugin_cls: type[Tier0Plugin] | type[BasePlugin]) -> None:
+def register_plugin(plugin_cls: type[Tier0Plugin]) -> None:
     if not hasattr(plugin_cls, "id") or not plugin_cls.id:
         raise ValueError(f"Plugin {plugin_cls.__name__} must define an id")
     if plugin_cls.id in REGISTRY:
         return
-    if issubclass(plugin_cls, Tier0Plugin):
-        REGISTRY[plugin_cls.id] = _registration_for_tier0(plugin_cls)
-    else:
-        REGISTRY[plugin_cls.id] = _registration_for_legacy(plugin_cls)
+    REGISTRY[plugin_cls.id] = _registration_for_tier0(plugin_cls)
 
 
 def discover_plugins(package) -> None:
@@ -108,20 +135,26 @@ def discover_plugins(package) -> None:
 
 
 def discover_user_plugins(plugins_dir: Path) -> None:
-    """Load .py files from a user's _civex/plugins/ directory."""
+    """Register every .py file in a user's _civex/plugins/ directory as a
+    Tier 1 (subprocess) plugin: spawn it and ask it to describe itself,
+    rather than exec_module-ing it in-process — a plugin file may declare
+    arbitrary PEP 723 dependencies that must never be imported into
+    civex-service's own process (CIVEX-127). Files already registered from
+    this exact path are not re-described within this process's lifetime."""
     if not plugins_dir.exists():
         return
+
+    from civex.plugins.subprocess_runtime import describe_plugin
+
     for path in sorted(plugins_dir.glob("*.py")):
-        spec = importlib.util.spec_from_file_location(path.stem, path)
-        if spec is None or spec.loader is None:
+        resolved = path.resolve()
+        cached_id = _SUBPROCESS_DESCRIBED.get(resolved)
+        if cached_id is not None and cached_id in REGISTRY:
             continue
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[path.stem] = (
-            module  # required before exec so @dataclass can resolve __module__
-        )
-        spec.loader.exec_module(module)
-        if hasattr(module, "Plugin"):
-            register_plugin(module.Plugin)
+        describe_result = describe_plugin(path)
+        registration = _registration_for_subprocess(path, describe_result)
+        REGISTRY[registration.id] = registration
+        _SUBPROCESS_DESCRIBED[resolved] = registration.id
 
 
 def get_plugin(plugin_id: str) -> PluginRegistration | None:

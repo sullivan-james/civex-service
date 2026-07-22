@@ -81,7 +81,11 @@ def run_pending_jobs() -> None:
                     )
                     initial_outputs = job.input_data or None
                     executor.run(
-                        wf_def, wf_ctx, plugins, initial_outputs=initial_outputs
+                        wf_def,
+                        wf_ctx,
+                        plugins,
+                        initial_outputs=initial_outputs,
+                        default_timeout_seconds=config.plugins.default_timeout_seconds,
                     )
                 ctx.job_svc.mark_completed(job.id, log=log_buf.getvalue() or None)
                 ctx.commit()

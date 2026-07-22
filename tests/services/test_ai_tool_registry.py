@@ -107,12 +107,21 @@ def test_list_plugins_tool_reads_via_plugin_service(ctx: AppContext) -> None:
     plugin (built-ins + custom, incl. category/config_schema -- CIVEX-56)
     and full source for custom plugin files."""
     code = (
-        "from civex.plugins.base import BasePlugin, WorkflowContext\n\n"
-        "class Plugin(BasePlugin):\n"
+        "# /// script\n"
+        '# requires-python = ">=3.10"\n'
+        '# dependencies = ["civex-plugin-sdk"]\n'
+        "# ///\n"
+        "from pydantic import BaseModel\n"
+        "from civex_plugin_sdk import Ctx, Plugin as PluginBase, serve\n\n"
+        "class Plugin(PluginBase):\n"
         '    id = "project.demo"\n'
         '    name = "Demo"\n\n'
-        "    def run(self, inputs, config, ctx: WorkflowContext) -> dict:\n"
-        "        return {}\n"
+        "    class Config(BaseModel):\n"
+        "        pass\n\n"
+        "    def invoke(self, inputs, config, ctx: Ctx) -> dict:\n"
+        "        return {}\n\n"
+        'if __name__ == "__main__":\n'
+        "    serve(Plugin)\n"
     )
     ctx.plugin_svc.save("demo", code)
     result = json.loads(dispatch("list_plugins", {}, _tool_ctx(ctx)))
@@ -158,11 +167,14 @@ def test_save_workflow_tool_rejects_invalid_yaml(ctx: AppContext) -> None:
 
 def test_save_plugin_tool_validates_without_writing(ctx: AppContext) -> None:
     code = (
-        "from civex.plugins.base import BasePlugin, WorkflowContext\n\n"
-        "class Plugin(BasePlugin):\n"
+        "from pydantic import BaseModel\n"
+        "from civex_plugin_sdk import Ctx, Plugin as PluginBase, serve\n\n"
+        "class Plugin(PluginBase):\n"
         '    id = "project.demo"\n'
         '    name = "Demo"\n\n'
-        "    def run(self, inputs, config, ctx: WorkflowContext) -> dict:\n"
+        "    class Config(BaseModel):\n"
+        "        pass\n\n"
+        "    def invoke(self, inputs, config, ctx: Ctx) -> dict:\n"
         "        return {}\n"
     )
     result = json.loads(

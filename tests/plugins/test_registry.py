@@ -1,10 +1,8 @@
-"""PluginRegistration/PluginTier redesign (CIVEX-126/CIVEX-135).
-
-Built-in plugins (new-style Tier0Plugin) and user/custom plugins (legacy
-BasePlugin, unchanged _civex/plugins/*.py contract) must both register
-uniformly as PluginRegistration(tier=BUILTIN, invoke(...) -> StepResult),
-even though only built-ins were actually re-implemented against the new
-interface this story.
+"""PluginRegistration/PluginTier redesign (CIVEX-126) and the Tier 1
+subprocess runtime (CIVEX-127). Built-in plugins (Tier0Plugin, in-process)
+and user/custom plugins (civex_plugin_sdk.Plugin, uv-managed subprocess)
+both register uniformly as PluginRegistration(invoke(...) -> StepResult),
+but resolve to different tiers -- BUILTIN vs. SUBPROCESS.
 """
 
 from __future__ import annotations
@@ -49,44 +47,83 @@ def test_builtin_invoke_returns_step_result_wrapping_outputs():
     class _FakeCtx:
         record = _FakeRecord()
 
-    result = registration.invoke({}, config, _FakeCtx())
+    result = registration.invoke({}, config, _FakeCtx(), 60.0)
     assert isinstance(result, StepResult)
     assert result.outputs == {"value": "value"}
     assert result.logs == []
     assert result.error is None
 
 
-_LEGACY_USER_PLUGIN_CODE = """\
-from civex.plugins.base import BasePlugin, WorkflowContext
+_USER_PLUGIN_CODE = """\
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["civex-plugin-sdk"]
+# ///
+from pydantic import BaseModel
+from civex_plugin_sdk import Ctx, Plugin as PluginBase, serve
 
-class Plugin(BasePlugin):
+class Plugin(PluginBase):
     id = "project.registry_test_plugin"
     name = "Registry Test Plugin"
     category = "test"
+    capabilities = ["commit"]
 
-    def run(self, inputs, config, ctx: WorkflowContext) -> dict:
+    class Config(BaseModel):
+        pass
+
+    def invoke(self, inputs, config, ctx: Ctx) -> dict:
         return {"saw": inputs.get("value")}
+
+if __name__ == "__main__":
+    serve(Plugin)
 """
 
 
-def test_legacy_user_plugin_also_registers_as_tier_builtin(tmp_path: Path):
-    """Today's _civex/plugins/*.py contract (BasePlugin.run, exec_module
-    discovery) is unchanged this story -- it still executes in-process, so
-    it registers as tier BUILTIN too, wrapped into the same
-    invoke()->StepResult shape as new-style built-ins."""
+def test_user_plugin_registers_as_tier_subprocess(tmp_path: Path):
+    """A _civex/plugins/*.py file is discovered by spawning it and asking it
+    to describe itself (CIVEX-127), not by exec_module-ing it in-process --
+    it registers as tier SUBPROCESS, with capabilities/config_schema coming
+    from its own describe response."""
     plugins_dir = tmp_path / "plugins"
     plugins_dir.mkdir()
-    (plugins_dir / "registry_test_plugin.py").write_text(_LEGACY_USER_PLUGIN_CODE)
+    (plugins_dir / "registry_test_plugin.py").write_text(_USER_PLUGIN_CODE)
 
     discover_user_plugins(plugins_dir)
 
     registration = get_plugin("project.registry_test_plugin")
     assert registration is not None
-    assert registration.tier == PluginTier.BUILTIN
+    assert registration.tier == PluginTier.SUBPROCESS
     assert registration.name == "Registry Test Plugin"
     assert registration.category == "test"
-    assert registration.capabilities == []
+    assert registration.capabilities == ["commit"]
+    assert registration.config_schema is not None
 
-    result = registration.invoke({"value": "x"}, registration.config_model(), None)
+    result = registration.invoke(
+        {"value": "x"}, registration.config_model(), None, 20.0
+    )
     assert isinstance(result, StepResult)
     assert result.outputs == {"saw": "x"}
+
+
+def test_user_plugin_discovery_is_cached_within_process(tmp_path: Path, monkeypatch):
+    """Re-running discover_user_plugins against an already-registered file
+    shouldn't re-spawn `uv run` -- expensive, and unnecessary since nothing
+    about revalidating a changed file is in scope here (CIVEX-128)."""
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    (plugins_dir / "cached_plugin.py").write_text(
+        _USER_PLUGIN_CODE.replace(
+            "project.registry_test_plugin", "project.cached_plugin"
+        )
+    )
+
+    discover_user_plugins(plugins_dir)
+    assert get_plugin("project.cached_plugin") is not None
+
+    from civex.plugins import subprocess_runtime
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("describe_plugin should not be called again")
+
+    monkeypatch.setattr(subprocess_runtime, "describe_plugin", _boom)
+    discover_user_plugins(plugins_dir)  # must not raise

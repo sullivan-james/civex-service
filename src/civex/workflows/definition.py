@@ -11,6 +11,10 @@ class StepDef(BaseModel):
     plugin: str
     config: dict = {}
     inputs: dict[str, str] = {}  # input_name → "step_id.output_name"
+    # Wall-clock budget in seconds for this step's plugin run; overrides
+    # [plugins].default_timeout_seconds from config.toml when set. Only
+    # consulted for subprocess/container-tier plugins.
+    timeout: int | None = None
 
 
 class RecordEventTrigger(BaseModel):

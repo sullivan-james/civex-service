@@ -5,8 +5,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
-
 from civex.domain.dtos import DatasetDTO, FileRef, RecordDTO, SchemaDTO
 from civex_plugin_sdk.plugin_base import PluginBase
 
@@ -14,31 +12,10 @@ if TYPE_CHECKING:
     from civex.context import AppContext
 
 
-class BasePlugin(ABC):
-    """Legacy in-process plugin contract, kept unchanged for backward
-    compatibility with existing user files under `_civex/plugins/*.py`.
-    New built-in plugins implement Tier0Plugin instead (see CIVEX-126)."""
-
-    id: str
-    name: str
-    category: str = "general"
-
-    class Config(BaseModel):
-        pass
-
-    @abstractmethod
-    def run(
-        self,
-        inputs: dict[str, Any],
-        config: Any,
-        ctx: "WorkflowContext",
-    ) -> dict[str, Any]: ...
-
-
 class PluginTier(str, Enum):
-    """Which runtime executes a plugin. Only BUILTIN is populated today —
-    SUBPROCESS/CONTAINER are structurally reserved for CIVEX-127+ so the
-    registry doesn't need another redesign when those tiers land."""
+    """Which runtime executes a plugin. BUILTIN (in-process) and SUBPROCESS
+    (uv-managed, CIVEX-127) are populated; CONTAINER is structurally
+    reserved for a later story."""
 
     BUILTIN = "builtin"
     SUBPROCESS = "subprocess"

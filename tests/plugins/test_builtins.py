@@ -26,7 +26,9 @@ def test_get_field_reads_record_data(ctx, make_collection, make_schema, make_rec
     wf_ctx = _wf_ctx(ctx, record, dataset)
 
     registration = get_plugin("civex.get_field")
-    result = registration.invoke({}, registration.config_model(field="name"), wf_ctx)
+    result = registration.invoke(
+        {}, registration.config_model(field="name"), wf_ctx, 60.0
+    )
 
     assert result.outputs == {"value": "S01"}
 
@@ -41,7 +43,7 @@ def test_save_field_writes_value_to_trigger_record(
 
     registration = get_plugin("civex.save_field")
     config = registration.config_model(field="status")
-    result = registration.invoke({"value": "done"}, config, wf_ctx)
+    result = registration.invoke({"value": "done"}, config, wf_ctx, 60.0)
 
     assert result.outputs == {}
     assert ctx.record_svc.get(str(record.id)).data["status"] == "done"
@@ -57,7 +59,7 @@ def test_save_fields_drops_none_valued_updates(
 
     registration = get_plugin("civex.save_fields")
     result = registration.invoke(
-        {"updates": {"a": "2", "b": None}}, registration.config_model(), wf_ctx
+        {"updates": {"a": "2", "b": None}}, registration.config_model(), wf_ctx, 60.0
     )
 
     assert result.outputs == {}
@@ -77,7 +79,7 @@ def test_load_file_returns_bytes_filename_and_sha256(
 
     registration = get_plugin("civex.load_file")
     config = registration.config_model(field="attachment")
-    result = registration.invoke({}, config, wf_ctx)
+    result = registration.invoke({}, config, wf_ctx, 60.0)
 
     assert result.outputs == {
         "bytes": b"hello world",
@@ -100,7 +102,7 @@ def test_load_file_list_returns_raw_file_refs(
 
     registration = get_plugin("civex.load_file_list")
     config = registration.config_model(field="attachments")
-    result = registration.invoke({}, config, wf_ctx)
+    result = registration.invoke({}, config, wf_ctx, 60.0)
 
     assert result.outputs == {"files": [ref1.to_dict(), ref2.to_dict()]}
 
@@ -115,7 +117,7 @@ def test_load_file_list_returns_empty_list_when_field_missing_no_raise(
 
     registration = get_plugin("civex.load_file_list")
     config = registration.config_model(field="attachments")
-    result = registration.invoke({}, config, wf_ctx)
+    result = registration.invoke({}, config, wf_ctx, 60.0)
 
     assert result.outputs == {"files": []}
 
@@ -131,7 +133,7 @@ def test_extract_from_filename_uses_capture_group(
 
     registration = get_plugin("civex.extract_from_filename")
     config = registration.config_model(field="attachment", pattern=r"sample_(\d+)")
-    result = registration.invoke({}, config, wf_ctx)
+    result = registration.invoke({}, config, wf_ctx, 60.0)
 
     assert result.outputs == {
         "value": "20240102",
@@ -156,7 +158,7 @@ def test_extract_from_filename_converts_to_date_via_token_format(
         output_type="date",
         date_format="YYYYMMDD",
     )
-    result = registration.invoke({}, config, wf_ctx)
+    result = registration.invoke({}, config, wf_ctx, 60.0)
 
     assert result.outputs["value"] == "2024-01-02"
 
@@ -172,7 +174,7 @@ def test_load_csv_parses_bytes_into_dataframe(
     registration = get_plugin("civex.load_csv")
     csv_bytes = b"name,age\nAlice,30\nBob,25\n"
     result = registration.invoke(
-        {"bytes": csv_bytes}, registration.config_model(), wf_ctx
+        {"bytes": csv_bytes}, registration.config_model(), wf_ctx, 60.0
     )
 
     df = result.outputs["table"]
@@ -192,7 +194,7 @@ def test_rows_to_records_creates_one_record_per_row(
     registration = get_plugin("civex.rows_to_records")
     config = registration.config_model(schema="item")
     df = pd.DataFrame([{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}])
-    result = registration.invoke({"table": df}, config, wf_ctx)
+    result = registration.invoke({"table": df}, config, wf_ctx, 60.0)
 
     assert result.outputs == {"created": 2}
     created = ctx.record_svc.find("study", schema_name="item")
@@ -211,7 +213,7 @@ def test_create_records_from_files_creates_one_per_file(
     registration = get_plugin("civex.create_records_from_files")
     config = registration.config_model(schema="attachment", file_field="file_field")
     ref = ctx.file_svc.store_bytes(b"x", "a.txt")
-    result = registration.invoke({"files": [ref.to_dict()]}, config, wf_ctx)
+    result = registration.invoke({"files": [ref.to_dict()]}, config, wf_ctx, 60.0)
 
     assert result.outputs == {"created": 1, "skipped": 0}
     created = ctx.record_svc.find("study", schema_name="attachment")
@@ -234,7 +236,7 @@ def test_create_records_from_files_counts_validation_failures_as_skipped(
     registration = get_plugin("civex.create_records_from_files")
     config = registration.config_model(schema="attachment", file_field="file_field")
     ref = ctx.file_svc.store_bytes(b"x", "a.txt")
-    result = registration.invoke({"files": [ref.to_dict()]}, config, wf_ctx)
+    result = registration.invoke({"files": [ref.to_dict()]}, config, wf_ctx, 60.0)
 
     assert result.outputs == {"created": 0, "skipped": 1}
 
@@ -260,15 +262,15 @@ def test_match_files_to_records_creates_then_updates_by_key(
     )
 
     ref1 = ctx.file_svc.store_bytes(b"x", "sel_01.txt")
-    result1 = registration.invoke({"files": [ref1.to_dict()]}, config, wf_ctx)
+    result1 = registration.invoke({"files": [ref1.to_dict()]}, config, wf_ctx, 60.0)
     assert result1.outputs == {"created": 1, "updated": 0, "unmatched": []}
 
     ref2 = ctx.file_svc.store_bytes(b"y", "sel_01_v2.txt")
-    result2 = registration.invoke({"files": [ref2.to_dict()]}, config, wf_ctx)
+    result2 = registration.invoke({"files": [ref2.to_dict()]}, config, wf_ctx, 60.0)
     assert result2.outputs == {"created": 0, "updated": 1, "unmatched": []}
 
     ref3 = ctx.file_svc.store_bytes(b"z", "nope.txt")
-    result3 = registration.invoke({"files": [ref3.to_dict()]}, config, wf_ctx)
+    result3 = registration.invoke({"files": [ref3.to_dict()]}, config, wf_ctx, 60.0)
     assert result3.outputs == {"created": 0, "updated": 0, "unmatched": ["nope.txt"]}
 
 
@@ -287,12 +289,12 @@ def test_upsert_records_creates_then_updates_by_key(
     config = registration.config_model(schema="item", key_field="sku")
 
     result1 = registration.invoke(
-        {"table": pd.DataFrame([{"sku": "A1", "qty": 5}])}, config, wf_ctx
+        {"table": pd.DataFrame([{"sku": "A1", "qty": 5}])}, config, wf_ctx, 60.0
     )
     assert result1.outputs == {"created": 1, "updated": 0}
 
     result2 = registration.invoke(
-        {"table": pd.DataFrame([{"sku": "A1", "qty": 9}])}, config, wf_ctx
+        {"table": pd.DataFrame([{"sku": "A1", "qty": 9}])}, config, wf_ctx, 60.0
     )
     assert result2.outputs == {"created": 0, "updated": 1}
 
@@ -313,7 +315,7 @@ def test_upsert_records_skips_rows_with_missing_key_value(
     registration = get_plugin("civex.upsert_records")
     config = registration.config_model(schema="item", key_field="sku")
     result = registration.invoke(
-        {"table": pd.DataFrame([{"sku": None, "qty": 1}])}, config, wf_ctx
+        {"table": pd.DataFrame([{"sku": None, "qty": 1}])}, config, wf_ctx, 60.0
     )
 
     assert result.outputs == {"created": 0, "updated": 0}
