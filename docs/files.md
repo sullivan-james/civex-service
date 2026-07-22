@@ -2,12 +2,19 @@
 
 ## How file storage works
 
-Civex uses a content-addressed object store: when you attach a file to a record, the file's bytes are stored in `.civex/objects/<sha256[:2]>/<sha256[2:]>` — the same layout as Git's object store. The record stores a lightweight reference: `{sha256, filename, size}`.
+Civex uses a content-addressed object store: when you attach a file to a record, the file's bytes are stored in `_civex/objects/<sha256[:2]>/<sha256[2:]>` — the same layout as Git's object store. The record stores a lightweight reference: `{sha256, filename, size}`.
 
 This means:
 - **Identical files are stored once.** Attaching the same file to ten records uses disk space once.
 - **Files are immutable.** The SHA-256 hash is the address; the content never changes.
 - **Filenames are cosmetic.** The stored filename is the original name you uploaded, but retrieval is always by hash.
+
+## File field types
+
+| Type | Stores |
+|---|---|
+| `file` | A single file attachment |
+| `file_list` | Multiple file attachments |
 
 ## Attaching files via CLI
 
@@ -55,4 +62,4 @@ The `--accept` value uses the same format as the HTML `accept` attribute. Extens
 
 ## Backing up files
 
-The `.civex/objects/` directory contains all file data. Include it in your backups alongside `civex.db`. If you use remote sync (`civex push`), objects are transferred automatically.
+The `_civex/objects/` directory contains all file data. Include it in your backups alongside `civex.db`. If you use [remote sync](remote-sync.md) (`civex push`), objects are transferred automatically.

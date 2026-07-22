@@ -1,6 +1,6 @@
 # Workflows
 
-Workflows are YAML files stored in `.civex/workflows/`. Each workflow defines a series of steps — each backed by a plugin — that run in dependency order. Workflows can be triggered automatically when records change, or run manually against a specific record.
+Workflows are YAML files stored in `_civex/workflows/`. Each workflow defines a series of steps — each backed by a plugin — that run in dependency order. Workflows can be triggered automatically when records change, or run manually against a specific record.
 
 ## Workflow file structure
 
@@ -66,9 +66,9 @@ triggers:
 ```
 
 !!! note
-    When a record is **created**, civex also fires `record_updated` for any fields that were given a non-null value at creation time. This means a `record_updated` trigger with `fields: [audio_file]` will fire when a new record is created with `audio_file` already filled in.
+    When a record is **created**, civex also fires `record_updated` for any fields that were given a non-null value at creation time. This means a `record_updated` trigger with `fields: [audio_file]` will fire when a new record is created with `audio_file` already filled in — you don't need both `record_created` and `record_updated` declared just to cover creation.
 
-Both `record_created` and `record_updated` can be declared at the same time if needed.
+Both `record_created` and `record_updated` can still be declared at the same time if you need to react differently, or if `record_created` doesn't have a `fields` restriction available to it (it always fires, since a newly created record has no "previous" state to diff against).
 
 ## Step inputs
 
@@ -114,7 +114,10 @@ steps:
       files: __input__.files    # reference the declared input
 ```
 
-`type: files` accepts a list of uploaded files. `type: value` accepts an arbitrary scalar.
+| Type | Accepts |
+|---|---|
+| `files` | A list of uploaded files (FileRef dicts). In the UI, a multi-file picker is shown. Via CLI, pass a glob pattern with `--input files=*.wav`. |
+| `value` | An arbitrary scalar (string, number). |
 
 ## Running workflows manually
 
@@ -135,11 +138,12 @@ steps:
 Every workflow execution creates a job. Jobs can be in state `pending`, `running`, `completed`, or `failed`.
 
 ```bash
-civex workflow jobs          # list recent jobs
-civex workflow drain         # process all pending jobs immediately
+civex automation jobs          # list recent jobs
+civex automation run           # process all pending jobs immediately
+civex automation logs <job-id> # show a job's captured log output
 ```
 
-In the UI, the **Jobs** page shows all jobs with their logs. The record detail page shows jobs that ran against that specific record.
+In the UI, the **Runs** page shows all jobs with their logs. The record detail page shows jobs that ran against that specific record.
 
 ## Example: extract datetime from a filename
 
