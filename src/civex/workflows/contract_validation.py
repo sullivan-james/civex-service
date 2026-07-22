@@ -17,7 +17,7 @@ What's checked:
     ones must be present
   * every `<step>.<output>` reference resolves to a real upstream step (or a
     declared workflow input) *and* to an output that step's plugin actually
-    declares
+    declares -- including references inside `if:` (CIVEX-129)
   * step ids are unique
 
 What isn't, and can't be: the *values* flowing between steps. A step's
@@ -37,6 +37,8 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from jsonschema import Draft202012Validator
+
+from civex.workflows.conditions import ConditionError, condition_refs
 
 if TYPE_CHECKING:
     from civex.plugins.registry import PluginRegistration
@@ -67,11 +69,16 @@ def validate_workflow_contracts(
         registration = plugins.get(step.plugin)
         if registration is None:
             errors.append(f"Step '{step.id}' references unknown plugin '{step.plugin}'")
-            continue
-        errors.extend(_check_config(step, registration))
-        errors.extend(_check_inputs(step, registration))
+        else:
+            errors.extend(_check_config(step, registration))
+            errors.extend(_check_inputs(step, registration))
+            errors.extend(
+                _check_input_references(
+                    step, plugins, steps_by_id, workflow_input_names
+                )
+            )
         errors.extend(
-            _check_input_references(step, plugins, steps_by_id, workflow_input_names)
+            _check_condition(step, plugins, steps_by_id, workflow_input_names)
         )
 
     return errors
@@ -198,5 +205,53 @@ def _check_input_references(
                 f"Step '{step.id}' input '{input_name}' references "
                 f"'{ref}', but step '{source}' ({source_step.plugin}) "
                 f"produces no output '{output_name}' (produces: {known})"
+            )
+    return errors
+
+
+def _check_condition(
+    step: "StepDef",
+    plugins: Mapping[str, "PluginRegistration"],
+    steps_by_id: Mapping[str, "StepDef"],
+    workflow_input_names: set[str],
+) -> list[str]:
+    """Same reference checks as `_check_input_references`, applied to
+    `if:` -- an `if:` typo should fail at save time rather than surface as
+    a run-time "step has not run yet" the first time that branch is hit."""
+    if step.if_ is None:
+        return []
+
+    try:
+        refs = condition_refs(step.if_)
+    except ConditionError as e:
+        return [f"Step '{step.id}' 'if': {e}"]
+
+    errors: list[str] = []
+    for source, output_name in refs:
+        if source == INPUT_STEP_ID:
+            if output_name not in workflow_input_names:
+                known = ", ".join(sorted(workflow_input_names)) or "none declared"
+                errors.append(
+                    f"Step '{step.id}' 'if' references '{source}.{output_name}', "
+                    f"but the workflow declares no input '{output_name}' "
+                    f"(has: {known})"
+                )
+            continue
+
+        source_step = steps_by_id.get(source)
+        if source_step is None:
+            errors.append(f"Step '{step.id}' 'if' references unknown step '{source}'")
+            continue
+
+        source_registration = plugins.get(source_step.plugin)
+        if source_registration is None or source_registration.outputs is None:
+            continue
+        declared = {spec.name for spec in source_registration.outputs}
+        if output_name not in declared:
+            known = ", ".join(sorted(declared)) or "none"
+            errors.append(
+                f"Step '{step.id}' 'if' references '{source}.{output_name}', "
+                f"but step '{source}' ({source_step.plugin}) produces no "
+                f"output '{output_name}' (produces: {known})"
             )
     return errors
