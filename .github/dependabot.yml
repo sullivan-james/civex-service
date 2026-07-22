@@ -32,6 +32,10 @@ updates:
           - "minor"
           - "patch"
     ignore:
+      # eslint-plugin-react-hooks/-react/-import/-jsx-a11y all cap their peer
+      # range at eslint ^9.0.0 as of March 2026 (react issue #35758 unconfirmed),
+      # and eslint-plugin-react crashes on 10 (jsx-eslint/eslint-plugin-react#3977).
+      # Revisit once those plugins declare eslint 10 support. (CIVEX-65)
       - dependency-name: "eslint"
         versions: [">=10.0.0"]
       - dependency-name: "typescript"
