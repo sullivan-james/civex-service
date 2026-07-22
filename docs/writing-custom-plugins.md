@@ -154,3 +154,7 @@ if ref:
 - A plugin can only reach project data through the `ctx.*` calls it declared in `capabilities`; anything else fails with `capability_denied`.
 - All changes are committed together at the end of the workflow run unless you call `ctx.commit()` explicitly.
 - If `invoke()` raises an exception (or the run times out), the entire workflow job is marked as failed and no changes are committed.
+
+## Other languages
+
+A plugin that needs something Python-level isolation can't give — a different language, system binaries, GPU access — runs in a container instead of a `uv`-managed subprocess, speaking the identical wire protocol. `plugin-templates/<language>/` at the repo root holds prebuilt starters (Dockerfile + a minimal shim) for languages other than Python; see `plugin-templates/r/` for the first one. The container-tier host runtime itself isn't built yet, so these are starting points to build from, not something you can run through a workflow today.

@@ -1,0 +1,14 @@
+# Starter manifest for a container-tier (Tier 2) R plugin. Copy this whole
+# directory to _civex/plugins/<name>/ and edit to taste.
+#
+# id/name/category/capabilities here must stay in sync with the PLUGIN_*
+# constants at the top of plugin.R -- the manifest is what a future
+# container-tier registry reads without having to build and run the image,
+# plugin.R's own `describe` response is what a plugin author-facing surface
+# (CLI/UI/AI authoring guide) reads once the image is built.
+
+id = "example.r_echo"
+name = "R Echo"
+description = "Starter template for an R-language container-tier plugin."
+category = "example"
+capabilities = ["commit"]
