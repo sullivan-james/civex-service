@@ -20,7 +20,7 @@ Check items off as they land; keep this current rather than historical.
 - [ ] 3. Backup/restore story for SQLite (`_civex/` local data)
 - [ ] 4. Release process (versioning, CHANGELOG discipline, alpha → beta gate) — see below
 - [ ] 5. Repo hygiene (stray `requirements.txt`, `build/`/`dist/` in git status)
-- [ ] 6. CI hardening (dependency/security scanning, frontend build check)
+- [x] 6. CI hardening (dependency/security scanning, frontend build check)
 - [x] 7. Test coverage baseline — see `tests/README.md` (~32%, steps 4-7 pending there)
 - [x] 7a. Structured logging + secret redaction — already solid, see notes below
 - [x] 7b. Opt-in error telemetry (Sentry) — already solid, see notes below
@@ -164,15 +164,14 @@ production cut, independent of code correctness:
 
 ## 6. CI hardening
 
-Current `.github/workflows/ci.yml` runs `ruff`, `mypy`, and `pytest` with a
-coverage gate — solid baseline. Not yet covered:
-
-- No dependency/vulnerability scanning (`pip-audit` or `safety` for civex,
-  `npm audit` for the frontend).
-- No frontend build check in CI (`npm run build` isn't run) — a TypeScript
-  break in `frontend/` currently wouldn't fail CI. This overlaps with step 6
-  of `tests/README.md` (frontend test setup) — the build check is cheaper
-  and can land first.
+**Done.** `.github/workflows/ci.yml` runs `ruff`, `mypy`, `pytest` with a
+coverage gate, and now an `audit` job (`uv run pip-audit`, dev dependency
+added in `pyproject.toml`) that fails the build on a known CVE in civex's
+resolved dependencies. `.github/workflows/frontend-ci.yml` has a `build` job
+(`npm run build`, i.e. `tsc -b && vite build`) that fails on a TypeScript
+break, and an `audit` job (`npm audit --audit-level=high`) for the frontend.
+Both audit jobs are also available locally via `make audit` (rolled into
+`make check`).
 
 ## Already in good shape
 
