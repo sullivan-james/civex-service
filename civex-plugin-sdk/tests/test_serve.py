@@ -7,14 +7,21 @@ from civex_plugin_sdk.ctx import Ctx
 from civex_plugin_sdk.errors import CapabilityDeniedError
 from civex_plugin_sdk.io import FrameReader, FrameWriter
 from civex_plugin_sdk.plugin import Plugin
+from civex_plugin_sdk.plugin_base import IOSpec
 from civex_plugin_sdk.serve import serve_loop
 
 
 class GreetPlugin(Plugin):
     id = "test.greet"
     name = "Greet"
+    description = "Echoes its config text back."
     category = "test"
     capabilities = ["commit"]
+    inputs = [IOSpec(name="call_commit", type="boolean", required=False)]
+    outputs = [
+        IOSpec(name="echo", type="string"),
+        IOSpec(name="inputs", type="mapping"),
+    ]
 
     class Config(BaseModel):
         text: str
@@ -55,18 +62,52 @@ def _run(plugin_cls, lines):
     return sent
 
 
-def test_describe_reports_id_name_capabilities_and_config_schema():
+def test_describe_reports_the_plugins_whole_declared_contract():
     sent = _run(GreetPlugin, [json.dumps({"type": "describe"})])
     assert sent == [
         {
             "type": "describe_result",
             "id": "test.greet",
             "name": "Greet",
+            "description": "Echoes its config text back.",
             "category": "test",
             "capabilities": ["commit"],
+            "inputs": [
+                {
+                    "name": "call_commit",
+                    "type": "boolean",
+                    "required": False,
+                    "description": "",
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "echo",
+                    "type": "string",
+                    "required": True,
+                    "description": "",
+                },
+                {
+                    "name": "inputs",
+                    "type": "mapping",
+                    "required": True,
+                    "description": "",
+                },
+            ],
             "config_schema": GreetPlugin.Config.model_json_schema(),
         }
     ]
+
+
+def test_describe_reports_an_undeclared_contract_as_null_not_empty():
+    """A plugin written against an older SDK (or one that simply declares
+    nothing beyond id/name) must still describe successfully rather than
+    failing discovery -- and its silence must stay distinguishable from an
+    explicit "I take no inputs", since the host enforces the latter."""
+    sent = _run(BoomPlugin, [json.dumps({"type": "describe"})])
+    assert sent[0]["description"] == ""
+    assert sent[0]["inputs"] is None
+    assert sent[0]["outputs"] is None
 
 
 def test_run_success_returns_result_frame():

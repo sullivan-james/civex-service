@@ -20,6 +20,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from civex_plugin_sdk.plugin_base import IOSpec
+
 RpcMethod = Literal["get_file", "update_record", "create_record", "commit", "call_tool"]
 
 CAPABILITIES: tuple[RpcMethod, ...] = (
@@ -51,11 +53,26 @@ class DescribeRequest(BaseModel):
 
 
 class DescribeResult(BaseModel):
+    """A plugin's complete contract, and the only source any surface (CLI
+    `plugin info`, `GET /plugins`, the frontend plugin panel, the AI's
+    authoring guide) reads it from -- identical in shape for all three
+    tiers, so none of those surfaces has a per-tier branch. Built-ins
+    produce it from class attributes; subprocess/container plugins produce
+    it by actually running in `describe` mode.
+
+    Every field after `id`/`name` has a default so a plugin written against
+    an older SDK still describes successfully against a newer host."""
+
     type: Literal["describe_result"] = "describe_result"
     id: str
     name: str
+    description: str = ""
     category: str = "general"
     capabilities: list[str] = Field(default_factory=list)
+    # None = this plugin declares no contract in that direction; [] = it
+    # declares that it has none. See PluginBase.inputs.
+    inputs: list[IOSpec] | None = None
+    outputs: list[IOSpec] | None = None
     config_schema: dict[str, Any] = Field(default_factory=dict)
 
 

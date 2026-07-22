@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel
 
 from civex.domain.dtos import FileRef
@@ -14,8 +15,17 @@ log = logging.getLogger(__name__)
 class Plugin(Tier0Plugin):
     id = "civex.load_file"
     name = "Load File"
+    description = (
+        "Load the bytes of a file stored in a `file` field on the trigger record."
+    )
     category = "data-sources"
     capabilities: list[str] = ["get_file"]
+    inputs: list[IOSpec] = []
+    outputs = [
+        IOSpec(name="bytes", type="bytes", description="The file's raw contents."),
+        IOSpec(name="filename", type="string", description="Original filename."),
+        IOSpec(name="sha256", type="string", description="Content hash of the file."),
+    ]
 
     class Config(BaseModel):
         field: str  # field name on the trigger record containing a FileRef

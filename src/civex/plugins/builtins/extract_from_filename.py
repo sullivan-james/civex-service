@@ -4,6 +4,7 @@ import re
 from datetime import date as _date, datetime as _dt, timezone as _tz
 from typing import Any
 
+from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel
 
 from civex.plugins.base import Tier0Plugin, WorkflowContext
@@ -48,8 +49,30 @@ def _parse_by_format(raw: str, fmt: str, output_type: str) -> str:
 class Plugin(Tier0Plugin):
     id = "civex.extract_from_filename"
     name = "Extract from Filename"
+    description = (
+        "Apply a regex to a file field's filename and optionally convert the "
+        "captured text to a date/datetime/number."
+    )
     category = "data-access"
     capabilities: list[str] = []
+    inputs: list[IOSpec] = []
+    outputs = [
+        IOSpec(
+            name="value",
+            type="any",
+            description="The captured text converted to `output_type`.",
+        ),
+        IOSpec(
+            name="filename",
+            type="string",
+            description="The filename the pattern was applied to.",
+        ),
+        IOSpec(
+            name="extracted",
+            type="string",
+            description="The raw captured text, before conversion.",
+        ),
+    ]
 
     class Config(BaseModel):
         field: str

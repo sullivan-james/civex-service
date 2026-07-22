@@ -65,8 +65,11 @@ def _handle_describe(plugin_cls: "type[Plugin]", writer: FrameWriter) -> None:
         DescribeResult(
             id=plugin_cls.id,
             name=plugin_cls.name,
+            description=plugin_cls.description,
             category=plugin_cls.category,
             capabilities=list(plugin_cls.capabilities),
+            inputs=None if plugin_cls.inputs is None else list(plugin_cls.inputs),
+            outputs=None if plugin_cls.outputs is None else list(plugin_cls.outputs),
             config_schema=plugin_cls.Config.model_json_schema(),
         ).model_dump()
     )

@@ -21,17 +21,31 @@ from civex.domain.exceptions import ValidationError
 _SAFE_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
+def _io_dicts(specs: list | None) -> list[dict] | None:
+    """None passes through as None rather than flattening to [] -- a plugin
+    that declares no inputs/outputs contract is a different thing from one
+    that declares it has none, and consumers need to keep telling them
+    apart (see civex_plugin_sdk.PluginBase.inputs)."""
+    return None if specs is None else [spec.model_dump() for spec in specs]
+
+
 class PluginService:
     def __init__(self, civex_dir: Path) -> None:
         self._dir = civex_dir / "plugins"
 
     def list_registered(self) -> list[dict]:
-        """[{"id", "description", "builtin", "category", "config_schema"}]
-        for every registered plugin (built-ins + user plugins discovered
-        from _civex/plugins/). config_schema is each plugin's Config
-        (a pydantic model) rendered as JSON schema -- introspected straight
-        off the class rather than hand-maintained (CIVEX-56), so it can't
-        drift the way the old hardcoded plugin-reference table could."""
+        """[{"id", "name", "description", "builtin", "category", "inputs",
+        "outputs", "config_schema"}] for every registered plugin (built-ins +
+        user plugins discovered from _civex/plugins/) -- one plugin's complete
+        declared contract, in the one shape every surface reads.
+
+        Nothing here is per-tier: a built-in's contract comes off its class
+        attributes and an out-of-process plugin's comes from its `describe`
+        response, but both are the same IOSpec/JSON-Schema declarations by the
+        time they reach a PluginRegistration, so no caller branches on tier.
+        config_schema is the plugin's Config rendered as JSON Schema --
+        introspected rather than hand-maintained (CIVEX-56), so it can't drift
+        the way the old hardcoded plugin-reference table could."""
         from civex.plugins.registry import all_plugins, discover_user_plugins
 
         discover_user_plugins(self._dir)
@@ -39,9 +53,12 @@ class PluginService:
         return [
             {
                 "id": plugin_id,
+                "name": registration.name,
                 "description": registration.description,
                 "builtin": plugin_id.startswith(builtin_prefix),
                 "category": registration.category,
+                "inputs": _io_dicts(registration.inputs),
+                "outputs": _io_dicts(registration.outputs),
                 "config_schema": (
                     registration.config_schema
                     if registration.config_schema is not None
