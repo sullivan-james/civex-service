@@ -8,14 +8,25 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 _VALID_CODE = """\
-from civex.plugins.base import BasePlugin, WorkflowContext
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["civex-plugin-sdk"]
+# ///
+from pydantic import BaseModel
+from civex_plugin_sdk import Ctx, Plugin as PluginBase, serve
 
-class Plugin(BasePlugin):
+class Plugin(PluginBase):
     id = "project.my_plugin"
     name = "My Plugin"
 
-    def run(self, inputs, config, ctx: WorkflowContext) -> dict:
+    class Config(BaseModel):
+        pass
+
+    def invoke(self, inputs, config, ctx: Ctx) -> dict:
         return {}
+
+if __name__ == "__main__":
+    serve(Plugin)
 """
 
 

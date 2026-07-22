@@ -11,14 +11,25 @@ from civex.context import AppContext
 from civex.domain.exceptions import ValidationError
 
 _VALID_CODE = """\
-from civex.plugins.base import BasePlugin, WorkflowContext
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["civex-plugin-sdk"]
+# ///
+from pydantic import BaseModel
+from civex_plugin_sdk import Ctx, Plugin as PluginBase, serve
 
-class Plugin(BasePlugin):
+class Plugin(PluginBase):
     id = "project.my_plugin"
     name = "My Plugin"
 
-    def run(self, inputs, config, ctx: WorkflowContext) -> dict:
+    class Config(BaseModel):
+        pass
+
+    def invoke(self, inputs, config, ctx: Ctx) -> dict:
         return {}
+
+if __name__ == "__main__":
+    serve(Plugin)
 """
 
 
@@ -33,7 +44,7 @@ def test_list_registered_includes_category_and_config_schema(
     ctx: AppContext,
 ) -> None:
     """category/config_schema are introspected off each plugin's own class
-    (BasePlugin.category, BasePlugin.Config) rather than hand-maintained,
+    (Tier0Plugin.category, Tier0Plugin.Config) rather than hand-maintained,
     so they can't silently drift from the real plugin (CIVEX-56)."""
     registered = {p["id"]: p for p in ctx.plugin_svc.list_registered()}
     builtin = next(p for pid, p in registered.items() if pid.startswith("civex."))
