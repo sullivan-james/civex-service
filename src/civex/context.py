@@ -12,6 +12,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from typing import Iterator
 
 from sqlalchemy import create_engine
@@ -42,6 +43,20 @@ from civex.services.workflow_service import WorkflowService
 def _get_engine(url: str) -> Engine:
     """Return a cached engine for the given DB URL."""
     return create_engine(url)
+
+
+def _plugins_provider(civex_dir: Path):
+    """Every registered plugin, user plugins included, resolved fresh on each
+    call so WorkflowService validates against the contracts that exist *now*
+    rather than the ones present when the context was built."""
+
+    def provider():
+        from civex.plugins.registry import all_plugins, discover_user_plugins
+
+        discover_user_plugins(civex_dir / "plugins")
+        return all_plugins()
+
+    return provider
 
 
 @dataclass
@@ -122,7 +137,9 @@ def build_local_context(
     store_svc = StoreService(config, file_store)
     ai_svc = AiService(schema_svc, dataset_svc, record_svc, job_svc)
     ai_usage_svc = AiUsageService(engine)
-    workflow_svc = WorkflowService(config.civex_dir)
+    workflow_svc = WorkflowService(
+        config.civex_dir, plugins_provider=_plugins_provider(config.civex_dir)
+    )
     plugin_svc = PluginService(config.civex_dir)
     policy_svc = PolicyService(config.civex_dir)
 

@@ -7,6 +7,7 @@ from typing import Any
 
 from civex.plugins.base import WorkflowContext
 from civex.plugins.registry import PluginRegistration
+from civex.workflows.contract_validation import validate_workflow_contracts
 from civex.workflows.definition import StepDef, WorkflowDef
 
 log = logging.getLogger(__name__)
@@ -75,6 +76,27 @@ def _resolve_inputs(
     return resolved
 
 
+def _validate_contracts(
+    wf: WorkflowDef, plugins: dict[str, PluginRegistration]
+) -> None:
+    """Re-check the workflow against its plugins' declared contracts before
+    running a single step (CIVEX-142).
+
+    A workflow validated at save time can still be wrong by the time it runs:
+    a plugin it uses may have been edited since, and an edited plugin is
+    re-described on discovery. Failing here means failing before any step has
+    written anything, with the same message the author would have seen at
+    save time -- rather than part-way through, with whatever half-finished
+    record writes that leaves behind.
+    """
+    errors = validate_workflow_contracts(wf, plugins)
+    if errors:
+        raise ValueError(
+            "Workflow no longer matches its plugins' declared contracts:\n"
+            + "\n".join(errors)
+        )
+
+
 def run(
     wf: WorkflowDef,
     ctx: WorkflowContext,
@@ -83,6 +105,7 @@ def run(
     default_timeout_seconds: float = 60.0,
 ) -> None:
     log.info(wf)
+    _validate_contracts(wf, plugins)
     virtual_ids = set(initial_outputs.keys()) if initial_outputs else None
     log.info("Virtual IDs: %s", virtual_ids)
     order = _topological_sort(wf.steps, virtual_ids=virtual_ids)
