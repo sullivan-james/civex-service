@@ -125,7 +125,7 @@ def test_run_with_invalid_config_returns_config_validation_error():
     )
     assert len(sent) == 1
     assert sent[0]["type"] == "error"
-    assert sent[0]["error"]["code"] == "config_validation_error"
+    assert sent[0]["error"]["kind"] == "config_validation_error"
 
 
 def test_run_where_invoke_raises_plain_exception_wraps_as_plugin_error():
@@ -134,14 +134,14 @@ def test_run_where_invoke_raises_plain_exception_wraps_as_plugin_error():
         {
             "type": "error",
             "call_id": None,
-            "error": {"code": "plugin_error", "message": "kaboom"},
+            "error": {"kind": "plugin_error", "message": "kaboom", "retryable": False},
         }
     ]
 
 
 def test_run_where_invoke_raises_typed_plugin_error_preserves_code():
     sent = _run(DeniedPlugin, [json.dumps({"type": "run", "inputs": {}, "config": {}})])
-    assert sent[0]["error"]["code"] == "capability_denied"
+    assert sent[0]["error"]["kind"] == "capability_denied"
 
 
 def test_unexpected_frame_type_on_control_channel_yields_protocol_error():
@@ -150,7 +150,7 @@ def test_unexpected_frame_type_on_control_channel_yields_protocol_error():
         [json.dumps({"type": "rpc_result", "call_id": "x", "result": {}})],
     )
     assert sent[0]["type"] == "error"
-    assert sent[0]["error"]["code"] == "protocol_error"
+    assert sent[0]["error"]["kind"] == "protocol_error"
 
 
 def test_run_with_nested_rpc_call_is_answered_mid_dispatch():

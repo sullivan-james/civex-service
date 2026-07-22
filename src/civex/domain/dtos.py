@@ -281,6 +281,59 @@ class AuditLogDTO:
 
 
 @dataclass
+class ErrorEnvelope:
+    """How a failed workflow step is recorded, identically for every tier.
+
+    `kind`/`message`/`retryable` are the wire protocol's envelope
+    (civex_plugin_sdk.errors) -- a built-in raising in-process, a subprocess
+    plugin sending an error frame, and a container exiting non-zero all
+    arrive here in the same shape.
+
+    `step` is added host-side and is deliberately not part of the wire
+    envelope: a plugin has no idea which step id it was invoked as, and
+    shouldn't. The executor knows, and a job error that doesn't say which
+    step failed is close to useless in a multi-step workflow.
+    """
+
+    kind: str
+    message: str
+    retryable: bool = False
+    step: str | None = None
+
+    @classmethod
+    def from_exception(
+        cls, exc: BaseException, step: str | None = None
+    ) -> "ErrorEnvelope":
+        """Classify any exception. Anything that doesn't declare a `kind`
+        (a bare ValueError from a built-in, say) is an unclassified crash:
+        reported as such, and never as retryable, because there's no basis
+        to guess and guessing wrong re-runs a permanently broken step."""
+        return cls(
+            kind=getattr(exc, "kind", None) or "plugin_error",
+            message=str(exc) or exc.__class__.__name__,
+            retryable=bool(getattr(exc, "retryable", False)),
+            step=step,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "message": self.message,
+            "retryable": self.retryable,
+            "step": self.step,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "ErrorEnvelope":
+        return cls(
+            kind=raw.get("kind", "plugin_error"),
+            message=raw.get("message", ""),
+            retryable=bool(raw.get("retryable", False)),
+            step=raw.get("step"),
+        )
+
+
+@dataclass
 class WorkflowJobDTO:
     id: uuid.UUID
     workflow_name: str
@@ -288,7 +341,8 @@ class WorkflowJobDTO:
     schema_name: str
     trigger: str  # record_created | record_updated | manual
     status: str  # pending | running | completed | failed
-    error: str | None
+    error: str | None  # human-readable message
+    error_details: dict[str, Any] | None  # ErrorEnvelope.to_dict(), when known
     log: str | None  # captured stdout/stderr from execution
     input_data: (
         dict[str, Any] | None

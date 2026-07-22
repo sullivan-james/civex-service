@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from civex.domain.dtos import RecordDTO, WorkflowJobDTO
+from civex.domain.dtos import ErrorEnvelope, RecordDTO, WorkflowJobDTO
 from civex.repositories.protocols import WorkflowJobRepository
 from civex.workflows.definition import WorkflowDef, load_workflow
 
@@ -109,9 +109,22 @@ class WorkflowJobService:
         self._repo.mark_completed(job_id, log=log)
 
     def mark_failed(
-        self, job_id: uuid.UUID, error: str, log: str | None = None
+        self,
+        job_id: uuid.UUID,
+        error: str,
+        log: str | None = None,
+        envelope: ErrorEnvelope | None = None,
     ) -> None:
-        self._repo.mark_failed(job_id, error, log=log)
+        """`envelope` is the structured form of the same failure (CIVEX-143).
+        Optional because a caller that only has a message string -- a failure
+        raised before any step ran, say -- shouldn't have to invent a
+        classification it doesn't have."""
+        self._repo.mark_failed(
+            job_id,
+            error,
+            log=log,
+            error_details=envelope.to_dict() if envelope else None,
+        )
 
     def list_jobs(
         self,

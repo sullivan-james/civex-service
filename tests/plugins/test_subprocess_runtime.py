@@ -328,10 +328,18 @@ def test_drive_run_undeclared_capability_fails_the_run(tmp_path: Path) -> None:
     # enforcement is supposed to catch.
     dispatcher = rt._HostRpcDispatcher(ctx, ["commit", "update_record"], tmp_path)
     try:
-        with pytest.raises(PluginExecutionError, match="capability_denied"):
+        with pytest.raises(PluginExecutionError) as excinfo:
             rt._drive_run(proc, {"call_denied": True}, {}, dispatcher)
     finally:
         rt._ensure_terminated(proc)
+    # The classification is a field now, not a prefix glued onto the message
+    # (CIVEX-143) -- and it survives the full round trip: host denies the
+    # rpc_call, the plugin's Ctx raises RpcError carrying the host's kind
+    # rather than flattening it to "rpc_error", and serve() sends it back as
+    # the run's top-level error frame.
+    assert excinfo.value.kind == "capability_denied"
+    assert excinfo.value.retryable is False
+    assert "get_file" in str(excinfo.value)
 
 
 def test_run_with_timeout_kills_process_group_and_raises(tmp_path: Path) -> None:

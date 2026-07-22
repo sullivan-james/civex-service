@@ -88,8 +88,16 @@ class RunResult(BaseModel):
 
 
 class ErrorPayload(BaseModel):
-    code: str
+    """See civex_plugin_sdk.errors for what `kind` and `retryable` mean.
+
+    `retryable` defaults to False so a plugin built against the older
+    two-field envelope still parses -- and defaults to the safe answer,
+    since treating an unknown failure as retryable is how you get a loop
+    that re-runs a permanently broken step forever."""
+
+    kind: str
     message: str
+    retryable: bool = False
 
 
 class ErrorFrame(BaseModel):

@@ -88,7 +88,7 @@ def test_invalid_config_over_real_stdio_pipes():
         _send(proc, {"type": "run", "inputs": {}, "config": {}})
         err = _recv(proc)
         assert err["type"] == "error"
-        assert err["error"]["code"] == "config_validation_error"
+        assert err["error"]["kind"] == "config_validation_error"
     finally:
         assert proc.stdin is not None
         proc.stdin.close()

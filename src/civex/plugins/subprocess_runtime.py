@@ -47,6 +47,7 @@ from civex_plugin_sdk.protocol import (
     parse_frame,
 )
 
+from civex.domain.dtos import ErrorEnvelope
 from civex.domain.exceptions import (
     CapabilityDeniedError,
     ConfigError,
@@ -373,13 +374,29 @@ def _drive_describe(proc: subprocess.Popen) -> DescribeResult:
     try:
         raw = next(reader)
     except StopIteration:
-        raise PluginExecutionError(_dead_process_message(proc)) from None
+        raise PluginExecutionError(
+            _dead_process_message(proc), kind="process_exit"
+        ) from None
     frame = parse_frame(raw)
     if isinstance(frame, DescribeResult):
         return frame
     if isinstance(frame, ErrorFrame):
-        raise PluginExecutionError(f"{frame.error.code}: {frame.error.message}")
-    raise PluginExecutionError(f"unexpected frame in response to describe: {raw!r}")
+        raise _error_from_frame(frame)
+    raise PluginExecutionError(
+        f"unexpected frame in response to describe: {raw!r}", kind="protocol_error"
+    )
+
+
+def _error_from_frame(frame: ErrorFrame) -> PluginExecutionError:
+    """Rebuild a plugin's own error envelope host-side, preserving the kind
+    and retryable flag it declared rather than re-deriving them. The plugin
+    is the only thing that knows whether its failure was transient, so a
+    plugin that says `retryable=True` is believed."""
+    return PluginExecutionError(
+        frame.error.message,
+        kind=frame.error.kind,
+        retryable=frame.error.retryable,
+    )
 
 
 def _handle_rpc_call(
@@ -387,19 +404,22 @@ def _handle_rpc_call(
 ) -> None:
     try:
         result = dispatcher.dispatch(frame.method, frame.params)
-    except CapabilityDeniedError as e:
-        writer.send(
-            ErrorFrame(
-                call_id=frame.call_id,
-                error=ErrorPayload(code="capability_denied", message=str(e)),
-            ).model_dump()
-        )
-        return
     except Exception as e:
+        # The host's own classification of a failed capability call, sent
+        # back in the same envelope shape the plugin uses for its own
+        # failures. A CivexError raised by the service layer (NotFoundError
+        # from get_record, ValidationError from create_record, ...) keeps its
+        # own kind rather than being flattened to "rpc_error" -- that
+        # distinction is exactly what makes a job error readable later.
+        envelope = ErrorEnvelope.from_exception(e)
         writer.send(
             ErrorFrame(
                 call_id=frame.call_id,
-                error=ErrorPayload(code="rpc_error", message=str(e)),
+                error=ErrorPayload(
+                    kind=envelope.kind,
+                    message=envelope.message,
+                    retryable=envelope.retryable,
+                ),
             ).model_dump()
         )
         return
@@ -419,18 +439,22 @@ def _drive_run(
         try:
             raw = next(reader)
         except StopIteration:
-            raise PluginExecutionError(_dead_process_message(proc)) from None
+            raise PluginExecutionError(
+                _dead_process_message(proc), kind="process_exit"
+            ) from None
         frame = parse_frame(raw)
         if isinstance(frame, RunResult):
             return frame.outputs
         if isinstance(frame, ErrorFrame) and frame.call_id is None:
-            raise PluginExecutionError(f"{frame.error.code}: {frame.error.message}")
+            raise _error_from_frame(frame)
         if isinstance(frame, RpcCall):
             _handle_rpc_call(writer, frame, dispatcher)
             continue
         if isinstance(frame, LogFrame):
             continue
-        raise PluginExecutionError(f"unexpected frame during run: {raw!r}")
+        raise PluginExecutionError(
+            f"unexpected frame during run: {raw!r}", kind="protocol_error"
+        )
 
 
 # -- public entrypoints ---------------------------------------------------------

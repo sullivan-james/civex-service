@@ -63,13 +63,18 @@ class LocalWorkflowJobRepository:
             self._s.flush()
 
     def mark_failed(
-        self, job_id: uuid.UUID, error: str, log: str | None = None
+        self,
+        job_id: uuid.UUID,
+        error: str,
+        log: str | None = None,
+        error_details: dict | None = None,
     ) -> None:
         row = self._s.query(WorkflowJob).filter_by(id=job_id).first()
         if row:
             row.status = "failed"
             row.finished_at = _now()
             row.error = error[:2000]
+            row.error_details = error_details
             row.log = log
             self._s.flush()
 
@@ -118,6 +123,7 @@ def _to_dto(row: WorkflowJob) -> WorkflowJobDTO:
         trigger=row.trigger,
         status=row.status,
         error=row.error,
+        error_details=row.error_details,
         log=row.log,
         input_data=row.input_data,
         created_at=row.created_at,

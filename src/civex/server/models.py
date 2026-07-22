@@ -251,6 +251,9 @@ class WorkflowJobResponse(BaseModel):
     trigger: str
     status: str
     error: str | None
+    # Structured {kind, message, retryable, step} for a failed job
+    # (CIVEX-143); null for jobs that succeeded or predate it.
+    error_details: dict | None
     log: str | None
     created_at: datetime
     started_at: datetime | None
@@ -266,6 +269,7 @@ class WorkflowJobResponse(BaseModel):
             trigger=dto.trigger,
             status=dto.status,
             error=dto.error,
+            error_details=dto.error_details,
             log=dto.log,
             created_at=dto.created_at,
             started_at=dto.started_at,

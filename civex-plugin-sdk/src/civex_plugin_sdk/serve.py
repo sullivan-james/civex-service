@@ -45,7 +45,7 @@ def serve_loop(
         try:
             frame = parse_frame(raw)
         except Exception as e:
-            _send_error(writer, "protocol_error", str(e))
+            _send_error(writer, PluginError(str(e), kind="protocol_error"))
             continue
 
         if isinstance(frame, DescribeRequest):
@@ -55,8 +55,10 @@ def serve_loop(
         else:
             _send_error(
                 writer,
-                "protocol_error",
-                f"unexpected frame type on control channel: {raw.get('type')!r}",
+                PluginError(
+                    f"unexpected frame type on control channel: {raw.get('type')!r}",
+                    kind="protocol_error",
+                ),
             )
 
 
@@ -84,22 +86,31 @@ def _handle_run(
     try:
         config = plugin_cls.Config.model_validate(frame.config)
     except ValidationError as e:
-        err = ConfigValidationError(str(e))
-        _send_error(writer, err.code, err.message)
+        _send_error(writer, ConfigValidationError(str(e)))
         return
 
     ctx = Ctx(writer, reader)
     try:
         outputs = plugin_cls().invoke(frame.inputs, config, ctx) or {}
     except PluginError as e:
-        _send_error(writer, e.code, e.message)
+        _send_error(writer, e)
         return
     except Exception as e:
-        _send_error(writer, "plugin_error", str(e))
+        # An exception the plugin didn't classify. Reported as the generic
+        # kind and never as retryable -- the SDK has no basis to guess, and
+        # guessing wrong in that direction means re-running a permanently
+        # broken step.
+        _send_error(writer, PluginError(str(e)))
         return
 
     writer.send(RunResult(outputs=outputs).model_dump())
 
 
-def _send_error(writer: FrameWriter, code: str, message: str) -> None:
-    writer.send(ErrorFrame(error=ErrorPayload(code=code, message=message)).model_dump())
+def _send_error(writer: FrameWriter, error: PluginError) -> None:
+    writer.send(
+        ErrorFrame(
+            error=ErrorPayload(
+                kind=error.kind, message=error.message, retryable=error.retryable
+            )
+        ).model_dump()
+    )

@@ -134,7 +134,11 @@ class WorkflowJobRepository(Protocol):
     def claim_pending(self) -> WorkflowJobDTO | None: ...
     def mark_completed(self, job_id: uuid.UUID, log: str | None = None) -> None: ...
     def mark_failed(
-        self, job_id: uuid.UUID, error: str, log: str | None = None
+        self,
+        job_id: uuid.UUID,
+        error: str,
+        log: str | None = None,
+        error_details: dict | None = None,
     ) -> None: ...
     def list_all(
         self,

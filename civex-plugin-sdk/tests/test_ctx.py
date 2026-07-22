@@ -93,12 +93,12 @@ def test_error_response_raises_rpc_error_with_host_code_and_message():
         lambda call: {
             "type": "error",
             "call_id": call["call_id"],
-            "error": {"code": "capability_denied", "message": "nope"},
+            "error": {"kind": "capability_denied", "message": "nope"},
         }
     )
     with pytest.raises(RpcError) as exc_info:
         ctx.commit()
-    assert exc_info.value.code == "capability_denied"
+    assert exc_info.value.kind == "capability_denied"
     assert exc_info.value.message == "nope"
 
 

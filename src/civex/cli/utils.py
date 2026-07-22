@@ -5,7 +5,7 @@ import typer
 from civex.config import Config, load_config
 from civex.console import console
 from civex.context import AppContext, build_local_context
-from civex.domain.dtos import WorkflowJobDTO
+from civex.domain.dtos import ErrorEnvelope, WorkflowJobDTO
 from civex.domain.exceptions import ConfigError
 
 
@@ -160,6 +160,8 @@ def drain_jobs(ctx: AppContext) -> None:
             ctx.commit()
             console.print("    [success]✓ done[/success]")
         except Exception as e:
-            ctx.job_svc.mark_failed(job.id, str(e))
+            envelope = getattr(e, "envelope", None) or ErrorEnvelope.from_exception(e)
+            ctx.job_svc.mark_failed(job.id, str(e), envelope=envelope)
             ctx.commit()
-            console.print(f"    [error]✗ {e}[/error]")
+            where = f" [{envelope.step}]" if envelope.step else ""
+            console.print(f"    [error]✗{where} {envelope.kind}: {e}[/error]")
