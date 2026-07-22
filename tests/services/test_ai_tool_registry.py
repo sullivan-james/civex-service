@@ -96,6 +96,102 @@ def test_dispatch_exception_in_tool_run_is_caught(ctx: AppContext, monkeypatch) 
     assert result == {"error": "kaboom"}
 
 
+# ---------------------------------------------------------------------------
+# list_schemas -- no prior direct test coverage existed for this tool's
+# handler (only indirectly, via the system prompt injecting schema_svc data).
+# ---------------------------------------------------------------------------
+
+
+def test_list_schemas_returns_name_type_and_restrictions(ctx: AppContext) -> None:
+    ctx.schema_svc.create("trial", description="t")
+    ctx.schema_svc.add_field("trial", "subject", "string")
+    ctx.schema_svc.add_field(
+        "trial", "age", "integer", restrictions={"min": 0, "max": 120}
+    )
+    ctx.commit()
+
+    result = json.loads(dispatch("list_schemas", {}, _tool_ctx(ctx)))
+
+    assert result == [
+        {
+            "name": "trial",
+            "fields": [
+                {"name": "subject", "type": "string"},
+                {
+                    "name": "age",
+                    "type": "integer",
+                    "restrictions": {"min": 0, "max": 120},
+                },
+            ],
+        }
+    ]
+
+
+def test_list_schemas_empty_project_returns_empty_list(ctx: AppContext) -> None:
+    assert json.loads(dispatch("list_schemas", {}, _tool_ctx(ctx))) == []
+
+
+# ---------------------------------------------------------------------------
+# query_records -- search/count records of one schema across all collections.
+# No prior direct test coverage existed for this tool's handler.
+# ---------------------------------------------------------------------------
+
+
+def _seed_query_records(ctx: AppContext) -> None:
+    ctx.schema_svc.create("trial", description="t")
+    ctx.schema_svc.add_field("trial", "subject", "string")
+    ctx.dataset_svc.create("study")
+    for sub in ["S01", "S02", "S03"]:
+        ctx.record_svc.add("study", "trial", {"subject": sub})
+    ctx.commit()
+
+
+def test_query_records_returns_total_and_records(ctx: AppContext) -> None:
+    _seed_query_records(ctx)
+    result = json.loads(dispatch("query_records", {"schema": "trial"}, _tool_ctx(ctx)))
+    assert result["total"] == "3"
+    assert len(result["records"]) == 3
+    assert all("id" in r and "data" in r for r in result["records"])
+
+
+def test_query_records_count_only_omits_records(ctx: AppContext) -> None:
+    _seed_query_records(ctx)
+    result = json.loads(
+        dispatch(
+            "query_records", {"schema": "trial", "count_only": True}, _tool_ctx(ctx)
+        )
+    )
+    assert result == {"total": "3"}
+
+
+def test_query_records_search_filters_results(ctx: AppContext) -> None:
+    _seed_query_records(ctx)
+    result = json.loads(
+        dispatch(
+            "query_records", {"schema": "trial", "search": "S02"}, _tool_ctx(ctx)
+        )
+    )
+    assert result["total"] == "1"
+    assert result["records"][0]["data"]["subject"] == "S02"
+
+
+def test_query_records_limit_bounds_returned_records_not_total(
+    ctx: AppContext,
+) -> None:
+    _seed_query_records(ctx)
+    result = json.loads(
+        dispatch("query_records", {"schema": "trial", "limit": 1}, _tool_ctx(ctx))
+    )
+    assert result["total"] == "3"  # true total still reported
+    assert len(result["records"]) == 1  # but payload is bounded
+
+
+def test_query_records_unknown_schema_returns_error(ctx: AppContext) -> None:
+    result = json.loads(dispatch("query_records", {"schema": "ghost"}, _tool_ctx(ctx)))
+    assert "error" in result
+    assert "ghost" in result["error"]
+
+
 def test_list_workflows_tool_reads_via_workflow_service(ctx: AppContext) -> None:
     ctx.workflow_svc.save("my-wf", "name: my-wf\nsteps: []\n")
     result = json.loads(dispatch("list_workflows", {}, _tool_ctx(ctx)))
