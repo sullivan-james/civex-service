@@ -1,6 +1,6 @@
 # civex
 
-A command-line research data management system. Define schemas, collect records into datasets, attach files, and run data processing workflows — all locally, with an optional HTTP server and web UI.
+A command-line research data management system. Define schemas, collect records into collections, attach files, and run data processing workflows — all locally, with an optional HTTP server and web UI.
 
 ---
 
@@ -10,7 +10,7 @@ A command-line research data management system. Define schemas, collect records 
 - [Quick start](#quick-start)
 - [Project initialisation](#project-initialisation)
 - [Schemas](#schemas)
-- [Datasets](#datasets)
+- [Collections](#collections)
 - [Records](#records)
 - [Workflows](#workflows)
 - [Plugins](#plugins)
@@ -60,7 +60,7 @@ civex init                                          # initialise a project here
 civex schema create trial --description "A single experimental trial"
 civex schema add-field trial subject --type string --required
 civex schema add-field trial duration --type float
-civex dataset create study-2024
+civex collection create study-2024
 civex record add --to study-2024
 civex record find --in study-2024
 civex serve                                         # open http://localhost:8000
@@ -126,22 +126,22 @@ Own fields shadow parent fields of the same name. Inheritance is resolved recurs
 
 ---
 
-## Datasets
+## Collections
 
-A dataset is a named container for records. Records within a dataset can have different schemas (e.g. a dataset can hold both `trial` and `experiment` records).
+A collection is a named container for records. Records within a collection can have different schemas (e.g. a collection can hold both `trial` and `experiment` records).
 
 ```bash
-civex dataset create <name> [--description TEXT]
-civex dataset list
-civex dataset show <name>
-civex dataset delete <name> [--yes]
+civex collection create <name> [--description TEXT]
+civex collection list
+civex collection show <name>
+civex collection delete <name> [--yes]
 ```
 
 **Example:**
 
 ```bash
-civex dataset create pilot-study --description "Pilot run, n=10"
-civex dataset show pilot-study
+civex collection create pilot-study --description "Pilot run, n=10"
+civex collection show pilot-study
 # pilot-study
 #   Records  0
 #   Pilot run, n=10
@@ -151,13 +151,13 @@ civex dataset show pilot-study
 
 ## Records
 
-Records are individual data entries within a dataset. `record add` prompts for each field in the schema (including inherited fields). Required fields cannot be skipped.
+Records are individual data entries within a collection. `record add` prompts for each field in the schema (including inherited fields). Required fields cannot be skipped.
 
 ```bash
-civex record add    --to <dataset> [--schema SCHEMA]
+civex record add    --to <collection> [--schema SCHEMA]
 civex record show   <id>
 civex record update <id>
-civex record find   --in <dataset> [--where field=value ...] [--limit N]
+civex record find   --in <collection> [--where field=value ...] [--limit N]
 civex record delete <id> [--yes]
 ```
 
@@ -250,12 +250,12 @@ Each step's `inputs` references the output of an earlier step using `step_id.out
 ### End-to-end example
 
 ```bash
-# 1. Prepare schemas and datasets
+# 1. Prepare schemas and collections
 civex schema create experiment
 civex schema add-field experiment subject  --type string --required
 civex schema add-field experiment raw_data --type file
-civex dataset create study
-civex dataset create results
+civex collection create study
+civex collection create results
 
 # 2. Add a trigger record that holds the CSV file
 civex record add --to study --schema experiment
@@ -376,10 +376,10 @@ civex serve [--host HOST] [--port PORT]
 
 Starts a local HTTP server (default `http://127.0.0.1:8000`) with:
 
-- A React web UI for browsing schemas, datasets, records, workflows, and jobs
+- A React web UI for browsing schemas, collections, records, workflows, and jobs
 - A full REST API at `/api/` (OpenAPI docs at `/docs`)
 - An interactive civex shell in the browser (Terminal tab)
-- Import/export YAML dumps from the Datasets page
+- Import/export YAML dumps from the Collections page
 
 The server requires the `[server]` extra (included in the `pipx install` command above).
 
@@ -555,7 +555,7 @@ Keys can be listed and deleted via the same UI or via `GET`/`DELETE /api/v1/sett
 civex init
 civex schema create site --description "Camera trap site"
 civex schema add-field site name --type string --required
-civex dataset create sites
+civex collection create sites
 civex record add --to sites --schema site
 
 # 2. Point it at a hub repository
@@ -604,7 +604,7 @@ civex db setup-docker
 
 **Each civex project needs its own database — civex has no multi-tenant
 isolation.** There's no per-project namespacing in the schema (schema and
-dataset names are globally unique within a database), so two projects
+collection names are globally unique within a database), so two projects
 pointed at the same Postgres database will collide or silently mix data.
 The commands above avoid this automatically by giving every project its own
 container; if you manage Postgres yourself instead (below), give every
