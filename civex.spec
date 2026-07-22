@@ -16,7 +16,7 @@
 #   Windows — uses WebView2 (Edge Chromium, ships with Win 10/11 since 2021)
 #   Linux   — uses WebKitGTK; users need: libwebkit2gtk-4.0 or libwebkitgtk-6.0
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 # Collect every civex.* submodule — avoids missing any module that is only
 # referenced by string (e.g. "civex.server.app:app" passed to uvicorn.run).
@@ -38,11 +38,24 @@ _HIDDEN = _CIVEX_ALL + [
     "webview.platforms.winforms",     # Windows
     "webview.platforms.edgechromium", # Windows (WebView2)
     "webview.platforms.gtk",          # Linux
+    # Loaded by referencing._core at import time to resolve $schema/$ref in a
+    # plugin's declared config schema (see _DATAS below)
+    "jsonschema_specifications",
 ]
 
 _DATAS = [
     # Built React app — server/app.py finds it at sys._MEIPASS/frontend_dist/
     ("frontend/dist", "frontend_dist"),
+    # jsonschema-specifications keeps the JSON Schema metaschemas as *package
+    # data*, read through importlib.resources rather than imported — so
+    # collect_submodules/hiddenimports alone don't bring them along, and a
+    # bundler that drops them produces a build that succeeds, passes every
+    # test from source, and then fails only inside the frozen app, the first
+    # time someone saves a workflow (workflows/contract_validation.py
+    # validates each step's config against its plugin's declared schema).
+    # pyinstaller-hooks-contrib probably handles this already; declaring it
+    # here costs nothing and doesn't depend on that staying true.
+    *collect_data_files("jsonschema_specifications"),
 ]
 
 # ── Desktop tray app ──────────────────────────────────────────────────────────
