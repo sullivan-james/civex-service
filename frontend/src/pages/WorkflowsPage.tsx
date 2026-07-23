@@ -10,7 +10,11 @@ import {
   useSaveWorkflow,
   useDeleteWorkflow,
 } from '../hooks/useWorkflows'
-import { usePlugins, useUploadPlugin } from '../hooks/usePlugins'
+import {
+  useDeletePlugin,
+  usePlugins,
+  useUploadPlugin,
+} from '../hooks/usePlugins'
 import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import { PluginEditor } from '../components/plugins/PluginEditor'
@@ -396,9 +400,13 @@ export default function WorkflowsPage() {
   const { data: workflows, isLoading, error } = useWorkflows()
   const { data: pluginList } = usePlugins()
   const uploadPlugin = useUploadPlugin()
+  const deletePlugin = useDeletePlugin()
   const deleteWf = useDeleteWorkflow()
   const pluginInputRef = useRef<HTMLInputElement>(null)
   const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null)
+  const [pluginDeleteError, setPluginDeleteError] = useState<string | null>(
+    null,
+  )
 
   const [editor, setEditor] = useState<{ stem: string; isNew: boolean } | null>(
     null,
@@ -438,6 +446,16 @@ export default function WorkflowsPage() {
 
   function openEditPlugin(filename: string) {
     setPluginEditor({ filename, isNew: false })
+  }
+
+  async function handleDeletePlugin(id: string, filename: string) {
+    if (!confirm(`Delete plugin '${id}'? This cannot be undone.`)) return
+    setPluginDeleteError(null)
+    try {
+      await deletePlugin.mutateAsync(filename)
+    } catch (err) {
+      setPluginDeleteError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   async function handleDelete(wf: Workflow) {
@@ -608,6 +626,9 @@ export default function WorkflowsPage() {
             </Button>
           </div>
         </div>
+        {pluginDeleteError && (
+          <p className="text-xs text-[#d1242f] mb-2">{pluginDeleteError}</p>
+        )}
         {pluginList && pluginList.length > 0 && (
           <table className="w-full text-sm border-collapse">
             <thead>
@@ -658,16 +679,29 @@ export default function WorkflowsPage() {
                       </td>
                       <td className="py-2 px-3 text-right">
                         {p.filename && (
-                          <Button
-                            size="sm"
-                            variant="default"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              openEditPlugin(p.filename!)
-                            }}
-                          >
-                            Edit
-                          </Button>
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              size="sm"
+                              variant="default"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openEditPlugin(p.filename!)
+                              }}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              disabled={deletePlugin.isPending}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleDeletePlugin(p.id, p.filename!)
+                              }}
+                            >
+                              Delete
+                            </Button>
+                          </div>
                         )}
                       </td>
                     </tr>

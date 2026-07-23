@@ -14,11 +14,20 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.workflows.definition import WorkflowDef
 
 _SAFE_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+
+# Every parsed workflow currently on disk, as (path, def) pairs -- same shape
+# as WorkflowService.list_defs(). Taken as a plain callable rather than a
+# WorkflowService instance so PluginService doesn't have to depend on it
+# directly; mirrors how WorkflowService itself takes a plugins_provider
+# rather than a PluginService.
+WorkflowsProvider = Callable[[], list[tuple[Path, WorkflowDef]]]
 
 
 def _io_dicts(specs: list | None) -> list[dict] | None:
@@ -30,8 +39,13 @@ def _io_dicts(specs: list | None) -> list[dict] | None:
 
 
 class PluginService:
-    def __init__(self, civex_dir: Path) -> None:
+    def __init__(
+        self,
+        civex_dir: Path,
+        workflows_provider: WorkflowsProvider | None = None,
+    ) -> None:
         self._dir = civex_dir / "plugins"
+        self._workflows_provider = workflows_provider or (lambda: [])
 
     def list_registered(self) -> list[dict]:
         """[{"id", "name", "description", "builtin", "category",
@@ -107,6 +121,49 @@ class PluginService:
         if not path.is_file():
             raise NotFoundError(f"Plugin file '{filename}' not found")
         return path.read_text(encoding="utf-8")
+
+    def used_by(self, plugin_id: str) -> list[str]:
+        """Filenames of every workflow with a step invoking `plugin_id`."""
+        return [
+            path.name
+            for path, wf in self._workflows_provider()
+            if any(step.plugin == plugin_id for step in wf.steps)
+        ]
+
+    def delete(self, filename: str) -> None:
+        """Delete a user plugin file. Refuses to delete a plugin still
+        referenced by a workflow step -- deleting it out from under a
+        workflow would only turn a load-time contract check into a
+        confusing run-time failure. Built-ins have no file here and so
+        always 404, same as get_source()."""
+        if "/" in filename or "\\" in filename or filename.startswith("."):
+            raise ValidationError("Invalid filename")
+        path = self._dir / filename
+        if not path.is_file():
+            raise NotFoundError(f"Plugin file '{filename}' not found")
+
+        registered = self._register()
+        plugin_id = next(
+            (
+                pid
+                for pid, registration in registered.items()
+                if Path(registration.module_name).name == filename
+            ),
+            None,
+        )
+        if plugin_id is not None:
+            used_by = self.used_by(plugin_id)
+            if used_by:
+                raise ValidationError(
+                    f"Plugin '{plugin_id}' is used by workflow(s): "
+                    f"{', '.join(used_by)}. Remove those steps before deleting it."
+                )
+
+        path.unlink()
+        if plugin_id is not None:
+            from civex.plugins.registry import unregister_plugin
+
+            unregister_plugin(plugin_id)
 
     def validate(self, name: str, code: str) -> None:
         """Check name format and that code defines a class named 'Plugin',
