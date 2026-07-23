@@ -232,14 +232,22 @@ def _dead_process_message(proc: subprocess.Popen) -> str:
 
 
 def _run_with_timeout(
-    proc: subprocess.Popen, driver_fn: Callable[[], Any], timeout: float, *, label: str
+    proc: subprocess.Popen,
+    driver_fn: Callable[[], Any],
+    timeout: float,
+    *,
+    label: str,
+    kill_fn: Callable[[], None] | None = None,
 ) -> Any:
     """Runs driver_fn() (the blocking frame-exchange loop) on a daemon thread
     so the calling thread can enforce a real wall-clock deadline with
     Event.wait() -- a blocking `next(reader)` read has no timeout parameter
-    of its own. On timeout, kills the whole process group; the daemon thread
-    then unblocks on EOF and exits on its own (never joined past a short
-    grace period, so a stuck kill can't hang the caller)."""
+    of its own. On timeout, calls kill_fn() (default: kill proc's whole
+    process group -- right for a Tier 1 subprocess; container_runtime.py
+    passes a `docker kill` closure instead, since killing the local `docker
+    run` client doesn't reliably stop the container itself). The daemon
+    thread then unblocks on EOF and exits on its own (never joined past a
+    short grace period, so a stuck kill can't hang the caller)."""
     box: dict[str, Any] = {}
     done = threading.Event()
 
@@ -254,7 +262,7 @@ def _run_with_timeout(
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
     if not done.wait(timeout):
-        _kill_process_group(proc)
+        (kill_fn or (lambda: _kill_process_group(proc)))()
         thread.join(timeout=5.0)
         raise PluginTimeoutError(f"plugin '{label}' exceeded {timeout}s timeout")
     if "exc" in box:
