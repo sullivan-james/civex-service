@@ -1,0 +1,23 @@
+[package]
+name = "civex-plugin"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "civex-plugin"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "0.8"
+libc = "0.2"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+# Small, fast-starting binary -- this runs fresh once per `docker run`, not
+# as a long-lived server, so startup latency matters more than build time.
+lto = true
+strip = true

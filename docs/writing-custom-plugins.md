@@ -157,10 +157,12 @@ if ref:
 
 ## Container-tier (Tier 2) plugins
 
-For a plugin that needs something the subprocess tier can't give — a different language, system binaries, GPU access, stricter resource limits — civex runs it inside a Docker container instead, using the same `id`/`name`/`capabilities`/`Config`/`invoke()` shape and the same wire protocol described above. A Python starter (Dockerfile + `plugin.py` shim) lives in `templates/container-plugins/python/`; copy it into `_civex/plugins/<name>/` alongside a `civex-plugin.toml` manifest (`id`/`name`/`category`/`capabilities`) and fill in `invoke()`.
+Everything above is the Tier 1 (subprocess) tier — Python only, run via `uv run`. For a plugin that needs something the subprocess tier can't give — a different language, system binaries, GPU access, stricter resource limits — civex runs it inside a Docker container instead, using the same `id`/`name`/`capabilities`/`Config`/`invoke()` shape and the same wire protocol described above, over `docker run -i <image> <mode>`. A Python starter (Dockerfile + `plugin.py` shim) lives in `templates/container-plugins/python/`; copy it into `_civex/plugins/<name>/` alongside a `civex-plugin.toml` manifest (`id`/`name`/`category`/`capabilities`) and fill in `invoke()`.
 
 The one difference from the subprocess tier: `civex_plugin_sdk.serve_container` (instead of `serve`) is called from `__main__`, since a container is invoked once per operation (`docker run -i <image> describe` or `docker run -i <image> run`) rather than as a long-lived process — it reads that mode from `sys.argv[1]` instead of from a leading control frame on stdin.
 
+The host-side runtime that drives this (`civex.plugins.container_runtime`) and builds/caches each plugin's image (`civex.plugins.container_build`) now exists, but neither is wired into the plugin registry or workflow executor yet, so a container-tier plugin still isn't something you can run through a workflow today — these are starting points to build from.
+
 ### Other languages
 
-A plugin that needs something Python-level isolation can't give runs in a container the same way, speaking the identical wire protocol. `plugin-templates/<language>/` at the repo root holds prebuilt starters (Dockerfile + a minimal shim) for languages other than Python; see `plugin-templates/r/` for the first one. The host side of the container runtime (spawning `docker run`, building and content-hash-caching each plugin's image) exists, but it isn't wired into the plugin registry or workflow executor yet, so these starters are still a starting point to build from, not something you can run through a workflow today.
+Prebuilt starters (Dockerfile + a minimal shim implementing the identical wire protocol, including the same fd-dup stdout-isolation trick) exist for several languages besides Python: `plugin-templates/r/`, `plugin-templates/java/`, `starters/c/`, `templates/plugins/go/`, and `plugin-starters/rust/`.
