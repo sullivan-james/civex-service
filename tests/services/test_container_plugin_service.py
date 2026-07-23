@@ -94,10 +94,20 @@ def test_save_file_raises_not_found_for_unknown_plugin(ctx: AppContext) -> None:
         ctx.container_plugin_svc.save_file("nope", "Dockerfile", "FROM scratch\n")
 
 
-def test_rebuild_reports_failure_when_docker_missing(ctx: AppContext) -> None:
-    """docker isn't installed in this environment -- exercises the real
-    FileNotFoundError path rather than a mocked one."""
+def test_rebuild_reports_failure_when_docker_missing(
+    ctx: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Docker may or may not be installed wherever tests run, so force the
+    FileNotFoundError path explicitly rather than relying on the ambient
+    environment lacking a `docker` binary."""
     _make_container_plugin(ctx)
+
+    def fake_run(cmd, capture_output, text, timeout):
+        raise FileNotFoundError("docker")
+
+    monkeypatch.setattr(
+        "civex.services.container_plugin_service.subprocess.run", fake_run
+    )
     result = ctx.container_plugin_svc.rebuild("my_plugin")
     assert result["success"] is False
     assert "docker" in result["log"]
