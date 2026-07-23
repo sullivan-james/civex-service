@@ -14,12 +14,20 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from civex.domain.exceptions import NotFoundError, ValidationError
-from civex.workflows.definition import load_workflow
+from civex.workflows.definition import WorkflowDef
 
 _SAFE_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+
+# Every parsed workflow currently on disk, as (path, def) pairs -- same shape
+# as WorkflowService.list_defs(). Taken as a plain callable rather than a
+# WorkflowService instance so PluginService doesn't have to depend on it
+# directly; mirrors how WorkflowService itself takes a plugins_provider
+# rather than a PluginService.
+WorkflowsProvider = Callable[[], list[tuple[Path, WorkflowDef]]]
 
 
 def _io_dicts(specs: list | None) -> list[dict] | None:
@@ -31,8 +39,13 @@ def _io_dicts(specs: list | None) -> list[dict] | None:
 
 
 class PluginService:
-    def __init__(self, civex_dir: Path) -> None:
+    def __init__(
+        self,
+        civex_dir: Path,
+        workflows_provider: WorkflowsProvider | None = None,
+    ) -> None:
         self._dir = civex_dir / "plugins"
+        self._workflows_provider = workflows_provider or (lambda: [])
 
     def list_registered(self) -> list[dict]:
         """[{"id", "name", "description", "builtin", "category",
@@ -109,6 +122,52 @@ class PluginService:
             raise NotFoundError(f"Plugin file '{filename}' not found")
         return path.read_text(encoding="utf-8")
 
+    def used_by(self, plugin_id: str) -> list[str]:
+        """Filenames of every workflow with a step invoking `plugin_id`."""
+        return [
+            path.name
+            for path, wf in self._workflows_provider()
+            if any(step.plugin == plugin_id for step in wf.steps)
+        ]
+
+    def delete(self, filename: str, force: bool = False) -> None:
+        """Delete a user plugin file. Refuses to delete a plugin still
+        referenced by a workflow step (409) unless `force` is set --
+        deleting it out from under a workflow would only turn a load-time
+        contract check into a confusing run-time failure (CIVEX-119/120,
+        mirrors WorkflowService.delete's force pattern). Built-ins have no
+        file here and so always 404, same as get_source()."""
+        if "/" in filename or "\\" in filename or filename.startswith("."):
+            raise ValidationError("Invalid filename")
+        path = self._dir / filename
+        if not path.is_file():
+            raise NotFoundError(f"Plugin file '{filename}' not found")
+
+        registered = self._register()
+        plugin_id = next(
+            (
+                pid
+                for pid, registration in registered.items()
+                if Path(registration.module_name).name == filename
+            ),
+            None,
+        )
+        if not force and plugin_id is not None:
+            used_by = self.used_by(plugin_id)
+            if used_by:
+                raise ValidationError(
+                    f"Plugin '{plugin_id}' is used by workflow(s): "
+                    f"{', '.join(used_by)}. Remove those steps first, or use "
+                    "force=true to delete anyway (those workflows will fail "
+                    "contract validation)."
+                )
+
+        path.unlink()
+        if plugin_id is not None:
+            from civex.plugins.registry import unregister_plugin
+
+            unregister_plugin(plugin_id)
+
     def validate(self, name: str, code: str) -> None:
         """Check name format and that code defines a class named 'Plugin',
         without writing anything. Raises ValidationError on failure."""
@@ -168,58 +227,3 @@ class PluginService:
 
         discover_user_plugins(self._dir)
         return all_plugins()
-
-    def delete(self, filename: str, force: bool = False) -> None:
-        """Delete a user plugin file and drop its registration. There's
-        nothing under _dir for a built-in id to match, so this can only ever
-        remove a user plugin.
-
-        Unless `force`, refuses when a workflow step still references the
-        plugin's id -- deleting out from under a workflow would only turn a
-        clean validation error into a step that can't find its plugin at
-        run time (CIVEX-119, mirrors StoreService.remove_volume's
-        used-by check)."""
-        if "/" in filename or "\\" in filename or filename.startswith("."):
-            raise ValidationError("Invalid filename")
-        path = self._dir / filename
-        if not path.is_file():
-            raise NotFoundError(f"Plugin file '{filename}' not found")
-
-        from civex.plugins.registry import all_plugins, unregister_plugin
-
-        plugin_id = next(
-            (
-                pid
-                for pid, reg in all_plugins().items()
-                if Path(reg.module_name).name == filename
-            ),
-            None,
-        )
-
-        if not force and plugin_id is not None:
-            used_by = self._workflows_referencing(plugin_id)
-            if used_by:
-                raise ValidationError(
-                    f"Plugin '{filename}' is used by workflow(s): "
-                    f"{', '.join(used_by)}. Remove those steps first, or use "
-                    "force=true to delete anyway (those workflows will fail "
-                    "contract validation)."
-                )
-
-        path.unlink()
-        if plugin_id is not None:
-            unregister_plugin(plugin_id)
-
-    def _workflows_referencing(self, plugin_id: str) -> list[str]:
-        wf_dir = self._dir.parent / "workflows"
-        if not wf_dir.exists():
-            return []
-        names = []
-        for path in sorted(wf_dir.glob("*.yaml")) + sorted(wf_dir.glob("*.yml")):
-            try:
-                wf = load_workflow(path)
-            except Exception:
-                continue
-            if any(step.plugin == plugin_id for step in wf.steps):
-                names.append(wf.name or path.stem)
-        return names

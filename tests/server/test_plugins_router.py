@@ -136,13 +136,14 @@ def test_get_plugin_source_rejects_non_py_filename(client: TestClient) -> None:
 
 def test_delete_plugin(client: TestClient) -> None:
     client.post("/api/plugins", json={"name": "my_plugin", "code": _VALID_CODE})
-    del_resp = client.delete("/api/plugins/my_plugin.py")
-    assert del_resp.status_code == 204
-    ids = {p["id"] for p in client.get("/api/plugins").json()}
-    assert "project.my_plugin" not in ids
+    resp = client.delete("/api/plugins/my_plugin.py")
+    assert resp.status_code == 204
+
+    list_resp = client.get("/api/plugins")
+    assert all(p["id"] != "project.my_plugin" for p in list_resp.json())
 
 
-def test_delete_plugin_missing_file_returns_404(client: TestClient) -> None:
+def test_delete_plugin_missing_file(client: TestClient) -> None:
     resp = client.delete("/api/plugins/does_not_exist.py")
     assert resp.status_code == 404
 
@@ -152,24 +153,26 @@ def test_delete_plugin_rejects_non_py_filename(client: TestClient) -> None:
     assert resp.status_code == 400
 
 
-def test_delete_plugin_blocked_by_workflow_reference_returns_409(
+def test_delete_plugin_refuses_a_plugin_still_used_by_a_workflow(
     client: TestClient,
 ) -> None:
     client.post("/api/plugins", json={"name": "my_plugin", "code": _VALID_CODE})
-    client.put(
-        "/api/workflows/uses-plugin",
-        json={
-            "content": (
-                "name: uses-plugin\n"
-                "steps:\n"
-                "  - id: step-one\n"
-                "    plugin: project.my_plugin\n"
-            )
-        },
-    )
+    workflow_yaml = """\
+name: wf1
+steps:
+  - id: step1
+    plugin: project.my_plugin
+"""
+    save_resp = client.put("/api/workflows/wf1", json={"content": workflow_yaml})
+    assert save_resp.status_code == 200
 
-    del_resp = client.delete("/api/plugins/my_plugin.py")
-    assert del_resp.status_code == 409
+    resp = client.delete("/api/plugins/my_plugin.py")
+    assert resp.status_code == 409
+    assert "wf1" in resp.json()["detail"]
+
+    # Still registered -- the delete never happened.
+    list_resp = client.get("/api/plugins")
+    assert any(p["id"] == "project.my_plugin" for p in list_resp.json())
 
     force_resp = client.delete("/api/plugins/my_plugin.py?force=true")
     assert force_resp.status_code == 204

@@ -142,7 +142,9 @@ def build_local_context(
         plugins_provider=_plugins_provider(config.civex_dir),
         active_job_counter=job_svc.count_active_for_workflow,
     )
-    plugin_svc = PluginService(config.civex_dir)
+    plugin_svc = PluginService(
+        config.civex_dir, workflows_provider=workflow_svc.list_defs
+    )
     policy_svc = PolicyService(config.civex_dir)
 
     ctx = AppContext(

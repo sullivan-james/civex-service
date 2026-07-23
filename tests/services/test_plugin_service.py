@@ -138,7 +138,9 @@ def test_get_source_rejects_path_traversal(ctx: AppContext) -> None:
         ctx.plugin_svc.get_source("../escape.py")
 
 
-def test_delete_removes_the_file_and_registration(ctx: AppContext) -> None:
+def test_delete_removes_the_file_and_unregisters_the_plugin(
+    ctx: AppContext,
+) -> None:
     ctx.plugin_svc.save("my_plugin", _VALID_CODE)
     ctx.plugin_svc.delete("my_plugin.py")
     assert ctx.plugin_svc.list_raw() == []
@@ -146,7 +148,7 @@ def test_delete_removes_the_file_and_registration(ctx: AppContext) -> None:
     assert "project.my_plugin" not in registered
 
 
-def test_delete_unknown_filename_raises_not_found(ctx: AppContext) -> None:
+def test_delete_rejects_missing_file(ctx: AppContext) -> None:
     with pytest.raises(NotFoundError):
         ctx.plugin_svc.delete("does_not_exist.py")
 
@@ -156,33 +158,31 @@ def test_delete_rejects_path_traversal(ctx: AppContext) -> None:
         ctx.plugin_svc.delete("../escape.py")
 
 
-def test_delete_blocked_when_referenced_by_workflow(ctx: AppContext) -> None:
+def test_delete_refuses_a_plugin_still_used_by_a_workflow(
+    ctx: AppContext,
+) -> None:
     ctx.plugin_svc.save("my_plugin", _VALID_CODE)
-    ctx.workflow_svc.save(
-        "uses-plugin",
-        """\
-name: uses-plugin
-steps:
-  - id: step-one
-    plugin: project.my_plugin
-""",
+    workflows_dir = ctx.workflow_svc._dir
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "wf1.yaml").write_text(
+        "name: wf1\nsteps:\n  - id: step1\n    plugin: project.my_plugin\n"
     )
 
-    with pytest.raises(ValidationError, match="uses-plugin"):
+    with pytest.raises(ValidationError, match="wf1.yaml"):
         ctx.plugin_svc.delete("my_plugin.py")
-    assert ctx.plugin_svc.list_raw() != []
+
+    # Still on disk and registered -- the delete never happened.
+    assert ctx.plugin_svc.list_raw() == [
+        {"filename": "my_plugin.py", "code": _VALID_CODE}
+    ]
 
 
 def test_delete_force_ignores_workflow_reference(ctx: AppContext) -> None:
     ctx.plugin_svc.save("my_plugin", _VALID_CODE)
-    ctx.workflow_svc.save(
-        "uses-plugin",
-        """\
-name: uses-plugin
-steps:
-  - id: step-one
-    plugin: project.my_plugin
-""",
+    workflows_dir = ctx.workflow_svc._dir
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "wf1.yaml").write_text(
+        "name: wf1\nsteps:\n  - id: step1\n    plugin: project.my_plugin\n"
     )
 
     ctx.plugin_svc.delete("my_plugin.py", force=True)

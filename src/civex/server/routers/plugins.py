@@ -107,8 +107,9 @@ def get_plugin_source(filename: str, ctx: AppContext = Depends(get_ctx)):
 def delete_plugin(
     filename: str, force: bool = False, ctx: AppContext = Depends(get_ctx)
 ):
-    """Delete a user plugin file. Refused with 409 if a workflow step still
-    references it, unless `force` is set."""
+    """Delete a user plugin file. Refuses to delete built-ins (they have no
+    file to delete, and 404) and any plugin still referenced by a workflow
+    step (409), unless `force` is set."""
     if not filename.endswith(".py") or "/" in filename or "\\" in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
     try:
