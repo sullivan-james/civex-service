@@ -56,8 +56,16 @@ class GetWorkflowAuthoringGuideTool(AiTool):
 
     def run(self, tool_input: dict, ctx: AiToolContext) -> Any:
         # Raw markdown, not JSON -- registry.dispatch() passes strings through
-        # unchanged rather than re-encoding them.
-        return WORKFLOW_AUTHORING_GUIDE
+        # unchanged rather than re-encoding them. The built-in plugin
+        # reference table is generated per call from the live registry
+        # (CIVEX-144) rather than baked into the static template below, so
+        # the AI can never be handed a stale signature for a plugin that
+        # changed -- it's the same describe-derived contract list_plugins
+        # and every other surface reads.
+        reference = _format_builtin_reference(ctx.plugin_svc.list_registered())
+        return WORKFLOW_AUTHORING_GUIDE.replace(
+            "{{BUILTIN_PLUGIN_REFERENCE}}", reference
+        )
 
 
 class SaveWorkflowTool(AiTool):
@@ -124,10 +132,41 @@ class SavePluginTool(AiTool):
         return {"status": "proposed", "name": name, "code": code}
 
 
+def _format_builtin_reference(registered: list[dict]) -> str:
+    """One line per built-in plugin: id, config keys (with a trailing `?` on
+    any key that has a default, i.e. isn't in the schema's `required` list),
+    and declared input/output names -- generated from
+    PluginService.list_registered() rather than hand-maintained, so this
+    table can't silently drift from what a plugin's Config/inputs/outputs
+    actually are the way the old hardcoded version could (CIVEX-144). Prose
+    detail that isn't part of any plugin's declared contract (date_format
+    token syntax, the loop-prevention rules, ...) stays hand-written below in
+    ## Critical gotchas -- there's no other source of truth for those."""
+    builtins = [p for p in registered if p["builtin"]]
+    id_width = max((len(p["id"]) for p in builtins), default=0)
+    lines = []
+    for p in builtins:
+        schema = p["config_schema"]
+        required = set(schema.get("required") or [])
+        config_keys = list((schema.get("properties") or {}).keys())
+        segments = [p["id"].ljust(id_width)]
+        if config_keys:
+            rendered = [k if k in required else f"{k}?" for k in config_keys]
+            segments.append("config: {" + ", ".join(rendered) + "}")
+        if p["inputs"]:
+            segments.append("inputs: " + ", ".join(s["name"] for s in p["inputs"]))
+        if p["outputs"]:
+            segments.append("outputs: " + ", ".join(s["name"] for s in p["outputs"]))
+        lines.append("  ".join(segments))
+    return "\n".join(lines)
+
+
 # Returned by GetWorkflowAuthoringGuideTool rather than inlined in the system
 # prompt on every request — it's only relevant when the model is actually
-# about to draft a workflow or plugin, which is a minority of turns. Static
-# (no ctx/schema data), so it's defined once at import time.
+# about to draft a workflow or plugin, which is a minority of turns. The
+# {{BUILTIN_PLUGIN_REFERENCE}} placeholder is filled in per call by
+# _format_builtin_reference() (CIVEX-144); everything else here is static
+# process/format documentation with no other source of truth to read from.
 WORKFLOW_AUTHORING_GUIDE = """## Workflow YAML format
 ```
 name: string
@@ -154,20 +193,13 @@ steps:
 ```
 
 ## Built-in plugins (complete reference)
-civex.get_field              config: {field}                           outputs: value
-civex.save_field             config: {field}                           inputs:  value
-civex.save_fields                                                      inputs:  updates (dict field→value)
-civex.load_file              config: {field}                           outputs: bytes, filename, sha256
-civex.load_file_list         config: {field}                           outputs: files (list of FileRef dicts)
-civex.extract_from_filename  config: {field, pattern, output_type, date_format?}  outputs: value, filename, extracted
-  output_type: "string"|"date"|"datetime"|"integer"|"float"
-  date_format tokens: YYYY MM DD HH mm SS  (NOT strftime — do not use %Y etc.)
-  pattern: Python regex; non-token chars are literal so [-_] matches separator alternatives
-civex.create_records_from_files  config: {schema, file_field, dataset?}  inputs: files  outputs: created, skipped
-civex.match_files_to_records     config: {schema, key_field, file_field, pattern, dataset?}  inputs: files  outputs: created, updated, unmatched
-civex.upsert_records         config: {schema, key_field, dataset?}    inputs: table (DataFrame)  outputs: created, updated
-civex.rows_to_records        config: {schema, dataset?, field_mapping?}  inputs: table (DataFrame)  outputs: created
-civex.load_csv               config: {delimiter?, encoding?}           inputs: bytes  outputs: table (DataFrame)
+{{BUILTIN_PLUGIN_REFERENCE}}
+
+Notes not captured in the table above:
+  civex.extract_from_filename: output_type is "string"|"date"|"datetime"|"integer"|"float".
+    date_format tokens: YYYY MM DD HH mm SS (NOT strftime — do not use %Y etc.).
+    pattern is a Python regex; non-token chars are literal so [-_] matches separator alternatives.
+  civex.load_csv / civex.upsert_records / civex.rows_to_records: `table` is a pandas DataFrame.
 
 ## Custom plugin format
 File: _civex/plugins/{name}.py — a real OS-process script (Tier 1, uv-managed subprocess),

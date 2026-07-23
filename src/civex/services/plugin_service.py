@@ -34,10 +34,12 @@ class PluginService:
         self._dir = civex_dir / "plugins"
 
     def list_registered(self) -> list[dict]:
-        """[{"id", "name", "description", "builtin", "category", "inputs",
-        "outputs", "config_schema"}] for every registered plugin (built-ins +
-        user plugins discovered from _civex/plugins/) -- one plugin's complete
-        declared contract, in the one shape every surface reads.
+        """[{"id", "name", "description", "builtin", "category",
+        "capabilities", "inputs", "outputs", "config_schema"}] for every
+        registered plugin (built-ins + user plugins discovered from
+        _civex/plugins/) -- one plugin's complete declared contract, in the
+        one shape every surface (CLI `plugin info`, `GET /plugins`, the
+        frontend plugin panel, the AI's authoring guide) reads (CIVEX-144).
 
         Nothing here is per-tier: a built-in's contract comes off its class
         attributes and an out-of-process plugin's comes from its `describe`
@@ -57,6 +59,7 @@ class PluginService:
                 "description": registration.description,
                 "builtin": plugin_id.startswith(builtin_prefix),
                 "category": registration.category,
+                "capabilities": list(registration.capabilities),
                 "inputs": _io_dicts(registration.inputs),
                 "outputs": _io_dicts(registration.outputs),
                 "config_schema": (

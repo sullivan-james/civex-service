@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
@@ -10,10 +12,30 @@ from civex.server.deps import get_ctx
 router = APIRouter(prefix="/plugins", tags=["plugins"])
 
 
+class PluginIOSpec(BaseModel):
+    name: str
+    type: str
+    required: bool
+    description: str
+
+
 class PluginInfo(BaseModel):
+    """Mirrors PluginService.list_registered() field-for-field (CIVEX-144) --
+    the frontend plugin panel and `civex plugin info` both read this same
+    shape, so a field missing here silently vanishes from every UI even
+    though the service already returns it. `inputs`/`outputs` stay nullable:
+    None means the plugin declared no contract in that direction, `[]` means
+    it declared it has none (see civex_plugin_sdk.PluginBase.inputs)."""
+
     id: str
+    name: str
     description: str
     builtin: bool
+    category: str
+    capabilities: list[str]
+    inputs: list[PluginIOSpec] | None
+    outputs: list[PluginIOSpec] | None
+    config_schema: dict[str, Any]
     filename: str | None = None
 
 
