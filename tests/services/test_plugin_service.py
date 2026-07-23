@@ -175,3 +175,15 @@ def test_delete_refuses_a_plugin_still_used_by_a_workflow(
     assert ctx.plugin_svc.list_raw() == [
         {"filename": "my_plugin.py", "code": _VALID_CODE}
     ]
+
+
+def test_delete_force_ignores_workflow_reference(ctx: AppContext) -> None:
+    ctx.plugin_svc.save("my_plugin", _VALID_CODE)
+    workflows_dir = ctx.workflow_svc._dir
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "wf1.yaml").write_text(
+        "name: wf1\nsteps:\n  - id: step1\n    plugin: project.my_plugin\n"
+    )
+
+    ctx.plugin_svc.delete("my_plugin.py", force=True)
+    assert ctx.plugin_svc.list_raw() == []

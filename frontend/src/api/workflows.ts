@@ -42,8 +42,10 @@ export const workflowsApi = {
     api.put<WorkflowDetail>(`/workflows/${encodeURIComponent(stem)}`, {
       content,
     }),
-  delete: (stem: string) =>
-    api.delete<void>(`/workflows/${encodeURIComponent(stem)}`),
+  delete: (stem: string, force = false) =>
+    api.delete<void>(
+      `/workflows/${encodeURIComponent(stem)}${force ? '?force=true' : ''}`,
+    ),
   run: (name: string, record_id: string) =>
     api.post<WorkflowJob>(`/workflows/${encodeURIComponent(name)}/run`, {
       record_id,

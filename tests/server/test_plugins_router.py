@@ -173,3 +173,6 @@ steps:
     # Still registered -- the delete never happened.
     list_resp = client.get("/api/plugins")
     assert any(p["id"] == "project.my_plugin" for p in list_resp.json())
+
+    force_resp = client.delete("/api/plugins/my_plugin.py?force=true")
+    assert force_resp.status_code == 204

@@ -452,15 +452,33 @@ export default function WorkflowsPage() {
     if (!confirm(`Delete plugin '${id}'? This cannot be undone.`)) return
     setPluginDeleteError(null)
     try {
-      await deletePlugin.mutateAsync(filename)
+      await deletePlugin.mutateAsync({ filename })
     } catch (err) {
-      setPluginDeleteError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : 'Delete failed'
+      if (confirm(`${message}\n\nDelete anyway?`)) {
+        try {
+          await deletePlugin.mutateAsync({ filename, force: true })
+        } catch (err2) {
+          setPluginDeleteError(
+            err2 instanceof Error ? err2.message : String(err2),
+          )
+        }
+      } else {
+        setPluginDeleteError(message)
+      }
     }
   }
 
   async function handleDelete(wf: Workflow) {
     if (!confirm(`Delete workflow '${wf.name}'? This cannot be undone.`)) return
-    deleteWf.mutate(wf.stem)
+    try {
+      await deleteWf.mutateAsync({ stem: wf.stem })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Delete failed'
+      if (confirm(`${message}\n\nDelete anyway?`)) {
+        await deleteWf.mutateAsync({ stem: wf.stem, force: true })
+      }
+    }
   }
 
   function openRun(wf: Workflow) {

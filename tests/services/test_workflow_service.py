@@ -106,3 +106,47 @@ def test_delete_removes_the_file(ctx: AppContext) -> None:
 def test_delete_unknown_stem_raises_not_found(ctx: AppContext) -> None:
     with pytest.raises(NotFoundError, match="ghost"):
         ctx.workflow_svc.delete("ghost")
+
+
+def test_delete_blocked_by_pending_job(
+    ctx: AppContext, make_collection, make_schema, make_record
+) -> None:
+    ctx.workflow_svc.save("parse-audio-dates", _VALID_YAML)
+    make_collection("study")
+    make_schema("doc", fields=[("subject", "string")])
+    record = make_record("study", "doc", {"subject": "x"})
+    ctx.job_svc.enqueue_manual("parse-audio-dates", record)
+    ctx.commit()
+
+    with pytest.raises(ValidationError, match="pending/running job"):
+        ctx.workflow_svc.delete("parse-audio-dates")
+    assert ctx.workflow_svc.list_defs() != []
+
+
+def test_delete_force_ignores_pending_job(
+    ctx: AppContext, make_collection, make_schema, make_record
+) -> None:
+    ctx.workflow_svc.save("parse-audio-dates", _VALID_YAML)
+    make_collection("study")
+    make_schema("doc", fields=[("subject", "string")])
+    record = make_record("study", "doc", {"subject": "x"})
+    ctx.job_svc.enqueue_manual("parse-audio-dates", record)
+    ctx.commit()
+
+    ctx.workflow_svc.delete("parse-audio-dates", force=True)
+    assert ctx.workflow_svc.list_defs() == []
+
+
+def test_delete_not_blocked_by_completed_job(
+    ctx: AppContext, make_collection, make_schema, make_record
+) -> None:
+    ctx.workflow_svc.save("parse-audio-dates", _VALID_YAML)
+    make_collection("study")
+    make_schema("doc", fields=[("subject", "string")])
+    record = make_record("study", "doc", {"subject": "x"})
+    job = ctx.job_svc.enqueue_manual("parse-audio-dates", record)
+    ctx.job_svc.mark_completed(job.id)
+    ctx.commit()
+
+    ctx.workflow_svc.delete("parse-audio-dates")
+    assert ctx.workflow_svc.list_defs() == []

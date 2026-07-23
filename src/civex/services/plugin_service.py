@@ -130,12 +130,13 @@ class PluginService:
             if any(step.plugin == plugin_id for step in wf.steps)
         ]
 
-    def delete(self, filename: str) -> None:
+    def delete(self, filename: str, force: bool = False) -> None:
         """Delete a user plugin file. Refuses to delete a plugin still
-        referenced by a workflow step -- deleting it out from under a
-        workflow would only turn a load-time contract check into a
-        confusing run-time failure. Built-ins have no file here and so
-        always 404, same as get_source()."""
+        referenced by a workflow step (409) unless `force` is set --
+        deleting it out from under a workflow would only turn a load-time
+        contract check into a confusing run-time failure (CIVEX-119/120,
+        mirrors WorkflowService.delete's force pattern). Built-ins have no
+        file here and so always 404, same as get_source()."""
         if "/" in filename or "\\" in filename or filename.startswith("."):
             raise ValidationError("Invalid filename")
         path = self._dir / filename
@@ -151,12 +152,14 @@ class PluginService:
             ),
             None,
         )
-        if plugin_id is not None:
+        if not force and plugin_id is not None:
             used_by = self.used_by(plugin_id)
             if used_by:
                 raise ValidationError(
                     f"Plugin '{plugin_id}' is used by workflow(s): "
-                    f"{', '.join(used_by)}. Remove those steps before deleting it."
+                    f"{', '.join(used_by)}. Remove those steps first, or use "
+                    "force=true to delete anyway (those workflows will fail "
+                    "contract validation)."
                 )
 
         path.unlink()

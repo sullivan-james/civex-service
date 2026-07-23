@@ -256,18 +256,24 @@ def _write_describe_cache(cache_path: Path, cache: dict[str, Any]) -> None:
         return  # a read-only or full project dir just means no caching
 
 
-def unregister_plugin(plugin_id: str) -> None:
-    """Drop a plugin from the registry, e.g. after its file is deleted.
-    A no-op if it isn't registered."""
-    REGISTRY.pop(plugin_id, None)
-
-
 def get_plugin(plugin_id: str) -> PluginRegistration | None:
     return REGISTRY.get(plugin_id)
 
 
 def all_plugins() -> dict[str, PluginRegistration]:
     return dict(REGISTRY)
+
+
+def unregister_plugin(plugin_id: str) -> None:
+    """Drop a plugin's registration, e.g. after its source file is deleted.
+    Also clears its describe-cache entry so a future file of the same name
+    is described fresh rather than matched against the deleted file's hash."""
+    REGISTRY.pop(plugin_id, None)
+    stale_paths = [
+        path for path, (_, pid) in _SUBPROCESS_DESCRIBED.items() if pid == plugin_id
+    ]
+    for path in stale_paths:
+        _SUBPROCESS_DESCRIBED.pop(path, None)
 
 
 # Auto-register built-ins on import.

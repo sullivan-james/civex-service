@@ -76,3 +76,37 @@ def test_delete_unknown_stem_returns_404(client: TestClient) -> None:
 def test_run_unknown_workflow_returns_404(client: TestClient) -> None:
     resp = client.post("/api/workflows/ghost/run", json={"record_id": "x"})
     assert resp.status_code == 404
+
+
+def test_delete_blocked_by_pending_job_returns_409(client: TestClient) -> None:
+    """Enqueues the job directly against the same on-disk project rather
+    than via POST .../run -- TestClient executes FastAPI BackgroundTasks
+    synchronously before the request returns, so a /run call would drain
+    the job to 'completed' before delete ever saw it as pending."""
+    from civex.config import load_config
+    from civex.context import build_local_context
+
+    client.put("/api/workflows/parse-audio-dates", json={"content": _VALID_YAML})
+    client.post("/api/schemas", json={"name": "doc", "description": None})
+    client.post(
+        "/api/schemas/doc/fields",
+        json={"name": "subject", "type": "string", "required": False},
+    )
+    client.post("/api/collections", json={"name": "study", "description": None})
+    rec_resp = client.post(
+        "/api/collections/study/records",
+        json={"schema_name": "doc", "data": {"subject": "x"}},
+    )
+    record_id = rec_resp.json()["id"]
+
+    ctx = build_local_context(load_config())
+    record = ctx.record_svc.get(record_id)
+    ctx.job_svc.enqueue_manual("parse-audio-dates", record)
+    ctx.commit()
+    ctx.close()
+
+    del_resp = client.delete("/api/workflows/parse-audio-dates")
+    assert del_resp.status_code == 409
+
+    force_resp = client.delete("/api/workflows/parse-audio-dates?force=true")
+    assert force_resp.status_code == 204
