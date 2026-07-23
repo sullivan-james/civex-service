@@ -105,8 +105,13 @@ class WorkflowJobService:
     def claim_pending(self) -> WorkflowJobDTO | None:
         return self._repo.claim_pending()
 
-    def mark_completed(self, job_id: uuid.UUID, log: str | None = None) -> None:
-        self._repo.mark_completed(job_id, log=log)
+    def mark_completed(
+        self,
+        job_id: uuid.UUID,
+        log: str | None = None,
+        step_executions: list[dict] | None = None,
+    ) -> None:
+        self._repo.mark_completed(job_id, log=log, step_executions=step_executions)
 
     def mark_failed(
         self,
@@ -114,16 +119,21 @@ class WorkflowJobService:
         error: str,
         log: str | None = None,
         envelope: ErrorEnvelope | None = None,
+        step_executions: list[dict] | None = None,
     ) -> None:
         """`envelope` is the structured form of the same failure (CIVEX-143).
         Optional because a caller that only has a message string -- a failure
         raised before any step ran, say -- shouldn't have to invent a
-        classification it doesn't have."""
+        classification it doesn't have. `step_executions` (CIVEX-117) is the
+        per-step record of however far the run got before failing -- also
+        optional for the same reason: a failure before the first step has
+        none to report."""
         self._repo.mark_failed(
             job_id,
             error,
             log=log,
             error_details=envelope.to_dict() if envelope else None,
+            step_executions=step_executions,
         )
 
     def list_jobs(

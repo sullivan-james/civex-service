@@ -81,20 +81,25 @@ def run_pending_jobs() -> None:
                         job_depth=job.depth,
                     )
                     initial_outputs = job.input_data or None
-                    executor.run(
+                    step_executions = executor.run(
                         wf_def,
                         wf_ctx,
                         plugins,
                         initial_outputs=initial_outputs,
                         default_timeout_seconds=config.plugins.default_timeout_seconds,
                     )
-                ctx.job_svc.mark_completed(job.id, log=log_buf.getvalue() or None)
+                ctx.job_svc.mark_completed(
+                    job.id,
+                    log=log_buf.getvalue() or None,
+                    step_executions=step_executions,
+                )
                 ctx.commit()
             except Exception as e:
                 # executor.run() attaches the envelope (with the failing step
                 # id) to whatever it re-raises; anything raised before the
                 # first step -- a missing workflow or record -- is classified
-                # here instead, where there's no step to name.
+                # here instead, where there's no step to name. Same for
+                # step_executions (CIVEX-117): None if nothing ran yet.
                 envelope = getattr(e, "envelope", None) or ErrorEnvelope.from_exception(
                     e
                 )
@@ -103,6 +108,7 @@ def run_pending_jobs() -> None:
                     str(e),
                     log=log_buf.getvalue() or None,
                     envelope=envelope,
+                    step_executions=getattr(e, "step_executions", None),
                 )
                 ctx.commit()
     finally:

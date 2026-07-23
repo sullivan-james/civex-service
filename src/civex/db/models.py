@@ -257,6 +257,14 @@ class WorkflowJob(Base):
     error_details: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     log: Mapped[str | None] = mapped_column(String, nullable=True)
     input_data: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    # Per-step execution records (CIVEX-117): list of {step_id, plugin,
+    # status, inputs, outputs, duration_seconds, error} in execution order --
+    # see civex.domain.dtos.StepExecution. Set alongside `log`/`error` when
+    # the job finishes, replacing that flat blob as the way to see what each
+    # step actually did.
+    step_executions: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        _JSON, nullable=True
+    )
     depth: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )

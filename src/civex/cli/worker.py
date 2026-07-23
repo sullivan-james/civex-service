@@ -40,13 +40,18 @@ def worker_run(
             f"  [dim]→ workflow '{job.workflow_name}' (trigger: {job.trigger})[/dim]"
         )
         try:
-            run_job(job, ctx)
-            ctx.job_svc.mark_completed(job.id)
+            step_executions, _ = run_job(job, ctx)
+            ctx.job_svc.mark_completed(job.id, step_executions=step_executions)
             ctx.commit()
             console.print("    [success]✓ done[/success]")
         except Exception as e:
             envelope = getattr(e, "envelope", None) or ErrorEnvelope.from_exception(e)
-            ctx.job_svc.mark_failed(job.id, str(e), envelope=envelope)
+            ctx.job_svc.mark_failed(
+                job.id,
+                str(e),
+                envelope=envelope,
+                step_executions=getattr(e, "step_executions", None),
+            )
             ctx.commit()
             where = f" [{envelope.step}]" if envelope.step else ""
             retry_hint = " [dim](retryable)[/dim]" if envelope.retryable else ""
