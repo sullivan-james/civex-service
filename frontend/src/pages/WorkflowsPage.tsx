@@ -8,6 +8,8 @@ import {
 } from '../hooks/useWorkflows'
 import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
+import { ContainerPluginEditor } from '../components/workflows/ContainerPluginEditor'
+import { useContainerPlugins } from '../hooks/useContainerPlugins'
 import type { Workflow } from '../api/workflows'
 import { api } from '../api/client'
 
@@ -223,6 +225,7 @@ function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
 export default function WorkflowsPage() {
   const { data: workflows, isLoading, error } = useWorkflows()
   const { data: pluginList } = usePlugins()
+  const { data: containerPlugins } = useContainerPlugins()
   const uploadPlugin = useUploadPlugin()
   const deleteWf = useDeleteWorkflow()
   const pluginInputRef = useRef<HTMLInputElement>(null)
@@ -234,6 +237,9 @@ export default function WorkflowsPage() {
   const [pluginUploadError, setPluginUploadError] = useState<string | null>(
     null,
   )
+  const [containerEditorTarget, setContainerEditorTarget] = useState<
+    string | null
+  >(null)
 
   async function handlePluginFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -468,6 +474,60 @@ export default function WorkflowsPage() {
         )}
       </div>
 
+      {/* Container (Tier 2) plugins panel */}
+      {containerPlugins && containerPlugins.length > 0 && (
+        <div className="mt-10">
+          <div className="mb-3">
+            <h2 className="text-base font-semibold text-[#1f2328]">
+              Container plugins
+            </h2>
+            <p className="text-xs text-[#656d76] mt-0.5">
+              Tier 2 plugins — Dockerfile + source tree, from{' '}
+              _civex/plugins/&lt;name&gt;/
+            </p>
+          </div>
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="border-b border-[#d0d7de]">
+                <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
+                  Name
+                </th>
+                <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
+                  Files
+                </th>
+                <th className="py-2 px-3 text-right" />
+              </tr>
+            </thead>
+            <tbody>
+              {containerPlugins.map((p) => (
+                <tr
+                  key={p.name}
+                  className="border-b border-[#d0d7de] hover:bg-[#f6f8fa]"
+                >
+                  <td className="py-2 px-3 font-medium text-[#1f2328]">
+                    {p.name}
+                  </td>
+                  <td className="py-2 px-3 font-mono text-xs text-[#656d76]">
+                    {p.files.length}
+                  </td>
+                  <td className="py-2 px-3">
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => setContainerEditorTarget(p.name)}
+                      >
+                        Edit
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* YAML editor modal */}
       {editor && (
         <WorkflowEditor
@@ -481,6 +541,13 @@ export default function WorkflowsPage() {
         <WorkflowRunModal
           workflow={runTarget}
           onClose={() => setRunTarget(null)}
+        />
+      )}
+
+      {containerEditorTarget && (
+        <ContainerPluginEditor
+          name={containerEditorTarget}
+          onClose={() => setContainerEditorTarget(null)}
         />
       )}
     </>
