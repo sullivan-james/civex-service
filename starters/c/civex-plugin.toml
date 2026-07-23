@@ -1,0 +1,14 @@
+# Tier 2 (container) plugin manifest. Its presence (alongside a Dockerfile
+# in the same directory) is what tells the registry this is a container
+# plugin rather than a Tier 1 subprocess one -- the build context is just
+# this directory, so there's no separate path field.
+#
+# Keep these fields in sync with the ShimPlugin descriptor in src/plugin.c:
+# this file is what the host reads to index the plugin without building/
+# running the container; `docker run -i <image> describe` (src/shim.c) is
+# the runtime source of truth once the image exists.
+
+id = "my_project.c_example_sum"
+name = "C Example: Sum Numbers"
+category = "starters"
+capabilities = []
