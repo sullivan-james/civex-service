@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import logging
 import os
 import pkgutil
 import tempfile
@@ -16,6 +17,8 @@ from civex_plugin_sdk.protocol import DescribeResult
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from civex.plugins.base import PluginTier, StepResult, Tier0Plugin, WorkflowContext
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -189,8 +192,15 @@ def discover_user_plugins(plugins_dir: Path) -> None:
         cached = _SUBPROCESS_DESCRIBED.get(resolved)
         if cached is not None and cached[0] == content_hash and cached[1] in REGISTRY:
             continue
-        describe_result = _describe_with_disk_cache(path, content_hash)
-        registration = _registration_for_subprocess(path, describe_result)
+        try:
+            describe_result = _describe_with_disk_cache(path, content_hash)
+            registration = _registration_for_subprocess(path, describe_result)
+        except Exception as exc:
+            # A single broken plugin file (bad PEP 723 deps, a describe()
+            # that raises, a timeout, ...) must not stop discovery of every
+            # other file -- only workflows referencing this one are affected.
+            log.warning("Failed to load plugin %s: %s", path, exc)
+            continue
         REGISTRY[registration.id] = registration
         _SUBPROCESS_DESCRIBED[resolved] = (content_hash, registration.id)
 
