@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { Fragment, useState, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   useWorkflows,
@@ -10,14 +10,16 @@ import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import { ContainerPluginEditor } from '../components/workflows/ContainerPluginEditor'
 import { useContainerPlugins } from '../hooks/useContainerPlugins'
+import { AutocompleteMenu } from '../components/workflows/YamlAutocomplete'
+import {
+  getAutocompleteContext,
+  getSuggestions,
+  type Suggestion,
+} from '../utils/workflowAutocomplete'
+import { getCaretCoordinates } from '../utils/caretCoordinates'
 import type { Workflow } from '../api/workflows'
+import type { PluginInfo, PluginIOSpec } from '../api/plugins'
 import { api } from '../api/client'
-
-interface PluginInfo {
-  id: string
-  description: string
-  builtin: boolean
-}
 
 function usePlugins() {
   return useQuery<PluginInfo[]>({
@@ -80,9 +82,15 @@ interface EditorProps {
   stem: string
   isNew: boolean
   onClose: () => void
+  plugins: PluginInfo[]
 }
 
-function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
+function WorkflowEditor({
+  stem: initialStem,
+  isNew,
+  onClose,
+  plugins,
+}: EditorProps) {
   const [stem, setStem] = useState(initialStem)
   const [content, setContent] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -99,9 +107,86 @@ function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
     setContent(NEW_TEMPLATE)
   }
 
-  // Tab key → 2 spaces
+  // Autocomplete (CIVEX-122) — plugin ids, config keys, step output refs,
+  // driven off the same Story 3 plugin schema the contract panel below reads.
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 })
+  const acContextRef = useRef<{
+    replaceFrom: number
+    replaceTo: number
+  } | null>(null)
+
+  const refreshSuggestions = useCallback(
+    (text: string, cursor: number) => {
+      const ctx = getAutocompleteContext(text, cursor)
+      const matches = ctx ? getSuggestions(ctx, plugins, text) : []
+      if (!ctx || matches.length === 0) {
+        acContextRef.current = null
+        setSuggestions([])
+        return
+      }
+      acContextRef.current = ctx
+      setSuggestions(matches)
+      setActiveIndex(0)
+      const el = textareaRef.current
+      if (el) {
+        const coords = getCaretCoordinates(el, cursor)
+        setMenuPos({ top: coords.top + coords.height, left: coords.left })
+      }
+    },
+    [plugins],
+  )
+
+  const applySuggestion = useCallback(
+    (index: number) => {
+      const ctx = acContextRef.current
+      const chosen = suggestions[index]
+      if (!ctx || !chosen || content === null) return
+      const next =
+        content.slice(0, ctx.replaceFrom) +
+        chosen.insertText +
+        content.slice(ctx.replaceTo)
+      const newCursor = ctx.replaceFrom + chosen.insertText.length
+      setContent(next)
+      setSuggestions([])
+      const el = textareaRef.current
+      requestAnimationFrame(() => {
+        if (!el) return
+        el.selectionStart = el.selectionEnd = newCursor
+        el.focus()
+      })
+    },
+    [content, suggestions],
+  )
+
+  // Tab key → 2 spaces (or accept the active suggestion, if the menu is open)
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (suggestions.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          setActiveIndex((i) => (i + 1) % suggestions.length)
+          return
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          setActiveIndex(
+            (i) => (i - 1 + suggestions.length) % suggestions.length,
+          )
+          return
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault()
+          applySuggestion(activeIndex)
+          return
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setSuggestions([])
+          return
+        }
+      }
       if (e.key === 'Tab') {
         e.preventDefault()
         const el = e.currentTarget
@@ -114,7 +199,21 @@ function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
         })
       }
     },
-    [],
+    [suggestions, activeIndex, applySuggestion],
+  )
+
+  const handleKeyUp = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === 'Escape') return
+      if (
+        suggestions.length > 0 &&
+        (e.key === 'ArrowDown' || e.key === 'ArrowUp')
+      )
+        return
+      const el = e.currentTarget
+      refreshSuggestions(el.value, el.selectionStart)
+    },
+    [suggestions.length, refreshSuggestions],
   )
 
   async function handleSave() {
@@ -181,15 +280,34 @@ function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
               <span className="text-xs font-medium text-[#1f2328] mb-1">
                 YAML
               </span>
-              <textarea
-                ref={textareaRef}
-                value={content ?? ''}
-                onChange={(e) => setContent(e.target.value)}
-                onKeyDown={handleKeyDown}
-                spellCheck={false}
-                className="flex-1 min-h-0 font-mono text-xs border border-[#d0d7de] rounded-md p-3 resize-none bg-[#f6f8fa] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] leading-relaxed"
-                style={{ minHeight: '200px' }}
-              />
+              <div className="relative flex-1 min-h-0">
+                <textarea
+                  ref={textareaRef}
+                  value={content ?? ''}
+                  onChange={(e) => {
+                    setContent(e.target.value)
+                    refreshSuggestions(e.target.value, e.target.selectionStart)
+                  }}
+                  onKeyDown={handleKeyDown}
+                  onKeyUp={handleKeyUp}
+                  onClick={(e) =>
+                    refreshSuggestions(
+                      e.currentTarget.value,
+                      e.currentTarget.selectionStart,
+                    )
+                  }
+                  onBlur={() => setSuggestions([])}
+                  spellCheck={false}
+                  className="w-full h-full font-mono text-xs border border-[#d0d7de] rounded-md p-3 resize-none bg-[#f6f8fa] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] leading-relaxed"
+                  style={{ minHeight: '200px' }}
+                />
+                <AutocompleteMenu
+                  suggestions={suggestions}
+                  activeIndex={activeIndex}
+                  position={menuPos}
+                  onSelect={applySuggestion}
+                />
+              </div>
             </div>
           )}
 
@@ -219,6 +337,81 @@ function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Plugin contract detail (CIVEX-144) — one declared contract (config keys,
+// inputs, outputs, capabilities), same shape for every tier, read straight
+// off GET /plugins rather than a second endpoint.
+// ---------------------------------------------------------------------------
+
+function IOSpecList({ specs }: { specs: PluginIOSpec[] | null }) {
+  if (specs === null) {
+    return <p className="text-xs text-[#656d76] italic">not declared</p>
+  }
+  if (specs.length === 0) {
+    return <p className="text-xs text-[#656d76]">none</p>
+  }
+  return (
+    <ul className="text-xs space-y-0.5">
+      {specs.map((s) => (
+        <li key={s.name} className="font-mono">
+          <span className="text-[#1f2328]">{s.name}</span>
+          <span className="text-[#656d76]"> : {s.type}</span>
+          {!s.required && <span className="text-[#656d76]"> (optional)</span>}
+          {s.description && (
+            <span className="text-[#656d76] font-sans"> — {s.description}</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function PluginContractDetail({ plugin }: { plugin: PluginInfo }) {
+  const configProps = Object.entries(plugin.config_schema.properties ?? {})
+  const required = new Set(plugin.config_schema.required ?? [])
+
+  return (
+    <div className="grid grid-cols-3 gap-4">
+      <div>
+        <h4 className="text-xs font-semibold text-[#1f2328] mb-1">Inputs</h4>
+        <IOSpecList specs={plugin.inputs} />
+      </div>
+      <div>
+        <h4 className="text-xs font-semibold text-[#1f2328] mb-1">Outputs</h4>
+        <IOSpecList specs={plugin.outputs} />
+      </div>
+      <div>
+        <h4 className="text-xs font-semibold text-[#1f2328] mb-1">Config</h4>
+        {configProps.length === 0 ? (
+          <p className="text-xs text-[#656d76]">none</p>
+        ) : (
+          <ul className="text-xs space-y-0.5">
+            {configProps.map(([key, prop]) => (
+              <li key={key} className="font-mono">
+                <span className="text-[#1f2328]">{key}</span>
+                <span className="text-[#656d76]"> : {prop.type ?? 'any'}</span>
+                {!required.has(key) && (
+                  <span className="text-[#656d76]"> (optional)</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {plugin.capabilities.length > 0 && (
+          <>
+            <h4 className="text-xs font-semibold text-[#1f2328] mt-2 mb-1">
+              Capabilities
+            </h4>
+            <p className="text-xs font-mono text-[#656d76]">
+              {plugin.capabilities.join(', ')}
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -229,6 +422,7 @@ export default function WorkflowsPage() {
   const uploadPlugin = useUploadPlugin()
   const deleteWf = useDeleteWorkflow()
   const pluginInputRef = useRef<HTMLInputElement>(null)
+  const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null)
 
   const [editor, setEditor] = useState<{ stem: string; isNew: boolean } | null>(
     null,
@@ -439,33 +633,51 @@ export default function WorkflowsPage() {
                 <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
                   Source
                 </th>
+                <th className="py-2 px-3" />
               </tr>
             </thead>
             <tbody>
-              {pluginList.map((p) => (
-                <tr
-                  key={p.id}
-                  className="border-b border-[#d0d7de] hover:bg-[#f6f8fa]"
-                >
-                  <td className="py-2 px-3 font-mono text-xs text-[#1f2328]">
-                    {p.id}
-                  </td>
-                  <td className="py-2 px-3 text-[#656d76]">
-                    {p.description || '—'}
-                  </td>
-                  <td className="py-2 px-3">
-                    <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        p.builtin
-                          ? 'bg-[#ddf4ff] text-[#0969da]'
-                          : 'bg-[#dafbe1] text-[#1a7f37]'
-                      }`}
+              {pluginList.map((p) => {
+                const isExpanded = expandedPlugin === p.id
+                return (
+                  <Fragment key={p.id}>
+                    <tr
+                      onClick={() =>
+                        setExpandedPlugin(isExpanded ? null : p.id)
+                      }
+                      className="border-b border-[#d0d7de] hover:bg-[#f6f8fa] cursor-pointer"
                     >
-                      {p.builtin ? 'built-in' : 'user'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+                      <td className="py-2 px-3 font-mono text-xs text-[#1f2328]">
+                        {p.id}
+                      </td>
+                      <td className="py-2 px-3 text-[#656d76]">
+                        {p.description || '—'}
+                      </td>
+                      <td className="py-2 px-3">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                            p.builtin
+                              ? 'bg-[#ddf4ff] text-[#0969da]'
+                              : 'bg-[#dafbe1] text-[#1a7f37]'
+                          }`}
+                        >
+                          {p.builtin ? 'built-in' : 'user'}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-[#656d76] text-xs">
+                        {isExpanded ? '▲' : '▼'}
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr className="border-b border-[#d0d7de]">
+                        <td colSpan={4} className="bg-[#f6f8fa] px-3 py-3">
+                          <PluginContractDetail plugin={p} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         )}
@@ -534,6 +746,7 @@ export default function WorkflowsPage() {
           stem={editor.stem}
           isNew={editor.isNew}
           onClose={() => setEditor(null)}
+          plugins={pluginList ?? []}
         />
       )}
 
