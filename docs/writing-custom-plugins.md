@@ -154,3 +154,9 @@ if ref:
 - A plugin can only reach project data through the `ctx.*` calls it declared in `capabilities`; anything else fails with `capability_denied`.
 - All changes are committed together at the end of the workflow run unless you call `ctx.commit()` explicitly.
 - If `invoke()` raises an exception (or the run times out), the entire workflow job is marked as failed and no changes are committed.
+
+## Container-tier (Tier 2) plugins
+
+For a plugin that needs something the subprocess tier can't give — a different language, system binaries, GPU access, stricter resource limits — civex will run it inside a Docker container instead, using the same `id`/`name`/`capabilities`/`Config`/`invoke()` shape and the same wire protocol described above. A Python starter (Dockerfile + `plugin.py` shim) lives in `templates/container-plugins/python/`; copy it into `_civex/plugins/<name>/` alongside a `civex-plugin.toml` manifest (`id`/`name`/`category`/`capabilities`) and fill in `invoke()`.
+
+The one difference from the subprocess tier: `civex_plugin_sdk.serve_container` (instead of `serve`) is called from `__main__`, since a container is invoked once per operation (`docker run -i <image> describe` or `docker run -i <image> run`) rather than as a long-lived process — it reads that mode from `sys.argv[1]` instead of from a leading control frame on stdin.
