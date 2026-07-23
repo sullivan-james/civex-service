@@ -18,8 +18,10 @@ from civex.workflows.definition import WorkflowDef
 
 
 def _errors(yaml_text: str) -> list[str]:
+    """Message text only -- most of this file cares about wording, not the
+    `step` field. See test_*_error_is_tagged_with_its_step below for that."""
     wf = WorkflowDef.model_validate(yaml.safe_load(yaml_text))
-    return validate_workflow_contracts(wf, all_plugins())
+    return [e.message for e in validate_workflow_contracts(wf, all_plugins())]
 
 
 def test_valid_workflow_has_no_contract_errors():
@@ -376,11 +378,11 @@ steps:
 """)
     )
     errors = validate_workflow_contracts(wf, {"civex.get_field": undeclared})
-    assert any("unknown key 'nonsense'" in e for e in errors)
+    assert any("unknown key 'nonsense'" in e.message for e in errors)
 
 
 def test_save_rejects_a_workflow_that_violates_a_contract(ctx):
-    from civex.domain.exceptions import ValidationError
+    from civex.domain.exceptions import ValidationError, WorkflowValidationError
 
     with pytest.raises(ValidationError) as excinfo:
         ctx.workflow_svc.save(
@@ -390,11 +392,41 @@ name: broken
 steps:
   - id: one
     plugin: civex.get_field
-    config: {fileds: subject}
+    config: {field: subject, fileds: subject}
 """,
         )
     assert "unknown key 'fileds'" in str(excinfo.value)
     assert ctx.workflow_svc.find_path("broken") is None
+
+    assert isinstance(excinfo.value, WorkflowValidationError)
+    assert excinfo.value.errors == [
+        {
+            "step": "one",
+            "message": (
+                "Step 'one' config has unknown key 'fileds' for plugin "
+                "'civex.get_field' (accepts: field)"
+            ),
+        }
+    ]
+
+
+def test_contract_errors_are_tagged_with_their_step():
+    """The `step` field is what lets a caller (the workflows API, CIVEX-109)
+    point a user at the offending step without parsing it back out of the
+    message text."""
+    wf = WorkflowDef.model_validate(
+        yaml.safe_load("""
+name: wf
+steps:
+  - id: one
+    plugin: civex.get_field
+    config: {}
+  - id: two
+    plugin: civex.nope
+""")
+    )
+    errors = validate_workflow_contracts(wf, all_plugins())
+    assert {e.step for e in errors} == {"one", "two"}
 
 
 def test_run_revalidates_before_executing_any_step(

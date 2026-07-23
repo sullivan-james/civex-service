@@ -34,6 +34,7 @@ virtue of having a Config model. See civex_plugin_sdk.PluginBase.inputs.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from jsonschema import Draft202012Validator
@@ -49,17 +50,32 @@ if TYPE_CHECKING:
 INPUT_STEP_ID = "__input__"
 
 
+@dataclass
+class ContractError:
+    """One contract violation, with the step it belongs to broken out so a
+    caller (e.g. the workflows API, CIVEX-109) can report per-step rather
+    than parsing a step id back out of `message`.
+
+    `step` is None only for violations that aren't about a single step --
+    there are none of those today, but callers shouldn't assume it's always
+    set.
+    """
+
+    step: str | None
+    message: str
+
+
 def validate_workflow_contracts(
     wf: "WorkflowDef", plugins: Mapping[str, "PluginRegistration"]
-) -> list[str]:
-    """Every contract violation in `wf`, as human-readable messages.
+) -> list[ContractError]:
+    """Every contract violation in `wf`, each tagged with its step.
 
     Returns all of them rather than raising on the first: a workflow is
     typically saved by someone (or something -- the AI's save_workflow tool)
     that would otherwise have to fix one error, re-submit, and discover the
     next.
     """
-    errors: list[str] = []
+    errors: list[ContractError] = []
     errors.extend(_check_unique_step_ids(wf))
 
     steps_by_id = {step.id: step for step in wf.steps}
@@ -68,7 +84,12 @@ def validate_workflow_contracts(
     for step in wf.steps:
         registration = plugins.get(step.plugin)
         if registration is None:
-            errors.append(f"Step '{step.id}' references unknown plugin '{step.plugin}'")
+            errors.append(
+                ContractError(
+                    step=step.id,
+                    message=f"Step '{step.id}' references unknown plugin '{step.plugin}'",
+                )
+            )
         else:
             errors.extend(_check_config(step, registration))
             errors.extend(_check_inputs(step, registration))
@@ -84,7 +105,7 @@ def validate_workflow_contracts(
     return errors
 
 
-def _check_unique_step_ids(wf: "WorkflowDef") -> list[str]:
+def _check_unique_step_ids(wf: "WorkflowDef") -> list[ContractError]:
     """Duplicate ids don't currently fail anywhere -- the executor's
     topological sort keys steps by id, so a duplicate silently drops a step
     rather than running it."""
@@ -94,10 +115,15 @@ def _check_unique_step_ids(wf: "WorkflowDef") -> list[str]:
         if step.id in seen and step.id not in duplicates:
             duplicates.append(step.id)
         seen.add(step.id)
-    return [f"Step id '{sid}' is used more than once" for sid in duplicates]
+    return [
+        ContractError(step=sid, message=f"Step id '{sid}' is used more than once")
+        for sid in duplicates
+    ]
 
 
-def _check_config(step: "StepDef", registration: "PluginRegistration") -> list[str]:
+def _check_config(
+    step: "StepDef", registration: "PluginRegistration"
+) -> list[ContractError]:
     """Validate step.config against the plugin's declared config schema.
 
     Unknown keys are rejected on top of standard JSON Schema validation,
@@ -114,7 +140,9 @@ def _check_config(step: "StepDef", registration: "PluginRegistration") -> list[s
         schema = registration.config_model.model_json_schema()
 
     errors = [
-        f"Step '{step.id}' config: {_format_schema_error(e)}"
+        ContractError(
+            step=step.id, message=f"Step '{step.id}' config: {_format_schema_error(e)}"
+        )
         for e in sorted(
             Draft202012Validator(schema).iter_errors(step.config),
             key=lambda e: list(e.path),
@@ -126,8 +154,13 @@ def _check_config(step: "StepDef", registration: "PluginRegistration") -> list[s
         unknown = sorted(set(step.config) - set(properties))
         known = ", ".join(sorted(properties)) or "none"
         errors.extend(
-            f"Step '{step.id}' config has unknown key '{key}' for plugin "
-            f"'{step.plugin}' (accepts: {known})"
+            ContractError(
+                step=step.id,
+                message=(
+                    f"Step '{step.id}' config has unknown key '{key}' for plugin "
+                    f"'{step.plugin}' (accepts: {known})"
+                ),
+            )
             for key in unknown
         )
     return errors
@@ -138,20 +171,32 @@ def _format_schema_error(error: Any) -> str:
     return f"{location}: {error.message}" if location else error.message
 
 
-def _check_inputs(step: "StepDef", registration: "PluginRegistration") -> list[str]:
+def _check_inputs(
+    step: "StepDef", registration: "PluginRegistration"
+) -> list[ContractError]:
     if registration.inputs is None:
         return []  # plugin declares no input contract
     declared = {spec.name for spec in registration.inputs}
     required = {spec.name for spec in registration.inputs if spec.required}
     known = ", ".join(sorted(declared)) or "none"
     errors = [
-        f"Step '{step.id}' supplies unknown input '{name}' to plugin "
-        f"'{step.plugin}' (accepts: {known})"
+        ContractError(
+            step=step.id,
+            message=(
+                f"Step '{step.id}' supplies unknown input '{name}' to plugin "
+                f"'{step.plugin}' (accepts: {known})"
+            ),
+        )
         for name in sorted(set(step.inputs) - declared)
     ]
     errors.extend(
-        f"Step '{step.id}' is missing required input '{name}' for plugin "
-        f"'{step.plugin}'"
+        ContractError(
+            step=step.id,
+            message=(
+                f"Step '{step.id}' is missing required input '{name}' for plugin "
+                f"'{step.plugin}'"
+            ),
+        )
         for name in sorted(required - set(step.inputs))
     )
     return errors
@@ -162,14 +207,19 @@ def _check_input_references(
     plugins: Mapping[str, "PluginRegistration"],
     steps_by_id: Mapping[str, "StepDef"],
     workflow_input_names: set[str],
-) -> list[str]:
-    errors: list[str] = []
+) -> list[ContractError]:
+    errors: list[ContractError] = []
     for input_name, ref in step.inputs.items():
         source, _, output_name = ref.partition(".")
         if not output_name:
             errors.append(
-                f"Step '{step.id}' input '{input_name}' must reference "
-                f"'step_id.output_name', got '{ref}'"
+                ContractError(
+                    step=step.id,
+                    message=(
+                        f"Step '{step.id}' input '{input_name}' must reference "
+                        f"'step_id.output_name', got '{ref}'"
+                    ),
+                )
             )
             continue
 
@@ -177,17 +227,27 @@ def _check_input_references(
             if output_name not in workflow_input_names:
                 known = ", ".join(sorted(workflow_input_names)) or "none declared"
                 errors.append(
-                    f"Step '{step.id}' input '{input_name}' references "
-                    f"'{ref}', but the workflow declares no input "
-                    f"'{output_name}' (has: {known})"
+                    ContractError(
+                        step=step.id,
+                        message=(
+                            f"Step '{step.id}' input '{input_name}' references "
+                            f"'{ref}', but the workflow declares no input "
+                            f"'{output_name}' (has: {known})"
+                        ),
+                    )
                 )
             continue
 
         source_step = steps_by_id.get(source)
         if source_step is None:
             errors.append(
-                f"Step '{step.id}' input '{input_name}' references unknown "
-                f"step '{source}'"
+                ContractError(
+                    step=step.id,
+                    message=(
+                        f"Step '{step.id}' input '{input_name}' references unknown "
+                        f"step '{source}'"
+                    ),
+                )
             )
             continue
 
@@ -202,9 +262,14 @@ def _check_input_references(
         if output_name not in declared:
             known = ", ".join(sorted(declared)) or "none"
             errors.append(
-                f"Step '{step.id}' input '{input_name}' references "
-                f"'{ref}', but step '{source}' ({source_step.plugin}) "
-                f"produces no output '{output_name}' (produces: {known})"
+                ContractError(
+                    step=step.id,
+                    message=(
+                        f"Step '{step.id}' input '{input_name}' references "
+                        f"'{ref}', but step '{source}' ({source_step.plugin}) "
+                        f"produces no output '{output_name}' (produces: {known})"
+                    ),
+                )
             )
     return errors
 
@@ -214,7 +279,7 @@ def _check_condition(
     plugins: Mapping[str, "PluginRegistration"],
     steps_by_id: Mapping[str, "StepDef"],
     workflow_input_names: set[str],
-) -> list[str]:
+) -> list[ContractError]:
     """Same reference checks as `_check_input_references`, applied to
     `if:` -- an `if:` typo should fail at save time rather than surface as
     a run-time "step has not run yet" the first time that branch is hit."""
@@ -224,23 +289,35 @@ def _check_condition(
     try:
         refs = condition_refs(step.if_)
     except ConditionError as e:
-        return [f"Step '{step.id}' 'if': {e}"]
+        return [ContractError(step=step.id, message=f"Step '{step.id}' 'if': {e}")]
 
-    errors: list[str] = []
+    errors: list[ContractError] = []
     for source, output_name in refs:
         if source == INPUT_STEP_ID:
             if output_name not in workflow_input_names:
                 known = ", ".join(sorted(workflow_input_names)) or "none declared"
                 errors.append(
-                    f"Step '{step.id}' 'if' references '{source}.{output_name}', "
-                    f"but the workflow declares no input '{output_name}' "
-                    f"(has: {known})"
+                    ContractError(
+                        step=step.id,
+                        message=(
+                            f"Step '{step.id}' 'if' references '{source}.{output_name}', "
+                            f"but the workflow declares no input '{output_name}' "
+                            f"(has: {known})"
+                        ),
+                    )
                 )
             continue
 
         source_step = steps_by_id.get(source)
         if source_step is None:
-            errors.append(f"Step '{step.id}' 'if' references unknown step '{source}'")
+            errors.append(
+                ContractError(
+                    step=step.id,
+                    message=(
+                        f"Step '{step.id}' 'if' references unknown step '{source}'"
+                    ),
+                )
+            )
             continue
 
         source_registration = plugins.get(source_step.plugin)
@@ -250,8 +327,13 @@ def _check_condition(
         if output_name not in declared:
             known = ", ".join(sorted(declared)) or "none"
             errors.append(
-                f"Step '{step.id}' 'if' references '{source}.{output_name}', "
-                f"but step '{source}' ({source_step.plugin}) produces no "
-                f"output '{output_name}' (produces: {known})"
+                ContractError(
+                    step=step.id,
+                    message=(
+                        f"Step '{step.id}' 'if' references '{source}.{output_name}', "
+                        f"but step '{source}' ({source_step.plugin}) produces no "
+                        f"output '{output_name}' (produces: {known})"
+                    ),
+                )
             )
     return errors

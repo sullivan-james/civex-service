@@ -12,7 +12,11 @@ from fastapi import (
 )
 
 from civex.context import AppContext
-from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.domain.exceptions import (
+    NotFoundError,
+    ValidationError,
+    WorkflowValidationError,
+)
 from civex.server.background import run_pending_jobs
 from civex.server.deps import get_ctx
 from civex.server.models import (
@@ -72,6 +76,8 @@ def save_workflow(
 ):
     try:
         path, wf = ctx.workflow_svc.save(stem, body.content)
+    except WorkflowValidationError as e:
+        raise HTTPException(422, detail=e.errors)
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
     return WorkflowDetailResponse(

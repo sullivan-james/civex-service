@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 
 class CivexError(Exception):
     """Base for all domain errors — catch this to handle any civex failure.
@@ -37,6 +39,21 @@ class AlreadyExistsError(CivexError):
 
 class ValidationError(CivexError):
     kind = "validation_error"
+
+
+class WorkflowValidationError(ValidationError):
+    """A workflow's steps violate their plugins' declared contracts.
+
+    Carries `errors` -- a list of `{"step": str | None, "message": str}` --
+    alongside the flattened message every `ValidationError` has, so a caller
+    that wants to point a user at the specific offending step (e.g. the
+    workflows API, CIVEX-109) doesn't have to parse one back out of a
+    newline-joined string.
+    """
+
+    def __init__(self, errors: list[dict[str, Any]]) -> None:
+        self.errors = errors
+        super().__init__("\n".join(e["message"] for e in errors))
 
 
 class VolumeUnavailableError(CivexError):
