@@ -26,6 +26,10 @@ import {
   getSuggestions,
   type Suggestion,
 } from '../utils/workflowAutocomplete'
+import {
+  groupWorkflowValidationErrors,
+  findStepLine,
+} from '../utils/workflowValidationErrors'
 import type { Workflow } from '../api/workflows'
 import type { PluginInfo, PluginIOSpec } from '../api/plugins'
 
@@ -210,6 +214,22 @@ function WorkflowEditor({
     }
   }
 
+  // Jumps the editor's selection to a failing step's `id:` line, so a
+  // structured error can be clicked to find the step it's about instead of
+  // hunting for it in the YAML by hand.
+  function jumpToStep(stepId: string) {
+    const view = viewRef.current
+    if (!view || content === null) return
+    const lineNumber = findStepLine(content, stepId)
+    if (lineNumber === null) return
+    const line = view.state.doc.line(lineNumber)
+    view.dispatch({
+      selection: { anchor: line.from, head: line.to },
+      scrollIntoView: true,
+    })
+    view.focus()
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div
@@ -295,9 +315,34 @@ function WorkflowEditor({
           )}
 
           {saveError && (
-            <pre className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 whitespace-pre-wrap">
-              {saveError}
-            </pre>
+            <div className="text-xs bg-red-50 border border-red-200 rounded p-2 max-h-40 overflow-auto space-y-2">
+              {groupWorkflowValidationErrors(saveError).map(
+                ({ step, messages }) => (
+                  <div key={step ?? '__general__'}>
+                    {step ? (
+                      <button
+                        type="button"
+                        onClick={() => jumpToStep(step)}
+                        className="font-mono font-semibold text-red-700 hover:underline"
+                      >
+                        Step '{step}'
+                      </button>
+                    ) : (
+                      <span className="font-semibold text-red-700">
+                        General
+                      </span>
+                    )}
+                    <ul className="list-disc list-inside text-red-600">
+                      {messages.map((message, i) => (
+                        <li key={i} className="whitespace-pre-wrap">
+                          {message}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ),
+              )}
+            </div>
           )}
         </div>
 
