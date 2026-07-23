@@ -61,6 +61,34 @@ def test_list_plugins_returns_the_full_declared_contract(client: TestClient) -> 
     assert save_field["capabilities"] == ["update_record"]
 
 
+def test_list_plugin_load_errors_empty_by_default(client: TestClient) -> None:
+    resp = client.get("/api/plugins/errors")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_list_plugin_load_errors_surfaces_a_broken_upload(client: TestClient) -> None:
+    """upload_plugin() writes verbatim without validating first (unlike the
+    JSON save endpoint) -- a broken file lands in _civex/plugins/ and must
+    show up here with why it didn't register (CIVEX-112)."""
+    upload_resp = client.post(
+        "/api/plugins/upload",
+        files={"file": ("broken.py", "this is not valid python (((", "text/x-python")},
+    )
+    assert upload_resp.status_code == 200
+
+    resp = client.get("/api/plugins/errors")
+    assert resp.status_code == 200
+    errors = resp.json()
+    assert len(errors) == 1
+    assert errors[0]["filename"] == "broken.py"
+    assert errors[0]["error"]
+
+    assert not any(
+        p["filename"] == "broken.py" for p in client.get("/api/plugins").json()
+    )
+
+
 def test_save_plugin_json_then_list(client: TestClient) -> None:
     save_resp = client.post(
         "/api/plugins", json={"name": "my_plugin", "code": _VALID_CODE}

@@ -94,6 +94,18 @@ class PluginService:
             for plugin_id, registration in sorted(all_plugins().items())
         ]
 
+    def list_load_errors(self) -> list[dict]:
+        """[{"filename", "error"}] for every user plugin file that most
+        recently failed discovery (bad PEP 723 deps, a describe() that
+        raises, a timeout, ...) -- these never make it into list_registered()
+        since they have no plugin id, so the frontend plugin panel needs this
+        separately to show *why* a file it can see in _civex/plugins/ isn't
+        usable by any workflow (CIVEX-112)."""
+        from civex.plugins.registry import discover_user_plugins, get_load_failures
+
+        discover_user_plugins(self._dir)
+        return get_load_failures(self._dir)
+
     def list_raw(self) -> list[dict]:
         """[{"filename", "code"}] for every *.py file in _civex/plugins/, or
         {"filename", "error"} for one that fails to read -- for the AI

@@ -58,8 +58,6 @@ def run_pending_jobs() -> None:
 
     ctx = build_local_context(config)
     try:
-        plugin_registry.discover_user_plugins(config.civex_dir / "plugins")
-        plugins = plugin_registry.all_plugins()
         while True:
             job = ctx.job_svc.claim_pending()
             if job is None:
@@ -67,6 +65,13 @@ def run_pending_jobs() -> None:
             log_buf = io.StringIO()
             try:
                 with _capture_output() as log_buf:
+                    # Discovery runs inside the log-capture block (rather
+                    # than once up front) so a broken plugin file's
+                    # log.warning() -- which file failed and why -- lands in
+                    # this job's log instead of vanishing into the process's
+                    # own stderr (CIVEX-112).
+                    plugin_registry.discover_user_plugins(config.civex_dir / "plugins")
+                    plugins = plugin_registry.all_plugins()
                     wf_def = ctx.job_svc.find_workflow(job.workflow_name)
                     if wf_def is None:
                         raise ValueError(f"Workflow '{job.workflow_name}' not found")

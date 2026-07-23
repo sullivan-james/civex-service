@@ -9,6 +9,14 @@ export function usePlugins() {
   })
 }
 
+export function usePluginLoadErrors() {
+  return useQuery({
+    queryKey: ['plugins', 'errors'],
+    queryFn: pluginsApi.loadErrors,
+    staleTime: 30_000,
+  })
+}
+
 export function usePluginSource(filename: string) {
   return useQuery({
     queryKey: ['plugins', filename, 'source'],

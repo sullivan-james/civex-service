@@ -13,6 +13,7 @@ import {
 import {
   useDeletePlugin,
   usePlugins,
+  usePluginLoadErrors,
   useUploadPlugin,
 } from '../hooks/usePlugins'
 import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
@@ -462,6 +463,7 @@ function PluginContractDetail({ plugin }: { plugin: PluginInfo }) {
 export default function WorkflowsPage() {
   const { data: workflows, isLoading, error } = useWorkflows()
   const { data: pluginList } = usePlugins()
+  const { data: pluginLoadErrors } = usePluginLoadErrors()
   const { data: containerPlugins } = useContainerPlugins()
   const uploadPlugin = useUploadPlugin()
   const deletePlugin = useDeletePlugin()
@@ -805,6 +807,54 @@ export default function WorkflowsPage() {
         )}
         {pluginList?.length === 0 && (
           <p className="text-sm text-[#656d76]">No plugins loaded yet.</p>
+        )}
+        {pluginLoadErrors && pluginLoadErrors.length > 0 && (
+          <table className="w-full text-sm border-collapse mt-3">
+            <thead>
+              <tr className="border-b border-[#d0d7de]">
+                <th className="text-left py-2 px-3 font-medium text-[#d1242f]">
+                  Failed to load
+                </th>
+                <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
+                  Error
+                </th>
+                <th className="py-2 px-3 text-right" />
+              </tr>
+            </thead>
+            <tbody>
+              {pluginLoadErrors.map((e) => (
+                <tr key={e.filename} className="border-b border-[#d0d7de]">
+                  <td className="py-2 px-3 font-mono text-xs text-[#1f2328]">
+                    {e.filename}
+                  </td>
+                  <td className="py-2 px-3 text-[#d1242f] text-xs whitespace-pre-wrap">
+                    {e.error}
+                  </td>
+                  <td className="py-2 px-3 text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => openEditPlugin(e.filename)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={deletePlugin.isPending}
+                        onClick={() =>
+                          handleDeletePlugin(e.filename, e.filename)
+                        }
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
 
