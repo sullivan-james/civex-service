@@ -288,4 +288,42 @@ def test_corrupt_disk_cache_is_ignored_rather_than_fatal(tmp_path: Path, monkeyp
     monkeypatch.setattr(registry, "_SUBPROCESS_DESCRIBED", {})
     discover_user_plugins(plugins_dir)
 
+
+def test_one_broken_plugin_file_does_not_stop_discovery_of_the_others(
+    tmp_path: Path, monkeypatch, caplog
+):
+    """discover_user_plugins() is called at the start of every job run
+    (cli/utils.run_job) -- a plugin file that fails to describe itself (bad
+    PEP 723 deps, a raise in describe(), a timeout, ...) must only cost that
+    one file, not abort discovery for every other plugin and thus every
+    workflow run."""
+    import logging
+
+    from civex.domain.exceptions import PluginExecutionError
+    from civex.plugins import subprocess_runtime
+
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    (plugins_dir / "a_broken_plugin.py").write_text("this is not valid python (((")
+    (plugins_dir / "b_good_plugin.py").write_text(
+        _USER_PLUGIN_CODE.replace(
+            "project.registry_test_plugin", "project.b_good_plugin"
+        )
+    )
+
+    real_describe_plugin = subprocess_runtime.describe_plugin
+
+    def _fake_describe(path: Path, *args, **kwargs):
+        if path.name == "a_broken_plugin.py":
+            raise PluginExecutionError("boom: invalid syntax")
+        return real_describe_plugin(path, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess_runtime, "describe_plugin", _fake_describe)
+
+    with caplog.at_level(logging.WARNING, logger="civex.plugins.registry"):
+        discover_user_plugins(plugins_dir)  # must not raise
+
+    assert get_plugin("project.b_good_plugin") is not None
+    assert "a_broken_plugin.py" in caplog.text
+
     assert get_plugin("project.corrupt_cache_plugin") is not None
