@@ -73,8 +73,10 @@ def get_ctx() -> AppContext:
     return build_local_context(cli_load_config())
 
 
-def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[None, str]:
-    """Execute one workflow job. Returns captured log output. Raises on failure."""
+def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[list[dict], str]:
+    """Execute one workflow job. Returns (per-step execution records, captured
+    log output). Raises on failure -- the exception carries whatever
+    per-step records did complete as `.step_executions` (CIVEX-117)."""
     import contextlib
     import io
     import logging as _logging
@@ -131,7 +133,7 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[None, str]:
     try:
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             wf_ctx = WorkflowContext(record=record, dataset=dataset, _app_ctx=ctx)
-            executor.run(
+            step_executions = executor.run(
                 wf_def,
                 wf_ctx,
                 plugins,
@@ -142,7 +144,7 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[None, str]:
         root.removeHandler(handler)
         root.setLevel(prev_level)
 
-    return None, buf.getvalue()
+    return step_executions, buf.getvalue()
 
 
 def drain_jobs(ctx: AppContext) -> None:
@@ -155,13 +157,20 @@ def drain_jobs(ctx: AppContext) -> None:
             f"  [dim]→ workflow '{job.workflow_name}' (trigger: {job.trigger})[/dim]"
         )
         try:
-            _, log = run_job(job, ctx)
-            ctx.job_svc.mark_completed(job.id, log=log or None)
+            step_executions, log = run_job(job, ctx)
+            ctx.job_svc.mark_completed(
+                job.id, log=log or None, step_executions=step_executions
+            )
             ctx.commit()
             console.print("    [success]✓ done[/success]")
         except Exception as e:
             envelope = getattr(e, "envelope", None) or ErrorEnvelope.from_exception(e)
-            ctx.job_svc.mark_failed(job.id, str(e), envelope=envelope)
+            ctx.job_svc.mark_failed(
+                job.id,
+                str(e),
+                envelope=envelope,
+                step_executions=getattr(e, "step_executions", None),
+            )
             ctx.commit()
             where = f" [{envelope.step}]" if envelope.step else ""
             console.print(f"    [error]✗{where} {envelope.kind}: {e}[/error]")

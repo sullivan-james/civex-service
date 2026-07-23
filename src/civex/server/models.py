@@ -255,6 +255,10 @@ class WorkflowJobResponse(BaseModel):
     # (CIVEX-143); null for jobs that succeeded or predate it.
     error_details: dict | None
     log: str | None
+    # Per-step execution records (CIVEX-117): [{step_id, plugin, status,
+    # inputs, outputs, duration_seconds, error}, ...] in execution order;
+    # null for jobs still pending/running or that predate this field.
+    step_executions: list[dict] | None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
@@ -271,6 +275,7 @@ class WorkflowJobResponse(BaseModel):
             error=dto.error,
             error_details=dto.error_details,
             log=dto.log,
+            step_executions=dto.step_executions,
             created_at=dto.created_at,
             started_at=dto.started_at,
             finished_at=dto.finished_at,

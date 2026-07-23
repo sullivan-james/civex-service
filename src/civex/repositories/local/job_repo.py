@@ -54,12 +54,18 @@ class LocalWorkflowJobRepository:
         self._s.flush()
         return _to_dto(row)
 
-    def mark_completed(self, job_id: uuid.UUID, log: str | None = None) -> None:
+    def mark_completed(
+        self,
+        job_id: uuid.UUID,
+        log: str | None = None,
+        step_executions: list[dict] | None = None,
+    ) -> None:
         row = self._s.query(WorkflowJob).filter_by(id=job_id).first()
         if row:
             row.status = "completed"
             row.finished_at = _now()
             row.log = log
+            row.step_executions = step_executions
             self._s.flush()
 
     def mark_failed(
@@ -68,6 +74,7 @@ class LocalWorkflowJobRepository:
         error: str,
         log: str | None = None,
         error_details: dict | None = None,
+        step_executions: list[dict] | None = None,
     ) -> None:
         row = self._s.query(WorkflowJob).filter_by(id=job_id).first()
         if row:
@@ -76,6 +83,7 @@ class LocalWorkflowJobRepository:
             row.error = error[:2000]
             row.error_details = error_details
             row.log = log
+            row.step_executions = step_executions
             self._s.flush()
 
     def list_all(
@@ -141,4 +149,5 @@ def _to_dto(row: WorkflowJob) -> WorkflowJobDTO:
         started_at=row.started_at,
         finished_at=row.finished_at,
         depth=row.depth,
+        step_executions=row.step_executions,
     )

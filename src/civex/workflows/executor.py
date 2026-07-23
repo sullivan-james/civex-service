@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections import deque
 from typing import Any
 
-from civex.domain.dtos import ErrorEnvelope
+from civex.domain.dtos import ErrorEnvelope, StepExecution
 from civex.plugins.base import WorkflowContext
 from civex.plugins.registry import PluginRegistration
 from civex.workflows.conditions import (
@@ -95,6 +96,32 @@ def _resolve_inputs(
     return resolved
 
 
+def _json_safe(value: Any) -> Any:
+    """Reduce a resolved input/output value to something a JSON column can
+    store, for the per-step execution record (CIVEX-117).
+
+    Plugin inputs/outputs aren't guaranteed JSON-safe -- `civex.load_file`
+    hands back raw `bytes`, `civex.load_csv` a pandas DataFrame -- so this
+    summarizes what it can't represent instead of failing the whole job
+    write over a value nobody needed byte-for-byte in a job record.
+    """
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, bytes):
+        return f"<{len(value)} bytes>"
+    if hasattr(value, "columns") and hasattr(value, "shape"):  # pandas DataFrame
+        return {"rows": value.shape[0], "columns": [str(c) for c in value.columns]}
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        return repr(value)
+
+
 def _validate_contracts(
     wf: WorkflowDef, plugins: dict[str, PluginRegistration]
 ) -> None:
@@ -122,7 +149,15 @@ def run(
     plugins: dict[str, PluginRegistration],
     initial_outputs: dict[str, dict[str, Any]] | None = None,
     default_timeout_seconds: float = 60.0,
-) -> None:
+) -> list[dict[str, Any]]:
+    """Runs `wf` to completion and returns its per-step execution records
+    (CIVEX-117), in execution order, for the caller to persist on the job.
+
+    On failure, the records for every step that ran (including the failing
+    one) are attached to the raised exception as `.step_executions` --
+    mirroring how `.envelope` is attached -- since the caller still wants
+    that partial history for a job that didn't finish.
+    """
     log.info(wf)
     _validate_contracts(wf, plugins)
     virtual_ids = set(initial_outputs.keys()) if initial_outputs else None
@@ -138,6 +173,7 @@ def run(
         len(order),
     )
     wf_start = time.perf_counter()
+    step_executions: list[dict[str, Any]] = []
 
     for step in order:
         registration = plugins.get(step.plugin)
@@ -147,6 +183,16 @@ def run(
         if step.if_ is not None and not evaluate_condition(step.if_, step_outputs):
             log.info("  [%s] ⏭ skipped ('if' was false)", step.id)
             step_outputs[step.id] = SKIPPED_OUTPUTS
+            step_executions.append(
+                StepExecution(
+                    step_id=step.id,
+                    plugin=step.plugin,
+                    status="skipped",
+                    inputs={},
+                    outputs=None,
+                    duration_seconds=0.0,
+                ).to_dict()
+            )
             continue
 
         log.info("  [%s] → %s", step.id, step.plugin)
@@ -169,9 +215,34 @@ def run(
                 e.envelope.kind,  # type: ignore[attr-defined]
                 e,
             )
+            step_executions.append(
+                StepExecution(
+                    step_id=step.id,
+                    plugin=step.plugin,
+                    status="failed",
+                    inputs=_json_safe(inputs),
+                    outputs=None,
+                    duration_seconds=time.perf_counter() - t,
+                    error=str(e),
+                ).to_dict()
+            )
+            # The caller has no other way to see how far a failed run got --
+            # mirrors `.envelope` just above.
+            e.step_executions = step_executions  # type: ignore[attr-defined]
             raise
         step_outputs[step.id] = result.outputs
         log.info("  [%s] ✓ %.3fs", step.id, time.perf_counter() - t)
+        step_executions.append(
+            StepExecution(
+                step_id=step.id,
+                plugin=step.plugin,
+                status="success",
+                inputs=_json_safe(inputs),
+                outputs=_json_safe(result.outputs),
+                duration_seconds=time.perf_counter() - t,
+            ).to_dict()
+        )
 
     ctx.commit()
     log.info("✓ done (%.3fs total)", time.perf_counter() - wf_start)
+    return step_executions

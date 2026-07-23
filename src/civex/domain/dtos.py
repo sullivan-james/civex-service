@@ -334,6 +334,51 @@ class ErrorEnvelope:
 
 
 @dataclass
+class StepExecution:
+    """One step's resolved inputs/outputs/timing/outcome from a single
+    `executor.run()` pass (CIVEX-117). Persisted as a list of these (via
+    `to_dict()`) on `WorkflowJob.step_executions`, replacing the flat
+    stdout/logging blob as the way to see what a step actually did.
+
+    `outputs` is None for a step that raised (there's nothing to report) or
+    was skipped by a falsy `if:` (its plugin never ran). `error` is the same
+    human-readable message form `ErrorEnvelope.message` uses, not the full
+    envelope -- the failing step already names itself via `step_id`.
+    """
+
+    step_id: str
+    plugin: str
+    status: str  # success | failed | skipped
+    inputs: dict[str, Any]
+    outputs: dict[str, Any] | None
+    duration_seconds: float
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "step_id": self.step_id,
+            "plugin": self.plugin,
+            "status": self.status,
+            "inputs": self.inputs,
+            "outputs": self.outputs,
+            "duration_seconds": self.duration_seconds,
+            "error": self.error,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "StepExecution":
+        return cls(
+            step_id=raw["step_id"],
+            plugin=raw["plugin"],
+            status=raw["status"],
+            inputs=raw.get("inputs") or {},
+            outputs=raw.get("outputs"),
+            duration_seconds=raw.get("duration_seconds", 0.0),
+            error=raw.get("error"),
+        )
+
+
+@dataclass
 class WorkflowJobDTO:
     id: uuid.UUID
     workflow_name: str
@@ -351,6 +396,10 @@ class WorkflowJobDTO:
     started_at: datetime | None
     finished_at: datetime | None
     depth: int = 0  # trigger chain depth; jobs enqueued at MAX_JOB_DEPTH are refused
+    # Per-step execution records (CIVEX-117): list of StepExecution.to_dict(),
+    # in execution order. None for jobs still pending/running, or for jobs
+    # that predate this field.
+    step_executions: list[dict[str, Any]] | None = None
 
 
 @dataclass
