@@ -162,6 +162,7 @@ frontend/src/
 | Add business logic | `src/civex/services/<name>_service.py` |
 | Add a DB table | `src/civex/db/models.py` + `src/civex/repositories/protocols.py` + `src/civex/repositories/local/` |
 | Add a built-in plugin | `src/civex/plugins/builtins/<name>.py` (auto-discovered; no registration needed) |
+| Add a container-tier (Tier 2) plugin starter for a new language | `plugin-templates/<language>/` — Dockerfile + minimal shim speaking the Tier 1 wire protocol (see `plugin-templates/r/`) |
 | Add an API endpoint | `src/civex/server/routers/<resource>.py` |
 | New domain types | `src/civex/domain/dtos.py` or `src/civex/domain/exceptions.py` |
 | Add a frontend API call | `frontend/src/api/<resource>.ts` + hook in `frontend/src/hooks/use<Resource>.ts` |

@@ -1,0 +1,12 @@
+# Tier 2 (container) plugin manifest. civex discovers this plugin by finding
+# this file in a subdirectory of _civex/plugins/ -- the directory itself is
+# the Docker build context (this Dockerfile + this source), so no separate
+# path field is needed.
+#
+# id/name/category/capabilities mirror what a Tier 1 plugin declares as
+# Python class attributes (see docs/writing-custom-plugins.md) -- civex
+# treats both tiers identically everywhere except how they're invoked.
+id = "my_project.compute_duration"
+name = "Compute Duration"
+category = "transforms"
+capabilities = ["get_context_record"]

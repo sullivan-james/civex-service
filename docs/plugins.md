@@ -430,3 +430,5 @@ Create or update records from a DataFrame, matching existing records by a key fi
 ## Writing your own
 
 Custom plugins live in `_civex/plugins/*.py` and run as isolated subprocesses — see [Writing custom plugins](writing-custom-plugins.md) for the full guide.
+
+For a plugin that needs a different language, system binaries, or resource limits stricter than a subprocess gives you, a container-tier plugin lives in `_civex/plugins/<name>/` instead of a single file (a `civex-plugin.toml` manifest alongside its `Dockerfile` and source). See [`plugin-templates/`](../plugin-templates/) in the repo for starter templates — currently Java.
