@@ -113,6 +113,17 @@ class LocalWorkflowJobRepository:
         row = self._s.query(WorkflowJob).filter_by(id=job_id).first()
         return _to_dto(row) if row else None
 
+    def count_active_for_workflow(self, workflow_name: str) -> int:
+        """Pending or running jobs queued against this workflow name -- these
+        would fail to find their workflow definition mid-run if the file
+        were deleted out from under them."""
+        return (
+            self._s.query(WorkflowJob)
+            .filter_by(workflow_name=workflow_name)
+            .filter(WorkflowJob.status.in_(("pending", "running")))
+            .count()
+        )
+
 
 def _to_dto(row: WorkflowJob) -> WorkflowJobDTO:
     return WorkflowJobDTO(

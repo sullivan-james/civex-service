@@ -25,7 +25,8 @@ export function useSaveWorkflow() {
 export function useDeleteWorkflow() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (stem: string) => workflowsApi.delete(stem),
+    mutationFn: ({ stem, force }: { stem: string; force?: boolean }) =>
+      workflowsApi.delete(stem, force),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['workflows'] }),
   })
 }

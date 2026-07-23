@@ -85,11 +85,13 @@ def save_workflow(
 
 
 @router.delete("/{stem}", status_code=204)
-def delete_workflow(stem: str, ctx: AppContext = Depends(get_ctx)):
+def delete_workflow(stem: str, force: bool = False, ctx: AppContext = Depends(get_ctx)):
     try:
-        ctx.workflow_svc.delete(stem)
+        ctx.workflow_svc.delete(stem, force=force)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(409, detail=str(e))
 
 
 @router.post("/{name}/run", response_model=WorkflowJobResponse, status_code=202)

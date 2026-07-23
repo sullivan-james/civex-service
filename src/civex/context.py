@@ -138,7 +138,9 @@ def build_local_context(
     ai_svc = AiService(schema_svc, dataset_svc, record_svc, job_svc)
     ai_usage_svc = AiUsageService(engine)
     workflow_svc = WorkflowService(
-        config.civex_dir, plugins_provider=_plugins_provider(config.civex_dir)
+        config.civex_dir,
+        plugins_provider=_plugins_provider(config.civex_dir),
+        active_job_counter=job_svc.count_active_for_workflow,
     )
     plugin_svc = PluginService(config.civex_dir)
     policy_svc = PolicyService(config.civex_dir)

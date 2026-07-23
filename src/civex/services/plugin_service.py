@@ -17,6 +17,7 @@ import re
 from pathlib import Path
 
 from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.workflows.definition import load_workflow
 
 _SAFE_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -167,3 +168,58 @@ class PluginService:
 
         discover_user_plugins(self._dir)
         return all_plugins()
+
+    def delete(self, filename: str, force: bool = False) -> None:
+        """Delete a user plugin file and drop its registration. There's
+        nothing under _dir for a built-in id to match, so this can only ever
+        remove a user plugin.
+
+        Unless `force`, refuses when a workflow step still references the
+        plugin's id -- deleting out from under a workflow would only turn a
+        clean validation error into a step that can't find its plugin at
+        run time (CIVEX-119, mirrors StoreService.remove_volume's
+        used-by check)."""
+        if "/" in filename or "\\" in filename or filename.startswith("."):
+            raise ValidationError("Invalid filename")
+        path = self._dir / filename
+        if not path.is_file():
+            raise NotFoundError(f"Plugin file '{filename}' not found")
+
+        from civex.plugins.registry import all_plugins, unregister_plugin
+
+        plugin_id = next(
+            (
+                pid
+                for pid, reg in all_plugins().items()
+                if Path(reg.module_name).name == filename
+            ),
+            None,
+        )
+
+        if not force and plugin_id is not None:
+            used_by = self._workflows_referencing(plugin_id)
+            if used_by:
+                raise ValidationError(
+                    f"Plugin '{filename}' is used by workflow(s): "
+                    f"{', '.join(used_by)}. Remove those steps first, or use "
+                    "force=true to delete anyway (those workflows will fail "
+                    "contract validation)."
+                )
+
+        path.unlink()
+        if plugin_id is not None:
+            unregister_plugin(plugin_id)
+
+    def _workflows_referencing(self, plugin_id: str) -> list[str]:
+        wf_dir = self._dir.parent / "workflows"
+        if not wf_dir.exists():
+            return []
+        names = []
+        for path in sorted(wf_dir.glob("*.yaml")) + sorted(wf_dir.glob("*.yml")):
+            try:
+                wf = load_workflow(path)
+            except Exception:
+                continue
+            if any(step.plugin == plugin_id for step in wf.steps):
+                names.append(wf.name or path.stem)
+        return names

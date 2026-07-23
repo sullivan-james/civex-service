@@ -264,6 +264,18 @@ def all_plugins() -> dict[str, PluginRegistration]:
     return dict(REGISTRY)
 
 
+def unregister_plugin(plugin_id: str) -> None:
+    """Drop a plugin's registration, e.g. after its source file is deleted.
+    Also clears its describe-cache entry so a future file of the same name
+    is described fresh rather than matched against the deleted file's hash."""
+    REGISTRY.pop(plugin_id, None)
+    stale_paths = [
+        path for path, (_, pid) in _SUBPROCESS_DESCRIBED.items() if pid == plugin_id
+    ]
+    for path in stale_paths:
+        _SUBPROCESS_DESCRIBED.pop(path, None)
+
+
 # Auto-register built-ins on import.
 from civex.plugins import builtins as _builtins_pkg  # noqa: E402
 

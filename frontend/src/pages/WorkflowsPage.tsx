@@ -10,7 +10,7 @@ import {
   useSaveWorkflow,
   useDeleteWorkflow,
 } from '../hooks/useWorkflows'
-import { usePlugins, useUploadPlugin } from '../hooks/usePlugins'
+import { usePlugins, useUploadPlugin, useDeletePlugin } from '../hooks/usePlugins'
 import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import { PluginEditor } from '../components/plugins/PluginEditor'
@@ -397,6 +397,7 @@ export default function WorkflowsPage() {
   const { data: pluginList } = usePlugins()
   const uploadPlugin = useUploadPlugin()
   const deleteWf = useDeleteWorkflow()
+  const deletePlugin = useDeletePlugin()
   const pluginInputRef = useRef<HTMLInputElement>(null)
   const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null)
 
@@ -442,7 +443,26 @@ export default function WorkflowsPage() {
 
   async function handleDelete(wf: Workflow) {
     if (!confirm(`Delete workflow '${wf.name}'? This cannot be undone.`)) return
-    deleteWf.mutate(wf.stem)
+    try {
+      await deleteWf.mutateAsync({ stem: wf.stem })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Delete failed'
+      if (confirm(`${message}\n\nDelete anyway?`)) {
+        await deleteWf.mutateAsync({ stem: wf.stem, force: true })
+      }
+    }
+  }
+
+  async function handleDeletePlugin(filename: string) {
+    if (!confirm(`Delete plugin '${filename}'? This cannot be undone.`)) return
+    try {
+      await deletePlugin.mutateAsync({ filename })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Delete failed'
+      if (confirm(`${message}\n\nDelete anyway?`)) {
+        await deletePlugin.mutateAsync({ filename, force: true })
+      }
+    }
   }
 
   function openRun(wf: Workflow) {
@@ -658,16 +678,28 @@ export default function WorkflowsPage() {
                       </td>
                       <td className="py-2 px-3 text-right">
                         {p.filename && (
-                          <Button
-                            size="sm"
-                            variant="default"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              openEditPlugin(p.filename!)
-                            }}
-                          >
-                            Edit
-                          </Button>
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              size="sm"
+                              variant="default"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openEditPlugin(p.filename!)
+                              }}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleDeletePlugin(p.filename!)
+                              }}
+                            >
+                              Delete
+                            </Button>
+                          </div>
                         )}
                       </td>
                     </tr>

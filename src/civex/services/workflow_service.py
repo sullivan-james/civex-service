@@ -24,17 +24,29 @@ if TYPE_CHECKING:
 _SAFE_STEM = re.compile(r"^[\w-]+$")
 
 PluginsProvider = Callable[[], Mapping[str, "PluginRegistration"]]
+ActiveJobCounter = Callable[[str], int]
 
 
 class WorkflowService:
-    def __init__(self, civex_dir: Path, plugins_provider: PluginsProvider) -> None:
+    def __init__(
+        self,
+        civex_dir: Path,
+        plugins_provider: PluginsProvider,
+        active_job_counter: ActiveJobCounter,
+    ) -> None:
         """`plugins_provider` is called per validation rather than held as a
         snapshot: a plugin edited (or added) since this service was built has
         to be visible to the next save, which is what makes CIVEX-142's
         revalidation lazy. It's cheap to call -- discovery re-describes only
-        plugin files whose contents actually changed."""
+        plugin files whose contents actually changed.
+
+        `active_job_counter` is likewise called fresh per delete rather than
+        held as a snapshot -- it backs the pre-delete "used by" check, which
+        needs the job queue's state at delete time, not at service
+        construction time."""
         self._dir = civex_dir / "workflows"
         self._plugins_provider = plugins_provider
+        self._active_job_counter = active_job_counter
 
     def list_defs(self) -> list[tuple[Path, WorkflowDef]]:
         """Every parseable workflow file as (path, parsed def). Files that
@@ -127,8 +139,20 @@ class WorkflowService:
         path.write_text(content, encoding="utf-8")
         return path, wf
 
-    def delete(self, stem: str) -> None:
+    def delete(self, stem: str, force: bool = False) -> None:
         path = self.find_path(stem)
         if path is None:
             raise NotFoundError(f"Workflow '{stem}' not found")
+        if not force:
+            try:
+                workflow_name = load_workflow(path).name
+            except Exception:
+                workflow_name = stem
+            active = self._active_job_counter(workflow_name)
+            if active:
+                raise ValidationError(
+                    f"Workflow '{stem}' has {active} pending/running job(s). "
+                    "Wait for them to finish, or use force=true to delete anyway "
+                    "(those jobs will fail when they run)."
+                )
         path.unlink()

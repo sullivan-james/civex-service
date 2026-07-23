@@ -132,3 +132,44 @@ def test_get_plugin_source_missing_file(client: TestClient) -> None:
 def test_get_plugin_source_rejects_non_py_filename(client: TestClient) -> None:
     resp = client.get("/api/plugins/notes.txt/source")
     assert resp.status_code == 400
+
+
+def test_delete_plugin(client: TestClient) -> None:
+    client.post("/api/plugins", json={"name": "my_plugin", "code": _VALID_CODE})
+    del_resp = client.delete("/api/plugins/my_plugin.py")
+    assert del_resp.status_code == 204
+    ids = {p["id"] for p in client.get("/api/plugins").json()}
+    assert "project.my_plugin" not in ids
+
+
+def test_delete_plugin_missing_file_returns_404(client: TestClient) -> None:
+    resp = client.delete("/api/plugins/does_not_exist.py")
+    assert resp.status_code == 404
+
+
+def test_delete_plugin_rejects_non_py_filename(client: TestClient) -> None:
+    resp = client.delete("/api/plugins/notes.txt")
+    assert resp.status_code == 400
+
+
+def test_delete_plugin_blocked_by_workflow_reference_returns_409(
+    client: TestClient,
+) -> None:
+    client.post("/api/plugins", json={"name": "my_plugin", "code": _VALID_CODE})
+    client.put(
+        "/api/workflows/uses-plugin",
+        json={
+            "content": (
+                "name: uses-plugin\n"
+                "steps:\n"
+                "  - id: step-one\n"
+                "    plugin: project.my_plugin\n"
+            )
+        },
+    )
+
+    del_resp = client.delete("/api/plugins/my_plugin.py")
+    assert del_resp.status_code == 409
+
+    force_resp = client.delete("/api/plugins/my_plugin.py?force=true")
+    assert force_resp.status_code == 204

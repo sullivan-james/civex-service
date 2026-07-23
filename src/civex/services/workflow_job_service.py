@@ -144,3 +144,7 @@ class WorkflowJobService:
 
     def get_job(self, job_id: uuid.UUID) -> WorkflowJobDTO | None:
         return self._repo.get_by_id(job_id)
+
+    def count_active_for_workflow(self, workflow_name: str) -> int:
+        """Pending/running jobs currently queued against this workflow name."""
+        return self._repo.count_active_for_workflow(workflow_name)
