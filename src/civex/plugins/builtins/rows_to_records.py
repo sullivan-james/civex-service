@@ -6,6 +6,7 @@ from typing import Any
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field
 
+from civex.domain.exceptions import ValidationError
 from civex.plugins.base import Tier0Plugin, WorkflowContext
 
 log = logging.getLogger(__name__)
@@ -27,7 +28,14 @@ class Plugin(Tier0Plugin):
             description="Rows to insert; columns map to schema fields by name unless `field_mapping` is set.",
         )
     ]
-    outputs = [IOSpec(name="created", type="number", description="Records created.")]
+    outputs = [
+        IOSpec(name="created", type="number", description="Records created."),
+        IOSpec(
+            name="skipped",
+            type="number",
+            description="Rows whose record failed validation.",
+        ),
+    ]
 
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
@@ -54,7 +62,7 @@ class Plugin(Tier0Plugin):
             dataset_name,
             config.schema_name,
         )
-        created = 0
+        created = skipped = 0
         for _, row in df.iterrows():
             if config.field_mapping:
                 raw = {
@@ -69,13 +77,17 @@ class Plugin(Tier0Plugin):
                 for k, v in raw.items()
                 if not pd.isna(v)
             }
-            ctx.create_record(
-                dataset_name,
-                config.schema_name,
-                data,
-                context_record_id=config.context_record_id or None,
-            )
-            created += 1
+            try:
+                ctx.create_record(
+                    dataset_name,
+                    config.schema_name,
+                    data,
+                    context_record_id=config.context_record_id or None,
+                )
+                created += 1
+            except ValidationError as e:
+                log.warning("  ✗ skipped row %s: %s", data, e)
+                skipped += 1
 
-        log.info("Created %d records", created)
-        return {"created": created}
+        log.info("Done: %d created, %d skipped", created, skipped)
+        return {"created": created, "skipped": skipped}

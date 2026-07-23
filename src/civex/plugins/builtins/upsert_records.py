@@ -6,6 +6,7 @@ from typing import Any
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field
 
+from civex.domain.exceptions import ValidationError
 from civex.plugins.base import Tier0Plugin, WorkflowContext
 
 log = logging.getLogger(__name__)
@@ -30,6 +31,11 @@ class Plugin(Tier0Plugin):
     outputs = [
         IOSpec(name="created", type="number", description="Rows that inserted."),
         IOSpec(name="updated", type="number", description="Rows that matched."),
+        IOSpec(
+            name="skipped",
+            type="number",
+            description="Rows whose record failed validation.",
+        ),
     ]
 
     class Config(BaseModel):
@@ -60,7 +66,7 @@ class Plugin(Tier0Plugin):
             config.schema_name,
             config.key_field,
         )
-        created = updated = 0
+        created = updated = skipped = 0
 
         for _, row in df.iterrows():
             data: dict[str, Any] = {}
@@ -82,14 +88,23 @@ class Plugin(Tier0Plugin):
                 limit=1,
             )
 
-            if existing:
-                ctx.update_record(str(existing[0].id), data)
-                updated += 1
-            else:
-                ctx.create_record(
-                    dataset_name, config.schema_name, data, context_record_id=parent_id
-                )
-                created += 1
+            try:
+                if existing:
+                    ctx.update_record(str(existing[0].id), data)
+                    updated += 1
+                else:
+                    ctx.create_record(
+                        dataset_name,
+                        config.schema_name,
+                        data,
+                        context_record_id=parent_id,
+                    )
+                    created += 1
+            except ValidationError as e:
+                log.warning("  ✗ skipped row %s: %s", data, e)
+                skipped += 1
 
-        log.info("Upsert done: %d created, %d updated", created, updated)
-        return {"created": created, "updated": updated}
+        log.info(
+            "Upsert done: %d created, %d updated, %d skipped", created, updated, skipped
+        )
+        return {"created": created, "updated": updated, "skipped": skipped}

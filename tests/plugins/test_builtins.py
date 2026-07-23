@@ -1,9 +1,12 @@
 """Characterization tests for the 11 built-in plugins re-implemented against
 Tier0Plugin/invoke() in CIVEX-136. Each locks in the exact behavior the
-plugin already had under BasePlugin.run() -- including pre-existing warts
-(e.g. create_records_from_files/match_files_to_records/upsert_records
-bypassing ctx.create_record/update_record's job_depth propagation) that were
-deliberately preserved rather than fixed, per the "no behavior change" bar.
+plugin already had under BasePlugin.run().
+
+create_records_from_files/match_files_to_records/rows_to_records/
+upsert_records all catch ValidationError per-row/per-item and count it as
+skipped/unmatched rather than aborting the whole run (CIVEX-157) -- and all
+go through ctx.create_record()/ctx.update_record() for job_depth propagation
+(CIVEX-158).
 """
 
 from __future__ import annotations
@@ -246,9 +249,36 @@ def test_rows_to_records_creates_one_record_per_row(
     df = pd.DataFrame([{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}])
     result = registration.invoke({"table": df}, config, wf_ctx, 60.0)
 
-    assert result.outputs == {"created": 2}
+    assert result.outputs == {"created": 2, "skipped": 0}
     created = ctx.record_svc.find("study", schema_name="item")
     assert {r.data["name"] for r in created} == {"Alice", "Bob"}
+
+
+def test_rows_to_records_counts_validation_failures_as_skipped_and_continues(
+    ctx, make_collection, make_schema, make_record
+):
+    dataset = make_collection("study")
+    make_schema("trigger", fields=[])
+    trigger = make_record("study", "trigger", {})
+    ctx.schema_svc.create("item")
+    ctx.schema_svc.add_field("item", "name", "string")
+    ctx.schema_svc.add_field("item", "required_note", "string", required=True)
+    ctx.commit()
+    wf_ctx = _wf_ctx(ctx, trigger, dataset)
+
+    registration = get_plugin("civex.rows_to_records")
+    config = registration.config_model(schema="item")
+    df = pd.DataFrame(
+        [
+            {"name": "Alice", "required_note": "ok"},
+            {"name": "Bob"},  # missing required_note -> fails validation
+        ]
+    )
+    result = registration.invoke({"table": df}, config, wf_ctx, 60.0)
+
+    assert result.outputs == {"created": 1, "skipped": 1}
+    created = ctx.record_svc.find("study", schema_name="item")
+    assert [r.data["name"] for r in created] == ["Alice"]
 
 
 def test_create_records_from_files_creates_one_per_file(
@@ -341,12 +371,12 @@ def test_upsert_records_creates_then_updates_by_key(
     result1 = registration.invoke(
         {"table": pd.DataFrame([{"sku": "A1", "qty": 5}])}, config, wf_ctx, 60.0
     )
-    assert result1.outputs == {"created": 1, "updated": 0}
+    assert result1.outputs == {"created": 1, "updated": 0, "skipped": 0}
 
     result2 = registration.invoke(
         {"table": pd.DataFrame([{"sku": "A1", "qty": 9}])}, config, wf_ctx, 60.0
     )
-    assert result2.outputs == {"created": 0, "updated": 1}
+    assert result2.outputs == {"created": 0, "updated": 1, "skipped": 0}
 
     existing = ctx.record_svc.find("study", schema_name="item")
     assert len(existing) == 1
@@ -368,4 +398,32 @@ def test_upsert_records_skips_rows_with_missing_key_value(
         {"table": pd.DataFrame([{"sku": None, "qty": 1}])}, config, wf_ctx, 60.0
     )
 
-    assert result.outputs == {"created": 0, "updated": 0}
+    assert result.outputs == {"created": 0, "updated": 0, "skipped": 0}
+
+
+def test_upsert_records_counts_validation_failures_as_skipped_and_continues(
+    ctx, make_collection, make_schema, make_record
+):
+    dataset = make_collection("study")
+    make_schema("trigger", fields=[])
+    trigger = make_record("study", "trigger", {})
+    ctx.schema_svc.create("item")
+    ctx.schema_svc.add_field("item", "sku", "string")
+    ctx.schema_svc.add_field("item", "qty", "integer")
+    ctx.schema_svc.add_field("item", "required_note", "string", required=True)
+    ctx.commit()
+    wf_ctx = _wf_ctx(ctx, trigger, dataset)
+
+    registration = get_plugin("civex.upsert_records")
+    config = registration.config_model(schema="item", key_field="sku")
+    df = pd.DataFrame(
+        [
+            {"sku": "A1", "qty": 5, "required_note": "ok"},
+            {"sku": "A2", "qty": 6},  # missing required_note -> fails validation
+        ]
+    )
+    result = registration.invoke({"table": df}, config, wf_ctx, 60.0)
+
+    assert result.outputs == {"created": 1, "updated": 0, "skipped": 1}
+    existing = ctx.record_svc.find("study", schema_name="item")
+    assert [r.data["sku"] for r in existing] == ["A1"]

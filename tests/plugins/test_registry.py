@@ -31,8 +31,8 @@ _BUILTIN_CONTRACTS = {
     "civex.load_csv": (("bytes",), ("table",)),
     "civex.create_records_from_files": (("files",), ("created", "skipped")),
     "civex.match_files_to_records": (("files",), ("created", "updated", "unmatched")),
-    "civex.rows_to_records": (("table",), ("created",)),
-    "civex.upsert_records": (("table",), ("created", "updated")),
+    "civex.rows_to_records": (("table",), ("created", "skipped")),
+    "civex.upsert_records": (("table",), ("created", "updated", "skipped")),
 }
 
 _ALL_BUILTIN_IDS_AND_CAPABILITIES = {
