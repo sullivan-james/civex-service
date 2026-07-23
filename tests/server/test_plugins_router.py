@@ -37,6 +37,30 @@ def test_list_plugins_includes_builtins(client: TestClient) -> None:
     assert any(pid.startswith("civex.") for pid in ids)
 
 
+def test_list_plugins_returns_the_full_declared_contract(client: TestClient) -> None:
+    """PluginInfo mirrors PluginService.list_registered() field-for-field
+    (CIVEX-144) -- before this, name/category/capabilities/inputs/outputs
+    were silently dropped by pydantic's default extra="ignore", even though
+    the service already returned them."""
+    resp = client.get("/api/plugins")
+    plugins = {p["id"]: p for p in resp.json()}
+    get_field = plugins["civex.get_field"]
+    assert get_field["name"] == "Get Field"
+    assert get_field["category"] == "data-access"
+    assert get_field["outputs"] == [
+        {
+            "name": "value",
+            "type": "any",
+            "required": True,
+            "description": "The field's current value, or null if unset.",
+        }
+    ]
+    assert get_field["config_schema"]["properties"]["field"]["type"] == "string"
+
+    save_field = plugins["civex.save_field"]
+    assert save_field["capabilities"] == ["update_record"]
+
+
 def test_save_plugin_json_then_list(client: TestClient) -> None:
     save_resp = client.post(
         "/api/plugins", json={"name": "my_plugin", "code": _VALID_CODE}

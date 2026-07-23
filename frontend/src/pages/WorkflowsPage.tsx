@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { Fragment, useState, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   useWorkflows,
@@ -11,10 +11,28 @@ import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import type { Workflow } from '../api/workflows'
 import { api } from '../api/client'
 
+interface PluginIOSpec {
+  name: string
+  type: string
+  required: boolean
+  description: string
+}
+
 interface PluginInfo {
   id: string
+  name: string
   description: string
   builtin: boolean
+  category: string
+  capabilities: string[]
+  // null = plugin declared no contract in this direction; [] = it declared
+  // it has none (see civex_plugin_sdk.PluginBase.inputs)
+  inputs: PluginIOSpec[] | null
+  outputs: PluginIOSpec[] | null
+  config_schema: {
+    properties?: Record<string, { type?: string; default?: unknown }>
+    required?: string[]
+  }
 }
 
 function usePlugins() {
@@ -217,6 +235,81 @@ function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Plugin contract detail (CIVEX-144) — one declared contract (config keys,
+// inputs, outputs, capabilities), same shape for every tier, read straight
+// off GET /plugins rather than a second endpoint.
+// ---------------------------------------------------------------------------
+
+function IOSpecList({ specs }: { specs: PluginIOSpec[] | null }) {
+  if (specs === null) {
+    return <p className="text-xs text-[#656d76] italic">not declared</p>
+  }
+  if (specs.length === 0) {
+    return <p className="text-xs text-[#656d76]">none</p>
+  }
+  return (
+    <ul className="text-xs space-y-0.5">
+      {specs.map((s) => (
+        <li key={s.name} className="font-mono">
+          <span className="text-[#1f2328]">{s.name}</span>
+          <span className="text-[#656d76]"> : {s.type}</span>
+          {!s.required && <span className="text-[#656d76]"> (optional)</span>}
+          {s.description && (
+            <span className="text-[#656d76] font-sans"> — {s.description}</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function PluginContractDetail({ plugin }: { plugin: PluginInfo }) {
+  const configProps = Object.entries(plugin.config_schema.properties ?? {})
+  const required = new Set(plugin.config_schema.required ?? [])
+
+  return (
+    <div className="grid grid-cols-3 gap-4">
+      <div>
+        <h4 className="text-xs font-semibold text-[#1f2328] mb-1">Inputs</h4>
+        <IOSpecList specs={plugin.inputs} />
+      </div>
+      <div>
+        <h4 className="text-xs font-semibold text-[#1f2328] mb-1">Outputs</h4>
+        <IOSpecList specs={plugin.outputs} />
+      </div>
+      <div>
+        <h4 className="text-xs font-semibold text-[#1f2328] mb-1">Config</h4>
+        {configProps.length === 0 ? (
+          <p className="text-xs text-[#656d76]">none</p>
+        ) : (
+          <ul className="text-xs space-y-0.5">
+            {configProps.map(([key, prop]) => (
+              <li key={key} className="font-mono">
+                <span className="text-[#1f2328]">{key}</span>
+                <span className="text-[#656d76]"> : {prop.type ?? 'any'}</span>
+                {!required.has(key) && (
+                  <span className="text-[#656d76]"> (optional)</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {plugin.capabilities.length > 0 && (
+          <>
+            <h4 className="text-xs font-semibold text-[#1f2328] mt-2 mb-1">
+              Capabilities
+            </h4>
+            <p className="text-xs font-mono text-[#656d76]">
+              {plugin.capabilities.join(', ')}
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -226,6 +319,7 @@ export default function WorkflowsPage() {
   const uploadPlugin = useUploadPlugin()
   const deleteWf = useDeleteWorkflow()
   const pluginInputRef = useRef<HTMLInputElement>(null)
+  const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null)
 
   const [editor, setEditor] = useState<{ stem: string; isNew: boolean } | null>(
     null,
@@ -433,33 +527,51 @@ export default function WorkflowsPage() {
                 <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
                   Source
                 </th>
+                <th className="py-2 px-3" />
               </tr>
             </thead>
             <tbody>
-              {pluginList.map((p) => (
-                <tr
-                  key={p.id}
-                  className="border-b border-[#d0d7de] hover:bg-[#f6f8fa]"
-                >
-                  <td className="py-2 px-3 font-mono text-xs text-[#1f2328]">
-                    {p.id}
-                  </td>
-                  <td className="py-2 px-3 text-[#656d76]">
-                    {p.description || '—'}
-                  </td>
-                  <td className="py-2 px-3">
-                    <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        p.builtin
-                          ? 'bg-[#ddf4ff] text-[#0969da]'
-                          : 'bg-[#dafbe1] text-[#1a7f37]'
-                      }`}
+              {pluginList.map((p) => {
+                const isExpanded = expandedPlugin === p.id
+                return (
+                  <Fragment key={p.id}>
+                    <tr
+                      onClick={() =>
+                        setExpandedPlugin(isExpanded ? null : p.id)
+                      }
+                      className="border-b border-[#d0d7de] hover:bg-[#f6f8fa] cursor-pointer"
                     >
-                      {p.builtin ? 'built-in' : 'user'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+                      <td className="py-2 px-3 font-mono text-xs text-[#1f2328]">
+                        {p.id}
+                      </td>
+                      <td className="py-2 px-3 text-[#656d76]">
+                        {p.description || '—'}
+                      </td>
+                      <td className="py-2 px-3">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                            p.builtin
+                              ? 'bg-[#ddf4ff] text-[#0969da]'
+                              : 'bg-[#dafbe1] text-[#1a7f37]'
+                          }`}
+                        >
+                          {p.builtin ? 'built-in' : 'user'}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-[#656d76] text-xs">
+                        {isExpanded ? '▲' : '▼'}
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr className="border-b border-[#d0d7de]">
+                        <td colSpan={4} className="bg-[#f6f8fa] px-3 py-3">
+                          <PluginContractDetail plugin={p} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         )}

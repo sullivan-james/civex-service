@@ -40,6 +40,16 @@ def test_list_registered_includes_builtins(ctx: AppContext) -> None:
     assert all(p["builtin"] for p in registered if p["id"].startswith("civex."))
 
 
+def test_list_registered_includes_capabilities(ctx: AppContext) -> None:
+    """capabilities was missing from list_registered() until CIVEX-144, even
+    though CIVEX-141's describe contract explicitly includes it -- the CLI/
+    API/frontend surfaces need it to show what an out-of-process plugin is
+    allowed to touch."""
+    registered = {p["id"]: p for p in ctx.plugin_svc.list_registered()}
+    assert registered["civex.save_field"]["capabilities"] == ["update_record"]
+    assert registered["civex.get_field"]["capabilities"] == []
+
+
 def test_list_registered_includes_category_and_config_schema(
     ctx: AppContext,
 ) -> None:
