@@ -145,10 +145,21 @@ def test_get_container_plugin_404_for_unknown(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
-def test_save_container_plugin_file_triggers_rebuild(client: TestClient) -> None:
-    """docker isn't installed in this environment, so this exercises the
-    real failure path -- the important thing is the endpoint always returns
-    a build result rather than erroring."""
+def test_save_container_plugin_file_triggers_rebuild(
+    client: TestClient, monkeypatch
+) -> None:
+    """Whether docker happens to be installed on the machine running the
+    test suite shouldn't affect the outcome -- simulate the missing-binary
+    case explicitly so this exercises that failure path deterministically.
+    The important thing is the endpoint always returns a build result
+    rather than erroring."""
+    from civex.services import container_plugin_service
+
+    def _fake_run(*args, **kwargs):
+        raise FileNotFoundError("docker")
+
+    monkeypatch.setattr(container_plugin_service.subprocess, "run", _fake_run)
+
     _make_container_plugin(client)
     resp = client.put(
         "/api/plugins/containers/my_plugin",

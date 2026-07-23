@@ -22,9 +22,7 @@ export function ContainerPluginEditor({
   const { data: detail, isLoading } = useContainerPlugin(name)
   const save = useSaveContainerPluginFile()
 
-  const [contents, setContents] = useState<Record<string, string> | null>(
-    null,
-  )
+  const [contents, setContents] = useState<Record<string, string> | null>(null)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [buildResult, setBuildResult] = useState<BuildResult | null>(null)
 
@@ -32,7 +30,9 @@ export function ContainerPluginEditor({
   if (detail && contents === null) {
     setContents(detail.files)
     setSelectedPath(
-      'Dockerfile' in detail.files ? 'Dockerfile' : Object.keys(detail.files)[0],
+      'Dockerfile' in detail.files
+        ? 'Dockerfile'
+        : Object.keys(detail.files)[0],
     )
   }
 
