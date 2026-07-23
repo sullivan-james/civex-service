@@ -8,32 +8,16 @@ import {
 } from '../hooks/useWorkflows'
 import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
+import { AutocompleteMenu } from '../components/workflows/YamlAutocomplete'
+import {
+  getAutocompleteContext,
+  getSuggestions,
+  type Suggestion,
+} from '../utils/workflowAutocomplete'
+import { getCaretCoordinates } from '../utils/caretCoordinates'
 import type { Workflow } from '../api/workflows'
+import type { PluginInfo, PluginIOSpec } from '../api/plugins'
 import { api } from '../api/client'
-
-interface PluginIOSpec {
-  name: string
-  type: string
-  required: boolean
-  description: string
-}
-
-interface PluginInfo {
-  id: string
-  name: string
-  description: string
-  builtin: boolean
-  category: string
-  capabilities: string[]
-  // null = plugin declared no contract in this direction; [] = it declared
-  // it has none (see civex_plugin_sdk.PluginBase.inputs)
-  inputs: PluginIOSpec[] | null
-  outputs: PluginIOSpec[] | null
-  config_schema: {
-    properties?: Record<string, { type?: string; default?: unknown }>
-    required?: string[]
-  }
-}
 
 function usePlugins() {
   return useQuery<PluginInfo[]>({
@@ -96,9 +80,15 @@ interface EditorProps {
   stem: string
   isNew: boolean
   onClose: () => void
+  plugins: PluginInfo[]
 }
 
-function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
+function WorkflowEditor({
+  stem: initialStem,
+  isNew,
+  onClose,
+  plugins,
+}: EditorProps) {
   const [stem, setStem] = useState(initialStem)
   const [content, setContent] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -115,9 +105,86 @@ function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
     setContent(NEW_TEMPLATE)
   }
 
-  // Tab key → 2 spaces
+  // Autocomplete (CIVEX-122) — plugin ids, config keys, step output refs,
+  // driven off the same Story 3 plugin schema the contract panel below reads.
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 })
+  const acContextRef = useRef<{
+    replaceFrom: number
+    replaceTo: number
+  } | null>(null)
+
+  const refreshSuggestions = useCallback(
+    (text: string, cursor: number) => {
+      const ctx = getAutocompleteContext(text, cursor)
+      const matches = ctx ? getSuggestions(ctx, plugins, text) : []
+      if (!ctx || matches.length === 0) {
+        acContextRef.current = null
+        setSuggestions([])
+        return
+      }
+      acContextRef.current = ctx
+      setSuggestions(matches)
+      setActiveIndex(0)
+      const el = textareaRef.current
+      if (el) {
+        const coords = getCaretCoordinates(el, cursor)
+        setMenuPos({ top: coords.top + coords.height, left: coords.left })
+      }
+    },
+    [plugins],
+  )
+
+  const applySuggestion = useCallback(
+    (index: number) => {
+      const ctx = acContextRef.current
+      const chosen = suggestions[index]
+      if (!ctx || !chosen || content === null) return
+      const next =
+        content.slice(0, ctx.replaceFrom) +
+        chosen.insertText +
+        content.slice(ctx.replaceTo)
+      const newCursor = ctx.replaceFrom + chosen.insertText.length
+      setContent(next)
+      setSuggestions([])
+      const el = textareaRef.current
+      requestAnimationFrame(() => {
+        if (!el) return
+        el.selectionStart = el.selectionEnd = newCursor
+        el.focus()
+      })
+    },
+    [content, suggestions],
+  )
+
+  // Tab key → 2 spaces (or accept the active suggestion, if the menu is open)
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (suggestions.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          setActiveIndex((i) => (i + 1) % suggestions.length)
+          return
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          setActiveIndex(
+            (i) => (i - 1 + suggestions.length) % suggestions.length,
+          )
+          return
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault()
+          applySuggestion(activeIndex)
+          return
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setSuggestions([])
+          return
+        }
+      }
       if (e.key === 'Tab') {
         e.preventDefault()
         const el = e.currentTarget
@@ -130,7 +197,21 @@ function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
         })
       }
     },
-    [],
+    [suggestions, activeIndex, applySuggestion],
+  )
+
+  const handleKeyUp = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === 'Escape') return
+      if (
+        suggestions.length > 0 &&
+        (e.key === 'ArrowDown' || e.key === 'ArrowUp')
+      )
+        return
+      const el = e.currentTarget
+      refreshSuggestions(el.value, el.selectionStart)
+    },
+    [suggestions.length, refreshSuggestions],
   )
 
   async function handleSave() {
@@ -197,15 +278,34 @@ function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
               <span className="text-xs font-medium text-[#1f2328] mb-1">
                 YAML
               </span>
-              <textarea
-                ref={textareaRef}
-                value={content ?? ''}
-                onChange={(e) => setContent(e.target.value)}
-                onKeyDown={handleKeyDown}
-                spellCheck={false}
-                className="flex-1 min-h-0 font-mono text-xs border border-[#d0d7de] rounded-md p-3 resize-none bg-[#f6f8fa] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] leading-relaxed"
-                style={{ minHeight: '200px' }}
-              />
+              <div className="relative flex-1 min-h-0">
+                <textarea
+                  ref={textareaRef}
+                  value={content ?? ''}
+                  onChange={(e) => {
+                    setContent(e.target.value)
+                    refreshSuggestions(e.target.value, e.target.selectionStart)
+                  }}
+                  onKeyDown={handleKeyDown}
+                  onKeyUp={handleKeyUp}
+                  onClick={(e) =>
+                    refreshSuggestions(
+                      e.currentTarget.value,
+                      e.currentTarget.selectionStart,
+                    )
+                  }
+                  onBlur={() => setSuggestions([])}
+                  spellCheck={false}
+                  className="w-full h-full font-mono text-xs border border-[#d0d7de] rounded-md p-3 resize-none bg-[#f6f8fa] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] leading-relaxed"
+                  style={{ minHeight: '200px' }}
+                />
+                <AutocompleteMenu
+                  suggestions={suggestions}
+                  activeIndex={activeIndex}
+                  position={menuPos}
+                  onSelect={applySuggestion}
+                />
+              </div>
             </div>
           )}
 
@@ -586,6 +686,7 @@ export default function WorkflowsPage() {
           stem={editor.stem}
           isNew={editor.isNew}
           onClose={() => setEditor(null)}
+          plugins={pluginList ?? []}
         />
       )}
 
