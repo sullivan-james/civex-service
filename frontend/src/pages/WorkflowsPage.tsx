@@ -1,53 +1,29 @@
 import { Fragment, useState, useRef, useCallback } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import CodeMirror, {
+  type EditorView,
+  type ViewUpdate,
+} from '@uiw/react-codemirror'
+import { yaml } from '@codemirror/lang-yaml'
 import {
   useWorkflows,
   useWorkflow,
   useSaveWorkflow,
   useDeleteWorkflow,
 } from '../hooks/useWorkflows'
+import { usePlugins, useUploadPlugin } from '../hooks/usePlugins'
 import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import { ContainerPluginEditor } from '../components/workflows/ContainerPluginEditor'
 import { useContainerPlugins } from '../hooks/useContainerPlugins'
+import { PluginEditor } from '../components/plugins/PluginEditor'
 import { AutocompleteMenu } from '../components/workflows/YamlAutocomplete'
 import {
   getAutocompleteContext,
   getSuggestions,
   type Suggestion,
 } from '../utils/workflowAutocomplete'
-import { getCaretCoordinates } from '../utils/caretCoordinates'
 import type { Workflow } from '../api/workflows'
 import type { PluginInfo, PluginIOSpec } from '../api/plugins'
-import { api } from '../api/client'
-
-function usePlugins() {
-  return useQuery<PluginInfo[]>({
-    queryKey: ['plugins'],
-    queryFn: () => api.get<PluginInfo[]>('/plugins'),
-    staleTime: 30_000,
-  })
-}
-
-function useUploadPlugin() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: async (file: File) => {
-      const form = new FormData()
-      form.append('file', file)
-      const res = await fetch('/api/plugins/upload', {
-        method: 'POST',
-        body: form,
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.detail ?? `HTTP ${res.status}`)
-      }
-      return res.json()
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['plugins'] }),
-  })
-}
 
 const NEW_TEMPLATE = `name: my-workflow
 description: null
@@ -94,7 +70,6 @@ function WorkflowEditor({
   const [stem, setStem] = useState(initialStem)
   const [content, setContent] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const { data: detail, isLoading } = useWorkflow(isNew ? '' : initialStem)
   const save = useSaveWorkflow()
@@ -116,6 +91,11 @@ function WorkflowEditor({
     replaceFrom: number
     replaceTo: number
   } | null>(null)
+  const viewRef = useRef<EditorView | null>(null)
+  const editorWrapRef = useRef<HTMLDivElement>(null)
+  // Suppresses the onUpdate-driven refresh for the dispatch applySuggestion
+  // itself issues, so accepting a suggestion doesn't immediately reopen the menu.
+  const applyingSuggestionRef = useRef(false)
 
   const refreshSuggestions = useCallback(
     (text: string, cursor: number) => {
@@ -129,10 +109,15 @@ function WorkflowEditor({
       acContextRef.current = ctx
       setSuggestions(matches)
       setActiveIndex(0)
-      const el = textareaRef.current
-      if (el) {
-        const coords = getCaretCoordinates(el, cursor)
-        setMenuPos({ top: coords.top + coords.height, left: coords.left })
+      const view = viewRef.current
+      const wrap = editorWrapRef.current
+      const coords = view?.coordsAtPos(cursor)
+      if (coords && wrap) {
+        const wrapRect = wrap.getBoundingClientRect()
+        setMenuPos({
+          top: coords.bottom - wrapRect.top,
+          left: coords.left - wrapRect.left,
+        })
       }
     },
     [plugins],
@@ -142,78 +127,72 @@ function WorkflowEditor({
     (index: number) => {
       const ctx = acContextRef.current
       const chosen = suggestions[index]
-      if (!ctx || !chosen || content === null) return
-      const next =
-        content.slice(0, ctx.replaceFrom) +
-        chosen.insertText +
-        content.slice(ctx.replaceTo)
+      const view = viewRef.current
+      if (!ctx || !chosen || !view) return
       const newCursor = ctx.replaceFrom + chosen.insertText.length
-      setContent(next)
-      setSuggestions([])
-      const el = textareaRef.current
-      requestAnimationFrame(() => {
-        if (!el) return
-        el.selectionStart = el.selectionEnd = newCursor
-        el.focus()
+      applyingSuggestionRef.current = true
+      view.dispatch({
+        changes: {
+          from: ctx.replaceFrom,
+          to: ctx.replaceTo,
+          insert: chosen.insertText,
+        },
+        selection: { anchor: newCursor },
       })
+      acContextRef.current = null
+      setSuggestions([])
+      view.focus()
     },
-    [content, suggestions],
+    [suggestions],
   )
 
-  // Tab key → 2 spaces (or accept the active suggestion, if the menu is open)
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (suggestions.length > 0) {
-        if (e.key === 'ArrowDown') {
-          e.preventDefault()
-          setActiveIndex((i) => (i + 1) % suggestions.length)
-          return
-        }
-        if (e.key === 'ArrowUp') {
-          e.preventDefault()
-          setActiveIndex(
-            (i) => (i - 1 + suggestions.length) % suggestions.length,
-          )
-          return
-        }
-        if (e.key === 'Enter' || e.key === 'Tab') {
-          e.preventDefault()
-          applySuggestion(activeIndex)
-          return
-        }
-        if (e.key === 'Escape') {
-          e.preventDefault()
-          setSuggestions([])
-          return
-        }
+  const handleUpdate = useCallback(
+    (update: ViewUpdate) => {
+      viewRef.current = update.view
+      if (applyingSuggestionRef.current) {
+        applyingSuggestionRef.current = false
+        return
       }
-      if (e.key === 'Tab') {
+      if (!update.docChanged && !update.selectionSet) return
+      refreshSuggestions(
+        update.state.doc.toString(),
+        update.state.selection.main.head,
+      )
+    },
+    [refreshSuggestions],
+  )
+
+  // Intercepted in the capture phase so the keys never reach CodeMirror's
+  // own keymap (e.g. Tab-to-indent) while the suggestion menu is open.
+  const handleEditorKeyDownCapture = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (suggestions.length === 0) return
+      if (e.key === 'ArrowDown') {
         e.preventDefault()
-        const el = e.currentTarget
-        const start = el.selectionStart
-        const end = el.selectionEnd
-        const next = el.value.slice(0, start) + '  ' + el.value.slice(end)
-        setContent(next)
-        requestAnimationFrame(() => {
-          el.selectionStart = el.selectionEnd = start + 2
-        })
+        e.stopPropagation()
+        setActiveIndex((i) => (i + 1) % suggestions.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        e.stopPropagation()
+        setActiveIndex((i) => (i - 1 + suggestions.length) % suggestions.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        e.stopPropagation()
+        applySuggestion(activeIndex)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        setSuggestions([])
+        return
       }
     },
     [suggestions, activeIndex, applySuggestion],
-  )
-
-  const handleKeyUp = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Escape') return
-      if (
-        suggestions.length > 0 &&
-        (e.key === 'ArrowDown' || e.key === 'ArrowUp')
-      )
-        return
-      const el = e.currentTarget
-      refreshSuggestions(el.value, el.selectionStart)
-    },
-    [suggestions.length, refreshSuggestions],
   )
 
   async function handleSave() {
@@ -280,26 +259,26 @@ function WorkflowEditor({
               <span className="text-xs font-medium text-[#1f2328] mb-1">
                 YAML
               </span>
-              <div className="relative flex-1 min-h-0">
-                <textarea
-                  ref={textareaRef}
+              <div
+                ref={editorWrapRef}
+                onKeyDownCapture={handleEditorKeyDownCapture}
+                className="relative flex-1 min-h-0 overflow-auto border border-[#d0d7de] rounded-md bg-[#f6f8fa] focus-within:border-[#0969da] focus-within:ring-1 focus-within:ring-[#0969da]"
+                style={{ minHeight: '200px' }}
+              >
+                <CodeMirror
                   value={content ?? ''}
-                  onChange={(e) => {
-                    setContent(e.target.value)
-                    refreshSuggestions(e.target.value, e.target.selectionStart)
+                  onChange={(value) => setContent(value)}
+                  onUpdate={handleUpdate}
+                  onCreateEditor={(view) => {
+                    viewRef.current = view
                   }}
-                  onKeyDown={handleKeyDown}
-                  onKeyUp={handleKeyUp}
-                  onClick={(e) =>
-                    refreshSuggestions(
-                      e.currentTarget.value,
-                      e.currentTarget.selectionStart,
-                    )
-                  }
                   onBlur={() => setSuggestions([])}
-                  spellCheck={false}
-                  className="w-full h-full font-mono text-xs border border-[#d0d7de] rounded-md p-3 resize-none bg-[#f6f8fa] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] leading-relaxed"
-                  style={{ minHeight: '200px' }}
+                  extensions={[yaml()]}
+                  basicSetup={{ tabSize: 2 }}
+                  indentWithTab
+                  height="100%"
+                  className="h-full text-xs"
+                  style={{ height: '100%' }}
                 />
                 <AutocompleteMenu
                   suggestions={suggestions}
@@ -434,6 +413,10 @@ export default function WorkflowsPage() {
   const [containerEditorTarget, setContainerEditorTarget] = useState<
     string | null
   >(null)
+  const [pluginEditor, setPluginEditor] = useState<{
+    filename: string
+    isNew: boolean
+  } | null>(null)
 
   async function handlePluginFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -453,6 +436,14 @@ export default function WorkflowsPage() {
 
   function openEdit(wf: Workflow) {
     setEditor({ stem: wf.stem, isNew: false })
+  }
+
+  function openNewPlugin() {
+    setPluginEditor({ filename: '', isNew: true })
+  }
+
+  function openEditPlugin(filename: string) {
+    setPluginEditor({ filename, isNew: false })
   }
 
   async function handleDelete(wf: Workflow) {
@@ -618,6 +609,9 @@ export default function WorkflowsPage() {
             >
               {uploadPlugin.isPending ? 'Uploading…' : 'Upload plugin'}
             </Button>
+            <Button size="sm" variant="primary" onClick={openNewPlugin}>
+              + New plugin
+            </Button>
           </div>
         </div>
         {pluginList && pluginList.length > 0 && (
@@ -634,6 +628,7 @@ export default function WorkflowsPage() {
                   Source
                 </th>
                 <th className="py-2 px-3" />
+                <th className="py-2 px-3 text-right" />
               </tr>
             </thead>
             <tbody>
@@ -667,10 +662,24 @@ export default function WorkflowsPage() {
                       <td className="py-2 px-3 text-[#656d76] text-xs">
                         {isExpanded ? '▲' : '▼'}
                       </td>
+                      <td className="py-2 px-3 text-right">
+                        {p.filename && (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openEditPlugin(p.filename!)
+                            }}
+                          >
+                            Edit
+                          </Button>
+                        )}
+                      </td>
                     </tr>
                     {isExpanded && (
                       <tr className="border-b border-[#d0d7de]">
-                        <td colSpan={4} className="bg-[#f6f8fa] px-3 py-3">
+                        <td colSpan={5} className="bg-[#f6f8fa] px-3 py-3">
                           <PluginContractDetail plugin={p} />
                         </td>
                       </tr>
@@ -747,6 +756,14 @@ export default function WorkflowsPage() {
           isNew={editor.isNew}
           onClose={() => setEditor(null)}
           plugins={pluginList ?? []}
+        />
+      )}
+
+      {pluginEditor && (
+        <PluginEditor
+          filename={pluginEditor.filename}
+          isNew={pluginEditor.isNew}
+          onClose={() => setPluginEditor(null)}
         />
       )}
 

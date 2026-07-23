@@ -1,6 +1,14 @@
 """serve(plugin_cls) is the entrypoint a plugin script calls to speak the
 wire protocol over stdin/stdout. It isolates stdout first (before any
 plugin code runs), then loops dispatching `describe`/`run` frames.
+
+serve_container(plugin_cls) is the container-tier (CIVEX-149) counterpart:
+same frame shapes and same fd-dup stdout isolation, but the host does one
+`docker run -i <image> <mode>` per operation instead of Tier 1's persistent
+`uv run` process, so `mode` ("describe" or "run") arrives as sys.argv[1]
+rather than as a leading frame on stdin -- a fresh container per call is
+what lets --memory/--cpus limits and CIVEX-137's timeout/kill wrapper apply
+per operation.
 """
 
 from __future__ import annotations
@@ -34,6 +42,63 @@ def serve(plugin_cls: "type[Plugin]") -> None:
     writer = FrameWriter.for_stream(out)
     reader = FrameReader.for_stream(sys.stdin)
     serve_loop(plugin_cls, reader, writer)
+
+
+def serve_container(plugin_cls: "type[Plugin]") -> None:
+    """Container-tier entrypoint: isolates the actual stdout fd, then
+    performs exactly one `describe` or `run` (per sys.argv[1]) off real
+    stdin. Call this (and only this) from a container-tier plugin's
+    __main__ -- see docs/writing-custom-plugins.md's container section."""
+    out = isolate_stdout()
+    writer = FrameWriter.for_stream(out)
+    reader = FrameReader.for_stream(sys.stdin)
+    mode = sys.argv[1] if len(sys.argv) > 1 else None
+    serve_container_once(plugin_cls, mode, reader, writer)
+
+
+def serve_container_once(
+    plugin_cls: "type[Plugin]",
+    mode: str | None,
+    reader: FrameReader,
+    writer: FrameWriter,
+) -> None:
+    """The single-shot dispatch itself, decoupled from real stdio/argv so
+    it's unit-testable against injected reader/writer."""
+    if mode == "describe":
+        _handle_describe(plugin_cls, writer)
+        return
+    if mode == "run":
+        try:
+            raw = next(reader)
+        except StopIteration:
+            _send_error(
+                writer,
+                PluginError("no run frame received on stdin", kind="protocol_error"),
+            )
+            return
+        try:
+            frame = parse_frame(raw)
+        except Exception as e:
+            _send_error(writer, PluginError(str(e), kind="protocol_error"))
+            return
+        if not isinstance(frame, RunRequest):
+            _send_error(
+                writer,
+                PluginError(
+                    f"expected a 'run' frame, got {raw.get('type')!r}",
+                    kind="protocol_error",
+                ),
+            )
+            return
+        _handle_run(plugin_cls, frame, reader, writer)
+        return
+    _send_error(
+        writer,
+        PluginError(
+            f"unknown mode {mode!r}; expected 'describe' or 'run'",
+            kind="protocol_error",
+        ),
+    )
 
 
 def serve_loop(

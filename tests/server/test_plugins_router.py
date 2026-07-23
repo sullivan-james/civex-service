@@ -178,3 +178,30 @@ def test_save_container_plugin_file_rejects_path_traversal(client: TestClient) -
         json={"path": "../../escape.txt", "content": "x"},
     )
     assert resp.status_code == 400
+
+
+def test_list_plugins_reports_filename_for_user_plugins_only(
+    client: TestClient,
+) -> None:
+    client.post("/api/plugins", json={"name": "my_plugin", "code": _VALID_CODE})
+    plugins = {p["id"]: p for p in client.get("/api/plugins").json()}
+    assert plugins["project.my_plugin"]["filename"] == "my_plugin.py"
+    builtin = next(p for pid, p in plugins.items() if pid.startswith("civex."))
+    assert builtin["filename"] is None
+
+
+def test_get_plugin_source(client: TestClient) -> None:
+    client.post("/api/plugins", json={"name": "my_plugin", "code": _VALID_CODE})
+    resp = client.get("/api/plugins/my_plugin.py/source")
+    assert resp.status_code == 200
+    assert resp.json() == {"filename": "my_plugin.py", "code": _VALID_CODE}
+
+
+def test_get_plugin_source_missing_file(client: TestClient) -> None:
+    resp = client.get("/api/plugins/does_not_exist.py/source")
+    assert resp.status_code == 404
+
+
+def test_get_plugin_source_rejects_non_py_filename(client: TestClient) -> None:
+    resp = client.get("/api/plugins/notes.txt/source")
+    assert resp.status_code == 400

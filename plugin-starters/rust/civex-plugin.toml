@@ -1,0 +1,13 @@
+# Manifest for this Tier 2 (container) plugin. It lives alongside its
+# Dockerfile and source in the same directory -- civex's registry treats any
+# directory under _civex/plugins/ containing a civex-plugin.toml as a Tier 2
+# (container) plugin, built from that directory (the build context is just
+# "this directory", so there's no separate `path` field here).
+#
+# Keep these in sync with the constants at the top of src/plugin.rs -- this
+# file is what the registry reads without running the container; describe
+# mode is what the container itself reports at run time.
+id = "example.echo"
+name = "Echo"
+category = "example"
+capabilities = ["commit"]
