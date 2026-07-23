@@ -1,5 +1,7 @@
-import { Fragment, useState, useRef, useCallback } from 'react'
+import { Fragment, useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import CodeMirror from '@uiw/react-codemirror'
+import { yaml } from '@codemirror/lang-yaml'
 import {
   useWorkflows,
   useWorkflow,
@@ -102,7 +104,6 @@ function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
   const [stem, setStem] = useState(initialStem)
   const [content, setContent] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const { data: detail, isLoading } = useWorkflow(isNew ? '' : initialStem)
   const save = useSaveWorkflow()
@@ -114,24 +115,6 @@ function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
   if (isNew && content === null) {
     setContent(NEW_TEMPLATE)
   }
-
-  // Tab key → 2 spaces
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Tab') {
-        e.preventDefault()
-        const el = e.currentTarget
-        const start = el.selectionStart
-        const end = el.selectionEnd
-        const next = el.value.slice(0, start) + '  ' + el.value.slice(end)
-        setContent(next)
-        requestAnimationFrame(() => {
-          el.selectionStart = el.selectionEnd = start + 2
-        })
-      }
-    },
-    [],
-  )
 
   async function handleSave() {
     if (!stem.trim() || content === null) return
@@ -197,15 +180,21 @@ function WorkflowEditor({ stem: initialStem, isNew, onClose }: EditorProps) {
               <span className="text-xs font-medium text-[#1f2328] mb-1">
                 YAML
               </span>
-              <textarea
-                ref={textareaRef}
-                value={content ?? ''}
-                onChange={(e) => setContent(e.target.value)}
-                onKeyDown={handleKeyDown}
-                spellCheck={false}
-                className="flex-1 min-h-0 font-mono text-xs border border-[#d0d7de] rounded-md p-3 resize-none bg-[#f6f8fa] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] leading-relaxed"
+              <div
+                className="flex-1 min-h-0 overflow-auto border border-[#d0d7de] rounded-md bg-[#f6f8fa] focus-within:border-[#0969da] focus-within:ring-1 focus-within:ring-[#0969da]"
                 style={{ minHeight: '200px' }}
-              />
+              >
+                <CodeMirror
+                  value={content ?? ''}
+                  onChange={(value) => setContent(value)}
+                  extensions={[yaml()]}
+                  basicSetup={{ tabSize: 2 }}
+                  indentWithTab
+                  height="100%"
+                  className="h-full text-xs"
+                  style={{ height: '100%' }}
+                />
+              </div>
             </div>
           )}
 
