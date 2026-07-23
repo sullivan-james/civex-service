@@ -44,4 +44,6 @@ export const pluginsApi = {
       form,
     )
   },
+  delete: (filename: string) =>
+    api.delete<void>(`/plugins/${encodeURIComponent(filename)}`),
 }

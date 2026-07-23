@@ -142,7 +142,9 @@ def build_local_context(
     workflow_svc = WorkflowService(
         config.civex_dir, plugins_provider=_plugins_provider(config.civex_dir)
     )
-    plugin_svc = PluginService(config.civex_dir)
+    plugin_svc = PluginService(
+        config.civex_dir, workflows_provider=workflow_svc.list_defs
+    )
     container_plugin_svc = ContainerPluginService(config.civex_dir)
     policy_svc = PolicyService(config.civex_dir)
 
