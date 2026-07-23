@@ -136,3 +136,42 @@ def test_get_source_rejects_missing_file(ctx: AppContext) -> None:
 def test_get_source_rejects_path_traversal(ctx: AppContext) -> None:
     with pytest.raises(ValidationError):
         ctx.plugin_svc.get_source("../escape.py")
+
+
+def test_delete_removes_the_file_and_unregisters_the_plugin(
+    ctx: AppContext,
+) -> None:
+    ctx.plugin_svc.save("my_plugin", _VALID_CODE)
+    ctx.plugin_svc.delete("my_plugin.py")
+    assert ctx.plugin_svc.list_raw() == []
+    registered = {p["id"] for p in ctx.plugin_svc.list_registered()}
+    assert "project.my_plugin" not in registered
+
+
+def test_delete_rejects_missing_file(ctx: AppContext) -> None:
+    with pytest.raises(NotFoundError):
+        ctx.plugin_svc.delete("does_not_exist.py")
+
+
+def test_delete_rejects_path_traversal(ctx: AppContext) -> None:
+    with pytest.raises(ValidationError):
+        ctx.plugin_svc.delete("../escape.py")
+
+
+def test_delete_refuses_a_plugin_still_used_by_a_workflow(
+    ctx: AppContext,
+) -> None:
+    ctx.plugin_svc.save("my_plugin", _VALID_CODE)
+    workflows_dir = ctx.workflow_svc._dir
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "wf1.yaml").write_text(
+        "name: wf1\nsteps:\n  - id: step1\n    plugin: project.my_plugin\n"
+    )
+
+    with pytest.raises(ValidationError, match="wf1.yaml"):
+        ctx.plugin_svc.delete("my_plugin.py")
+
+    # Still on disk and registered -- the delete never happened.
+    assert ctx.plugin_svc.list_raw() == [
+        {"filename": "my_plugin.py", "code": _VALID_CODE}
+    ]

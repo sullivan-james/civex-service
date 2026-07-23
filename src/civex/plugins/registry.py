@@ -256,6 +256,12 @@ def _write_describe_cache(cache_path: Path, cache: dict[str, Any]) -> None:
         return  # a read-only or full project dir just means no caching
 
 
+def unregister_plugin(plugin_id: str) -> None:
+    """Drop a plugin from the registry, e.g. after its file is deleted.
+    A no-op if it isn't registered."""
+    REGISTRY.pop(plugin_id, None)
+
+
 def get_plugin(plugin_id: str) -> PluginRegistration | None:
     return REGISTRY.get(plugin_id)
 
