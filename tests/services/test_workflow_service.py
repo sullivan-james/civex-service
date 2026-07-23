@@ -97,6 +97,31 @@ def test_save_rejects_bad_stem_without_writing(ctx: AppContext) -> None:
     assert ctx.workflow_svc.list_defs() == []
 
 
+_CYCLE_YAML = """\
+name: cyclic
+steps:
+  - id: a
+    plugin: civex.load_csv
+    inputs:
+      bytes: b.table
+  - id: b
+    plugin: civex.load_csv
+    inputs:
+      bytes: a.table
+"""
+
+
+def test_validate_rejects_dependency_cycle(ctx: AppContext) -> None:
+    with pytest.raises(ValidationError, match="dependency cycle"):
+        ctx.workflow_svc.validate("cyclic", _CYCLE_YAML)
+
+
+def test_save_rejects_dependency_cycle_without_writing(ctx: AppContext) -> None:
+    with pytest.raises(ValidationError, match="dependency cycle"):
+        ctx.workflow_svc.save("cyclic", _CYCLE_YAML)
+    assert ctx.workflow_svc.list_defs() == []
+
+
 def test_delete_removes_the_file(ctx: AppContext) -> None:
     ctx.workflow_svc.save("parse-audio-dates", _VALID_YAML)
     ctx.workflow_svc.delete("parse-audio-dates")

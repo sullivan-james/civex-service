@@ -19,13 +19,18 @@ from civex.workflows.definition import StepDef, WorkflowDef
 log = logging.getLogger(__name__)
 
 
-def _topological_sort(
+def topological_sort(
     steps: list[StepDef], virtual_ids: set[str] | None = None
 ) -> list[StepDef]:
     """Kahn's algorithm — returns steps in execution order.
 
     virtual_ids: step-like ids (e.g. "__input__") that may be referenced in inputs
                  but are not actual steps; they carry no deps and are never enqueued.
+
+    Raises ValueError on an unresolvable step reference or a dependency cycle.
+    Public (no leading underscore) so WorkflowService.validate() can reuse the
+    same cycle check as a dry-run at save time (CIVEX-108), rather than only
+    discovering a cycle when a trigger fires at run time.
     """
     ids = {s.id for s in steps}
     known_ids = ids | (virtual_ids or set())
@@ -122,7 +127,7 @@ def run(
     _validate_contracts(wf, plugins)
     virtual_ids = set(initial_outputs.keys()) if initial_outputs else None
     log.info("Virtual IDs: %s", virtual_ids)
-    order = _topological_sort(wf.steps, virtual_ids=virtual_ids)
+    order = topological_sort(wf.steps, virtual_ids=virtual_ids)
     log.info("Execution order: %s", [s.id for s in order])
     step_outputs: dict[str, dict[str, Any]] = dict(initial_outputs or {})
 
