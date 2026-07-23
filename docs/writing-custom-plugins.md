@@ -155,8 +155,14 @@ if ref:
 - All changes are committed together at the end of the workflow run unless you call `ctx.commit()` explicitly.
 - If `invoke()` raises an exception (or the run times out), the entire workflow job is marked as failed and no changes are committed.
 
-## Other languages (Tier 2, container plugins)
+## Container-tier (Tier 2) plugins
 
-Everything above is the Tier 1 (subprocess) tier — Python only, run via `uv run`. A plugin that needs something Python-level isolation can't give (a different language, a system binary, GPU access, stricter resource limits) runs in a container instead, speaking the identical stdin/stdout wire protocol over `docker run -i <image> <mode>`. The host-side runtime that drives that (`civex.plugins.container_runtime`) and builds/caches the image (`civex.plugins.container_build`) now exists, but neither is wired into the plugin registry or workflow executor yet, so a container-tier plugin still isn't something you can run through a workflow today — these are starting points to build from.
+Everything above is the Tier 1 (subprocess) tier — Python only, run via `uv run`. For a plugin that needs something the subprocess tier can't give — a different language, system binaries, GPU access, stricter resource limits — civex runs it inside a Docker container instead, using the same `id`/`name`/`capabilities`/`Config`/`invoke()` shape and the same wire protocol described above, over `docker run -i <image> <mode>`. A Python starter (Dockerfile + `plugin.py` shim) lives in `templates/container-plugins/python/`; copy it into `_civex/plugins/<name>/` alongside a `civex-plugin.toml` manifest (`id`/`name`/`category`/`capabilities`) and fill in `invoke()`.
 
-Prebuilt starters (Dockerfile + a minimal shim implementing the protocol, including the same fd-dup stdout-isolation trick) exist in the repo for several languages, e.g. `plugin-templates/r/`, `plugin-templates/java/`, `starters/c/`, `templates/plugins/go/`, and `plugin-starters/rust/`.
+The one difference from the subprocess tier: `civex_plugin_sdk.serve_container` (instead of `serve`) is called from `__main__`, since a container is invoked once per operation (`docker run -i <image> describe` or `docker run -i <image> run`) rather than as a long-lived process — it reads that mode from `sys.argv[1]` instead of from a leading control frame on stdin.
+
+The host-side runtime that drives this (`civex.plugins.container_runtime`) and builds/caches each plugin's image (`civex.plugins.container_build`) now exists, but neither is wired into the plugin registry or workflow executor yet, so a container-tier plugin still isn't something you can run through a workflow today — these are starting points to build from.
+
+### Other languages
+
+Prebuilt starters (Dockerfile + a minimal shim implementing the identical wire protocol, including the same fd-dup stdout-isolation trick) exist for several languages besides Python: `plugin-templates/r/`, `plugin-templates/java/`, `starters/c/`, `templates/plugins/go/`, and `plugin-starters/rust/`.
