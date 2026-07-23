@@ -1,49 +1,15 @@
 import { useState, useRef, useCallback } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   useWorkflows,
   useWorkflow,
   useSaveWorkflow,
   useDeleteWorkflow,
 } from '../hooks/useWorkflows'
+import { usePlugins, useUploadPlugin } from '../hooks/usePlugins'
 import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
+import { PluginEditor } from '../components/plugins/PluginEditor'
 import type { Workflow } from '../api/workflows'
-import { api } from '../api/client'
-
-interface PluginInfo {
-  id: string
-  description: string
-  builtin: boolean
-}
-
-function usePlugins() {
-  return useQuery<PluginInfo[]>({
-    queryKey: ['plugins'],
-    queryFn: () => api.get<PluginInfo[]>('/plugins'),
-    staleTime: 30_000,
-  })
-}
-
-function useUploadPlugin() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: async (file: File) => {
-      const form = new FormData()
-      form.append('file', file)
-      const res = await fetch('/api/plugins/upload', {
-        method: 'POST',
-        body: form,
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.detail ?? `HTTP ${res.status}`)
-      }
-      return res.json()
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['plugins'] }),
-  })
-}
 
 const NEW_TEMPLATE = `name: my-workflow
 description: null
@@ -234,6 +200,10 @@ export default function WorkflowsPage() {
   const [pluginUploadError, setPluginUploadError] = useState<string | null>(
     null,
   )
+  const [pluginEditor, setPluginEditor] = useState<{
+    filename: string
+    isNew: boolean
+  } | null>(null)
 
   async function handlePluginFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -253,6 +223,14 @@ export default function WorkflowsPage() {
 
   function openEdit(wf: Workflow) {
     setEditor({ stem: wf.stem, isNew: false })
+  }
+
+  function openNewPlugin() {
+    setPluginEditor({ filename: '', isNew: true })
+  }
+
+  function openEditPlugin(filename: string) {
+    setPluginEditor({ filename, isNew: false })
   }
 
   async function handleDelete(wf: Workflow) {
@@ -418,6 +396,9 @@ export default function WorkflowsPage() {
             >
               {uploadPlugin.isPending ? 'Uploading…' : 'Upload plugin'}
             </Button>
+            <Button size="sm" variant="primary" onClick={openNewPlugin}>
+              + New plugin
+            </Button>
           </div>
         </div>
         {pluginList && pluginList.length > 0 && (
@@ -433,6 +414,7 @@ export default function WorkflowsPage() {
                 <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
                   Source
                 </th>
+                <th className="py-2 px-3 text-right" />
               </tr>
             </thead>
             <tbody>
@@ -458,6 +440,17 @@ export default function WorkflowsPage() {
                       {p.builtin ? 'built-in' : 'user'}
                     </span>
                   </td>
+                  <td className="py-2 px-3 text-right">
+                    {p.filename && (
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => openEditPlugin(p.filename!)}
+                      >
+                        Edit
+                      </Button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -474,6 +467,14 @@ export default function WorkflowsPage() {
           stem={editor.stem}
           isNew={editor.isNew}
           onClose={() => setEditor(null)}
+        />
+      )}
+
+      {pluginEditor && (
+        <PluginEditor
+          filename={pluginEditor.filename}
+          isNew={pluginEditor.isNew}
+          onClose={() => setPluginEditor(null)}
         />
       )}
 

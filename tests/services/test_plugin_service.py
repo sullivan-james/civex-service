@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from civex.context import AppContext
-from civex.domain.exceptions import ValidationError
+from civex.domain.exceptions import NotFoundError, ValidationError
 
 _VALID_CODE = """\
 # /// script
@@ -101,3 +101,28 @@ def test_save_uploaded_writes_and_returns_plugin_id(ctx: AppContext) -> None:
     assert ctx.plugin_svc.list_raw() == [
         {"filename": "my_plugin.py", "code": _VALID_CODE}
     ]
+
+
+def test_list_registered_reports_filename_for_user_plugins_only(
+    ctx: AppContext,
+) -> None:
+    ctx.plugin_svc.save("my_plugin", _VALID_CODE)
+    registered = {p["id"]: p for p in ctx.plugin_svc.list_registered()}
+    assert registered["project.my_plugin"]["filename"] == "my_plugin.py"
+    builtin = next(p for pid, p in registered.items() if pid.startswith("civex."))
+    assert builtin["filename"] is None
+
+
+def test_get_source_returns_saved_code(ctx: AppContext) -> None:
+    ctx.plugin_svc.save("my_plugin", _VALID_CODE)
+    assert ctx.plugin_svc.get_source("my_plugin.py") == _VALID_CODE
+
+
+def test_get_source_rejects_missing_file(ctx: AppContext) -> None:
+    with pytest.raises(NotFoundError):
+        ctx.plugin_svc.get_source("does_not_exist.py")
+
+
+def test_get_source_rejects_path_traversal(ctx: AppContext) -> None:
+    with pytest.raises(ValidationError):
+        ctx.plugin_svc.get_source("../escape.py")

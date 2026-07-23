@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from civex.context import AppContext
-from civex.domain.exceptions import ValidationError
+from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.server.deps import get_ctx
 
 router = APIRouter(prefix="/plugins", tags=["plugins"])
@@ -14,6 +14,7 @@ class PluginInfo(BaseModel):
     id: str
     description: str
     builtin: bool
+    filename: str | None = None
 
 
 class UploadResult(BaseModel):
@@ -52,9 +53,29 @@ class PluginSaveRequest(BaseModel):
 
 @router.post("", status_code=201)
 def save_plugin_json(body: PluginSaveRequest, ctx: AppContext = Depends(get_ctx)):
-    """Save a plugin from JSON source (used by the AI confirmation UI)."""
+    """Save a plugin from JSON source (used by the AI confirmation UI and the
+    Tier 1 plugin editor). Writes the file, then re-registers it -- which
+    describes it in the same request, so a broken contract surfaces
+    immediately as an error response rather than only on next use."""
     try:
         ctx.plugin_svc.save(body.name, body.code)
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
     return {"filename": f"{body.name}.py"}
+
+
+class PluginSource(BaseModel):
+    filename: str
+    code: str
+
+
+@router.get("/{filename}/source", response_model=PluginSource)
+def get_plugin_source(filename: str, ctx: AppContext = Depends(get_ctx)):
+    """Read a single user plugin's raw source, e.g. to populate the editor."""
+    if not filename.endswith(".py") or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    try:
+        code = ctx.plugin_svc.get_source(filename)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    return PluginSource(filename=filename, code=code)

@@ -16,7 +16,7 @@ import ast
 import re
 from pathlib import Path
 
-from civex.domain.exceptions import ValidationError
+from civex.domain.exceptions import NotFoundError, ValidationError
 
 _SAFE_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -64,6 +64,15 @@ class PluginService:
                     if registration.config_schema is not None
                     else registration.config_model.model_json_schema()
                 ),
+                # module_name is a dotted import path for a built-in and the
+                # on-disk file path for a user plugin (see
+                # _registration_for_subprocess) -- only the latter has a
+                # filename an editor can open and save back.
+                "filename": (
+                    None
+                    if plugin_id.startswith(builtin_prefix)
+                    else Path(registration.module_name).name
+                ),
             }
             for plugin_id, registration in sorted(all_plugins().items())
         ]
@@ -83,6 +92,18 @@ class PluginService:
             except Exception as e:
                 results.append({"filename": path.name, "error": str(e)})
         return results
+
+    def get_source(self, filename: str) -> str:
+        """Read one user plugin file's raw source by filename, e.g. to
+        populate the editor. `filename` is untrusted input -- reject
+        anything that could escape _civex/plugins/ rather than resolving
+        and comparing, so a rejected path never touches the filesystem."""
+        if "/" in filename or "\\" in filename or filename.startswith("."):
+            raise ValidationError("Invalid filename")
+        path = self._dir / filename
+        if not path.is_file():
+            raise NotFoundError(f"Plugin file '{filename}' not found")
+        return path.read_text(encoding="utf-8")
 
     def validate(self, name: str, code: str) -> None:
         """Check name format and that code defines a class named 'Plugin',
