@@ -108,6 +108,13 @@ class CapabilityDeniedError(PluginExecutionError):
         super().__init__(f"plugin is not declared to use capability '{method}'")
 
 
+class ContainerBuildError(CivexError):
+    """Raised when `docker build` fails for a Tier 2 (container) plugin's
+    Dockerfile + source directory (CIVEX-148)."""
+
+    kind = "container_build_error"
+
+
 class CoercionError(ValidationError):
     def __init__(
         self, field_name: str, dtype: str, raw: str, extra: str | None = None
