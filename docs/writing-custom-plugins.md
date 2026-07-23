@@ -155,6 +155,12 @@ if ref:
 - All changes are committed together at the end of the workflow run unless you call `ctx.commit()` explicitly.
 - If `invoke()` raises an exception (or the run times out), the entire workflow job is marked as failed and no changes are committed.
 
-## Other languages
+## Container-tier (Tier 2) plugins
 
-A plugin that needs something Python-level isolation can't give — a different language, system binaries, GPU access — runs in a container instead of a `uv`-managed subprocess, speaking the identical wire protocol. `plugin-templates/<language>/` at the repo root holds prebuilt starters (Dockerfile + a minimal shim) for languages other than Python; see `plugin-templates/r/` for the first one. The container-tier host runtime itself isn't built yet, so these are starting points to build from, not something you can run through a workflow today.
+For a plugin that needs something the subprocess tier can't give — a different language, system binaries, GPU access, stricter resource limits — civex runs it inside a Docker container instead, using the same `id`/`name`/`capabilities`/`Config`/`invoke()` shape and the same wire protocol described above. A Python starter (Dockerfile + `plugin.py` shim) lives in `templates/container-plugins/python/`; copy it into `_civex/plugins/<name>/` alongside a `civex-plugin.toml` manifest (`id`/`name`/`category`/`capabilities`) and fill in `invoke()`.
+
+The one difference from the subprocess tier: `civex_plugin_sdk.serve_container` (instead of `serve`) is called from `__main__`, since a container is invoked once per operation (`docker run -i <image> describe` or `docker run -i <image> run`) rather than as a long-lived process — it reads that mode from `sys.argv[1]` instead of from a leading control frame on stdin.
+
+### Other languages
+
+A plugin that needs something Python-level isolation can't give runs in a container the same way, speaking the identical wire protocol. `plugin-templates/<language>/` at the repo root holds prebuilt starters (Dockerfile + a minimal shim) for languages other than Python; see `plugin-templates/r/` for the first one. The host side of the container runtime (spawning `docker run`, building and content-hash-caching each plugin's image) exists, but it isn't wired into the plugin registry or workflow executor yet, so these starters are still a starting point to build from, not something you can run through a workflow today.

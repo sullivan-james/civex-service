@@ -8,7 +8,7 @@ from civex_plugin_sdk.errors import CapabilityDeniedError
 from civex_plugin_sdk.io import FrameReader, FrameWriter
 from civex_plugin_sdk.plugin import Plugin
 from civex_plugin_sdk.plugin_base import IOSpec
-from civex_plugin_sdk.serve import serve_loop
+from civex_plugin_sdk.serve import serve_container_once, serve_loop
 
 
 class GreetPlugin(Plugin):
@@ -182,3 +182,74 @@ def test_run_with_nested_rpc_call_is_answered_mid_dispatch():
         "type": "result",
         "outputs": {"echo": "hi", "inputs": {"call_commit": True}},
     }
+
+
+def _run_container(plugin_cls, mode, lines):
+    sent: list[dict] = []
+    writer = FrameWriter(lambda line: sent.append(json.loads(line)))
+    reader = FrameReader(lines)
+    serve_container_once(plugin_cls, mode, reader, writer)
+    return sent
+
+
+def test_container_describe_mode_reports_the_plugins_contract_without_reading_stdin():
+    sent = _run_container(GreetPlugin, "describe", [])
+    assert sent[0]["type"] == "describe_result"
+    assert sent[0]["id"] == "test.greet"
+
+
+def test_container_run_mode_reads_one_frame_from_stdin_and_returns_result():
+    sent = _run_container(
+        GreetPlugin,
+        "run",
+        [json.dumps({"type": "run", "inputs": {}, "config": {"text": "hi"}})],
+    )
+    assert sent == [{"type": "result", "outputs": {"echo": "hi", "inputs": {}}}]
+
+
+def test_container_run_mode_handles_nested_rpc_call_mid_dispatch():
+    sent: list[dict] = []
+    writer = FrameWriter(lambda line: sent.append(json.loads(line)))
+
+    def lines():
+        yield json.dumps(
+            {"type": "run", "inputs": {"call_commit": True}, "config": {"text": "hi"}}
+        )
+        call = sent[-1]
+        assert call["type"] == "rpc_call"
+        assert call["method"] == "commit"
+        yield json.dumps(
+            {"type": "rpc_result", "call_id": call["call_id"], "result": {}}
+        )
+
+    reader = FrameReader(lines())
+    serve_container_once(GreetPlugin, "run", reader, writer)
+
+    assert sent[-1] == {
+        "type": "result",
+        "outputs": {"echo": "hi", "inputs": {"call_commit": True}},
+    }
+
+
+def test_container_run_mode_with_no_stdin_frame_yields_protocol_error():
+    sent = _run_container(GreetPlugin, "run", [])
+    assert sent[0]["type"] == "error"
+    assert sent[0]["error"]["kind"] == "protocol_error"
+
+
+def test_container_run_mode_with_non_run_frame_yields_protocol_error():
+    sent = _run_container(GreetPlugin, "run", [json.dumps({"type": "describe"})])
+    assert sent[0]["type"] == "error"
+    assert sent[0]["error"]["kind"] == "protocol_error"
+
+
+def test_container_unknown_mode_yields_protocol_error():
+    sent = _run_container(GreetPlugin, "bogus", [])
+    assert sent[0]["type"] == "error"
+    assert sent[0]["error"]["kind"] == "protocol_error"
+
+
+def test_container_missing_mode_yields_protocol_error():
+    sent = _run_container(GreetPlugin, None, [])
+    assert sent[0]["type"] == "error"
+    assert sent[0]["error"]["kind"] == "protocol_error"

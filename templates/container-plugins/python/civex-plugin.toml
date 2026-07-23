@@ -1,0 +1,8 @@
+# Manifest for a Tier 2 (container) civex plugin. Lives alongside this
+# plugin's Dockerfile and source in _civex/plugins/<name>/ -- the build
+# context is this directory, so no separate path field is needed.
+
+id = "my_project.my_container_plugin"  # must match Plugin.id in plugin.py
+name = "My Container Plugin"
+category = "transforms"
+capabilities = []
