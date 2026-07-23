@@ -107,6 +107,90 @@ def test_upload_plugin_rejects_path_traversal(client: TestClient) -> None:
     assert resp.status_code == 400
 
 
+def _make_container_plugin(client: TestClient, name: str = "my_plugin") -> None:
+    from civex.config import find_project_root
+
+    root = find_project_root() / "_civex" / "plugins" / name
+    (root / "src").mkdir(parents=True)
+    (root / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    (root / "civex-plugin.toml").write_text(
+        'id = "example.my_plugin"\nname = "My Plugin"\n', encoding="utf-8"
+    )
+    (root / "src" / "plugin.c").write_text("int main() { return 0; }\n", encoding="utf-8")
+
+
+def test_list_container_plugins(client: TestClient) -> None:
+    _make_container_plugin(client)
+    resp = client.get("/api/plugins/containers")
+    assert resp.status_code == 200
+    assert resp.json() == [
+        {
+            "name": "my_plugin",
+            "files": ["Dockerfile", "civex-plugin.toml", "src/plugin.c"],
+        }
+    ]
+
+
+def test_get_container_plugin(client: TestClient) -> None:
+    _make_container_plugin(client)
+    resp = client.get("/api/plugins/containers/my_plugin")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "my_plugin"
+    assert body["files"]["Dockerfile"] == "FROM scratch\n"
+
+
+def test_get_container_plugin_404_for_unknown(client: TestClient) -> None:
+    resp = client.get("/api/plugins/containers/nope")
+    assert resp.status_code == 404
+
+
+def test_save_container_plugin_file_triggers_rebuild(
+    client: TestClient, monkeypatch
+) -> None:
+    """Whether docker happens to be installed on the machine running the
+    test suite shouldn't affect the outcome -- simulate the missing-binary
+    case explicitly so this exercises that failure path deterministically.
+    The important thing is the endpoint always returns a build result
+    rather than erroring."""
+    from civex.services import container_plugin_service
+
+    def _fake_run(*args, **kwargs):
+        raise FileNotFoundError("docker")
+
+    monkeypatch.setattr(container_plugin_service.subprocess, "run", _fake_run)
+
+    _make_container_plugin(client)
+    resp = client.put(
+        "/api/plugins/containers/my_plugin",
+        json={"path": "Dockerfile", "content": "FROM alpine\n"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is False
+    assert "docker" in body["log"]
+
+    get_resp = client.get("/api/plugins/containers/my_plugin")
+    assert get_resp.json()["files"]["Dockerfile"] == "FROM alpine\n"
+
+
+def test_save_container_plugin_file_404_for_unknown_plugin(client: TestClient) -> None:
+    resp = client.put(
+        "/api/plugins/containers/nope",
+        json={"path": "Dockerfile", "content": "FROM alpine\n"},
+    )
+    assert resp.status_code == 404
+
+
+def test_save_container_plugin_file_rejects_path_traversal(client: TestClient) -> None:
+    _make_container_plugin(client)
+    resp = client.put(
+        "/api/plugins/containers/my_plugin",
+        json={"path": "../../escape.txt", "content": "x"},
+    )
+    assert resp.status_code == 400
+
+
 def test_list_plugins_reports_filename_for_user_plugins_only(
     client: TestClient,
 ) -> None:
