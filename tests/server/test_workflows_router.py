@@ -54,6 +54,40 @@ def test_save_rejects_invalid_yaml(client: TestClient) -> None:
         "/api/workflows/parse-audio-dates", json={"content": "not: [valid"}
     )
     assert resp.status_code == 422
+    assert isinstance(resp.json()["detail"], str)
+
+
+def test_save_rejects_a_contract_violation_with_structured_per_step_errors(
+    client: TestClient,
+) -> None:
+    """CIVEX-109: a plugin/config/input-reference violation returns a list
+    of {step, message} instead of one flattened exception string, so a UI
+    can point at the offending step directly."""
+    resp = client.put(
+        "/api/workflows/broken",
+        json={
+            "content": """\
+name: broken
+steps:
+  - id: one
+    plugin: civex.get_field
+    config:
+      field: subject
+      fileds: subject
+"""
+        },
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert detail == [
+        {
+            "step": "one",
+            "message": (
+                "Step 'one' config has unknown key 'fileds' for plugin "
+                "'civex.get_field' (accepts: field)"
+            ),
+        }
+    ]
 
 
 def test_get_unknown_stem_returns_404(client: TestClient) -> None:

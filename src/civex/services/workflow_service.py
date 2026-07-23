@@ -14,7 +14,11 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.domain.exceptions import (
+    NotFoundError,
+    ValidationError,
+    WorkflowValidationError,
+)
 from civex.workflows.contract_validation import validate_workflow_contracts
 from civex.workflows.definition import WorkflowDef, load_workflow
 
@@ -116,7 +120,9 @@ class WorkflowService:
         -- whoever is fixing them (often the AI's save_workflow tool) would
         otherwise have to resubmit once per error.
 
-        Raises ValidationError on failure.
+        Raises ValidationError on a bad stem or unparseable YAML;
+        WorkflowValidationError (carrying structured per-step errors,
+        CIVEX-109) on a contract violation.
         """
         if not _SAFE_STEM.match(stem):
             raise ValidationError(
@@ -130,7 +136,9 @@ class WorkflowService:
 
         errors = validate_workflow_contracts(wf, self._plugins_provider())
         if errors:
-            raise ValidationError("\n".join(errors))
+            raise WorkflowValidationError(
+                [{"step": e.step, "message": e.message} for e in errors]
+            )
         return wf
 
     def save(self, stem: str, content: str) -> tuple[Path, WorkflowDef]:

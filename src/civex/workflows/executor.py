@@ -107,7 +107,7 @@ def _validate_contracts(
     if errors:
         raise ValueError(
             "Workflow no longer matches its plugins' declared contracts:\n"
-            + "\n".join(errors)
+            + "\n".join(e.message for e in errors)
         )
 
 
