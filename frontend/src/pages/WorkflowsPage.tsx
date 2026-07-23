@@ -1,5 +1,4 @@
 import { Fragment, useState, useRef, useCallback } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import CodeMirror, {
   type EditorView,
   type ViewUpdate,
@@ -11,8 +10,10 @@ import {
   useSaveWorkflow,
   useDeleteWorkflow,
 } from '../hooks/useWorkflows'
+import { usePlugins, useUploadPlugin } from '../hooks/usePlugins'
 import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
+import { PluginEditor } from '../components/plugins/PluginEditor'
 import { AutocompleteMenu } from '../components/workflows/YamlAutocomplete'
 import {
   getAutocompleteContext,
@@ -21,35 +22,6 @@ import {
 } from '../utils/workflowAutocomplete'
 import type { Workflow } from '../api/workflows'
 import type { PluginInfo, PluginIOSpec } from '../api/plugins'
-import { api } from '../api/client'
-
-function usePlugins() {
-  return useQuery<PluginInfo[]>({
-    queryKey: ['plugins'],
-    queryFn: () => api.get<PluginInfo[]>('/plugins'),
-    staleTime: 30_000,
-  })
-}
-
-function useUploadPlugin() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: async (file: File) => {
-      const form = new FormData()
-      form.append('file', file)
-      const res = await fetch('/api/plugins/upload', {
-        method: 'POST',
-        body: form,
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.detail ?? `HTTP ${res.status}`)
-      }
-      return res.json()
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['plugins'] }),
-  })
-}
 
 const NEW_TEMPLATE = `name: my-workflow
 description: null
@@ -435,6 +407,10 @@ export default function WorkflowsPage() {
   const [pluginUploadError, setPluginUploadError] = useState<string | null>(
     null,
   )
+  const [pluginEditor, setPluginEditor] = useState<{
+    filename: string
+    isNew: boolean
+  } | null>(null)
 
   async function handlePluginFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -454,6 +430,14 @@ export default function WorkflowsPage() {
 
   function openEdit(wf: Workflow) {
     setEditor({ stem: wf.stem, isNew: false })
+  }
+
+  function openNewPlugin() {
+    setPluginEditor({ filename: '', isNew: true })
+  }
+
+  function openEditPlugin(filename: string) {
+    setPluginEditor({ filename, isNew: false })
   }
 
   async function handleDelete(wf: Workflow) {
@@ -619,6 +603,9 @@ export default function WorkflowsPage() {
             >
               {uploadPlugin.isPending ? 'Uploading…' : 'Upload plugin'}
             </Button>
+            <Button size="sm" variant="primary" onClick={openNewPlugin}>
+              + New plugin
+            </Button>
           </div>
         </div>
         {pluginList && pluginList.length > 0 && (
@@ -635,6 +622,7 @@ export default function WorkflowsPage() {
                   Source
                 </th>
                 <th className="py-2 px-3" />
+                <th className="py-2 px-3 text-right" />
               </tr>
             </thead>
             <tbody>
@@ -668,10 +656,24 @@ export default function WorkflowsPage() {
                       <td className="py-2 px-3 text-[#656d76] text-xs">
                         {isExpanded ? '▲' : '▼'}
                       </td>
+                      <td className="py-2 px-3 text-right">
+                        {p.filename && (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openEditPlugin(p.filename!)
+                            }}
+                          >
+                            Edit
+                          </Button>
+                        )}
+                      </td>
                     </tr>
                     {isExpanded && (
                       <tr className="border-b border-[#d0d7de]">
-                        <td colSpan={4} className="bg-[#f6f8fa] px-3 py-3">
+                        <td colSpan={5} className="bg-[#f6f8fa] px-3 py-3">
                           <PluginContractDetail plugin={p} />
                         </td>
                       </tr>
@@ -694,6 +696,14 @@ export default function WorkflowsPage() {
           isNew={editor.isNew}
           onClose={() => setEditor(null)}
           plugins={pluginList ?? []}
+        />
+      )}
+
+      {pluginEditor && (
+        <PluginEditor
+          filename={pluginEditor.filename}
+          isNew={pluginEditor.isNew}
+          onClose={() => setPluginEditor(null)}
         />
       )}
 
