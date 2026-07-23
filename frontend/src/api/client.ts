@@ -1,5 +1,19 @@
 const BASE = '/api'
 
+/** Some endpoints (e.g. PUT /workflows/{stem}, CIVEX-109) send structured
+ * data as `detail` rather than a plain string. `.detail` carries that raw
+ * value so callers who know its shape can use it directly; `.message`
+ * stays a human-readable fallback for callers that just display text. */
+export class ApiError extends Error {
+  detail: unknown
+
+  constructor(detail: unknown, status: number) {
+    super(typeof detail === 'string' ? detail : `HTTP ${status}`)
+    this.name = 'ApiError'
+    this.detail = detail
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   console.log('Making a request on', BASE, path, 'with init', init)
   const res = await fetch(`${BASE}${path}`, {
@@ -10,7 +24,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     console.log('Response received', res, body)
-    throw new Error(body.detail ?? `HTTP ${res.status}`)
+    throw new ApiError(body.detail, res.status)
   }
   if (res.status === 204) return undefined as T
   return res.json()

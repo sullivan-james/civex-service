@@ -1,9 +1,10 @@
-// Save-time validation errors arrive as one message per line (see
-// WorkflowService.validate / validate_workflow_contracts), each either
-// prefixed with "Step '<id>'" / "Step id '<id>'" or, for stem/YAML-parse
-// failures, unprefixed. Parsing that convention client-side lets the editor
-// group errors by step and jump to the offending step instead of showing
-// one opaque blob of text.
+// PUT /workflows/{stem} reports contract violations as structured, per-step
+// issues (WorkflowService.validate / validate_workflow_contracts, CIVEX-109)
+// rather than a flat string, so the editor can group them by step and jump
+// to the offending step instead of showing one opaque blob of text. Each
+// issue's `message` still carries a redundant "Step '<id>'" / "Step id
+// '<id>'" prefix (mirroring the `step` field) -- stripped here since the
+// group header already names the step.
 
 const STEP_PREFIX_RE = /^Step (?:id )?'([^']+)'\s*/
 
@@ -12,27 +13,14 @@ export interface WorkflowValidationIssue {
   message: string
 }
 
-export function parseWorkflowValidationErrors(
-  raw: string,
-): WorkflowValidationIssue[] {
-  return raw
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => ({
-      step: line.match(STEP_PREFIX_RE)?.[1] ?? null,
-      message: line,
-    }))
-}
-
 /** Issues grouped by step, in order of first appearance; `null` (general,
- * not tied to a step) comes wherever it was first seen among the messages. */
+ * not tied to a step) comes wherever it was first seen among the issues. */
 export function groupWorkflowValidationErrors(
-  raw: string,
+  issues: WorkflowValidationIssue[],
 ): Array<{ step: string | null; messages: string[] }> {
   const groups: Array<{ step: string | null; messages: string[] }> = []
   const byStep = new Map<string | null, string[]>()
-  for (const { step, message } of parseWorkflowValidationErrors(raw)) {
+  for (const { step, message } of issues) {
     let messages = byStep.get(step)
     if (!messages) {
       messages = []
