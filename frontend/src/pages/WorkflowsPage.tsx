@@ -29,7 +29,9 @@ import {
 import {
   groupWorkflowValidationErrors,
   findStepLine,
+  type WorkflowValidationIssue,
 } from '../utils/workflowValidationErrors'
+import { ApiError } from '../api/client'
 import type { Workflow } from '../api/workflows'
 import type { PluginInfo, PluginIOSpec } from '../api/plugins'
 
@@ -77,7 +79,9 @@ function WorkflowEditor({
 }: EditorProps) {
   const [stem, setStem] = useState(initialStem)
   const [content, setContent] = useState<string | null>(null)
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<WorkflowValidationIssue[] | null>(
+    null,
+  )
 
   const { data: detail, isLoading } = useWorkflow(isNew ? '' : initialStem)
   const save = useSaveWorkflow()
@@ -210,7 +214,19 @@ function WorkflowEditor({
       await save.mutateAsync({ stem: stem.trim(), content })
       onClose()
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Save failed')
+      // Contract violations (CIVEX-109) arrive as structured per-step
+      // issues; anything else (bad stem, unparseable YAML) is a plain
+      // string -- shown as a single general issue.
+      if (err instanceof ApiError && Array.isArray(err.detail)) {
+        setSaveError(err.detail as WorkflowValidationIssue[])
+      } else {
+        setSaveError([
+          {
+            step: null,
+            message: err instanceof Error ? err.message : 'Save failed',
+          },
+        ])
+      }
     }
   }
 
