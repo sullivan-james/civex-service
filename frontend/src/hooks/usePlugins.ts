@@ -37,7 +37,8 @@ export function useUploadPlugin() {
 export function useDeletePlugin() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (filename: string) => pluginsApi.delete(filename),
+    mutationFn: ({ filename, force }: { filename: string; force?: boolean }) =>
+      pluginsApi.delete(filename, force),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['plugins'] }),
   })
 }

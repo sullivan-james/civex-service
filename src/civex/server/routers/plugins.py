@@ -159,14 +159,16 @@ def get_plugin_source(filename: str, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.delete("/{filename}", status_code=204)
-def delete_plugin(filename: str, ctx: AppContext = Depends(get_ctx)):
+def delete_plugin(
+    filename: str, force: bool = False, ctx: AppContext = Depends(get_ctx)
+):
     """Delete a user plugin file. Refuses to delete built-ins (they have no
     file to delete, and 404) and any plugin still referenced by a workflow
-    step (409)."""
+    step (409), unless `force` is set."""
     if not filename.endswith(".py") or "/" in filename or "\\" in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
     try:
-        ctx.plugin_svc.delete(filename)
+        ctx.plugin_svc.delete(filename, force=force)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except ValidationError as e:
