@@ -10,7 +10,11 @@ import {
   useSaveWorkflow,
   useDeleteWorkflow,
 } from '../hooks/useWorkflows'
-import { useDeletePlugin, usePlugins, useUploadPlugin } from '../hooks/usePlugins'
+import {
+  useDeletePlugin,
+  usePlugins,
+  useUploadPlugin,
+} from '../hooks/usePlugins'
 import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import { PluginEditor } from '../components/plugins/PluginEditor'
