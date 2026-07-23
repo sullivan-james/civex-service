@@ -19,8 +19,13 @@ from civex.domain.exceptions import (
     ValidationError,
     WorkflowValidationError,
 )
-from civex.workflows.contract_validation import validate_workflow_contracts
+from civex.workflows.contract_validation import (
+    INPUT_STEP_ID,
+    ContractError,
+    validate_workflow_contracts,
+)
 from civex.workflows.definition import WorkflowDef, load_workflow
+from civex.workflows.executor import topological_sort
 
 if TYPE_CHECKING:
     from civex.plugins.registry import PluginRegistration
@@ -113,12 +118,19 @@ class WorkflowService:
         return results
 
     def validate(self, stem: str, content: str) -> WorkflowDef:
-        """Check stem format, YAML validity, and every step against the
-        contract its plugin declared, without writing anything.
+        """Check stem format, YAML validity, every step against the contract
+        its plugin declared, and the step graph itself (unresolvable
+        references, dependency cycles), without writing anything.
 
-        Contract violations are reported together rather than one at a time
-        -- whoever is fixing them (often the AI's save_workflow tool) would
-        otherwise have to resubmit once per error.
+        The graph check is a dry-run of the same
+        `civex.workflows.executor.topological_sort` the executor runs
+        against a live trigger -- so a cycle or a dangling reference fails
+        here, at save time, with a per-step message, instead of only
+        surfacing when a trigger fires (CIVEX-108).
+
+        Errors are reported together rather than one at a time -- whoever is
+        fixing them (often the AI's save_workflow tool) would otherwise have
+        to resubmit once per error.
 
         Raises ValidationError on a bad stem or unparseable YAML;
         WorkflowValidationError (carrying structured per-step errors,
@@ -135,6 +147,16 @@ class WorkflowService:
             raise ValidationError(f"Invalid workflow YAML: {e}")
 
         errors = validate_workflow_contracts(wf, self._plugins_provider())
+
+        try:
+            topological_sort(wf.steps, virtual_ids={INPUT_STEP_ID})
+        except ValueError as e:
+            # Unresolvable-reference messages are already reported, per
+            # input/step, by validate_workflow_contracts above -- only a
+            # cycle is genuinely new information here.
+            if "dependency cycle" in str(e):
+                errors.append(ContractError(step=None, message=str(e)))
+
         if errors:
             raise WorkflowValidationError(
                 [{"step": e.step, "message": e.message} for e in errors]
