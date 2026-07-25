@@ -1,4 +1,4 @@
-.PHONY: install install-all lock lint format format-check typecheck test secrets audit check pre-commit serve dev clean frontend-lint frontend-format frontend-format-check
+.PHONY: install install-all lock lint format format-check typecheck test secrets audit migrations-check check pre-commit serve dev clean frontend-install frontend-lint frontend-lint-check frontend-format frontend-format-check frontend-build
 
 install: ## Sync the dev environment (server + workflows + dev extras)
 	uv sync --extra server --extra workflows --extra dev
@@ -32,12 +32,29 @@ audit: ## Scan Python + frontend dependencies for known vulnerabilities
 	uv run pip-audit
 	cd frontend && npm audit --audit-level=high
 
+migrations-check: ## Check for Alembic migration drift (what CI runs)
+	$(eval DBFILE := $(shell mktemp -u --suffix=.db))
+	uv run alembic -x db_url="sqlite:///$(DBFILE)" upgrade head
+	uv run alembic -x db_url="sqlite:///$(DBFILE)" check
+
+# format-check/ruff/typecheck/test/secrets/audit/migrations-check mirror
+# ci.yml's lint/test/audit/migrations jobs; frontend-lint-check/
+# frontend-format-check/frontend-build mirror frontend-ci.yml's lint/build
+# jobs. Keep this list in lockstep with both workflow files — this target's
+# whole point is that a green `make check` locally means CI will be green
+# too, so agent-driven commits stop landing PRs that pass this and then
+# fail the real pipeline. Requires frontend deps installed (frontend-install
+# or npm ci) in addition to `make install`.
 check: format-check ## Everything CI checks, in one shot
 	uv run ruff check src/
 	$(MAKE) typecheck
 	$(MAKE) test
 	$(MAKE) secrets
 	$(MAKE) audit
+	$(MAKE) migrations-check
+	$(MAKE) frontend-lint-check
+	$(MAKE) frontend-format-check
+	$(MAKE) frontend-build
 
 pre-commit: ## Run all pre-commit hooks against the whole tree
 	uv run pre-commit run --all-files
@@ -48,14 +65,23 @@ serve: ## Start the API with auto-reload (requires the server extra)
 dev: ## Frontend dev server (run alongside `make serve`)
 	cd frontend && npm run dev
 
+frontend-install: ## Install frontend dependencies (matches CI's `npm ci`)
+	cd frontend && npm ci
+
 frontend-lint: ## ESLint (auto-fix)
 	cd frontend && npm run lint:fix
+
+frontend-lint-check: ## ESLint, check only (what CI runs)
+	cd frontend && npm run lint
 
 frontend-format: ## Prettier
 	cd frontend && npm run format
 
 frontend-format-check: ## Prettier, check only
 	cd frontend && npm run format:check
+
+frontend-build: ## Type-check + build frontend (what CI runs)
+	cd frontend && npm run build
 
 clean: ## Remove caches and the synced environment
 	rm -rf .venv .ruff_cache .mypy_cache .pytest_cache .coverage htmlcov
