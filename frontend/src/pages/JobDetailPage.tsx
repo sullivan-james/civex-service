@@ -2,6 +2,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useJob, useRerunJob } from '../hooks/useWorkflows'
 import { type WorkflowJob } from '../api/workflows'
 import { Badge, Button, LoadingState, ErrorState } from '../components/ui'
+import StepExecutionCard from '../components/jobs/StepExecutionCard'
 
 function StatusBadge({ status }: { status: WorkflowJob['status'] }) {
   switch (status) {
@@ -130,17 +131,25 @@ export default function JobDetailPage() {
         </div>
       )}
 
-      {/* Log output */}
+      {/* Steps */}
       <div>
         <h2 className="text-sm font-semibold text-[#1f2328] mb-2">
-          Output log
+          Steps
           {isActive && (
             <span className="ml-2 text-xs font-normal text-[#0969da] animate-pulse">
               updating…
             </span>
           )}
         </h2>
-        {job.log ? (
+        {job.step_executions && job.step_executions.length > 0 ? (
+          <div className="space-y-2">
+            {job.step_executions.map((step) => (
+              <StepExecutionCard key={step.step_id} step={step} />
+            ))}
+          </div>
+        ) : job.log ? (
+          // Jobs that predate per-step execution records (CIVEX-117/118)
+          // only have the flat captured-output blob to fall back to.
           <pre className="text-xs font-mono bg-[#1c2128] text-[#adbac7] rounded-md p-4 overflow-auto max-h-[60vh] whitespace-pre-wrap leading-relaxed">
             {job.log}
           </pre>

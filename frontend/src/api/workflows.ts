@@ -20,6 +20,16 @@ export interface WorkflowDetail extends Workflow {
   content: string
 }
 
+export interface StepExecution {
+  step_id: string
+  plugin: string
+  status: 'success' | 'failed' | 'skipped'
+  inputs: Record<string, unknown>
+  outputs: Record<string, unknown> | null
+  duration_seconds: number
+  error: string | null
+}
+
 export interface WorkflowJob {
   id: string
   workflow_name: string
@@ -29,6 +39,7 @@ export interface WorkflowJob {
   status: 'pending' | 'running' | 'completed' | 'failed'
   error: string | null
   log: string | null
+  step_executions: StepExecution[] | null
   created_at: string
   started_at: string | null
   finished_at: string | null
