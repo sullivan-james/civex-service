@@ -327,3 +327,55 @@ def test_one_broken_plugin_file_does_not_stop_discovery_of_the_others(
     assert "a_broken_plugin.py" in caplog.text
 
     assert get_plugin("project.corrupt_cache_plugin") is not None
+
+
+def test_get_load_failures_surfaces_which_file_failed_and_why(
+    tmp_path: Path, monkeypatch
+):
+    """CIVEX-112: a plugin file that fails discovery must be reported back
+    (filename + reason) so job logs and the plugin list UI can surface it --
+    cleared once the file is fixed, and swept once the file is deleted."""
+    from civex.domain.exceptions import PluginExecutionError
+    from civex.plugins import subprocess_runtime
+    from civex.plugins.registry import get_load_failures
+
+    broken_content = "this is not valid python ((("
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    broken_path = plugins_dir / "broken_plugin.py"
+    broken_path.write_text(broken_content)
+
+    real_describe_plugin = subprocess_runtime.describe_plugin
+
+    def _fake_describe(path: Path, *args, **kwargs):
+        if path.read_text() == broken_content:
+            raise PluginExecutionError("boom: invalid syntax")
+        return real_describe_plugin(path, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess_runtime, "describe_plugin", _fake_describe)
+
+    discover_user_plugins(plugins_dir)
+    failures = get_load_failures(plugins_dir)
+    assert failures == [
+        {"filename": "broken_plugin.py", "error": "boom: invalid syntax"}
+    ]
+
+    # Fixing the file's contents clears the failure on the next scan.
+    broken_path.write_text(
+        _USER_PLUGIN_CODE.replace(
+            "project.registry_test_plugin", "project.formerly_broken_plugin"
+        )
+    )
+    discover_user_plugins(plugins_dir)
+    assert get_load_failures(plugins_dir) == []
+    assert get_plugin("project.formerly_broken_plugin") is not None
+
+    # Deleting the file sweeps its (now stale) failure entry too.
+    broken_path.write_text(broken_content)
+    discover_user_plugins(plugins_dir)
+    assert get_load_failures(plugins_dir) == [
+        {"filename": "broken_plugin.py", "error": "boom: invalid syntax"}
+    ]
+    broken_path.unlink()
+    discover_user_plugins(plugins_dir)
+    assert get_load_failures(plugins_dir) == []

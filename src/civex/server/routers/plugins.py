@@ -50,6 +50,19 @@ def list_plugins(ctx: AppContext = Depends(get_ctx)):
     return [PluginInfo(**p) for p in ctx.plugin_svc.list_registered()]
 
 
+class PluginLoadError(BaseModel):
+    filename: str
+    error: str
+
+
+@router.get("/errors", response_model=list[PluginLoadError])
+def list_plugin_load_errors(ctx: AppContext = Depends(get_ctx)):
+    """List user plugin files that failed discovery -- these have no plugin
+    id and so never appear in GET /plugins, but the frontend plugin panel
+    still needs to show why they're missing."""
+    return [PluginLoadError(**e) for e in ctx.plugin_svc.list_load_errors()]
+
+
 @router.post("/upload", response_model=UploadResult)
 async def upload_plugin(
     file: UploadFile = File(...), ctx: AppContext = Depends(get_ctx)

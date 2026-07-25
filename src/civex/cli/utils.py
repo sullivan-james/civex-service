@@ -86,8 +86,6 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[list[dict], str]:
     from civex.workflows import executor
 
     config = cli_load_config()
-    plugin_registry.discover_user_plugins(config.civex_dir / "plugins")
-    plugins = plugin_registry.all_plugins()
 
     wf_def = ctx.job_svc.find_workflow(job.workflow_name)
     if wf_def is None:
@@ -132,6 +130,12 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[list[dict], str]:
     root.setLevel(min(prev_level, _logging.DEBUG))
     try:
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            # Discovery runs inside the log-capture block (rather than once
+            # up front) so a broken plugin file's log.warning() -- and thus
+            # which file failed and why -- lands in this job's log instead of
+            # vanishing into the process's own stderr (CIVEX-112).
+            plugin_registry.discover_user_plugins(config.civex_dir / "plugins")
+            plugins = plugin_registry.all_plugins()
             wf_ctx = WorkflowContext(record=record, dataset=dataset, _app_ctx=ctx)
             step_executions = executor.run(
                 wf_def,

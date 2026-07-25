@@ -76,6 +76,16 @@ REGISTRY: dict[str, PluginRegistration] = {}
 # of "which workflows use plugin X" is needed.
 _SUBPROCESS_DESCRIBED: dict[Path, tuple[str, str]] = {}
 
+# Resolved path -> human-readable error, for every user plugin file that most
+# recently failed discovery (bad PEP 723 deps, a describe() that raises, a
+# timeout, ...). Populated/cleared by discover_user_plugins() each scan, so it
+# always reflects the current contents of _civex/plugins/ rather than history
+# -- see get_load_failures(), read by PluginService.list_load_errors() to
+# surface these in the plugin list UI (and by run_job()/run_pending_jobs(),
+# where the log.warning() below lands in the job log because discovery now
+# runs inside their log-capture block) (CIVEX-112).
+_LOAD_FAILURES: dict[Path, str] = {}
+
 
 def _registration_for_tier0(plugin_cls: type[Tier0Plugin]) -> PluginRegistration:
     def invoke(
@@ -180,17 +190,23 @@ def discover_user_plugins(plugins_dir: Path) -> None:
     is skipped; an edited one is described again so its new contract takes
     effect immediately (CIVEX-142). Describe results are also cached on disk
     by content hash, so a restart doesn't re-spawn every plugin."""
+    resolved_dir = plugins_dir.resolve()
     if not plugins_dir.exists():
+        for stale in [p for p in _LOAD_FAILURES if p.parent == resolved_dir]:
+            _LOAD_FAILURES.pop(stale, None)
         return
 
+    seen: set[Path] = set()
     for path in sorted(plugins_dir.glob("*.py")):
         resolved = path.resolve()
+        seen.add(resolved)
         try:
             content_hash = _content_hash(resolved)
         except OSError:
             continue  # unreadable or vanished mid-scan; nothing to register
         cached = _SUBPROCESS_DESCRIBED.get(resolved)
         if cached is not None and cached[0] == content_hash and cached[1] in REGISTRY:
+            _LOAD_FAILURES.pop(resolved, None)
             continue
         try:
             describe_result = _describe_with_disk_cache(path, content_hash)
@@ -200,9 +216,16 @@ def discover_user_plugins(plugins_dir: Path) -> None:
             # that raises, a timeout, ...) must not stop discovery of every
             # other file -- only workflows referencing this one are affected.
             log.warning("Failed to load plugin %s: %s", path, exc)
+            _LOAD_FAILURES[resolved] = str(exc)
             continue
         REGISTRY[registration.id] = registration
         _SUBPROCESS_DESCRIBED[resolved] = (content_hash, registration.id)
+        _LOAD_FAILURES.pop(resolved, None)
+
+    for stale in [
+        p for p in _LOAD_FAILURES if p.parent == resolved_dir and p not in seen
+    ]:
+        _LOAD_FAILURES.pop(stale, None)
 
 
 def _content_hash(path: Path) -> str:
@@ -272,6 +295,22 @@ def get_plugin(plugin_id: str) -> PluginRegistration | None:
 
 def all_plugins() -> dict[str, PluginRegistration]:
     return dict(REGISTRY)
+
+
+def get_load_failures(plugins_dir: Path) -> list[dict[str, str]]:
+    """[{"filename", "error"}] for every file directly inside `plugins_dir`
+    that failed to load as of the last discover_user_plugins() scan, sorted
+    by filename. Scoped to `plugins_dir` (rather than returning every failure
+    this process has ever seen) so one project's broken files don't leak into
+    another's -- relevant here mainly because REGISTRY/_LOAD_FAILURES are
+    process-wide globals and a single process may build_local_context() for
+    more than one project directory over its lifetime."""
+    resolved_dir = plugins_dir.resolve()
+    return [
+        {"filename": path.name, "error": error}
+        for path, error in sorted(_LOAD_FAILURES.items(), key=lambda item: item[0].name)
+        if path.parent == resolved_dir
+    ]
 
 
 def unregister_plugin(plugin_id: str) -> None:

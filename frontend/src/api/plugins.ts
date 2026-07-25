@@ -30,8 +30,14 @@ export interface PluginSource {
   code: string
 }
 
+export interface PluginLoadError {
+  filename: string
+  error: string
+}
+
 export const pluginsApi = {
   list: () => api.get<PluginInfo[]>('/plugins'),
+  loadErrors: () => api.get<PluginLoadError[]>('/plugins/errors'),
   source: (filename: string) =>
     api.get<PluginSource>(`/plugins/${encodeURIComponent(filename)}/source`),
   save: (name: string, code: string) =>

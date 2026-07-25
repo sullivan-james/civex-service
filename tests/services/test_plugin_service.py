@@ -63,6 +63,31 @@ def test_list_registered_includes_category_and_config_schema(
     assert "properties" in builtin["config_schema"]
 
 
+def test_list_load_errors_empty_when_no_plugins_dir_populated(
+    ctx: AppContext,
+) -> None:
+    assert ctx.plugin_svc.list_load_errors() == []
+
+
+def test_list_load_errors_surfaces_a_broken_plugin_file(ctx: AppContext) -> None:
+    """A file that fails discovery (syntax error, bad PEP 723 deps, ...) has
+    no plugin id and so never appears in list_registered() -- the plugin
+    list UI needs list_load_errors() to know it's there and why it's broken
+    (CIVEX-112)."""
+    plugins_dir = ctx.plugin_svc._dir
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    (plugins_dir / "broken.py").write_text("this is not valid python (((")
+
+    errors = ctx.plugin_svc.list_load_errors()
+    assert len(errors) == 1
+    assert errors[0]["filename"] == "broken.py"
+    assert errors[0]["error"]
+
+    assert not any(
+        p["filename"] == "broken.py" for p in ctx.plugin_svc.list_registered()
+    )
+
+
 def test_list_raw_empty_when_no_plugins_dir_populated(ctx: AppContext) -> None:
     assert ctx.plugin_svc.list_raw() == []
 
