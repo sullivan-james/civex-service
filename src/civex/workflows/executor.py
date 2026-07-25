@@ -20,24 +20,20 @@ from civex.workflows.definition import StepDef, WorkflowDef
 log = logging.getLogger(__name__)
 
 
-def topological_sort(
+def _build_dependency_graph(
     steps: list[StepDef], virtual_ids: set[str] | None = None
-) -> list[StepDef]:
-    """Kahn's algorithm — returns steps in execution order.
+) -> dict[str, set[str]]:
+    """step_id → set of real step_ids it depends on, derived from `inputs`
+    and `if` references. Virtual ids (e.g. "__input__") may be referenced
+    but carry no deps of their own and are excluded from the result.
 
-    virtual_ids: step-like ids (e.g. "__input__") that may be referenced in inputs
-                 but are not actual steps; they carry no deps and are never enqueued.
-
-    Raises ValueError on an unresolvable step reference or a dependency cycle.
-    Public (no leading underscore) so WorkflowService.validate() can reuse the
-    same cycle check as a dry-run at save time (CIVEX-108), rather than only
-    discovering a cycle when a trigger fires at run time.
+    Raises ValueError on an unresolvable step reference. Shared by
+    `topological_sort()` (execution order) and `run()` (CIVEX-132's
+    `StepExecution.depends_on`) so both derive the same edges one way.
     """
     ids = {s.id for s in steps}
     known_ids = ids | (virtual_ids or set())
-    by_id = {s.id: s for s in steps}
 
-    # Build: step_id → set of step_ids it depends on
     deps: dict[str, set[str]] = {s.id: set() for s in steps}
     for step in steps:
         for ref in step.inputs.values():
@@ -56,8 +52,27 @@ def topological_sort(
                     )
                 if source_id in ids:
                     deps[step.id].add(source_id)
+    return deps
 
-    # Kahn's
+
+def topological_sort(
+    steps: list[StepDef], virtual_ids: set[str] | None = None
+) -> list[StepDef]:
+    """Kahn's algorithm — returns steps in execution order.
+
+    virtual_ids: step-like ids (e.g. "__input__") that may be referenced in inputs
+                 but are not actual steps; they carry no deps and are never enqueued.
+
+    Raises ValueError on an unresolvable step reference or a dependency cycle.
+    Public (no leading underscore) so WorkflowService.validate() can reuse the
+    same cycle check as a dry-run at save time (CIVEX-108), rather than only
+    discovering a cycle when a trigger fires at run time.
+    """
+    by_id = {s.id: s for s in steps}
+    deps = _build_dependency_graph(steps, virtual_ids)
+
+    # Kahn's — mutates its own copy of the dependency sets
+    deps = {sid: set(d) for sid, d in deps.items()}
     in_degree = {sid: len(d) for sid, d in deps.items()}
     queue = deque(sid for sid, d in in_degree.items() if d == 0)
     order: list[StepDef] = []
@@ -164,6 +179,7 @@ def run(
     log.info("Virtual IDs: %s", virtual_ids)
     order = topological_sort(wf.steps, virtual_ids=virtual_ids)
     log.info("Execution order: %s", [s.id for s in order])
+    dependency_graph = _build_dependency_graph(wf.steps, virtual_ids=virtual_ids)
     step_outputs: dict[str, dict[str, Any]] = dict(initial_outputs or {})
 
     log.info(
@@ -191,6 +207,7 @@ def run(
                     inputs={},
                     outputs=None,
                     duration_seconds=0.0,
+                    depends_on=sorted(dependency_graph[step.id]),
                 ).to_dict()
             )
             continue
@@ -224,6 +241,7 @@ def run(
                     outputs=None,
                     duration_seconds=time.perf_counter() - t,
                     error=str(e),
+                    depends_on=sorted(dependency_graph[step.id]),
                 ).to_dict()
             )
             # The caller has no other way to see how far a failed run got --
@@ -240,6 +258,7 @@ def run(
                 inputs=_json_safe(inputs),
                 outputs=_json_safe(result.outputs),
                 duration_seconds=time.perf_counter() - t,
+                depends_on=sorted(dependency_graph[step.id]),
             ).to_dict()
         )
 

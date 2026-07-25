@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from 'react'
-import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { remoteApi, type SyncResult } from '../api/remote'
 import AiAttestationGate from './ai/AiAttestationGate'

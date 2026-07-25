@@ -344,6 +344,12 @@ class StepExecution:
     was skipped by a falsy `if:` (its plugin never ran). `error` is the same
     human-readable message form `ErrorEnvelope.message` uses, not the full
     envelope -- the failing step already names itself via `step_id`.
+
+    `depends_on` is the same dependency edges `executor.topological_sort()`
+    derived to order this run (CIVEX-132) -- the step ids (not virtual ones
+    like `__input__`) this step's `inputs`/`if` reference. It reflects the
+    dependencies actually used by this run rather than requiring a separate
+    fetch/parse of the workflow's YAML to draw a DAG of it.
     """
 
     step_id: str
@@ -353,6 +359,7 @@ class StepExecution:
     outputs: dict[str, Any] | None
     duration_seconds: float
     error: str | None = None
+    depends_on: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -363,6 +370,7 @@ class StepExecution:
             "outputs": self.outputs,
             "duration_seconds": self.duration_seconds,
             "error": self.error,
+            "depends_on": self.depends_on,
         }
 
     @classmethod
@@ -375,6 +383,7 @@ class StepExecution:
             outputs=raw.get("outputs"),
             duration_seconds=raw.get("duration_seconds", 0.0),
             error=raw.get("error"),
+            depends_on=raw.get("depends_on") or [],
         )
 
 

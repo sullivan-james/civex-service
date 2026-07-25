@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router'
 import { utcToDatetimeLocal, datetimeLocalToUTC } from '../utils/dates'
 import {
   useSchema,

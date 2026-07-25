@@ -1,8 +1,10 @@
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router'
 import { useJob, useRerunJob } from '../hooks/useWorkflows'
 import { type WorkflowJob } from '../api/workflows'
 import { Badge, Button, LoadingState, ErrorState } from '../components/ui'
 import StepExecutionCard from '../components/jobs/StepExecutionCard'
+import JobStepsDiagram from '../components/jobs/JobStepsDiagram'
 
 function StatusBadge({ status }: { status: WorkflowJob['status'] }) {
   switch (status) {
@@ -33,6 +35,7 @@ export default function JobDetailPage() {
   const navigate = useNavigate()
   const { data: job, isLoading, error } = useJob(id ?? '')
   const rerun = useRerunJob()
+  const [view, setView] = useState<'list' | 'diagram'>('list')
 
   if (isLoading) return <LoadingState />
   if (error) return <ErrorState message={error.message} />
@@ -133,20 +136,44 @@ export default function JobDetailPage() {
 
       {/* Steps */}
       <div>
-        <h2 className="text-sm font-semibold text-[#1f2328] mb-2">
-          Steps
-          {isActive && (
-            <span className="ml-2 text-xs font-normal text-[#0969da] animate-pulse">
-              updating…
-            </span>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-semibold text-[#1f2328]">
+            Steps
+            {isActive && (
+              <span className="ml-2 text-xs font-normal text-[#0969da] animate-pulse">
+                updating…
+              </span>
+            )}
+          </h2>
+          {job.step_executions && job.step_executions.length > 0 && (
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant={view === 'list' ? 'primary' : 'default'}
+                onClick={() => setView('list')}
+              >
+                List
+              </Button>
+              <Button
+                size="sm"
+                variant={view === 'diagram' ? 'primary' : 'default'}
+                onClick={() => setView('diagram')}
+              >
+                Diagram
+              </Button>
+            </div>
           )}
-        </h2>
+        </div>
         {job.step_executions && job.step_executions.length > 0 ? (
-          <div className="space-y-2">
-            {job.step_executions.map((step) => (
-              <StepExecutionCard key={step.step_id} step={step} />
-            ))}
-          </div>
+          view === 'diagram' ? (
+            <JobStepsDiagram steps={job.step_executions} />
+          ) : (
+            <div className="space-y-2">
+              {job.step_executions.map((step) => (
+                <StepExecutionCard key={step.step_id} step={step} />
+              ))}
+            </div>
+          )
         ) : job.log ? (
           // Jobs that predate per-step execution records (CIVEX-117/118)
           // only have the flat captured-output blob to fall back to.
