@@ -44,9 +44,40 @@ steps:
             "outputs": {"value": "alice"},
             "duration_seconds": step_executions[0]["duration_seconds"],
             "error": None,
+            "depends_on": [],
         }
     ]
     assert step_executions[0]["duration_seconds"] >= 0.0
+
+
+def test_run_records_depends_on_for_a_step_that_reads_another_steps_output(
+    ctx, make_collection, make_schema, make_record
+):
+    dataset = make_collection("study")
+    make_schema("doc", fields=[("name", "string"), ("copy", "string")])
+    record = make_record("study", "doc", {"name": "alice"})
+    wf_ctx = WorkflowContext(record=record, dataset=dataset, _app_ctx=ctx)
+
+    wf = WorkflowDef.model_validate(
+        yaml.safe_load("""
+name: wf
+steps:
+  - id: read
+    plugin: civex.get_field
+    config: {field: name}
+  - id: write
+    plugin: civex.save_field
+    config: {field: copy}
+    inputs: {value: read.value}
+""")
+    )
+
+    step_executions = executor.run(wf, wf_ctx, all_plugins())
+
+    assert [(s["step_id"], s["depends_on"]) for s in step_executions] == [
+        ("read", []),
+        ("write", ["read"]),
+    ]
 
 
 def test_run_records_a_skipped_step(ctx, make_collection, make_schema, make_record):
@@ -77,6 +108,7 @@ steps:
             "outputs": None,
             "duration_seconds": 0.0,
             "error": None,
+            "depends_on": [],
         }
     ]
 
@@ -150,6 +182,7 @@ steps:
             "outputs": {"value": "alice"},
             "duration_seconds": finished.step_executions[0]["duration_seconds"],
             "error": None,
+            "depends_on": [],
         }
     ]
 

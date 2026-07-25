@@ -28,6 +28,7 @@ export interface StepExecution {
   outputs: Record<string, unknown> | null
   duration_seconds: number
   error: string | null
+  depends_on: string[]
 }
 
 export interface WorkflowJob {
