@@ -73,3 +73,13 @@ def _migrate_connection(connection: Connection) -> None:
     else:
         command.upgrade(cfg, "head")
     connection.commit()
+
+    if connection.dialect.name == "sqlite":
+        # Migrations run with PRAGMA foreign_keys=OFF while any table rebuild
+        # is in progress (see migrations/env.py). PRAGMA foreign_keys can't
+        # be changed while a transaction is open, and one is reliably open
+        # again by the time command.upgrade() returns (e.g. batch mode's
+        # INSERT...SELECT copy step) -- so this has to happen after the
+        # commit above, not inside env.py.
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+        connection.commit()

@@ -54,7 +54,10 @@ class LocalDatasetRepository:
             synchronize_session=False
         )
         # Clear parent_record_id before bulk-deleting records to satisfy the
-        # self-referential FK on PostgreSQL (SQLite ignores it without PRAGMA).
+        # composite self-referential FK (parent_record_id, dataset_id) ->
+        # (records.id, records.dataset_id). A child can only ever point to a
+        # parent in the same dataset, so nulling every record in this dataset
+        # can't strand a reference from another dataset.
         self._s.query(Record).filter_by(dataset_id=id).update(
             {"parent_record_id": None}, synchronize_session=False
         )

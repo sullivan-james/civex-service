@@ -19,6 +19,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     JSON,
@@ -156,6 +157,17 @@ class Record(Base):
 
     __tablename__ = "records"
     __table_args__ = (
+        # A child's dataset_id must match its parent's (parent_record_id ->
+        # dataset_id is a functional dependency; enforcing it as a plain FK
+        # on id alone would be a 3NF violation). The unique constraint below
+        # lets (id, dataset_id) be the target of the composite FK that ties
+        # parent_record_id to the parent's dataset_id.
+        UniqueConstraint("id", "dataset_id", name="uq_records_id_dataset"),
+        ForeignKeyConstraint(
+            ["parent_record_id", "dataset_id"],
+            ["records.id", "records.dataset_id"],
+            name="fk_records_parent_same_dataset",
+        ),
         Index("ix_records_dataset_schema", "dataset_id", "schema_id"),
         Index("ix_records_dataset_created", "dataset_id", "created_at"),
         Index("ix_records_dataset_parent", "dataset_id", "parent_record_id"),
@@ -171,9 +183,7 @@ class Record(Base):
     schema_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("schemas.id"), nullable=False
     )
-    parent_record_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("records.id"), nullable=True
-    )
+    parent_record_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     data: Mapped[dict[str, Any]] = mapped_column(_JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
