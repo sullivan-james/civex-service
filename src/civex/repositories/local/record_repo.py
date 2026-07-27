@@ -21,17 +21,6 @@ def _coerce_json_value(v: str) -> Any:
         return v
 
 
-def _search_text(data: dict[str, Any]) -> str:
-    """Concatenate searchable values for FTS. Skips bools and file-ref dicts."""
-    parts: list[str] = []
-    for v in data.values():
-        if isinstance(v, bool) or isinstance(v, dict):
-            continue
-        if isinstance(v, (str, int, float)):
-            parts.append(str(v))
-    return " ".join(parts)
-
-
 class LocalRecordRepository:
     def __init__(self, session: Session, is_postgres: bool = False) -> None:
         self._s = session
@@ -138,13 +127,14 @@ class LocalRecordRepository:
         data: dict[str, Any],
         parent_record_id: uuid.UUID | None = None,
     ) -> RecordDTO:
-        sv = func.to_tsvector("simple", _search_text(data)) if self._pg else None
+        # search_vector is maintained by a Postgres trigger (CIVEX-173) so it
+        # can't go stale on writes that don't go through this repo; unused on
+        # SQLite (see models._TSVECTOR).
         row = Record(
             dataset_id=dataset_id,
             schema_id=schema_id,
             data=data,
             parent_record_id=parent_record_id,
-            search_vector=sv,
         )
         self._s.add(row)
         self._s.flush()
@@ -155,9 +145,6 @@ class LocalRecordRepository:
         if row is None:
             raise NotFoundError(f"Record '{id}' not found")
         row.data = data
-        row.search_vector = (
-            func.to_tsvector("simple", _search_text(data)) if self._pg else None
-        )
         self._s.flush()
         return _to_dto(row)
 
