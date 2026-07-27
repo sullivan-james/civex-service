@@ -32,7 +32,7 @@ def apply_bundle(session: Session, bundle: SyncBundle) -> None:
     _upsert_datasets(session, bundle.datasets)
     _upsert_records(session, bundle.records)
     _delete_records(session, bundle.deleted_record_ids)
-    _upsert_commits(session, bundle.commits)
+    _upsert_commits(session, bundle.commits, bundle.audit_log)
     _upsert_audit_log(session, bundle.audit_log)
     session.flush()
 
@@ -156,7 +156,9 @@ def _delete_records(session: Session, record_ids: list[str]) -> None:
             session.delete(row)
 
 
-def _upsert_commits(session: Session, rows: list[dict]) -> None:
+def _upsert_commits(
+    session: Session, rows: list[dict], audit_log_rows: list[dict]
+) -> None:
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc)
@@ -164,21 +166,39 @@ def _upsert_commits(session: Session, rows: list[dict]) -> None:
         dto = CommitDTO.from_dict(d)
         existing = session.get(Commit, dto.id)
         if existing is None:
+            record_count, schema_count, dataset_count = _recompute_commit_counts(
+                dto.id, audit_log_rows
+            )
             session.add(
                 Commit(
                     id=dto.id,
                     seq=dto.seq,
                     message=dto.message,
                     created_at=dto.created_at,
-                    record_count=dto.record_count,
-                    schema_count=dto.schema_count,
-                    dataset_count=dto.dataset_count,
+                    record_count=record_count,
+                    schema_count=schema_count,
+                    dataset_count=dataset_count,
                     pushed_at=now,
                 )
             )
         else:
             if not existing.pushed_at:
                 existing.pushed_at = now
+
+
+def _recompute_commit_counts(
+    commit_id: uuid.UUID, audit_log_rows: list[dict]
+) -> tuple[int, int, int]:
+    """Recompute a commit's aggregate counts from the entries it actually
+    shipped with, rather than trusting the counts a peer put on the wire
+    (CIVEX-173) -- a commit and all of its audit_log entries always travel
+    together in the same bundle (see exporter.export_bundle), so this is a
+    complete recount, not a partial one."""
+    entries = [e for e in audit_log_rows if e.get("commit_id") == str(commit_id)]
+    record_count = sum(1 for e in entries if e["entity_type"] == "record")
+    schema_count = sum(1 for e in entries if e["entity_type"] in ("schema", "field"))
+    dataset_count = sum(1 for e in entries if e["entity_type"] == "dataset")
+    return record_count, schema_count, dataset_count
 
 
 def _upsert_audit_log(session: Session, rows: list[dict]) -> None:
