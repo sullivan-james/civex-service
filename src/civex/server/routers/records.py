@@ -131,9 +131,13 @@ def update_record(
 
 
 @router.delete("/records/{record_id}", status_code=204)
-def delete_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
+def delete_record(
+    record_id: str,
+    force: bool = Query(default=False),
+    ctx: AppContext = Depends(get_ctx),
+):
     try:
-        ctx.record_svc.delete(record_id)
+        ctx.record_svc.delete(record_id, force=force)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     ctx.commit()
@@ -142,9 +146,10 @@ def delete_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
 @router.post("/records/bulk-delete")
 def bulk_delete_records(
     ids: list[str] = Body(..., embed=True),
+    force: bool = Body(default=False, embed=True),
     ctx: AppContext = Depends(get_ctx),
 ):
-    deleted = ctx.record_svc.delete_many(ids)
+    deleted = ctx.record_svc.delete_many(ids, force=force)
     ctx.commit()
     return {"deleted": deleted}
 
@@ -153,10 +158,13 @@ def bulk_delete_records(
 def delete_all_records(
     dataset_name: str,
     schema: Optional[str] = Query(default=None),
+    force: bool = Query(default=False),
     ctx: AppContext = Depends(get_ctx),
 ):
     try:
-        deleted = ctx.record_svc.delete_all(dataset_name, schema_name=schema or None)
+        deleted = ctx.record_svc.delete_all(
+            dataset_name, schema_name=schema or None, force=force
+        )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     ctx.commit()

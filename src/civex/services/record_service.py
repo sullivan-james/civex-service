@@ -181,6 +181,21 @@ def _natural_name(
     return None
 
 
+def _referrers_message(referrers: list[tuple[RecordDTO, dict[str, str]]]) -> str:
+    shown = referrers[:10]
+    parts = [
+        f"{rec.schema_name} record {rec.id} (via {', '.join(sorted(set(fields.values())))})"
+        for rec, fields in shown
+    ]
+    msg = (
+        f"Cannot delete: still referenced by {len(referrers)} record(s): "
+        + "; ".join(parts)
+    )
+    if len(referrers) > len(shown):
+        msg += f" and {len(referrers) - len(shown)} more"
+    return msg
+
+
 class RecordService:
     def __init__(
         self,
@@ -555,22 +570,36 @@ class RecordService:
         records = self._records.list_by_schema(schema.id, search=search, limit=limit)
         return [self._with_names(r) for r in records]
 
-    def delete(self, record_id: str) -> None:
+    def delete(self, record_id: str, force: bool = False) -> None:
         record = self.get(record_id)
+        delete_set = self._collect_delete_set(record.id)
+        self._handle_referrers(delete_set, force)
         self._delete_recursive(record.id)
 
-    def delete_many(self, record_ids: list[str]) -> int:
-        deleted = 0
+    def delete_many(self, record_ids: list[str], force: bool = False) -> int:
+        records = []
         for rid in record_ids:
             try:
-                record = self.get(rid)
+                records.append(self.get(rid))
             except NotFoundError:
                 continue
-            self._delete_recursive(record.id)
+
+        delete_set: set[uuid.UUID] = set()
+        for r in records:
+            delete_set |= self._collect_delete_set(r.id)
+        self._handle_referrers(delete_set, force)
+
+        deleted = 0
+        for r in records:
+            if not self._records.get_by_id(r.id):
+                continue  # already gone via a parent cascade earlier in this batch
+            self._delete_recursive(r.id)
             deleted += 1
         return deleted
 
-    def delete_all(self, dataset_name: str, schema_name: str | None = None) -> int:
+    def delete_all(
+        self, dataset_name: str, schema_name: str | None = None, force: bool = False
+    ) -> int:
         dataset = self._datasets.get_by_name(dataset_name)
         if not dataset:
             raise NotFoundError(f"Dataset '{dataset_name}' not found")
@@ -579,10 +608,15 @@ class RecordService:
             schema = self._schema_svc.get(schema_name)
             schema_id = schema.id
         records = self._records.list_by_dataset(dataset.id)
+        targets = [r for r in records if not schema_id or r.schema_id == schema_id]
+
+        delete_set: set[uuid.UUID] = set()
+        for r in targets:
+            delete_set |= self._collect_delete_set(r.id)
+        self._handle_referrers(delete_set, force)
+
         deleted = 0
-        for r in records:
-            if schema_id and r.schema_id != schema_id:
-                continue
+        for r in targets:
             if not self._records.get_by_id(r.id):
                 continue  # already gone via a parent cascade
             self._delete_recursive(r.id)
@@ -596,3 +630,131 @@ class RecordService:
         if self._audit and record_dto:
             self._audit.log_change("delete", "record", id, record_dto.to_dict(), None)
         self._records.delete(id)
+
+    def _collect_delete_set(self, root_id: uuid.UUID) -> set[uuid.UUID]:
+        """A record plus every descendant that cascades with it via
+        parent_record_id -- the full set of ids that will disappear together,
+        so referrers *within* the set don't block the delete."""
+        ids = {root_id}
+        for child in self._records.list_children(root_id):
+            ids |= self._collect_delete_set(child.id)
+        return ids
+
+    def _reference_field_map(self) -> dict[str, tuple[str, str]]:
+        """field id (str) -> (field name, dtype) for every reference/reference_list
+        field across all schemas -- record data is stored id-keyed (see
+        _names_to_ids), and a reference field on any schema can point at a
+        record of any other schema, so this has to span all of them."""
+        result: dict[str, tuple[str, str]] = {}
+        for schema in self._schema_svc.list_all():
+            for f in schema.fields:
+                if f.dtype in ("reference", "reference_list"):
+                    result[str(f.id)] = (f.name, f.dtype)
+        return result
+
+    def _find_referrers(
+        self, target_ids: set[uuid.UUID], exclude_ids: set[uuid.UUID]
+    ) -> list[tuple[RecordDTO, dict[str, str]]]:
+        """Records outside exclude_ids holding a reference/reference_list value
+        that points at any of target_ids. Returns (referrer, {field_id: field_name})
+        pairs so callers know exactly which field(s) to null out or report."""
+        field_map = self._reference_field_map()
+        if not field_map:
+            return []
+        ref_ids = [
+            uuid.UUID(fid) for fid, (_, dt) in field_map.items() if dt == "reference"
+        ]
+        ref_list_ids = [
+            uuid.UUID(fid)
+            for fid, (_, dt) in field_map.items()
+            if dt == "reference_list"
+        ]
+        target_strs = {str(t) for t in target_ids}
+        candidates = self._records.list_referencing(
+            list(target_ids), ref_ids, ref_list_ids
+        )
+
+        results = []
+        for rec in candidates:
+            if rec.id in exclude_ids:
+                continue
+            matched: dict[str, str] = {}
+            for fid_str, (fname, dt) in field_map.items():
+                val = rec.data.get(fid_str)
+                if dt == "reference" and val in target_strs:
+                    matched[fid_str] = fname
+                elif (
+                    dt == "reference_list"
+                    and isinstance(val, list)
+                    and target_strs & set(val)
+                ):
+                    matched[fid_str] = fname
+            if matched:
+                results.append((rec, matched))
+        return results
+
+    def _handle_referrers(self, target_ids: set[uuid.UUID], force: bool) -> None:
+        """Block a delete of target_ids if anything outside the batch still
+        references it, unless force=True -- in which case the referencing
+        fields are cleared (ON DELETE SET NULL) and audit-logged instead."""
+        referrers = self._find_referrers(target_ids, exclude_ids=target_ids)
+        if not referrers:
+            return
+        if not force:
+            raise ValidationError(_referrers_message(referrers))
+
+        target_strs = {str(t) for t in target_ids}
+        for rec, matched_fields in referrers:
+            old_named = self._with_names(rec)
+            new_data = dict(rec.data)
+            for fid_str in matched_fields:
+                val = new_data.get(fid_str)
+                if isinstance(val, list):
+                    new_data[fid_str] = [v for v in val if v not in target_strs]
+                else:
+                    new_data[fid_str] = None
+            updated = self._records.update(id=rec.id, data=new_data)
+            if self._audit:
+                self._audit.log_change(
+                    "update",
+                    "record",
+                    rec.id,
+                    old_named.to_dict(),
+                    self._with_names(updated).to_dict(),
+                )
+
+    def find_dangling_references(self) -> list[dict[str, Any]]:
+        """Scan every record for reference/reference_list values pointing at a
+        record id that no longer exists. Surfaces integrity violations left
+        over from before delete-time enforcement existed (CIVEX-169) --
+        used by `civex doctor`."""
+        field_map = self._reference_field_map()
+        if not field_map:
+            return []
+        all_records = self._records.list_all()
+        existing_ids = {r.id for r in all_records}
+
+        dangling: list[dict[str, Any]] = []
+        for rec in all_records:
+            for fid_str, (fname, dt) in field_map.items():
+                val = rec.data.get(fid_str)
+                if val is None:
+                    continue
+                targets = val if dt == "reference_list" else [val]
+                if not isinstance(targets, list):
+                    continue
+                for t in targets:
+                    try:
+                        tid = uuid.UUID(str(t))
+                    except ValueError:
+                        continue
+                    if tid not in existing_ids:
+                        dangling.append(
+                            {
+                                "record_id": rec.id,
+                                "schema_name": rec.schema_name,
+                                "field_name": fname,
+                                "dangling_target_id": tid,
+                            }
+                        )
+        return dangling

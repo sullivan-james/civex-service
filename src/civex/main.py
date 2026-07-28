@@ -19,6 +19,7 @@ from civex.cli import (
 from civex.cli.shell import run_shell
 from civex.cli.clone import clone
 from civex.cli.demo import demo
+from civex.cli.doctor import doctor
 from civex.cli.dump import dump, restore
 from civex.cli.init import init
 from civex.cli.license import license_cmd
@@ -83,6 +84,7 @@ app.add_typer(plugin.app, name="plugin", rich_help_panel=_WORK)
 app.add_typer(policy.app, name="policy", rich_help_panel=_WORK)
 app.add_typer(worker.app, name="automation", rich_help_panel=_WORK)
 app.command("resolve", rich_help_panel=_WORK)(resolve)
+app.command("doctor", rich_help_panel=_WORK)(doctor)
 
 app.command("status", rich_help_panel=_COLLAB)(status)
 

@@ -215,16 +215,22 @@ def record_find(
 def record_delete(
     record_id: str = typer.Argument(...),
     yes: bool = typer.Option(False, "--yes", "-y"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Clear any reference/reference_list fields pointing at this record "
+        "instead of blocking the delete",
+    ),
 ) -> None:
     """Delete a record."""
     if not yes:
         typer.confirm(f"Delete record '{record_id}'?", abort=True)
     ctx = _ctx()
     try:
-        ctx.record_svc.delete(record_id)
+        ctx.record_svc.delete(record_id, force=force)
         ctx.commit()
         console.print(f"[success]Deleted record '{record_id}'.[/success]")
-    except NotFoundError as e:
+    except (NotFoundError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
@@ -236,6 +242,12 @@ def record_delete_all(
         None, "--schema", "-s", help="Limit to this schema"
     ),
     yes: bool = typer.Option(False, "--yes", "-y"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Clear any reference/reference_list fields pointing at deleted records "
+        "instead of blocking the delete",
+    ),
 ) -> None:
     """Delete all records in a dataset (optionally filtered by schema)."""
     target = f"all '{schema}' records" if schema else "ALL records"
@@ -243,11 +255,13 @@ def record_delete_all(
         typer.confirm(f"Delete {target} in dataset '{dataset_name}'?", abort=True)
     ctx = _ctx()
     try:
-        deleted = ctx.record_svc.delete_all(dataset_name, schema_name=schema)
+        deleted = ctx.record_svc.delete_all(
+            dataset_name, schema_name=schema, force=force
+        )
         ctx.commit()
         console.print(
             f"[success]Deleted {deleted} record(s) from '{dataset_name}'.[/success]"
         )
-    except NotFoundError as e:
+    except (NotFoundError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
