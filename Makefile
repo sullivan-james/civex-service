@@ -10,7 +10,7 @@ lock: ## Re-resolve dependencies into uv.lock
 	uv lock
 
 lint: ## Ruff lint (auto-fix)
-	uv run ruff check --fix src/
+	uv run ruff check --fix src/ civex-plugin-sdk/src/
 
 format: ## Ruff format
 	uv run ruff format src/
@@ -19,7 +19,7 @@ format-check: ## Ruff format, check only (what CI runs)
 	uv run ruff format --check src/
 
 typecheck: ## Mypy
-	uv run mypy src/civex
+	uv run mypy src/civex civex-plugin-sdk/src/civex_plugin_sdk
 
 test: ## Run the test suite with coverage
 	uv run pytest tests/ -q --cov=civex --cov-report=term-missing
@@ -47,7 +47,7 @@ migrations-check: ## Check for Alembic migration drift (what CI runs)
 # frontend deps installed (frontend-install or npm ci) in addition to
 # `make install`.
 check: format-check ## Everything CI checks, in one shot
-	uv run ruff check src/
+	uv run ruff check src/ civex-plugin-sdk/src/
 	$(MAKE) typecheck
 	$(MAKE) test
 	$(MAKE) secrets
