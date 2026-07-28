@@ -1,7 +1,7 @@
-.PHONY: install install-all lock lint format format-check typecheck test secrets audit migrations-check check pre-commit serve dev clean frontend-install frontend-lint frontend-lint-check frontend-format frontend-format-check frontend-build
+.PHONY: install install-all lock lint format format-check typecheck test secrets audit migrations-check check pre-commit serve dev docs docs-build clean frontend-install frontend-lint frontend-lint-check frontend-format frontend-format-check frontend-build
 
-install: ## Sync the dev environment (server + workflows + dev extras)
-	uv sync --extra server --extra workflows --extra dev
+install: ## Sync the dev environment (server + workflows + dev + docs extras)
+	uv sync --extra server --extra workflows --extra dev --extra docs
 
 install-all: ## Sync every optional extra
 	uv sync --all-extras
@@ -40,11 +40,12 @@ migrations-check: ## Check for Alembic migration drift (what CI runs)
 # format-check/ruff/typecheck/test/secrets/audit/migrations-check mirror
 # ci.yml's lint/test/audit/migrations jobs; frontend-lint-check/
 # frontend-format-check/frontend-build mirror frontend-ci.yml's lint/build
-# jobs. Keep this list in lockstep with both workflow files — this target's
-# whole point is that a green `make check` locally means CI will be green
-# too, so agent-driven commits stop landing PRs that pass this and then
-# fail the real pipeline. Requires frontend deps installed (frontend-install
-# or npm ci) in addition to `make install`.
+# jobs; docs-build mirrors docs.yml's build job. Keep this list in lockstep
+# with all three workflow files — this target's whole point is that a green
+# `make check` locally means CI will be green too, so agent-driven commits
+# stop landing PRs that pass this and then fail the real pipeline. Requires
+# frontend deps installed (frontend-install or npm ci) in addition to
+# `make install`.
 check: format-check ## Everything CI checks, in one shot
 	uv run ruff check src/
 	$(MAKE) typecheck
@@ -55,6 +56,7 @@ check: format-check ## Everything CI checks, in one shot
 	$(MAKE) frontend-lint-check
 	$(MAKE) frontend-format-check
 	$(MAKE) frontend-build
+	$(MAKE) docs-build
 
 pre-commit: ## Run all pre-commit hooks against the whole tree
 	uv run pre-commit run --all-files
@@ -64,6 +66,12 @@ serve: ## Start the API with auto-reload (requires the server extra)
 
 dev: ## Frontend dev server (run alongside `make serve`)
 	cd frontend && npm run dev
+
+docs: ## Serve the docs site with live reload
+	uv run mkdocs serve
+
+docs-build: ## Build the static site into site/ (what CI runs)
+	CIVEX_LOG_LEVEL=WARNING uv run mkdocs build --strict
 
 frontend-install: ## Install frontend dependencies (matches CI's `npm ci`)
 	cd frontend && npm ci
