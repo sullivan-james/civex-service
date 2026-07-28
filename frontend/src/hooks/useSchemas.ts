@@ -27,7 +27,7 @@ export function useUpdateSchema(name: string) {
     mutationFn: (body: {
       rename?: string
       description?: string
-      display_field?: string | null
+      display_fields?: string[] | null
     }) => schemasApi.update(name, body),
     onSuccess: (updated) => {
       qc.invalidateQueries({ queryKey: ['schemas'] })

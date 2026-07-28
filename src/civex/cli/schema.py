@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 import typer
 from rich.table import Table
@@ -205,33 +205,38 @@ def schema_update(
         None, "--rename", help="New name for the schema"
     ),
     description: Optional[str] = typer.Option(None, "--description", "-d"),
-    display_field: Optional[str] = typer.Option(
-        None, "--display-field", help="Field name to use as the record's natural name"
+    display_field: Optional[List[str]] = typer.Option(
+        None,
+        "--display-field",
+        help="Field name to include in the record's natural name "
+        "(repeatable; order matters, e.g. --display-field first_name --display-field last_name)",
     ),
-    clear_display_field: bool = typer.Option(
-        False, "--clear-display-field", help="Remove the display field (revert to auto)"
+    clear_display_fields: bool = typer.Option(
+        False,
+        "--clear-display-fields",
+        help="Remove all display fields (revert to auto)",
     ),
 ) -> None:
-    """Update a schema's name, description, or display field."""
+    """Update a schema's name, description, or display fields."""
     if (
         rename is None
         and description is None
-        and display_field is None
-        and not clear_display_field
+        and not display_field
+        and not clear_display_fields
     ):
         console.print(
-            "[error]Provide at least one of --rename, --description, --display-field, or --clear-display-field.[/error]"
+            "[error]Provide at least one of --rename, --description, --display-field, or --clear-display-fields.[/error]"
         )
         raise typer.Exit(1)
     df: Any = ...
-    if display_field is not None:
+    if display_field:
         df = display_field
-    elif clear_display_field:
-        df = None
+    elif clear_display_fields:
+        df = []
     ctx = _ctx()
     try:
         schema = ctx.schema_svc.update(
-            name, new_name=rename, description=description, display_field=df
+            name, new_name=rename, description=description, display_fields=df
         )
         ctx.commit()
         console.print(f"[success]Updated schema '{schema.name}'.[/success]")

@@ -86,7 +86,9 @@ class Schema(Base):
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("schemas.id"), nullable=True
     )
-    display_field: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    display_fields: Mapped[list[str]] = mapped_column(
+        _JSON, nullable=False, default=list, server_default="[]"
+    )
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
     fields: Mapped[list[Field]] = relationship(

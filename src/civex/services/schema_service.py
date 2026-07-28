@@ -158,21 +158,24 @@ class SchemaService:
         name: str,
         new_name: str | None = None,
         description: str | None = None,
-        display_field=...,
+        display_fields=...,
     ) -> SchemaDTO:
         schema = self.get(name)
         if new_name and new_name != name:
             if self._repo.get_by_name(new_name):
                 raise AlreadyExistsError(f"Schema '{new_name}' already exists")
-        if display_field is not ... and display_field is not None:
-            all_fields = self.collect_fields(schema)
-            names = {rf.field.name for rf in all_fields}
-            if display_field not in names:
-                raise NotFoundError(
-                    f"Field '{display_field}' not found on schema '{name}'"
-                )
+        if display_fields is not ...:
+            entries = list(display_fields or [])
+            names = {rf.field.name for rf in self.collect_fields(schema)}
+            unknown = [n for n in entries if n not in names]
+            if unknown:
+                raise NotFoundError(f"Field(s) {unknown} not found on schema '{name}'")
         old_dict = schema.to_dict()
-        extra = {} if display_field is ... else {"display_field": display_field}
+        extra = (
+            {}
+            if display_fields is ...
+            else {"display_fields": list(display_fields or [])}
+        )
         updated = self._repo.update(
             schema.id, name=new_name, description=description, **extra
         )
@@ -182,6 +185,33 @@ class SchemaService:
             )
         return updated
 
+    def _schemas_displaying_field(
+        self, target_field: FieldDTO
+    ) -> list[tuple[SchemaDTO, list[int]]]:
+        """Every schema whose display_fields currently resolves at least one
+        entry to `target_field` -- resolved by field identity (not just name),
+        respecting name-shadowing in the inheritance chain, so a schema whose
+        own field of the same name shadows an inherited `target_field` is
+        correctly left out.
+
+        Returns (schema, [indices into that schema's display_fields]) pairs.
+        """
+        results = []
+        for schema in self._repo.list_all():
+            if not schema.display_fields:
+                continue
+            resolved_by_name = {
+                rf.field.name: rf.field.id for rf in self.collect_fields(schema)
+            }
+            indices = [
+                i
+                for i, entry_name in enumerate(schema.display_fields)
+                if resolved_by_name.get(entry_name) == target_field.id
+            ]
+            if indices:
+                results.append((schema, indices))
+        return results
+
     def delete_field(self, schema_name: str, field_name: str) -> None:
         schema = self.get(schema_name)
         field = next((f for f in schema.fields if f.name == field_name), None)
@@ -189,9 +219,22 @@ class SchemaService:
             raise NotFoundError(
                 f"Field '{field_name}' not found on schema '{schema_name}'"
             )
+        affected = self._schemas_displaying_field(field)
         if self._audit:
             self._audit.log_change("delete", "field", field.id, field.to_dict(), None)
         self._repo.delete_field(field.id)
+        for affected_schema, indices in affected:
+            remaining = [
+                entry
+                for i, entry in enumerate(affected_schema.display_fields)
+                if i not in indices
+            ]
+            self._repo.update(
+                affected_schema.id,
+                name=None,
+                description=None,
+                display_fields=remaining,
+            )
 
     def update_field(
         self,
@@ -209,7 +252,8 @@ class SchemaService:
             raise NotFoundError(
                 f"Field '{field_name}' not found on schema '{schema_name}'"
             )
-        if new_name and new_name != field_name:
+        renaming = bool(new_name and new_name != field_name)
+        if renaming:
             if any(f.name == new_name for f in schema.fields):
                 raise AlreadyExistsError(
                     f"Field '{new_name}' already exists on schema '{schema_name}'"
@@ -222,7 +266,16 @@ class SchemaService:
         )
         if default_value is not ...:
             kwargs["default_value"] = default_value
+        affected = self._schemas_displaying_field(field) if renaming else []
         updated = self._repo.update_field(field.id, **kwargs)
+        for affected_schema, indices in affected:
+            assert new_name is not None  # implied by `renaming`
+            renamed = list(affected_schema.display_fields)
+            for i in indices:
+                renamed[i] = new_name
+            self._repo.update(
+                affected_schema.id, name=None, description=None, display_fields=renamed
+            )
         if self._audit:
             self._audit.log_change(
                 "update", "field", updated.id, old_dict, updated.to_dict()

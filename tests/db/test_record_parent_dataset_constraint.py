@@ -68,11 +68,14 @@ def test_migration_repairs_pre_existing_cross_dataset_parent_links(tmp_path) -> 
     new composite FK is added."""
     from pathlib import Path
 
+    import uuid
+    from datetime import datetime, timezone
+
     from alembic import command
     from alembic.config import Config
     from sqlalchemy.orm import Session
 
-    from civex.db.models import Dataset, Record, Schema
+    from civex.db.models import Record
 
     db_path = tmp_path / "legacy.db"
     migrations_dir = Path(__file__).resolve().parents[2] / "src/civex/db/migrations"
@@ -82,31 +85,61 @@ def test_migration_repairs_pre_existing_cross_dataset_parent_links(tmp_path) -> 
     # Build the DB at the revision immediately before CIVEX-168's, so the old
     # single-column parent_record_id FK is in place but the new composite one
     # (and its data repair) isn't -- then seed a violation only that older
-    # schema would allow.
+    # schema would allow. Seeded via Core against that revision's own column
+    # set (not the ORM models, which reflect *current* head and would include
+    # columns -- e.g. schemas.display_fields -- that don't exist yet at this
+    # revision).
     engine = create_engine(f"sqlite:///{db_path}")
     with engine.connect() as c:
         cfg.attributes["connection"] = c
         command.upgrade(cfg, "f70228df9305")
         c.commit()
 
-    with Session(engine) as session:
-        ds1 = Dataset(name="ds1")
-        ds2 = Dataset(name="ds2")
-        sch = Schema(name="sch")
-        session.add_all([ds1, ds2, sch])
-        session.flush()
-        parent = Record(dataset_id=ds1.id, schema_id=sch.id, data={})
-        session.add(parent)
-        session.flush()
-        bad_child = Record(
-            dataset_id=ds2.id,
-            schema_id=sch.id,
-            data={},
-            parent_record_id=parent.id,
+    # SQLAlchemy's Uuid type binds/stores as 32-char hex without dashes on
+    # SQLite (see models.Schema.id etc., all plain `Mapped[uuid.UUID]`) --
+    # seed with `.hex` so the migration's own Core queries (which go through
+    # that same type) can find and update these rows by id.
+    now = datetime.now(timezone.utc)
+    ds1_id, ds2_id, sch_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    parent_id, bad_child_id = uuid.uuid4(), uuid.uuid4()
+    with engine.begin() as c:
+        c.execute(
+            text("INSERT INTO datasets (id, name, created_at) VALUES (:id, :name, :created_at)"),
+            [
+                {"id": ds1_id.hex, "name": "ds1", "created_at": now},
+                {"id": ds2_id.hex, "name": "ds2", "created_at": now},
+            ],
         )
-        session.add(bad_child)
-        session.commit()
-        bad_child_id = bad_child.id
+        c.execute(
+            text("INSERT INTO schemas (id, name, created_at) VALUES (:id, :name, :created_at)"),
+            {"id": sch_id.hex, "name": "sch", "created_at": now},
+        )
+        c.execute(
+            text(
+                "INSERT INTO records (id, dataset_id, schema_id, parent_record_id, data, created_at, updated_at) "
+                "VALUES (:id, :dataset_id, :schema_id, :parent_record_id, :data, :created_at, :updated_at)"
+            ),
+            [
+                {
+                    "id": parent_id.hex,
+                    "dataset_id": ds1_id.hex,
+                    "schema_id": sch_id.hex,
+                    "parent_record_id": None,
+                    "data": "{}",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "id": bad_child_id.hex,
+                    "dataset_id": ds2_id.hex,
+                    "schema_id": sch_id.hex,
+                    "parent_record_id": parent_id.hex,
+                    "data": "{}",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            ],
+        )
 
     engine = enable_sqlite_foreign_keys(create_engine(f"sqlite:///{db_path}"))
     ensure_schema_current(engine)

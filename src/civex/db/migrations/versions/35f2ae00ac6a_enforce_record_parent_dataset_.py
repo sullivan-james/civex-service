@@ -14,7 +14,7 @@ ADD CONSTRAINT would fail with an opaque integrity error on whichever row it
 happens to hit first.
 
 Revision ID: 35f2ae00ac6a
-Revises: f70228df9305
+Revises: c6e4c3b2bbe8
 Create Date: 2026-07-27 23:31:07.366233
 """
 
@@ -27,7 +27,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision: str = "35f2ae00ac6a"
-down_revision: Union[str, None] = "f70228df9305"
+down_revision: Union[str, None] = "c6e4c3b2bbe8"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

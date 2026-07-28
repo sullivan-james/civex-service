@@ -15,7 +15,7 @@ export interface Schema {
   name: string
   description: string | null
   parent_id: string | null
-  display_field: string | null
+  display_fields: string[]
   fields: Field[]
 }
 
@@ -29,7 +29,7 @@ export const schemasApi = {
     body: {
       rename?: string
       description?: string
-      display_field?: string | null
+      display_fields?: string[] | null
     },
   ) => api.patch<Schema>(`/schemas/${name}`, body),
   delete: (name: string) => api.delete<void>(`/schemas/${name}`),

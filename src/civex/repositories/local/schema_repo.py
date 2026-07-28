@@ -64,7 +64,7 @@ class LocalSchemaRepository:
         id: uuid.UUID,
         name: str | None,
         description: str | None,
-        display_field=_SENTINEL,
+        display_fields=_SENTINEL,
     ) -> SchemaDTO:
         row = self._s.query(Schema).filter_by(id=id).first()
         if row is None:
@@ -73,8 +73,8 @@ class LocalSchemaRepository:
             row.name = name
         if description is not None:
             row.description = description
-        if display_field is not self._SENTINEL:
-            row.display_field = display_field  # None clears it; a string sets it
+        if display_fields is not self._SENTINEL:
+            row.display_fields = display_fields or []  # None/[] clears it
         self._s.flush()
         return _schema_to_dto(row)
 
@@ -172,7 +172,7 @@ def _schema_to_dto(row: Schema) -> SchemaDTO:
         name=row.name,
         description=row.description,
         parent_id=row.parent_id,
-        display_field=row.display_field,
+        display_fields=row.display_fields or [],
         created_at=row.created_at,
         fields=[_field_to_dto(f) for f in row.fields],
     )

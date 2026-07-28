@@ -63,15 +63,15 @@ def get_schema(name_or_id: str, ctx: AppContext = Depends(get_ctx)):
 def update_schema(
     name: str, body: UpdateSchemaRequest, ctx: AppContext = Depends(get_ctx)
 ):
-    display_field = (
-        body.display_field if "display_field" in body.model_fields_set else ...
+    display_fields = (
+        body.display_fields if "display_fields" in body.model_fields_set else ...
     )
     try:
         dto = ctx.schema_svc.update(
             name,
             new_name=body.rename,
             description=body.description,
-            display_field=display_field,
+            display_fields=display_fields,
         )
         ctx.commit()
     except NotFoundError as e:

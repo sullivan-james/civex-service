@@ -42,7 +42,7 @@ civex serve [--host HOST] [--port PORT] [--reload]
 | `civex schema create <name> [-d TEXT] [--parent SCHEMA]` | Define a new schema, optionally inheriting from a parent |
 | `civex schema list` | List all schemas |
 | `civex schema show <name>` | Inspect a schema's fields (including inherited) |
-| `civex schema update <name> [--rename NAME] [-d TEXT] [--display-field FIELD] [--clear-display-field]` | Update name, description, or the field shown as a record's natural name |
+| `civex schema update <name> [--rename NAME] [-d TEXT] [--display-field FIELD ...] [--clear-display-fields]` | Update name, description, or the ordered fields joined to form a record's natural name (`--display-field` is repeatable) |
 | `civex schema add-field <schema> <field> --type TYPE [--required] [restrictions]` | Add a field |
 | `civex schema update-field <schema> <field> [...]` | Update a field's name, required flag, or restrictions |
 | `civex schema remove-field <schema> <field>` | Remove a field (stored data is not deleted) |
