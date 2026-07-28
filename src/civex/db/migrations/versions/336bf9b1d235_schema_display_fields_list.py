@@ -13,7 +13,7 @@ logic regardless.
 Existing single-value data is carried forward as a one-element list.
 
 Revision ID: 336bf9b1d235
-Revises: 35f2ae00ac6a
+Revises: 11204ab5d093
 Create Date: 2026-07-28 20:34:24.472398
 """
 
@@ -26,7 +26,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = "336bf9b1d235"
-down_revision: Union[str, None] = "35f2ae00ac6a"
+down_revision: Union[str, None] = "11204ab5d093"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

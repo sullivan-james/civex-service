@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Sequence, Union
 
 revision: str = "11204ab5d093"
-down_revision: Union[str, Sequence[str], None] = ("35f2ae00ac6a", "c6e4c3b2bbe8")
+down_revision: Union[str, Sequence[str], None] = "35f2ae00ac6a"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
