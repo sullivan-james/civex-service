@@ -158,3 +158,7 @@ class WorkflowJobService:
     def count_active_for_workflow(self, workflow_name: str) -> int:
         """Pending/running jobs currently queued against this workflow name."""
         return self._repo.count_active_for_workflow(workflow_name)
+
+    def failure_counts_by_plugin(self) -> dict[str, int]:
+        """Failed step-execution count per plugin, most failures first."""
+        return self._repo.failure_counts_by_plugin()

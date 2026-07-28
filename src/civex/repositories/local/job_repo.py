@@ -3,9 +3,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.orm import Session, selectinload
 
-from civex.db.models import WorkflowJob
+from civex.db.models import StepExecution, WorkflowJob
 from civex.domain.dtos import WorkflowJobDTO
 
 
@@ -65,7 +66,7 @@ class LocalWorkflowJobRepository:
             row.status = "completed"
             row.finished_at = _now()
             row.log = log
-            row.step_executions = step_executions
+            _replace_step_executions(self._s, job_id, step_executions)
             self._s.flush()
 
     def mark_failed(
@@ -83,7 +84,7 @@ class LocalWorkflowJobRepository:
             row.error = error[:2000]
             row.error_details = error_details
             row.log = log
-            row.step_executions = step_executions
+            _replace_step_executions(self._s, job_id, step_executions)
             self._s.flush()
 
     def list_all(
@@ -93,7 +94,7 @@ class LocalWorkflowJobRepository:
         offset: int = 0,
         limit: int | None = None,
     ) -> list[WorkflowJobDTO]:
-        q = self._s.query(WorkflowJob)
+        q = self._s.query(WorkflowJob).options(selectinload(WorkflowJob.steps))
         if status:
             q = q.filter_by(status=status)
         if record_id:
@@ -118,7 +119,12 @@ class LocalWorkflowJobRepository:
         return q.count()
 
     def get_by_id(self, job_id: uuid.UUID) -> WorkflowJobDTO | None:
-        row = self._s.query(WorkflowJob).filter_by(id=job_id).first()
+        row = (
+            self._s.query(WorkflowJob)
+            .options(selectinload(WorkflowJob.steps))
+            .filter_by(id=job_id)
+            .first()
+        )
         return _to_dto(row) if row else None
 
     def count_active_for_workflow(self, workflow_name: str) -> int:
@@ -132,8 +138,68 @@ class LocalWorkflowJobRepository:
             .count()
         )
 
+    def failure_counts_by_plugin(self) -> dict[str, int]:
+        """Number of failed step executions per plugin, across every job --
+        the aggregate query the JSON blob made expensive (CIVEX-170): this
+        is a GROUP BY on an indexed-able column instead of a full scan
+        parsing every job's JSON."""
+        rows = (
+            self._s.query(StepExecution.plugin, func.count(StepExecution.id))
+            .filter(StepExecution.status == "failed")
+            .group_by(StepExecution.plugin)
+            .order_by(func.count(StepExecution.id).desc())
+            .all()
+        )
+        return {plugin: count for plugin, count in rows}
+
+
+def _replace_step_executions(
+    session: Session, job_id: uuid.UUID, step_executions: list[dict] | None
+) -> None:
+    """Overwrites this job's step_executions rows -- mirrors the old
+    `row.step_executions = step_executions` assignment now that the per-step
+    records live in their own table (CIVEX-170). `mark_completed`/`mark_failed`
+    are each only ever called once per job, but delete-then-insert keeps this
+    safe to call again."""
+    session.query(StepExecution).filter_by(job_id=job_id).delete()
+    if not step_executions:
+        return
+    for position, step in enumerate(step_executions):
+        session.add(
+            StepExecution(
+                job_id=job_id,
+                position=position,
+                step_id=step["step_id"],
+                plugin=step["plugin"],
+                status=step["status"],
+                duration_seconds=step.get("duration_seconds"),
+                error=step.get("error"),
+                error_details=step.get("error_details"),
+                inputs=step.get("inputs"),
+                outputs=step.get("outputs"),
+                depends_on=step.get("depends_on"),
+            )
+        )
+
 
 def _to_dto(row: WorkflowJob) -> WorkflowJobDTO:
+    step_executions = (
+        [
+            {
+                "step_id": s.step_id,
+                "plugin": s.plugin,
+                "status": s.status,
+                "inputs": s.inputs,
+                "outputs": s.outputs,
+                "duration_seconds": s.duration_seconds,
+                "error": s.error,
+                "depends_on": s.depends_on,
+            }
+            for s in row.steps
+        ]
+        if row.steps
+        else None
+    )
     return WorkflowJobDTO(
         id=row.id,
         workflow_name=row.workflow_name,
@@ -149,5 +215,5 @@ def _to_dto(row: WorkflowJob) -> WorkflowJobDTO:
         started_at=row.started_at,
         finished_at=row.finished_at,
         depth=row.depth,
-        step_executions=row.step_executions,
+        step_executions=step_executions,
     )

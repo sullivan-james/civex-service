@@ -217,3 +217,46 @@ steps:
     assert len(failed.step_executions) == 1
     assert failed.step_executions[0]["status"] == "failed"
     assert failed.step_executions[0]["step_id"] == "load-the-attachment"
+
+
+def test_failure_counts_by_plugin_aggregates_across_jobs(
+    ctx, make_collection, make_schema, make_record
+):
+    """The step_executions table (CIVEX-170) exists so questions like "which
+    plugin fails most often" are a GROUP BY instead of a JSON scan -- this
+    is that query, run against two failed jobs sharing a failing plugin and
+    one successful job that shouldn't count."""
+    from civex.cli.utils import drain_jobs
+
+    make_collection("study")
+    make_schema("doc", fields=[("name", "string"), ("attachment", "file")])
+
+    wf_dir = ctx.workflow_svc._dir
+    wf_dir.mkdir(parents=True, exist_ok=True)
+    (wf_dir / "failing.yaml").write_text("""
+name: failing
+steps:
+  - id: load-the-attachment
+    plugin: civex.load_file
+    config: {field: attachment}
+""")
+    (wf_dir / "fine.yaml").write_text("""
+name: fine
+steps:
+  - id: read
+    plugin: civex.get_field
+    config: {field: name}
+""")
+
+    for _ in range(2):
+        record = make_record("study", "doc", {})
+        ctx.job_svc.enqueue_manual("failing", record)
+        ctx.commit()
+
+    fine_record = make_record("study", "doc", {"name": "alice"})
+    ctx.job_svc.enqueue_manual("fine", fine_record)
+    ctx.commit()
+
+    drain_jobs(ctx)
+
+    assert ctx.job_svc.failure_counts_by_plugin() == {"civex.load_file": 2}
