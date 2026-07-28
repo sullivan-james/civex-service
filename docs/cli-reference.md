@@ -15,7 +15,7 @@ civex init [PATH] [--sqlite] [--bare]
 | `--sqlite` | Force SQLite instead of trying Docker-managed PostgreSQL first |
 | `--bare` | Create a bare repository (remote storage only, no working directory) |
 
-By default, `civex init` tries to provision a Docker-managed PostgreSQL container automatically, falling back to SQLite if a PostgreSQL driver or Docker isn't available. See [Getting started](getting-started.md#initialise-a-project) for the full provisioning story, including connecting to an existing PostgreSQL server via `civex db setup-postgres`.
+By default, `civex init` tries to provision a Docker-managed PostgreSQL container automatically, falling back to SQLite if a PostgreSQL driver or Docker isn't available. See [Getting started](getting-started/install.md#initialise-a-project) for the full provisioning story, including connecting to an existing PostgreSQL server via `civex db setup-postgres`.
 
 ---
 
@@ -68,7 +68,7 @@ civex serve [--host HOST] [--port PORT] [--reload]
 
 ## `civex collection`
 
-Collections are named containers for records — see [Datasets & Records](datasets-records.md).
+Collections are named containers for records — see [Datasets & Records](guides/collections-and-records.md).
 
 | Command | Description |
 |---|---|
@@ -151,7 +151,7 @@ civex restore <dump-file> [--yes]
 | `--no-workflows` | Omit workflows and plugins from the export |
 | `--yes` (restore) | Skip the confirmation prompt |
 
-File attachments are not included — see [Files](files.md#backing-up-files).
+File attachments are not included — see [Files](guides/files.md#backing-up-files).
 
 ---
 
@@ -168,7 +168,7 @@ civex pull
 civex clone <url> [local_dir] [--remote-civex PATH]
 ```
 
-See [Remote sync](remote-sync.md) for the full workflow.
+See [Remote sync](guides/remote-sync.md) for the full workflow.
 
 ---
 
