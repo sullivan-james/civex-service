@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -263,20 +264,10 @@ class WorkflowJob(Base):
     # step}, identical whether the step failed in-process, in a subprocess,
     # or (later) in a container. `error` stays as the human-readable message
     # so existing readers keep working; this is what anything wanting to
-    # *branch* on a failure reads. A JSON column rather than three typed
-    # ones so the per-step execution records in CIVEX-105/117 can extend the
-    # shape without another migration.
+    # *branch* on a failure reads.
     error_details: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     log: Mapped[str | None] = mapped_column(String, nullable=True)
     input_data: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
-    # Per-step execution records (CIVEX-117): list of {step_id, plugin,
-    # status, inputs, outputs, duration_seconds, error} in execution order --
-    # see civex.domain.dtos.StepExecution. Set alongside `log`/`error` when
-    # the job finishes, replacing that flat blob as the way to see what each
-    # step actually did.
-    step_executions: Mapped[list[dict[str, Any]] | None] = mapped_column(
-        _JSON, nullable=True
-    )
     depth: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
@@ -285,6 +276,49 @@ class WorkflowJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
 
     record: Mapped[Record] = relationship("Record")
+    steps: Mapped[list["StepExecution"]] = relationship(
+        "StepExecution",
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="StepExecution.position",
+    )
+
+
+class StepExecution(Base):
+    """One step's resolved inputs/outputs/timing/outcome from a single
+    `executor.run()` pass -- see civex.domain.dtos.StepExecution, which is
+    what `executor.run()` builds these rows from.
+
+    Normalized out of the old `workflow_jobs.step_executions` JSON blob
+    (CIVEX-117 -> CIVEX-170) so the envelope columns that analytics actually
+    query (plugin, status, duration) don't require a JSON scan. `inputs` /
+    `outputs` / `error_details` stay JSON -- they're arbitrary plugin
+    payloads / envelopes with no fixed shape, and normalizing those out
+    would just be trading one JSON blob for another.
+    """
+
+    __tablename__ = "step_executions"
+    __table_args__ = (UniqueConstraint("job_id", "position"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workflow_jobs.id"), nullable=False
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    step_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    plugin: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_details: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    inputs: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    outputs: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    # Not part of CIVEX-170's proposed schema, but dropping it would break
+    # JobStepsDiagram's DAG view (CIVEX-132) -- kept as opaque JSON like
+    # inputs/outputs since it's a list of step ids, not something queried on.
+    depends_on: Mapped[list[str] | None] = mapped_column(_JSON, nullable=True)
+
+    job: Mapped[WorkflowJob] = relationship("WorkflowJob", back_populates="steps")
 
 
 class AiUsageEvent(Base):

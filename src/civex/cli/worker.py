@@ -123,6 +123,22 @@ def worker_logs(
         console.print("\n[dim](no output captured)[/dim]")
 
 
+@app.command("stats")
+def worker_stats() -> None:
+    """Show failed step-execution counts by plugin, across all jobs."""
+    ctx = get_ctx()
+    counts = ctx.job_svc.failure_counts_by_plugin()
+
+    if not counts:
+        console.print("[info]No failed steps recorded.[/info]")
+        return
+
+    table = Table("Plugin", "Failures")
+    for plugin, count in counts.items():
+        table.add_row(plugin, str(count))
+    console.print(table)
+
+
 @app.command("enqueue")
 def worker_enqueue(
     workflow: str = typer.Option(..., "--workflow", "-w", help="Workflow name"),

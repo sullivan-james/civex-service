@@ -339,8 +339,9 @@ class ErrorEnvelope:
 class StepExecution:
     """One step's resolved inputs/outputs/timing/outcome from a single
     `executor.run()` pass (CIVEX-117). Persisted as a list of these (via
-    `to_dict()`) on `WorkflowJob.step_executions`, replacing the flat
-    stdout/logging blob as the way to see what a step actually did.
+    `to_dict()`) on the `step_executions` table, one row per step
+    (CIVEX-170) -- `WorkflowJobDTO.step_executions` reassembles that back
+    into this same list-of-dicts shape.
 
     `outputs` is None for a step that raised (there's nothing to report) or
     was skipped by a falsy `if:` (its plugin never ran). `error` is the same
@@ -407,9 +408,9 @@ class WorkflowJobDTO:
     started_at: datetime | None
     finished_at: datetime | None
     depth: int = 0  # trigger chain depth; jobs enqueued at MAX_JOB_DEPTH are refused
-    # Per-step execution records (CIVEX-117): list of StepExecution.to_dict(),
-    # in execution order. None for jobs still pending/running, or for jobs
-    # that predate this field.
+    # Per-step execution records (CIVEX-117), backed by the `step_executions`
+    # table (CIVEX-170): list of StepExecution.to_dict(), in execution order.
+    # None for jobs still pending/running, or that have no steps recorded.
     step_executions: list[dict[str, Any]] | None = None
 
 
