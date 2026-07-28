@@ -42,6 +42,10 @@ class LocalRecordRepository:
             )
         return _to_dto(row) if row else None
 
+    def list_all(self) -> list[RecordDTO]:
+        rows = self._s.query(Record).order_by(Record.created_at).all()
+        return [_to_dto(r) for r in rows]
+
     def list_by_dataset(self, dataset_id: uuid.UUID) -> list[RecordDTO]:
         rows = (
             self._s.query(Record)
@@ -109,6 +113,54 @@ class LocalRecordRepository:
     def list_children(self, parent_id: uuid.UUID) -> list[RecordDTO]:
         rows = self._s.query(Record).filter_by(parent_record_id=parent_id).all()
         return [_to_dto(r) for r in rows]
+
+    def list_referencing(
+        self,
+        target_ids: list[uuid.UUID],
+        reference_field_ids: list[uuid.UUID],
+        reference_list_field_ids: list[uuid.UUID],
+    ) -> list[RecordDTO]:
+        """Records holding a `reference`/`reference_list` value that points at
+        any of target_ids, keyed by field id (data is stored id-keyed, not
+        name-keyed -- see RecordService._names_to_ids)."""
+        if not target_ids or not (reference_field_ids or reference_list_field_ids):
+            return []
+        target_strs = [str(t) for t in target_ids]
+
+        if self._pg:
+            # @> containment: for a nested array value, {"k": ["a","b"]} @> {"k": ["a"]}
+            # is true iff "a" appears in the array -- exactly the reference_list case.
+            clauses = [
+                Record.data.op("@>")(cast(literal(json.dumps({str(fid): t})), PG_JSONB))
+                for fid in reference_field_ids
+                for t in target_strs
+            ] + [
+                Record.data.op("@>")(
+                    cast(literal(json.dumps({str(fid): [t]})), PG_JSONB)
+                )
+                for fid in reference_list_field_ids
+                for t in target_strs
+            ]
+            rows = self._s.query(Record).filter(or_(*clauses)).all()
+            return [_to_dto(r) for r in rows]
+
+        # SQLite has no JSONB containment operator -- scan and check in Python.
+        # Acceptable for target dataset sizes (see CIVEX-169).
+        target_set = set(target_strs)
+        ref_ids = {str(fid) for fid in reference_field_ids}
+        ref_list_ids = {str(fid) for fid in reference_list_field_ids}
+        result = []
+        for row in self._s.query(Record).all():
+            data = row.data or {}
+            hit = any(data.get(fid) in target_set for fid in ref_ids)
+            if not hit:
+                hit = any(
+                    isinstance(data.get(fid), list) and target_set & set(data[fid])
+                    for fid in ref_list_ids
+                )
+            if hit:
+                result.append(_to_dto(row))
+        return result
 
     def count_by_schema(self, dataset_id: uuid.UUID) -> dict[str, int]:
         rows = (
