@@ -31,6 +31,6 @@ Everything is available via both the **CLI** and the **web UI + HTTP API**. The 
 
 ## Next steps
 
-- [Get started in five minutes →](getting-started.md)
-- [Understand schemas and field types →](schemas.md)
-- [Automate with workflows →](workflows.md)
+- [Get started in five minutes →](getting-started/install.md)
+- [Understand schemas and field types →](guides/schemas-and-fields.md)
+- [Automate with workflows →](guides/workflows.md)
