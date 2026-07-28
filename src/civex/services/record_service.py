@@ -164,13 +164,15 @@ _SKIP_TYPES = {"reference", "reference_list", "file", "file_list", "tags"}
 
 
 def _natural_name(
-    data: dict[str, Any], fields: list, display_field: str | None = None
+    data: dict[str, Any], fields: list, display_fields: list[str] | None = None
 ) -> str | None:
-    if display_field:
-        val = data.get(display_field)
-        if val is not None and str(val).strip():
-            return str(val)
-        return None
+    if display_fields:
+        parts = []
+        for name in display_fields:
+            val = data.get(name)
+            if val is not None and str(val).strip():
+                parts.append(str(val))
+        return " ".join(parts) if parts else None
     for rf in fields:
         f = rf.field
         if f.dtype in _SKIP_TYPES:
@@ -227,7 +229,7 @@ class RecordService:
         id_map = self._schema_svc.id_to_name_map(schema)
         named_data = {id_map.get(k, k): v for k, v in dto.data.items()}
         fields = self._schema_svc.collect_fields(schema)
-        natural_name = _natural_name(named_data, fields, schema.display_field)
+        natural_name = _natural_name(named_data, fields, schema.display_fields)
         return dataclasses.replace(dto, data=named_data, natural_name=natural_name)
 
     def _apply_defaults(

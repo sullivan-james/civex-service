@@ -478,9 +478,11 @@ def test_update_schema_field_rejects_unknown_field_without_restrictions(ctx) -> 
 
 
 def test_update_schema_rejects_unknown_display_field(ctx) -> None:
-    """Regression: update_schema never validated that display_field actually
+    """Regression: update_schema never validated that display_fields actually
     names a field on the schema before proposing."""
-    result = _call("update_schema", {"name": "trial", "display_field": "ghost"}, ctx)
+    result = _call(
+        "update_schema", {"name": "trial", "display_fields": ["ghost"]}, ctx
+    )
     assert result["status"] == "error"
 
 

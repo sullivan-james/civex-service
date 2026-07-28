@@ -40,7 +40,7 @@ class SchemaRepository(Protocol):
         id: uuid.UUID,
         name: str | None,
         description: str | None,
-        display_field: str | None = ...,
+        display_fields: list[str] | None = ...,
     ) -> SchemaDTO: ...
     def delete(self, id: uuid.UUID) -> None: ...
     def add_field(

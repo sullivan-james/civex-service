@@ -747,8 +747,26 @@ export default function SchemaDetailPage() {
     null,
   )
 
-  function setDisplayField(fieldName: string | null) {
-    updateSchema.mutate({ display_field: fieldName })
+  function toggleDisplayField(fieldName: string) {
+    if (!schema) return
+    const current = schema.display_fields
+    const next = current.includes(fieldName)
+      ? current.filter((n) => n !== fieldName)
+      : [...current, fieldName]
+    updateSchema.mutate({ display_fields: next })
+  }
+
+  function moveDisplayField(fieldName: string, direction: 'up' | 'down') {
+    if (!schema) return
+    const current = [...schema.display_fields]
+    const index = current.indexOf(fieldName)
+    const targetIndex = direction === 'up' ? index - 1 : index + 1
+    if (index === -1 || targetIndex < 0 || targetIndex >= current.length) return
+    ;[current[index], current[targetIndex]] = [
+      current[targetIndex],
+      current[index],
+    ]
+    updateSchema.mutate({ display_fields: current })
   }
 
   const handleDragStart = useCallback((index: number) => {
@@ -944,12 +962,14 @@ export default function SchemaDetailPage() {
                     <span className="flex flex-col gap-0.5">
                       <span className="flex items-center gap-1.5">
                         <span className="font-mono text-sm">{field.name}</span>
-                        {schema.display_field === field.name && (
+                        {schema.display_fields.includes(field.name) && (
                           <span
                             className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]"
-                            title="Display field — used as record name"
+                            title="Display field — included in the record's natural name"
                           >
                             display
+                            {schema.display_fields.length > 1 &&
+                              ` #${schema.display_fields.indexOf(field.name) + 1}`}
                           </span>
                         )}
                       </span>
@@ -1026,22 +1046,53 @@ export default function SchemaDetailPage() {
                       ) : (
                         <>
                           <button
-                            onClick={() =>
-                              setDisplayField(
-                                schema.display_field === field.name
-                                  ? null
-                                  : field.name,
-                              )
-                            }
-                            className={`text-xs transition-colors ${schema.display_field === field.name ? 'text-[#9a6700]' : 'text-[#d0d7de] hover:text-[#9a6700]'}`}
+                            onClick={() => toggleDisplayField(field.name)}
+                            className={`text-xs transition-colors ${schema.display_fields.includes(field.name) ? 'text-[#9a6700]' : 'text-[#d0d7de] hover:text-[#9a6700]'}`}
                             title={
-                              schema.display_field === field.name
-                                ? 'Clear display field'
-                                : 'Set as display field'
+                              schema.display_fields.includes(field.name)
+                                ? 'Remove from display fields'
+                                : 'Add to display fields'
                             }
                           >
                             ★
                           </button>
+                          {schema.display_fields.length > 1 &&
+                            schema.display_fields.includes(field.name) && (
+                              <span className="flex flex-col items-center gap-0.5">
+                                <button
+                                  type="button"
+                                  title="Move earlier in display order"
+                                  disabled={
+                                    schema.display_fields.indexOf(
+                                      field.name,
+                                    ) === 0 || updateSchema.isPending
+                                  }
+                                  onClick={() =>
+                                    moveDisplayField(field.name, 'up')
+                                  }
+                                  className="text-[9px] text-[#9a6700] hover:text-[#7d5700] disabled:opacity-30 leading-none"
+                                >
+                                  ▲
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Move later in display order"
+                                  disabled={
+                                    schema.display_fields.indexOf(
+                                      field.name,
+                                    ) ===
+                                      schema.display_fields.length - 1 ||
+                                    updateSchema.isPending
+                                  }
+                                  onClick={() =>
+                                    moveDisplayField(field.name, 'down')
+                                  }
+                                  className="text-[9px] text-[#9a6700] hover:text-[#7d5700] disabled:opacity-30 leading-none"
+                                >
+                                  ▼
+                                </button>
+                              </span>
+                            )}
                           <button
                             onClick={() => {
                               setConfirmDeleteField(null)

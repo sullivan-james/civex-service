@@ -66,7 +66,9 @@ class SchemaDTO:
     parent_id: uuid.UUID | None
     created_at: datetime
     fields: list[FieldDTO] = field(default_factory=list)
-    display_field: str | None = None  # field name to use as the record's natural name
+    # Ordered field names joined (space-separated) to form the record's natural
+    # name; entries with no value on a given record are skipped at render time.
+    display_fields: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         # fields excluded — it's a loaded relationship, not a scalar property
@@ -75,7 +77,7 @@ class SchemaDTO:
             "name": self.name,
             "description": self.description,
             "parent_id": str(self.parent_id) if self.parent_id else None,
-            "display_field": self.display_field,
+            "display_fields": self.display_fields,
             "created_at": self.created_at.isoformat(),
         }
 
@@ -86,7 +88,7 @@ class SchemaDTO:
             name=d["name"],
             description=d.get("description"),
             parent_id=uuid.UUID(d["parent_id"]) if d.get("parent_id") else None,
-            display_field=d.get("display_field"),
+            display_fields=d.get("display_fields") or [],
             created_at=datetime.fromisoformat(d["created_at"]),
         )
 

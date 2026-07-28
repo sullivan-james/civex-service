@@ -30,7 +30,7 @@ class SchemaResponse(BaseModel):
     name: str
     description: str | None
     parent_id: str | None
-    display_field: str | None
+    display_fields: list[str]
     fields: list[FieldResponse]
 
     @classmethod
@@ -40,7 +40,7 @@ class SchemaResponse(BaseModel):
             name=dto.name,
             description=dto.description,
             parent_id=str(dto.parent_id) if dto.parent_id else None,
-            display_field=dto.display_field,
+            display_fields=dto.display_fields,
             fields=[
                 FieldResponse(
                     id=str(f.id),
@@ -73,7 +73,7 @@ class CreateSchemaRequest(BaseModel):
 class UpdateSchemaRequest(BaseModel):
     rename: str | None = None
     description: str | None = None
-    display_field: str | None = None
+    display_fields: list[str] | None = None
 
 
 class UpdateFieldRequest(BaseModel):

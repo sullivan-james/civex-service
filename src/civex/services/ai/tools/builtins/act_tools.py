@@ -246,7 +246,7 @@ class CreateSchemaTool(AiTool):
 
 class UpdateSchemaTool(AiTool):
     name = "update_schema"
-    description = "Propose renaming a schema, changing its description, or setting its display field. Requires user approval."
+    description = "Propose renaming a schema, changing its description, or setting its display fields. Requires user approval."
     mutating = True
     input_schema = {
         "type": "object",
@@ -257,7 +257,11 @@ class UpdateSchemaTool(AiTool):
             },
             "rename": {"type": "string"},
             "description": {"type": "string"},
-            "display_field": {"type": "string"},
+            "display_fields": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Ordered field names to join (space-separated) for the record's natural name",
+            },
         },
         "required": ["name"],
     }
@@ -269,20 +273,20 @@ class UpdateSchemaTool(AiTool):
             return tool_error(f"Schema '{name}' does not exist.")
         body = {
             k: tool_input[k]
-            for k in ("rename", "description", "display_field")
+            for k in ("rename", "description", "display_fields")
             if tool_input.get(k) is not None
         }
         if not body:
             return tool_error(
-                "Nothing to change (provide rename, description, or display_field)."
+                "Nothing to change (provide rename, description, or display_fields)."
             )
         update_kwargs: dict[str, Any] = {}
         if "rename" in body:
             update_kwargs["new_name"] = body["rename"]
         if "description" in body:
             update_kwargs["description"] = body["description"]
-        if "display_field" in body:
-            update_kwargs["display_field"] = body["display_field"]
+        if "display_fields" in body:
+            update_kwargs["display_fields"] = body["display_fields"]
         err = validate_via(ctx, ctx.schema_svc.update, name, **update_kwargs)
         if err:
             return err
