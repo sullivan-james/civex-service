@@ -13,6 +13,21 @@ civex serve --port 9000      # custom port (default: 8000)
 
 The server must be run from within (or below) a directory that contains a `_civex/` project.
 
+## Security model
+
+`civex serve` is **local-first, like `git`** — it runs for a single trusted user on your own machine and has **no authentication**. By default it binds to loopback (`127.0.0.1`) and a middleware guards the two attack classes that still apply to a localhost server open in a browser:
+
+- **DNS rebinding** — requests whose `Host` header isn't a loopback name are rejected.
+- **CSRF** — state-changing requests (`POST`/`PUT`/`PATCH`/`DELETE`) carrying a non-loopback `Origin` are rejected.
+
+To expose the server to other machines you must opt in explicitly:
+
+```bash
+civex serve --host 0.0.0.0 --allow-remote
+```
+
+`--allow-remote` stands the guard down and prints a warning. Because there is still no authentication, only do this on a trusted network **behind a reverse proxy or firewall**.
+
 ## Web UI
 
 Opening [http://localhost:8000](http://localhost:8000) (or wherever you configured it) loads the web interface. The main sections are:
