@@ -69,9 +69,9 @@ def _migrate_connection(connection: Connection) -> None:
     # as caller-owned (won't commit it itself) -- so we must commit here.
     tables = inspect(connection).get_table_names()
     if "alembic_version" not in tables and _LEGACY_MARKER_TABLE in tables:
-        command.stamp(cfg, "head")
+        command.stamp(cfg, "heads")
     else:
-        command.upgrade(cfg, "head")
+        command.upgrade(cfg, "heads")
     connection.commit()
 
     if connection.dialect.name == "sqlite":
