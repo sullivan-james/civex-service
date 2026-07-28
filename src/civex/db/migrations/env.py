@@ -22,18 +22,42 @@ config = context.config
 target_metadata = Base.metadata
 
 
+def _configure_and_run(connection) -> None:
+    is_sqlite = connection.dialect.name == "sqlite"
+    if is_sqlite:
+        # Batch mode's table-recreation trick needs FK enforcement off during
+        # the rebuild -- this is SQLite's own documented ALTER TABLE
+        # procedure (disable FK enforcement, rebuild, re-enable) --
+        # otherwise self-referential FKs like records' composite
+        # parent/dataset constraint raise "foreign key mismatch" mid-rebuild.
+        # Issued via the raw DBAPI cursor rather than connection.exec_driver_
+        # sql: going through Core would autobegin a transaction that Core
+        # treats as pre-existing once alembic's own context.begin_transaction()
+        # starts below, which makes alembic skip committing it (it assumes
+        # a pre-existing transaction is caller-owned -- see the same caveat
+        # in civex.db.migrate's reflection call).
+        # Re-enabling the pragma is civex.db.migrate's job: by the time this
+        # function returns, a real DML-triggered transaction is typically
+        # open (e.g. the INSERT...SELECT batch mode uses to copy rows into
+        # the rebuilt table), so a PRAGMA here would silently no-op.
+        raw_cursor = connection.connection.dbapi_connection.cursor()
+        raw_cursor.execute("PRAGMA foreign_keys=OFF")
+        raw_cursor.close()
+    # SQLite can't ALTER most things in place; batch mode recreates the
+    # table under the hood instead. No-op cost on other dialects.
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        render_as_batch=is_sqlite,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
 def _run_migrations_online() -> None:
     connection = config.attributes.get("connection")
     if connection is not None:
-        # SQLite can't ALTER most things in place; batch mode recreates the
-        # table under the hood instead. No-op cost on other dialects.
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            render_as_batch=connection.dialect.name == "sqlite",
-        )
-        with context.begin_transaction():
-            context.run_migrations()
+        _configure_and_run(connection)
         return
 
     db_url = context.get_x_argument(as_dictionary=True).get(
@@ -49,13 +73,7 @@ def _run_migrations_online() -> None:
     engine = create_engine(db_url)
     try:
         with engine.connect() as connection:
-            context.configure(
-                connection=connection,
-                target_metadata=target_metadata,
-                render_as_batch=connection.dialect.name == "sqlite",
-            )
-            with context.begin_transaction():
-                context.run_migrations()
+            _configure_and_run(connection)
     finally:
         engine.dispose()
 

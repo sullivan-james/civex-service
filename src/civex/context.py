@@ -20,6 +20,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from civex.config import Config
+from civex.db.engine import enable_sqlite_foreign_keys
 from civex.repositories.local.audit_repo import LocalAuditRepository
 from civex.repositories.local.dataset_repo import LocalDatasetRepository
 from civex.repositories.local.file_store import VolumeAwareFileObjectStore
@@ -43,7 +44,7 @@ from civex.services.workflow_service import WorkflowService
 @lru_cache(maxsize=None)
 def _get_engine(url: str) -> Engine:
     """Return a cached engine for the given DB URL."""
-    return create_engine(url)
+    return enable_sqlite_foreign_keys(create_engine(url))
 
 
 def _plugins_provider(civex_dir: Path):
