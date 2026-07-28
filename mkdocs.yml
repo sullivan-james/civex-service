@@ -62,4 +62,6 @@ nav:
   - Writing custom plugins: writing-custom-plugins.md
   - Server & UI: guides/server-and-web-ui.md
   - Remote sync: guides/remote-sync.md
+  - Logging & telemetry: guides/logging-and-telemetry.md
+  - PostgreSQL: guides/postgresql.md
   - CLI reference: cli-reference.md
