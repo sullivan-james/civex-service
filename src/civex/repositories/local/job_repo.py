@@ -4,10 +4,14 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
-from civex.db.models import StepExecution, WorkflowJob
+from civex.db.models import Record, StepExecution, WorkflowJob
 from civex.domain.dtos import WorkflowJobDTO
+
+# schema_name isn't a column (CIVEX-171) -- every query needs the record's
+# schema loaded so _to_dto can resolve it via the join.
+_WITH_SCHEMA = joinedload(WorkflowJob.record).joinedload(Record.schema)
 
 
 def _now() -> datetime:
@@ -22,7 +26,6 @@ class LocalWorkflowJobRepository:
         self,
         workflow_name: str,
         record_id: uuid.UUID,
-        schema_name: str,
         trigger: str,
         input_data: dict | None = None,
         depth: int = 0,
@@ -30,7 +33,6 @@ class LocalWorkflowJobRepository:
         row = WorkflowJob(
             workflow_name=workflow_name,
             record_id=record_id,
-            schema_name=schema_name,
             trigger=trigger,
             status="pending",
             input_data=input_data,
@@ -72,16 +74,18 @@ class LocalWorkflowJobRepository:
     def mark_failed(
         self,
         job_id: uuid.UUID,
-        error: str,
+        error_details: dict,
         log: str | None = None,
-        error_details: dict | None = None,
         step_executions: list[dict] | None = None,
     ) -> None:
         row = self._s.query(WorkflowJob).filter_by(id=job_id).first()
         if row:
             row.status = "failed"
             row.finished_at = _now()
-            row.error = error[:2000]
+            # `error` and `error_details["message"]` are the same string --
+            # writing both here, in the one place a job is marked failed, is
+            # what keeps them from disagreeing (CIVEX-171).
+            row.error = error_details["message"][:2000]
             row.error_details = error_details
             row.log = log
             _replace_step_executions(self._s, job_id, step_executions)
@@ -94,7 +98,9 @@ class LocalWorkflowJobRepository:
         offset: int = 0,
         limit: int | None = None,
     ) -> list[WorkflowJobDTO]:
-        q = self._s.query(WorkflowJob).options(selectinload(WorkflowJob.steps))
+        q = self._s.query(WorkflowJob).options(
+            selectinload(WorkflowJob.steps), _WITH_SCHEMA
+        )
         if status:
             q = q.filter_by(status=status)
         if record_id:
@@ -121,7 +127,7 @@ class LocalWorkflowJobRepository:
     def get_by_id(self, job_id: uuid.UUID) -> WorkflowJobDTO | None:
         row = (
             self._s.query(WorkflowJob)
-            .options(selectinload(WorkflowJob.steps))
+            .options(selectinload(WorkflowJob.steps), _WITH_SCHEMA)
             .filter_by(id=job_id)
             .first()
         )
@@ -204,7 +210,7 @@ def _to_dto(row: WorkflowJob) -> WorkflowJobDTO:
         id=row.id,
         workflow_name=row.workflow_name,
         record_id=row.record_id,
-        schema_name=row.schema_name,
+        schema_name=row.record.schema.name,
         trigger=row.trigger,
         status=row.status,
         error=row.error,

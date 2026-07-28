@@ -110,9 +110,8 @@ def run_pending_jobs() -> None:
                 )
                 ctx.job_svc.mark_failed(
                     job.id,
-                    str(e),
+                    envelope,
                     log=log_buf.getvalue() or None,
-                    envelope=envelope,
                     step_executions=getattr(e, "step_executions", None),
                 )
                 ctx.commit()

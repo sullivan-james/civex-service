@@ -133,7 +133,6 @@ class WorkflowJobRepository(Protocol):
         self,
         workflow_name: str,
         record_id: uuid.UUID,
-        schema_name: str,
         trigger: str,
         input_data: dict | None = None,
         depth: int = 0,
@@ -148,9 +147,8 @@ class WorkflowJobRepository(Protocol):
     def mark_failed(
         self,
         job_id: uuid.UUID,
-        error: str,
+        error_details: dict,
         log: str | None = None,
-        error_details: dict | None = None,
         step_executions: list[dict] | None = None,
     ) -> None: ...
     def list_all(

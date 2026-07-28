@@ -171,8 +171,7 @@ def drain_jobs(ctx: AppContext) -> None:
             envelope = getattr(e, "envelope", None) or ErrorEnvelope.from_exception(e)
             ctx.job_svc.mark_failed(
                 job.id,
-                str(e),
-                envelope=envelope,
+                envelope,
                 step_executions=getattr(e, "step_executions", None),
             )
             ctx.commit()
