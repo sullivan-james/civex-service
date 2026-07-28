@@ -166,3 +166,22 @@ frontend/src/
 | Add an API endpoint | `src/civex/server/routers/<resource>.py` |
 | New domain types | `src/civex/domain/dtos.py` or `src/civex/domain/exceptions.py` |
 | Add a frontend API call | `frontend/src/api/<resource>.ts` + hook in `frontend/src/hooks/use<Resource>.ts` |
+
+## Documentation
+
+The docs site lives under `docs/` (MkDocs Material, see `mkdocs.yml`). Some pages are generated at build time — editing a generated page directly loses the change on the next build, so know which is which before touching a file under `docs/`:
+
+| Path | Source of truth |
+|---|---|
+| `docs/reference/cli/*` | Generated from `civex.main:app` by `docs/_gen/_cli.py` |
+| `docs/reference/http-api.md` + `openapi.json` | Generated from `create_app().openapi()` |
+| `docs/reference/plugins/*` | Generated from the plugin registry + `docs/_prose/plugins/*.md` |
+| everything else under `docs/` | Hand-written |
+
+Keep-in-sync rules:
+
+- New CLI command → write prose help only; no indented line art, and never `\b` escapes — it renders in the generated reference.
+- New HTTP endpoint → add a docstring, and `Field(description=)` on any new request/response model — both feed the generated `http-api.md`.
+- New built-in plugin → add `docs/_prose/plugins/<slug>.md` with the `<!-- civex:tables -->` marker, or CI fails.
+
+`make docs` serves the site with live reload; `make docs-build` runs the strict build CI uses.
