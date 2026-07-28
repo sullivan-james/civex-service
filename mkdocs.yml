@@ -1,7 +1,10 @@
 site_name: Civex
 site_description: Research data management — schemas, records, files, and workflows.
+site_url: https://docs.civex.dev/
 repo_url: https://github.com/CivexData/civex-service
 repo_name: civex
+edit_uri: edit/main/docs/
+use_directory_urls: false
 
 theme:
   name: material
@@ -25,6 +28,15 @@ theme:
     - content.code.copy
     - content.code.annotate
 
+plugins:
+  - search
+  - gen-files:
+      scripts: []          # populated by C2, D2, E6
+
+exclude_docs: |
+  _gen/
+  _prose/
+
 markdown_extensions:
   - admonition
   - pymdownx.details
@@ -33,6 +45,9 @@ markdown_extensions:
       alternate_style: true
   - pymdownx.highlight:
       anchor_linenums: true
+  - pymdownx.snippets:
+      base_path: ["docs", "."]
+      check_paths: true
   - tables
   - attr_list
 
