@@ -395,10 +395,10 @@ class WorkflowJobDTO:
     id: uuid.UUID
     workflow_name: str
     record_id: uuid.UUID
-    schema_name: str
+    schema_name: str  # resolved via record_id -> schemas.name, not stored (CIVEX-171)
     trigger: str  # record_created | record_updated | manual
     status: str  # pending | running | completed | failed
-    error: str | None  # human-readable message
+    error: str | None  # human-readable message; == error_details["message"] when set
     error_details: dict[str, Any] | None  # ErrorEnvelope.to_dict(), when known
     log: str | None  # captured stdout/stderr from execution
     input_data: (

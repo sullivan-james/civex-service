@@ -82,9 +82,7 @@ class WorkflowJobService:
             if trigger_def.fields and changed_fields is not None:
                 if not any(f in changed_fields for f in trigger_def.fields):
                     continue
-            job = self._repo.enqueue(
-                wf.name, record.id, record.schema_name, event, depth=depth
-            )
+            job = self._repo.enqueue(wf.name, record.id, event, depth=depth)
             jobs.append(job)
         return jobs
 
@@ -97,7 +95,6 @@ class WorkflowJobService:
         return self._repo.enqueue(
             workflow_name,
             record.id,
-            record.schema_name,
             "manual",
             input_data=input_data,
         )
@@ -116,23 +113,22 @@ class WorkflowJobService:
     def mark_failed(
         self,
         job_id: uuid.UUID,
-        error: str,
+        envelope: ErrorEnvelope,
         log: str | None = None,
-        envelope: ErrorEnvelope | None = None,
         step_executions: list[dict] | None = None,
     ) -> None:
-        """`envelope` is the structured form of the same failure (CIVEX-143).
-        Optional because a caller that only has a message string -- a failure
-        raised before any step ran, say -- shouldn't have to invent a
-        classification it doesn't have. `step_executions` (CIVEX-117) is the
-        per-step record of however far the run got before failing -- also
-        optional for the same reason: a failure before the first step has
-        none to report."""
+        """`envelope` (CIVEX-143) is the single source for both the flat
+        `error` message and the structured `error_details` -- every caller
+        already builds one (`from_exception` at worst), so there's no reason
+        to also pass the message as a separate string and risk it drifting
+        from `envelope.message` (CIVEX-171). `step_executions` (CIVEX-117) is
+        the per-step record of however far the run got before failing --
+        optional because a failure before the first step ran has none to
+        report."""
         self._repo.mark_failed(
             job_id,
-            error,
+            envelope.to_dict(),
             log=log,
-            error_details=envelope.to_dict() if envelope else None,
             step_executions=step_executions,
         )
 

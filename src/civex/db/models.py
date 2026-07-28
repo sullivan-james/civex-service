@@ -256,15 +256,21 @@ class WorkflowJob(Base):
     record_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("records.id"), nullable=False
     )
-    schema_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # No schema_name column here (CIVEX-171): it was a copy of
+    # records.schema_id -> schemas.name that went stale on rename. record_id
+    # is a hard FK with no cascade, so a job's record can never disappear out
+    # from under it -- the join is always available, so there's nothing to
+    # snapshot. See job_repo._to_dto for where it's resolved on read.
     trigger: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
-    error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     # Structured form of `error` (CIVEX-143): {kind, message, retryable,
     # step}, identical whether the step failed in-process, in a subprocess,
     # or (later) in a container. `error` stays as the human-readable message
     # so existing readers keep working; this is what anything wanting to
-    # *branch* on a failure reads.
+    # *branch* on a failure reads. Both are written from `error_details` in
+    # one place (WorkflowJobRepository.mark_failed, CIVEX-171) so they can't
+    # disagree.
+    error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     error_details: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     log: Mapped[str | None] = mapped_column(String, nullable=True)
     input_data: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
