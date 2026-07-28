@@ -15,7 +15,7 @@ civex init [PATH] [--sqlite] [--bare]
 | `--sqlite` | Force SQLite instead of trying Docker-managed PostgreSQL first |
 | `--bare` | Create a bare repository (remote storage only, no working directory) |
 
-By default, `civex init` tries to provision a Docker-managed PostgreSQL container automatically, falling back to SQLite if a PostgreSQL driver or Docker isn't available. See [Getting started](getting-started/install.md#initialise-a-project) for the full provisioning story, including connecting to an existing PostgreSQL server via `civex db setup-postgres`.
+By default, `civex init` tries to provision a Docker-managed PostgreSQL container automatically, falling back to SQLite if a PostgreSQL driver or Docker isn't available. See [Your first project](getting-started/first-project.md) for the full provisioning story, including connecting to an existing PostgreSQL server via `civex db setup-postgres`.
 
 ---
 

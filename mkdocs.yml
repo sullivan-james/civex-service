@@ -53,7 +53,10 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Getting started: getting-started/install.md
+  - Getting started:
+      - Install: getting-started/install.md
+      - Your first project: getting-started/first-project.md
+      - Five-minute tour: getting-started/tour.md
   - Schemas: guides/schemas-and-fields.md
   - Datasets & Records: guides/collections-and-records.md
   - Files: guides/files.md

@@ -1,6 +1,4 @@
-# Getting started
-
-## Installation
+# Install
 
 === "Desktop app"
 
@@ -23,14 +21,16 @@
     pipx ensurepath        # adds civex to PATH — open a new terminal after this
     ```
 
-    Download the latest release wheel and install:
+    Download the latest release wheel and install it:
 
     ```bash
     gh release download --repo CivexData/civex-service --pattern "*.whl"
-    pipx install "./civex-0.1.0-py3-none-any.whl[server]"
+    pipx install "./$(ls civex-*-py3-none-any.whl)[server]"
     ```
 
-    To upgrade, re-run `pipx install --force` with the new wheel.
+    The version in the wheel's filename is derived from the git tag it was built from, so it changes with every release — the commands above pick up whatever was just downloaded instead of pinning a specific version.
+
+    To upgrade, re-run `pipx install --force` with the newly downloaded wheel.
 
 === "From source (development)"
 
@@ -48,65 +48,6 @@ civex --version
 civex --help
 ```
 
-## Initialise a project
+## Next step
 
-Navigate to your project directory and run:
-
-```bash
-civex init
-```
-
-This creates a `_civex/` directory with:
-
-```
-_civex/
-  config.toml     # database URL and optional remote config
-  civex.db        # SQLite database (if not using PostgreSQL)
-  objects/        # content-addressed file storage
-  workflows/      # YAML workflow definitions
-  plugins/        # custom Python plugins
-```
-
-By default, `civex init` tries to set up a **Docker-managed PostgreSQL** container automatically (if a PostgreSQL driver and Docker are both available), falling back to SQLite otherwise. Force SQLite explicitly with:
-
-```bash
-civex init --sqlite
-```
-
-To connect to an existing PostgreSQL server instead of a Docker-managed one, run `civex db setup-postgres` after `civex init` (auto-detects a local server and prompts interactively, or pass `--url` to skip prompts):
-
-```bash
-civex db setup-postgres --url postgresql+psycopg2://user:pass@host:5432/dbname
-```
-
-## Quick start
-
-```bash
-# Define your data shape
-civex schema create trial --description "A single experimental trial"
-civex schema add-field trial subject --type string --required
-civex schema add-field trial duration --type float
-civex schema add-field trial result --type string --choices "pass,fail,inconclusive"
-
-# Create a container for your data
-civex collection create study-2024
-
-# Add a record (civex will prompt for each field)
-civex record add --to study-2024 --schema trial
-
-# Query records
-civex record find --in study-2024 --schema trial
-```
-
-## Start the web UI
-
-The desktop app starts the server automatically. If you're using the CLI:
-
-```bash
-civex serve
-```
-
-Open [http://localhost:8000](http://localhost:8000). The UI lets you browse schemas, datasets, and records, upload files, run workflows, and monitor jobs — all without using the CLI.
-
-!!! tip
-    Use `civex serve --reload` during development for automatic restarts on code changes.
+[Create your first project →](first-project.md)
