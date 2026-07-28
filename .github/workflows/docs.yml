@@ -1,0 +1,46 @@
+name: Docs
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "README.md"
+      - "src/**"
+      - "pyproject.toml"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "README.md"
+      - "src/**"
+      - "pyproject.toml"
+      - ".github/workflows/docs.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - run: uv sync --extra server --extra docs
+
+      - name: Build docs
+        env: { CIVEX_LOG_LEVEL: WARNING }
+        run: uv run mkdocs build --strict
+
+      - uses: actions/upload-artifact@v4
+        with: { name: docs-site, path: site/ }
+
+      - name: Publish
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.DOCS_HOST != '' }}
+        run: rsync -az --delete site/ "$DOCS_HOST:$DOCS_PATH"
+        env:
+          DOCS_HOST: ${{ secrets.DOCS_HOST }}
+          DOCS_PATH: ${{ secrets.DOCS_PATH }}
