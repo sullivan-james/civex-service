@@ -16,31 +16,29 @@ This means:
 | `file` | A single file attachment |
 | `file_list` | Multiple file attachments |
 
-## Attaching files via CLI
+## Attaching files
 
-For a `file` field, pass the file path when prompted:
+=== "CLI"
+    For a `file` field, pass the file path when prompted:
 
-```
-  audio (file) [required]: /data/recordings/20240315_090000.wav
-```
+    ```
+      audio (file) [required]: /data/recordings/20240315_090000.wav
+    ```
 
-For a `file_list` field, the prompt repeats until you leave it blank:
+    For a `file_list` field, the prompt repeats until you leave it blank:
 
-```
-  audio_clips (file_list): /data/clip1.wav
-  audio_clips (file_list): /data/clip2.wav
-  audio_clips (file_list):        ← blank to finish
-```
+    ```
+      audio_clips (file_list): /data/clip1.wav
+      audio_clips (file_list): /data/clip2.wav
+      audio_clips (file_list):        ← blank to finish
+    ```
 
-## Attaching files via the UI
-
-On a record's detail page, file fields show a file picker. Multiple files can be attached to a `file_list` field. Uploaded files are stored immediately; they are associated with the record when you save the form.
+=== "Web UI"
+    On a record's detail page, file fields show a file picker. Multiple files can be attached to a `file_list` field. Uploaded files are stored immediately; they are associated with the record when you save the form.
 
 ## Downloading files
 
-In the UI, each file field shows a download link next to the filename.
-
-Via the API:
+In the UI, each file field shows a download link next to the filename. Via the API:
 
 ```
 GET /api/files/<sha256>
@@ -48,7 +46,7 @@ GET /api/files/<sha256>
 
 ## Restricting accepted files
 
-File fields support two restrictions:
+File fields support two restrictions, added the same way as any other field restriction — see [Schemas & fields](schemas-and-fields.md#adding-fields):
 
 ```bash
 # Only allow specific extensions
@@ -59,6 +57,8 @@ civex schema add-field document attachment --type file --max-size 104857600
 ```
 
 The `--accept` value uses the same format as the HTML `accept` attribute. Extension checks are case-insensitive.
+
+Both restrictions are enforced when a record is **saved**, not when a file is uploaded. Neither the CLI's file storage nor the web UI's `POST /api/files` upload endpoint checks `accept` or `max_size` — a file that violates either uploads successfully but is rejected when you try to attach its reference to the field.
 
 ## Backing up files
 

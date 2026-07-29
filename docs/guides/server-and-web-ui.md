@@ -1,4 +1,4 @@
-# Server & UI
+# Server & web UI
 
 ## Starting the server
 
@@ -7,8 +7,9 @@ The desktop app starts the server automatically. If you're using the CLI:
 ```bash
 civex serve                  # production mode — serves built UI from frontend/dist/
 civex serve --reload         # development mode — auto-restarts on code changes
-civex serve --host 0.0.0.0   # listen on all interfaces
+civex serve --host 0.0.0.0   # listen on all interfaces (see Security model below)
 civex serve --port 9000      # custom port (default: 8000)
+civex serve --log-level DEBUG  # DEBUG | INFO | WARNING | ERROR — see Logging & telemetry
 ```
 
 The server must be run from within (or below) a directory that contains a `_civex/` project.
@@ -20,13 +21,23 @@ The server must be run from within (or below) a directory that contains a `_cive
 - **DNS rebinding** — requests whose `Host` header isn't a loopback name are rejected.
 - **CSRF** — state-changing requests (`POST`/`PUT`/`PATCH`/`DELETE`) carrying a non-loopback `Origin` are rejected.
 
+Passing a non-loopback `--host` (e.g. `0.0.0.0`) without opting in exits immediately with an error and does not start the server:
+
+```bash
+civex serve --host 0.0.0.0
+# Refusing to bind to non-loopback address '0.0.0.0': the civex server has no
+# authentication and would be reachable by other machines.
+# Re-run with --allow-remote if this is intentional (and put it behind a
+# reverse proxy / firewall).
+```
+
 To expose the server to other machines you must opt in explicitly:
 
 ```bash
 civex serve --host 0.0.0.0 --allow-remote
 ```
 
-`--allow-remote` stands the guard down and prints a warning. Because there is still no authentication, only do this on a trusted network **behind a reverse proxy or firewall**.
+`--allow-remote` stands the guard down and prints a warning instead of exiting. Because there is still no authentication, only do this on a trusted network **behind a reverse proxy or firewall**.
 
 ## Web UI
 
@@ -50,85 +61,18 @@ Opening [http://localhost:8000](http://localhost:8000) (or wherever you configur
 
 ## HTTP API
 
-All endpoints are under `/api/`. Responses are JSON. Interactive documentation (Swagger UI) is available at `/api/docs` while the server is running.
+Everything the web UI does, it does through `/api/` — schemas, collections (`/api/collections`), records, files, workflows, and jobs. Responses are JSON. For the complete, current list of endpoints, use the interactive documentation (Swagger UI) at [`/docs`](http://localhost:8000/docs) while the server is running, rather than a table here that would drift from the code.
 
-### Schemas
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/schemas` | List all schemas |
-| `POST` | `/api/schemas` | Create a schema |
-| `GET` | `/api/schemas/{name}` | Get a schema with its fields |
-| `PATCH` | `/api/schemas/{name}` | Update schema name or description |
-| `DELETE` | `/api/schemas/{name}` | Delete a schema |
-| `POST` | `/api/schemas/{name}/fields` | Add a field |
-| `PATCH` | `/api/schemas/{name}/fields/{field}` | Update a field (rename, restrictions) |
-| `DELETE` | `/api/schemas/{name}/fields/{field}` | Remove a field |
-
-### Datasets
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/datasets` | List all datasets |
-| `POST` | `/api/datasets` | Create a dataset |
-| `GET` | `/api/datasets/{name}` | Get a dataset |
-| `PATCH` | `/api/datasets/{name}` | Update name or description |
-| `DELETE` | `/api/datasets/{name}` | Delete a dataset and all its records |
-
-### Records
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/records` | List records (supports `dataset`, `schema`, `parent_record_id`, `search`, `limit`, `offset`) |
-| `POST` | `/api/records` | Create a record |
-| `GET` | `/api/records/count` | Count records matching filters |
-| `GET` | `/api/records/{id}` | Get a single record |
-| `PATCH` | `/api/records/{id}` | Update a record's data |
-| `DELETE` | `/api/records/{id}` | Delete a record |
-
-### Files
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/files` | Upload a file (multipart). Returns `{sha256, filename, size}`. |
-| `GET` | `/api/files/{sha256}` | Download a file by hash |
+Two examples worth calling out because they're the ones you're likely to script against directly:
 
 ```bash
+# Upload a file, then use the returned sha256 as a `file` field's value
 curl -X POST http://localhost:8000/api/files \
   -F "file=@/path/to/recording.wav"
 # → {"sha256": "abc123…", "filename": "recording.wav", "size": 4096000}
-```
 
-The returned `sha256` can then be used as the value of a `file` field when creating or updating a record.
-
-### Workflows
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/workflows` | List all workflow definitions |
-| `GET` | `/api/workflows/{stem}` | Get a workflow (including YAML source) |
-| `PUT` | `/api/workflows/{stem}` | Create or update a workflow YAML |
-| `DELETE` | `/api/workflows/{stem}` | Delete a workflow |
-| `POST` | `/api/workflows/{name}/run` | Run a workflow |
-
-```bash
-# Simple run (no file inputs)
+# Run a workflow against a record (multipart if it declares `files` inputs)
 curl -X POST http://localhost:8000/api/workflows/extract-start-time/run \
   -H "Content-Type: application/json" \
   -d '{"record_id": "abc123…"}'
-
-# Run with file inputs (multipart)
-curl -X POST http://localhost:8000/api/workflows/load-recordings/run \
-  -F "record_id=abc123…" \
-  -F "files=@recording1.wav" \
-  -F "files=@recording2.wav"
 ```
-
-### Jobs
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/jobs` | List jobs (supports `status`, `record_id`, `offset`, `limit`) |
-| `GET` | `/api/jobs/count` | Count jobs matching filters |
-| `GET` | `/api/jobs/{id}` | Get a single job |
-| `POST` | `/api/jobs/drain` | Process all pending jobs immediately |

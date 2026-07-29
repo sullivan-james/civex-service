@@ -94,4 +94,5 @@ Workflows are YAML files under `_civex/workflows/`. This one copies `result` int
 - [Schemas and field types →](../guides/schemas-and-fields.md)
 - [Collections and records →](../guides/collections-and-records.md)
 - [Workflows →](../guides/workflows.md)
+- [Automation →](../guides/automation.md)
 - [Server & web UI →](../guides/server-and-web-ui.md)
