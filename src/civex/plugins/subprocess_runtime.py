@@ -29,7 +29,7 @@ import tempfile
 import threading
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TextIO, cast
 
 from civex_plugin_sdk.io import FrameReader, FrameWriter
 from civex_plugin_sdk.protocol import (
@@ -376,8 +376,10 @@ class _HostRpcDispatcher:
 
 
 def _drive_describe(proc: subprocess.Popen) -> DescribeResult:
-    writer = FrameWriter.for_stream(proc.stdin)
-    reader = FrameReader.for_stream(proc.stdout)
+    # _spawn always pipes stdin/stdout with text=True, so these are always
+    # open text streams at runtime -- Popen's own type can't express that.
+    writer = FrameWriter.for_stream(cast(TextIO, proc.stdin))
+    reader = FrameReader.for_stream(cast(TextIO, proc.stdout))
     writer.send(DescribeRequest().model_dump())
     try:
         raw = next(reader)
@@ -440,8 +442,10 @@ def _drive_run(
     config: dict[str, Any],
     dispatcher: _HostRpcDispatcher,
 ) -> dict[str, Any]:
-    writer = FrameWriter.for_stream(proc.stdin)
-    reader = FrameReader.for_stream(proc.stdout)
+    # _spawn always pipes stdin/stdout with text=True, so these are always
+    # open text streams at runtime -- Popen's own type can't express that.
+    writer = FrameWriter.for_stream(cast(TextIO, proc.stdin))
+    reader = FrameReader.for_stream(cast(TextIO, proc.stdout))
     writer.send(RunRequest(inputs=inputs, config=config).model_dump())
     while True:
         try:
