@@ -119,6 +119,14 @@ steps:
 | `files` | A list of uploaded files (FileRef dicts). In the UI, a multi-file picker is shown. Via CLI, pass a glob pattern with `--input files=*.wav`. |
 | `value` | An arbitrary scalar (string, number). |
 
+## Creating and editing a workflow
+
+=== "CLI"
+    Workflow YAML files live in `_civex/workflows/` — create or edit them with any text editor. `civex workflow list` picks up changes on the next run; there is no separate "register" step.
+
+=== "Web UI"
+    Go to **Workflows → New workflow** (or select an existing one) and edit the YAML directly in the browser. Saving writes the same file under `_civex/workflows/`.
+
 ## Running workflows manually
 
 === "CLI"
@@ -130,20 +138,12 @@ steps:
     civex workflow run load-recordings --record abc123 --input files=recordings/*.wav
     ```
 
-=== "UI"
+=== "Web UI"
     Navigate to a record's detail page. The **Workflows** panel lists all workflows compatible with that record's schema. Click **Run** to execute immediately, or supply file inputs when prompted.
 
 ## Monitoring jobs
 
-Every workflow execution creates a job. Jobs can be in state `pending`, `running`, `completed`, or `failed`.
-
-```bash
-civex automation jobs          # list recent jobs
-civex automation run           # process all pending jobs immediately
-civex automation logs <job-id> # show a job's captured log output
-```
-
-In the UI, the **Runs** page shows all jobs with their logs. The record detail page shows jobs that ran against that specific record.
+Every workflow execution — automatic or manual — creates a job. See [Automation](automation.md) for managing and inspecting the job queue.
 
 ## Example: extract datetime from a filename
 

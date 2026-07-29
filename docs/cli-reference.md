@@ -68,7 +68,7 @@ civex serve [--host HOST] [--port PORT] [--reload]
 
 ## `civex collection`
 
-Collections are named containers for records — see [Datasets & Records](guides/collections-and-records.md).
+Collections are named containers for records — see [Collections & records](guides/collections-and-records.md).
 
 | Command | Description |
 |---|---|
@@ -116,7 +116,7 @@ civex workflow run load-recordings --record abc123 --input files=data/*.wav
 
 ## `civex automation`
 
-Processes and inspects workflow jobs — the queue that both automatic triggers and `civex workflow run` enqueue into.
+Processes and inspects workflow jobs — the queue that both automatic triggers and `civex workflow run` enqueue into. See [Automation](guides/automation.md) for the day-to-day workflow.
 
 | Command | Description |
 |---|---|
@@ -124,6 +124,7 @@ Processes and inspects workflow jobs — the queue that both automatic triggers 
 | `civex automation jobs [--status STATUS]` | List jobs (`pending`, `running`, `completed`, `failed`) |
 | `civex automation logs <job-id>` | Show captured log output for a job |
 | `civex automation enqueue --workflow NAME --record RECORD_ID` | Manually enqueue a job without running it immediately |
+| `civex automation stats` | Show failed step-execution counts by plugin, across all jobs |
 
 ---
 

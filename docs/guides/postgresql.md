@@ -8,9 +8,13 @@ By default a civex project uses SQLite. Switching to PostgreSQL gives you indexe
 
 Already on SQLite and want to switch a project over later:
 
-```bash
-civex db setup-docker
-```
+=== "CLI"
+    ```bash
+    civex db setup-docker
+    ```
+
+=== "Web UI"
+    Go to **Settings → Database → Docker-managed PostgreSQL** and click **Start / recreate container**.
 
 **Each civex project needs its own database — civex has no multi-tenant isolation.** There's no per-project namespacing in the schema (schema and collection names are globally unique within a database), so two projects pointed at the same Postgres database will collide or silently mix data. `civex db setup-docker` avoids this automatically by giving every project its own container; if you manage Postgres yourself instead (below), give every project its own database, and preferably its own container.
 
@@ -29,20 +33,36 @@ docker run -d \
 docker stop civex-pg-myproject && docker rm civex-pg-myproject
 ```
 
-Edit `_civex/config.toml`:
+Point civex at the server:
 
-```toml
-[db]
-url = "postgresql://civex:civex@localhost:5432/civex_myproject"
-```
+=== "CLI"
+    ```bash
+    civex db setup-postgres --url postgresql+psycopg2://civex:civex@localhost:5432/civex_myproject
+    ```
 
-Or point civex at the server without hand-editing the file:
+    Or edit `_civex/config.toml` directly:
 
-```bash
-civex db setup-postgres --url postgresql+psycopg2://civex:civex@localhost:5432/civex_myproject
-```
+    ```toml
+    [db]
+    url = "postgresql://civex:civex@localhost:5432/civex_myproject"
+    ```
+
+=== "Web UI"
+    Go to **Settings → Database**, click **Change URL…**, and paste the connection string. Civex tests the connection and migrates it before switching over — the target database itself is left untouched.
 
 JSON fields (`record.data`) automatically upgrade to `JSONB` on PostgreSQL for indexed querying. Install the driver with `pipx inject civex psycopg2-binary`.
+
+## Checking status and migrations
+
+=== "CLI"
+    ```bash
+    civex db status   # connection, migration, and Docker container status
+    civex db current  # current migration revision
+    civex db migrate  # apply pending migrations now
+    ```
+
+=== "Web UI"
+    **Settings → Database** shows the connection URL, dialect, and a badge (`up to date`, `pending migrations`, or `unreachable`). A **Run migrations** button appears whenever migrations are pending.
 
 ## Index benchmark
 
