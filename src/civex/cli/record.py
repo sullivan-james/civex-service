@@ -89,7 +89,9 @@ def record_add(
 
 
 @app.command("show")
-def record_show(record_id: str = typer.Argument(...)) -> None:
+def record_show(
+    record_id: str = typer.Argument(..., help="Record ID or short prefix"),
+) -> None:
     """Show a record's field values."""
     ctx = _ctx()
     try:
@@ -122,7 +124,9 @@ def record_show(record_id: str = typer.Argument(...)) -> None:
 
 
 @app.command("update")
-def record_update(record_id: str = typer.Argument(...)) -> None:
+def record_update(
+    record_id: str = typer.Argument(..., help="Record ID or short prefix"),
+) -> None:
     """Update a record's field values, prompting for each field."""
     ctx = _ctx()
     try:
@@ -163,14 +167,14 @@ def record_update(record_id: str = typer.Argument(...)) -> None:
 
 @app.command("find")
 def record_find(
-    dataset_name: str = typer.Option(..., "--in"),
+    dataset_name: str = typer.Option(..., "--in", help="Dataset to search"),
     schema_name: Optional[str] = typer.Option(
         None, "--schema", "-s", help="Filter by schema"
     ),
     where: Optional[list[str]] = typer.Option(
         None, "--where", help="field=value filter (repeatable)"
     ),
-    limit: int = typer.Option(50, "--limit", "-n"),
+    limit: int = typer.Option(50, "--limit", "-n", help="Maximum records to return"),
 ) -> None:
     """List records in a dataset. Use --schema to filter by type and show field columns."""
     ctx = _ctx()
@@ -213,8 +217,8 @@ def record_find(
 
 @app.command("delete")
 def record_delete(
-    record_id: str = typer.Argument(...),
-    yes: bool = typer.Option(False, "--yes", "-y"),
+    record_id: str = typer.Argument(..., help="Record ID or short prefix"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
     force: bool = typer.Option(
         False,
         "--force",
@@ -241,7 +245,7 @@ def record_delete_all(
     schema: Optional[str] = typer.Option(
         None, "--schema", "-s", help="Limit to this schema"
     ),
-    yes: bool = typer.Option(False, "--yes", "-y"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
     force: bool = typer.Option(
         False,
         "--force",

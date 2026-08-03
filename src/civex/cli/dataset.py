@@ -20,8 +20,10 @@ app = typer.Typer(
 
 @app.command("create")
 def dataset_create(
-    name: str = typer.Argument(...),
-    description: Optional[str] = typer.Option(None, "--description", "-d"),
+    name: str = typer.Argument(..., help="Collection name"),
+    description: Optional[str] = typer.Option(
+        None, "--description", "-d", help="Collection description"
+    ),
 ) -> None:
     """Create a new collection."""
     ctx = _ctx()
@@ -52,7 +54,7 @@ def dataset_list() -> None:
 
 
 @app.command("show")
-def dataset_show(name: str = typer.Argument(...)) -> None:
+def dataset_show(name: str = typer.Argument(..., help="Collection name")) -> None:
     """Show a collection summary with record counts per schema."""
     ctx = _ctx()
     try:
@@ -77,11 +79,13 @@ def dataset_show(name: str = typer.Argument(...)) -> None:
 
 @app.command("update")
 def dataset_update(
-    name: str = typer.Argument(...),
+    name: str = typer.Argument(..., help="Collection name"),
     rename: Optional[str] = typer.Option(
         None, "--rename", help="New name for the collection"
     ),
-    description: Optional[str] = typer.Option(None, "--description", "-d"),
+    description: Optional[str] = typer.Option(
+        None, "--description", "-d", help="New description for the collection"
+    ),
 ) -> None:
     """Update a collection's name or description."""
     if rename is None and description is None:
@@ -105,8 +109,8 @@ def dataset_update(
 
 @app.command("delete")
 def dataset_delete(
-    name: str = typer.Argument(...),
-    yes: bool = typer.Option(False, "--yes", "-y"),
+    name: str = typer.Argument(..., help="Collection name"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
 ) -> None:
     """Delete a collection and all its records."""
     if not yes:
@@ -122,7 +126,7 @@ def dataset_delete(
 
 
 @app.command("graph")
-def dataset_graph(name: str = typer.Argument(...)) -> None:
+def dataset_graph(name: str = typer.Argument(..., help="Collection name")) -> None:
     """Show the schema hierarchy for schemas present in a collection."""
     ctx = _ctx()
     try:
