@@ -24,14 +24,18 @@ By default, `civex init` tries to provision a Docker-managed PostgreSQL containe
 Start the HTTP server and web UI.
 
 ```bash
-civex serve [--host HOST] [--port PORT] [--reload]
+civex serve [--host HOST] [--port PORT] [--reload] [--allow-remote] [--log-level LEVEL]
 ```
 
 | Flag | Default | Description |
 |---|---|---|
-| `--host` | `127.0.0.1` | Interface to listen on. Use `0.0.0.0` for all interfaces. |
+| `--host` | `127.0.0.1` | Interface to listen on. Binding to any non-loopback address (e.g. `0.0.0.0`) exits with an error unless `--allow-remote` is also passed. |
 | `--port` | `8000` | TCP port |
 | `--reload` | off | Auto-restart on source changes (development) |
+| `--allow-remote` | off | Permit binding to a non-loopback address. Required whenever `--host` isn't a loopback address, because the server has no authentication — only pass this on a trusted network behind a reverse proxy or firewall. |
+| `--log-level` | `INFO` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR`. Overrides `[logging]` in `config.toml`. |
+
+API docs are served at `/docs` (not under `/api/`).
 
 ---
 
@@ -243,4 +247,5 @@ civex auth status
 | `civex demo [PATH]` | Create a demo project pre-populated with example schemas and records (default: `./civex-demo`) |
 | `civex shell` | Start an interactive civex shell — run commands without the `civex` prefix |
 | `civex license` | Print civex's software license |
-| `civex plugin list` / `civex plugin info` | Inspect registered plugins — not yet implemented |
+| `civex plugin list` | List registered plugins (built-ins and custom) |
+| `civex plugin info <plugin-id>` | Show a plugin's inputs, outputs, capabilities, and config schema |

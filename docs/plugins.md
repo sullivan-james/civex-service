@@ -219,7 +219,7 @@ Create one child record per file in a file list. No key matching — every file 
 |---|---|---|---|
 | `schema` | string | yes | Schema name for the new records |
 | `file_field` | string | yes | Field name on the new records to store the file reference |
-| `dataset` | string | no | Dataset to create records in. Defaults to the trigger record's dataset. |
+| `dataset` | string | no | Collection to create records in. Defaults to the trigger record's collection. |
 | `parent_record_id` | string | no | Parent record ID for child schemas. Defaults to the trigger record's ID. |
 
 **Inputs**
@@ -265,7 +265,7 @@ Match each file to an existing child record by extracting a key value from the f
 | `key_field` | string | yes | Field on the child records used for matching |
 | `file_field` | string | yes | Field on the child records to set with the matched file |
 | `pattern` | string | yes | Regex with one capture group; the capture is the key value |
-| `dataset` | string | no | Dataset to search in. Defaults to the trigger record's dataset. |
+| `dataset` | string | no | Collection to search in. Defaults to the trigger record's collection. |
 | `parent_record_id` | string | no | Scope the search to children of this record. Defaults to the trigger record's ID. |
 
 **Inputs**
@@ -350,7 +350,7 @@ Create one record per row in a DataFrame. Every row produces a new record; use `
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `schema` | string | yes | Schema name for the new records |
-| `dataset` | string | yes | Dataset to create records in |
+| `dataset` | string | yes | Collection to create records in |
 | `field_mapping` | dict | no | Maps DataFrame column names to schema field names: `{csv_column: schema_field}`. If omitted, column names are used as-is. |
 | `parent_record_id` | string | no | Parent record ID. Defaults to the trigger record's ID. |
 
@@ -389,7 +389,7 @@ Create one record per row in a DataFrame. Every row produces a new record; use `
 
 ## `civex.upsert_records`
 
-Create or update records from a DataFrame, matching existing records by a key field. If a record with the same key exists in the dataset, it is updated; otherwise a new record is created.
+Create or update records from a DataFrame, matching existing records by a key field. If a record with the same key exists in the collection, it is updated; otherwise a new record is created.
 
 > Requires the `[workflows]` extra.
 
@@ -399,7 +399,7 @@ Create or update records from a DataFrame, matching existing records by a key fi
 |---|---|---|---|
 | `schema` | string | yes | Schema name |
 | `key_field` | string | yes | Field used to match existing records |
-| `dataset` | string | no | Dataset to operate on. Defaults to the trigger record's dataset. |
+| `dataset` | string | no | Collection to operate on. Defaults to the trigger record's collection. |
 | `parent_record_id` | string | no | Scope matching to children of this record. Defaults to the trigger record's ID. |
 
 **Inputs**

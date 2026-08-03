@@ -371,7 +371,7 @@ ctx.create_record(dataset_name, data)  # create a new record in any dataset
 ## Web UI & server
 
 ```bash
-civex serve [--host HOST] [--port PORT]
+civex serve [--host HOST] [--port PORT] [--reload] [--allow-remote] [--log-level LEVEL]
 ```
 
 Starts a local HTTP server (default `http://127.0.0.1:8000`) with:
