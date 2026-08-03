@@ -1,6 +1,7 @@
-"""serve(plugin_cls) is the entrypoint a plugin script calls to speak the
-wire protocol over stdin/stdout. It isolates stdout first (before any
-plugin code runs), then loops dispatching `describe`/`run` frames.
+"""serve(plugin_cls) is the entrypoint a plugin script calls to speak the wire protocol over stdin/stdout.
+
+It isolates stdout first (before any plugin code runs), then loops
+dispatching `describe`/`run` frames.
 
 serve_container(plugin_cls) is the container-tier (CIVEX-149) counterpart:
 same frame shapes and same fd-dup stdout isolation, but the host does one
@@ -38,8 +39,10 @@ if TYPE_CHECKING:
 
 
 def serve(plugin_cls: "type[Plugin]") -> None:
-    """Real entrypoint: isolates the actual stdout fd, then serves forever
-    off real stdin. Call this (and only this) from a plugin's __main__."""
+    """Real entrypoint: isolates the actual stdout fd, then serves forever off real stdin.
+
+    Call this (and only this) from a plugin's __main__.
+    """
     out = isolate_stdout()
     writer = FrameWriter.for_stream(out)
     reader = FrameReader.for_stream(sys.stdin)
@@ -47,10 +50,11 @@ def serve(plugin_cls: "type[Plugin]") -> None:
 
 
 def serve_container(plugin_cls: "type[Plugin]") -> None:
-    """Container-tier entrypoint: isolates the actual stdout fd, then
-    performs exactly one `describe` or `run` (per sys.argv[1]) off real
-    stdin. Call this (and only this) from a container-tier plugin's
-    __main__ -- see docs/writing-custom-plugins.md's container section."""
+    """Container-tier entrypoint: isolates the actual stdout fd, then performs exactly one `describe` or `run` (per sys.argv[1]) off real stdin.
+
+    Call this (and only this) from a container-tier plugin's __main__ --
+    see docs/writing-custom-plugins.md's container section.
+    """
     out = isolate_stdout()
     writer = FrameWriter.for_stream(out)
     reader = FrameReader.for_stream(sys.stdin)
@@ -64,8 +68,7 @@ def serve_container_once(
     reader: FrameReader,
     writer: FrameWriter,
 ) -> None:
-    """The single-shot dispatch itself, decoupled from real stdio/argv so
-    it's unit-testable against injected reader/writer."""
+    """The single-shot dispatch itself, decoupled from real stdio/argv so it's unit-testable against injected reader/writer."""
     if mode == "describe":
         _handle_describe(plugin_cls, writer)
         return
@@ -106,8 +109,7 @@ def serve_container_once(
 def serve_loop(
     plugin_cls: "type[Plugin]", reader: FrameReader, writer: FrameWriter
 ) -> None:
-    """The dispatch loop itself, decoupled from real stdio so it's
-    unit-testable against injected reader/writer."""
+    """The dispatch loop itself, decoupled from real stdio so it's unit-testable against injected reader/writer."""
     for raw in reader:
         try:
             frame = parse_frame(raw)

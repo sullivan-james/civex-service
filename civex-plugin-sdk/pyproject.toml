@@ -29,3 +29,16 @@ table = ["pandas>=2.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+extend = "../pyproject.toml"
+
+[tool.ruff.lint]
+extend-select = ["D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]
+"examples/**" = ["D"]

@@ -1,3 +1,11 @@
+"""SDK for authoring out-of-process (subprocess/container tier) civex workflow plugins.
+
+Subclass `Plugin`, declare `id`/`name`/`inputs`/`outputs`/`Config`,
+implement `invoke()`, and call `serve()` (Tier 1) or `serve_container()`
+(Tier 2) from the plugin script's `__main__` -- see
+docs/writing-custom-plugins.md for the full authoring guide.
+"""
+
 from civex_plugin_sdk.ctx import Ctx
 from civex_plugin_sdk.errors import (
     CapabilityDeniedError,
