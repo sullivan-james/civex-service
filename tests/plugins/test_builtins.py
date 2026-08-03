@@ -16,6 +16,8 @@ import sys
 
 import pandas as pd
 import pytest
+from civex_plugin_sdk.io_convert import to_invoke_form
+from civex_plugin_sdk.protocol import decode_binary
 
 from civex.context import AppContext
 from civex.plugins.base import WorkflowContext
@@ -134,11 +136,13 @@ def test_load_file_returns_bytes_filename_and_sha256(
     config = registration.config_model(field="attachment")
     result = registration.invoke({}, config, wf_ctx, 60.0)
 
-    assert result.outputs == {
-        "bytes": b"hello world",
-        "filename": "hello.txt",
-        "sha256": file_ref.sha256,
-    }
+    # A declared `bytes` output leaves a step in the binary envelope, not as
+    # raw bytes -- the wire form every tier produces (see
+    # registry._registration_for_tier0). The next step's own convert_inputs
+    # turns it back into `bytes` before its invoke() sees it.
+    assert result.outputs["filename"] == "hello.txt"
+    assert result.outputs["sha256"] == file_ref.sha256
+    assert decode_binary(result.outputs["bytes"]) == b"hello world"
 
 
 def test_load_file_list_returns_raw_file_refs(
@@ -230,7 +234,16 @@ def test_load_csv_parses_bytes_into_dataframe(
         {"bytes": csv_bytes}, registration.config_model(), wf_ctx, 60.0
     )
 
-    df = result.outputs["table"]
+    # Same as the `bytes` case above: the DataFrame the plugin returns leaves
+    # the step as the columnar, typed envelope, and is reconstructed into a
+    # real DataFrame by whichever downstream step actually reads it.
+    assert result.outputs["table"] == {
+        "encoding": "inline",
+        "columns": ["name", "age"],
+        "dtypes": {"name": "string", "age": "integer"},
+        "data": {"name": ["Alice", "Bob"], "age": [30, 25]},
+    }
+    df = to_invoke_form("table", result.outputs["table"])
     assert list(df.columns) == ["name", "age"]
     assert len(df) == 2
 

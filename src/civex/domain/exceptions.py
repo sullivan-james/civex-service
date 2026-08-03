@@ -125,6 +125,23 @@ class CapabilityDeniedError(PluginExecutionError):
         super().__init__(f"plugin is not declared to use capability '{method}'")
 
 
+class PluginContractError(CivexError):
+    """Raised when a step's outputs violate the one contract every tier is
+    held to: they must be JSON-serializable, so a workflow behaves the same
+    regardless of which tier a step happens to run on.
+
+    Declared `table`/`bytes` IOSpec values are converted for the author
+    automatically (civex_plugin_sdk.io_convert, wired into both
+    registry._registration_for_tier0 and civex_plugin_sdk.serve._handle_run),
+    so this only fires for a BUILTIN plugin returning some *other*
+    non-serializable value -- caught at the step that produced it rather than
+    later and further away, when a downstream subprocess step tried to send it
+    in a RunRequest or the job record was written.
+    """
+
+    kind = "plugin_contract_error"
+
+
 class ContainerBuildError(CivexError):
     """Raised when `docker build` fails for a Tier 2 (container) plugin's
     Dockerfile + source directory (CIVEX-148)."""

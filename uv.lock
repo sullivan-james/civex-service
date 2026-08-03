@@ -398,7 +398,7 @@ provides-extras = ["postgres", "workflows", "server", "desktop", "ai", "telemetr
 
 [[package]]
 name = "civex-plugin-sdk"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "civex-plugin-sdk" }
 dependencies = [
     { name = "pydantic" },
@@ -408,13 +408,17 @@ dependencies = [
 dev = [
     { name = "pytest" },
 ]
+table = [
+    { name = "pandas" },
+]
 
 [package.metadata]
 requires-dist = [
+    { name = "pandas", marker = "extra == 'table'", specifier = ">=2.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["dev", "table"]
 
 [[package]]
 name = "click"

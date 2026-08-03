@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from civex_plugin_sdk.io_convert import convert_inputs, convert_outputs
 from civex_plugin_sdk.plugin_base import IOSpec
 from civex_plugin_sdk.protocol import DescribeResult
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -91,8 +92,20 @@ def _registration_for_tier0(plugin_cls: type[Tier0Plugin]) -> PluginRegistration
     def invoke(
         inputs: dict[str, Any], config: Any, ctx: WorkflowContext, timeout: float
     ) -> StepResult:
-        outputs = plugin_cls().invoke(inputs, config, ctx) or {}
-        return StepResult(outputs=outputs)
+        # The same declared-`table`/`bytes` conversion the out-of-process
+        # tiers get in civex_plugin_sdk.serve._handle_run, applied here so a
+        # BUILTIN plugin's author code sees the identical invoke-time values
+        # (a real DataFrame, real `bytes`) while its *outputs* still leave in
+        # the always-JSON-safe wire form. Without this, a step like
+        # civex.load_csv would hand a live DataFrame to the next step -- fine
+        # for another in-process step, but a TypeError the moment that step is
+        # a subprocess/container one whose RunRequest has to json.dumps it.
+        #
+        # scratch_dir=None: tier BUILTIN has no per-run scratch dir to write
+        # into (nothing spawns a process here), so values always inline.
+        converted = convert_inputs(plugin_cls.inputs, inputs)
+        outputs = plugin_cls().invoke(converted, config, ctx) or {}
+        return StepResult(outputs=convert_outputs(plugin_cls.outputs, outputs))
 
     return PluginRegistration(
         id=plugin_cls.id,

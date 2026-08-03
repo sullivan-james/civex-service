@@ -7,6 +7,7 @@ from collections import deque
 from typing import Any
 
 from civex.domain.dtos import ErrorEnvelope, StepExecution
+from civex.domain.exceptions import PluginContractError
 from civex.plugins.base import WorkflowContext
 from civex.plugins.registry import PluginRegistration
 from civex.workflows.conditions import (
@@ -137,6 +138,31 @@ def _json_safe(value: Any) -> Any:
         return repr(value)
 
 
+def _assert_json_safe_outputs(
+    step_id: str, plugin_id: str, outputs: dict[str, Any]
+) -> None:
+    """Enforce the cross-tier output contract on a step that just succeeded.
+
+    A subprocess/container-tier step's outputs came off a JSON wire and so are
+    serializable by construction. A BUILTIN step's didn't: only its declared
+    `table`/`bytes` values are converted (registry._registration_for_tier0),
+    and anything else it returns would otherwise fail somewhere else entirely
+    -- when the next step happens to be out-of-process, or when the job record
+    is written -- rather than at the step that produced it.
+
+    Deliberately a real `json.dumps` rather than an isinstance walk: the
+    serializer is the thing that will actually have to do this later, so it is
+    the only check that can't disagree with it.
+    """
+    try:
+        json.dumps(outputs)
+    except TypeError as e:
+        raise PluginContractError(
+            f"step '{step_id}' ({plugin_id}) returned outputs that aren't "
+            f"JSON-serializable: {e}"
+        ) from e
+
+
 def _validate_contracts(
     wf: WorkflowDef, plugins: dict[str, PluginRegistration]
 ) -> None:
@@ -219,6 +245,7 @@ def run(
         timeout = step.timeout if step.timeout is not None else default_timeout_seconds
         try:
             result = registration.invoke(inputs, config, ctx, timeout)
+            _assert_json_safe_outputs(step.id, step.plugin, result.outputs)
         except Exception as e:
             # Attach the step id and re-raise unchanged. The exception keeps
             # its own type and kind -- this is the one place that knows which

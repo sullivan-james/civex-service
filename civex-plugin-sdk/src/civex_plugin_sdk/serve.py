@@ -14,6 +14,7 @@ per operation.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
@@ -21,6 +22,7 @@ from pydantic import ValidationError
 from civex_plugin_sdk.ctx import Ctx
 from civex_plugin_sdk.errors import ConfigValidationError, PluginError
 from civex_plugin_sdk.io import FrameReader, FrameWriter, isolate_stdout
+from civex_plugin_sdk.io_convert import convert_inputs, convert_outputs
 from civex_plugin_sdk.protocol import (
     DescribeRequest,
     DescribeResult,
@@ -154,9 +156,30 @@ def _handle_run(
         _send_error(writer, ConfigValidationError(str(e)))
         return
 
+    # A plugin's cwd already *is* the host-managed, per-run scratch dir (see
+    # civex-service's subprocess_runtime._spawn), so it needs no scratch path
+    # of its own -- anything too large to inline is written here and crosses
+    # back as an absolute path.
+    scratch_dir = Path(".")
+    try:
+        inputs = convert_inputs(plugin_cls.inputs, frame.inputs, scratch_dir=scratch_dir)
+    except Exception as e:
+        # A malformed/unreadable `table`/`bytes` envelope is the host's or an
+        # upstream step's fault, not this plugin author's -- classified as a
+        # protocol error rather than reported as if invoke() had failed.
+        _send_error(
+            writer,
+            PluginError(f"could not decode step inputs: {e}", kind="protocol_error"),
+        )
+        return
+
     ctx = Ctx(writer, reader)
     try:
-        outputs = plugin_cls().invoke(frame.inputs, config, ctx) or {}
+        outputs = plugin_cls().invoke(inputs, config, ctx) or {}
+        # Declared `table`/`bytes` outputs become the always-JSON-safe wire
+        # envelope here, so an author can return a DataFrame or raw bytes
+        # from invoke() and the frame below still serializes.
+        outputs = convert_outputs(plugin_cls.outputs, outputs, scratch_dir=scratch_dir)
     except PluginError as e:
         _send_error(writer, e)
         return

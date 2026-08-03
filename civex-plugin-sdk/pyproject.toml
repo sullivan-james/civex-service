@@ -4,7 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "civex-plugin-sdk"
-version = "0.1.0"
+# 0.2.0: `table`/`bytes` IOSpec values now cross the wire as the typed
+# columnar/binary envelope (civex_plugin_sdk.io_convert), and the `[table]`
+# extra provides the pandas that a `table`-typed plugin is handed. The bump
+# is load-bearing, not cosmetic: `uv run` caches a per-script environment, so
+# an already-resolved plugin would otherwise keep an older SDK with the old
+# behaviour and never see the new conversion at all.
+version = "0.2.0"
 description = "SDK for authoring out-of-process Civex workflow plugins (subprocess/container tiers)"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,6 +19,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# A `table`-typed IOSpec value is handed to author code as a pandas
+# DataFrame (civex_plugin_sdk.io_convert) -- an extra rather than a hard
+# dependency because a plugin declaring no `table` input/output has no
+# reason to pay for it, and io_convert degrades to plain records without it.
+# A plugin that does declare one asks for it by name in its own PEP 723
+# header: dependencies = ["civex-plugin-sdk[table]"].
+table = ["pandas>=2.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

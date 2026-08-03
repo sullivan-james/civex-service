@@ -161,7 +161,10 @@ def encode_binary(data: bytes, scratch_dir: Path | None = None) -> dict[str, Any
     if scratch_dir is None or len(data) <= BINARY_INLINE_THRESHOLD:
         return {"encoding": "base64", "data": base64.b64encode(data).decode("ascii")}
     scratch_dir.mkdir(parents=True, exist_ok=True)
-    path = scratch_dir / f"{uuid.uuid4().hex}.bin"
+    # .resolve(): a relative scratch_dir (Path(".") -- a Tier 1 plugin's own
+    # cwd, see serve.py's _handle_run) is only meaningful relative to *this*
+    # process, but the path in this envelope crosses to another one.
+    path = (scratch_dir / f"{uuid.uuid4().hex}.bin").resolve()
     path.write_bytes(data)
     return {"encoding": "path", "path": str(path)}
 

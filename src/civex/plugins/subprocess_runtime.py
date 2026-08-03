@@ -126,11 +126,33 @@ def _sdk_find_links_dir() -> Path | None:
     return wheel_dir
 
 
+def _local_sdk_version(wheel_dir: Path) -> str | None:
+    """Version of the wheel `_sdk_find_links_dir` just built, read off its
+    filename (`civex_plugin_sdk-<version>-py3-none-any.whl`)."""
+    for wheel in sorted(wheel_dir.glob("civex_plugin_sdk-*.whl")):
+        parts = wheel.name.split("-")
+        if len(parts) > 1:
+            return parts[1]
+    return None
+
+
 def _build_command(uv_bin: str, plugin_path: Path) -> list[str]:
     argv = [uv_bin, "run", "--no-project"]
     find_links = _sdk_find_links_dir()
     if find_links is not None:
         argv += ["--find-links", str(find_links)]
+        # Pin the SDK the *host* speaks. `uv run` caches a per-script
+        # environment keyed on the requirements it was given, and a plugin's
+        # own header asks for `civex-plugin-sdk` unpinned -- which whatever
+        # version that cached environment already holds satisfies forever.
+        # So without this pin, a plugin that resolved once against an older
+        # SDK keeps using it after the SDK changes, and silently disagrees
+        # with the host about the wire format (a `table` input arriving as a
+        # raw envelope dict instead of a DataFrame, say). Naming the version
+        # makes it part of the cache key, so an SDK bump re-resolves.
+        version = _local_sdk_version(find_links)
+        if version is not None:
+            argv += ["--with", f"civex-plugin-sdk=={version}"]
     argv.append(str(plugin_path))
     return argv
 
