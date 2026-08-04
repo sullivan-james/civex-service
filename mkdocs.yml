@@ -32,6 +32,16 @@ plugins:
   - search
   - gen-files:
       scripts: []          # populated by C2, D2, E6
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [civex-plugin-sdk/src]
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: true
+            members_order: source
+            filters: ["!^_"]
 
 exclude_docs: |
   _gen/
@@ -69,4 +79,6 @@ nav:
       - Logging & telemetry: guides/logging-and-telemetry.md
   - Plugins: plugins.md
   - Writing custom plugins: writing-custom-plugins.md
+  - Extending:
+      - SDK reference: extending/sdk-reference.md
   - CLI reference: cli-reference.md
