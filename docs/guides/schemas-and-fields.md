@@ -14,8 +14,6 @@ A schema defines the structure of a record: what fields it has, what types those
 === "Web UI"
     Go to **Schemas → New schema**, enter a name and optional description, and save. The new schema appears in the schema list with a link to its detail page.
 
-The full command list is in the [CLI reference](../cli-reference.md#civex-schema).
-
 ## Field types
 
 | Type | Stores | CLI prompt accepts |
@@ -80,7 +78,19 @@ Restrictions constrain what values are accepted when records are saved. They are
 === "Web UI"
     On a schema's detail page, click **Add field**. Enter a name, pick a type from the dropdown, and toggle **Required**. The form reveals the restrictions that apply to the chosen type — min/max for `integer`/`float`, choices/max length for `string`, accept/max size for `file`/`file_list`, and a target-schema picker for `reference`.
 
-The full flag list is in the [CLI reference](../cli-reference.md#civex-schema).
+**Restriction flags** (on `add-field` and `update-field`):
+
+| Flag | Applies to | Description |
+|---|---|---|
+| `--required` / `--optional` | all | Whether the field must be set |
+| `--min VALUE` / `--max VALUE` | `integer`, `float` | Value range |
+| `--min VALUE` / `--max VALUE` | `date`, `datetime` | Date range (ISO string) |
+| `--choices A,B,C` | `string` | Comma-separated allowed values |
+| `--max-length N` | `string` | Maximum character length |
+| `--accept .ext,.ext` | `file`, `file_list` | Comma-separated allowed extensions |
+| `--max-size BYTES` | `file`, `file_list` | Maximum file size in bytes |
+| `--references SCHEMA` | `reference` | Target schema name |
+| `--clear-restrictions` | all | Remove all restrictions (on `update-field`) |
 
 ## Editing fields
 

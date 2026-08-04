@@ -84,4 +84,3 @@ nav:
   - Reference:
       - CLI:
           - Plumbing commands: reference/cli/plumbing.md
-  - CLI reference: cli-reference.md
