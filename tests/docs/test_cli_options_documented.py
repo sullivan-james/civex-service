@@ -46,10 +46,10 @@ def _iter_visible_params(cmd: Any, path: list[str], hidden: bool) -> list[tuple[
 def test_all_cli_options_and_arguments_have_help() -> None:
     click_app = typer.main.get_command(cli_app)
     missing = _iter_visible_params(click_app, [], hidden=False)
-assert not missing, (
-    "These CLI options/arguments are missing help=:\n"
-    + "\n".join(
-        f"  civex {cmd} {param}" if cmd else f"  civex {param}"
-        for cmd, param in missing
+    assert not missing, (
+        "These CLI options/arguments are missing help=:\n"
+        + "\n".join(
+            f"  civex {cmd} {param}" if cmd else f"  civex {param}"
+            for cmd, param in missing
+        )
     )
-)
