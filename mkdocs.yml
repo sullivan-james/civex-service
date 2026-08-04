@@ -81,4 +81,7 @@ nav:
   - Writing custom plugins: writing-custom-plugins.md
   - Extending:
       - SDK reference: extending/sdk-reference.md
+  - Reference:
+      - CLI:
+          - Plumbing commands: reference/cli/plumbing.md
   - CLI reference: cli-reference.md
