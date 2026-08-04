@@ -94,12 +94,13 @@ def _print_config_section(config_schema: dict[str, Any]) -> None:
         console.print("  (none)")
         return
     required = set(config_schema.get("required") or [])
-    table = Table("Key", "Type", "Required", "Default")
+    table = Table("Key", "Type", "Required", "Default", "Description")
     for key, prop in properties.items():
         table.add_row(
             key,
             str(prop.get("type", "any")),
             "yes" if key in required else "",
             str(prop["default"]) if "default" in prop else "",
+            prop.get("description") or "",
         )
     console.print(table)

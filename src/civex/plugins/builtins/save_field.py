@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from civex.plugins.base import Tier0Plugin, WorkflowContext
 
@@ -18,7 +18,9 @@ class Plugin(Tier0Plugin):
     outputs: list[IOSpec] = []
 
     class Config(BaseModel):
-        field: str  # field name on the trigger record to write to
+        field: str = Field(
+            description="Name of the field on the trigger record to write to."
+        )
 
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext

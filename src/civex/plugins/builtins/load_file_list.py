@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from civex.plugins.base import Tier0Plugin, WorkflowContext
 
@@ -30,7 +30,9 @@ class Plugin(Tier0Plugin):
     ]
 
     class Config(BaseModel):
-        field: str  # name of the file_list field on the trigger record
+        field: str = Field(
+            description="Name of the `file_list` field on the trigger record to read."
+        )
 
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext

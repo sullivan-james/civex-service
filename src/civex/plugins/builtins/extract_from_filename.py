@@ -5,7 +5,7 @@ from datetime import date as _date, datetime as _dt, timezone as _tz
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from civex.plugins.base import Tier0Plugin, WorkflowContext
 
@@ -75,11 +75,27 @@ class Plugin(Tier0Plugin):
     ]
 
     class Config(BaseModel):
-        field: str
-        pattern: str = r"(.+)"
-        output_type: str = "string"  # string | integer | float | date | datetime
-        date_format: str | None = (
-            None  # e.g. "YYYYMMDD-HHmmSS"; required when output_type is date/datetime
+        field: str = Field(
+            description="Field on the trigger record holding the filename to match "
+            "(a `file`/`file_list` field, or a plain string field)."
+        )
+        pattern: str = Field(
+            default=r"(.+)",
+            description="Regex applied to the filename. The first capture group "
+            "(or the whole match if there is none) is extracted.",
+        )
+        output_type: str = Field(
+            default="string",
+            description="Type to convert the captured text to: "
+            "string | integer | float | date | datetime.",
+        )
+        date_format: str | None = Field(
+            default=None,
+            description="Token format for parsing the captured text when "
+            "`output_type` is date/datetime, e.g. 'YYYYMMDD-HHmmSS'. Tokens are "
+            "YYYY MM DD HH mm SS; non-token characters are treated as raw regex, "
+            "so e.g. 'YYYYMMDD[-_]HHmmSS' matches both dashes and underscores. "
+            "Required when output_type is date or datetime.",
         )
 
     def invoke(

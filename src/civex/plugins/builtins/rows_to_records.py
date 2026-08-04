@@ -39,10 +39,27 @@ class Plugin(Tier0Plugin):
 
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
-        schema_name: str = Field(alias="schema")
-        dataset: str = ""  # "" = use ctx.dataset.name
-        field_mapping: dict[str, str] = {}  # csv_column → schema_field
-        context_record_id: str = ""  # "" = use ctx.get_context_record().id
+        schema_name: str = Field(
+            alias="schema",
+            description="Name of the schema to create records under. Workflow "
+            "YAML sets this via the `schema:` key (the Python field is "
+            "`schema_name`).",
+        )
+        dataset: str = Field(
+            default="",
+            description="Dataset to create records in. Empty string falls back "
+            "to the trigger record's own dataset.",
+        )
+        field_mapping: dict[str, str] = Field(
+            default_factory=dict,
+            description="Maps table column names to schema field names. Empty "
+            "means columns are used as schema field names directly.",
+        )
+        context_record_id: str = Field(
+            default="",
+            description="Parent record ID to attach created records to. Empty "
+            "string falls back to the workflow's context record.",
+        )
 
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext

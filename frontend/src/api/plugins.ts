@@ -19,7 +19,10 @@ export interface PluginInfo {
   inputs: PluginIOSpec[] | null
   outputs: PluginIOSpec[] | null
   config_schema: {
-    properties?: Record<string, { type?: string; default?: unknown }>
+    properties?: Record<
+      string,
+      { type?: string; default?: unknown; description?: string }
+    >
     required?: string[]
   }
   filename: string | null

@@ -437,6 +437,12 @@ function PluginContractDetail({ plugin }: { plugin: PluginInfo }) {
                 {!required.has(key) && (
                   <span className="text-[#656d76]"> (optional)</span>
                 )}
+                {prop.description && (
+                  <span className="text-[#656d76] font-sans">
+                    {' '}
+                    — {prop.description}
+                  </span>
+                )}
               </li>
             ))}
           </ul>
