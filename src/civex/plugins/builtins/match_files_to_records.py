@@ -41,14 +41,34 @@ class Plugin(Tier0Plugin):
 
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
-        schema_name: str = Field(alias="schema")
-        key_field: (
-            str  # field on child records to match against (e.g. selection_number)
+        schema_name: str = Field(
+            alias="schema",
+            description="Name of the child schema to match/create records "
+            "under. Workflow YAML sets this via the `schema:` key (the Python "
+            "field is `schema_name`).",
         )
-        file_field: str  # field on child records to set (e.g. contour_file)
-        pattern: str  # regex with one capture group for the key value
-        dataset: str = ""  # defaults to ctx.dataset.name
-        parent_record_id: str = ""  # defaults to ctx.record.id
+        key_field: str = Field(
+            description="Field on child records to match the extracted key "
+            "against, e.g. 'selection_number'."
+        )
+        file_field: str = Field(
+            description="Field on child records to set with the matched file "
+            "reference, e.g. 'contour_file'."
+        )
+        pattern: str = Field(
+            description="Regex with one capture group that extracts the key "
+            "value from each filename."
+        )
+        dataset: str = Field(
+            default="",
+            description="Dataset to search and create records in. Empty string "
+            "falls back to the trigger record's own dataset.",
+        )
+        parent_record_id: str = Field(
+            default="",
+            description="Parent record ID to scope matching and creation to. "
+            "Empty string falls back to the trigger record's ID.",
+        )
 
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext

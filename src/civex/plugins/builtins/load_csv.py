@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from civex.plugins.base import Tier0Plugin, WorkflowContext
 
@@ -24,8 +24,10 @@ class Plugin(Tier0Plugin):
     ]
 
     class Config(BaseModel):
-        delimiter: str = ","
-        encoding: str = "utf-8"
+        delimiter: str = Field(default=",", description="Column separator character.")
+        encoding: str = Field(
+            default="utf-8", description="Text encoding to decode the CSV bytes with."
+        )
 
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext

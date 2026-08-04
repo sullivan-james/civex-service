@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from civex.plugins.base import Tier0Plugin, WorkflowContext
 
@@ -24,7 +24,9 @@ class Plugin(Tier0Plugin):
     ]
 
     class Config(BaseModel):
-        field: str
+        field: str = Field(
+            description="Name of the field to read from the trigger record."
+        )
 
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext

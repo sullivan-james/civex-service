@@ -39,10 +39,25 @@ class Plugin(Tier0Plugin):
 
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
-        schema_name: str = Field(alias="schema")
-        file_field: str
-        dataset: str = ""
-        context_record_id: str = ""
+        schema_name: str = Field(
+            alias="schema",
+            description="Name of the schema to create records under. Workflow "
+            "YAML sets this via the `schema:` key (the Python field is "
+            "`schema_name`).",
+        )
+        file_field: str = Field(
+            description="Field on the created records to store each file reference in."
+        )
+        dataset: str = Field(
+            default="",
+            description="Dataset to create records in. Empty string falls back "
+            "to the trigger record's own dataset.",
+        )
+        context_record_id: str = Field(
+            default="",
+            description="Parent record ID to attach created records to. Empty "
+            "string falls back to the workflow's context record.",
+        )
 
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext

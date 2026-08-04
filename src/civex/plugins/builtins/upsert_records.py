@@ -40,10 +40,25 @@ class Plugin(Tier0Plugin):
 
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
-        schema_name: str = Field(alias="schema")
-        key_field: str  # field used to match existing records
-        dataset: str = ""  # defaults to ctx.dataset.name
-        parent_record_id: str = ""  # defaults to ctx.record.id
+        schema_name: str = Field(
+            alias="schema",
+            description="Name of the schema to create/update records under. "
+            "Workflow YAML sets this via the `schema:` key (the Python field is "
+            "`schema_name`).",
+        )
+        key_field: str = Field(
+            description="Field used to match table rows against existing records."
+        )
+        dataset: str = Field(
+            default="",
+            description="Dataset to search and create records in. Empty string "
+            "falls back to the trigger record's own dataset.",
+        )
+        parent_record_id: str = Field(
+            default="",
+            description="Parent record ID to scope matching and creation to. "
+            "Empty string falls back to the trigger record's ID.",
+        )
 
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
