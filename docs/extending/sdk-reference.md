@@ -13,4 +13,3 @@ function they share a name with, so listing it above renders nothing. -->
 ::: civex_plugin_sdk.serve.serve
     options:
       show_root_full_path: false
-
