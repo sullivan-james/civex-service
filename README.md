@@ -16,7 +16,7 @@ Schema ──defines──▶ Record
 pipx install "civex[server,workflows]"
 ```
 
-See [Install](https://docs.civex.dev/getting-started/install.html) for the desktop app, upgrading, and installing from source.
+See [Install](docs/getting-started/install.md) for the desktop app, upgrading, and installing from source.
 
 ## 60-second example
 
@@ -29,16 +29,16 @@ civex record add --to study-2024 --schema trial
 civex serve                          # open http://localhost:8000
 ```
 
-Take the [five-minute tour](https://docs.civex.dev/getting-started/tour.html) for the full walkthrough, including workflows.
+Take the [five-minute tour](docs/getting-started/tour.md) for the full walkthrough, including workflows.
 
 ## Documentation
 
-Full docs: **[docs.civex.dev](https://docs.civex.dev/)**
+Full docs live in [`docs/`](docs/index.md) — run `make docs` to browse them locally with live reload.
 
-- **Getting started** — [install](https://docs.civex.dev/getting-started/install.html), [your first project](https://docs.civex.dev/getting-started/first-project.html), [five-minute tour](https://docs.civex.dev/getting-started/tour.html)
-- **Guides** — [schemas & fields](https://docs.civex.dev/guides/schemas-and-fields.html), [collections & records](https://docs.civex.dev/guides/collections-and-records.html), [files](https://docs.civex.dev/guides/files.html), [workflows](https://docs.civex.dev/guides/workflows.html), [automation](https://docs.civex.dev/guides/automation.html), [server & web UI](https://docs.civex.dev/guides/server-and-web-ui.html), [remote sync & CivexHub](https://docs.civex.dev/guides/remote-sync.html), [PostgreSQL](https://docs.civex.dev/guides/postgresql.html), [logging & telemetry](https://docs.civex.dev/guides/logging-and-telemetry.html)
-- **Reference** — [CLI reference](https://docs.civex.dev/cli-reference.html), [plugins](https://docs.civex.dev/plugins.html), [writing custom plugins](https://docs.civex.dev/writing-custom-plugins.html)
-- **Contributing** — [architecture](https://docs.civex.dev/contributing/architecture.html), [dev setup](https://docs.civex.dev/contributing/dev-setup.html)
+- **Getting started** — [install](docs/getting-started/install.md), [your first project](docs/getting-started/first-project.md), [five-minute tour](docs/getting-started/tour.md)
+- **Guides** — [schemas & fields](docs/guides/schemas-and-fields.md), [collections & records](docs/guides/collections-and-records.md), [files](docs/guides/files.md), [workflows](docs/guides/workflows.md), [automation](docs/guides/automation.md), [server & web UI](docs/guides/server-and-web-ui.md), [remote sync & CivexHub](docs/guides/remote-sync.md), [PostgreSQL](docs/guides/postgresql.md), [logging & telemetry](docs/guides/logging-and-telemetry.md)
+- **Reference** — [CLI reference](docs/cli-reference.md), [plugins](docs/plugins.md), [writing custom plugins](docs/writing-custom-plugins.md), [plugin SDK](docs/extending/sdk-reference.md)
+- **Contributing** — [architecture](docs/contributing/architecture.md), [dev setup](docs/contributing/dev-setup.md)
 
 ## Development
 
@@ -47,7 +47,7 @@ make install   # uv sync — sets up the venv and dependencies
 make check     # everything CI runs: format, lint, typecheck, test, docs build
 ```
 
-See [dev setup](https://docs.civex.dev/contributing/dev-setup.html) for the full local development workflow.
+See [dev setup](docs/contributing/dev-setup.md) for the full local development workflow.
 
 ## License
 
