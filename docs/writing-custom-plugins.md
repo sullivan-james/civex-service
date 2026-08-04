@@ -107,7 +107,7 @@ Return a dict of output values. These are referenced by downstream steps as `thi
 | Method | Capability name | Description |
 |---|---|---|
 | `ctx.get_context_record() → dict` | `get_context_record` | The record that triggered this workflow (`id`, `schema_id`, `data`, ...). This is how a plugin learns what triggered it — there's no ambient `.record` field. |
-| `ctx.get_context_dataset() → dict` | `get_context_dataset` | The dataset the trigger record belongs to. |
+| `ctx.get_context_dataset() → dict` | `get_context_dataset` | The collection the trigger record belongs to. |
 | `ctx.get_file(sha256: str) → bytes` | `get_file` | Retrieve a stored file's bytes by hash. |
 | `ctx.store_file(data: bytes, filename: str) → dict` | `store_file` | Store bytes as a new file object; returns a `FileRef`-shaped dict. |
 | `ctx.update_record(record_id: str, data: dict) → dict` | `update_record` | Write `data` into any record by id (not just the trigger — pass the trigger's id from `get_context_record()` to update it). Merges into existing data. |
@@ -116,7 +116,7 @@ Return a dict of output values. These are referenced by downstream steps as `thi
 | `ctx.find_records(dataset_name, schema_name=None, parent_record_id=None, filters=None, search=None, limit=50, offset=0) → list[dict]` | `find_records` | Query records. |
 | `ctx.delete_record(record_id: str)` | `delete_record` | Delete a record. |
 | `ctx.get_schema(name: str) → dict`, `ctx.list_schemas() → list[dict]` | `get_schema`, `list_schemas` | Read-only schema introspection. |
-| `ctx.get_collection(name: str) → dict`, `ctx.list_collections() → list[dict]` | `get_collection`, `list_collections` | Read-only dataset (collection) introspection. |
+| `ctx.get_collection(name: str) → dict`, `ctx.list_collections() → list[dict]` | `get_collection`, `list_collections` | Read-only collection introspection. |
 | `ctx.commit()` | `commit` | Flush pending changes to the database. The executor also commits once at the end of a successful run; call this yourself only if you need an intermediate commit. |
 
 Declare each one you use in `capabilities` — see the table above for the exact capability name per method.
