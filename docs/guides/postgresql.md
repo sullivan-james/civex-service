@@ -1,6 +1,6 @@
 # PostgreSQL
 
-By default a civex project uses SQLite. Switching to PostgreSQL gives you indexed querying over record data (JSON columns automatically upgrade to `JSONB` via SQLAlchemy's `with_variant`) and is a better fit once a project's data or concurrent access grows. All setup and status commands live under the [`civex db` command group](../cli-reference.md#civex-db).
+By default a civex project uses SQLite. Switching to PostgreSQL gives you indexed querying over record data (JSON columns automatically upgrade to `JSONB` via SQLAlchemy's `with_variant`) and is a better fit once a project's data or concurrent access grows. All setup and status commands live under the `civex db` command group.
 
 ## Automatic setup (recommended)
 

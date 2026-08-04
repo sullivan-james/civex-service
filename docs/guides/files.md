@@ -63,3 +63,5 @@ Both restrictions are enforced when a record is **saved**, not when a file is up
 ## Backing up files
 
 The `_civex/objects/` directory contains all file data. Include it in your backups alongside `civex.db`. If you use [remote sync](remote-sync.md) (`civex push`), objects are transferred automatically.
+
+`civex dump` does not include file attachments — only schemas, collections, records, and workflows. Back up `_civex/objects/` separately, or use remote sync, which transfers objects automatically.
