@@ -41,7 +41,7 @@ def plugin_list() -> None:
 
 
 @app.command("info")
-def plugin_info(plugin_id: str = typer.Argument(...)) -> None:
+def plugin_info(plugin_id: str = typer.Argument(..., help="Plugin ID")) -> None:
     """Show a plugin's inputs, outputs, capabilities, and config schema."""
     ctx = _ctx()
     by_id = {p["id"]: p for p in ctx.plugin_svc.list_registered()}

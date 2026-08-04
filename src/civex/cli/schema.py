@@ -14,8 +14,10 @@ app = typer.Typer(help="Manage schemas (data structure definitions)")
 
 @app.command("create")
 def schema_create(
-    name: str = typer.Argument(...),
-    description: Optional[str] = typer.Option(None, "--description", "-d"),
+    name: str = typer.Argument(..., help="Schema name"),
+    description: Optional[str] = typer.Option(
+        None, "--description", "-d", help="Schema description"
+    ),
     parent: Optional[str] = typer.Option(
         None, "--parent", "-p", help="Inherit fields from this schema"
     ),
@@ -54,7 +56,7 @@ def schema_list() -> None:
 
 
 @app.command("show")
-def schema_show(name: str = typer.Argument(...)) -> None:
+def schema_show(name: str = typer.Argument(..., help="Schema name")) -> None:
     """Inspect a schema's fields (including inherited)."""
     ctx = _ctx()
     try:
@@ -91,10 +93,17 @@ def schema_show(name: str = typer.Argument(...)) -> None:
 
 @app.command("add-field")
 def schema_add_field(
-    schema_name: str = typer.Argument(...),
-    field_name: str = typer.Argument(...),
-    dtype: str = typer.Option(..., "--type", "-t"),
-    required: bool = typer.Option(False, "--required/--optional"),
+    schema_name: str = typer.Argument(..., help="Schema to add the field to"),
+    field_name: str = typer.Argument(..., help="Field name"),
+    dtype: str = typer.Option(
+        ...,
+        "--type",
+        "-t",
+        help="Field type: integer | float | string | boolean | date | datetime | file | file_list | reference",
+    ),
+    required: bool = typer.Option(
+        False, "--required/--optional", help="Whether the field is required"
+    ),
     # reference
     references: Optional[str] = typer.Option(
         None, "--references", help="Target schema (--type reference)"
@@ -200,11 +209,13 @@ def schema_add_field(
 
 @app.command("update")
 def schema_update(
-    name: str = typer.Argument(...),
+    name: str = typer.Argument(..., help="Schema name"),
     rename: Optional[str] = typer.Option(
         None, "--rename", help="New name for the schema"
     ),
-    description: Optional[str] = typer.Option(None, "--description", "-d"),
+    description: Optional[str] = typer.Option(
+        None, "--description", "-d", help="New description for the schema"
+    ),
     display_field: Optional[List[str]] = typer.Option(
         None,
         "--display-field",
@@ -247,8 +258,8 @@ def schema_update(
 
 @app.command("update-field")
 def schema_update_field(
-    schema_name: str = typer.Argument(...),
-    field_name: str = typer.Argument(...),
+    schema_name: str = typer.Argument(..., help="Schema containing the field"),
+    field_name: str = typer.Argument(..., help="Field name"),
     rename: Optional[str] = typer.Option(
         None, "--rename", help="New name for the field"
     ),
@@ -376,9 +387,9 @@ def schema_update_field(
 
 @app.command("remove-field")
 def schema_remove_field(
-    schema_name: str = typer.Argument(...),
-    field_name: str = typer.Argument(...),
-    yes: bool = typer.Option(False, "--yes", "-y"),
+    schema_name: str = typer.Argument(..., help="Schema containing the field"),
+    field_name: str = typer.Argument(..., help="Field to remove"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
 ) -> None:
     """Remove a field from a schema."""
     if not yes:
@@ -399,8 +410,8 @@ def schema_remove_field(
 
 @app.command("delete")
 def schema_delete(
-    name: str = typer.Argument(...),
-    yes: bool = typer.Option(False, "--yes", "-y"),
+    name: str = typer.Argument(..., help="Schema name"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
 ) -> None:
     """Delete a schema and its fields."""
     if not yes:
