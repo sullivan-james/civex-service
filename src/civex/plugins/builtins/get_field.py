@@ -24,7 +24,9 @@ class Plugin(Tier0Plugin):
     ]
 
     class Config(BaseModel):
-        field: str = Field(description="Name of the field to read from the trigger record.")
+        field: str = Field(
+            description="Name of the field to read from the trigger record."
+        )
 
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext

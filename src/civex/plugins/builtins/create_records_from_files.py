@@ -46,8 +46,7 @@ class Plugin(Tier0Plugin):
             "`schema_name`).",
         )
         file_field: str = Field(
-            description="Field on the created records to store each file "
-            "reference in."
+            description="Field on the created records to store each file reference in."
         )
         dataset: str = Field(
             default="",
