@@ -49,19 +49,22 @@ CAPABILITIES: tuple[RpcMethod, ...] = (
 
 
 class DescribeRequest(BaseModel):
+    """Host -> plugin: "tell me your contract." Carries no fields of its own; the plugin responds with a `DescribeResult`."""
+
     type: Literal["describe"] = "describe"
 
 
 class DescribeResult(BaseModel):
-    """A plugin's complete contract, and the only source any surface (CLI
-    `plugin info`, `GET /plugins`, the frontend plugin panel, the AI's
-    authoring guide) reads it from -- identical in shape for all three
-    tiers, so none of those surfaces has a per-tier branch. Built-ins
-    produce it from class attributes; subprocess/container plugins produce
-    it by actually running in `describe` mode.
+    """A plugin's complete contract, and the only source any surface (CLI `plugin info`, `GET /plugins`, the frontend plugin panel, the AI's authoring guide) reads it from.
+
+    Identical in shape for all three tiers, so none of those surfaces has a
+    per-tier branch. Built-ins produce it from class attributes;
+    subprocess/container plugins produce it by actually running in
+    `describe` mode.
 
     Every field after `id`/`name` has a default so a plugin written against
-    an older SDK still describes successfully against a newer host."""
+    an older SDK still describes successfully against a newer host.
+    """
 
     type: Literal["describe_result"] = "describe_result"
     id: str
@@ -77,12 +80,16 @@ class DescribeResult(BaseModel):
 
 
 class RunRequest(BaseModel):
+    """Host -> plugin: run one workflow step with these `inputs`/`config`."""
+
     type: Literal["run"] = "run"
     inputs: dict[str, Any] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunResult(BaseModel):
+    """Plugin -> host: `invoke()` succeeded; here are the step's outputs."""
+
     type: Literal["result"] = "result"
     outputs: dict[str, Any] = Field(default_factory=dict)
 
@@ -93,7 +100,8 @@ class ErrorPayload(BaseModel):
     `retryable` defaults to False so a plugin built against the older
     two-field envelope still parses -- and defaults to the safe answer,
     since treating an unknown failure as retryable is how you get a loop
-    that re-runs a permanently broken step forever."""
+    that re-runs a permanently broken step forever.
+    """
 
     kind: str
     message: str
@@ -101,6 +109,8 @@ class ErrorPayload(BaseModel):
 
 
 class ErrorFrame(BaseModel):
+    """Either side -> the other: a `run`/`rpc_call` failed with `error`."""
+
     type: Literal["error"] = "error"
     # Set when this frame is a response to a specific rpc_call; unset when
     # it's the top-level error for a "run" request.
@@ -109,12 +119,16 @@ class ErrorFrame(BaseModel):
 
 
 class LogFrame(BaseModel):
+    """Plugin -> host: a line of stdout/stderr output captured during `run`, relayed rather than left to corrupt the protocol stream."""
+
     type: Literal["log"] = "log"
     stream: Literal["stdout", "stderr"] = "stdout"
     text: str
 
 
 class RpcCall(BaseModel):
+    """Plugin -> host: invoke one `RpcMethod`, blocking for the matching `RpcResult`/`ErrorFrame`."""
+
     type: Literal["rpc_call"] = "rpc_call"
     call_id: str
     method: RpcMethod
@@ -122,6 +136,8 @@ class RpcCall(BaseModel):
 
 
 class RpcResult(BaseModel):
+    """Host -> plugin: the successful response to the `RpcCall` with the matching `call_id`."""
+
     type: Literal["rpc_result"] = "rpc_result"
     call_id: str
     result: dict[str, Any] = Field(default_factory=dict)
@@ -149,6 +165,7 @@ def parse_frame(raw: dict[str, Any]) -> BaseModel:
 
 
 def new_call_id() -> str:
+    """Return a fresh, unique id for an `RpcCall.call_id`."""
     return uuid.uuid4().hex
 
 
@@ -158,6 +175,7 @@ BINARY_INLINE_THRESHOLD = 1_000_000  # 1 MB
 
 
 def encode_binary(data: bytes, scratch_dir: Path | None = None) -> dict[str, Any]:
+    """Encode `data` as a wire-safe envelope: inline base64, or a scratch path above `BINARY_INLINE_THRESHOLD` when `scratch_dir` is given."""
     if scratch_dir is None or len(data) <= BINARY_INLINE_THRESHOLD:
         return {"encoding": "base64", "data": base64.b64encode(data).decode("ascii")}
     scratch_dir.mkdir(parents=True, exist_ok=True)
@@ -170,6 +188,7 @@ def encode_binary(data: bytes, scratch_dir: Path | None = None) -> dict[str, Any
 
 
 def decode_binary(payload: dict[str, Any]) -> bytes:
+    """Decode an `encode_binary` envelope back to raw bytes."""
     encoding = payload.get("encoding")
     if encoding == "base64":
         return base64.b64decode(payload["data"])

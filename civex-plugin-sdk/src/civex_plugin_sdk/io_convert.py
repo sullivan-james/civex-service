@@ -1,6 +1,8 @@
-"""Converts declared `table`/`bytes` IOSpec values between the form a plugin
-author writes (a pandas DataFrame, raw `bytes`) and the form that's always
-safe to put in a `RunRequest`/`RunResult` and hand to another step.
+"""Converts declared `table`/`bytes` IOSpec values between the invoke-time form and the always-JSON-safe wire form.
+
+The invoke-time form is what a plugin author writes (a pandas DataFrame,
+raw `bytes`); the wire form is what's always safe to put in a
+`RunRequest`/`RunResult` and hand to another step.
 
 `bytes` crosses the wire as the same `{"encoding": "base64"|"path", ...}`
 envelope `civex_plugin_sdk.protocol.encode_binary`/`get_file` already use --
@@ -127,8 +129,10 @@ def _dataframe_to_columnar(df: Any) -> dict[str, Any]:
 
 
 def _python_value_civex_type(value: Any) -> str | None:
-    """Best-effort type of a single JSON-decoded value. None for a value
-    that doesn't narrow the guess (null)."""
+    """Best-effort type of a single JSON-decoded value.
+
+    None for a value that doesn't narrow the guess (null).
+    """
     if value is None:
         return None
     if isinstance(value, bool):  # bool is an int subclass -- check first
@@ -147,10 +151,12 @@ def _python_value_civex_type(value: Any) -> str | None:
 def _records_columns_and_dtypes(
     records: list[dict[str, Any]],
 ) -> tuple[list[str], dict[str, str]]:
-    """Column order (first-seen across all rows) and a best-effort civex
-    dtype per column, inferred from whichever row happens to have that
-    column's first non-null value. A column that's all-null (or empty)
-    falls back to "string"."""
+    """Column order (first-seen across all rows) and a best-effort civex dtype per column.
+
+    The dtype is inferred from whichever row happens to have that column's
+    first non-null value. A column that's all-null (or empty) falls back to
+    "string".
+    """
     columns: list[str] = []
     seen: set[str] = set()
     dtypes: dict[str, str] = {}
@@ -248,9 +254,11 @@ def _read_ndjson_table(
 
 
 def _dataframe_row_dicts(df: Any, columns: list[str], dtypes: dict[str, str]) -> Any:
-    """Row-by-row generator for the NDJSON scratch-file path -- avoids ever
-    building the whole table as one big in-memory list of dicts just to
-    write it out one line at a time."""
+    """Row-by-row generator for the NDJSON scratch-file path.
+
+    Avoids ever building the whole table as one big in-memory list of dicts
+    just to write it out one line at a time.
+    """
     for _, row in df.iterrows():
         yield _row_to_wire_dict(row, columns, dtypes)
 
@@ -344,9 +352,11 @@ def _bytes_to_invoke_form(value: Any) -> Any:
 
 
 def to_invoke_form(io_type: str, value: Any, scratch_dir: Path | None = None) -> Any:
-    """Wire form -> what a plugin's own `invoke()` should see. `scratch_dir`
-    is accepted for symmetry with `to_wire_form` but unused here -- reading
-    never needs anywhere to write."""
+    """Convert one value from its wire form to what a plugin's own `invoke()` should see.
+
+    `scratch_dir` is accepted for symmetry with `to_wire_form` but unused
+    here -- reading never needs anywhere to write.
+    """
     if io_type == "table":
         return _table_to_invoke_form(value)
     if io_type == "bytes":
@@ -355,10 +365,12 @@ def to_invoke_form(io_type: str, value: Any, scratch_dir: Path | None = None) ->
 
 
 def to_wire_form(io_type: str, value: Any, scratch_dir: Path | None = None) -> Any:
-    """A plugin's returned value -> the canonical, always-JSON-safe form.
+    """Convert one plugin-returned value to the canonical, always-JSON-safe wire form.
+
     `scratch_dir`, when given, is where a value too large to inline gets
     written -- `None` (the default, and always the case for tier BUILTIN,
-    which has no scratch-dir lifecycle of its own) means always inline."""
+    which has no scratch-dir lifecycle of its own) means always inline.
+    """
     if io_type == "table":
         return _table_to_wire_form(value, scratch_dir)
     if io_type == "bytes" and isinstance(value, (bytes, bytearray)):
@@ -371,6 +383,11 @@ def convert_inputs(
     values: dict[str, Any],
     scratch_dir: Path | None = None,
 ) -> dict[str, Any]:
+    """Apply `to_invoke_form` to every value in `values` whose name has a declared spec in `specs`.
+
+    A name with no matching spec (or `specs` being `None`) passes through
+    unconverted, since there's no declared `type` to convert it against.
+    """
     if not specs:
         return values
     types_by_name = {spec.name: spec.type for spec in specs}
@@ -387,6 +404,11 @@ def convert_outputs(
     values: dict[str, Any],
     scratch_dir: Path | None = None,
 ) -> dict[str, Any]:
+    """Apply `to_wire_form` to every value in `values` whose name has a declared spec in `specs`.
+
+    A name with no matching spec (or `specs` being `None`) passes through
+    unconverted, since there's no declared `type` to convert it against.
+    """
     if not specs:
         return values
     types_by_name = {spec.name: spec.type for spec in specs}

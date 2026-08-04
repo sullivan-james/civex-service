@@ -1,11 +1,12 @@
-"""RPC-backed plugin context: the out-of-process equivalent of civex-service's
-in-process `WorkflowContext`, offering the same CRUD-shaped capability
-surface but implemented by sending an `rpc_call` frame and blocking for the
-matching `rpc_result`/`error` response. Every method takes an explicit
-target (record id, dataset name, ...) -- none of them special-case "the
-record that triggered this workflow"; get_context_record()/
-get_context_dataset() are how a plugin learns that id in the first place,
-since (unlike WorkflowContext) Ctx has no ambient `.record`/`.dataset`.
+"""RPC-backed plugin context: the out-of-process equivalent of civex-service's in-process `WorkflowContext`.
+
+Offers the same CRUD-shaped capability surface but implemented by sending an
+`rpc_call` frame and blocking for the matching `rpc_result`/`error`
+response. Every method takes an explicit target (record id, dataset name,
+...) -- none of them special-case "the record that triggered this
+workflow"; get_context_record()/get_context_dataset() are how a plugin
+learns that id in the first place, since (unlike WorkflowContext) Ctx has no
+ambient `.record`/`.dataset`.
 
 The protocol is strictly synchronous request/response with no interleaving,
 so blocking on `next(reader)` for the next line is sufficient -- the host
@@ -31,12 +32,27 @@ from civex_plugin_sdk.protocol import (
 
 
 class Ctx:
+    """The handle `invoke()` receives for everything beyond `inputs`/`config`: records, files, schemas, and collections.
+
+    Every method blocks on a single `rpc_call`/`rpc_result` round trip over
+    `writer`/`reader` -- there is no batching or concurrency, so a plugin
+    calling several `Ctx` methods pays one blocking round trip per call.
+    """
+
     def __init__(
         self,
         writer: FrameWriter,
         reader: FrameReader,
         scratch_dir: Path | None = None,
     ) -> None:
+        """Wrap the frame reader/writer pair `serve()`/`serve_container()` built for this run.
+
+        Args:
+            writer: Sends `rpc_call` frames to the host.
+            reader: Blocks for the matching `rpc_result`/`error` response.
+            scratch_dir: Where `store_file()` writes payloads too large to
+                inline. `None` (the default) always inlines as base64.
+        """
         self._writer = writer
         self._reader = reader
         self._scratch_dir = scratch_dir
@@ -62,29 +78,37 @@ class Ctx:
         return frame.result
 
     def _call_tool(self, tool: str, args: dict[str, Any]) -> dict[str, Any]:
-        """All CRUD-shaped methods below (records beyond the trigger,
+        """Send a `call_tool` rpc_call for `tool` and return its result.
+
+        All CRUD-shaped methods below (records beyond the trigger,
         files-as-create, schemas, collections) go over this one generic RPC
         method rather than growing RpcMethod one literal at a time -- see
-        protocol.py's note above CAPABILITIES."""
+        protocol.py's note above CAPABILITIES.
+        """
         return self._call("call_tool", {"tool": tool, "args": args})
 
     def get_context_record(self) -> dict[str, Any]:
-        """The record that triggered this workflow step. `Ctx` has no
-        ambient `.record`/`.dataset` fields the way in-process
+        """Return the record that triggered this workflow step.
+
+        `Ctx` has no ambient `.record`/`.dataset` fields the way in-process
         WorkflowContext does -- this (and get_context_dataset()) is the
-        only way an out-of-process plugin learns what triggered it."""
+        only way an out-of-process plugin learns what triggered it.
+        """
         result = self._call_tool("get_context_record", {})
         return result["record"]
 
     def get_context_dataset(self) -> dict[str, Any]:
+        """Return the dataset that owns `get_context_record()`'s record."""
         result = self._call_tool("get_context_dataset", {})
         return result["dataset"]
 
     def get_file(self, sha256: str) -> bytes:
+        """Return the raw bytes stored under `sha256` in the object store."""
         result = self._call("get_file", {"sha256": sha256})
         return decode_binary(result)
 
     def store_file(self, data: bytes, filename: str) -> dict[str, Any]:
+        """Write `data` to the object store and return its `FileRef` dict (`{sha256, filename, size}`)."""
         result = self._call_tool(
             "store_file",
             {"data": encode_binary(data, self._scratch_dir), "filename": filename},
@@ -92,6 +116,7 @@ class Ctx:
         return result["file"]
 
     def update_record(self, record_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Merge `data` into the record identified by `record_id` and return the updated record."""
         return self._call("update_record", {"record_id": record_id, "data": data})
 
     def create_record(
@@ -101,9 +126,12 @@ class Ctx:
         data: dict[str, Any],
         context_record_id: str | None = None,
     ) -> dict[str, Any]:
-        """`context_record_id`, when omitted, defaults host-side to
+        """Create a record in `dataset_name` against `schema_name` and return it.
+
+        `context_record_id`, when omitted, defaults host-side to
         get_context_record()'s id -- see WorkflowContext.create_record's
-        docstring for why it isn't called parent_record_id."""
+        docstring for why it isn't called parent_record_id.
+        """
         return self._call(
             "create_record",
             {
@@ -115,6 +143,7 @@ class Ctx:
         )
 
     def get_record(self, record_id: str) -> dict[str, Any]:
+        """Return the record identified by `record_id`."""
         result = self._call_tool("get_record", {"record_id": record_id})
         return result["record"]
 
@@ -128,6 +157,21 @@ class Ctx:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        """Return records in `dataset_name` matching the given filters.
+
+        Args:
+            dataset_name: Dataset to search within.
+            schema_name: Restrict to records of this schema, if given.
+            parent_record_id: Restrict to children of this record, if given.
+            filters: Host-parsed filter expressions (field/operator/value),
+                ANDed together.
+            search: Free-text search over the dataset's searchable fields.
+            limit: Maximum number of records to return.
+            offset: Number of matching records to skip, for pagination.
+
+        Returns:
+            The matching records, most-recent-first.
+        """
         result = self._call_tool(
             "find_records",
             {
@@ -143,23 +187,36 @@ class Ctx:
         return result["records"]
 
     def delete_record(self, record_id: str) -> None:
+        """Delete the record identified by `record_id`."""
         self._call_tool("delete_record", {"record_id": record_id})
 
     def get_schema(self, name: str) -> dict[str, Any]:
+        """Return the schema named `name`, including its resolved fields."""
         result = self._call_tool("get_schema", {"name": name})
         return result["schema"]
 
     def list_schemas(self) -> list[dict[str, Any]]:
+        """Return every schema in the project."""
         result = self._call_tool("list_schemas", {})
         return result["schemas"]
 
     def get_collection(self, name: str) -> dict[str, Any]:
+        """Return the collection named `name`."""
         result = self._call_tool("get_collection", {"name": name})
         return result["collection"]
 
     def list_collections(self) -> list[dict[str, Any]]:
+        """Return every collection in the project."""
         result = self._call_tool("list_collections", {})
         return result["collections"]
 
     def commit(self) -> None:
+        """Persist every write this `Ctx` made so far.
+
+        Mirrors `AppContext.commit()`'s in-process contract: nothing a
+        plugin writes via `update_record`/`create_record`/`store_file`/the
+        `call_tool` mutators is guaranteed durable until this is called (or
+        the workflow step ends and the executor commits on the plugin's
+        behalf).
+        """
         self._call("commit", {})

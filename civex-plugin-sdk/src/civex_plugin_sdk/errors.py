@@ -23,6 +23,12 @@ from __future__ import annotations
 
 
 class PluginError(Exception):
+    """Base class for every error this SDK raises. Carries the `{kind, message, retryable}` envelope this module documents above.
+
+    Raise this directly (with a custom `kind`) from `invoke()` for a failure
+    that doesn't fit one of the more specific subclasses below.
+    """
+
     kind = "plugin_error"
     retryable = False
 
@@ -32,6 +38,13 @@ class PluginError(Exception):
         kind: str | None = None,
         retryable: bool | None = None,
     ) -> None:
+        """Build the error, optionally overriding the class-level `kind`/`retryable` defaults.
+
+        Args:
+            message: Human-readable failure description.
+            kind: Overrides the class's default `kind`, if given.
+            retryable: Overrides the class's default `retryable`, if given.
+        """
         super().__init__(message)
         self.message = message
         if kind is not None:
@@ -40,6 +53,7 @@ class PluginError(Exception):
             self.retryable = retryable
 
     def to_envelope(self) -> dict[str, object]:
+        """Return the `{kind, message, retryable}` dict this error sends over the wire."""
         return {
             "kind": self.kind,
             "message": self.message,
@@ -48,25 +62,23 @@ class PluginError(Exception):
 
 
 class CapabilityDeniedError(PluginError):
-    """Raised host-side when a plugin issues an rpc_call for a method it
-    didn't declare in its `describe` capabilities list."""
+    """Raised host-side when a plugin issues an rpc_call for a method it didn't declare in its `describe` capabilities list."""
 
     kind = "capability_denied"
 
     def __init__(self, method: str) -> None:
+        """Build the error for the specific `method` the plugin wasn't declared to use."""
         super().__init__(f"plugin is not declared to use capability '{method}'")
         self.method = method
 
 
 class ConfigValidationError(PluginError):
-    """Raised when incoming `run` config fails validation against the
-    plugin's declared Config model."""
+    """Raised when incoming `run` config fails validation against the plugin's declared Config model."""
 
     kind = "config_validation_error"
 
 
 class RpcError(PluginError):
-    """Raised plugin-side when the host responds to an rpc_call with an
-    error frame."""
+    """Raised plugin-side when the host responds to an rpc_call with an error frame."""
 
     kind = "rpc_error"

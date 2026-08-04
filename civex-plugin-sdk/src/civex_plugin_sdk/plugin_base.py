@@ -22,23 +22,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-# Vocabulary for IOSpec.type. Deliberately coarse: a step input/output is a
-# live Python object (a DataFrame, raw bytes, a list of FileRef dicts), so
-# this names the *shape a workflow author needs to know when wiring one step
-# into the next*, not a validatable type. Nothing ever validates a runtime
-# value against it -- host-side contract checking (CIVEX-142) matches input
-# and output *names*, never types.
-#
-#   any      no constraint / plugin-specific
-#   string   text scalar
-#   number   int or float
-#   boolean  true/false
-#   bytes    raw binary payload
-#   table    tabular data (a pandas DataFrame in-process)
-#   files    list of FileRef dicts ({sha256, filename, size})
-#   records  list of record dicts
-#   mapping  dict keyed by field/column name
-#   list     list of anything not covered by files/records
 IO_TYPES = (
     "any",
     "string",
@@ -51,6 +34,26 @@ IO_TYPES = (
     "mapping",
     "list",
 )
+"""Vocabulary for `IOSpec.type`.
+
+Deliberately coarse: a step input/output is a live Python object (a
+DataFrame, raw bytes, a list of FileRef dicts), so this names the *shape a
+workflow author needs to know when wiring one step into the next*, not a
+validatable type. Nothing ever validates a runtime value against it --
+host-side contract checking (CIVEX-142) matches input and output *names*,
+never types.
+
+    any      no constraint / plugin-specific
+    string   text scalar
+    number   int or float
+    boolean  true/false
+    bytes    raw binary payload
+    table    tabular data (a pandas DataFrame in-process)
+    files    list of FileRef dicts ({sha256, filename, size})
+    records  list of record dicts
+    mapping  dict keyed by field/column name
+    list     list of anything not covered by files/records
+"""
 
 
 class IOSpec(BaseModel):
@@ -62,7 +65,8 @@ class IOSpec(BaseModel):
     newer SDK that added a vocabulary entry. An unrecognized type should
     degrade to being displayed as-is, not take the plugin down. In-repo
     declarations are held to the vocabulary by test, where a typo is worth
-    failing on."""
+    failing on.
+    """
 
     name: str
     type: str = "any"
@@ -71,6 +75,13 @@ class IOSpec(BaseModel):
 
 
 class PluginBase:
+    """Declarative metadata shared by every plugin tier (BUILTIN, SUBPROCESS, CONTAINER).
+
+    Set the class attributes below on a subclass; `invoke()` itself is
+    declared separately by each tier (see this package's `Plugin` for the
+    out-of-process one).
+    """
+
     id: str
     name: str
     description: str = ""
@@ -97,4 +108,9 @@ class PluginBase:
     outputs: list[IOSpec] | None = None
 
     class Config(BaseModel):
-        pass
+        """A plugin's `run`-time configuration.
+
+        Override with the fields this plugin actually accepts; the model is
+        rendered to JSON Schema for `describe` and validated against the
+        `run` frame's config dict before `invoke()` is called.
+        """
