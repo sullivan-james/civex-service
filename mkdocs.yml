@@ -31,7 +31,8 @@ theme:
 plugins:
   - search
   - gen-files:
-      scripts: []          # populated by C2, D2, E6
+      scripts:              # more populated by C2, D2
+        - docs/_gen/plugin_reference.py
   - mkdocstrings:
       handlers:
         python:
@@ -77,11 +78,22 @@ nav:
       - Remote sync: guides/remote-sync.md
       - PostgreSQL: guides/postgresql.md
       - Logging & telemetry: guides/logging-and-telemetry.md
-  - Plugins: plugins.md
   - Writing custom plugins: writing-custom-plugins.md
   - Extending:
       - SDK reference: extending/sdk-reference.md
   - Reference:
       - CLI:
           - Plumbing commands: reference/cli/plumbing.md
+      - Plugins:
+          - Get Field: reference/plugins/get_field.md
+          - Save Field: reference/plugins/save_field.md
+          - Save Fields: reference/plugins/save_fields.md
+          - Load File: reference/plugins/load_file.md
+          - Load File List: reference/plugins/load_file_list.md
+          - Extract from Filename: reference/plugins/extract_from_filename.md
+          - Create Records from Files: reference/plugins/create_records_from_files.md
+          - Match Files to Records: reference/plugins/match_files_to_records.md
+          - Load CSV: reference/plugins/load_csv.md
+          - Rows to Records: reference/plugins/rows_to_records.md
+          - Upsert Records: reference/plugins/upsert_records.md
   - CLI reference: cli-reference.md

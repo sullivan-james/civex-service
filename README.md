@@ -37,7 +37,7 @@ Full docs live in [`docs/`](docs/index.md) — run `make docs` to browse them lo
 
 - **Getting started** — [install](docs/getting-started/install.md), [your first project](docs/getting-started/first-project.md), [five-minute tour](docs/getting-started/tour.md)
 - **Guides** — [schemas & fields](docs/guides/schemas-and-fields.md), [collections & records](docs/guides/collections-and-records.md), [files](docs/guides/files.md), [workflows](docs/guides/workflows.md), [automation](docs/guides/automation.md), [server & web UI](docs/guides/server-and-web-ui.md), [remote sync & CivexHub](docs/guides/remote-sync.md), [PostgreSQL](docs/guides/postgresql.md), [logging & telemetry](docs/guides/logging-and-telemetry.md)
-- **Reference** — [CLI reference](docs/cli-reference.md), [plugins](docs/plugins.md), [writing custom plugins](docs/writing-custom-plugins.md), [plugin SDK](docs/extending/sdk-reference.md)
+- **Reference** — [CLI reference](docs/cli-reference.md), [plugins](docs/_prose/plugins/), [writing custom plugins](docs/writing-custom-plugins.md), [plugin SDK](docs/extending/sdk-reference.md)
 - **Contributing** — [architecture](docs/contributing/architecture.md), [dev setup](docs/contributing/dev-setup.md)
 
 ## Development
