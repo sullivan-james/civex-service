@@ -467,7 +467,9 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
               <p className="text-xs text-[#d1242f]">{ollamaError}</p>
               <p className="text-xs text-[#adbac7]">
                 Make sure Ollama is running:{' '}
-                <code className="bg-[#eaeef2] px-1 rounded-md">ollama serve</code>
+                <code className="bg-[#eaeef2] px-1 rounded-md">
+                  ollama serve
+                </code>
               </p>
               <input
                 value={customModel}
