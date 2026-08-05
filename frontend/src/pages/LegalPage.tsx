@@ -17,18 +17,18 @@ function LicenseSection() {
     )
 
   return (
-    <div className="border border-[#d0d7de] rounded-md bg-white p-4 space-y-3">
+    <div className="border border-border rounded-md bg-white p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-[#1f2328]">Software license</p>
+        <p className="text-sm font-semibold text-fg">Software license</p>
         <button
           onClick={() => setExpanded((e) => !e)}
-          className="text-xs text-[#0969da] hover:underline"
+          className="text-xs text-accent hover:underline"
         >
           {expanded ? 'Collapse' : 'Show full text'}
         </button>
       </div>
       <pre
-        className={`text-xs font-mono text-[#656d76] whitespace-pre-wrap ${expanded ? '' : 'max-h-24 overflow-hidden'}`}
+        className={`text-xs font-mono text-fg-muted whitespace-pre-wrap ${expanded ? '' : 'max-h-24 overflow-hidden'}`}
       >
         {data.text}
       </pre>
@@ -50,7 +50,7 @@ function PoliciesSection() {
 
   if (policies.length === 0) {
     return (
-      <p className="text-sm text-[#656d76] italic">
+      <p className="text-sm text-fg-muted italic">
         No policy documents configured. Add markdown files to{' '}
         <span className="font-mono text-xs">_civex/policies/</span> to have them
         show up here.
@@ -65,22 +65,20 @@ function PoliciesSection() {
         return (
           <div
             key={p.stem}
-            className="border border-[#d0d7de] rounded-md bg-white"
+            className="border border-border rounded-md bg-white"
           >
             <button
               onClick={() => setOpenStem(open ? null : p.stem)}
               className="w-full flex items-center justify-between px-4 py-3 text-left"
             >
-              <span className="text-sm font-medium text-[#1f2328]">
-                {p.title}
-              </span>
-              <span className="text-[#656d76]">
+              <span className="text-sm font-medium text-fg">{p.title}</span>
+              <span className="text-xs text-fg-muted">
                 {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
               </span>
             </button>
             {open && (
-              <div className="border-t border-[#d0d7de] px-4 py-3 bg-[#f6f8fa]">
-                <pre className="text-xs font-mono text-[#1f2328] whitespace-pre-wrap">
+              <div className="border-t border-border px-4 py-3 bg-canvas-subtle">
+                <pre className="text-xs font-mono text-fg whitespace-pre-wrap">
                   {p.content}
                 </pre>
               </div>
@@ -96,22 +94,22 @@ export default function LegalPage() {
   return (
     <div className="space-y-10">
       <div>
-        <h1 className="text-xl font-semibold text-[#1f2328]">
+        <h1 className="text-xl font-semibold text-fg">
           Licenses &amp; Policies
         </h1>
-        <p className="text-sm text-[#656d76] mt-0.5">
+        <p className="text-sm text-fg-muted mt-0.5">
           The software license for this build, plus any data/governance policies
           this deployment has documented.
         </p>
       </div>
 
       <div className="space-y-3">
-        <h2 className="text-lg font-semibold text-[#1f2328]">License</h2>
+        <h2 className="text-lg font-semibold text-fg">License</h2>
         <LicenseSection />
       </div>
 
       <div className="space-y-3">
-        <h2 className="text-lg font-semibold text-[#1f2328]">Policies</h2>
+        <h2 className="text-lg font-semibold text-fg">Policies</h2>
         <PoliciesSection />
       </div>
     </div>

@@ -18,7 +18,7 @@ interface Props {
 }
 
 const inputClass =
-  'w-full border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]'
+  'w-full border border-border rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent'
 
 function fileAccept(
   restrictions: Record<string, unknown> | undefined,
@@ -82,7 +82,7 @@ function FileField({ field, value, onChange }: Props) {
   return (
     <div className="space-y-1">
       {ref && (
-        <div className="flex items-center gap-2 text-xs text-[#656d76]">
+        <div className="flex items-center gap-2 text-xs text-fg-muted">
           <span className="inline-flex items-center gap-1">
             <Paperclip size={12} /> {ref.filename}
           </span>
@@ -90,7 +90,7 @@ function FileField({ field, value, onChange }: Props) {
           <a
             href={`/api/files/${ref.sha256}`}
             download={ref.filename}
-            className="text-[#0969da] hover:underline"
+            className="text-accent hover:underline"
           >
             Download
           </a>
@@ -101,9 +101,9 @@ function FileField({ field, value, onChange }: Props) {
         accept={accept}
         onChange={handleChange}
         disabled={uploading}
-        className="block w-full text-sm text-[#1f2328] file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-[#f6f8fa] file:text-[#1f2328] hover:file:bg-[#eaeef2] cursor-pointer disabled:opacity-50"
+        className="block w-full text-sm text-fg file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer disabled:opacity-50"
       />
-      {uploading && <p className="text-xs text-[#656d76]">Uploading…</p>}
+      {uploading && <p className="text-xs text-fg-muted">Uploading…</p>}
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   )
@@ -153,7 +153,7 @@ function FileListField({ field, value, onChange }: Props) {
       {existing.map((ref) => (
         <div
           key={ref.sha256}
-          className="flex items-center gap-2 text-xs text-[#656d76]"
+          className="flex items-center gap-2 text-xs text-fg-muted"
         >
           <span className="truncate">
             {ref.filename} ({(ref.size / 1024).toFixed(1)} KB)
@@ -161,7 +161,7 @@ function FileListField({ field, value, onChange }: Props) {
           <button
             type="button"
             onClick={() => remove(ref.sha256)}
-            className="text-[#d1242f] hover:underline shrink-0"
+            className="text-danger hover:underline shrink-0"
           >
             <X size={12} />
           </button>
@@ -173,9 +173,9 @@ function FileListField({ field, value, onChange }: Props) {
         accept={accept}
         onChange={handleChange}
         disabled={uploading}
-        className="block w-full text-sm text-[#1f2328] file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-[#f6f8fa] file:text-[#1f2328] hover:file:bg-[#eaeef2] cursor-pointer disabled:opacity-50"
+        className="block w-full text-sm text-fg file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer disabled:opacity-50"
       />
-      {uploading && <p className="text-xs text-[#656d76]">Uploading…</p>}
+      {uploading && <p className="text-xs text-fg-muted">Uploading…</p>}
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   )
@@ -252,10 +252,10 @@ function ReferenceField({ field, value, onChange }: Props) {
         className={inputClass}
       />
       {open && (
-        <div className="absolute z-10 mt-1 w-full bg-white border border-[#d0d7de] rounded-md shadow-sm max-h-48 overflow-y-auto text-sm">
-          {loading && <div className="px-3 py-2 text-[#656d76]">Loading…</div>}
+        <div className="absolute z-10 mt-1 w-full bg-white border border-border rounded-md shadow-sm max-h-48 overflow-y-auto text-sm">
+          {loading && <div className="px-3 py-2 text-fg-muted">Loading…</div>}
           {!loading && results.length === 0 && (
-            <div className="px-3 py-2 text-[#656d76] italic">
+            <div className="px-3 py-2 text-fg-muted italic">
               No records found
             </div>
           )}
@@ -263,15 +263,13 @@ function ReferenceField({ field, value, onChange }: Props) {
             <button
               key={record.id}
               onMouseDown={() => handleSelect(record)}
-              className="w-full text-left px-3 py-1.5 hover:bg-[#f6f8fa] truncate"
+              className="w-full text-left px-3 py-1.5 hover:bg-canvas-subtle truncate"
             >
-              <span className="font-mono text-xs text-[#656d76]">
+              <span className="font-mono text-xs text-fg-muted">
                 {record.id.slice(0, 8)}
               </span>
               {record.natural_name && (
-                <span className="ml-2 text-[#1f2328]">
-                  {record.natural_name}
-                </span>
+                <span className="ml-2 text-fg">{record.natural_name}</span>
               )}
             </button>
           ))}
@@ -408,7 +406,7 @@ export function DynamicField({ field, value, onChange }: Props) {
 
     case 'boolean':
       return (
-        <label className="flex items-center gap-2 text-sm text-[#1f2328] cursor-pointer select-none">
+        <label className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none">
           <input
             type="checkbox"
             checked={(value as boolean) ?? false}
@@ -418,7 +416,7 @@ export function DynamicField({ field, value, onChange }: Props) {
           {field.required ? (
             <span>Required</span>
           ) : (
-            <span className="text-[#656d76]">Optional</span>
+            <span className="text-fg-muted">Optional</span>
           )}
         </label>
       )

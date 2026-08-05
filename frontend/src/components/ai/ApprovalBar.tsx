@@ -48,10 +48,10 @@ export default function ApprovalBar({
 
   return (
     <div
-      className={`rounded-md border p-3 ${destructive ? 'bg-[#ffebe9] border-[#ff8182]' : 'bg-[#ddf4ff] border-[#54aeff]'}`}
+      className={`rounded-md border p-3 ${destructive ? 'bg-danger-subtle border-danger-muted' : 'bg-accent-subtle border-accent-muted'}`}
     >
       <div
-        className={`flex items-center gap-1 text-xs font-semibold mb-1 ${destructive ? 'text-[#cf222e]' : 'text-[#0969da]'}`}
+        className={`flex items-center gap-1 text-xs font-semibold mb-1 ${destructive ? 'text-danger' : 'text-accent'}`}
       >
         {destructive ? (
           <>
@@ -61,7 +61,7 @@ export default function ApprovalBar({
           'Needs your approval'
         )}
       </div>
-      <div className="text-sm text-[#1f2328] mb-2">{summary}</div>
+      <div className="text-sm text-fg mb-2">{summary}</div>
       {isSaveTool && (
         <div className="flex items-center gap-2 mb-2">
           <input
@@ -70,26 +70,26 @@ export default function ApprovalBar({
             placeholder={
               entry.name === 'save_workflow' ? 'filename-stem' : 'plugin_name'
             }
-            className="flex-1 rounded border border-[#d0d7de] bg-white px-2 py-1 text-xs text-[#1f2328] focus:outline-none focus:border-[#0969da]"
+            className="flex-1 rounded border border-border bg-white px-2 py-1 text-xs text-fg focus:outline-none focus:border-accent"
           />
-          <span className="text-[#adbac7] text-xs">
+          <span className="text-fg-subtle text-xs">
             {entry.name === 'save_workflow' ? '.yaml' : '.py'}
           </span>
         </div>
       )}
-      {error && <div className="mb-2 text-xs text-[#d1242f]">{error}</div>}
+      {error && <div className="mb-2 text-xs text-danger">{error}</div>}
       <div className="flex gap-2">
         <button
           onClick={approve}
           disabled={busy || (isSaveTool && !stem.trim())}
-          className={`px-3 py-1.5 rounded text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${destructive ? 'bg-[#cf222e] hover:bg-[#a40e26]' : 'bg-[#0969da] hover:bg-[#0860ca]'}`}
+          className={`px-3 py-1.5 rounded text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${destructive ? 'bg-danger hover:bg-danger-emphasis' : 'bg-accent hover:bg-accent-emphasis'}`}
         >
           {busy ? 'Working…' : approveLabel}
         </button>
         <button
           onClick={() => onResolve([{ id: entry.id, outcome: 'cancelled' }])}
           disabled={busy}
-          className="px-3 py-1.5 rounded border border-[#d0d7de] text-[#656d76] text-sm hover:bg-[#eaeef2] disabled:opacity-40 transition-colors"
+          className="px-3 py-1.5 rounded border border-border text-fg-muted text-sm hover:bg-border-muted disabled:opacity-40 transition-colors"
         >
           Cancel
         </button>

@@ -10,9 +10,9 @@ const base =
 
 const variants: Record<Variant, string> = {
   primary:
-    'bg-[#1f883d] hover:bg-[#1a7f37] border-[rgba(31,35,40,0.15)] text-white',
-  default: 'bg-[#f6f8fa] hover:bg-[#eff2f5] border-[#d0d7de] text-[#24292f]',
-  danger: 'bg-[#f6f8fa] hover:bg-[#ffebe9] border-[#d0d7de] text-[#d1242f]',
+    'bg-success-emphasis hover:bg-success border-[rgba(31,35,40,0.15)] text-white',
+  default: 'bg-canvas-subtle hover:bg-canvas-inset border-border text-fg',
+  danger: 'bg-canvas-subtle hover:bg-danger-subtle border-border text-danger',
 }
 
 const sizes = { sm: 'px-3 py-1 text-xs', md: 'px-4 py-1.5 text-sm' }

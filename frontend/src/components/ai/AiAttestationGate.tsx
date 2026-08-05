@@ -50,12 +50,12 @@ export default function AiAttestationGate({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
       <div className="max-w-md w-full rounded-lg bg-white shadow-xl p-6 space-y-4">
         <div className="flex items-center gap-2">
-          <Sparkles size={18} className="text-[#0969da]" />
-          <h2 className="text-base font-semibold text-[#1f2328]">
+          <Sparkles size={18} className="text-accent" />
+          <h2 className="text-base font-semibold text-fg">
             Before you use the AI assistant
           </h2>
         </div>
-        <div className="text-sm text-[#1f2328] space-y-2">
+        <div className="text-sm text-fg space-y-2">
           <p>
             Depending on how it&apos;s configured, the AI assistant sends
             conversation content — including schema, record, and workflow data
@@ -69,9 +69,9 @@ export default function AiAttestationGate({
             leaves this machine — check AI settings to see which provider is
             currently active.
           </p>
-          <p className="text-[#656d76] text-xs">
+          <p className="text-fg-muted text-xs">
             Review this project&apos;s data-handling policies under{' '}
-            <a href="/legal" className="text-[#0969da] hover:underline">
+            <a href="/legal" className="text-accent hover:underline">
               Licenses &amp; policies
             </a>{' '}
             before enabling this with sensitive data.
@@ -80,7 +80,7 @@ export default function AiAttestationGate({
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded border border-[#d0d7de] text-sm text-[#656d76] hover:bg-[#f6f8fa]"
+            className="px-3 py-1.5 rounded border border-border text-sm text-fg-muted hover:bg-canvas-subtle"
           >
             Not now
           </button>
@@ -89,7 +89,7 @@ export default function AiAttestationGate({
               acknowledge()
               setAcked(true)
             }}
-            className="px-3 py-1.5 rounded bg-[#0969da] text-white text-sm font-medium hover:bg-[#0860ca]"
+            className="px-3 py-1.5 rounded bg-accent text-white text-sm font-medium hover:bg-accent-emphasis"
           >
             I understand, continue
           </button>

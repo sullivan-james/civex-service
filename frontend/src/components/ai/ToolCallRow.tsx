@@ -28,20 +28,20 @@ export default function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
   const isToolError = parsed?.status === 'error'
 
   return (
-    <div className="my-1 rounded border border-[#d0d7de] bg-[#f6f8fa] text-xs overflow-hidden">
+    <div className="my-1 rounded border border-border bg-canvas-subtle text-xs overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left text-[#656d76] hover:bg-[#eaeef2] transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-2 text-left text-fg-muted hover:bg-border-muted transition-colors"
       >
         <Settings size={12} />
         <span className="font-mono">{entry.name}</span>
-        <span className="ml-auto text-[#adbac7]">
+        <span className="ml-auto text-fg-subtle">
           {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
         </span>
       </button>
 
       {open && (
-        <div className="border-t border-[#d0d7de] p-3 space-y-2">
+        <div className="border-t border-border p-3 space-y-2">
           {/* Content preview */}
           {entry.name === 'save_workflow' &&
           (parsed?.content ?? safeInput.content) ? (
@@ -57,19 +57,19 @@ export default function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
             />
           ) : isActTool ? (
             parsed?.preview ? (
-              <pre className="text-[#656d76] whitespace-pre-wrap break-words">
+              <pre className="text-fg-muted whitespace-pre-wrap break-words">
                 {JSON.stringify(parsed.preview, null, 2)}
               </pre>
             ) : null
           ) : !isSaveTool ? (
-            <pre className="text-[#1f2328] whitespace-pre-wrap break-words">
+            <pre className="text-fg whitespace-pre-wrap break-words">
               {JSON.stringify(entry.input, null, 2)}
             </pre>
           ) : null}
 
           {/* Resolved outcome (persisted, survives reload) */}
           {entry.outcome === 'approved' && (
-            <div className="flex items-center gap-1 mt-2 rounded px-2 py-1 bg-[#dafbe1] text-[#1a7f37]">
+            <div className="flex items-center gap-1 mt-2 rounded px-2 py-1 bg-success-subtle text-success">
               {entry.name === 'save_workflow' && (
                 <Link
                   to="/workflows"
@@ -82,33 +82,33 @@ export default function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
             </div>
           )}
           {entry.outcome === 'cancelled' && (
-            <div className="mt-2 rounded px-2 py-1 bg-[#f6f8fa] text-[#adbac7] border border-[#d0d7de]">
+            <div className="mt-2 rounded px-2 py-1 bg-canvas-subtle text-fg-subtle border border-border">
               Cancelled
             </div>
           )}
           {entry.outcome === 'error' && (
-            <div className="mt-2 rounded px-2 py-1 bg-[#ffebe9] text-[#d1242f]">
+            <div className="mt-2 rounded px-2 py-1 bg-danger-subtle text-danger">
               {entry.outcomeLabel}
             </div>
           )}
 
           {/* Awaiting resolution — the buttons are in the bar below the messages */}
           {isPendingApproval(entry) && (
-            <div className="flex items-center gap-1 mt-2 text-[#9a6700]">
+            <div className="flex items-center gap-1 mt-2 text-attention">
               Awaiting your approval below <ArrowDown size={12} />
             </div>
           )}
 
           {/* Validation error from the AI tool (status === 'error') */}
           {isToolError && (
-            <div className="mt-2 rounded px-2 py-1 bg-[#ffebe9] text-[#d1242f]">
+            <div className="mt-2 rounded px-2 py-1 bg-danger-subtle text-danger">
               {parsed?.message ?? entry.result}
             </div>
           )}
 
           {/* Read-only tool results (raw). Act/save tools render status above. */}
           {!isSaveTool && !isActTool && entry.result && (
-            <div className="mt-2 text-[#656d76]">{entry.result}</div>
+            <div className="mt-2 text-fg-muted">{entry.result}</div>
           )}
         </div>
       )}

@@ -81,7 +81,7 @@ function TableSummaryBadge({
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <Badge variant="accent">table</Badge>
-      <span className="text-[#656d76]">
+      <span className="text-fg-muted">
         {rows != null ? `${rows} row${rows === 1 ? '' : 's'}` : 'size unknown'}
         {columns.length > 0 && ` · ${columns.join(', ')}`}
       </span>
@@ -109,7 +109,7 @@ function InlineTable({ table }: { table: TableEnvelope }) {
               {table.columns.map((c) => (
                 <Th key={c}>
                   {c}
-                  <span className="ml-1.5 normal-case font-normal text-[#8c959f]">
+                  <span className="ml-1.5 normal-case font-normal text-fg-subtle">
                     {table.dtypes[c]}
                   </span>
                 </Th>
@@ -130,7 +130,7 @@ function InlineTable({ table }: { table: TableEnvelope }) {
         </Table>
       </div>
       {rowCount > shown && (
-        <p className="text-[#656d76]">
+        <p className="text-fg-muted">
           showing {shown} of {rowCount} rows
         </p>
       )}
@@ -173,17 +173,17 @@ export default function StepValueDisplay({ value }: { value: unknown }) {
   }
 
   if (value === null || value === undefined) {
-    return <span className="font-mono text-[#8c959f]">null</span>
+    return <span className="font-mono text-fg-subtle">null</span>
   }
   if (
     typeof value === 'string' ||
     typeof value === 'number' ||
     typeof value === 'boolean'
   ) {
-    return <span className="font-mono text-[#1f2328]">{String(value)}</span>
+    return <span className="font-mono text-fg">{String(value)}</span>
   }
   return (
-    <pre className="font-mono text-[#1f2328] whitespace-pre-wrap break-words">
+    <pre className="font-mono text-fg whitespace-pre-wrap break-words">
       {JSON.stringify(value, null, 2)}
     </pre>
   )

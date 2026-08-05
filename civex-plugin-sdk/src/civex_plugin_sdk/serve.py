@@ -53,7 +53,7 @@ def serve_container(plugin_cls: "type[Plugin]") -> None:
     """Container-tier entrypoint: isolates the actual stdout fd, then performs exactly one `describe` or `run` (per sys.argv[1]) off real stdin.
 
     Call this (and only this) from a container-tier plugin's __main__ --
-    see docs/writing-custom-plugins.md's container section.
+    see docs/extending/container-plugins.md.
     """
     out = isolate_stdout()
     writer = FrameWriter.for_stream(out)

@@ -37,6 +37,6 @@ structural difference: a container is invoked once per operation as
 than staying alive to field either frame type the way a long-lived `uv run`
 subprocess does.
 
-See `docs/writing-custom-plugins.md` in the main civex repo for the full
+See `docs/extending/writing-a-plugin.md` in the main civex repo for the full
 `Ctx` API reference -- every method there has a same-named, same-shaped
 counterpart on the `*Ctx` in `shim.go`.

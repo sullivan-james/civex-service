@@ -179,16 +179,16 @@ export default function CollectionDetailPage() {
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-sm text-[#656d76]">
-        <Link to="/collections" className="hover:text-[#0969da]">
+      <nav className="flex items-center gap-1.5 text-sm text-fg-muted">
+        <Link to="/collections" className="hover:text-accent">
           Collections
         </Link>
         <span>/</span>
-        <span className="text-[#1f2328] font-medium">{collection.name}</span>
+        <span className="text-fg font-medium">{collection.name}</span>
       </nav>
 
       {renaming ? (
-        <div className="border border-[#d0d7de] rounded-md p-4 bg-[#f6f8fa] flex items-center gap-3">
+        <div className="border border-border rounded-md p-4 bg-canvas-subtle flex items-center gap-3">
           <input
             autoFocus
             value={renameValue}
@@ -197,10 +197,10 @@ export default function CollectionDetailPage() {
               if (e.key === 'Enter') handleRename()
               if (e.key === 'Escape') setRenaming(false)
             }}
-            className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] w-64"
+            className="border border-border rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent w-64"
           />
           {updateCollection.error && (
-            <span className="text-xs text-[#d1242f]">
+            <span className="text-xs text-danger">
               {errorMessage(updateCollection.error)}
             </span>
           )}
@@ -251,8 +251,8 @@ export default function CollectionDetailPage() {
             onClick={() => selectSchema(null)}
             className={`px-3 py-1 rounded-full text-sm border transition-colors cursor-pointer ${
               selectedSchema === null
-                ? 'bg-[#1f2328] text-white border-[#1f2328]'
-                : 'bg-white text-[#656d76] border-[#d0d7de] hover:border-[#1f2328] hover:text-[#1f2328]'
+                ? 'bg-fg text-white border-fg'
+                : 'bg-white text-fg-muted border-border hover:border-fg hover:text-fg'
             }`}
           >
             All{' '}
@@ -270,8 +270,8 @@ export default function CollectionDetailPage() {
                   onClick={() => selectSchema(name)}
                   className={`px-3 py-1 rounded-full text-sm border transition-colors cursor-pointer ${
                     selectedSchema === name
-                      ? 'bg-[#1f2328] text-white border-[#1f2328]'
-                      : 'bg-white text-[#656d76] border-[#d0d7de] hover:border-[#1f2328] hover:text-[#1f2328]'
+                      ? 'bg-fg text-white border-fg'
+                      : 'bg-white text-fg-muted border-border hover:border-fg hover:text-fg'
                   }`}
                 >
                   {name}{' '}
@@ -284,7 +284,7 @@ export default function CollectionDetailPage() {
           {selectedSchema &&
             (confirmDeleteAll ? (
               <div className="flex items-center gap-2">
-                <span className="text-xs text-[#656d76]">
+                <span className="text-xs text-fg-muted">
                   Delete all {selectedSchema}?
                 </span>
                 <Button
@@ -326,7 +326,7 @@ export default function CollectionDetailPage() {
         value={searchInput}
         onChange={(e) => setSearchInput(e.target.value)}
         placeholder="Search records…"
-        className="w-full border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+        className="w-full border border-border rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
       />
 
       {/* Add record form */}
@@ -353,7 +353,7 @@ export default function CollectionDetailPage() {
             height="40"
             viewBox="0 0 16 16"
             fill="none"
-            className="mb-4 text-[#d0d7de]"
+            className="mb-4 text-border"
             aria-hidden
           >
             <rect
@@ -372,10 +372,10 @@ export default function CollectionDetailPage() {
               strokeLinecap="round"
             />
           </svg>
-          <h2 className="text-lg font-semibold text-[#1f2328] mb-2">
+          <h2 className="text-lg font-semibold text-fg mb-2">
             {selectedSchema ? `No ${selectedSchema} records` : 'No records'}
           </h2>
-          <p className="text-sm text-[#656d76] mb-6 max-w-sm">
+          <p className="text-sm text-fg-muted mb-6 max-w-sm">
             {!selectedSchema
               ? 'Add your first record using the button above, or set up a workflow to import data automatically.'
               : `No ${selectedSchema} records in this collection yet.`}
@@ -384,8 +384,8 @@ export default function CollectionDetailPage() {
       ) : (
         <>
           {selected.size > 0 && (
-            <div className="flex items-center gap-3 px-3 py-2 bg-[#ddf4ff] border border-[#54aeff] rounded-md text-sm">
-              <span className="text-[#0969da] font-medium">
+            <div className="flex items-center gap-3 px-3 py-2 bg-accent-subtle border border-accent-muted rounded-md text-sm">
+              <span className="text-accent font-medium">
                 {selected.size} selected
               </span>
               <Button
@@ -399,7 +399,7 @@ export default function CollectionDetailPage() {
                   : `Delete ${selected.size}`}
               </Button>
               <button
-                className="text-xs text-[#656d76] hover:text-[#1f2328]"
+                className="text-xs text-fg-muted hover:text-fg"
                 onClick={() => setSelected(new Set())}
               >
                 Clear selection
@@ -446,7 +446,7 @@ export default function CollectionDetailPage() {
                   <Td>
                     <Link
                       to={`/records/${r.id}`}
-                      className="text-xs text-[#0969da] hover:underline"
+                      className="text-xs text-accent hover:underline"
                     >
                       {r.natural_name ?? (
                         <span className="font-mono">{r.id.slice(0, 8)}</span>
@@ -470,15 +470,15 @@ export default function CollectionDetailPage() {
                     </Td>
                   )}
                   {columns.map((col) => (
-                    <Td key={col} className="text-[#1f2328]">
+                    <Td key={col} className="text-fg">
                       {r.data[col] !== undefined && r.data[col] !== null ? (
                         String(r.data[col])
                       ) : (
-                        <span className="text-[#818b98]">—</span>
+                        <span className="text-fg-subtle">—</span>
                       )}
                     </Td>
                   ))}
-                  <Td className="text-[#656d76]">{formatDate(r.created_at)}</Td>
+                  <Td className="text-fg-muted">{formatDate(r.created_at)}</Td>
                 </Tr>
               ))}
             </Tbody>
@@ -486,7 +486,7 @@ export default function CollectionDetailPage() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between text-sm text-[#656d76]">
+            <div className="flex items-center justify-between text-sm text-fg-muted">
               <span>
                 {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
               </span>
@@ -511,22 +511,22 @@ export default function CollectionDetailPage() {
         </>
       )}
       {/* Danger zone */}
-      <div className="border border-[#d1242f33] rounded-md">
-        <div className="px-4 py-3 border-b border-[#d1242f33] bg-[#ffebe9] rounded-t-md">
-          <h2 className="text-sm font-semibold text-[#d1242f]">Danger zone</h2>
+      <div className="border border-danger-muted rounded-md">
+        <div className="px-4 py-3 border-b border-danger-muted bg-danger-subtle rounded-t-md">
+          <h2 className="text-sm font-semibold text-danger">Danger zone</h2>
         </div>
         <div className="px-4 py-3 flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-[#1f2328]">
+            <p className="text-sm font-medium text-fg">
               Delete this collection
             </p>
-            <p className="text-xs text-[#656d76]">
+            <p className="text-xs text-fg-muted">
               Permanently removes this collection and all its records.
             </p>
           </div>
           {confirmDelete ? (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-[#656d76]">Are you sure?</span>
+              <span className="text-xs text-fg-muted">Are you sure?</span>
               <Button
                 variant="danger"
                 size="sm"

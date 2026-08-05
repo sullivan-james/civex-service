@@ -23,7 +23,7 @@ function StatusBadge({ status }: { status: WorkflowJob['status'] }) {
       )
     case 'running':
       return (
-        <span className="inline-flex items-center gap-1 text-sm font-medium text-[#0969da]">
+        <span className="inline-flex items-center gap-1 text-sm font-medium text-accent">
           <RefreshCw size={12} className="animate-spin" /> running
         </span>
       )
@@ -55,8 +55,8 @@ export default function JobDetailPage() {
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
-      <nav className="text-sm text-[#656d76]">
-        <Link to="/runs" className="text-[#0969da] hover:underline">
+      <nav className="text-sm text-fg-muted">
+        <Link to="/runs" className="text-accent hover:underline">
           Runs
         </Link>
         <span className="mx-2">/</span>
@@ -66,14 +66,12 @@ export default function JobDetailPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-[#1f2328]">
-            {job.workflow_name}
-          </h1>
-          <p className="text-sm text-[#656d76] mt-0.5 font-mono">{job.id}</p>
+          <h1 className="text-xl font-semibold text-fg">{job.workflow_name}</h1>
+          <p className="text-sm text-fg-muted mt-0.5 font-mono">{job.id}</p>
         </div>
         <div className="flex items-center gap-2">
           {isActive && (
-            <span className="text-xs text-[#0969da] animate-pulse">live</span>
+            <span className="text-xs text-accent animate-pulse">live</span>
           )}
           <StatusBadge status={job.status} />
           <Button
@@ -92,42 +90,42 @@ export default function JobDetailPage() {
       </div>
 
       {/* Metadata grid */}
-      <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm border border-[#d0d7de] rounded-md p-4 bg-[#f6f8fa]">
+      <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm border border-border rounded-md p-4 bg-canvas-subtle">
         <div>
-          <dt className="text-[#656d76] font-medium">Record</dt>
+          <dt className="text-fg-muted font-medium">Record</dt>
           <dd>
             <Link
               to={`/records/${job.record_id}`}
-              className="font-mono text-[#0969da] hover:underline text-xs"
+              className="font-mono text-accent hover:underline text-xs"
             >
               {job.record_id.slice(0, 8)}…
             </Link>
           </dd>
         </div>
         <div>
-          <dt className="text-[#656d76] font-medium">Schema</dt>
-          <dd className="text-[#1f2328]">{job.schema_name}</dd>
+          <dt className="text-fg-muted font-medium">Schema</dt>
+          <dd className="text-fg">{job.schema_name}</dd>
         </div>
         <div>
-          <dt className="text-[#656d76] font-medium">Trigger</dt>
+          <dt className="text-fg-muted font-medium">Trigger</dt>
           <dd>
             <Badge variant="default">{job.trigger}</Badge>
           </dd>
         </div>
         <div>
-          <dt className="text-[#656d76] font-medium">Duration</dt>
-          <dd className="text-[#1f2328]">{duration(job) ?? '—'}</dd>
+          <dt className="text-fg-muted font-medium">Duration</dt>
+          <dd className="text-fg">{duration(job) ?? '—'}</dd>
         </div>
         <div>
-          <dt className="text-[#656d76] font-medium">Created</dt>
-          <dd className="text-[#1f2328]">
+          <dt className="text-fg-muted font-medium">Created</dt>
+          <dd className="text-fg">
             {new Date(job.created_at).toLocaleString()}
           </dd>
         </div>
         {job.finished_at && (
           <div>
-            <dt className="text-[#656d76] font-medium">Finished</dt>
-            <dd className="text-[#1f2328]">
+            <dt className="text-fg-muted font-medium">Finished</dt>
+            <dd className="text-fg">
               {new Date(job.finished_at).toLocaleString()}
             </dd>
           </div>
@@ -147,10 +145,10 @@ export default function JobDetailPage() {
       {/* Steps */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-semibold text-[#1f2328]">
+          <h2 className="text-sm font-semibold text-fg">
             Steps
             {isActive && (
-              <span className="ml-2 text-xs font-normal text-[#0969da] animate-pulse">
+              <span className="ml-2 text-xs font-normal text-accent animate-pulse">
                 updating…
               </span>
             )}
@@ -187,11 +185,11 @@ export default function JobDetailPage() {
         ) : job.log ? (
           // Jobs that predate per-step execution records (CIVEX-117/118)
           // only have the flat captured-output blob to fall back to.
-          <pre className="text-xs font-mono bg-[#1c2128] text-[#adbac7] rounded-md p-4 overflow-auto max-h-[60vh] whitespace-pre-wrap leading-relaxed">
+          <pre className="text-xs font-mono bg-nav-surface-strong text-nav-fg-muted rounded-md p-4 overflow-auto max-h-[60vh] whitespace-pre-wrap leading-relaxed">
             {job.log}
           </pre>
         ) : (
-          <div className="border border-dashed border-[#d0d7de] rounded-md p-6 text-sm text-center text-[#656d76]">
+          <div className="border border-dashed border-border rounded-md p-6 text-sm text-center text-fg-muted">
             {isActive ? 'Waiting for output…' : 'No output captured.'}
           </div>
         )}

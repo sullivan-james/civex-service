@@ -31,7 +31,7 @@ async function browseFolderDesktop(): Promise<string | null> {
 }
 
 const inputCls =
-  'border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] w-full'
+  'border border-border rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent w-full'
 
 function fmtBytes(b: number | null): string {
   if (b === null) return '—'
@@ -50,15 +50,15 @@ function UsageBar({
   warn: boolean
 }) {
   if (used === null)
-    return <div className="h-1.5 w-full bg-[#eaeef2] rounded-full" />
+    return <div className="h-1.5 w-full bg-border-muted rounded-full" />
   const pct = Math.min(100, (used / total) * 100)
   const color = warn
-    ? 'bg-[#d1242f]'
+    ? 'bg-danger'
     : pct > 75
-      ? 'bg-[#d4a72c]'
-      : 'bg-[#1a7f37]'
+      ? 'bg-attention-muted'
+      : 'bg-success'
   return (
-    <div className="h-1.5 w-full bg-[#eaeef2] rounded-full overflow-hidden">
+    <div className="h-1.5 w-full bg-border-muted rounded-full overflow-hidden">
       <div
         className={`h-full rounded-full transition-all ${color}`}
         style={{ width: `${pct}%` }}
@@ -113,33 +113,29 @@ function VolumeCard({
 
   return (
     <div
-      className={`border rounded-md ${vol.warning ? 'border-[#d4a72c]' : 'border-[#d0d7de]'} bg-white`}
+      className={`border rounded-md ${vol.warning ? 'border-attention-muted' : 'border-border'} bg-white`}
     >
       <div className="px-4 py-3 flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-0.5">
-            <span className="font-semibold text-sm text-[#1f2328]">
-              {vol.name}
-            </span>
+            <span className="font-semibold text-sm text-fg">{vol.name}</span>
             {vol.in_queue && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#dafbe1] text-[#1a7f37] border border-[#4ac26b55]">
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-subtle text-success border border-success-muted">
                 queue #{queueIndex + 1}
               </span>
             )}
             {!vol.available && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#eaeef2] text-[#656d76] border border-[#d0d7de]">
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-border-muted text-fg-muted border border-border">
                 unavailable
               </span>
             )}
             {vol.warning && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]">
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-attention-subtle text-attention border border-attention-muted">
                 <AlertTriangle size={10} /> low space
               </span>
             )}
           </div>
-          <p className="text-xs text-[#656d76] font-mono truncate">
-            {vol.path}
-          </p>
+          <p className="text-xs text-fg-muted font-mono truncate">{vol.path}</p>
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
@@ -148,7 +144,7 @@ function VolumeCard({
               <button
                 onClick={onMoveUp}
                 disabled={queueIndex === 0}
-                className="px-1.5 py-1 rounded text-[#656d76] hover:text-[#1f2328] hover:bg-[#f6f8fa] disabled:opacity-30 disabled:cursor-not-allowed"
+                className="text-xs px-1.5 py-1 rounded text-fg-muted hover:text-fg hover:bg-canvas-subtle disabled:opacity-30 disabled:cursor-not-allowed"
                 title="Move up in queue"
               >
                 <ChevronUp size={12} />
@@ -156,14 +152,14 @@ function VolumeCard({
               <button
                 onClick={onMoveDown}
                 disabled={queueIndex === queueLength - 1}
-                className="px-1.5 py-1 rounded text-[#656d76] hover:text-[#1f2328] hover:bg-[#f6f8fa] disabled:opacity-30 disabled:cursor-not-allowed"
+                className="text-xs px-1.5 py-1 rounded text-fg-muted hover:text-fg hover:bg-canvas-subtle disabled:opacity-30 disabled:cursor-not-allowed"
                 title="Move down in queue"
               >
                 <ChevronDown size={12} />
               </button>
               <button
                 onClick={onRemoveFromQueue}
-                className="inline-flex items-center gap-1 text-xs px-1.5 py-1 rounded text-[#656d76] hover:text-[#d1242f] hover:bg-[#f6f8fa]"
+                className="inline-flex items-center gap-1 text-xs px-1.5 py-1 rounded text-fg-muted hover:text-danger hover:bg-canvas-subtle"
                 title="Remove from write queue"
               >
                 <X size={12} /> queue
@@ -173,7 +169,7 @@ function VolumeCard({
           {!vol.in_queue && (
             <button
               onClick={onAddToQueue}
-              className="text-xs px-2 py-1 rounded border border-[#d0d7de] text-[#656d76] hover:bg-[#f6f8fa]"
+              className="text-xs px-2 py-1 rounded border border-border text-fg-muted hover:bg-canvas-subtle"
               title="Add to write queue"
             >
               + queue
@@ -184,7 +180,7 @@ function VolumeCard({
               setEditing((e) => !e)
               setConfirmRemove(false)
             }}
-            className="px-1.5 py-1 rounded text-[#656d76] hover:text-[#0969da] hover:bg-[#f6f8fa]"
+            className="text-xs px-1.5 py-1 rounded text-fg-muted hover:text-accent hover:bg-canvas-subtle"
             title="Edit volume"
           >
             <Pencil size={12} />
@@ -203,7 +199,7 @@ function VolumeCard({
                   })
                 }}
                 disabled={removeVolume.isPending}
-                className="text-xs px-2 py-1 rounded bg-[#d1242f] text-white hover:bg-[#b91c1c] disabled:opacity-50"
+                className="text-xs px-2 py-1 rounded bg-danger text-white hover:bg-danger-emphasis disabled:opacity-50"
               >
                 Confirm
               </button>
@@ -212,7 +208,7 @@ function VolumeCard({
                   setConfirmRemove(false)
                   setRemoveError(null)
                 }}
-                className="text-xs px-1.5 py-1 text-[#656d76] hover:underline"
+                className="text-xs px-1.5 py-1 text-fg-muted hover:underline"
               >
                 Cancel
               </button>
@@ -224,7 +220,7 @@ function VolumeCard({
                 setEditing(false)
                 setRemoveError(null)
               }}
-              className="px-1.5 py-1 rounded text-[#656d76] hover:text-[#d1242f] hover:bg-[#f6f8fa]"
+              className="text-xs px-1.5 py-1 rounded text-fg-muted hover:text-danger hover:bg-canvas-subtle"
               title="Delete volume from config (does not delete files)"
             >
               <X size={12} />
@@ -235,7 +231,7 @@ function VolumeCard({
 
       {removeError && (
         <div className="px-4 pb-3">
-          <p className="text-xs text-[#d1242f] bg-[#ffebe9] border border-[#d1242f33] rounded px-3 py-2">
+          <p className="text-xs text-danger bg-danger-subtle border border-danger-muted rounded px-3 py-2">
             {removeError}
           </p>
         </div>
@@ -246,7 +242,7 @@ function VolumeCard({
         <div className="px-4 pb-3 space-y-2">
           {allocBytes !== null && (
             <div>
-              <div className="flex justify-between text-[10px] text-[#656d76] mb-0.5">
+              <div className="flex justify-between text-[10px] text-fg-muted mb-0.5">
                 <span>Civex usage</span>
                 <span>
                   {fmtBytes(vol.civex_used_bytes)} / {fmtBytes(allocBytes)}
@@ -261,7 +257,7 @@ function VolumeCard({
           )}
           {diskTotal !== null && (
             <div>
-              <div className="flex justify-between text-[10px] text-[#656d76] mb-0.5">
+              <div className="flex justify-between text-[10px] text-fg-muted mb-0.5">
                 <span>Disk free</span>
                 <span>
                   {fmtBytes(vol.disk_free_bytes)} of {fmtBytes(diskTotal)}
@@ -279,9 +275,9 @@ function VolumeCard({
 
       {/* Inline editor */}
       {editing && (
-        <div className="border-t border-[#d0d7de] px-4 py-3 bg-[#f6f8fa] space-y-2 rounded-b-md">
+        <div className="border-t border-border px-4 py-3 bg-canvas-subtle space-y-2 rounded-b-md">
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-[#656d76] uppercase tracking-wide">
+            <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
               Path
             </label>
             <div className="flex gap-2">
@@ -305,7 +301,7 @@ function VolumeCard({
             </div>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-[#656d76] uppercase tracking-wide">
+            <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
               Allocation (GB)
             </label>
             <div className="flex items-center gap-2">
@@ -322,7 +318,7 @@ function VolumeCard({
                 className={inputCls}
                 disabled={clearAlloc}
               />
-              <label className="flex items-center gap-1.5 text-xs text-[#656d76] whitespace-nowrap cursor-pointer select-none">
+              <label className="flex items-center gap-1.5 text-xs text-fg-muted whitespace-nowrap cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={clearAlloc}
@@ -333,7 +329,7 @@ function VolumeCard({
             </div>
           </div>
           {updateVolume.error && (
-            <p className="text-xs text-[#d1242f]">
+            <p className="text-xs text-danger">
               {errorMessage(updateVolume.error)}
             </p>
           )}
@@ -375,14 +371,14 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <div className="border border-dashed border-[#0969da55] rounded-md p-4 bg-[#f6f8fa] space-y-3">
-      <p className="text-xs font-semibold text-[#0969da] uppercase tracking-wide">
+    <div className="border border-dashed border-accent-muted rounded-md p-4 bg-canvas-subtle space-y-3">
+      <p className="text-xs font-semibold text-accent uppercase tracking-wide">
         New volume
       </p>
       <div className="grid grid-cols-3 gap-3">
         <div className="flex flex-col gap-1">
-          <label className="text-xs text-[#656d76]">
-            Name <span className="text-[#818b98]">(letters, digits, - _)</span>
+          <label className="text-xs text-fg-muted">
+            Name <span className="text-fg-subtle">(letters, digits, - _)</span>
           </label>
           <input
             value={name}
@@ -393,7 +389,7 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs text-[#656d76]">Path</label>
+          <label className="text-xs text-fg-muted">Path</label>
           <div className="flex gap-2">
             <input
               value={path}
@@ -416,7 +412,7 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
           </div>
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs text-[#656d76]">
+          <label className="text-xs text-fg-muted">
             Allocation (GB, optional)
           </label>
           <input
@@ -431,9 +427,7 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
         </div>
       </div>
       {addVolume.error && (
-        <p className="text-xs text-[#d1242f]">
-          {errorMessage(addVolume.error)}
-        </p>
+        <p className="text-xs text-danger">{errorMessage(addVolume.error)}</p>
       )}
       <div className="flex gap-2">
         <Button
@@ -495,8 +489,8 @@ export default function StorageSection() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-[#1f2328]">Storage</h2>
-          <p className="text-sm text-[#656d76] mt-0.5">
+          <h2 className="text-lg font-semibold text-fg">Storage</h2>
+          <p className="text-sm text-fg-muted mt-0.5">
             Configure where civex stores files. New uploads go to the first
             available volume in the write queue.
           </p>
@@ -509,7 +503,7 @@ export default function StorageSection() {
       </div>
 
       {hasWarning && (
-        <div className="flex items-start gap-1.5 border border-[#d4a72c] rounded-md px-4 py-3 bg-[#fff8c5] text-sm text-[#9a6700]">
+        <div className="flex items-start gap-1.5 border border-attention-muted rounded-md px-4 py-3 bg-attention-subtle text-sm text-attention">
           <AlertTriangle size={14} className="shrink-0 mt-0.5" />
           One or more volumes are running low on space. Consider adding a new
           volume or freeing disk space.
@@ -520,9 +514,7 @@ export default function StorageSection() {
 
       <div className="space-y-3">
         {volumes.length === 0 && (
-          <p className="text-sm text-[#656d76] italic">
-            No volumes configured.
-          </p>
+          <p className="text-sm text-fg-muted italic">No volumes configured.</p>
         )}
         {volumes.map((vol) => {
           const qi = queueNames.indexOf(vol.name)
@@ -541,9 +533,9 @@ export default function StorageSection() {
         })}
       </div>
 
-      <div className="border border-[#d0d7de] rounded-md px-4 py-3 bg-[#f6f8fa] text-xs text-[#656d76] space-y-1">
+      <div className="border border-border rounded-md px-4 py-3 bg-canvas-subtle text-xs text-fg-muted space-y-1">
         <p className="flex items-center flex-wrap gap-1">
-          <span className="font-semibold text-[#1f2328]">Write queue:</span>
+          <span className="font-semibold text-fg">Write queue:</span>
           {queueNames.length ? (
             queueNames.map((name, i) => (
               <span key={name} className="inline-flex items-center gap-1">

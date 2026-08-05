@@ -14,7 +14,7 @@ import java.util.UUID;
 /**
  * Minimal Tier 2 (container) plugin shim. Speaks the same newline-delimited
  * JSON protocol as civex-plugin-sdk (civex_plugin_sdk.protocol / .serve) --
- * see docs/writing-custom-plugins.md for the frame shapes this mirrors.
+ * see docs/extending/wire-protocol.md for the frame shapes this mirrors.
  *
  * Copy this file into your own _civex/plugins/&lt;name&gt;/ directory
  * alongside civex-plugin.toml and the Dockerfile, then edit the PLUGIN_*

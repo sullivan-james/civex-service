@@ -3,7 +3,7 @@
 A minimal, working Tier 2 (container) civex plugin written in C, plus the
 protocol runtime (a "shim") it's built on. Speaks the same newline-delimited
 JSON-over-stdio protocol as Tier 1 (`uv run`) plugins — see
-`docs/writing-custom-plugins.md` for the protocol from the host's point of
+`docs/extending/wire-protocol.md` for the protocol from the host's point of
 view. C++ plugins can reuse `src/shim.c`/`src/json.c` as-is (compile them
 with a C compiler, link from C++ — see "Using C++" below).
 
