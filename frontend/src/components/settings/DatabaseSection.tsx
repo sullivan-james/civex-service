@@ -6,11 +6,10 @@ import {
   useSetupDockerDb,
   useTeardownDockerDb,
 } from '../../hooks/useDb'
-import { Button, LoadingState, ErrorState } from '../ui'
+import { Button, Input, LoadingState, ErrorState } from '../ui'
 import { errorMessage } from '../../lib/errors'
 
-const inputCls =
-  'border border-border rounded-md px-3 py-2 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent w-full font-mono'
+const inputCls = 'w-full font-mono'
 
 function SchemaBadge({
   migration,
@@ -134,7 +133,7 @@ export default function DatabaseSection() {
           </Button>
         ) : (
           <div className="space-y-2">
-            <input
+            <Input
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
               placeholder="postgresql+psycopg2://user:pass@host:5432/dbname"

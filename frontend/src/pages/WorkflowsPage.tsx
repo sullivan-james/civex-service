@@ -16,7 +16,13 @@ import {
   usePluginLoadErrors,
   useUploadPlugin,
 } from '../hooks/usePlugins'
-import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
+import {
+  PageHeader,
+  Button,
+  LoadingState,
+  ErrorState,
+  Input,
+} from '../components/ui'
 import { ChevronUp, ChevronDown } from '../components/ui/icons'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import { ContainerPluginEditor } from '../components/workflows/ContainerPluginEditor'
@@ -275,14 +281,14 @@ function WorkflowEditor({
             <label className="block">
               <span className="text-xs font-medium text-fg">Filename stem</span>
               <div className="flex items-center gap-1 mt-1">
-                <input
+                <Input
                   type="text"
                   value={stem}
                   onChange={(e) =>
                     setStem(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))
                   }
                   placeholder="my-workflow"
-                  className="border border-border rounded-md px-3 py-2 text-sm w-56 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+                  className="w-56"
                 />
                 <span className="text-sm text-fg-muted">.yaml</span>
               </div>

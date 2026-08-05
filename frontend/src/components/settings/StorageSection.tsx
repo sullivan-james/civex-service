@@ -7,7 +7,7 @@ import {
   useSetQueue,
 } from '../../hooks/useStore'
 import type { VolumeStats } from '../../api/store'
-import { Button, LoadingState, ErrorState } from '../ui'
+import { Button, Input, Checkbox, LoadingState, ErrorState } from '../ui'
 import {
   AlertTriangle,
   ChevronUp,
@@ -30,8 +30,7 @@ async function browseFolderDesktop(): Promise<string | null> {
   return r.path ?? null
 }
 
-const inputCls =
-  'border border-border rounded-md px-3 py-2 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent w-full'
+const inputCls = 'w-full'
 
 function fmtBytes(b: number | null): string {
   if (b === null) return '—'
@@ -281,7 +280,7 @@ function VolumeCard({
               Path
             </label>
             <div className="flex gap-2">
-              <input
+              <Input
                 value={editPath}
                 onChange={(e) => setEditPath(normalizePath(e.target.value))}
                 onBlur={(e) => setEditPath(normalizePath(e.target.value))}
@@ -305,7 +304,7 @@ function VolumeCard({
               Allocation (GB)
             </label>
             <div className="flex items-center gap-2">
-              <input
+              <Input
                 type="number"
                 min="0.1"
                 step="0.1"
@@ -319,8 +318,7 @@ function VolumeCard({
                 disabled={clearAlloc}
               />
               <label className="flex items-center gap-2 text-xs text-fg-muted whitespace-nowrap cursor-pointer select-none">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={clearAlloc}
                   onChange={(e) => setClearAlloc(e.target.checked)}
                 />
@@ -380,7 +378,7 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
           <label className="text-xs text-fg-muted">
             Name <span className="text-fg-subtle">(letters, digits, - _)</span>
           </label>
-          <input
+          <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. external"
@@ -391,7 +389,7 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
         <div className="flex flex-col gap-1">
           <label className="text-xs text-fg-muted">Path</label>
           <div className="flex gap-2">
-            <input
+            <Input
               value={path}
               onChange={(e) => setPath(normalizePath(e.target.value))}
               onBlur={(e) => setPath(normalizePath(e.target.value))}
@@ -415,7 +413,7 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
           <label className="text-xs text-fg-muted">
             Allocation (GB, optional)
           </label>
-          <input
+          <Input
             type="number"
             min="0.1"
             step="0.1"

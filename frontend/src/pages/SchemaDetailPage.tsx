@@ -23,6 +23,9 @@ import {
   Td,
   LoadingState,
   ErrorState,
+  Input,
+  Select,
+  Checkbox,
 } from '../components/ui'
 import {
   Star,
@@ -88,21 +91,16 @@ function MetaEditor({
         <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
           Name
         </label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="border border-border rounded-md px-3 py-2 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
-        />
+        <Input value={name} onChange={(e) => setName(e.target.value)} />
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
           Description
         </label>
-        <input
+        <Input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="No description"
-          className="border border-border rounded-md px-3 py-2 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
         />
       </div>
       {updateSchema.error && (
@@ -170,9 +168,6 @@ function RestrictionsSummary({
 }
 
 // --- Add field form ---
-
-const inputSm =
-  'border border-border rounded-md px-2 py-2 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent'
 
 function AddFieldForm({
   schemaName,
@@ -277,28 +272,29 @@ function AddFieldForm({
     <div className="border-t border-border bg-canvas-subtle px-4 py-3 flex flex-col gap-3">
       {/* Row 1: name, type, required */}
       <div className="flex items-center gap-3 flex-wrap">
-        <input
+        <Input
+          size="sm"
           value={fieldName}
           onChange={(e) => setFieldName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
           placeholder="Field name"
           autoFocus
-          className={`${inputSm} w-40`}
+          className="w-40"
         />
-        <select
+        <Select
+          size="sm"
           value={type}
           onChange={(e) => handleTypeChange(e.target.value)}
-          className={inputSm}
         >
           {FIELD_TYPES.map((t) => (
             <option key={t}>{t}</option>
           ))}
-        </select>
+        </Select>
         {type === 'reference' && (
-          <select
+          <Select
+            size="sm"
             value={refSchema}
             onChange={(e) => setRefSchema(e.target.value)}
-            className={inputSm}
           >
             <option value="">— target schema —</option>
             {allSchemas
@@ -308,11 +304,10 @@ function AddFieldForm({
                   {s.name}
                 </option>
               ))}
-          </select>
+          </Select>
         )}
         <label className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={required}
             onChange={(e) => setRequired(e.target.checked)}
           />
@@ -338,11 +333,12 @@ function AddFieldForm({
         <div className="flex items-center gap-3 flex-wrap">
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Default value
-            <input
+            <Input
+              size="sm"
               value={defaultVal}
               onChange={(e) => setDefaultVal(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-40`}
+              className="w-40"
             />
           </label>
         </div>
@@ -356,24 +352,26 @@ function AddFieldForm({
           </span>
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Min
-            <input
+            <Input
+              size="sm"
               type="number"
               step={type === 'integer' ? '1' : 'any'}
               value={minVal}
               onChange={(e) => setMinVal(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-24`}
+              className="w-24"
             />
           </label>
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Max
-            <input
+            <Input
+              size="sm"
               type="number"
               step={type === 'integer' ? '1' : 'any'}
               value={maxVal}
               onChange={(e) => setMaxVal(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-24`}
+              className="w-24"
             />
           </label>
         </div>
@@ -385,24 +383,26 @@ function AddFieldForm({
           </span>
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Choices (comma-separated)
-            <input
+            <Input
+              size="sm"
               value={choices}
               onChange={(e) => setChoices(e.target.value)}
               placeholder="e.g. left,right,bilateral"
-              className={`${inputSm} w-52`}
+              className="w-52"
             />
           </label>
           {type === 'string' && (
             <label className="flex items-center gap-2 text-xs text-fg-muted">
               Max length
-              <input
+              <Input
+                size="sm"
                 type="number"
                 step="1"
                 min="1"
                 value={maxLength}
                 onChange={(e) => setMaxLength(e.target.value)}
                 placeholder="none"
-                className={`${inputSm} w-24`}
+                className="w-24"
               />
             </label>
           )}
@@ -415,23 +415,25 @@ function AddFieldForm({
           </span>
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Accept
-            <input
+            <Input
+              size="sm"
               value={accept}
               onChange={(e) => setAccept(e.target.value)}
               placeholder=".csv,.txt"
-              className={`${inputSm} w-36`}
+              className="w-36"
             />
           </label>
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Max size (bytes)
-            <input
+            <Input
+              size="sm"
               type="number"
               step="1"
               min="1"
               value={maxSize}
               onChange={(e) => setMaxSize(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-28`}
+              className="w-28"
             />
           </label>
         </div>
@@ -443,20 +445,20 @@ function AddFieldForm({
           </span>
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Not before
-            <input
+            <Input
+              size="sm"
               type={type === 'date' ? 'date' : 'datetime-local'}
               value={minDate}
               onChange={(e) => setMinDate(e.target.value)}
-              className={inputSm}
             />
           </label>
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Not after
-            <input
+            <Input
+              size="sm"
               type={type === 'date' ? 'date' : 'datetime-local'}
               value={maxDate}
               onChange={(e) => setMaxDate(e.target.value)}
-              className={inputSm}
             />
           </label>
         </div>
@@ -585,17 +587,17 @@ function FieldEditForm({
   return (
     <div className="bg-accent-subtle border-t border-border px-4 py-3 flex flex-col gap-3">
       <div className="flex items-center gap-3 flex-wrap">
-        <input
+        <Input
+          size="sm"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSave()}
           autoFocus
-          className={`${inputSm} w-40`}
+          className="w-40"
         />
         <Badge variant="accent">{dtype}</Badge>
         <label className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={required}
             onChange={(e) => setRequired(e.target.checked)}
           />
@@ -623,24 +625,26 @@ function FieldEditForm({
           </span>
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Min
-            <input
+            <Input
+              size="sm"
               type="number"
               step={dtype === 'integer' ? '1' : 'any'}
               value={minVal}
               onChange={(e) => setMinVal(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-24`}
+              className="w-24"
             />
           </label>
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Max
-            <input
+            <Input
+              size="sm"
               type="number"
               step={dtype === 'integer' ? '1' : 'any'}
               value={maxVal}
               onChange={(e) => setMaxVal(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-24`}
+              className="w-24"
             />
           </label>
         </div>
@@ -652,24 +656,26 @@ function FieldEditForm({
           </span>
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Choices (comma-separated)
-            <input
+            <Input
+              size="sm"
               value={choices}
               onChange={(e) => setChoices(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-52`}
+              className="w-52"
             />
           </label>
           {dtype === 'string' && (
             <label className="flex items-center gap-2 text-xs text-fg-muted">
               Max length
-              <input
+              <Input
+                size="sm"
                 type="number"
                 step="1"
                 min="1"
                 value={maxLength}
                 onChange={(e) => setMaxLength(e.target.value)}
                 placeholder="none"
-                className={`${inputSm} w-24`}
+                className="w-24"
               />
             </label>
           )}
@@ -682,23 +688,25 @@ function FieldEditForm({
           </span>
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Accept
-            <input
+            <Input
+              size="sm"
               value={accept}
               onChange={(e) => setAccept(e.target.value)}
               placeholder=".csv,.txt"
-              className={`${inputSm} w-36`}
+              className="w-36"
             />
           </label>
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Max size (bytes)
-            <input
+            <Input
+              size="sm"
               type="number"
               step="1"
               min="1"
               value={maxSize}
               onChange={(e) => setMaxSize(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-28`}
+              className="w-28"
             />
           </label>
         </div>
@@ -710,20 +718,20 @@ function FieldEditForm({
           </span>
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Not before
-            <input
+            <Input
+              size="sm"
               type={dtype === 'date' ? 'date' : 'datetime-local'}
               value={minDate}
               onChange={(e) => setMinDate(e.target.value)}
-              className={inputSm}
             />
           </label>
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             Not after
-            <input
+            <Input
+              size="sm"
               type={dtype === 'date' ? 'date' : 'datetime-local'}
               value={maxDate}
               onChange={(e) => setMaxDate(e.target.value)}
-              className={inputSm}
             />
           </label>
         </div>
