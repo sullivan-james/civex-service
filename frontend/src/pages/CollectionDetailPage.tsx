@@ -181,7 +181,7 @@ export default function CollectionDetailPage() {
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-sm text-fg-muted">
+      <nav className="flex items-center gap-2 text-sm text-fg-muted">
         <Link to="/collections" className="hover:text-accent">
           Collections
         </Link>
@@ -251,7 +251,7 @@ export default function CollectionDetailPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => selectSchema(null)}
-            className={`px-3 py-1 rounded-full text-sm border transition-colors cursor-pointer ${
+            className={`px-3 py-2 rounded-full text-sm border transition-colors cursor-pointer ${
               selectedSchema === null
                 ? 'bg-fg text-fg-on-emphasis border-fg'
                 : 'bg-canvas text-fg-muted border-border hover:border-fg hover:text-fg'
@@ -270,7 +270,7 @@ export default function CollectionDetailPage() {
                 <button
                   key={name}
                   onClick={() => selectSchema(name)}
-                  className={`px-3 py-1 rounded-full text-sm border transition-colors cursor-pointer ${
+                  className={`px-3 py-2 rounded-full text-sm border transition-colors cursor-pointer ${
                     selectedSchema === name
                       ? 'bg-fg text-fg-on-emphasis border-fg'
                       : 'bg-canvas text-fg-muted border-border hover:border-fg hover:text-fg'
@@ -444,7 +444,7 @@ export default function CollectionDetailPage() {
                   <Td>
                     <Link
                       to={`/records/${r.id}`}
-                      className="text-xs text-accent hover:underline"
+                      className="text-sm text-accent hover:underline"
                     >
                       {r.natural_name ?? (
                         <span className="font-mono">{r.id.slice(0, 8)}</span>

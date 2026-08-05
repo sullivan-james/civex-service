@@ -282,7 +282,7 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
             <div className="text-center py-12 text-fg-muted text-sm space-y-3">
               <Sparkles size={28} className="mx-auto" />
               <p className="font-medium text-fg">Ask me anything</p>
-              <div className="text-xs space-y-1.5 text-left max-w-[280px] mx-auto">
+              <div className="text-xs space-y-2 text-left max-w-[280px] mx-auto">
                 <p className="text-fg-muted">Try:</p>
                 {[
                   'How many records do I have?',
@@ -296,7 +296,7 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
                       setInput(s)
                       textareaRef.current?.focus()
                     }}
-                    className="block w-full text-left px-3 py-1.5 rounded border border-border bg-canvas hover:bg-canvas-subtle text-fg transition-colors"
+                    className="block w-full text-left px-3 py-2 rounded-md border border-border bg-canvas hover:bg-canvas-subtle text-fg transition-colors"
                   >
                     {s}
                   </button>
@@ -344,7 +344,7 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
                 onResolve={handleResolveAndContinue}
               />
               <div
-                className={`space-y-2 ${pendingEntries.length > 2 ? 'max-h-64 overflow-y-auto pr-0.5' : ''}`}
+                className={`space-y-2 ${pendingEntries.length > 2 ? 'max-h-64 overflow-y-auto pr-1' : ''}`}
               >
                 {pendingEntries.map((e) => (
                   <ApprovalBar
@@ -398,7 +398,7 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
                   )}
                 </button>
               </div>
-              <p className="mt-1.5 text-[10px] text-fg-subtle text-center">
+              <p className="mt-2 text-xs text-fg-subtle text-center">
                 Enter to send · Shift+Enter for new line
               </p>
             </>

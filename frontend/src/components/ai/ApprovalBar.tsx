@@ -84,14 +84,14 @@ export default function ApprovalBar({
         <button
           onClick={approve}
           disabled={busy || (isSaveTool && !stem.trim())}
-          className={`px-3 py-1.5 rounded text-fg-on-emphasis text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${destructive ? 'bg-danger hover:bg-danger-emphasis' : 'bg-accent hover:bg-accent-emphasis'}`}
+          className={`px-3 py-2 rounded-md text-fg-on-emphasis text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${destructive ? 'bg-danger hover:bg-danger-emphasis' : 'bg-accent hover:bg-accent-emphasis'}`}
         >
           {busy ? 'Working…' : approveLabel}
         </button>
         <button
           onClick={() => onResolve([{ id: entry.id, outcome: 'cancelled' }])}
           disabled={busy}
-          className="px-3 py-1.5 rounded border border-border text-fg-muted text-sm hover:bg-border-muted disabled:opacity-40 transition-colors"
+          className="px-3 py-2 rounded-md border border-border text-fg-muted text-sm hover:bg-border-muted disabled:opacity-40 transition-colors"
         >
           Cancel
         </button>

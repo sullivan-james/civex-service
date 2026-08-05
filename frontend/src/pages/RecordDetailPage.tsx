@@ -51,7 +51,7 @@ function FieldValue({ value }: { value: unknown }) {
         {refs.map((ref) => (
           <span
             key={ref.sha256}
-            className="inline-flex items-center gap-2 text-xs text-fg-muted"
+            className="inline-flex items-center gap-2 text-sm text-fg-muted"
           >
             <span>
               {ref.filename} ({(ref.size / 1024).toFixed(1)} KB)
@@ -71,7 +71,7 @@ function FieldValue({ value }: { value: unknown }) {
   if (typeof value === 'object' && 'sha256' in (value as object)) {
     const ref = value as { filename: string; size: number; sha256: string }
     return (
-      <span className="inline-flex items-center gap-2 text-xs text-fg-muted">
+      <span className="inline-flex items-center gap-2 text-sm text-fg-muted">
         <span>
           {ref.filename} ({(ref.size / 1024).toFixed(1)} KB)
         </span>
@@ -134,7 +134,7 @@ function ChildTable({
               <Td>
                 <Link
                   to={`/records/${r.id}`}
-                  className="text-xs text-accent hover:underline"
+                  className="text-sm text-accent hover:underline"
                 >
                   {r.natural_name ?? (
                     <span className="font-mono">{r.id.slice(0, 8)}</span>
@@ -149,7 +149,7 @@ function ChildTable({
               <Td className="text-fg-muted">{formatDate(r.created_at)}</Td>
               <Td>
                 {confirmId === r.id ? (
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex items-center gap-2">
                     <button
                       onClick={() => {
                         onDelete(r.id)
@@ -280,7 +280,7 @@ export default function RecordDetailPage() {
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-sm text-fg-muted flex-wrap">
+      <nav className="flex items-center gap-2 text-sm text-fg-muted flex-wrap">
         <Link to="/collections" className="hover:text-accent">
           Collections
         </Link>
@@ -369,7 +369,7 @@ export default function RecordDetailPage() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {(schema?.fields ?? []).map((field) => (
                 <div key={field.name} className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-fg flex items-center gap-1.5">
+                  <label className="text-xs font-medium text-fg flex items-center gap-2">
                     <span className="font-mono">{field.name}</span>
                     <Badge variant="accent">{field.type}</Badge>
                     {field.required && (
@@ -419,7 +419,7 @@ export default function RecordDetailPage() {
               }))
             ).map((field) => (
               <div key={field.name} className="bg-canvas px-4 py-3">
-                <p className="text-xs text-fg-muted font-mono mb-0.5 flex items-center gap-1.5">
+                <p className="text-xs text-fg-muted font-mono mb-1 flex items-center gap-2">
                   {field.name}
                   {'type' in field && (
                     <Badge variant="accent">
@@ -495,7 +495,7 @@ export default function RecordDetailPage() {
               <button
                 key={wf.name}
                 onClick={() => setRunWorkflow(wf.name)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-md hover:bg-canvas-subtle hover:border-accent transition-colors text-fg"
+                className="flex items-center gap-2 px-3 py-2 text-sm border border-border rounded-md hover:bg-canvas-subtle hover:border-accent transition-colors text-fg"
               >
                 <Play size={12} />
                 <span className="font-mono text-xs">{wf.name}</span>

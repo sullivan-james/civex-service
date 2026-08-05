@@ -95,7 +95,7 @@ export function WorkflowRunModal({
             <label className="block">
               <span className="text-sm font-medium text-fg">Record ID</span>
               {workflow.record_schema && (
-                <span className="ml-1.5 text-xs text-fg-muted">
+                <span className="ml-2 text-xs text-fg-muted">
                   ({workflow.record_schema})
                 </span>
               )}
@@ -124,7 +124,7 @@ export function WorkflowRunModal({
                     </p>
                   )}
                   <div
-                    className="border-2 border-dashed border-border rounded-md px-4 py-5 text-center cursor-pointer hover:border-accent hover:bg-canvas-subtle transition-colors"
+                    className="border-2 border-dashed border-border rounded-md px-4 py-6 text-center cursor-pointer hover:border-accent hover:bg-canvas-subtle transition-colors"
                     onClick={() => fileRefs.current[inputName]?.click()}
                     onDragOver={(e) => {
                       e.preventDefault()
@@ -153,7 +153,7 @@ export function WorkflowRunModal({
                       </p>
                     ) : (
                       <div className="text-left">
-                        <div className="max-h-32 overflow-y-auto space-y-0.5 mb-1">
+                        <div className="max-h-32 overflow-y-auto space-y-1 mb-1">
                           {chosen.map((f, i) => (
                             <p
                               key={i}

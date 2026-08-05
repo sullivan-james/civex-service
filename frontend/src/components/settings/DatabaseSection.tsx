@@ -22,18 +22,18 @@ function SchemaBadge({
 }) {
   if (migration.error)
     return (
-      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-danger-subtle text-danger border border-danger-muted">
+      <span className="text-xs font-medium px-2 py-1 rounded-full bg-danger-subtle text-danger border border-danger-muted">
         unreachable
       </span>
     )
   if (migration.up_to_date)
     return (
-      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-subtle text-success border border-success-muted">
+      <span className="text-xs font-medium px-2 py-1 rounded-full bg-success-subtle text-success border border-success-muted">
         up to date
       </span>
     )
   return (
-    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-attention-subtle text-attention border border-attention-muted">
+    <span className="text-xs font-medium px-2 py-1 rounded-full bg-attention-subtle text-attention border border-attention-muted">
       pending migrations
     </span>
   )
@@ -72,7 +72,7 @@ export default function DatabaseSection() {
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-fg">Database</h2>
-        <p className="text-sm text-fg-muted mt-0.5">
+        <p className="text-sm text-fg-muted mt-1">
           Connection, schema, and provisioning for this project's database.
         </p>
       </div>
@@ -81,7 +81,7 @@ export default function DatabaseSection() {
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="text-xs font-mono text-fg truncate">{status.url}</p>
-            <p className="text-xs text-fg-muted mt-0.5">
+            <p className="text-xs text-fg-muted mt-1">
               {status.dialect} — managed by{' '}
               {status.docker_managed ? 'civex (Docker)' : 'you'}
             </p>
@@ -90,7 +90,7 @@ export default function DatabaseSection() {
         </div>
 
         {status.migration.error && (
-          <p className="text-xs text-danger bg-danger-subtle border border-danger-muted rounded px-3 py-2">
+          <p className="text-xs text-danger bg-danger-subtle border border-danger-muted rounded-md px-3 py-2">
             {status.migration.error}
           </p>
         )}

@@ -28,7 +28,7 @@ export default function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
   const isToolError = parsed?.status === 'error'
 
   return (
-    <div className="my-1 rounded border border-border bg-canvas-subtle text-xs overflow-hidden">
+    <div className="my-1 rounded-lg border border-border bg-canvas-subtle text-xs overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center gap-2 px-3 py-2 text-left text-fg-muted hover:bg-border-muted transition-colors"
@@ -69,7 +69,7 @@ export default function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 
           {/* Resolved outcome (persisted, survives reload) */}
           {entry.outcome === 'approved' && (
-            <div className="flex items-center gap-1 mt-2 rounded px-2 py-1 bg-success-subtle text-success">
+            <div className="flex items-center gap-1 mt-2 rounded-md px-2 py-1 bg-success-subtle text-success">
               {entry.name === 'save_workflow' && (
                 <Link
                   to="/workflows"
@@ -82,12 +82,12 @@ export default function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
             </div>
           )}
           {entry.outcome === 'cancelled' && (
-            <div className="mt-2 rounded px-2 py-1 bg-canvas-subtle text-fg-subtle border border-border">
+            <div className="mt-2 rounded-md px-2 py-1 bg-canvas-subtle text-fg-subtle border border-border">
               Cancelled
             </div>
           )}
           {entry.outcome === 'error' && (
-            <div className="mt-2 rounded px-2 py-1 bg-danger-subtle text-danger">
+            <div className="mt-2 rounded-md px-2 py-1 bg-danger-subtle text-danger">
               {entry.outcomeLabel}
             </div>
           )}
@@ -101,7 +101,7 @@ export default function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 
           {/* Validation error from the AI tool (status === 'error') */}
           {isToolError && (
-            <div className="mt-2 rounded px-2 py-1 bg-danger-subtle text-danger">
+            <div className="mt-2 rounded-md px-2 py-1 bg-danger-subtle text-danger">
               {parsed?.message ?? entry.result}
             </div>
           )}

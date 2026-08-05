@@ -99,7 +99,7 @@ function FileField({ field, value, onChange }: Props) {
         accept={accept}
         onChange={handleChange}
         disabled={uploading}
-        className="block w-full text-sm text-fg file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer disabled:opacity-50"
+        className="block w-full text-sm text-fg file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer disabled:opacity-50"
       />
       {uploading && <p className="text-xs text-fg-muted">Uploading…</p>}
       {error && <p className="text-xs text-danger">{error}</p>}
@@ -147,7 +147,7 @@ function FileListField({ field, value, onChange }: Props) {
   }
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       {existing.map((ref) => (
         <div
           key={ref.sha256}
@@ -171,7 +171,7 @@ function FileListField({ field, value, onChange }: Props) {
         accept={accept}
         onChange={handleChange}
         disabled={uploading}
-        className="block w-full text-sm text-fg file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer disabled:opacity-50"
+        className="block w-full text-sm text-fg file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer disabled:opacity-50"
       />
       {uploading && <p className="text-xs text-fg-muted">Uploading…</p>}
       {error && <p className="text-xs text-danger">{error}</p>}
@@ -261,7 +261,7 @@ function ReferenceField({ field, value, onChange }: Props) {
             <button
               key={record.id}
               onMouseDown={() => handleSelect(record)}
-              className="w-full text-left px-3 py-1.5 hover:bg-canvas-subtle truncate"
+              className="w-full text-left px-3 py-2 hover:bg-canvas-subtle truncate"
             >
               <span className="font-mono text-xs text-fg-muted">
                 {record.id.slice(0, 8)}

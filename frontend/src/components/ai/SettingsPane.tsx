@@ -297,7 +297,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           ))}
         </Select>
         {presetObj.docs && !isOllama && (
-          <p className="mt-1 text-[10px] text-fg-subtle">
+          <p className="mt-1 text-xs text-fg-subtle">
             Get a free API key at{' '}
             <a
               href={presetObj.docs}
@@ -310,7 +310,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           </p>
         )}
         {isOllama && (
-          <p className="mt-1 text-[10px] text-fg-subtle">
+          <p className="mt-1 text-xs text-fg-subtle">
             {'note' in presetObj ? (presetObj as { note: string }).note : ''}{' '}
             <a
               href="https://ollama.com"
@@ -323,7 +323,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           </p>
         )}
         {isOpenRouter && (
-          <p className="mt-1 text-[10px] text-fg-subtle">
+          <p className="mt-1 text-xs text-fg-subtle">
             {'note' in presetObj ? (presetObj as { note: string }).note : ''}
           </p>
         )}
@@ -342,7 +342,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
             className="w-full"
           />
           {isOllama && (
-            <p className="mt-1 text-[10px] text-fg-subtle">
+            <p className="mt-1 text-xs text-fg-subtle">
               Change if Ollama runs on a different host/port.
             </p>
           )}
@@ -355,7 +355,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           <button
             onClick={handleOpenRouterLogin}
             disabled={orPolling}
-            className="w-full py-1.5 rounded-md border border-border bg-canvas text-sm font-medium text-fg hover:bg-canvas-subtle disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+            className="w-full py-2 rounded-md border border-border bg-canvas text-sm font-medium text-fg hover:bg-canvas-subtle disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
           >
             {orPolling ? (
               <>
@@ -404,13 +404,13 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                 <span>Free tier</span>
                 <span>{orLimits.data.is_free_tier ? 'Yes' : 'No'}</span>
               </div>
-              <p className="text-[10px] text-fg-subtle pt-0.5">
+              <p className="text-xs text-fg-subtle pt-1">
                 Refreshes every 30 s. Limit resets daily.
               </p>
             </div>
           )}
 
-          <p className="text-[10px] text-fg-subtle">
+          <p className="text-xs text-fg-subtle">
             Or paste a key manually below.
           </p>
         </div>
@@ -433,7 +433,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
             }
             className="w-full"
           />
-          <p className="mt-1 text-[10px] text-fg-subtle">
+          <p className="mt-1 text-xs text-fg-subtle">
             {cfg?.configured
               ? 'Leave blank to keep existing key.'
               : 'Required.'}{' '}
@@ -447,7 +447,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
         <label className="block text-xs font-medium text-fg mb-1">Model</label>
         {isOllama ? (
           ollamaLoading ? (
-            <div className="flex items-center gap-2 text-xs text-fg-muted py-1.5">
+            <div className="flex items-center gap-2 text-xs text-fg-muted py-2">
               <svg
                 className="animate-spin w-3.5 h-3.5"
                 viewBox="0 0 24 24"
@@ -463,11 +463,11 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
               Detecting installed models…
             </div>
           ) : ollamaError ? (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <p className="text-xs text-danger">{ollamaError}</p>
-              <p className="text-[10px] text-fg-subtle">
+              <p className="text-xs text-fg-subtle">
                 Make sure Ollama is running:{' '}
-                <code className="bg-border-muted px-1 rounded">
+                <code className="bg-border-muted px-1 rounded-md">
                   ollama serve
                 </code>
               </p>
@@ -479,11 +479,11 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
               />
             </div>
           ) : ollamaModels.length === 0 ? (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <p className="text-xs text-fg-muted">No models installed.</p>
-              <p className="text-[10px] text-fg-subtle">
+              <p className="text-xs text-fg-subtle">
                 Run{' '}
-                <code className="bg-border-muted px-1 rounded">
+                <code className="bg-border-muted px-1 rounded-md">
                   ollama pull qwen2.5:7b
                 </code>{' '}
                 then refresh.
@@ -505,7 +505,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                   </option>
                 ))}
               </Select>
-              <p className="text-[10px] text-fg-subtle">
+              <p className="text-xs text-fg-subtle">
                 {ollamaModels.length} model
                 {ollamaModels.length !== 1 ? 's' : ''} installed. Tool calling
                 requires qwen2.5, llama3.1, or mistral.
@@ -562,7 +562,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
       <button
         onClick={handleSave}
         disabled={saving}
-        className="w-full py-1.5 rounded-md bg-accent text-fg-on-emphasis text-sm font-medium hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        className="w-full py-2 rounded-md bg-accent text-fg-on-emphasis text-sm font-medium hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
       >
         {saving ? 'Saving…' : 'Save'}
       </button>

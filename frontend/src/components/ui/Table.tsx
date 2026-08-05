@@ -35,7 +35,7 @@ export function Th({
 }) {
   return (
     <th
-      className={`px-4 py-2.5 text-left text-xs font-semibold text-fg-muted uppercase tracking-wider ${className}`}
+      className={`px-4 py-3 text-left text-xs font-semibold text-fg-muted uppercase tracking-wider ${className}`}
     >
       {children}
     </th>

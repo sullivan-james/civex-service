@@ -4,7 +4,7 @@ import ThemeSection from '../components/settings/ThemeSection'
 
 export default function SettingsPage() {
   return (
-    <div className="space-y-10">
+    <div className="space-y-8">
       <h1 className="text-xl font-semibold text-fg">Settings</h1>
       <ThemeSection />
       <hr className="border-border" />
