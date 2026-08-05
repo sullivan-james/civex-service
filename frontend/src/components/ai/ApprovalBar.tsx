@@ -65,7 +65,7 @@ export default function ApprovalBar({
             placeholder={
               entry.name === 'save_workflow' ? 'filename-stem' : 'plugin_name'
             }
-            className="flex-1 rounded border border-border bg-white px-2 py-1 text-xs text-fg focus:outline-none focus:border-accent"
+            className="flex-1 rounded border border-border bg-canvas px-2 py-1 text-xs text-fg focus:outline-none focus:border-accent"
           />
           <span className="text-fg-subtle text-xs">
             {entry.name === 'save_workflow' ? '.yaml' : '.py'}
@@ -77,7 +77,7 @@ export default function ApprovalBar({
         <button
           onClick={approve}
           disabled={busy || (isSaveTool && !stem.trim())}
-          className={`px-3 py-1.5 rounded text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${destructive ? 'bg-danger hover:bg-danger-emphasis' : 'bg-accent hover:bg-accent-emphasis'}`}
+          className={`px-3 py-1.5 rounded text-fg-on-emphasis text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${destructive ? 'bg-danger hover:bg-danger-emphasis' : 'bg-accent hover:bg-accent-emphasis'}`}
         >
           {busy ? 'Working…' : approveLabel}
         </button>

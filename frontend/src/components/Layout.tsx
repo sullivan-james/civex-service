@@ -96,8 +96,10 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Top navbar */}
-      <header className="bg-nav-bg px-6 py-3 flex items-center gap-4">
+      {/* Top navbar — always dark regardless of theme, so it needs its own
+          border to stay visible against a dark-theme canvas instead of
+          blending into it. */}
+      <header className="bg-nav-bg border-b border-nav-border px-6 py-3 flex items-center gap-4">
         <span className="text-nav-fg font-semibold text-base tracking-tight">
           civex
         </span>
@@ -124,7 +126,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           title="Open AI assistant"
           className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
             aiOpen
-              ? 'border-accent bg-accent text-white'
+              ? 'border-accent bg-accent text-fg-on-emphasis'
               : 'border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg'
           }`}
         >
@@ -136,7 +138,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           title="Settings"
           className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
             settingsActive
-              ? 'border-accent bg-accent text-white'
+              ? 'border-accent bg-accent text-fg-on-emphasis'
               : 'border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg'
           }`}
         >
@@ -264,7 +266,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </header>
 
       {/* Tab bar */}
-      <div className="border-b border-border bg-white px-6">
+      <div className="border-b border-border bg-canvas px-6">
         <nav className="flex gap-1 -mb-px">
           {tabs.map(({ to, label }) => (
             <NavLink
@@ -298,7 +300,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-border bg-white px-6 py-3 text-center">
+      <footer className="border-t border-border bg-canvas px-6 py-3 text-center">
         <NavLink
           to="/legal"
           className="text-xs text-fg-muted hover:text-fg hover:underline"

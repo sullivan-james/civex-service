@@ -25,7 +25,7 @@ export default function StepExecutionCard({ step }: { step: StepExecution }) {
   const hasOutputs = step.outputs && Object.keys(step.outputs).length > 0
 
   return (
-    <div className="rounded-md border border-border bg-white overflow-hidden">
+    <div className="rounded-md border border-border bg-canvas overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-canvas-subtle transition-colors"

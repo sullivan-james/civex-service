@@ -417,7 +417,7 @@ export default function RecordDetailPage() {
                 id: name,
               }))
             ).map((field) => (
-              <div key={field.name} className="bg-white px-4 py-3">
+              <div key={field.name} className="bg-canvas px-4 py-3">
                 <p className="text-xs text-fg-muted font-mono mb-0.5 flex items-center gap-1.5">
                   {field.name}
                   {'type' in field && (

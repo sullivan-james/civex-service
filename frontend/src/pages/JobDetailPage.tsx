@@ -124,9 +124,9 @@ export default function JobDetailPage() {
 
       {/* Error */}
       {job.error && (
-        <div className="border border-red-200 rounded-md bg-red-50 p-4">
-          <h2 className="text-sm font-semibold text-red-700 mb-1">Error</h2>
-          <pre className="text-xs text-red-700 whitespace-pre-wrap font-mono">
+        <div className="border border-danger-subtle-border rounded-md bg-danger-subtle p-4">
+          <h2 className="text-sm font-semibold text-danger mb-1">Error</h2>
+          <pre className="text-xs text-danger whitespace-pre-wrap font-mono">
             {job.error}
           </pre>
         </div>

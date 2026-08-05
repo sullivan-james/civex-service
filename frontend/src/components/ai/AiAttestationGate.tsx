@@ -46,8 +46,8 @@ export default function AiAttestationGate({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="max-w-md w-full rounded-lg bg-white shadow-xl p-6 space-y-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay-scrim px-4">
+      <div className="max-w-md w-full rounded-lg bg-canvas shadow-xl p-6 space-y-4">
         <div className="flex items-center gap-2">
           <span className="text-accent text-xl">✦</span>
           <h2 className="text-base font-semibold text-fg">
@@ -88,7 +88,7 @@ export default function AiAttestationGate({
               acknowledge()
               setAcked(true)
             }}
-            className="px-3 py-1.5 rounded bg-accent text-white text-sm font-medium hover:bg-accent-emphasis"
+            className="px-3 py-1.5 rounded bg-accent text-fg-on-emphasis text-sm font-medium hover:bg-accent-emphasis"
           >
             I understand, continue
           </button>

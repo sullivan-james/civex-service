@@ -82,7 +82,7 @@ function MetaEditor({
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="border border-border rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+          className="border border-border rounded-md px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
         />
       </div>
       <div className="flex flex-col gap-1">
@@ -93,7 +93,7 @@ function MetaEditor({
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="No description"
-          className="border border-border rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+          className="border border-border rounded-md px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
         />
       </div>
       {updateSchema.error && (
@@ -163,7 +163,7 @@ function RestrictionsSummary({
 // --- Add field form ---
 
 const inputSm =
-  'border border-border rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent'
+  'border border-border rounded-md px-2 py-1.5 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent'
 
 function AddFieldForm({
   schemaName,
@@ -909,7 +909,7 @@ export default function SchemaDetailPage() {
             )}
             {schema.fields.map((field, index) =>
               editingField === field.name ? (
-                <tr key={field.id} className="bg-white">
+                <tr key={field.id} className="bg-canvas">
                   <td colSpan={5} className="p-0">
                     <FieldEditForm
                       field={field}
@@ -926,7 +926,7 @@ export default function SchemaDetailPage() {
                   onDragOver={(e: React.DragEvent) => handleDragOver(e, index)}
                   onDrop={() => handleDrop(index)}
                   onDragEnd={handleDragEnd}
-                  className={`bg-white transition-colors ${
+                  className={`bg-canvas transition-colors ${
                     dragOverIndex === index && dragSrcIndex !== index
                       ? 'bg-accent-subtle outline outline-2 outline-accent'
                       : dragSrcIndex === index
