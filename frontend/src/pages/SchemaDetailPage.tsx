@@ -74,30 +74,30 @@ function MetaEditor({
   }
 
   return (
-    <div className="border border-[#d0d7de] rounded-md p-4 bg-[#f6f8fa] mb-4 flex flex-col gap-3">
+    <div className="border border-border rounded-md p-4 bg-canvas-subtle mb-4 flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <label className="text-xs font-semibold text-[#656d76] uppercase tracking-wide">
+        <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
           Name
         </label>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+          className="border border-border rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
         />
       </div>
       <div className="flex flex-col gap-1">
-        <label className="text-xs font-semibold text-[#656d76] uppercase tracking-wide">
+        <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
           Description
         </label>
         <input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="No description"
-          className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+          className="border border-border rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
         />
       </div>
       {updateSchema.error && (
-        <p className="text-xs text-[#d1242f]">
+        <p className="text-xs text-danger">
           {errorMessage(updateSchema.error)}
         </p>
       )}
@@ -154,7 +154,7 @@ function RestrictionsSummary({
   }
   if (!parts.length) return null
   return (
-    <span className="text-[10px] text-[#656d76] leading-tight">
+    <span className="text-[10px] text-fg-muted leading-tight">
       {parts.join(' · ')}
     </span>
   )
@@ -163,7 +163,7 @@ function RestrictionsSummary({
 // --- Add field form ---
 
 const inputSm =
-  'border border-[#d0d7de] rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]'
+  'border border-border rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent'
 
 function AddFieldForm({
   schemaName,
@@ -265,7 +265,7 @@ function AddFieldForm({
   }
 
   return (
-    <div className="border-t border-[#d0d7de] bg-[#f6f8fa] px-4 py-3 flex flex-col gap-3">
+    <div className="border-t border-border bg-canvas-subtle px-4 py-3 flex flex-col gap-3">
       {/* Row 1: name, type, required */}
       <div className="flex items-center gap-3 flex-wrap">
         <input
@@ -301,7 +301,7 @@ function AddFieldForm({
               ))}
           </select>
         )}
-        <label className="flex items-center gap-1.5 text-sm text-[#1f2328] cursor-pointer select-none">
+        <label className="flex items-center gap-1.5 text-sm text-fg cursor-pointer select-none">
           <input
             type="checkbox"
             checked={required}
@@ -327,7 +327,7 @@ function AddFieldForm({
       {/* Default value */}
       {showDefault && (
         <div className="flex items-center gap-3 flex-wrap">
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Default value
             <input
               value={defaultVal}
@@ -342,10 +342,10 @@ function AddFieldForm({
       {/* Row 2: type-specific restrictions */}
       {(type === 'integer' || type === 'float') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">
+          <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Min
             <input
               type="number"
@@ -356,7 +356,7 @@ function AddFieldForm({
               className={`${inputSm} w-24`}
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Max
             <input
               type="number"
@@ -371,10 +371,10 @@ function AddFieldForm({
       )}
       {(type === 'string' || type === 'enum') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">
+          <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Choices (comma-separated)
             <input
               value={choices}
@@ -384,7 +384,7 @@ function AddFieldForm({
             />
           </label>
           {type === 'string' && (
-            <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            <label className="flex items-center gap-1.5 text-xs text-fg-muted">
               Max length
               <input
                 type="number"
@@ -401,10 +401,10 @@ function AddFieldForm({
       )}
       {(type === 'file' || type === 'file_list') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">
+          <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Accept
             <input
               value={accept}
@@ -413,7 +413,7 @@ function AddFieldForm({
               className={`${inputSm} w-36`}
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Max size (bytes)
             <input
               type="number"
@@ -429,10 +429,10 @@ function AddFieldForm({
       )}
       {(type === 'date' || type === 'datetime') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">
+          <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Not before
             <input
               type={type === 'date' ? 'date' : 'datetime-local'}
@@ -441,7 +441,7 @@ function AddFieldForm({
               className={inputSm}
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Not after
             <input
               type={type === 'date' ? 'date' : 'datetime-local'}
@@ -454,7 +454,7 @@ function AddFieldForm({
       )}
 
       {addField.error && (
-        <span className="text-xs text-[#d1242f]">
+        <span className="text-xs text-danger">
           {errorMessage(addField.error)}
         </span>
       )}
@@ -574,7 +574,7 @@ function FieldEditForm({
   const dtype = field.type
 
   return (
-    <div className="bg-[#f0f6ff] border-t border-[#d0d7de] px-4 py-3 flex flex-col gap-3">
+    <div className="bg-accent-subtle border-t border-border px-4 py-3 flex flex-col gap-3">
       <div className="flex items-center gap-3 flex-wrap">
         <input
           value={name}
@@ -584,7 +584,7 @@ function FieldEditForm({
           className={`${inputSm} w-40`}
         />
         <Badge variant="accent">{dtype}</Badge>
-        <label className="flex items-center gap-1.5 text-sm text-[#1f2328] cursor-pointer select-none">
+        <label className="flex items-center gap-1.5 text-sm text-fg cursor-pointer select-none">
           <input
             type="checkbox"
             checked={required}
@@ -609,10 +609,10 @@ function FieldEditForm({
 
       {(dtype === 'integer' || dtype === 'float') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">
+          <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Min
             <input
               type="number"
@@ -623,7 +623,7 @@ function FieldEditForm({
               className={`${inputSm} w-24`}
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Max
             <input
               type="number"
@@ -638,10 +638,10 @@ function FieldEditForm({
       )}
       {(dtype === 'string' || dtype === 'enum') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">
+          <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Choices (comma-separated)
             <input
               value={choices}
@@ -651,7 +651,7 @@ function FieldEditForm({
             />
           </label>
           {dtype === 'string' && (
-            <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            <label className="flex items-center gap-1.5 text-xs text-fg-muted">
               Max length
               <input
                 type="number"
@@ -668,10 +668,10 @@ function FieldEditForm({
       )}
       {(dtype === 'file' || dtype === 'file_list') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">
+          <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Accept
             <input
               value={accept}
@@ -680,7 +680,7 @@ function FieldEditForm({
               className={`${inputSm} w-36`}
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Max size (bytes)
             <input
               type="number"
@@ -696,10 +696,10 @@ function FieldEditForm({
       )}
       {(dtype === 'date' || dtype === 'datetime') && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-[#656d76] font-medium">
+          <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Not before
             <input
               type={dtype === 'date' ? 'date' : 'datetime-local'}
@@ -708,7 +708,7 @@ function FieldEditForm({
               className={inputSm}
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
             Not after
             <input
               type={dtype === 'date' ? 'date' : 'datetime-local'}
@@ -720,7 +720,7 @@ function FieldEditForm({
         </div>
       )}
       {updateField.error && (
-        <span className="text-xs text-[#d1242f]">
+        <span className="text-xs text-danger">
           {errorMessage(updateField.error)}
         </span>
       )}
@@ -830,12 +830,12 @@ export default function SchemaDetailPage() {
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-sm text-[#656d76]">
-        <Link to="/schemas" className="hover:text-[#0969da]">
+      <nav className="flex items-center gap-1.5 text-sm text-fg-muted">
+        <Link to="/schemas" className="hover:text-accent">
           Schemas
         </Link>
         <span>/</span>
-        <span className="text-[#1f2328] font-medium">{schema.name}</span>
+        <span className="text-fg font-medium">{schema.name}</span>
       </nav>
 
       {/* Header */}
@@ -845,20 +845,20 @@ export default function SchemaDetailPage() {
         ) : (
           <div className="flex items-start justify-between">
             <div>
-              <h1 className="text-xl font-semibold text-[#1f2328]">
+              <h1 className="text-xl font-semibold text-fg">
                 {schema.name}
               </h1>
-              <p className="mt-0.5 text-sm text-[#656d76]">
+              <p className="mt-0.5 text-sm text-fg-muted">
                 {schema.description ?? (
                   <span className="italic">No description</span>
                 )}
               </p>
               {parentSchema && (
-                <p className="mt-1 text-sm text-[#656d76]">
+                <p className="mt-1 text-sm text-fg-muted">
                   Inherits from{' '}
                   <Link
                     to={`/schemas/${parentSchema.id}`}
-                    className="text-[#0969da] hover:underline"
+                    className="text-accent hover:underline"
                   >
                     {parentSchema.name}
                   </Link>
@@ -875,9 +875,9 @@ export default function SchemaDetailPage() {
       {/* Fields */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-base font-semibold text-[#1f2328]">
+          <h2 className="text-base font-semibold text-fg">
             Fields
-            <span className="ml-2 text-sm font-normal text-[#656d76]">
+            <span className="ml-2 text-sm font-normal text-fg-muted">
               {schema.fields.length} own
             </span>
           </h2>
@@ -903,7 +903,7 @@ export default function SchemaDetailPage() {
               <Tr>
                 <td
                   colSpan={5}
-                  className="px-4 py-3 text-sm text-[#656d76] italic"
+                  className="px-4 py-3 text-sm text-fg-muted italic"
                 >
                   No fields yet.
                 </td>
@@ -930,21 +930,21 @@ export default function SchemaDetailPage() {
                   onDragEnd={handleDragEnd}
                   className={`bg-white transition-colors ${
                     dragOverIndex === index && dragSrcIndex !== index
-                      ? 'bg-[#ddf4ff] outline outline-2 outline-[#0969da]'
+                      ? 'bg-accent-subtle outline outline-2 outline-accent'
                       : dragSrcIndex === index
                         ? 'opacity-50'
                         : ''
                   }`}
                 >
                   {/* Drag handle + reorder buttons */}
-                  <Td className="w-8 cursor-grab text-[#d0d7de] hover:text-[#656d76] select-none">
+                  <Td className="w-8 cursor-grab text-border hover:text-fg-muted select-none">
                     <div className="flex flex-col items-center gap-0.5">
                       <button
                         type="button"
                         title="Move up"
                         disabled={index === 0 || reorderFields.isPending}
                         onClick={() => moveField(index, 'up')}
-                        className="text-[10px] text-[#d0d7de] hover:text-[#1f2328] disabled:opacity-30 leading-none"
+                        className="text-[10px] text-border hover:text-fg disabled:opacity-30 leading-none"
                       >
                         ▲
                       </button>
@@ -959,7 +959,7 @@ export default function SchemaDetailPage() {
                           reorderFields.isPending
                         }
                         onClick={() => moveField(index, 'down')}
-                        className="text-[10px] text-[#d0d7de] hover:text-[#1f2328] disabled:opacity-30 leading-none"
+                        className="text-[10px] text-border hover:text-fg disabled:opacity-30 leading-none"
                       >
                         ▼
                       </button>
@@ -971,7 +971,7 @@ export default function SchemaDetailPage() {
                         <span className="font-mono text-sm">{field.name}</span>
                         {schema.display_fields.includes(field.name) && (
                           <span
-                            className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]"
+                            className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-attention-subtle text-attention border border-attention-muted"
                             title="Display field — included in the record's natural name"
                           >
                             display
@@ -982,7 +982,7 @@ export default function SchemaDetailPage() {
                       </span>
                       {field.default !== null &&
                         field.default !== undefined && (
-                          <span className="text-[11px] text-[#9a6700]">
+                          <span className="text-[11px] text-attention">
                             default: {String(field.default)}
                           </span>
                         )}
@@ -994,11 +994,11 @@ export default function SchemaDetailPage() {
                         <Badge variant="accent">{field.type}</Badge>
                         {field.type === 'reference' &&
                           !!field.restrictions?.schema && (
-                            <span className="text-xs text-[#656d76]">
+                            <span className="text-xs text-fg-muted">
                               {'→ '}
                               <Link
                                 to={`/schemas/${allSchemas?.find((s) => s.name === String(field.restrictions.schema))?.id ?? String(field.restrictions.schema)}`}
-                                className="text-[#0969da] hover:underline"
+                                className="text-accent hover:underline"
                               >
                                 {String(field.restrictions.schema)}
                               </Link>
@@ -1021,8 +1021,8 @@ export default function SchemaDetailPage() {
                       }
                       className={`text-xs font-medium px-2 py-0.5 rounded-full border cursor-pointer transition-colors ${
                         field.required
-                          ? 'bg-[#dafbe1] text-[#1a7f37] border-[#4ac26b66] hover:bg-[#aceebb]'
-                          : 'bg-[#f6f8fa] text-[#656d76] border-[#d0d7de] hover:bg-[#eff2f5]'
+                          ? 'bg-success-subtle text-success border-success-muted hover:bg-success-subtle-hover'
+                          : 'bg-canvas-subtle text-fg-muted border-border hover:bg-canvas-inset'
                       }`}
                     >
                       {field.required ? 'Required' : 'Optional'}
@@ -1039,13 +1039,13 @@ export default function SchemaDetailPage() {
                               })
                             }
                             disabled={deleteField.isPending}
-                            className="text-xs text-[#d1242f] font-medium hover:underline disabled:opacity-50"
+                            className="text-xs text-danger font-medium hover:underline disabled:opacity-50"
                           >
                             Confirm
                           </button>
                           <button
                             onClick={() => setConfirmDeleteField(null)}
-                            className="text-xs text-[#656d76] hover:underline"
+                            className="text-xs text-fg-muted hover:underline"
                           >
                             Cancel
                           </button>
@@ -1054,7 +1054,7 @@ export default function SchemaDetailPage() {
                         <>
                           <button
                             onClick={() => toggleDisplayField(field.name)}
-                            className={`text-xs transition-colors ${schema.display_fields.includes(field.name) ? 'text-[#9a6700]' : 'text-[#d0d7de] hover:text-[#9a6700]'}`}
+                            className={`text-xs transition-colors ${schema.display_fields.includes(field.name) ? 'text-attention' : 'text-border hover:text-attention'}`}
                             title={
                               schema.display_fields.includes(field.name)
                                 ? 'Remove from display fields'
@@ -1077,7 +1077,7 @@ export default function SchemaDetailPage() {
                                   onClick={() =>
                                     moveDisplayField(field.name, 'up')
                                   }
-                                  className="text-[9px] text-[#9a6700] hover:text-[#7d5700] disabled:opacity-30 leading-none"
+                                  className="text-[9px] text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
                                 >
                                   ▲
                                 </button>
@@ -1094,7 +1094,7 @@ export default function SchemaDetailPage() {
                                   onClick={() =>
                                     moveDisplayField(field.name, 'down')
                                   }
-                                  className="text-[9px] text-[#9a6700] hover:text-[#7d5700] disabled:opacity-30 leading-none"
+                                  className="text-[9px] text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
                                 >
                                   ▼
                                 </button>
@@ -1105,7 +1105,7 @@ export default function SchemaDetailPage() {
                               setConfirmDeleteField(null)
                               setEditingField(field.name)
                             }}
-                            className="text-xs text-[#656d76] hover:text-[#0969da] transition-colors"
+                            className="text-xs text-fg-muted hover:text-accent transition-colors"
                             title="Edit field"
                           >
                             ✎
@@ -1115,7 +1115,7 @@ export default function SchemaDetailPage() {
                               setEditingField(null)
                               setConfirmDeleteField(field.name)
                             }}
-                            className="text-xs text-[#656d76] hover:text-[#d1242f] transition-colors"
+                            className="text-xs text-fg-muted hover:text-danger transition-colors"
                             title="Remove field"
                           >
                             ✕
@@ -1144,22 +1144,22 @@ export default function SchemaDetailPage() {
       </div>
 
       {/* Danger zone */}
-      <div className="border border-[#d1242f33] rounded-md">
-        <div className="px-4 py-3 border-b border-[#d1242f33] bg-[#ffebe9] rounded-t-md">
-          <h2 className="text-sm font-semibold text-[#d1242f]">Danger zone</h2>
+      <div className="border border-danger-muted rounded-md">
+        <div className="px-4 py-3 border-b border-danger-muted bg-danger-subtle rounded-t-md">
+          <h2 className="text-sm font-semibold text-danger">Danger zone</h2>
         </div>
         <div className="px-4 py-3 flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-[#1f2328]">
+            <p className="text-sm font-medium text-fg">
               Delete this schema
             </p>
-            <p className="text-xs text-[#656d76]">
+            <p className="text-xs text-fg-muted">
               This cannot be undone. All field definitions will be removed.
             </p>
           </div>
           {confirmDelete ? (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-[#656d76]">Are you sure?</span>
+              <span className="text-xs text-fg-muted">Are you sure?</span>
               <Button
                 variant="danger"
                 size="sm"

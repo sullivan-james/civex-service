@@ -235,7 +235,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
     }
   }
 
-  if (loading) return <div className="p-4 text-sm text-[#656d76]">Loading…</div>
+  if (loading) return <div className="p-4 text-sm text-fg-muted">Loading…</div>
 
   const isCustom = preset === 'custom'
   const isOllama = preset === 'ollama'
@@ -247,11 +247,11 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="p-4 space-y-4 text-sm">
       <div>
-        <p className="font-semibold text-[#1f2328] mb-1">
+        <p className="font-semibold text-fg mb-1">
           AI Assistant Settings
         </p>
         {cfg?.configured ? (
-          <p className="text-xs text-[#3fb950]">
+          <p className="text-xs text-success-emphasis">
             ✓{' '}
             {cfg.provider === 'anthropic'
               ? 'Claude'
@@ -270,17 +270,17 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
               ? cfg.model
               : `key ${cfg.key_hint}`}
             {cfg.source === 'env' && (
-              <span className="text-[#adbac7] ml-1">(via env)</span>
+              <span className="text-fg-subtle ml-1">(via env)</span>
             )}
           </p>
         ) : (
-          <p className="text-xs text-[#f85149]">Not configured</p>
+          <p className="text-xs text-danger-emphasis">Not configured</p>
         )}
       </div>
 
       {/* Provider */}
       <div>
-        <label className="block text-xs font-medium text-[#1f2328] mb-1">
+        <label className="block text-xs font-medium text-fg mb-1">
           Provider
         </label>
         <select
@@ -288,7 +288,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           onChange={(e) =>
             handlePresetChange(e.target.value as PresetProviderId)
           }
-          className="w-full rounded-md border border-[#d0d7de] px-3 py-1.5 text-sm text-[#1f2328] bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+          className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-fg bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
         >
           {PRESET_PROVIDERS.map((p) => (
             <option key={p.id} value={p.id}>
@@ -297,33 +297,33 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           ))}
         </select>
         {presetObj.docs && !isOllama && (
-          <p className="mt-1 text-[10px] text-[#adbac7]">
+          <p className="mt-1 text-[10px] text-fg-subtle">
             Get a free API key at{' '}
             <a
               href={presetObj.docs}
               target="_blank"
               rel="noreferrer"
-              className="text-[#0969da] hover:underline"
+              className="text-accent hover:underline"
             >
               {presetObj.docs.replace('https://', '')}
             </a>
           </p>
         )}
         {isOllama && (
-          <p className="mt-1 text-[10px] text-[#adbac7]">
+          <p className="mt-1 text-[10px] text-fg-subtle">
             {'note' in presetObj ? (presetObj as { note: string }).note : ''}{' '}
             <a
               href="https://ollama.com"
               target="_blank"
               rel="noreferrer"
-              className="text-[#0969da] hover:underline"
+              className="text-accent hover:underline"
             >
               ollama.com
             </a>
           </p>
         )}
         {isOpenRouter && (
-          <p className="mt-1 text-[10px] text-[#adbac7]">
+          <p className="mt-1 text-[10px] text-fg-subtle">
             {'note' in presetObj ? (presetObj as { note: string }).note : ''}
           </p>
         )}
@@ -332,17 +332,17 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
       {/* Base URL — editable for ollama and custom */}
       {(isCustom || isOllama) && (
         <div>
-          <label className="block text-xs font-medium text-[#1f2328] mb-1">
+          <label className="block text-xs font-medium text-fg mb-1">
             Base URL
           </label>
           <input
             value={customBaseUrl}
             onChange={(e) => setCustomBaseUrl(e.target.value)}
             placeholder="http://localhost:11434/v1"
-            className="w-full rounded-md border border-[#d0d7de] px-3 py-1.5 text-sm text-[#1f2328] placeholder:text-[#adbac7] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+            className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
           />
           {isOllama && (
-            <p className="mt-1 text-[10px] text-[#adbac7]">
+            <p className="mt-1 text-[10px] text-fg-subtle">
               Change if Ollama runs on a different host/port.
             </p>
           )}
@@ -355,7 +355,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           <button
             onClick={handleOpenRouterLogin}
             disabled={orPolling}
-            className="w-full py-1.5 rounded-md border border-[#d0d7de] bg-white text-sm font-medium text-[#1f2328] hover:bg-[#f6f8fa] disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+            className="w-full py-1.5 rounded-md border border-border bg-white text-sm font-medium text-fg hover:bg-canvas-subtle disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
           >
             {orPolling ? (
               <>
@@ -384,8 +384,8 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
 
           {/* Live limits widget */}
           {orLimits && (
-            <div className="rounded-md border border-[#d0d7de] bg-[#f6f8fa] px-3 py-2 text-xs space-y-1">
-              <div className="flex justify-between text-[#1f2328]">
+            <div className="rounded-md border border-border bg-canvas-subtle px-3 py-2 text-xs space-y-1">
+              <div className="flex justify-between text-fg">
                 <span className="font-medium">Daily request limit</span>
                 <span>
                   {orLimits.data.rate_limit?.requests ?? '—'} /{' '}
@@ -393,22 +393,22 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                 </span>
               </div>
               {orLimits.data.limit !== null && (
-                <div className="flex justify-between text-[#656d76]">
+                <div className="flex justify-between text-fg-muted">
                   <span>Credit usage</span>
                   <span>${orLimits.data.usage.toFixed(4)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-[#656d76]">
+              <div className="flex justify-between text-fg-muted">
                 <span>Free tier</span>
                 <span>{orLimits.data.is_free_tier ? 'Yes' : 'No'}</span>
               </div>
-              <p className="text-[10px] text-[#adbac7] pt-0.5">
+              <p className="text-[10px] text-fg-subtle pt-0.5">
                 Refreshes every 30 s. Limit resets daily.
               </p>
             </div>
           )}
 
-          <p className="text-[10px] text-[#adbac7]">
+          <p className="text-[10px] text-fg-subtle">
             Or paste a key manually below.
           </p>
         </div>
@@ -417,7 +417,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
       {/* API key */}
       {!isOllama && (
         <div>
-          <label className="block text-xs font-medium text-[#1f2328] mb-1">
+          <label className="block text-xs font-medium text-fg mb-1">
             API key
           </label>
           <input
@@ -429,9 +429,9 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                 ? `Current: ${cfg.key_hint}`
                 : presetObj.key_placeholder
             }
-            className="w-full rounded-md border border-[#d0d7de] px-3 py-1.5 text-sm text-[#1f2328] placeholder:text-[#adbac7] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+            className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
           />
-          <p className="mt-1 text-[10px] text-[#adbac7]">
+          <p className="mt-1 text-[10px] text-fg-subtle">
             {cfg?.configured
               ? 'Leave blank to keep existing key.'
               : 'Required.'}{' '}
@@ -442,12 +442,12 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
 
       {/* Model */}
       <div>
-        <label className="block text-xs font-medium text-[#1f2328] mb-1">
+        <label className="block text-xs font-medium text-fg mb-1">
           Model
         </label>
         {isOllama ? (
           ollamaLoading ? (
-            <div className="flex items-center gap-2 text-xs text-[#656d76] py-1.5">
+            <div className="flex items-center gap-2 text-xs text-fg-muted py-1.5">
               <svg
                 className="animate-spin w-3.5 h-3.5"
                 viewBox="0 0 24 24"
@@ -464,24 +464,24 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
             </div>
           ) : ollamaError ? (
             <div className="space-y-1.5">
-              <p className="text-xs text-[#d1242f]">{ollamaError}</p>
-              <p className="text-[10px] text-[#adbac7]">
+              <p className="text-xs text-danger">{ollamaError}</p>
+              <p className="text-[10px] text-fg-subtle">
                 Make sure Ollama is running:{' '}
-                <code className="bg-[#eaeef2] px-1 rounded">ollama serve</code>
+                <code className="bg-border-muted px-1 rounded">ollama serve</code>
               </p>
               <input
                 value={customModel}
                 onChange={(e) => setCustomModel(e.target.value)}
                 placeholder="qwen2.5:7b"
-                className="w-full rounded-md border border-[#d0d7de] px-3 py-1.5 text-sm text-[#1f2328] placeholder:text-[#adbac7] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+                className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
               />
             </div>
           ) : ollamaModels.length === 0 ? (
             <div className="space-y-1.5">
-              <p className="text-xs text-[#656d76]">No models installed.</p>
-              <p className="text-[10px] text-[#adbac7]">
+              <p className="text-xs text-fg-muted">No models installed.</p>
+              <p className="text-[10px] text-fg-subtle">
                 Run{' '}
-                <code className="bg-[#eaeef2] px-1 rounded">
+                <code className="bg-border-muted px-1 rounded">
                   ollama pull qwen2.5:7b
                 </code>{' '}
                 then refresh.
@@ -492,7 +492,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
               <select
                 value={customModel}
                 onChange={(e) => setCustomModel(e.target.value)}
-                className="w-full rounded-md border border-[#d0d7de] px-3 py-1.5 text-sm text-[#1f2328] bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+                className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-fg bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
               >
                 {ollamaModels.map((m) => (
                   <option key={m.name} value={m.name}>
@@ -503,7 +503,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                   </option>
                 ))}
               </select>
-              <p className="text-[10px] text-[#adbac7]">
+              <p className="text-[10px] text-fg-subtle">
                 {ollamaModels.length} model
                 {ollamaModels.length !== 1 ? 's' : ''} installed. Tool calling
                 requires qwen2.5, llama3.1, or mistral.
@@ -523,7 +523,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                     : 'model name'
               }
               list={isOpenRouter ? 'openrouter-model-suggestions' : undefined}
-              className="w-full rounded-md border border-[#d0d7de] px-3 py-1.5 text-sm text-[#1f2328] placeholder:text-[#adbac7] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+              className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
             />
             {isOpenRouter && (
               <datalist id="openrouter-model-suggestions">
@@ -539,7 +539,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           <select
             value={effectiveModel || presetObj.models[0]?.id || ''}
             onChange={(e) => setModel(e.target.value)}
-            className="w-full rounded-md border border-[#d0d7de] px-3 py-1.5 text-sm text-[#1f2328] bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+            className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-fg bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
           >
             {presetObj.models.map((m) => (
               <option key={m.id} value={m.id}>
@@ -550,13 +550,13 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
         )}
       </div>
 
-      {error && <p className="text-xs text-[#d1242f]">{error}</p>}
-      {success && <p className="text-xs text-[#3fb950]">✓ Saved</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
+      {success && <p className="text-xs text-success-emphasis">✓ Saved</p>}
 
       <button
         onClick={handleSave}
         disabled={saving}
-        className="w-full py-1.5 rounded-md bg-[#0969da] text-white text-sm font-medium hover:bg-[#0860ca] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        className="w-full py-1.5 rounded-md bg-accent text-white text-sm font-medium hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
       >
         {saving ? 'Saving…' : 'Save'}
       </button>

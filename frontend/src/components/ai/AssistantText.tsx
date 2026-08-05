@@ -32,7 +32,7 @@ export default function AssistantText({
   }
 
   return (
-    <div className="text-sm text-[#1f2328]">
+    <div className="text-sm text-fg">
       {parts.map((p, i) =>
         p.type === 'code' ? (
           <CodeBlock key={i} lang={p.lang} code={p.content} />
@@ -43,7 +43,7 @@ export default function AssistantText({
         ),
       )}
       {streaming && (
-        <span className="inline-block w-1.5 h-3.5 bg-[#0969da] animate-pulse ml-0.5 align-middle" />
+        <span className="inline-block w-1.5 h-3.5 bg-accent animate-pulse ml-0.5 align-middle" />
       )}
     </div>
   )
