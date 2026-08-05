@@ -37,11 +37,11 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay-scrim"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg border border-border shadow-lg w-full max-w-md p-6"
+        className="bg-canvas rounded-lg border border-border shadow-lg w-full max-w-md p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-base font-semibold text-fg mb-4">New schema</h2>
@@ -77,7 +77,7 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
             <select
               value={parent}
               onChange={(e) => setParent(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-white"
+              className="w-full px-3 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-canvas"
             >
               <option value="">None</option>
               {schemas?.map((s) => (

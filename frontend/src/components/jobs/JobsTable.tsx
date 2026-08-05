@@ -59,7 +59,7 @@ function Pagination({
               onPageSize(Number(e.target.value))
               onPage(0)
             }}
-            className="border border-border rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-accent"
+            className="border border-border rounded px-1.5 py-0.5 text-xs bg-canvas focus:outline-none focus:border-accent"
           >
             {PAGE_SIZES.map((s) => (
               <option key={s} value={s}>
@@ -72,7 +72,7 @@ function Pagination({
           <button
             onClick={() => onPage(0)}
             disabled={page === 0}
-            className="px-2 py-0.5 rounded border border-border text-xs bg-white disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
+            className="px-2 py-0.5 rounded border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
             title="First page"
           >
             «
@@ -80,7 +80,7 @@ function Pagination({
           <button
             onClick={() => onPage(page - 1)}
             disabled={page === 0}
-            className="px-2 py-0.5 rounded border border-border text-xs bg-white disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
+            className="px-2 py-0.5 rounded border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
           >
             ‹ Prev
           </button>
@@ -90,14 +90,14 @@ function Pagination({
           <button
             onClick={() => onPage(page + 1)}
             disabled={page >= totalPages - 1}
-            className="px-2 py-0.5 rounded border border-border text-xs bg-white disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
+            className="px-2 py-0.5 rounded border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
           >
             Next ›
           </button>
           <button
             onClick={() => onPage(totalPages - 1)}
             disabled={page >= totalPages - 1}
-            className="px-2 py-0.5 rounded border border-border text-xs bg-white disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
+            className="px-2 py-0.5 rounded border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
             title="Last page"
           >
             »
@@ -244,11 +244,11 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
               {job.status === 'failed' && job.error && (
                 <tr
                   key={`${job.id}-err`}
-                  className="border-b border-border bg-red-50"
+                  className="border-b border-border bg-danger-subtle"
                 >
                   <td
                     colSpan={recordId ? 8 : 9}
-                    className="py-1.5 px-3 text-xs text-red-700 font-mono"
+                    className="py-1.5 px-3 text-xs text-danger font-mono"
                   >
                     {job.error}
                   </td>

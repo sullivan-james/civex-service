@@ -7,6 +7,17 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Applied before React mounts so the correct theme paints on first
+      // frame instead of flashing light then swapping to a stored dark
+      // preference.
+      ;(function () {
+        var pref = localStorage.getItem('civex-theme')
+        if (pref === 'light' || pref === 'dark') {
+          document.documentElement.setAttribute('data-theme', pref)
+        }
+      })()
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

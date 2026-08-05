@@ -16,7 +16,7 @@ function LicenseSection() {
     )
 
   return (
-    <div className="border border-border rounded-md bg-white p-4 space-y-3">
+    <div className="border border-border rounded-md bg-canvas p-4 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold text-fg">Software license</p>
         <button
@@ -64,7 +64,7 @@ function PoliciesSection() {
         return (
           <div
             key={p.stem}
-            className="border border-border rounded-md bg-white"
+            className="border border-border rounded-md bg-canvas"
           >
             <button
               onClick={() => setOpenStem(open ? null : p.stem)}

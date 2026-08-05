@@ -23,7 +23,7 @@ async function browseFolderDesktop(): Promise<string | null> {
 }
 
 const inputCls =
-  'border border-border rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent w-full'
+  'border border-border rounded-md px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent w-full'
 
 function fmtBytes(b: number | null): string {
   if (b === null) return '—'
@@ -105,7 +105,7 @@ function VolumeCard({
 
   return (
     <div
-      className={`border rounded-md ${vol.warning ? 'border-attention-muted' : 'border-border'} bg-white`}
+      className={`border rounded-md ${vol.warning ? 'border-attention-muted' : 'border-border'} bg-canvas`}
     >
       <div className="px-4 py-3 flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
@@ -191,7 +191,7 @@ function VolumeCard({
                   })
                 }}
                 disabled={removeVolume.isPending}
-                className="text-xs px-2 py-1 rounded bg-danger text-white hover:bg-danger-emphasis disabled:opacity-50"
+                className="text-xs px-2 py-1 rounded bg-danger text-fg-on-emphasis hover:bg-danger-emphasis disabled:opacity-50"
               >
                 Confirm
               </button>
