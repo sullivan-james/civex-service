@@ -96,4 +96,3 @@ nav:
           - Load CSV: reference/plugins/load_csv.md
           - Rows to Records: reference/plugins/rows_to_records.md
           - Upsert Records: reference/plugins/upsert_records.md
-  - CLI reference: cli-reference.md

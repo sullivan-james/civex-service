@@ -16,8 +16,6 @@ A **collection** is a named container for records. One project might have a sing
 === "Web UI"
     Go to **Collections → New collection**. On a collection's detail page, **Delete collection** removes it and every record inside.
 
-The full command list is in the [CLI reference](../cli-reference.md#civex-collection).
-
 ## Adding records
 
 === "CLI"
@@ -57,6 +55,12 @@ For schemas with a parent, civex first prompts for the parent record.
 
     # Limit results
     civex record find --in study-2024 --limit 20
+    ```
+
+    `--where` is repeatable — all conditions must match:
+
+    ```bash
+    civex record find --in study-2024 --schema trial --where "outcome=pass" --where "location=Brazil" --limit 20
     ```
 
 === "Web UI"
