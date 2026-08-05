@@ -7,8 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "eslint .",
+    "lint": "eslint . && npm run lint:colors",
     "lint:fix": "eslint . --fix",
+    "lint:colors": "node scripts/check-hardcoded-colors.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
