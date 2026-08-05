@@ -2,8 +2,20 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { useJobsPaged, useRerunJob } from '../../hooks/useWorkflows'
 import { type WorkflowJob } from '../../api/workflows'
-import { LoadingState, ErrorState, Badge, Button } from '../ui'
+import { TableSkeleton, ErrorState, Badge, Button } from '../ui'
 import { Check, XCircle, RefreshCw } from '../ui/icons'
+
+const RUN_COLUMNS = ['w-20', 'w-32', 'w-20', 'w-24', 'w-16', 'w-16', 'w-24']
+const RUN_COLUMNS_WITH_RECORD = [
+  'w-20',
+  'w-32',
+  'w-20',
+  'w-20',
+  'w-24',
+  'w-16',
+  'w-16',
+  'w-24',
+]
 
 const PAGE_SIZES = [25, 50, 100]
 
@@ -144,7 +156,14 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
   )
   const rerun = useRerunJob()
 
-  if (isLoading) return <LoadingState />
+  if (isLoading)
+    return (
+      <TableSkeleton
+        bordered={false}
+        columns={recordId ? RUN_COLUMNS_WITH_RECORD : RUN_COLUMNS}
+        rows={8}
+      />
+    )
   if (error) return <ErrorState message={error.message} />
 
   if (!jobs.data?.length) {

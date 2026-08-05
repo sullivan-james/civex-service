@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { useJob, useRerunJob } from '../hooks/useWorkflows'
 import { type WorkflowJob } from '../api/workflows'
-import { Badge, Button, LoadingState, ErrorState } from '../components/ui'
+import { Badge, Button, DetailSkeleton, ErrorState } from '../components/ui'
 import StepExecutionCard from '../components/jobs/StepExecutionCard'
 import JobStepsDiagram from '../components/jobs/JobStepsDiagram'
 import { Check, XCircle, RefreshCw } from '../components/ui/icons'
@@ -46,7 +46,7 @@ export default function JobDetailPage() {
   const rerun = useRerunJob()
   const [view, setView] = useState<'list' | 'diagram'>('list')
 
-  if (isLoading) return <LoadingState />
+  if (isLoading) return <DetailSkeleton metadataRows={6} sections={1} />
   if (error) return <ErrorState message={error.message} />
   if (!job) return <ErrorState message="Run not found" />
 

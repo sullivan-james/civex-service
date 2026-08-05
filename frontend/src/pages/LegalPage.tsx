@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLicense, usePolicies } from '../hooks/useLegal'
-import { LoadingState, ErrorState } from '../components/ui'
+import { Skeleton, ErrorState } from '../components/ui'
 import { ChevronUp, ChevronDown } from '../components/ui/icons'
 import { errorMessage } from '../lib/errors'
 
@@ -8,7 +8,19 @@ function LicenseSection() {
   const { data, isLoading, error } = useLicense()
   const [expanded, setExpanded] = useState(false)
 
-  if (isLoading) return <LoadingState />
+  if (isLoading)
+    return (
+      <div
+        className="border border-border rounded-md bg-canvas p-4 space-y-3"
+        aria-hidden="true"
+      >
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-4 w-36" />
+          <Skeleton className="h-3 w-20" />
+        </div>
+        <Skeleton className="h-24 w-full" />
+      </div>
+    )
   if (error || !data)
     return (
       <ErrorState
@@ -40,7 +52,14 @@ function PoliciesSection() {
   const { data: policies, isLoading, error } = usePolicies()
   const [openStem, setOpenStem] = useState<string | null>(null)
 
-  if (isLoading) return <LoadingState />
+  if (isLoading)
+    return (
+      <div className="space-y-3" aria-hidden="true">
+        <Skeleton className="h-11 w-full" />
+        <Skeleton className="h-11 w-full" />
+        <Skeleton className="h-11 w-full" />
+      </div>
+    )
   if (error || !policies)
     return (
       <ErrorState

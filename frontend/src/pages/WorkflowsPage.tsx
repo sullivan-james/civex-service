@@ -16,7 +16,7 @@ import {
   usePluginLoadErrors,
   useUploadPlugin,
 } from '../hooks/usePlugins'
-import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
+import { PageHeader, Button, TableSkeleton, ErrorState } from '../components/ui'
 import { ChevronUp, ChevronDown } from '../components/ui/icons'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import { ContainerPluginEditor } from '../components/workflows/ContainerPluginEditor'
@@ -558,9 +558,6 @@ export default function WorkflowsPage() {
     setRunTarget(wf)
   }
 
-  if (isLoading) return <LoadingState />
-  if (error) return <ErrorState message={error.message} />
-
   return (
     <>
       <PageHeader
@@ -573,7 +570,15 @@ export default function WorkflowsPage() {
         }
       />
 
-      {!workflows?.length ? (
+      {isLoading ? (
+        <TableSkeleton
+          bordered={false}
+          columns={['w-32', 'w-48', 'w-12', 'w-32']}
+          rows={6}
+        />
+      ) : error ? (
+        <ErrorState message={error.message} />
+      ) : !workflows?.length ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <svg
             width="40"
