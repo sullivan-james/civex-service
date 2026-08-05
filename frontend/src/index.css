@@ -8,38 +8,163 @@
     ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono',
     monospace;
 
+  /* Type scale — density goes up relative to Primer defaults.
+     15px body / 14px table cells (text-sm) / 13px floor for secondary
+     text (text-xs). Nothing below text-xs is a supported token — nowhere
+     in the app should a size need to go smaller than 13px. */
+  --text-xs: 0.8125rem; /* 13px */
+  --text-xs--line-height: 1.4;
+  --text-sm: 0.875rem; /* 14px */
+  --text-sm--line-height: 1.45;
+  --text-base: 0.9375rem; /* 15px */
+  --text-base--line-height: 1.55;
+  --text-lg: 1.0625rem; /* 17px */
+  --text-lg--line-height: 1.5;
+  --text-xl: 1.25rem; /* 20px */
+  --text-xl--line-height: 1.4;
+  --text-2xl: 1.5rem; /* 24px */
+  --text-2xl--line-height: 1.3;
+
+  /* Spacing runs on Tailwind's default 4px unit, used only at the
+     4/8/12/16/24/32 steps (p-1, p-2, p-3, p-4, p-6, p-8). Other steps
+     on the default scale (p-5, p-7, p-10, ...) and arbitrary values are
+     off the approved scale — see UI-AUDIT.md. */
+  --spacing: 0.25rem;
+
+  /* Control height reference tokens: 32px minimum, 36-40px for primary
+     actions. Compose with Tailwind's existing h-8/h-9/h-10 utilities
+     (which already resolve to these exact values off --spacing above)
+     or var(--control-height-*) directly in component CSS. */
+  --control-height-sm: 2rem; /* 32px — minimum control height */
+  --control-height-md: 2.25rem; /* 36px — primary action */
+  --control-height-lg: 2.5rem; /* 40px — primary action, large */
+
+  /* Radius: Tailwind's default scale already lines up with the decided
+     usage rule, so no override is needed — --radius-md (6px) for
+     controls, --radius-lg (8px) for surfaces, --radius-full for badges
+     only. Bare `rounded` (--radius-sm, 4px) is retired; see
+     UI-AUDIT.md. */
+
+  /* --- Warm neutral ramp (replaces Primer's blue-cast greys) --- */
   --color-canvas: #ffffff;
-  --color-canvas-subtle: #f6f8fa;
-  --color-canvas-inset: #eff2f5;
+  --color-canvas-subtle: #faf9f7;
+  --color-canvas-inset: #f3f1ec;
 
-  --color-border: #d0d7de;
-  --color-border-muted: #d8dee4;
+  --color-border-muted: #e8e3dc;
+  --color-border: #d8d1c6;
+  --color-border-strong: #b2a897;
 
-  --color-fg: #1f2328;
-  --color-fg-muted: #656d76;
-  --color-fg-subtle: #818b98;
+  --color-fg: #211d1a;
+  --color-fg-muted: #5c5449;
+  --color-fg-subtle: #837a6c;
   --color-fg-on-emphasis: #ffffff;
 
-  --color-accent: #0969da;
-  --color-accent-subtle: #ddf4ff;
-  --color-accent-muted: #54aeff66;
-  --color-accent-emphasis: #0969da;
+  /* --- Accent: one confident institutional blue --- */
+  --color-accent: #17569e;
+  --color-accent-emphasis: #123f77;
+  --color-accent-subtle: #e9f1fb;
+  --color-accent-subtle-border: #bcd4ee;
+  --color-accent-muted: rgb(23 86 158 / 30%);
 
+  /* --- Status semantics: always pair with an icon + word, never colour
+     alone (enforced at the component level, not here). --- */
+
+  /* Success */
   --color-success: #1a7f37;
-  --color-danger: #d1242f;
-  --color-danger-subtle: #ffebe9;
+  --color-success-emphasis: #1f883d;
+  --color-success-subtle: #e3f7e9;
+  --color-success-subtle-hover: #c9edd4;
+  --color-success-muted: rgb(31 136 61 / 35%);
 
+  /* Attention / warning — previously hardcoded ad hoc on the "display
+     field" chip, now a first-class family. */
+  --color-attention: #9a6700;
+  --color-attention-emphasis: #7d5700;
+  --color-attention-subtle: #fbf1cf;
+  --color-attention-muted: rgb(154 103 0 / 35%);
+
+  /* Danger / error */
+  --color-danger: #cf222e;
+  --color-danger-emphasis: #a40e26;
+  --color-danger-subtle: #fdecea;
+  --color-danger-subtle-border: #f6c6c2;
+  --color-danger-muted: rgb(207 34 46 / 30%);
+
+  /* Neutral chip (the "default" badge variant — status-free, informational) */
+  --color-neutral-subtle: rgb(131 122 108 / 16%);
+  --color-neutral-muted: rgb(131 122 108 / 24%);
+
+  /* Overlay scrim behind modals/dialogs — was inconsistently bg-black/40
+     vs bg-black/50 inline. */
+  --color-overlay-scrim: rgb(33 29 26 / 50%);
+
+  /* --- Dark-header set: the top nav bar is permanently dark regardless
+     of the app's light/dark mode, so these are fixed, not theme-swapped. --- */
   --color-nav-bg: #24292f;
-  --color-nav-fg: #f0f6fc;
-  --color-nav-fg-muted: #848d97;
+  --color-nav-surface: #2d333b;
+  --color-nav-surface-hover: #373e47;
+  --color-nav-surface-strong: #1c2128;
+  --color-nav-border: #444c56;
+  --color-nav-fg: #e6edf3;
+  --color-nav-fg-muted: #adbac7;
+}
+
+/* Dark-mode token values. Follows the OS `prefers-color-scheme` (no
+   toggle exists in the app yet); wiring a manual toggle is future work,
+   but the values are decided now so the codemod doesn't have to
+   revisit this. The always-dark nav set is unaffected — it doesn't
+   invert with the rest of the app. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-canvas: #1c1917;
+    --color-canvas-subtle: #26221f;
+    --color-canvas-inset: #302b27;
+
+    --color-border-muted: #3d3732;
+    --color-border: #4f473f;
+    --color-border-strong: #6e6459;
+
+    --color-fg: #f2ede6;
+    --color-fg-muted: #b5aa9c;
+    --color-fg-subtle: #8f8578;
+    --color-fg-on-emphasis: #ffffff;
+
+    --color-accent: #5b9bf0;
+    --color-accent-emphasis: #8ebbf5;
+    --color-accent-subtle: #16324f;
+    --color-accent-subtle-border: #2c517d;
+    --color-accent-muted: rgb(91 155 240 / 35%);
+
+    --color-success: #4ad17a;
+    --color-success-emphasis: #6fe097;
+    --color-success-subtle: #103822;
+    --color-success-subtle-hover: #17492c;
+    --color-success-muted: rgb(74 209 122 / 35%);
+
+    --color-attention: #e3b341;
+    --color-attention-emphasis: #f0cc6b;
+    --color-attention-subtle: #3d2f04;
+    --color-attention-muted: rgb(227 179 65 / 35%);
+
+    --color-danger: #f0656d;
+    --color-danger-emphasis: #ff9492;
+    --color-danger-subtle: #3d1418;
+    --color-danger-subtle-border: #6e2328;
+    --color-danger-muted: rgb(240 101 109 / 35%);
+
+    --color-neutral-subtle: rgb(181 170 156 / 16%);
+    --color-neutral-muted: rgb(181 170 156 / 24%);
+
+    --color-overlay-scrim: rgb(0 0 0 / 60%);
+  }
 }
 
 body {
   font-family: var(--font-sans);
   background-color: var(--color-canvas);
   color: var(--color-fg);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: var(--text-base);
+  line-height: var(--text-base--line-height);
 }
 
 * {
