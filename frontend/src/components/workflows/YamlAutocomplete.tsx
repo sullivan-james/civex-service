@@ -16,7 +16,7 @@ export function AutocompleteMenu({
   if (suggestions.length === 0) return null
   return (
     <ul
-      className="absolute z-10 min-w-[12rem] max-w-sm max-h-52 overflow-y-auto bg-white border border-border rounded-md shadow-lg text-xs py-1"
+      className="absolute z-10 min-w-[12rem] max-w-sm max-h-52 overflow-y-auto bg-canvas border border-border rounded-md shadow-lg text-xs py-1"
       style={{ top: position.top, left: position.left }}
     >
       {suggestions.map((s, i) => (
@@ -28,14 +28,14 @@ export function AutocompleteMenu({
           }}
           className={`px-2 py-1 cursor-pointer flex items-baseline gap-2 ${
             i === activeIndex
-              ? 'bg-accent text-white'
+              ? 'bg-accent text-fg-on-emphasis'
               : 'hover:bg-canvas-subtle'
           }`}
         >
           <span className="font-mono">{s.label}</span>
           {s.detail && (
             <span
-              className={`truncate ${i === activeIndex ? 'text-white/80' : 'text-fg-muted'}`}
+              className={`truncate ${i === activeIndex ? 'text-fg-on-emphasis/80' : 'text-fg-muted'}`}
             >
               {s.detail}
             </span>

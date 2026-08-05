@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { useJobsPaged, useRerunJob } from '../../hooks/useWorkflows'
 import { type WorkflowJob } from '../../api/workflows'
 import { LoadingState, ErrorState, Badge, Button, Select } from '../ui'
+import { Check, XCircle, RefreshCw } from '../ui/icons'
 
 const PAGE_SIZES = [25, 50, 100]
 
@@ -16,13 +17,21 @@ function duration(job: WorkflowJob): string {
 function StatusBadge({ status }: { status: WorkflowJob['status'] }) {
   switch (status) {
     case 'completed':
-      return <Badge variant="success">✓ completed</Badge>
+      return (
+        <Badge variant="success" className="gap-1">
+          <Check size={12} /> completed
+        </Badge>
+      )
     case 'failed':
-      return <Badge variant="danger">✗ failed</Badge>
+      return (
+        <Badge variant="danger" className="gap-1">
+          <XCircle size={12} /> failed
+        </Badge>
+      )
     case 'running':
       return (
         <span className="inline-flex items-center gap-1 text-xs font-medium text-accent">
-          <span className="animate-spin">↻</span> running
+          <RefreshCw size={12} className="animate-spin" /> running
         </span>
       )
     default:
@@ -72,7 +81,7 @@ function Pagination({
           <button
             onClick={() => onPage(0)}
             disabled={page === 0}
-            className="px-2 py-0.5 rounded border border-border text-xs bg-white disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
+            className="px-2 py-0.5 rounded border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
             title="First page"
           >
             «
@@ -80,7 +89,7 @@ function Pagination({
           <button
             onClick={() => onPage(page - 1)}
             disabled={page === 0}
-            className="px-2 py-0.5 rounded border border-border text-xs bg-white disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
+            className="px-2 py-0.5 rounded border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
           >
             ‹ Prev
           </button>
@@ -90,14 +99,14 @@ function Pagination({
           <button
             onClick={() => onPage(page + 1)}
             disabled={page >= totalPages - 1}
-            className="px-2 py-0.5 rounded border border-border text-xs bg-white disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
+            className="px-2 py-0.5 rounded border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
           >
             Next ›
           </button>
           <button
             onClick={() => onPage(totalPages - 1)}
             disabled={page >= totalPages - 1}
-            className="px-2 py-0.5 rounded border border-border text-xs bg-white disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
+            className="px-2 py-0.5 rounded border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
             title="Last page"
           >
             »
@@ -236,19 +245,20 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
                     variant="default"
                     disabled={rerun.isPending}
                     onClick={() => rerun.mutate(job.id)}
+                    title="Rerun"
                   >
-                    ↻
+                    <RefreshCw size={12} />
                   </Button>
                 </td>
               </tr>
               {job.status === 'failed' && job.error && (
                 <tr
                   key={`${job.id}-err`}
-                  className="border-b border-border bg-red-50"
+                  className="border-b border-border bg-danger-subtle"
                 >
                   <td
                     colSpan={recordId ? 8 : 9}
-                    className="py-1.5 px-3 text-xs text-red-700 font-mono"
+                    className="py-1.5 px-3 text-xs text-danger font-mono"
                   >
                     {job.error}
                   </td>

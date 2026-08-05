@@ -21,7 +21,7 @@ Check items off as they land; keep this current rather than historical.
 - [ ] 4. Release process (versioning, CHANGELOG discipline, alpha → beta gate) — see below
 - [ ] 5. Repo hygiene (stray `requirements.txt`, `build/`/`dist/` in git status)
 - [x] 6. CI hardening (dependency/security scanning, frontend build check)
-- [x] 7. Test coverage baseline — see `tests/README.md` (~32%, steps 4-7 pending there)
+- [x] 7. Test coverage baseline — see `docs/contributing/testing.md` (~32%, steps 4-7 pending there)
 - [x] 7a. Structured logging + secret redaction — already solid, see notes below
 - [x] 7b. Opt-in error telemetry (Sentry) — already solid, see notes below
 
@@ -191,7 +191,7 @@ Worth calling out so it doesn't get "fixed" again or re-litigated:
   reasonable, intentional model for a `git`-like local tool — don't add
   auth to civex core itself; if remote exposure needs auth, that belongs in
   civex-hub, which already has it.
-- **Test coverage baseline** — see `tests/README.md`; 90 tests, ~32%
+- **Test coverage baseline** — see `docs/contributing/testing.md`; 90 tests, ~32%
   coverage, CI-gated at 30%. Steps 4-7 there (workflows/plugins, server
   routers, frontend tests, gate ratcheting) are the natural continuation
   and are tracked there, not duplicated here.

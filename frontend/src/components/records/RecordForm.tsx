@@ -3,6 +3,7 @@ import type { Schema } from '../../api/schemas'
 import type { FileRef } from './DynamicField'
 import { useRecords } from '../../hooks/useRecords'
 import { Button, Badge, Input, Select } from '../ui'
+import { ArrowUp, ArrowRight, ScanText } from '../ui/icons'
 import { DynamicField } from './DynamicField'
 import { datetimeLocalToUTC } from '../../utils/dates'
 
@@ -246,7 +247,7 @@ function FilenameExtractor({
         />
         <button
           onClick={run}
-          className="px-3 py-1 text-xs rounded border border-border bg-white hover:bg-canvas-subtle shrink-0"
+          className="px-3 py-1 text-xs rounded border border-border bg-canvas hover:bg-canvas-subtle shrink-0"
         >
           Test
         </button>
@@ -278,12 +279,12 @@ function FilenameExtractor({
       {hasResult && (
         <div className="flex items-center gap-2 text-xs flex-wrap">
           <span className="text-fg-muted">Extracted:</span>
-          <code className="bg-white border border-border px-1.5 py-0.5 rounded font-mono">
+          <code className="bg-canvas border border-border px-1.5 py-0.5 rounded font-mono">
             {extracted}
           </code>
           {converted !== extracted && converted !== undefined && (
             <>
-              <span className="text-fg-muted">→</span>
+              <ArrowRight size={12} className="text-fg-muted" />
               <code className="bg-success-subtle border border-success-muted px-1.5 py-0.5 rounded font-mono text-success">
                 {String(converted)}
               </code>
@@ -297,13 +298,13 @@ function FilenameExtractor({
         <button
           onClick={apply}
           disabled={converted === undefined}
-          className="px-3 py-1 text-xs font-medium rounded border border-accent bg-accent text-white hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-3 py-1 text-xs font-medium rounded border border-accent bg-accent text-fg-on-emphasis hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Apply
         </button>
         <button
           onClick={onClose}
-          className="px-3 py-1 text-xs font-medium rounded border border-border bg-white hover:bg-canvas-subtle"
+          className="px-3 py-1 text-xs font-medium rounded border border-border bg-canvas hover:bg-canvas-subtle"
         >
           Cancel
         </button>
@@ -410,14 +411,15 @@ export function RecordForm({
               onClick={() => handleSchemaChange(s.id)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border transition-colors cursor-pointer ${
                 s.id === selectedSchemaId
-                  ? 'bg-accent text-white border-accent'
-                  : 'bg-white text-fg border-border hover:bg-canvas-inset'
+                  ? 'bg-accent text-fg-on-emphasis border-accent'
+                  : 'bg-canvas text-fg border-border hover:bg-canvas-inset'
               }`}
             >
               {s.name}
               {s.parent_id && (
-                <span className="text-xs opacity-70">
-                  ↑ {schemas.find((p) => p.id === s.parent_id)?.name}
+                <span className="inline-flex items-center gap-0.5 text-xs opacity-70">
+                  <ArrowUp size={11} />
+                  {schemas.find((p) => p.id === s.parent_id)?.name}
                 </span>
               )}
             </button>
@@ -486,14 +488,14 @@ export function RecordForm({
                       onClick={() =>
                         setExtractingField(isExtracting ? null : field.name)
                       }
-                      className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors shrink-0 ${
+                      className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-colors shrink-0 ${
                         isExtracting
                           ? 'border-accent bg-accent-subtle text-accent'
                           : 'border-border text-fg-muted hover:border-accent hover:text-accent'
                       }`}
                       title="Fill this field from an uploaded filename"
                     >
-                      ⊙ from filename
+                      <ScanText size={11} /> from filename
                     </button>
                   )}
                 </div>

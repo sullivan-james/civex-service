@@ -109,13 +109,16 @@
   --color-nav-fg-muted: #adbac7;
 }
 
-/* Dark-mode token values. Follows the OS `prefers-color-scheme` (no
-   toggle exists in the app yet); wiring a manual toggle is future work,
-   but the values are decided now so the codemod doesn't have to
-   revisit this. The always-dark nav set is unaffected — it doesn't
-   invert with the rest of the app. */
+/* Dark-mode token values, agreed in the token-set decision story. Applied
+   automatically from the OS `prefers-color-scheme`, unless overridden by an
+   explicit `data-theme` attribute on <html> (set by the Settings toggle and
+   persisted to localStorage — see hooks/useTheme.tsx). `:not([data-theme=
+   'light'])` lets a forced dark override apply regardless of the OS setting
+   while still letting a forced light override win over prefers-color-scheme.
+   The always-dark nav set is unaffected — it doesn't invert with the rest
+   of the app. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --color-canvas: #1c1917;
     --color-canvas-subtle: #26221f;
     --color-canvas-inset: #302b27;
@@ -127,7 +130,11 @@
     --color-fg: #f2ede6;
     --color-fg-muted: #b5aa9c;
     --color-fg-subtle: #8f8578;
-    --color-fg-on-emphasis: #ffffff;
+    /* Dark ink, not white: the emphasis fills below (accent/success/danger)
+       were brightened to stay legible as text on a dark canvas, which
+       means they're now light enough that dark text reads better on top
+       of them than white does — verified against WCAG AA (4.5:1). */
+    --color-fg-on-emphasis: #211d1a;
 
     --color-accent: #5b9bf0;
     --color-accent-emphasis: #8ebbf5;
@@ -157,6 +164,53 @@
 
     --color-overlay-scrim: rgb(0 0 0 / 60%);
   }
+}
+
+/* Explicit dark override — wins over prefers-color-scheme by specificity
+   (attribute selector on :root) regardless of source order, so it applies
+   even when the OS is set to light. Duplicates the block above because the
+   media-query guard can't be reused outside of a media context. */
+:root[data-theme='dark'] {
+  --color-canvas: #1c1917;
+  --color-canvas-subtle: #26221f;
+  --color-canvas-inset: #302b27;
+
+  --color-border-muted: #3d3732;
+  --color-border: #4f473f;
+  --color-border-strong: #6e6459;
+
+  --color-fg: #f2ede6;
+  --color-fg-muted: #b5aa9c;
+  --color-fg-subtle: #8f8578;
+  --color-fg-on-emphasis: #211d1a;
+
+  --color-accent: #5b9bf0;
+  --color-accent-emphasis: #8ebbf5;
+  --color-accent-subtle: #16324f;
+  --color-accent-subtle-border: #2c517d;
+  --color-accent-muted: rgb(91 155 240 / 35%);
+
+  --color-success: #4ad17a;
+  --color-success-emphasis: #6fe097;
+  --color-success-subtle: #103822;
+  --color-success-subtle-hover: #17492c;
+  --color-success-muted: rgb(74 209 122 / 35%);
+
+  --color-attention: #e3b341;
+  --color-attention-emphasis: #f0cc6b;
+  --color-attention-subtle: #3d2f04;
+  --color-attention-muted: rgb(227 179 65 / 35%);
+
+  --color-danger: #f0656d;
+  --color-danger-emphasis: #ff9492;
+  --color-danger-subtle: #3d1418;
+  --color-danger-subtle-border: #6e2328;
+  --color-danger-muted: rgb(240 101 109 / 35%);
+
+  --color-neutral-subtle: rgb(181 170 156 / 16%);
+  --color-neutral-muted: rgb(181 170 156 / 24%);
+
+  --color-overlay-scrim: rgb(0 0 0 / 60%);
 }
 
 body {

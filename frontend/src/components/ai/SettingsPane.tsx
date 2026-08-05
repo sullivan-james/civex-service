@@ -8,6 +8,7 @@ import {
   aiApi,
 } from '../../api/ai'
 import { Input, Select } from '../ui'
+import { Check, RotateCcw, ArrowRight } from '../ui/icons'
 
 function detectPreset(cfg: AiConfig | null): PresetProviderId {
   if (!cfg?.configured) return 'groq'
@@ -250,8 +251,8 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
       <div>
         <p className="font-semibold text-fg mb-1">AI Assistant Settings</p>
         {cfg?.configured ? (
-          <p className="text-xs text-success-emphasis">
-            ✓{' '}
+          <p className="inline-flex items-center gap-1 text-xs text-success-emphasis">
+            <Check size={12} />
             {cfg.provider === 'anthropic'
               ? 'Claude'
               : cfg.base_url?.includes('groq')
@@ -354,7 +355,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           <button
             onClick={handleOpenRouterLogin}
             disabled={orPolling}
-            className="w-full py-1.5 rounded-md border border-border bg-white text-sm font-medium text-fg hover:bg-canvas-subtle disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+            className="w-full py-1.5 rounded-md border border-border bg-canvas text-sm font-medium text-fg hover:bg-canvas-subtle disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
           >
             {orPolling ? (
               <>
@@ -372,11 +373,13 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                 </svg>
                 Waiting for login…
               </>
+            ) : cfg?.configured && detectPreset(cfg) === 'openrouter' ? (
+              <>
+                <RotateCcw size={14} /> Reconnect with OpenRouter
+              </>
             ) : (
               <>
-                {cfg?.configured && detectPreset(cfg) === 'openrouter'
-                  ? '↺ Reconnect with OpenRouter'
-                  : '→ Login with OpenRouter'}
+                <ArrowRight size={14} /> Login with OpenRouter
               </>
             )}
           </button>
@@ -550,12 +553,16 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
       </div>
 
       {error && <p className="text-xs text-danger">{error}</p>}
-      {success && <p className="text-xs text-success-emphasis">✓ Saved</p>}
+      {success && (
+        <p className="inline-flex items-center gap-1 text-xs text-success-emphasis">
+          <Check size={12} /> Saved
+        </p>
+      )}
 
       <button
         onClick={handleSave}
         disabled={saving}
-        className="w-full py-1.5 rounded-md bg-accent text-white text-sm font-medium hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        className="w-full py-1.5 rounded-md bg-accent text-fg-on-emphasis text-sm font-medium hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
       >
         {saving ? 'Saving…' : 'Save'}
       </button>

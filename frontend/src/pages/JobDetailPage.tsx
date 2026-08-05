@@ -5,17 +5,26 @@ import { type WorkflowJob } from '../api/workflows'
 import { Badge, Button, LoadingState, ErrorState } from '../components/ui'
 import StepExecutionCard from '../components/jobs/StepExecutionCard'
 import JobStepsDiagram from '../components/jobs/JobStepsDiagram'
+import { Check, XCircle, RefreshCw } from '../components/ui/icons'
 
 function StatusBadge({ status }: { status: WorkflowJob['status'] }) {
   switch (status) {
     case 'completed':
-      return <Badge variant="success">✓ completed</Badge>
+      return (
+        <Badge variant="success" className="gap-1">
+          <Check size={12} /> completed
+        </Badge>
+      )
     case 'failed':
-      return <Badge variant="danger">✗ failed</Badge>
+      return (
+        <Badge variant="danger" className="gap-1">
+          <XCircle size={12} /> failed
+        </Badge>
+      )
     case 'running':
       return (
         <span className="inline-flex items-center gap-1 text-sm font-medium text-accent">
-          <span className="animate-spin">↻</span> running
+          <RefreshCw size={12} className="animate-spin" /> running
         </span>
       )
     default:
@@ -74,7 +83,8 @@ export default function JobDetailPage() {
                 .then((newJob) => navigate(`/runs/${newJob.id}`))
             }
           >
-            {rerun.isPending ? '↻ Re-running…' : '↻ Re-run'}
+            <RefreshCw size={12} />
+            {rerun.isPending ? 'Re-running…' : 'Re-run'}
           </Button>
         </div>
       </div>
@@ -124,9 +134,9 @@ export default function JobDetailPage() {
 
       {/* Error */}
       {job.error && (
-        <div className="border border-red-200 rounded-md bg-red-50 p-4">
-          <h2 className="text-sm font-semibold text-red-700 mb-1">Error</h2>
-          <pre className="text-xs text-red-700 whitespace-pre-wrap font-mono">
+        <div className="border border-danger-subtle-border rounded-md bg-danger-subtle p-4">
+          <h2 className="text-sm font-semibold text-danger mb-1">Error</h2>
+          <pre className="text-xs text-danger whitespace-pre-wrap font-mono">
             {job.error}
           </pre>
         </div>
