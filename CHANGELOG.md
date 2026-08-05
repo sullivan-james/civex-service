@@ -64,7 +64,7 @@ PRODUCTION_READINESS.md for what's blocking a real 1.0.
 
 ### Other
 - Expanded automated test suite (~32% coverage, CI-gated at 30% — see
-  `tests/README.md`).
+  `docs/contributing/testing.md`).
 
 ### Installation
 See [README.md](README.md) for `pipx` install instructions.

@@ -98,3 +98,9 @@ nav:
           - Load CSV: reference/plugins/load_csv.md
           - Rows to Records: reference/plugins/rows_to_records.md
           - Upsert Records: reference/plugins/upsert_records.md
+  - Contributing:
+      - Dev setup: contributing/dev-setup.md
+      - Architecture: contributing/architecture.md
+      - Testing: contributing/testing.md
+      - Release process: contributing/release.md
+      - Publishing the docs site: contributing/publishing-docs.md
