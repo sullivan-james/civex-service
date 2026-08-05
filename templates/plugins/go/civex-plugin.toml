@@ -4,7 +4,7 @@
 # path field is needed.
 #
 # id/name/category/capabilities mirror what a Tier 1 plugin declares as
-# Python class attributes (see docs/writing-custom-plugins.md) -- civex
+# Python class attributes (see docs/extending/writing-a-plugin.md) -- civex
 # treats both tiers identically everywhere except how they're invoked.
 id = "my_project.compute_duration"
 name = "Compute Duration"
