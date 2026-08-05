@@ -4,7 +4,7 @@ import {
   useRunWorkflow,
   useRunWorkflowWithFiles,
 } from '../../hooks/useWorkflows'
-import { Button } from '../ui'
+import { Button, Input } from '../ui'
 import type { Workflow } from '../../api/workflows'
 
 interface Props {
@@ -99,7 +99,7 @@ export function WorkflowRunModal({
                   ({workflow.record_schema})
                 </span>
               )}
-              <input
+              <Input
                 autoFocus={!prefilled}
                 type="text"
                 value={recordId}
@@ -107,7 +107,7 @@ export function WorkflowRunModal({
                 placeholder="Short ID or full UUID"
                 readOnly={!!prefilled}
                 required
-                className={`mt-1 w-full border border-border rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent ${prefilled ? 'bg-canvas-subtle text-fg-muted' : ''}`}
+                className={`mt-1 w-full font-mono ${prefilled ? 'bg-canvas-subtle text-fg-muted' : ''}`}
               />
             </label>
 

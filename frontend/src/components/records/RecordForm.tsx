@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { Schema } from '../../api/schemas'
 import type { FileRef } from './DynamicField'
 import { useRecords } from '../../hooks/useRecords'
-import { Button, Badge } from '../ui'
+import { Button, Badge, Input, Select } from '../ui'
 import { DynamicField } from './DynamicField'
 import { datetimeLocalToUTC } from '../../utils/dates'
 
@@ -205,21 +205,22 @@ function FilenameExtractor({
     <div className="mt-1.5 border border-accent-subtle-border rounded-md bg-accent-subtle p-3 space-y-2">
       {/* File source */}
       {sources.length > 1 ? (
-        <select
+        <Select
+          size="sm"
           value={source}
           onChange={(e) => {
             setSource(e.target.value)
             setExtracted(null)
             setConverted(undefined)
           }}
-          className="w-full border border-border rounded px-2 py-1 text-xs bg-white focus:outline-none focus:border-accent"
+          className="w-full"
         >
           {sources.map((s) => (
             <option key={s.filename} value={s.filename}>
               {s.label}
             </option>
           ))}
-        </select>
+        </Select>
       ) : (
         <code
           className="text-xs text-fg-muted font-mono block truncate"
@@ -231,7 +232,8 @@ function FilenameExtractor({
 
       {/* Regex input */}
       <div className="flex gap-2">
-        <input
+        <Input
+          size="sm"
           value={pattern}
           onChange={(e) => {
             setPattern(e.target.value)
@@ -240,7 +242,7 @@ function FilenameExtractor({
           }}
           onKeyDown={(e) => e.key === 'Enter' && run()}
           placeholder="Regex — use a capture group ( ) to select the part you want"
-          className="flex-1 border border-border rounded px-2 py-1 text-xs font-mono bg-white focus:outline-none focus:border-accent"
+          className="flex-1 font-mono"
         />
         <button
           onClick={run}
@@ -253,7 +255,8 @@ function FilenameExtractor({
       {/* Date format (date / datetime only) */}
       {isDate && (
         <div className="flex gap-2 items-center">
-          <input
+          <Input
+            size="sm"
             value={fmt}
             onChange={(e) => {
               setFmt(e.target.value)
@@ -262,7 +265,7 @@ function FilenameExtractor({
             }}
             onKeyDown={(e) => e.key === 'Enter' && run()}
             placeholder={`Format, e.g. YYYYMMDD-HHmmSS  (tokens: ${FORMAT_HELP})`}
-            className="flex-1 border border-border rounded px-2 py-1 text-xs font-mono bg-white focus:outline-none focus:border-accent"
+            className="flex-1 font-mono"
           />
         </div>
       )}
@@ -437,10 +440,10 @@ export function RecordForm({
               first.
             </p>
           ) : (
-            <select
+            <Select
               value={parentRecordId}
               onChange={(e) => setParentRecordId(e.target.value)}
-              className="border border-border rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-accent w-full max-w-sm"
+              className="w-full max-w-sm"
             >
               <option value="">— Select a {parentSchema.name} record —</option>
               {parentCandidates.map((r) => {
@@ -453,7 +456,7 @@ export function RecordForm({
                   </option>
                 )
               })}
-            </select>
+            </Select>
           )}
         </div>
       )}

@@ -1,8 +1,15 @@
 import { forwardRef } from 'react'
-import { controlBase, controlBorder, controlSizes, type ControlSize } from './Input'
+import {
+  controlBase,
+  controlBorder,
+  controlSizes,
+  type ControlSize,
+} from './controlStyles'
 
-export interface SelectProps
-  extends React.SelectHTMLAttributes<HTMLSelectElement> {
+export interface SelectProps extends Omit<
+  React.SelectHTMLAttributes<HTMLSelectElement>,
+  'size'
+> {
   size?: ControlSize
   invalid?: boolean
 }

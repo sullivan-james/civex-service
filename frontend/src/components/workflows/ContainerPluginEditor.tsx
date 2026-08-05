@@ -3,7 +3,7 @@ import {
   useContainerPlugin,
   useSaveContainerPluginFile,
 } from '../../hooks/useContainerPlugins'
-import { Button } from '../ui'
+import { Button, Textarea } from '../ui'
 import type { BuildResult } from '../../api/containerPlugins'
 
 interface ContainerPluginEditorProps {
@@ -95,14 +95,15 @@ export function ContainerPluginEditor({
               <span className="text-xs font-medium text-fg">
                 {selectedPath}
               </span>
-              <textarea
+              <Textarea
+                size="sm"
                 value={selectedPath ? contents[selectedPath] : ''}
                 onChange={(e) =>
                   selectedPath &&
                   setContents({ ...contents, [selectedPath]: e.target.value })
                 }
                 spellCheck={false}
-                className="flex-1 min-h-0 font-mono text-xs border border-border rounded-md p-3 resize-none bg-canvas-subtle focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent leading-relaxed"
+                className="flex-1 min-h-0 font-mono resize-none bg-canvas-subtle leading-relaxed"
               />
 
               {buildResult && (

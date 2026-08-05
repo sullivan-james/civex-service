@@ -1,13 +1,12 @@
 import { forwardRef } from 'react'
-import { controlBase, controlBorder, type ControlSize } from './Input'
+import { controlBase, controlBorder, type ControlSize } from './controlStyles'
 
 const sizes: Record<ControlSize, string> = {
   sm: 'px-2.5 py-1.5 text-xs',
   md: 'px-3 py-2 text-sm',
 }
 
-export interface TextareaProps
-  extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
+export interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
   size?: ControlSize
   invalid?: boolean
 }

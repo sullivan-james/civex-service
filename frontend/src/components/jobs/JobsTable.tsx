@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { useJobsPaged, useRerunJob } from '../../hooks/useWorkflows'
 import { type WorkflowJob } from '../../api/workflows'
-import { LoadingState, ErrorState, Badge, Button } from '../ui'
+import { LoadingState, ErrorState, Badge, Button, Select } from '../ui'
 
 const PAGE_SIZES = [25, 50, 100]
 
@@ -53,20 +53,20 @@ function Pagination({
       <div className="flex items-center gap-3">
         <label className="flex items-center gap-1.5 text-xs">
           Rows
-          <select
+          <Select
+            size="sm"
             value={pageSize}
             onChange={(e) => {
               onPageSize(Number(e.target.value))
               onPage(0)
             }}
-            className="border border-border rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-accent"
           >
             {PAGE_SIZES.map((s) => (
               <option key={s} value={s}>
                 {s}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <div className="flex items-center gap-1">
           <button
