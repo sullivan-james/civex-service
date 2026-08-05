@@ -55,7 +55,7 @@ export function ContainerPluginEditor({
         className="bg-white rounded-lg shadow-xl w-full max-w-5xl flex flex-col"
         style={{ height: '90vh' }}
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#d0d7de]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#d0d7de]">
           <h2 className="text-base font-semibold text-[#1f2328]">
             Container plugin — {name}
           </h2>
@@ -79,7 +79,7 @@ export function ContainerPluginEditor({
                 <button
                   key={path}
                   onClick={() => setSelectedPath(path)}
-                  className={`block w-full text-left px-3 py-1.5 text-xs font-mono truncate ${
+                  className={`block w-full text-left px-3 py-2 text-xs font-mono truncate ${
                     path === selectedPath
                       ? 'bg-[#ddf4ff] text-[#0969da]'
                       : 'text-[#1f2328] hover:bg-[#f6f8fa]'
@@ -107,7 +107,7 @@ export function ContainerPluginEditor({
 
               {buildResult && (
                 <div
-                  className={`text-xs rounded p-2 whitespace-pre-wrap max-h-32 overflow-y-auto ${
+                  className={`text-xs rounded-md p-2 whitespace-pre-wrap max-h-32 overflow-y-auto ${
                     buildResult.success
                       ? 'text-[#1a7f37] bg-[#dafbe1] border border-[#1a7f37]/30'
                       : 'text-red-600 bg-red-50 border border-red-200'
@@ -121,7 +121,7 @@ export function ContainerPluginEditor({
           </div>
         )}
 
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-[#d0d7de]">
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#d0d7de]">
           <Button variant="default" onClick={onClose}>
             Close
           </Button>

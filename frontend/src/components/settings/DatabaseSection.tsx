@@ -10,7 +10,7 @@ import { Button, LoadingState, ErrorState } from '../ui'
 import { errorMessage } from '../../lib/errors'
 
 const inputCls =
-  'border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] w-full font-mono'
+  'border border-[#d0d7de] rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] w-full font-mono'
 
 function SchemaBadge({
   migration,
@@ -23,18 +23,18 @@ function SchemaBadge({
 }) {
   if (migration.error)
     return (
-      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#ffebe9] text-[#d1242f] border border-[#ff818255]">
+      <span className="text-xs font-medium px-2 py-1 rounded-full bg-[#ffebe9] text-[#d1242f] border border-[#ff818255]">
         unreachable
       </span>
     )
   if (migration.up_to_date)
     return (
-      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#dafbe1] text-[#1a7f37] border border-[#4ac26b55]">
+      <span className="text-xs font-medium px-2 py-1 rounded-full bg-[#dafbe1] text-[#1a7f37] border border-[#4ac26b55]">
         up to date
       </span>
     )
   return (
-    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]">
+    <span className="text-xs font-medium px-2 py-1 rounded-full bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]">
       pending migrations
     </span>
   )
@@ -73,7 +73,7 @@ export default function DatabaseSection() {
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-[#1f2328]">Database</h2>
-        <p className="text-sm text-[#656d76] mt-0.5">
+        <p className="text-sm text-[#656d76] mt-1">
           Connection, schema, and provisioning for this project's database.
         </p>
       </div>
@@ -84,7 +84,7 @@ export default function DatabaseSection() {
             <p className="text-xs font-mono text-[#1f2328] truncate">
               {status.url}
             </p>
-            <p className="text-xs text-[#656d76] mt-0.5">
+            <p className="text-xs text-[#656d76] mt-1">
               {status.dialect} — managed by{' '}
               {status.docker_managed ? 'civex (Docker)' : 'you'}
             </p>
@@ -93,7 +93,7 @@ export default function DatabaseSection() {
         </div>
 
         {status.migration.error && (
-          <p className="text-xs text-[#d1242f] bg-[#ffebe9] border border-[#d1242f33] rounded px-3 py-2">
+          <p className="text-xs text-[#d1242f] bg-[#ffebe9] border border-[#d1242f33] rounded-md px-3 py-2">
             {status.migration.error}
           </p>
         )}

@@ -17,7 +17,7 @@ interface Props {
 }
 
 const inputClass =
-  'w-full border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]'
+  'w-full border border-[#d0d7de] rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]'
 
 function fileAccept(
   restrictions: Record<string, unknown> | undefined,
@@ -98,7 +98,7 @@ function FileField({ field, value, onChange }: Props) {
         accept={accept}
         onChange={handleChange}
         disabled={uploading}
-        className="block w-full text-sm text-[#1f2328] file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-[#f6f8fa] file:text-[#1f2328] hover:file:bg-[#eaeef2] cursor-pointer disabled:opacity-50"
+        className="block w-full text-sm text-[#1f2328] file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-[#f6f8fa] file:text-[#1f2328] hover:file:bg-[#eaeef2] cursor-pointer disabled:opacity-50"
       />
       {uploading && <p className="text-xs text-[#656d76]">Uploading…</p>}
       {error && <p className="text-xs text-red-600">{error}</p>}
@@ -146,7 +146,7 @@ function FileListField({ field, value, onChange }: Props) {
   }
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       {existing.map((ref) => (
         <div
           key={ref.sha256}
@@ -170,7 +170,7 @@ function FileListField({ field, value, onChange }: Props) {
         accept={accept}
         onChange={handleChange}
         disabled={uploading}
-        className="block w-full text-sm text-[#1f2328] file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-[#f6f8fa] file:text-[#1f2328] hover:file:bg-[#eaeef2] cursor-pointer disabled:opacity-50"
+        className="block w-full text-sm text-[#1f2328] file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-[#f6f8fa] file:text-[#1f2328] hover:file:bg-[#eaeef2] cursor-pointer disabled:opacity-50"
       />
       {uploading && <p className="text-xs text-[#656d76]">Uploading…</p>}
       {error && <p className="text-xs text-red-600">{error}</p>}
@@ -260,7 +260,7 @@ function ReferenceField({ field, value, onChange }: Props) {
             <button
               key={record.id}
               onMouseDown={() => handleSelect(record)}
-              className="w-full text-left px-3 py-1.5 hover:bg-[#f6f8fa] truncate"
+              className="w-full text-left px-3 py-2 hover:bg-[#f6f8fa] truncate"
             >
               <span className="font-mono text-xs text-[#656d76]">
                 {record.id.slice(0, 8)}
@@ -410,7 +410,7 @@ export function DynamicField({ field, value, onChange }: Props) {
             type="checkbox"
             checked={(value as boolean) ?? false}
             onChange={(e) => onChange(e.target.checked)}
-            className="rounded"
+            className="rounded-md"
           />
           {field.required ? (
             <span>Required</span>

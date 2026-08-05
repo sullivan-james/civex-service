@@ -6,7 +6,7 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const base =
-  'inline-flex items-center gap-1.5 font-medium rounded-md border cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed'
+  'inline-flex items-center gap-2 font-medium rounded-md border cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed'
 
 const variants: Record<Variant, string> = {
   primary:
@@ -15,7 +15,7 @@ const variants: Record<Variant, string> = {
   danger: 'bg-[#f6f8fa] hover:bg-[#ffebe9] border-[#d0d7de] text-[#d1242f]',
 }
 
-const sizes = { sm: 'px-3 py-1 text-xs', md: 'px-4 py-1.5 text-sm' }
+const sizes = { sm: 'h-8 px-3 text-xs', md: 'h-9 px-4 text-sm' }
 
 export function Button({
   variant = 'default',

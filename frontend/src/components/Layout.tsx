@@ -104,7 +104,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <button
           onClick={() => queryClient.refetchQueries({ type: 'active' })}
           title="Refresh all data"
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
+          className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
         >
           <svg
             width="12"
@@ -121,7 +121,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <button
           onClick={() => setAiOpen((o) => !o)}
           title="Open AI assistant"
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
+          className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border transition-colors ${
             aiOpen
               ? 'border-[#0969da] bg-[#0969da] text-white'
               : 'border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3]'
@@ -133,7 +133,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <button
           onClick={() => navigate('/settings')}
           title="Settings"
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
+          className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border transition-colors ${
             settingsActive
               ? 'border-[#0969da] bg-[#0969da] text-white'
               : 'border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3]'
@@ -156,7 +156,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <button
               onClick={() => window.pywebview!.api.open_project()}
               title="Open a different civex project"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
+              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
             >
               <svg
                 width="12"
@@ -172,7 +172,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <button
               onClick={() => window.pywebview!.api.create_project()}
               title="Create a new civex project"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
+              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
             >
               <svg
                 width="12"
@@ -191,7 +191,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 if (r?.error) window.alert(r.error)
               }}
               title={`${fileManagerLabel()} — open this project's database directory`}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
+              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
             >
               <svg
                 width="12"
@@ -217,7 +217,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               onClick={() => runSync('pull')}
               disabled={syncing !== null}
               title={`Pull from ${remote.url}`}
-              className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {syncing === 'pull' ? (
                 <Spinner />
@@ -240,7 +240,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               onClick={() => runSync('push')}
               disabled={syncing !== null}
               title={`Push to ${remote.url}`}
-              className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {syncing === 'push' ? (
                 <Spinner />

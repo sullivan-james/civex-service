@@ -53,7 +53,7 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da]"
+              className="w-full px-3 py-2 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da]"
               placeholder="my-collection"
             />
           </div>
@@ -64,7 +64,7 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
             <input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da]"
+              className="w-full px-3 py-2 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da]"
               placeholder="Optional"
             />
           </div>

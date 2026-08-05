@@ -20,7 +20,7 @@ export default function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
   const isToolError = parsed?.status === 'error'
 
   return (
-    <div className="my-1 rounded border border-[#d0d7de] bg-[#f6f8fa] text-xs overflow-hidden">
+    <div className="my-1 rounded-lg border border-[#d0d7de] bg-[#f6f8fa] text-xs overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center gap-2 px-3 py-2 text-left text-[#656d76] hover:bg-[#eaeef2] transition-colors"
@@ -59,7 +59,7 @@ export default function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 
           {/* Resolved outcome (persisted, survives reload) */}
           {entry.outcome === 'approved' && (
-            <div className="mt-2 rounded px-2 py-1 bg-[#dafbe1] text-[#1a7f37]">
+            <div className="mt-2 rounded-md px-2 py-1 bg-[#dafbe1] text-[#1a7f37]">
               {entry.name === 'save_workflow' && (
                 <Link to="/workflows" className="underline mr-2">
                   View in Workflows →
@@ -69,12 +69,12 @@ export default function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
             </div>
           )}
           {entry.outcome === 'cancelled' && (
-            <div className="mt-2 rounded px-2 py-1 bg-[#f6f8fa] text-[#adbac7] border border-[#d0d7de]">
+            <div className="mt-2 rounded-md px-2 py-1 bg-[#f6f8fa] text-[#adbac7] border border-[#d0d7de]">
               Cancelled
             </div>
           )}
           {entry.outcome === 'error' && (
-            <div className="mt-2 rounded px-2 py-1 bg-[#ffebe9] text-[#d1242f]">
+            <div className="mt-2 rounded-md px-2 py-1 bg-[#ffebe9] text-[#d1242f]">
               {entry.outcomeLabel}
             </div>
           )}
@@ -88,7 +88,7 @@ export default function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 
           {/* Validation error from the AI tool (status === 'error') */}
           {isToolError && (
-            <div className="mt-2 rounded px-2 py-1 bg-[#ffebe9] text-[#d1242f]">
+            <div className="mt-2 rounded-md px-2 py-1 bg-[#ffebe9] text-[#d1242f]">
               {parsed?.message ?? entry.result}
             </div>
           )}

@@ -43,7 +43,7 @@ export default function AssistantText({
         ),
       )}
       {streaming && (
-        <span className="inline-block w-1.5 h-3.5 bg-[#0969da] animate-pulse ml-0.5 align-middle" />
+        <span className="inline-block w-1.5 h-3.5 bg-[#0969da] animate-pulse ml-1 align-middle" />
       )}
     </div>
   )

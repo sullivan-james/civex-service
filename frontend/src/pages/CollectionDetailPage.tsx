@@ -178,7 +178,7 @@ export default function CollectionDetailPage() {
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-sm text-[#656d76]">
+      <nav className="flex items-center gap-2 text-sm text-[#656d76]">
         <Link to="/collections" className="hover:text-[#0969da]">
           Collections
         </Link>
@@ -196,7 +196,7 @@ export default function CollectionDetailPage() {
               if (e.key === 'Enter') handleRename()
               if (e.key === 'Escape') setRenaming(false)
             }}
-            className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] w-64"
+            className="border border-[#d0d7de] rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] w-64"
           />
           {updateCollection.error && (
             <span className="text-xs text-[#d1242f]">
@@ -248,7 +248,7 @@ export default function CollectionDetailPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => selectSchema(null)}
-            className={`px-3 py-1 rounded-full text-sm border transition-colors cursor-pointer ${
+            className={`px-3 py-2 rounded-full text-sm border transition-colors cursor-pointer ${
               selectedSchema === null
                 ? 'bg-[#1f2328] text-white border-[#1f2328]'
                 : 'bg-white text-[#656d76] border-[#d0d7de] hover:border-[#1f2328] hover:text-[#1f2328]'
@@ -267,7 +267,7 @@ export default function CollectionDetailPage() {
                 <button
                   key={name}
                   onClick={() => selectSchema(name)}
-                  className={`px-3 py-1 rounded-full text-sm border transition-colors cursor-pointer ${
+                  className={`px-3 py-2 rounded-full text-sm border transition-colors cursor-pointer ${
                     selectedSchema === name
                       ? 'bg-[#1f2328] text-white border-[#1f2328]'
                       : 'bg-white text-[#656d76] border-[#d0d7de] hover:border-[#1f2328] hover:text-[#1f2328]'
@@ -325,7 +325,7 @@ export default function CollectionDetailPage() {
         value={searchInput}
         onChange={(e) => setSearchInput(e.target.value)}
         placeholder="Search records…"
-        className="w-full border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+        className="w-full border border-[#d0d7de] rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
       />
 
       {/* Add record form */}
@@ -445,7 +445,7 @@ export default function CollectionDetailPage() {
                   <Td>
                     <Link
                       to={`/records/${r.id}`}
-                      className="text-xs text-[#0969da] hover:underline"
+                      className="text-sm text-[#0969da] hover:underline"
                     >
                       {r.natural_name ?? (
                         <span className="font-mono">{r.id.slice(0, 8)}</span>

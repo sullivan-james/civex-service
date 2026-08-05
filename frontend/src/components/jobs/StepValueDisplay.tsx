@@ -109,7 +109,7 @@ function InlineTable({ table }: { table: TableEnvelope }) {
               {table.columns.map((c) => (
                 <Th key={c}>
                   {c}
-                  <span className="ml-1.5 normal-case font-normal text-[#8c959f]">
+                  <span className="ml-2 normal-case font-normal text-[#8c959f]">
                     {table.dtypes[c]}
                   </span>
                 </Th>

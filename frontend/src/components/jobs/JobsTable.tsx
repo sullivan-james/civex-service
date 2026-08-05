@@ -51,7 +51,7 @@ function Pagination({
     <div className="flex items-center justify-between mt-4 text-sm text-[#656d76]">
       <span>{total === 0 ? 'No results' : `${from}–${to} of ${total}`}</span>
       <div className="flex items-center gap-3">
-        <label className="flex items-center gap-1.5 text-xs">
+        <label className="flex items-center gap-2 text-xs">
           Rows
           <select
             value={pageSize}
@@ -59,7 +59,7 @@ function Pagination({
               onPageSize(Number(e.target.value))
               onPage(0)
             }}
-            className="border border-[#d0d7de] rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-[#0969da]"
+            className="border border-[#d0d7de] rounded-md px-2 py-2 text-xs bg-white focus:outline-none focus:border-[#0969da]"
           >
             {PAGE_SIZES.map((s) => (
               <option key={s} value={s}>
@@ -72,7 +72,7 @@ function Pagination({
           <button
             onClick={() => onPage(0)}
             disabled={page === 0}
-            className="px-2 py-0.5 rounded border border-[#d0d7de] text-xs bg-white disabled:opacity-40 hover:bg-[#f6f8fa] disabled:cursor-not-allowed"
+            className="px-2 py-2 rounded-md border border-[#d0d7de] text-xs bg-white disabled:opacity-40 hover:bg-[#f6f8fa] disabled:cursor-not-allowed"
             title="First page"
           >
             «
@@ -80,7 +80,7 @@ function Pagination({
           <button
             onClick={() => onPage(page - 1)}
             disabled={page === 0}
-            className="px-2 py-0.5 rounded border border-[#d0d7de] text-xs bg-white disabled:opacity-40 hover:bg-[#f6f8fa] disabled:cursor-not-allowed"
+            className="px-2 py-2 rounded-md border border-[#d0d7de] text-xs bg-white disabled:opacity-40 hover:bg-[#f6f8fa] disabled:cursor-not-allowed"
           >
             ‹ Prev
           </button>
@@ -90,14 +90,14 @@ function Pagination({
           <button
             onClick={() => onPage(page + 1)}
             disabled={page >= totalPages - 1}
-            className="px-2 py-0.5 rounded border border-[#d0d7de] text-xs bg-white disabled:opacity-40 hover:bg-[#f6f8fa] disabled:cursor-not-allowed"
+            className="px-2 py-2 rounded-md border border-[#d0d7de] text-xs bg-white disabled:opacity-40 hover:bg-[#f6f8fa] disabled:cursor-not-allowed"
           >
             Next ›
           </button>
           <button
             onClick={() => onPage(totalPages - 1)}
             disabled={page >= totalPages - 1}
-            className="px-2 py-0.5 rounded border border-[#d0d7de] text-xs bg-white disabled:opacity-40 hover:bg-[#f6f8fa] disabled:cursor-not-allowed"
+            className="px-2 py-2 rounded-md border border-[#d0d7de] text-xs bg-white disabled:opacity-40 hover:bg-[#f6f8fa] disabled:cursor-not-allowed"
             title="Last page"
           >
             »
@@ -260,7 +260,7 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
                 >
                   <td
                     colSpan={recordId ? 8 : 9}
-                    className="py-1.5 px-3 text-xs text-red-700 font-mono"
+                    className="py-2 px-3 text-xs text-red-700 font-mono"
                   >
                     {job.error}
                   </td>

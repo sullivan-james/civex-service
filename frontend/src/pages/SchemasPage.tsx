@@ -57,7 +57,7 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da]"
+              className="w-full px-3 py-2 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da]"
               placeholder="my-schema"
             />
           </div>
@@ -68,7 +68,7 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
             <input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da]"
+              className="w-full px-3 py-2 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da]"
               placeholder="Optional"
             />
           </div>
@@ -79,7 +79,7 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
             <select
               value={parent}
               onChange={(e) => setParent(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da] bg-white"
+              className="w-full px-3 py-2 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da] bg-white"
             >
               <option value="">None</option>
               {schemas?.map((s) => (

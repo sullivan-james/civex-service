@@ -71,7 +71,7 @@ export default function TerminalPage() {
       />
       <div
         ref={containerRef}
-        className="rounded border border-[#d0d7de] overflow-hidden"
+        className="rounded-lg border border-[#d0d7de] overflow-hidden"
         style={{ height: 'calc(100vh - 220px)' }}
       />
     </>

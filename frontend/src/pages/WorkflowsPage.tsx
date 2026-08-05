@@ -254,7 +254,7 @@ function WorkflowEditor({
         style={{ height: '90vh' }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#d0d7de]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#d0d7de]">
           <h2 className="text-base font-semibold text-[#1f2328]">
             {isNew ? 'New workflow' : `Edit — ${initialStem}.yaml`}
           </h2>
@@ -267,7 +267,7 @@ function WorkflowEditor({
         </div>
 
         {/* Body */}
-        <div className="flex flex-col gap-3 p-5 flex-1 min-h-0">
+        <div className="flex flex-col gap-3 p-6 flex-1 min-h-0">
           {isNew && (
             <label className="block">
               <span className="text-xs font-medium text-[#1f2328]">
@@ -281,7 +281,7 @@ function WorkflowEditor({
                     setStem(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))
                   }
                   placeholder="my-workflow"
-                  className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm w-56 focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+                  className="border border-[#d0d7de] rounded-md px-3 py-2 text-sm w-56 focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
                 />
                 <span className="text-sm text-[#656d76]">.yaml</span>
               </div>
@@ -332,7 +332,7 @@ function WorkflowEditor({
           )}
 
           {saveError && (
-            <div className="text-xs bg-red-50 border border-red-200 rounded p-2 max-h-40 overflow-auto space-y-2">
+            <div className="text-xs bg-red-50 border border-red-200 rounded-md p-2 max-h-40 overflow-auto space-y-2">
               {groupWorkflowValidationErrors(saveError).map(
                 ({ step, messages }) => (
                   <div key={step ?? '__general__'}>
@@ -364,7 +364,7 @@ function WorkflowEditor({
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-[#d0d7de]">
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#d0d7de]">
           <Button variant="default" onClick={onClose}>
             Cancel
           </Button>
@@ -395,7 +395,7 @@ function IOSpecList({ specs }: { specs: PluginIOSpec[] | null }) {
     return <p className="text-xs text-[#656d76]">none</p>
   }
   return (
-    <ul className="text-xs space-y-0.5">
+    <ul className="text-xs space-y-1">
       {specs.map((s) => (
         <li key={s.name} className="font-mono">
           <span className="text-[#1f2328]">{s.name}</span>
@@ -429,7 +429,7 @@ function PluginContractDetail({ plugin }: { plugin: PluginInfo }) {
         {configProps.length === 0 ? (
           <p className="text-xs text-[#656d76]">none</p>
         ) : (
-          <ul className="text-xs space-y-0.5">
+          <ul className="text-xs space-y-1">
             {configProps.map(([key, prop]) => (
               <li key={key} className="font-mono">
                 <span className="text-[#1f2328]">{key}</span>
@@ -692,11 +692,11 @@ export default function WorkflowsPage() {
         className="hidden"
         onChange={handlePluginFile}
       />
-      <div className="mt-10">
+      <div className="mt-8">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h2 className="text-base font-semibold text-[#1f2328]">Plugins</h2>
-            <p className="text-xs text-[#656d76] mt-0.5">
+            <p className="text-xs text-[#656d76] mt-1">
               Step implementations available to workflows
             </p>
           </div>
@@ -758,7 +758,7 @@ export default function WorkflowsPage() {
                       </td>
                       <td className="py-2 px-3">
                         <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                             p.builtin
                               ? 'bg-[#ddf4ff] text-[#0969da]'
                               : 'bg-[#dafbe1] text-[#1a7f37]'
@@ -866,12 +866,12 @@ export default function WorkflowsPage() {
 
       {/* Container (Tier 2) plugins panel */}
       {containerPlugins && containerPlugins.length > 0 && (
-        <div className="mt-10">
+        <div className="mt-8">
           <div className="mb-3">
             <h2 className="text-base font-semibold text-[#1f2328]">
               Container plugins
             </h2>
-            <p className="text-xs text-[#656d76] mt-0.5">
+            <p className="text-xs text-[#656d76] mt-1">
               Tier 2 plugins — Dockerfile + source tree, from{' '}
               _civex/plugins/&lt;name&gt;/
             </p>

@@ -52,7 +52,7 @@ export default function BulkApprovalBar({
         <button
           onClick={approveAll}
           disabled={busy}
-          className="flex-shrink-0 px-2.5 py-1 rounded bg-[#0969da] text-white font-medium hover:bg-[#0860ca] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="flex-shrink-0 px-3 py-2 rounded-md bg-[#0969da] text-white font-medium hover:bg-[#0860ca] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {busy ? 'Approving…' : `Approve all ${bulkable.length}`}
         </button>

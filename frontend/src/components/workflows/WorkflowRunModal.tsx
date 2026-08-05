@@ -97,7 +97,7 @@ export function WorkflowRunModal({
                 Record ID
               </span>
               {workflow.record_schema && (
-                <span className="ml-1.5 text-xs text-[#656d76]">
+                <span className="ml-2 text-xs text-[#656d76]">
                   ({workflow.record_schema})
                 </span>
               )}
@@ -109,7 +109,7 @@ export function WorkflowRunModal({
                 placeholder="Short ID or full UUID"
                 readOnly={!!prefilled}
                 required
-                className={`mt-1 w-full border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] ${prefilled ? 'bg-[#f6f8fa] text-[#656d76]' : ''}`}
+                className={`mt-1 w-full border border-[#d0d7de] rounded-md px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] ${prefilled ? 'bg-[#f6f8fa] text-[#656d76]' : ''}`}
               />
             </label>
 
@@ -126,7 +126,7 @@ export function WorkflowRunModal({
                     </p>
                   )}
                   <div
-                    className="border-2 border-dashed border-[#d0d7de] rounded-md px-4 py-5 text-center cursor-pointer hover:border-[#0969da] hover:bg-[#f6f8fa] transition-colors"
+                    className="border-2 border-dashed border-[#d0d7de] rounded-md px-4 py-6 text-center cursor-pointer hover:border-[#0969da] hover:bg-[#f6f8fa] transition-colors"
                     onClick={() => fileRefs.current[inputName]?.click()}
                     onDragOver={(e) => {
                       e.preventDefault()
@@ -155,7 +155,7 @@ export function WorkflowRunModal({
                       </p>
                     ) : (
                       <div className="text-left">
-                        <div className="max-h-32 overflow-y-auto space-y-0.5 mb-1">
+                        <div className="max-h-32 overflow-y-auto space-y-1 mb-1">
                           {chosen.map((f, i) => (
                             <p
                               key={i}

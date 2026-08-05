@@ -55,7 +55,7 @@ export default function JobsPage() {
           <button
             key={s || 'all'}
             onClick={() => handleStatusFilter(s)}
-            className={`px-3 py-1 text-xs rounded-full border transition-colors ${
+            className={`px-3 py-2 text-xs rounded-full border transition-colors ${
               (statusFilter ?? '') === s
                 ? 'bg-[#0969da] text-white border-[#0969da]'
                 : 'bg-white text-[#656d76] border-[#d0d7de] hover:bg-[#f6f8fa]'

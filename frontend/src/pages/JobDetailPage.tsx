@@ -60,7 +60,7 @@ export default function JobDetailPage() {
           <h1 className="text-xl font-semibold text-[#1f2328]">
             {job.workflow_name}
           </h1>
-          <p className="text-sm text-[#656d76] mt-0.5 font-mono">{job.id}</p>
+          <p className="text-sm text-[#656d76] mt-1 font-mono">{job.id}</p>
         </div>
         <div className="flex items-center gap-2">
           {isActive && (

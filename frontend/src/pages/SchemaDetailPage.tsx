@@ -82,7 +82,7 @@ function MetaEditor({
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+          className="border border-[#d0d7de] rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
         />
       </div>
       <div className="flex flex-col gap-1">
@@ -93,7 +93,7 @@ function MetaEditor({
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="No description"
-          className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+          className="border border-[#d0d7de] rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
         />
       </div>
       {updateSchema.error && (
@@ -154,7 +154,7 @@ function RestrictionsSummary({
   }
   if (!parts.length) return null
   return (
-    <span className="text-[10px] text-[#656d76] leading-tight">
+    <span className="text-xs text-[#656d76] leading-tight">
       {parts.join(' · ')}
     </span>
   )
@@ -163,7 +163,7 @@ function RestrictionsSummary({
 // --- Add field form ---
 
 const inputSm =
-  'border border-[#d0d7de] rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]'
+  'border border-[#d0d7de] rounded-md px-2 py-2 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]'
 
 function AddFieldForm({
   schemaName,
@@ -301,7 +301,7 @@ function AddFieldForm({
               ))}
           </select>
         )}
-        <label className="flex items-center gap-1.5 text-sm text-[#1f2328] cursor-pointer select-none">
+        <label className="flex items-center gap-2 text-sm text-[#1f2328] cursor-pointer select-none">
           <input
             type="checkbox"
             checked={required}
@@ -327,7 +327,7 @@ function AddFieldForm({
       {/* Default value */}
       {showDefault && (
         <div className="flex items-center gap-3 flex-wrap">
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Default value
             <input
               value={defaultVal}
@@ -345,7 +345,7 @@ function AddFieldForm({
           <span className="text-xs text-[#656d76] font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Min
             <input
               type="number"
@@ -356,7 +356,7 @@ function AddFieldForm({
               className={`${inputSm} w-24`}
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Max
             <input
               type="number"
@@ -374,7 +374,7 @@ function AddFieldForm({
           <span className="text-xs text-[#656d76] font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Choices (comma-separated)
             <input
               value={choices}
@@ -384,7 +384,7 @@ function AddFieldForm({
             />
           </label>
           {type === 'string' && (
-            <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            <label className="flex items-center gap-2 text-xs text-[#656d76]">
               Max length
               <input
                 type="number"
@@ -404,7 +404,7 @@ function AddFieldForm({
           <span className="text-xs text-[#656d76] font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Accept
             <input
               value={accept}
@@ -413,7 +413,7 @@ function AddFieldForm({
               className={`${inputSm} w-36`}
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Max size (bytes)
             <input
               type="number"
@@ -432,7 +432,7 @@ function AddFieldForm({
           <span className="text-xs text-[#656d76] font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Not before
             <input
               type={type === 'date' ? 'date' : 'datetime-local'}
@@ -441,7 +441,7 @@ function AddFieldForm({
               className={inputSm}
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Not after
             <input
               type={type === 'date' ? 'date' : 'datetime-local'}
@@ -584,7 +584,7 @@ function FieldEditForm({
           className={`${inputSm} w-40`}
         />
         <Badge variant="accent">{dtype}</Badge>
-        <label className="flex items-center gap-1.5 text-sm text-[#1f2328] cursor-pointer select-none">
+        <label className="flex items-center gap-2 text-sm text-[#1f2328] cursor-pointer select-none">
           <input
             type="checkbox"
             checked={required}
@@ -612,7 +612,7 @@ function FieldEditForm({
           <span className="text-xs text-[#656d76] font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Min
             <input
               type="number"
@@ -623,7 +623,7 @@ function FieldEditForm({
               className={`${inputSm} w-24`}
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Max
             <input
               type="number"
@@ -641,7 +641,7 @@ function FieldEditForm({
           <span className="text-xs text-[#656d76] font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Choices (comma-separated)
             <input
               value={choices}
@@ -651,7 +651,7 @@ function FieldEditForm({
             />
           </label>
           {dtype === 'string' && (
-            <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+            <label className="flex items-center gap-2 text-xs text-[#656d76]">
               Max length
               <input
                 type="number"
@@ -671,7 +671,7 @@ function FieldEditForm({
           <span className="text-xs text-[#656d76] font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Accept
             <input
               value={accept}
@@ -680,7 +680,7 @@ function FieldEditForm({
               className={`${inputSm} w-36`}
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Max size (bytes)
             <input
               type="number"
@@ -699,7 +699,7 @@ function FieldEditForm({
           <span className="text-xs text-[#656d76] font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Not before
             <input
               type={dtype === 'date' ? 'date' : 'datetime-local'}
@@ -708,7 +708,7 @@ function FieldEditForm({
               className={inputSm}
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[#656d76]">
+          <label className="flex items-center gap-2 text-xs text-[#656d76]">
             Not after
             <input
               type={dtype === 'date' ? 'date' : 'datetime-local'}
@@ -830,7 +830,7 @@ export default function SchemaDetailPage() {
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-sm text-[#656d76]">
+      <nav className="flex items-center gap-2 text-sm text-[#656d76]">
         <Link to="/schemas" className="hover:text-[#0969da]">
           Schemas
         </Link>
@@ -848,7 +848,7 @@ export default function SchemaDetailPage() {
               <h1 className="text-xl font-semibold text-[#1f2328]">
                 {schema.name}
               </h1>
-              <p className="mt-0.5 text-sm text-[#656d76]">
+              <p className="mt-1 text-sm text-[#656d76]">
                 {schema.description ?? (
                   <span className="italic">No description</span>
                 )}
@@ -938,13 +938,13 @@ export default function SchemaDetailPage() {
                 >
                   {/* Drag handle + reorder buttons */}
                   <Td className="w-8 cursor-grab text-[#d0d7de] hover:text-[#656d76] select-none">
-                    <div className="flex flex-col items-center gap-0.5">
+                    <div className="flex flex-col items-center gap-1">
                       <button
                         type="button"
                         title="Move up"
                         disabled={index === 0 || reorderFields.isPending}
                         onClick={() => moveField(index, 'up')}
-                        className="text-[10px] text-[#d0d7de] hover:text-[#1f2328] disabled:opacity-30 leading-none"
+                        className="text-xs text-[#d0d7de] hover:text-[#1f2328] disabled:opacity-30 leading-none"
                       >
                         ▲
                       </button>
@@ -959,19 +959,19 @@ export default function SchemaDetailPage() {
                           reorderFields.isPending
                         }
                         onClick={() => moveField(index, 'down')}
-                        className="text-[10px] text-[#d0d7de] hover:text-[#1f2328] disabled:opacity-30 leading-none"
+                        className="text-xs text-[#d0d7de] hover:text-[#1f2328] disabled:opacity-30 leading-none"
                       >
                         ▼
                       </button>
                     </div>
                   </Td>
                   <Td>
-                    <span className="flex flex-col gap-0.5">
-                      <span className="flex items-center gap-1.5">
+                    <span className="flex flex-col gap-1">
+                      <span className="flex items-center gap-2">
                         <span className="font-mono text-sm">{field.name}</span>
                         {schema.display_fields.includes(field.name) && (
                           <span
-                            className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]"
+                            className="text-xs font-medium px-2 py-1 rounded-full bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]"
                             title="Display field — included in the record's natural name"
                           >
                             display
@@ -982,15 +982,15 @@ export default function SchemaDetailPage() {
                       </span>
                       {field.default !== null &&
                         field.default !== undefined && (
-                          <span className="text-[11px] text-[#9a6700]">
+                          <span className="text-xs text-[#9a6700]">
                             default: {String(field.default)}
                           </span>
                         )}
                     </span>
                   </Td>
                   <Td>
-                    <div className="flex flex-col gap-0.5">
-                      <div className="flex items-center gap-1.5">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
                         <Badge variant="accent">{field.type}</Badge>
                         {field.type === 'reference' &&
                           !!field.restrictions?.schema && (
@@ -1019,7 +1019,7 @@ export default function SchemaDetailPage() {
                           required: !field.required,
                         })
                       }
-                      className={`text-xs font-medium px-2 py-0.5 rounded-full border cursor-pointer transition-colors ${
+                      className={`text-xs font-medium px-2 py-1 rounded-full border cursor-pointer transition-colors ${
                         field.required
                           ? 'bg-[#dafbe1] text-[#1a7f37] border-[#4ac26b66] hover:bg-[#aceebb]'
                           : 'bg-[#f6f8fa] text-[#656d76] border-[#d0d7de] hover:bg-[#eff2f5]'
@@ -1065,7 +1065,7 @@ export default function SchemaDetailPage() {
                           </button>
                           {schema.display_fields.length > 1 &&
                             schema.display_fields.includes(field.name) && (
-                              <span className="flex flex-col items-center gap-0.5">
+                              <span className="flex flex-col items-center gap-1">
                                 <button
                                   type="button"
                                   title="Move earlier in display order"
@@ -1077,7 +1077,7 @@ export default function SchemaDetailPage() {
                                   onClick={() =>
                                     moveDisplayField(field.name, 'up')
                                   }
-                                  className="text-[9px] text-[#9a6700] hover:text-[#7d5700] disabled:opacity-30 leading-none"
+                                  className="text-xs text-[#9a6700] hover:text-[#7d5700] disabled:opacity-30 leading-none"
                                 >
                                   ▲
                                 </button>
@@ -1094,7 +1094,7 @@ export default function SchemaDetailPage() {
                                   onClick={() =>
                                     moveDisplayField(field.name, 'down')
                                   }
-                                  className="text-[9px] text-[#9a6700] hover:text-[#7d5700] disabled:opacity-30 leading-none"
+                                  className="text-xs text-[#9a6700] hover:text-[#7d5700] disabled:opacity-30 leading-none"
                                 >
                                   ▼
                                 </button>

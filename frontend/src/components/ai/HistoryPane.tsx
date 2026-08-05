@@ -24,7 +24,7 @@ export default function HistoryPane({
       <div className="p-3 border-b border-[#d0d7de] flex-shrink-0">
         <button
           onClick={onNewChat}
-          className="w-full py-1.5 rounded-md bg-[#0969da] text-white text-sm font-medium hover:bg-[#0860ca] transition-colors"
+          className="w-full py-2 rounded-md bg-[#0969da] text-white text-sm font-medium hover:bg-[#0860ca] transition-colors"
         >
           + New chat
         </button>
@@ -63,7 +63,7 @@ export default function HistoryPane({
                   </svg>
                 </span>
               </div>
-              <p className="text-[10px] text-[#adbac7] mt-0.5">
+              <p className="text-xs text-[#adbac7] mt-1">
                 {relativeTime(s.createdAt)}
               </p>
             </button>

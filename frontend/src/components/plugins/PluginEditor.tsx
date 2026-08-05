@@ -76,7 +76,7 @@ export function PluginEditor({
         style={{ height: '90vh' }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#d0d7de]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#d0d7de]">
           <h2 className="text-base font-semibold text-[#1f2328]">
             {isNew ? 'New plugin' : `Edit — ${initialFilename}`}
           </h2>
@@ -89,7 +89,7 @@ export function PluginEditor({
         </div>
 
         {/* Body */}
-        <div className="flex flex-col gap-3 p-5 flex-1 min-h-0">
+        <div className="flex flex-col gap-3 p-6 flex-1 min-h-0">
           {isNew && (
             <label className="block">
               <span className="text-xs font-medium text-[#1f2328]">
@@ -105,7 +105,7 @@ export function PluginEditor({
                     )
                   }
                   placeholder="my_plugin"
-                  className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm w-56 focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+                  className="border border-[#d0d7de] rounded-md px-3 py-2 text-sm w-56 focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
                 />
                 <span className="text-sm text-[#656d76]">.py</span>
               </div>
@@ -138,14 +138,14 @@ export function PluginEditor({
           )}
 
           {saveError && (
-            <pre className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 whitespace-pre-wrap">
+            <pre className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md p-2 whitespace-pre-wrap">
               {saveError}
             </pre>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-[#d0d7de]">
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#d0d7de]">
           <Button variant="default" onClick={onClose}>
             Cancel
           </Button>

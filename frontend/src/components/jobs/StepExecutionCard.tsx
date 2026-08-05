@@ -28,7 +28,7 @@ export default function StepExecutionCard({ step }: { step: StepExecution }) {
     <div className="rounded-md border border-[#d0d7de] bg-white overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[#f6f8fa] transition-colors"
+        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[#f6f8fa] transition-colors"
       >
         <span className="font-mono text-sm text-[#1f2328]">{step.step_id}</span>
         <span className="text-xs text-[#656d76] font-mono">{step.plugin}</span>
@@ -44,14 +44,14 @@ export default function StepExecutionCard({ step }: { step: StepExecution }) {
       {open && (
         <div className="border-t border-[#d0d7de] px-4 py-3 space-y-3 text-xs">
           {step.error && (
-            <div className="rounded px-2 py-1.5 bg-[#ffebe9] text-[#d1242f] font-mono whitespace-pre-wrap">
+            <div className="rounded-md px-2 py-2 bg-[#ffebe9] text-[#d1242f] font-mono whitespace-pre-wrap">
               {step.error}
             </div>
           )}
           <div>
             <h3 className="font-medium text-[#656d76] mb-1">Inputs</h3>
             {hasInputs ? (
-              <pre className="font-mono text-[#1f2328] whitespace-pre-wrap break-words bg-[#f6f8fa] rounded p-2">
+              <pre className="font-mono text-[#1f2328] whitespace-pre-wrap break-words bg-[#f6f8fa] rounded-md p-2">
                 {JSON.stringify(step.inputs, null, 2)}
               </pre>
             ) : (
@@ -61,7 +61,7 @@ export default function StepExecutionCard({ step }: { step: StepExecution }) {
           <div>
             <h3 className="font-medium text-[#656d76] mb-1">Outputs</h3>
             {hasOutputs ? (
-              <pre className="font-mono text-[#1f2328] whitespace-pre-wrap break-words bg-[#f6f8fa] rounded p-2">
+              <pre className="font-mono text-[#1f2328] whitespace-pre-wrap break-words bg-[#f6f8fa] rounded-md p-2">
                 {JSON.stringify(step.outputs, null, 2)}
               </pre>
             ) : (

@@ -65,7 +65,7 @@ export default function ApprovalBar({
             placeholder={
               entry.name === 'save_workflow' ? 'filename-stem' : 'plugin_name'
             }
-            className="flex-1 rounded border border-[#d0d7de] bg-white px-2 py-1 text-xs text-[#1f2328] focus:outline-none focus:border-[#0969da]"
+            className="flex-1 rounded-md border border-[#d0d7de] bg-white px-2 py-2 text-xs text-[#1f2328] focus:outline-none focus:border-[#0969da]"
           />
           <span className="text-[#adbac7] text-xs">
             {entry.name === 'save_workflow' ? '.yaml' : '.py'}
@@ -77,14 +77,14 @@ export default function ApprovalBar({
         <button
           onClick={approve}
           disabled={busy || (isSaveTool && !stem.trim())}
-          className={`px-3 py-1.5 rounded text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${destructive ? 'bg-[#cf222e] hover:bg-[#a40e26]' : 'bg-[#0969da] hover:bg-[#0860ca]'}`}
+          className={`px-3 py-2 rounded-md text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${destructive ? 'bg-[#cf222e] hover:bg-[#a40e26]' : 'bg-[#0969da] hover:bg-[#0860ca]'}`}
         >
           {busy ? 'Working…' : approveLabel}
         </button>
         <button
           onClick={() => onResolve([{ id: entry.id, outcome: 'cancelled' }])}
           disabled={busy}
-          className="px-3 py-1.5 rounded border border-[#d0d7de] text-[#656d76] text-sm hover:bg-[#eaeef2] disabled:opacity-40 transition-colors"
+          className="px-3 py-2 rounded-md border border-[#d0d7de] text-[#656d76] text-sm hover:bg-[#eaeef2] disabled:opacity-40 transition-colors"
         >
           Cancel
         </button>

@@ -91,12 +91,12 @@ function PoliciesSection() {
 
 export default function LegalPage() {
   return (
-    <div className="space-y-10">
+    <div className="space-y-8">
       <div>
         <h1 className="text-xl font-semibold text-[#1f2328]">
           Licenses &amp; Policies
         </h1>
-        <p className="text-sm text-[#656d76] mt-0.5">
+        <p className="text-sm text-[#656d76] mt-1">
           The software license for this build, plus any data/governance policies
           this deployment has documented.
         </p>

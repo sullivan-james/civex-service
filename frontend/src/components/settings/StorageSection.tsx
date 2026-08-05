@@ -23,7 +23,7 @@ async function browseFolderDesktop(): Promise<string | null> {
 }
 
 const inputCls =
-  'border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] w-full'
+  'border border-[#d0d7de] rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] w-full'
 
 function fmtBytes(b: number | null): string {
   if (b === null) return '—'
@@ -109,22 +109,22 @@ function VolumeCard({
     >
       <div className="px-4 py-3 flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
+          <div className="flex items-center gap-2 mb-1">
             <span className="font-semibold text-sm text-[#1f2328]">
               {vol.name}
             </span>
             {vol.in_queue && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#dafbe1] text-[#1a7f37] border border-[#4ac26b55]">
+              <span className="text-xs font-medium px-2 py-1 rounded-full bg-[#dafbe1] text-[#1a7f37] border border-[#4ac26b55]">
                 queue #{queueIndex + 1}
               </span>
             )}
             {!vol.available && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#eaeef2] text-[#656d76] border border-[#d0d7de]">
+              <span className="text-xs font-medium px-2 py-1 rounded-full bg-[#eaeef2] text-[#656d76] border border-[#d0d7de]">
                 unavailable
               </span>
             )}
             {vol.warning && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]">
+              <span className="text-xs font-medium px-2 py-1 rounded-full bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]">
                 ⚠ low space
               </span>
             )}
@@ -140,7 +140,7 @@ function VolumeCard({
               <button
                 onClick={onMoveUp}
                 disabled={queueIndex === 0}
-                className="text-xs px-1.5 py-1 rounded text-[#656d76] hover:text-[#1f2328] hover:bg-[#f6f8fa] disabled:opacity-30 disabled:cursor-not-allowed"
+                className="text-xs px-2 py-2 rounded-md text-[#656d76] hover:text-[#1f2328] hover:bg-[#f6f8fa] disabled:opacity-30 disabled:cursor-not-allowed"
                 title="Move up in queue"
               >
                 ▲
@@ -148,14 +148,14 @@ function VolumeCard({
               <button
                 onClick={onMoveDown}
                 disabled={queueIndex === queueLength - 1}
-                className="text-xs px-1.5 py-1 rounded text-[#656d76] hover:text-[#1f2328] hover:bg-[#f6f8fa] disabled:opacity-30 disabled:cursor-not-allowed"
+                className="text-xs px-2 py-2 rounded-md text-[#656d76] hover:text-[#1f2328] hover:bg-[#f6f8fa] disabled:opacity-30 disabled:cursor-not-allowed"
                 title="Move down in queue"
               >
                 ▼
               </button>
               <button
                 onClick={onRemoveFromQueue}
-                className="text-xs px-1.5 py-1 rounded text-[#656d76] hover:text-[#d1242f] hover:bg-[#f6f8fa]"
+                className="text-xs px-2 py-2 rounded-md text-[#656d76] hover:text-[#d1242f] hover:bg-[#f6f8fa]"
                 title="Remove from write queue"
               >
                 ✕ queue
@@ -165,7 +165,7 @@ function VolumeCard({
           {!vol.in_queue && (
             <button
               onClick={onAddToQueue}
-              className="text-xs px-2 py-1 rounded border border-[#d0d7de] text-[#656d76] hover:bg-[#f6f8fa]"
+              className="text-xs px-2 py-2 rounded-md border border-[#d0d7de] text-[#656d76] hover:bg-[#f6f8fa]"
               title="Add to write queue"
             >
               + queue
@@ -176,7 +176,7 @@ function VolumeCard({
               setEditing((e) => !e)
               setConfirmRemove(false)
             }}
-            className="text-xs px-1.5 py-1 rounded text-[#656d76] hover:text-[#0969da] hover:bg-[#f6f8fa]"
+            className="text-xs px-2 py-2 rounded-md text-[#656d76] hover:text-[#0969da] hover:bg-[#f6f8fa]"
             title="Edit volume"
           >
             ✎
@@ -195,7 +195,7 @@ function VolumeCard({
                   })
                 }}
                 disabled={removeVolume.isPending}
-                className="text-xs px-2 py-1 rounded bg-[#d1242f] text-white hover:bg-[#b91c1c] disabled:opacity-50"
+                className="text-xs px-2 py-2 rounded-md bg-[#d1242f] text-white hover:bg-[#b91c1c] disabled:opacity-50"
               >
                 Confirm
               </button>
@@ -204,7 +204,7 @@ function VolumeCard({
                   setConfirmRemove(false)
                   setRemoveError(null)
                 }}
-                className="text-xs px-1.5 py-1 text-[#656d76] hover:underline"
+                className="text-xs px-2 py-2 text-[#656d76] hover:underline"
               >
                 Cancel
               </button>
@@ -216,7 +216,7 @@ function VolumeCard({
                 setEditing(false)
                 setRemoveError(null)
               }}
-              className="text-xs px-1.5 py-1 rounded text-[#656d76] hover:text-[#d1242f] hover:bg-[#f6f8fa]"
+              className="text-xs px-2 py-2 rounded-md text-[#656d76] hover:text-[#d1242f] hover:bg-[#f6f8fa]"
               title="Delete volume from config (does not delete files)"
             >
               ✕
@@ -227,7 +227,7 @@ function VolumeCard({
 
       {removeError && (
         <div className="px-4 pb-3">
-          <p className="text-xs text-[#d1242f] bg-[#ffebe9] border border-[#d1242f33] rounded px-3 py-2">
+          <p className="text-xs text-[#d1242f] bg-[#ffebe9] border border-[#d1242f33] rounded-md px-3 py-2">
             {removeError}
           </p>
         </div>
@@ -238,7 +238,7 @@ function VolumeCard({
         <div className="px-4 pb-3 space-y-2">
           {allocBytes !== null && (
             <div>
-              <div className="flex justify-between text-[10px] text-[#656d76] mb-0.5">
+              <div className="flex justify-between text-xs text-[#656d76] mb-1">
                 <span>Civex usage</span>
                 <span>
                   {fmtBytes(vol.civex_used_bytes)} / {fmtBytes(allocBytes)}
@@ -253,7 +253,7 @@ function VolumeCard({
           )}
           {diskTotal !== null && (
             <div>
-              <div className="flex justify-between text-[10px] text-[#656d76] mb-0.5">
+              <div className="flex justify-between text-xs text-[#656d76] mb-1">
                 <span>Disk free</span>
                 <span>
                   {fmtBytes(vol.disk_free_bytes)} of {fmtBytes(diskTotal)}
@@ -314,7 +314,7 @@ function VolumeCard({
                 className={inputCls}
                 disabled={clearAlloc}
               />
-              <label className="flex items-center gap-1.5 text-xs text-[#656d76] whitespace-nowrap cursor-pointer select-none">
+              <label className="flex items-center gap-2 text-xs text-[#656d76] whitespace-nowrap cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={clearAlloc}
@@ -488,7 +488,7 @@ export default function StorageSection() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-[#1f2328]">Storage</h2>
-          <p className="text-sm text-[#656d76] mt-0.5">
+          <p className="text-sm text-[#656d76] mt-1">
             Configure where civex stores files. New uploads go to the first
             available volume in the write queue.
           </p>
