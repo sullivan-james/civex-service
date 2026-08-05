@@ -10,6 +10,7 @@
     "lint": "eslint . && npm run lint:colors",
     "lint:fix": "eslint . --fix",
     "lint:colors": "node scripts/check-hardcoded-colors.mjs",
+    "test": "vitest run",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
@@ -42,6 +43,7 @@
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.64.0",
-    "vite": "^8.1.5"
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
   }
 }
