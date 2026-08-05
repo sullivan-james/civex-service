@@ -7,6 +7,7 @@ import {
   type PresetProviderId,
   aiApi,
 } from '../../api/ai'
+import { Input, Select } from '../ui'
 import { Check, RotateCcw, ArrowRight } from '../ui/icons'
 
 function detectPreset(cfg: AiConfig | null): PresetProviderId {
@@ -282,19 +283,19 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
         <label className="block text-xs font-medium text-fg mb-1">
           Provider
         </label>
-        <select
+        <Select
           value={preset}
           onChange={(e) =>
             handlePresetChange(e.target.value as PresetProviderId)
           }
-          className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-fg bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+          className="w-full"
         >
           {PRESET_PROVIDERS.map((p) => (
             <option key={p.id} value={p.id}>
               {p.label}
             </option>
           ))}
-        </select>
+        </Select>
         {presetObj.docs && !isOllama && (
           <p className="mt-1 text-[10px] text-fg-subtle">
             Get a free API key at{' '}
@@ -334,11 +335,11 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           <label className="block text-xs font-medium text-fg mb-1">
             Base URL
           </label>
-          <input
+          <Input
             value={customBaseUrl}
             onChange={(e) => setCustomBaseUrl(e.target.value)}
             placeholder="http://localhost:11434/v1"
-            className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+            className="w-full"
           />
           {isOllama && (
             <p className="mt-1 text-[10px] text-fg-subtle">
@@ -421,7 +422,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           <label className="block text-xs font-medium text-fg mb-1">
             API key
           </label>
-          <input
+          <Input
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
@@ -430,7 +431,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                 ? `Current: ${cfg.key_hint}`
                 : presetObj.key_placeholder
             }
-            className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+            className="w-full"
           />
           <p className="mt-1 text-[10px] text-fg-subtle">
             {cfg?.configured
@@ -470,11 +471,11 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                   ollama serve
                 </code>
               </p>
-              <input
+              <Input
                 value={customModel}
                 onChange={(e) => setCustomModel(e.target.value)}
                 placeholder="qwen2.5:7b"
-                className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+                className="w-full"
               />
             </div>
           ) : ollamaModels.length === 0 ? (
@@ -490,10 +491,10 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
             </div>
           ) : (
             <div className="space-y-1">
-              <select
+              <Select
                 value={customModel}
                 onChange={(e) => setCustomModel(e.target.value)}
-                className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-fg bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+                className="w-full"
               >
                 {ollamaModels.map((m) => (
                   <option key={m.name} value={m.name}>
@@ -503,7 +504,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                       : `${Math.round(m.size / 1e6)} MB`}
                   </option>
                 ))}
-              </select>
+              </Select>
               <p className="text-[10px] text-fg-subtle">
                 {ollamaModels.length} model
                 {ollamaModels.length !== 1 ? 's' : ''} installed. Tool calling
@@ -513,7 +514,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           )
         ) : isFreeText || presetObj.models.length === 0 ? (
           <>
-            <input
+            <Input
               value={customModel}
               onChange={(e) => setCustomModel(e.target.value)}
               placeholder={
@@ -524,7 +525,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                     : 'model name'
               }
               list={isOpenRouter ? 'openrouter-model-suggestions' : undefined}
-              className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+              className="w-full"
             />
             {isOpenRouter && (
               <datalist id="openrouter-model-suggestions">
@@ -537,17 +538,17 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
             )}
           </>
         ) : (
-          <select
+          <Select
             value={effectiveModel || presetObj.models[0]?.id || ''}
             onChange={(e) => setModel(e.target.value)}
-            className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-fg bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+            className="w-full"
           >
             {presetObj.models.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label}
               </option>
             ))}
-          </select>
+          </Select>
         )}
       </div>
 
