@@ -1,18 +1,53 @@
 import { useEffect, useRef } from 'react'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { PageHeader } from '../components/ui'
+import { useTheme } from '../hooks/useTheme'
+
+// xterm renders to canvas, which can't resolve CSS custom properties, so
+// the current token values are read out of computed styles instead.
+function xtermTheme(): ITheme {
+  const style = getComputedStyle(document.documentElement)
+  const token = (name: string) => style.getPropertyValue(name).trim()
+  return {
+    background: token('--color-canvas'),
+    foreground: token('--color-fg'),
+    cursor: token('--color-accent'),
+    cursorAccent: token('--color-canvas'),
+    selectionBackground: token('--color-accent-muted'),
+    black: token('--color-canvas'),
+    brightBlack: token('--color-fg-subtle'),
+    red: token('--color-danger'),
+    brightRed: token('--color-danger-emphasis'),
+    green: token('--color-success'),
+    brightGreen: token('--color-success-emphasis'),
+    yellow: token('--color-attention'),
+    brightYellow: token('--color-attention-emphasis'),
+    blue: token('--color-accent'),
+    brightBlue: token('--color-accent-emphasis'),
+    magenta: token('--color-accent-emphasis'),
+    brightMagenta: token('--color-accent-emphasis'),
+    cyan: token('--color-success-emphasis'),
+    brightCyan: token('--color-success-emphasis'),
+    white: token('--color-fg-muted'),
+    brightWhite: token('--color-fg'),
+  }
+}
 
 export default function TerminalPage() {
   const containerRef = useRef<HTMLDivElement>(null)
+  const { resolved: theme } = useTheme()
+  const termRef = useRef<Terminal | null>(null)
 
   useEffect(() => {
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
       fontFamily: 'monospace',
+      theme: xtermTheme(),
     })
+    termRef.current = term
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
     term.open(containerRef.current!)
@@ -60,8 +95,13 @@ export default function TerminalPage() {
       window.removeEventListener('resize', onWindowResize)
       ws.close()
       term.dispose()
+      termRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    if (termRef.current) termRef.current.options.theme = xtermTheme()
+  }, [theme])
 
   return (
     <>

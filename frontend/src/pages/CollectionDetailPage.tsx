@@ -26,6 +26,7 @@ import {
   LoadingState,
   ErrorState,
 } from '../components/ui'
+import { ArrowLeft, ArrowRight } from '../components/ui/icons'
 import { RecordForm } from '../components/records/RecordForm'
 import { formatDate } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
@@ -196,7 +197,7 @@ export default function CollectionDetailPage() {
               if (e.key === 'Enter') handleRename()
               if (e.key === 'Escape') setRenaming(false)
             }}
-            className="border border-border rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent w-64"
+            className="border border-border rounded-md px-3 py-2 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent w-64"
           />
           {updateCollection.error && (
             <span className="text-xs text-danger">
@@ -250,8 +251,8 @@ export default function CollectionDetailPage() {
             onClick={() => selectSchema(null)}
             className={`px-3 py-2 rounded-full text-sm border transition-colors cursor-pointer ${
               selectedSchema === null
-                ? 'bg-fg text-white border-fg'
-                : 'bg-white text-fg-muted border-border hover:border-fg hover:text-fg'
+                ? 'bg-fg text-fg-on-emphasis border-fg'
+                : 'bg-canvas text-fg-muted border-border hover:border-fg hover:text-fg'
             }`}
           >
             All{' '}
@@ -269,8 +270,8 @@ export default function CollectionDetailPage() {
                   onClick={() => selectSchema(name)}
                   className={`px-3 py-2 rounded-full text-sm border transition-colors cursor-pointer ${
                     selectedSchema === name
-                      ? 'bg-fg text-white border-fg'
-                      : 'bg-white text-fg-muted border-border hover:border-fg hover:text-fg'
+                      ? 'bg-fg text-fg-on-emphasis border-fg'
+                      : 'bg-canvas text-fg-muted border-border hover:border-fg hover:text-fg'
                   }`}
                 >
                   {name}{' '}
@@ -325,7 +326,7 @@ export default function CollectionDetailPage() {
         value={searchInput}
         onChange={(e) => setSearchInput(e.target.value)}
         placeholder="Search records…"
-        className="w-full border border-border rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+        className="w-full border border-border rounded-md px-3 py-2 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
       />
 
       {/* Add record form */}
@@ -495,14 +496,14 @@ export default function CollectionDetailPage() {
                   disabled={offset === 0}
                   onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
                 >
-                  ← Previous
+                  <ArrowLeft size={12} /> Previous
                 </Button>
                 <Button
                   size="sm"
                   disabled={offset + PAGE_SIZE >= total}
                   onClick={() => setOffset((o) => o + PAGE_SIZE)}
                 >
-                  Next →
+                  Next <ArrowRight size={12} />
                 </Button>
               </div>
             </div>

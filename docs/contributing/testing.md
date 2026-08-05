@@ -1,9 +1,8 @@
-# Testing plan
+# Testing
 
-The repo has ~11.6k lines of Python source and (before this plan) a single
-160-line smoke-test file plus zero frontend tests. This document tracks the
-plan to close that gap. Check items off as they land; this file should stay
-current rather than becoming a historical artifact.
+The repo has ~11.6k lines of Python source. This page tracks the plan for
+test coverage and describes the current test structure; keep it current as
+steps land rather than letting it go stale.
 
 ## Status
 
@@ -22,29 +21,34 @@ current rather than becoming a historical artifact.
 back to `httpx` with a deprecation warning, so the existing pin was correct
 and was left alone.)
 
-Added `pytest-cov` and a `[tool.coverage.run]` config (source = `civex`).
-CI now runs `pytest --cov=civex --cov-report=term-missing --cov-fail-under=30`.
-Coverage was ~28% before this plan and is ~32% after step 3; the threshold is
-set a few points below the measured value so normal variance doesn't flake
-CI. Ratchet it up as steps 4-6 land — don't raise it faster than real
-coverage grows, or CI starts failing for the wrong reason.
+`pytest-cov` and a `[tool.coverage.run]` config (`source = civex`) are wired
+in. CI runs `pytest --cov=civex --cov-report=term-missing --cov-fail-under=30`
+(see `make test`). Coverage was ~28% before this plan and is ~32% after
+step 3; the threshold is set a few points below the measured value so
+normal variance doesn't flake CI. Ratchet it up as steps 4-6 land — don't
+raise it faster than real coverage grows, or CI starts failing for the
+wrong reason. See `PRODUCTION_READINESS.md` at the repo root for how this
+fits into the broader 1.0 checklist — it's a root-level tracking doc, kept
+outside the docs site nav since it's a running punch list rather than
+reference documentation.
 
 `tests/bench_indexes.py` was a benchmark script living in `tests/`, excluded
-from CI via `--ignore`. Moved to `benchmarks/` so `tests/` only contains
-actual tests and nothing needs special-casing in the pytest invocation.
+from CI via `--ignore`. It lives in `benchmarks/` now, so `tests/` only
+contains actual tests and nothing needs special-casing in the pytest
+invocation.
 
 ## 2. Test structure
 
 ```
 tests/
-  conftest.py          # shared fixtures: ctx (AppContext), project_dir, client, factories
-  test_smoke.py        # end-to-end CLI/API happy path, trimmed to the essentials
-  cli/                 # CLI-level tests (Typer CliRunner)
-  services/            # service-layer tests (AppContext, no CLI/HTTP)
-  server/               # FastAPI router tests (TestClient)
-  db/                   # Alembic migration tests (bare engines, no AppContext)
-  workflows/            # executor + trigger tests (not yet created — step 4)
-  plugins/              # one file per built-in plugin (not yet created — step 4)
+  conftest.py   # shared fixtures: ctx (AppContext), project_dir, client, factories
+  test_smoke.py # end-to-end CLI/API happy path, trimmed to the essentials
+  cli/          # CLI-level tests (Typer CliRunner)
+  services/     # service-layer tests (AppContext, no CLI/HTTP)
+  server/       # FastAPI router tests (TestClient)
+  db/           # Alembic migration tests (bare engines, no AppContext)
+  workflows/    # executor + trigger tests (not yet created — step 4)
+  plugins/      # one file per built-in plugin (not yet created — step 4)
 ```
 
 `conftest.py` provides:
@@ -100,3 +104,10 @@ duplicate — regressions there are the most cross-cutting.
 **7. CI gate** — once steps 4-6 produce a real coverage number, raise
 `--cov-fail-under` to match, and add a `frontend-test` CI job running
 `npm run test` in `frontend/`.
+
+## Running tests
+
+```bash
+uv run pytest tests/                                             # all tests  (== make test)
+uv run pytest tests/test_smoke.py::test_init_creates_civex_dir   # a single test
+```

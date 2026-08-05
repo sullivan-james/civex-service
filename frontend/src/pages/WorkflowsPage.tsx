@@ -17,6 +17,7 @@ import {
   useUploadPlugin,
 } from '../hooks/usePlugins'
 import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
+import { ChevronUp, ChevronDown } from '../components/ui/icons'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import { ContainerPluginEditor } from '../components/workflows/ContainerPluginEditor'
 import { useContainerPlugins } from '../hooks/useContainerPlugins'
@@ -35,6 +36,7 @@ import {
 import { ApiError } from '../api/client'
 import type { Workflow } from '../api/workflows'
 import type { PluginInfo, PluginIOSpec } from '../api/plugins'
+import { useTheme } from '../hooks/useTheme'
 
 const NEW_TEMPLATE = `name: my-workflow
 description: null
@@ -83,6 +85,7 @@ function WorkflowEditor({
   const [saveError, setSaveError] = useState<WorkflowValidationIssue[] | null>(
     null,
   )
+  const { resolved: theme } = useTheme()
 
   const { data: detail, isLoading } = useWorkflow(isNew ? '' : initialStem)
   const save = useSaveWorkflow()
@@ -248,9 +251,9 @@ function WorkflowEditor({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-overlay-scrim flex items-center justify-center z-50 p-4">
       <div
-        className="bg-white rounded-lg shadow-xl w-full max-w-3xl flex flex-col"
+        className="bg-canvas rounded-lg shadow-xl w-full max-w-3xl flex flex-col"
         style={{ height: '90vh' }}
       >
         {/* Header */}
@@ -304,6 +307,7 @@ function WorkflowEditor({
               >
                 <CodeMirror
                   value={content ?? ''}
+                  theme={theme}
                   onChange={(value) => setContent(value)}
                   onUpdate={handleUpdate}
                   onCreateEditor={(view) => {
@@ -328,7 +332,7 @@ function WorkflowEditor({
           )}
 
           {saveError && (
-            <div className="text-xs bg-red-50 border border-red-200 rounded-md p-2 max-h-40 overflow-auto space-y-2">
+            <div className="text-xs bg-danger-subtle border border-danger-subtle-border rounded-md p-2 max-h-40 overflow-auto space-y-2">
               {groupWorkflowValidationErrors(saveError).map(
                 ({ step, messages }) => (
                   <div key={step ?? '__general__'}>
@@ -336,16 +340,14 @@ function WorkflowEditor({
                       <button
                         type="button"
                         onClick={() => jumpToStep(step)}
-                        className="font-mono font-semibold text-red-700 hover:underline"
+                        className="font-mono font-semibold text-danger hover:underline"
                       >
                         Step '{step}'
                       </button>
                     ) : (
-                      <span className="font-semibold text-red-700">
-                        General
-                      </span>
+                      <span className="font-semibold text-danger">General</span>
                     )}
-                    <ul className="list-disc list-inside text-red-600">
+                    <ul className="list-disc list-inside text-danger">
                       {messages.map((message, i) => (
                         <li key={i} className="whitespace-pre-wrap">
                           {message}
@@ -753,8 +755,12 @@ export default function WorkflowsPage() {
                           {p.builtin ? 'built-in' : 'user'}
                         </span>
                       </td>
-                      <td className="py-2 px-3 text-fg-muted text-xs">
-                        {isExpanded ? '▲' : '▼'}
+                      <td className="py-2 px-3 text-fg-muted">
+                        {isExpanded ? (
+                          <ChevronUp size={12} />
+                        ) : (
+                          <ChevronDown size={12} />
+                        )}
                       </td>
                       <td className="py-2 px-3 text-right">
                         {p.filename && (

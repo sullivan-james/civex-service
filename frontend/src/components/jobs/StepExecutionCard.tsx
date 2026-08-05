@@ -1,15 +1,34 @@
 import { useState } from 'react'
 import { type StepExecution } from '../../api/workflows'
 import { Badge } from '../ui'
+import {
+  Check,
+  XCircle,
+  SkipForward,
+  ChevronUp,
+  ChevronDown,
+} from '../ui/icons'
 
 function StatusBadge({ status }: { status: StepExecution['status'] }) {
   switch (status) {
     case 'success':
-      return <Badge variant="success">✓ success</Badge>
+      return (
+        <Badge variant="success" className="gap-1">
+          <Check size={12} /> success
+        </Badge>
+      )
     case 'failed':
-      return <Badge variant="danger">✗ failed</Badge>
+      return (
+        <Badge variant="danger" className="gap-1">
+          <XCircle size={12} /> failed
+        </Badge>
+      )
     default:
-      return <Badge variant="default">⏭ skipped</Badge>
+      return (
+        <Badge variant="default" className="gap-1">
+          <SkipForward size={12} /> skipped
+        </Badge>
+      )
   }
 }
 
@@ -25,7 +44,7 @@ export default function StepExecutionCard({ step }: { step: StepExecution }) {
   const hasOutputs = step.outputs && Object.keys(step.outputs).length > 0
 
   return (
-    <div className="rounded-md border border-border bg-white overflow-hidden">
+    <div className="rounded-md border border-border bg-canvas overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-canvas-subtle transition-colors"
@@ -37,7 +56,9 @@ export default function StepExecutionCard({ step }: { step: StepExecution }) {
             {duration(step.duration_seconds)}
           </span>
           <StatusBadge status={step.status} />
-          <span className="text-fg-subtle text-xs">{open ? '▲' : '▼'}</span>
+          <span className="text-fg-subtle">
+            {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          </span>
         </span>
       </button>
 

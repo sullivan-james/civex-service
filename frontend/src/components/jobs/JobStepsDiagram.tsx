@@ -14,7 +14,7 @@ const PADDING = 12
 const statusColors: Record<StepExecution['status'], string> = {
   success: 'border-success-muted bg-success-subtle',
   failed: 'border-danger-subtle-border bg-danger-subtle',
-  skipped: 'border-border bg-white',
+  skipped: 'border-border bg-canvas',
 }
 
 interface Node {

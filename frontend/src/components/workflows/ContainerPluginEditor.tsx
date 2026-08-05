@@ -50,9 +50,9 @@ export function ContainerPluginEditor({
   const filePaths = contents ? Object.keys(contents).sort() : []
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-overlay-scrim flex items-center justify-center z-50 p-4">
       <div
-        className="bg-white rounded-lg shadow-xl w-full max-w-5xl flex flex-col"
+        className="bg-canvas rounded-lg shadow-xl w-full max-w-5xl flex flex-col"
         style={{ height: '90vh' }}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
@@ -110,7 +110,7 @@ export function ContainerPluginEditor({
                   className={`text-xs rounded-md p-2 whitespace-pre-wrap max-h-32 overflow-y-auto ${
                     buildResult.success
                       ? 'text-success bg-success-subtle border border-success/30'
-                      : 'text-red-600 bg-red-50 border border-red-200'
+                      : 'text-danger bg-danger-subtle border border-danger-subtle-border'
                   }`}
                 >
                   {buildResult.success ? 'Build succeeded' : 'Build failed'}

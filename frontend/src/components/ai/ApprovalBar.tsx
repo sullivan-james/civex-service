@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ResolvedEntry, ToolCallEntry } from '../../types/ai'
 import { applyProposal, isSaveToolName, parseResult } from './proposals'
+import { AlertTriangle } from '../ui/icons'
 
 // Pinned above the input while a proposal awaits the user.
 //
@@ -50,11 +51,15 @@ export default function ApprovalBar({
       className={`rounded-md border p-3 ${destructive ? 'bg-danger-subtle border-danger-muted' : 'bg-accent-subtle border-accent-muted'}`}
     >
       <div
-        className={`text-xs font-semibold mb-1 ${destructive ? 'text-danger' : 'text-accent'}`}
+        className={`flex items-center gap-1 text-xs font-semibold mb-1 ${destructive ? 'text-danger' : 'text-accent'}`}
       >
-        {destructive
-          ? '⚠ Destructive action — needs your approval'
-          : 'Needs your approval'}
+        {destructive ? (
+          <>
+            <AlertTriangle size={12} /> Destructive action — needs your approval
+          </>
+        ) : (
+          'Needs your approval'
+        )}
       </div>
       <div className="text-sm text-fg mb-2">{summary}</div>
       {isSaveTool && (
@@ -65,7 +70,7 @@ export default function ApprovalBar({
             placeholder={
               entry.name === 'save_workflow' ? 'filename-stem' : 'plugin_name'
             }
-            className="flex-1 rounded-md border border-border bg-white px-2 py-2 text-xs text-fg focus:outline-none focus:border-accent"
+            className="flex-1 rounded-md border border-border bg-canvas px-2 py-2 text-xs text-fg focus:outline-none focus:border-accent"
           />
           <span className="text-fg-subtle text-xs">
             {entry.name === 'save_workflow' ? '.yaml' : '.py'}
@@ -77,7 +82,7 @@ export default function ApprovalBar({
         <button
           onClick={approve}
           disabled={busy || (isSaveTool && !stem.trim())}
-          className={`px-3 py-2 rounded-md text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${destructive ? 'bg-danger hover:bg-danger-emphasis' : 'bg-accent hover:bg-accent-emphasis'}`}
+          className={`px-3 py-2 rounded-md text-fg-on-emphasis text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${destructive ? 'bg-danger hover:bg-danger-emphasis' : 'bg-accent hover:bg-accent-emphasis'}`}
         >
           {busy ? 'Working…' : approveLabel}
         </button>

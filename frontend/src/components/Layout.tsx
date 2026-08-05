@@ -3,6 +3,17 @@ import { NavLink, useLocation, useNavigate } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { remoteApi, type SyncResult } from '../api/remote'
 import AiAttestationGate from './ai/AiAttestationGate'
+import {
+  RefreshCw,
+  Sparkles,
+  Settings,
+  ExternalLink,
+  ArrowDownToLine,
+  ArrowUpToLine,
+  FolderOpen,
+  FolderPlus,
+  Folder,
+} from './ui/icons'
 
 declare global {
   interface Window {
@@ -96,8 +107,10 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Top navbar */}
-      <header className="bg-nav-bg px-6 py-3 flex items-center gap-4">
+      {/* Top navbar — always dark regardless of theme, so it needs its own
+          border to stay visible against a dark-theme canvas instead of
+          blending into it. */}
+      <header className="bg-nav-bg border-b border-nav-border px-6 py-3 flex items-center gap-4">
         <span className="text-nav-fg font-semibold text-base tracking-tight">
           civex
         </span>
@@ -107,15 +120,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           title="Refresh all data"
           className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
         >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-            aria-hidden
-          >
-            <path d="M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z" />
-          </svg>
+          <RefreshCw size={12} />
           Refresh
         </button>
 
@@ -124,11 +129,11 @@ export default function Layout({ children }: { children: ReactNode }) {
           title="Open AI assistant"
           className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border transition-colors ${
             aiOpen
-              ? 'border-accent bg-accent text-white'
+              ? 'border-accent bg-accent text-fg-on-emphasis'
               : 'border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg'
           }`}
         >
-          ✦ Ask AI
+          <Sparkles size={12} /> Ask AI
         </button>
 
         <button
@@ -136,19 +141,11 @@ export default function Layout({ children }: { children: ReactNode }) {
           title="Settings"
           className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border transition-colors ${
             settingsActive
-              ? 'border-accent bg-accent text-white'
+              ? 'border-accent bg-accent text-fg-on-emphasis'
               : 'border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg'
           }`}
         >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-            aria-hidden
-          >
-            <path d="M8 0a8.2 8.2 0 0 1 .701.031C9.444.095 9.99.645 9.99 1.311v.171a6.946 6.946 0 0 1 1.524.625l.121-.12a1.311 1.311 0 0 1 1.855 0l.354.353a1.311 1.311 0 0 1 0 1.855l-.12.121c.247.473.43.98.524 1.524h.171c.666 0 1.216.546 1.28 1.29A8.2 8.2 0 0 1 16 8a8.2 8.2 0 0 1-.031.701c-.064.744-.614 1.29-1.28 1.29h-.171a6.946 6.946 0 0 1-.524 1.524l.12.121a1.311 1.311 0 0 1 0 1.855l-.353.354a1.311 1.311 0 0 1-1.855 0l-.121-.12a6.946 6.946 0 0 1-1.524.524v.171c0 .666-.546 1.216-1.29 1.28A8.2 8.2 0 0 1 8 16a8.2 8.2 0 0 1-.701-.031c-.744-.064-1.29-.614-1.29-1.28v-.171a6.946 6.946 0 0 1-1.524-.524l-.121.12a1.311 1.311 0 0 1-1.855 0l-.354-.353a1.311 1.311 0 0 1 0-1.855l.12-.121A6.946 6.946 0 0 1 2.25 10.7h-.171c-.666 0-1.216-.546-1.28-1.29A8.2 8.2 0 0 1 0 8a8.2 8.2 0 0 1 .031-.701C.095 6.556.645 6.01 1.311 6.01h.171a6.946 6.946 0 0 1 .524-1.524l-.12-.121a1.311 1.311 0 0 1 0-1.855l.353-.354a1.311 1.311 0 0 1 1.855 0l.121.12A6.946 6.946 0 0 1 5.74 1.77h-.17v-.17c0-.666.545-1.216 1.29-1.28A8.233 8.233 0 0 1 8 .001Zm-.5 4.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
-          </svg>
+          <Settings size={12} />
           Settings
         </button>
 
@@ -159,15 +156,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               title="Open a different civex project"
               className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
             >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                aria-hidden
-              >
-                <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75z" />
-              </svg>
+              <FolderOpen size={12} />
               Open project
             </button>
             <button
@@ -175,15 +164,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               title="Create a new civex project"
               className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
             >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                aria-hidden
-              >
-                <path d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2z" />
-              </svg>
+              <FolderPlus size={12} />
               New project
             </button>
             <button
@@ -194,15 +175,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               title={`${fileManagerLabel()} — open this project's database directory`}
               className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
             >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                aria-hidden
-              >
-                <path d="M1.75 3A1.75 1.75 0 0 0 0 4.75v6.5C0 12.216.784 13 1.75 13h12.5A1.75 1.75 0 0 0 16 11.25v-5.5A1.75 1.75 0 0 0 14.25 4H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 2.26 5.55 2 5 2H1.75z" />
-              </svg>
+              <Folder size={12} />
               {fileManagerLabel()}
             </button>
           </div>
@@ -220,20 +193,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               title={`Pull from ${remote.url}`}
               className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {syncing === 'pull' ? (
-                <Spinner />
-              ) : (
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                  aria-hidden
-                >
-                  <path d="M8 2a.75.75 0 0 1 .75.75v6.69l2.72-2.72a.75.75 0 1 1 1.06 1.06l-4 4a.75.75 0 0 1-1.06 0l-4-4a.75.75 0 0 1 1.06-1.06L7.25 9.44V2.75A.75.75 0 0 1 8 2z" />
-                  <path d="M2 13.25a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75z" />
-                </svg>
-              )}
+              {syncing === 'pull' ? <Spinner /> : <ArrowDownToLine size={12} />}
               Pull
             </button>
 
@@ -243,20 +203,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               title={`Push to ${remote.url}`}
               className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {syncing === 'push' ? (
-                <Spinner />
-              ) : (
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                  aria-hidden
-                >
-                  <path d="M8 14a.75.75 0 0 1-.75-.75V6.56L4.53 9.28a.75.75 0 0 1-1.06-1.06l4-4a.75.75 0 0 1 1.06 0l4 4a.75.75 0 0 1-1.06 1.06L8.75 6.56v6.69A.75.75 0 0 1 8 14z" />
-                  <path d="M2 2.75a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 2.75z" />
-                </svg>
-              )}
+              {syncing === 'push' ? <Spinner /> : <ArrowUpToLine size={12} />}
               Push
             </button>
           </div>
@@ -264,7 +211,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </header>
 
       {/* Tab bar */}
-      <div className="border-b border-border bg-white px-6">
+      <div className="border-b border-border bg-canvas px-6">
         <nav className="flex gap-1 -mb-px">
           {tabs.map(({ to, label }) => (
             <NavLink
@@ -285,9 +232,9 @@ export default function Layout({ children }: { children: ReactNode }) {
             href="/docs"
             target="_blank"
             rel="noopener noreferrer"
-            className="px-4 py-3 text-sm font-medium border-b-2 border-transparent text-fg-muted hover:text-fg hover:border-border transition-colors"
+            className="inline-flex items-center gap-1 px-4 py-3 text-sm font-medium border-b-2 border-transparent text-fg-muted hover:text-fg hover:border-border transition-colors"
           >
-            API docs ↗
+            API docs <ExternalLink size={12} />
           </a>
         </nav>
       </div>
@@ -298,7 +245,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-border bg-white px-6 py-3 text-center">
+      <footer className="border-t border-border bg-canvas px-6 py-3 text-center">
         <NavLink
           to="/legal"
           className="text-xs text-fg-muted hover:text-fg hover:underline"

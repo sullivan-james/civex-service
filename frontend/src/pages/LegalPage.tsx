@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useLicense, usePolicies } from '../hooks/useLegal'
 import { LoadingState, ErrorState } from '../components/ui'
+import { ChevronUp, ChevronDown } from '../components/ui/icons'
 import { errorMessage } from '../lib/errors'
 
 function LicenseSection() {
@@ -16,7 +17,7 @@ function LicenseSection() {
     )
 
   return (
-    <div className="border border-border rounded-md bg-white p-4 space-y-3">
+    <div className="border border-border rounded-md bg-canvas p-4 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold text-fg">Software license</p>
         <button
@@ -64,14 +65,16 @@ function PoliciesSection() {
         return (
           <div
             key={p.stem}
-            className="border border-border rounded-md bg-white"
+            className="border border-border rounded-md bg-canvas"
           >
             <button
               onClick={() => setOpenStem(open ? null : p.stem)}
               className="w-full flex items-center justify-between px-4 py-3 text-left"
             >
               <span className="text-sm font-medium text-fg">{p.title}</span>
-              <span className="text-xs text-fg-muted">{open ? '▲' : '▼'}</span>
+              <span className="text-xs text-fg-muted">
+                {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </span>
             </button>
             {open && (
               <div className="border-t border-border px-4 py-3 bg-canvas-subtle">

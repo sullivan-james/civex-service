@@ -56,7 +56,7 @@ export function Tr({
   return (
     <tr
       onClick={onClick}
-      className={`bg-white ${onClick ? 'hover:bg-canvas-subtle cursor-pointer' : ''}`}
+      className={`bg-canvas ${onClick ? 'hover:bg-canvas-subtle cursor-pointer' : ''}`}
     >
       {children}
     </tr>
