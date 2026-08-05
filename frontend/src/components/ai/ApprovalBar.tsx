@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ResolvedEntry, ToolCallEntry } from '../../types/ai'
 import { applyProposal, isSaveToolName, parseResult } from './proposals'
+import { AlertTriangle } from '../ui/icons'
 
 // Pinned above the input while a proposal awaits the user.
 //
@@ -50,11 +51,15 @@ export default function ApprovalBar({
       className={`rounded-md border p-3 ${destructive ? 'bg-danger-subtle border-danger-muted' : 'bg-accent-subtle border-accent-muted'}`}
     >
       <div
-        className={`text-xs font-semibold mb-1 ${destructive ? 'text-danger' : 'text-accent'}`}
+        className={`flex items-center gap-1 text-xs font-semibold mb-1 ${destructive ? 'text-danger' : 'text-accent'}`}
       >
-        {destructive
-          ? '⚠ Destructive action — needs your approval'
-          : 'Needs your approval'}
+        {destructive ? (
+          <>
+            <AlertTriangle size={12} /> Destructive action — needs your approval
+          </>
+        ) : (
+          'Needs your approval'
+        )}
       </div>
       <div className="text-sm text-fg mb-2">{summary}</div>
       {isSaveTool && (

@@ -5,17 +5,26 @@ import { type WorkflowJob } from '../api/workflows'
 import { Badge, Button, LoadingState, ErrorState } from '../components/ui'
 import StepExecutionCard from '../components/jobs/StepExecutionCard'
 import JobStepsDiagram from '../components/jobs/JobStepsDiagram'
+import { Check, XCircle, RefreshCw } from '../components/ui/icons'
 
 function StatusBadge({ status }: { status: WorkflowJob['status'] }) {
   switch (status) {
     case 'completed':
-      return <Badge variant="success">✓ completed</Badge>
+      return (
+        <Badge variant="success" className="gap-1">
+          <Check size={12} /> completed
+        </Badge>
+      )
     case 'failed':
-      return <Badge variant="danger">✗ failed</Badge>
+      return (
+        <Badge variant="danger" className="gap-1">
+          <XCircle size={12} /> failed
+        </Badge>
+      )
     case 'running':
       return (
         <span className="inline-flex items-center gap-1 text-sm font-medium text-accent">
-          <span className="animate-spin">↻</span> running
+          <RefreshCw size={12} className="animate-spin" /> running
         </span>
       )
     default:
@@ -74,7 +83,8 @@ export default function JobDetailPage() {
                 .then((newJob) => navigate(`/runs/${newJob.id}`))
             }
           >
-            {rerun.isPending ? '↻ Re-running…' : '↻ Re-run'}
+            <RefreshCw size={12} />
+            {rerun.isPending ? 'Re-running…' : 'Re-run'}
           </Button>
         </div>
       </div>

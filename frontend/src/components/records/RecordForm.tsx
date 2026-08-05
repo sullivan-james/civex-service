@@ -3,6 +3,7 @@ import type { Schema } from '../../api/schemas'
 import type { FileRef } from './DynamicField'
 import { useRecords } from '../../hooks/useRecords'
 import { Button, Badge } from '../ui'
+import { ArrowUp, ArrowRight, ScanText } from '../ui/icons'
 import { DynamicField } from './DynamicField'
 import { datetimeLocalToUTC } from '../../utils/dates'
 
@@ -280,7 +281,7 @@ function FilenameExtractor({
           </code>
           {converted !== extracted && converted !== undefined && (
             <>
-              <span className="text-fg-muted">→</span>
+              <ArrowRight size={12} className="text-fg-muted" />
               <code className="bg-success-subtle border border-success-muted px-1.5 py-0.5 rounded font-mono text-success">
                 {String(converted)}
               </code>
@@ -413,8 +414,9 @@ export function RecordForm({
             >
               {s.name}
               {s.parent_id && (
-                <span className="text-xs opacity-70">
-                  ↑ {schemas.find((p) => p.id === s.parent_id)?.name}
+                <span className="inline-flex items-center gap-0.5 text-xs opacity-70">
+                  <ArrowUp size={11} />
+                  {schemas.find((p) => p.id === s.parent_id)?.name}
                 </span>
               )}
             </button>
@@ -483,14 +485,14 @@ export function RecordForm({
                       onClick={() =>
                         setExtractingField(isExtracting ? null : field.name)
                       }
-                      className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors shrink-0 ${
+                      className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-colors shrink-0 ${
                         isExtracting
                           ? 'border-accent bg-accent-subtle text-accent'
                           : 'border-border text-fg-muted hover:border-accent hover:text-accent'
                       }`}
                       title="Fill this field from an uploaded filename"
                     >
-                      ⊙ from filename
+                      <ScanText size={11} /> from filename
                     </button>
                   )}
                 </div>

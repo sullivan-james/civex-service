@@ -8,6 +8,14 @@ import {
 } from '../../hooks/useStore'
 import type { VolumeStats } from '../../api/store'
 import { Button, LoadingState, ErrorState } from '../ui'
+import {
+  AlertTriangle,
+  ChevronUp,
+  ChevronDown,
+  X,
+  Pencil,
+  ArrowRight,
+} from '../ui/icons'
 import { errorMessage } from '../../lib/errors'
 
 const isDesktop = typeof window !== 'undefined' && !!window.pywebview
@@ -122,8 +130,8 @@ function VolumeCard({
               </span>
             )}
             {vol.warning && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-attention-subtle text-attention border border-attention-muted">
-                ⚠ low space
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-attention-subtle text-attention border border-attention-muted">
+                <AlertTriangle size={10} /> low space
               </span>
             )}
           </div>
@@ -139,7 +147,7 @@ function VolumeCard({
                 className="text-xs px-1.5 py-1 rounded text-fg-muted hover:text-fg hover:bg-canvas-subtle disabled:opacity-30 disabled:cursor-not-allowed"
                 title="Move up in queue"
               >
-                ▲
+                <ChevronUp size={12} />
               </button>
               <button
                 onClick={onMoveDown}
@@ -147,14 +155,14 @@ function VolumeCard({
                 className="text-xs px-1.5 py-1 rounded text-fg-muted hover:text-fg hover:bg-canvas-subtle disabled:opacity-30 disabled:cursor-not-allowed"
                 title="Move down in queue"
               >
-                ▼
+                <ChevronDown size={12} />
               </button>
               <button
                 onClick={onRemoveFromQueue}
-                className="text-xs px-1.5 py-1 rounded text-fg-muted hover:text-danger hover:bg-canvas-subtle"
+                className="inline-flex items-center gap-1 text-xs px-1.5 py-1 rounded text-fg-muted hover:text-danger hover:bg-canvas-subtle"
                 title="Remove from write queue"
               >
-                ✕ queue
+                <X size={12} /> queue
               </button>
             </>
           )}
@@ -175,7 +183,7 @@ function VolumeCard({
             className="text-xs px-1.5 py-1 rounded text-fg-muted hover:text-accent hover:bg-canvas-subtle"
             title="Edit volume"
           >
-            ✎
+            <Pencil size={12} />
           </button>
           {confirmRemove ? (
             <>
@@ -215,7 +223,7 @@ function VolumeCard({
               className="text-xs px-1.5 py-1 rounded text-fg-muted hover:text-danger hover:bg-canvas-subtle"
               title="Delete volume from config (does not delete files)"
             >
-              ✕
+              <X size={12} />
             </button>
           )}
         </div>
@@ -495,8 +503,9 @@ export default function StorageSection() {
       </div>
 
       {hasWarning && (
-        <div className="border border-attention-muted rounded-md px-4 py-3 bg-attention-subtle text-sm text-attention">
-          ⚠ One or more volumes are running low on space. Consider adding a new
+        <div className="flex items-start gap-1.5 border border-attention-muted rounded-md px-4 py-3 bg-attention-subtle text-sm text-attention">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+          One or more volumes are running low on space. Consider adding a new
           volume or freeing disk space.
         </div>
       )}
@@ -525,9 +534,18 @@ export default function StorageSection() {
       </div>
 
       <div className="border border-border rounded-md px-4 py-3 bg-canvas-subtle text-xs text-fg-muted space-y-1">
-        <p>
-          <span className="font-semibold text-fg">Write queue:</span>{' '}
-          {queueNames.length ? queueNames.join(' → ') : 'empty'}
+        <p className="flex items-center flex-wrap gap-1">
+          <span className="font-semibold text-fg">Write queue:</span>
+          {queueNames.length ? (
+            queueNames.map((name, i) => (
+              <span key={name} className="inline-flex items-center gap-1">
+                {i > 0 && <ArrowRight size={11} />}
+                {name}
+              </span>
+            ))
+          ) : (
+            <span>empty</span>
+          )}
         </p>
         <p>
           Civex tries each volume in order. A volume is skipped if its

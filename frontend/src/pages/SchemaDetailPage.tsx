@@ -24,6 +24,15 @@ import {
   LoadingState,
   ErrorState,
 } from '../components/ui'
+import {
+  Star,
+  Pencil,
+  X,
+  ChevronUp,
+  ChevronDown,
+  GripVertical,
+  ArrowRight,
+} from '../components/ui/icons'
 
 const FIELD_TYPES = [
   'string',
@@ -944,10 +953,10 @@ export default function SchemaDetailPage() {
                         onClick={() => moveField(index, 'up')}
                         className="text-[10px] text-border hover:text-fg disabled:opacity-30 leading-none"
                       >
-                        ▲
+                        <ChevronUp size={12} />
                       </button>
-                      <span className="text-xs" title="Drag to reorder">
-                        ⠿
+                      <span title="Drag to reorder">
+                        <GripVertical size={12} />
                       </span>
                       <button
                         type="button"
@@ -959,7 +968,7 @@ export default function SchemaDetailPage() {
                         onClick={() => moveField(index, 'down')}
                         className="text-[10px] text-border hover:text-fg disabled:opacity-30 leading-none"
                       >
-                        ▼
+                        <ChevronDown size={12} />
                       </button>
                     </div>
                   </Td>
@@ -992,8 +1001,8 @@ export default function SchemaDetailPage() {
                         <Badge variant="accent">{field.type}</Badge>
                         {field.type === 'reference' &&
                           !!field.restrictions?.schema && (
-                            <span className="text-xs text-fg-muted">
-                              {'→ '}
+                            <span className="inline-flex items-center gap-1 text-xs text-fg-muted">
+                              <ArrowRight size={12} />
                               <Link
                                 to={`/schemas/${allSchemas?.find((s) => s.name === String(field.restrictions.schema))?.id ?? String(field.restrictions.schema)}`}
                                 className="text-accent hover:underline"
@@ -1059,7 +1068,14 @@ export default function SchemaDetailPage() {
                                 : 'Add to display fields'
                             }
                           >
-                            ★
+                            <Star
+                              size={14}
+                              fill={
+                                schema.display_fields.includes(field.name)
+                                  ? 'currentColor'
+                                  : 'none'
+                              }
+                            />
                           </button>
                           {schema.display_fields.length > 1 &&
                             schema.display_fields.includes(field.name) && (
@@ -1077,7 +1093,7 @@ export default function SchemaDetailPage() {
                                   }
                                   className="text-[9px] text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
                                 >
-                                  ▲
+                                  <ChevronUp size={10} />
                                 </button>
                                 <button
                                   type="button"
@@ -1094,7 +1110,7 @@ export default function SchemaDetailPage() {
                                   }
                                   className="text-[9px] text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
                                 >
-                                  ▼
+                                  <ChevronDown size={10} />
                                 </button>
                               </span>
                             )}
@@ -1106,7 +1122,7 @@ export default function SchemaDetailPage() {
                             className="text-xs text-fg-muted hover:text-accent transition-colors"
                             title="Edit field"
                           >
-                            ✎
+                            <Pencil size={14} />
                           </button>
                           <button
                             onClick={() => {
@@ -1116,7 +1132,7 @@ export default function SchemaDetailPage() {
                             className="text-xs text-fg-muted hover:text-danger transition-colors"
                             title="Remove field"
                           >
-                            ✕
+                            <X size={14} />
                           </button>
                         </>
                       )}
