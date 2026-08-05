@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useLicense, usePolicies } from '../hooks/useLegal'
 import { LoadingState, ErrorState } from '../components/ui'
+import { errorMessage } from '../lib/errors'
 
 function LicenseSection() {
   const { data, isLoading, error } = useLicense()
@@ -9,7 +10,9 @@ function LicenseSection() {
   if (isLoading) return <LoadingState />
   if (error || !data)
     return (
-      <ErrorState message={error ? String(error) : 'Failed to load license'} />
+      <ErrorState
+        message={error ? errorMessage(error) : 'Failed to load license'}
+      />
     )
 
   return (
@@ -39,7 +42,9 @@ function PoliciesSection() {
   if (isLoading) return <LoadingState />
   if (error || !policies)
     return (
-      <ErrorState message={error ? String(error) : 'Failed to load policies'} />
+      <ErrorState
+        message={error ? errorMessage(error) : 'Failed to load policies'}
+      />
     )
 
   if (policies.length === 0) {

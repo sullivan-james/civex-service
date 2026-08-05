@@ -16,6 +16,7 @@ import {
   Tr,
 } from '../components/ui'
 import { pluralise } from '../lib/utils'
+import { errorMessage } from '../lib/errors'
 
 function CreateSchemaModal({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('')
@@ -89,7 +90,9 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
             </select>
           </div>
           {create.error && (
-            <p className="text-xs text-[#d1242f]">{String(create.error)}</p>
+            <p className="text-xs text-[#d1242f]">
+              {errorMessage(create.error)}
+            </p>
           )}
           <div className="flex justify-end gap-2 mt-1">
             <Button type="button" variant="default" onClick={onClose}>
@@ -125,7 +128,7 @@ export default function SchemasPage() {
       />
 
       {isLoading && <LoadingState />}
-      {error && <ErrorState message={String(error)} />}
+      {error && <ErrorState message={errorMessage(error)} />}
 
       {data?.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center">

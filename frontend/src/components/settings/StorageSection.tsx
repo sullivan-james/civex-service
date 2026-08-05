@@ -8,6 +8,7 @@ import {
 } from '../../hooks/useStore'
 import type { VolumeStats } from '../../api/store'
 import { Button, LoadingState, ErrorState } from '../ui'
+import { errorMessage } from '../../lib/errors'
 
 const isDesktop = typeof window !== 'undefined' && !!window.pywebview
 
@@ -325,7 +326,7 @@ function VolumeCard({
           </div>
           {updateVolume.error && (
             <p className="text-xs text-[#d1242f]">
-              {String(updateVolume.error)}
+              {errorMessage(updateVolume.error)}
             </p>
           )}
           <div className="flex gap-2">
@@ -422,7 +423,9 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
         </div>
       </div>
       {addVolume.error && (
-        <p className="text-xs text-[#d1242f]">{String(addVolume.error)}</p>
+        <p className="text-xs text-[#d1242f]">
+          {errorMessage(addVolume.error)}
+        </p>
       )}
       <div className="flex gap-2">
         <Button
@@ -449,7 +452,9 @@ export default function StorageSection() {
   if (isLoading) return <LoadingState />
   if (error || !volumes)
     return (
-      <ErrorState message={error ? String(error) : 'Failed to load volumes'} />
+      <ErrorState
+        message={error ? errorMessage(error) : 'Failed to load volumes'}
+      />
     )
 
   const queue = volumes

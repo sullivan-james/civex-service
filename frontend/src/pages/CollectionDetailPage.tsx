@@ -28,6 +28,7 @@ import {
 } from '../components/ui'
 import { RecordForm } from '../components/records/RecordForm'
 import { formatDate } from '../lib/utils'
+import { errorMessage } from '../lib/errors'
 import type { Schema } from '../api/schemas'
 
 const PAGE_SIZE = 50
@@ -91,7 +92,9 @@ export default function CollectionDetailPage() {
     return (
       <ErrorState
         message={
-          collectionError ? String(collectionError) : 'Collection not found'
+          collectionError
+            ? errorMessage(collectionError)
+            : 'Collection not found'
         }
       />
     )
@@ -197,7 +200,7 @@ export default function CollectionDetailPage() {
           />
           {updateCollection.error && (
             <span className="text-xs text-[#d1242f]">
-              {String(updateCollection.error)}
+              {errorMessage(updateCollection.error)}
             </span>
           )}
           <Button
@@ -333,7 +336,7 @@ export default function CollectionDetailPage() {
           onSubmit={handleAddRecord}
           onCancel={() => setAddingRecord(false)}
           isPending={createRecord.isPending}
-          error={createRecord.error ? String(createRecord.error) : null}
+          error={createRecord.error ? errorMessage(createRecord.error) : null}
         />
       )}
 
@@ -341,7 +344,7 @@ export default function CollectionDetailPage() {
       {recordsLoading ? (
         <LoadingState message="Loading records…" />
       ) : recordsError ? (
-        <ErrorState message={String(recordsError)} />
+        <ErrorState message={errorMessage(recordsError)} />
       ) : records.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <svg

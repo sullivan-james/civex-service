@@ -7,6 +7,7 @@ import {
   useTeardownDockerDb,
 } from '../../hooks/useDb'
 import { Button, LoadingState, ErrorState } from '../ui'
+import { errorMessage } from '../../lib/errors'
 
 const inputCls =
   'border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] w-full font-mono'
@@ -54,7 +55,7 @@ export default function DatabaseSection() {
   if (error || !status)
     return (
       <ErrorState
-        message={error ? String(error) : 'Failed to load database status'}
+        message={error ? errorMessage(error) : 'Failed to load database status'}
       />
     )
 
@@ -114,7 +115,7 @@ export default function DatabaseSection() {
           </Button>
           {migrate.error && (
             <span className="text-xs text-[#d1242f]">
-              {String(migrate.error)}
+              {errorMessage(migrate.error)}
             </span>
           )}
         </div>
@@ -143,7 +144,9 @@ export default function DatabaseSection() {
               autoFocus
             />
             {setUrl.error && (
-              <p className="text-xs text-[#d1242f]">{String(setUrl.error)}</p>
+              <p className="text-xs text-[#d1242f]">
+                {errorMessage(setUrl.error)}
+              </p>
             )}
             <div className="flex gap-2">
               <Button
@@ -188,7 +191,7 @@ export default function DatabaseSection() {
             </p>
             {setupDocker.error && (
               <p className="text-xs text-[#d1242f]">
-                {String(setupDocker.error)}
+                {errorMessage(setupDocker.error)}
               </p>
             )}
             <div className="flex gap-2">
@@ -233,7 +236,7 @@ export default function DatabaseSection() {
             </div>
             {teardownDocker.error && (
               <p className="text-xs text-[#d1242f]">
-                {String(teardownDocker.error)}
+                {errorMessage(teardownDocker.error)}
               </p>
             )}
           </>
@@ -245,7 +248,7 @@ export default function DatabaseSection() {
             </p>
             {setupDocker.error && (
               <p className="text-xs text-[#d1242f]">
-                {String(setupDocker.error)}
+                {errorMessage(setupDocker.error)}
               </p>
             )}
             <Button
