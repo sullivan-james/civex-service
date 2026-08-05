@@ -2,7 +2,7 @@ import { useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { usePluginSource, useSavePlugin } from '../../hooks/usePlugins'
-import { Button } from '../ui'
+import { Button, Modal, ModalBody, ModalFooter, ModalHeader } from '../ui'
 
 const NEW_PLUGIN_TEMPLATE = `#!/usr/bin/env python3
 # /// script
@@ -70,92 +70,74 @@ export function PluginEditor({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div
-        className="bg-white rounded-lg shadow-xl w-full max-w-3xl flex flex-col"
-        style={{ height: '90vh' }}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <h2 className="text-base font-semibold text-fg">
-            {isNew ? 'New plugin' : `Edit — ${initialFilename}`}
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-fg-muted hover:text-fg text-xl leading-none"
-          >
-            ×
-          </button>
-        </div>
+    <Modal onClose={onClose} size="xl" className="h-[90vh]">
+      <ModalHeader onClose={onClose}>
+        {isNew ? 'New plugin' : `Edit — ${initialFilename}`}
+      </ModalHeader>
 
-        {/* Body */}
-        <div className="flex flex-col gap-3 p-5 flex-1 min-h-0">
-          {isNew && (
-            <label className="block">
-              <span className="text-xs font-medium text-fg">
-                Plugin filename
-              </span>
-              <div className="flex items-center gap-1 mt-1">
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) =>
-                    setName(
-                      e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''),
-                    )
-                  }
-                  placeholder="my_plugin"
-                  className="border border-border rounded-md px-3 py-1.5 text-sm w-56 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
-                />
-                <span className="text-sm text-fg-muted">.py</span>
-              </div>
-              <p className="text-xs text-fg-muted mt-1">
-                Lowercase letters, digits and underscores only.
-              </p>
-            </label>
-          )}
-
-          {isLoading ? (
-            <div className="flex-1 flex items-center justify-center text-sm text-fg-muted">
-              Loading…
+      <ModalBody className="flex flex-col gap-3">
+        {isNew && (
+          <label className="block">
+            <span className="text-xs font-medium text-fg">Plugin filename</span>
+            <div className="flex items-center gap-1 mt-1">
+              <input
+                type="text"
+                value={name}
+                onChange={(e) =>
+                  setName(
+                    e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''),
+                  )
+                }
+                placeholder="my_plugin"
+                className="border border-border rounded-md px-3 py-1.5 text-sm w-56 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+              />
+              <span className="text-sm text-fg-muted">.py</span>
             </div>
-          ) : (
-            <div className="flex-1 flex flex-col min-h-0">
-              <span className="text-xs font-medium text-fg mb-1">Python</span>
-              <div className="flex-1 min-h-0 border border-border rounded-md overflow-auto bg-canvas-subtle">
-                <CodeMirror
-                  value={code ?? ''}
-                  height="100%"
-                  extensions={[python()]}
-                  onChange={(value) => setCode(value)}
-                  basicSetup={{ tabSize: 4 }}
-                  style={{ fontSize: '0.75rem', height: '100%' }}
-                />
-              </div>
+            <p className="text-xs text-fg-muted mt-1">
+              Lowercase letters, digits and underscores only.
+            </p>
+          </label>
+        )}
+
+        {isLoading ? (
+          <div className="flex-1 flex items-center justify-center text-sm text-fg-muted">
+            Loading…
+          </div>
+        ) : (
+          <div className="flex-1 flex flex-col min-h-0">
+            <span className="text-xs font-medium text-fg mb-1">Python</span>
+            <div className="flex-1 min-h-0 border border-border rounded-md overflow-auto bg-canvas-subtle">
+              <CodeMirror
+                value={code ?? ''}
+                height="100%"
+                extensions={[python()]}
+                onChange={(value) => setCode(value)}
+                basicSetup={{ tabSize: 4 }}
+                style={{ fontSize: '0.75rem', height: '100%' }}
+              />
             </div>
-          )}
+          </div>
+        )}
 
-          {saveError && (
-            <pre className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 whitespace-pre-wrap">
-              {saveError}
-            </pre>
-          )}
-        </div>
+        {saveError && (
+          <pre className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 whitespace-pre-wrap">
+            {saveError}
+          </pre>
+        )}
+      </ModalBody>
 
-        {/* Footer */}
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
-          <Button variant="default" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={handleSave}
-            disabled={save.isPending || !name.trim()}
-          >
-            {save.isPending ? 'Saving…' : 'Save'}
-          </Button>
-        </div>
-      </div>
-    </div>
+      <ModalFooter>
+        <Button variant="default" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          onClick={handleSave}
+          disabled={save.isPending || !name.trim()}
+        >
+          {save.isPending ? 'Saving…' : 'Save'}
+        </Button>
+      </ModalFooter>
+    </Modal>
   )
 }
