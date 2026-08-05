@@ -57,9 +57,7 @@ export default function JobDetailPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-fg">
-            {job.workflow_name}
-          </h1>
+          <h1 className="text-xl font-semibold text-fg">{job.workflow_name}</h1>
           <p className="text-sm text-fg-muted mt-1 font-mono">{job.id}</p>
         </div>
         <div className="flex items-center gap-2">

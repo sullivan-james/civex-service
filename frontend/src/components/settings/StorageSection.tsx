@@ -113,19 +113,16 @@ function VolumeCard({
             <span className="font-semibold text-sm text-fg">{vol.name}</span>
             {vol.in_queue && (
               <span className="text-xs font-medium px-2 py-1 rounded-full bg-success-subtle text-success border border-success-muted">
-
                 queue #{queueIndex + 1}
               </span>
             )}
             {!vol.available && (
               <span className="text-xs font-medium px-2 py-1 rounded-full bg-border-muted text-fg-muted border border-border">
-
                 unavailable
               </span>
             )}
             {vol.warning && (
               <span className="text-xs font-medium px-2 py-1 rounded-full bg-attention-subtle text-attention border border-attention-muted">
-
                 ⚠ low space
               </span>
             )}
@@ -227,7 +224,6 @@ function VolumeCard({
       {removeError && (
         <div className="px-4 pb-3">
           <p className="text-xs text-danger bg-danger-subtle border border-danger-muted rounded-md px-3 py-2">
-
             {removeError}
           </p>
         </div>
@@ -315,7 +311,6 @@ function VolumeCard({
                 disabled={clearAlloc}
               />
               <label className="flex items-center gap-2 text-xs text-fg-muted whitespace-nowrap cursor-pointer select-none">
-
                 <input
                   type="checkbox"
                   checked={clearAlloc}
@@ -488,7 +483,6 @@ export default function StorageSection() {
         <div>
           <h2 className="text-lg font-semibold text-fg">Storage</h2>
           <p className="text-sm text-fg-muted mt-1">
-
             Configure where civex stores files. New uploads go to the first
             available volume in the write queue.
           </p>
