@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Check } from '../ui/icons'
 
 export default function CodeBlock({
   lang,
@@ -20,9 +21,15 @@ export default function CodeBlock({
         <span className="text-[#656d76]">{lang}</span>
         <button
           onClick={copy}
-          className="text-[#656d76] hover:text-[#1f2328] transition-colors"
+          className="inline-flex items-center gap-1 text-[#656d76] hover:text-[#1f2328] transition-colors"
         >
-          {copied ? '✓ Copied' : 'Copy'}
+          {copied ? (
+            <>
+              <Check size={12} /> Copied
+            </>
+          ) : (
+            'Copy'
+          )}
         </button>
       </div>
       <pre className="p-3 whitespace-pre-wrap break-words">{code}</pre>

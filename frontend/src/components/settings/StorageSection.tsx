@@ -8,6 +8,14 @@ import {
 } from '../../hooks/useStore'
 import type { VolumeStats } from '../../api/store'
 import { Button, LoadingState, ErrorState } from '../ui'
+import {
+  AlertTriangle,
+  ChevronUp,
+  ChevronDown,
+  X,
+  Pencil,
+  ArrowRight,
+} from '../ui/icons'
 import { errorMessage } from '../../lib/errors'
 
 const isDesktop = typeof window !== 'undefined' && !!window.pywebview
@@ -124,8 +132,8 @@ function VolumeCard({
               </span>
             )}
             {vol.warning && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]">
-                ⚠ low space
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]">
+                <AlertTriangle size={10} /> low space
               </span>
             )}
           </div>
@@ -140,25 +148,25 @@ function VolumeCard({
               <button
                 onClick={onMoveUp}
                 disabled={queueIndex === 0}
-                className="text-xs px-1.5 py-1 rounded text-[#656d76] hover:text-[#1f2328] hover:bg-[#f6f8fa] disabled:opacity-30 disabled:cursor-not-allowed"
+                className="px-1.5 py-1 rounded text-[#656d76] hover:text-[#1f2328] hover:bg-[#f6f8fa] disabled:opacity-30 disabled:cursor-not-allowed"
                 title="Move up in queue"
               >
-                ▲
+                <ChevronUp size={12} />
               </button>
               <button
                 onClick={onMoveDown}
                 disabled={queueIndex === queueLength - 1}
-                className="text-xs px-1.5 py-1 rounded text-[#656d76] hover:text-[#1f2328] hover:bg-[#f6f8fa] disabled:opacity-30 disabled:cursor-not-allowed"
+                className="px-1.5 py-1 rounded text-[#656d76] hover:text-[#1f2328] hover:bg-[#f6f8fa] disabled:opacity-30 disabled:cursor-not-allowed"
                 title="Move down in queue"
               >
-                ▼
+                <ChevronDown size={12} />
               </button>
               <button
                 onClick={onRemoveFromQueue}
-                className="text-xs px-1.5 py-1 rounded text-[#656d76] hover:text-[#d1242f] hover:bg-[#f6f8fa]"
+                className="inline-flex items-center gap-1 text-xs px-1.5 py-1 rounded text-[#656d76] hover:text-[#d1242f] hover:bg-[#f6f8fa]"
                 title="Remove from write queue"
               >
-                ✕ queue
+                <X size={12} /> queue
               </button>
             </>
           )}
@@ -176,10 +184,10 @@ function VolumeCard({
               setEditing((e) => !e)
               setConfirmRemove(false)
             }}
-            className="text-xs px-1.5 py-1 rounded text-[#656d76] hover:text-[#0969da] hover:bg-[#f6f8fa]"
+            className="px-1.5 py-1 rounded text-[#656d76] hover:text-[#0969da] hover:bg-[#f6f8fa]"
             title="Edit volume"
           >
-            ✎
+            <Pencil size={12} />
           </button>
           {confirmRemove ? (
             <>
@@ -216,10 +224,10 @@ function VolumeCard({
                 setEditing(false)
                 setRemoveError(null)
               }}
-              className="text-xs px-1.5 py-1 rounded text-[#656d76] hover:text-[#d1242f] hover:bg-[#f6f8fa]"
+              className="px-1.5 py-1 rounded text-[#656d76] hover:text-[#d1242f] hover:bg-[#f6f8fa]"
               title="Delete volume from config (does not delete files)"
             >
-              ✕
+              <X size={12} />
             </button>
           )}
         </div>
@@ -501,8 +509,9 @@ export default function StorageSection() {
       </div>
 
       {hasWarning && (
-        <div className="border border-[#d4a72c] rounded-md px-4 py-3 bg-[#fff8c5] text-sm text-[#9a6700]">
-          ⚠ One or more volumes are running low on space. Consider adding a new
+        <div className="flex items-start gap-1.5 border border-[#d4a72c] rounded-md px-4 py-3 bg-[#fff8c5] text-sm text-[#9a6700]">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+          One or more volumes are running low on space. Consider adding a new
           volume or freeing disk space.
         </div>
       )}
@@ -533,9 +542,18 @@ export default function StorageSection() {
       </div>
 
       <div className="border border-[#d0d7de] rounded-md px-4 py-3 bg-[#f6f8fa] text-xs text-[#656d76] space-y-1">
-        <p>
-          <span className="font-semibold text-[#1f2328]">Write queue:</span>{' '}
-          {queueNames.length ? queueNames.join(' → ') : 'empty'}
+        <p className="flex items-center flex-wrap gap-1">
+          <span className="font-semibold text-[#1f2328]">Write queue:</span>
+          {queueNames.length ? (
+            queueNames.map((name, i) => (
+              <span key={name} className="inline-flex items-center gap-1">
+                {i > 0 && <ArrowRight size={11} />}
+                {name}
+              </span>
+            ))
+          ) : (
+            <span>empty</span>
+          )}
         </p>
         <p>
           Civex tries each volume in order. A volume is skipped if its

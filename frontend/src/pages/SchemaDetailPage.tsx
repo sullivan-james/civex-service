@@ -24,6 +24,15 @@ import {
   LoadingState,
   ErrorState,
 } from '../components/ui'
+import {
+  Star,
+  Pencil,
+  X,
+  ChevronUp,
+  ChevronDown,
+  GripVertical,
+  ArrowRight,
+} from '../components/ui/icons'
 
 const FIELD_TYPES = [
   'string',
@@ -944,12 +953,12 @@ export default function SchemaDetailPage() {
                         title="Move up"
                         disabled={index === 0 || reorderFields.isPending}
                         onClick={() => moveField(index, 'up')}
-                        className="text-[10px] text-[#d0d7de] hover:text-[#1f2328] disabled:opacity-30 leading-none"
+                        className="text-[#d0d7de] hover:text-[#1f2328] disabled:opacity-30 leading-none"
                       >
-                        ▲
+                        <ChevronUp size={12} />
                       </button>
-                      <span className="text-xs" title="Drag to reorder">
-                        ⠿
+                      <span title="Drag to reorder">
+                        <GripVertical size={12} />
                       </span>
                       <button
                         type="button"
@@ -959,9 +968,9 @@ export default function SchemaDetailPage() {
                           reorderFields.isPending
                         }
                         onClick={() => moveField(index, 'down')}
-                        className="text-[10px] text-[#d0d7de] hover:text-[#1f2328] disabled:opacity-30 leading-none"
+                        className="text-[#d0d7de] hover:text-[#1f2328] disabled:opacity-30 leading-none"
                       >
-                        ▼
+                        <ChevronDown size={12} />
                       </button>
                     </div>
                   </Td>
@@ -994,8 +1003,8 @@ export default function SchemaDetailPage() {
                         <Badge variant="accent">{field.type}</Badge>
                         {field.type === 'reference' &&
                           !!field.restrictions?.schema && (
-                            <span className="text-xs text-[#656d76]">
-                              {'→ '}
+                            <span className="inline-flex items-center gap-1 text-xs text-[#656d76]">
+                              <ArrowRight size={12} />
                               <Link
                                 to={`/schemas/${allSchemas?.find((s) => s.name === String(field.restrictions.schema))?.id ?? String(field.restrictions.schema)}`}
                                 className="text-[#0969da] hover:underline"
@@ -1054,14 +1063,21 @@ export default function SchemaDetailPage() {
                         <>
                           <button
                             onClick={() => toggleDisplayField(field.name)}
-                            className={`text-xs transition-colors ${schema.display_fields.includes(field.name) ? 'text-[#9a6700]' : 'text-[#d0d7de] hover:text-[#9a6700]'}`}
+                            className={`transition-colors ${schema.display_fields.includes(field.name) ? 'text-[#9a6700]' : 'text-[#d0d7de] hover:text-[#9a6700]'}`}
                             title={
                               schema.display_fields.includes(field.name)
                                 ? 'Remove from display fields'
                                 : 'Add to display fields'
                             }
                           >
-                            ★
+                            <Star
+                              size={14}
+                              fill={
+                                schema.display_fields.includes(field.name)
+                                  ? 'currentColor'
+                                  : 'none'
+                              }
+                            />
                           </button>
                           {schema.display_fields.length > 1 &&
                             schema.display_fields.includes(field.name) && (
@@ -1077,9 +1093,9 @@ export default function SchemaDetailPage() {
                                   onClick={() =>
                                     moveDisplayField(field.name, 'up')
                                   }
-                                  className="text-[9px] text-[#9a6700] hover:text-[#7d5700] disabled:opacity-30 leading-none"
+                                  className="text-[#9a6700] hover:text-[#7d5700] disabled:opacity-30 leading-none"
                                 >
-                                  ▲
+                                  <ChevronUp size={10} />
                                 </button>
                                 <button
                                   type="button"
@@ -1094,9 +1110,9 @@ export default function SchemaDetailPage() {
                                   onClick={() =>
                                     moveDisplayField(field.name, 'down')
                                   }
-                                  className="text-[9px] text-[#9a6700] hover:text-[#7d5700] disabled:opacity-30 leading-none"
+                                  className="text-[#9a6700] hover:text-[#7d5700] disabled:opacity-30 leading-none"
                                 >
-                                  ▼
+                                  <ChevronDown size={10} />
                                 </button>
                               </span>
                             )}
@@ -1105,20 +1121,20 @@ export default function SchemaDetailPage() {
                               setConfirmDeleteField(null)
                               setEditingField(field.name)
                             }}
-                            className="text-xs text-[#656d76] hover:text-[#0969da] transition-colors"
+                            className="text-[#656d76] hover:text-[#0969da] transition-colors"
                             title="Edit field"
                           >
-                            ✎
+                            <Pencil size={14} />
                           </button>
                           <button
                             onClick={() => {
                               setEditingField(null)
                               setConfirmDeleteField(field.name)
                             }}
-                            className="text-xs text-[#656d76] hover:text-[#d1242f] transition-colors"
+                            className="text-[#656d76] hover:text-[#d1242f] transition-colors"
                             title="Remove field"
                           >
-                            ✕
+                            <X size={14} />
                           </button>
                         </>
                       )}

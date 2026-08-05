@@ -7,6 +7,7 @@ import {
   type PresetProviderId,
   aiApi,
 } from '../../api/ai'
+import { Check, RotateCcw, ArrowRight } from '../ui/icons'
 
 function detectPreset(cfg: AiConfig | null): PresetProviderId {
   if (!cfg?.configured) return 'groq'
@@ -251,8 +252,8 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           AI Assistant Settings
         </p>
         {cfg?.configured ? (
-          <p className="text-xs text-[#3fb950]">
-            ✓{' '}
+          <p className="inline-flex items-center gap-1 text-xs text-[#3fb950]">
+            <Check size={12} />
             {cfg.provider === 'anthropic'
               ? 'Claude'
               : cfg.base_url?.includes('groq')
@@ -373,11 +374,13 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                 </svg>
                 Waiting for login…
               </>
+            ) : cfg?.configured && detectPreset(cfg) === 'openrouter' ? (
+              <>
+                <RotateCcw size={14} /> Reconnect with OpenRouter
+              </>
             ) : (
               <>
-                {cfg?.configured && detectPreset(cfg) === 'openrouter'
-                  ? '↺ Reconnect with OpenRouter'
-                  : '→ Login with OpenRouter'}
+                <ArrowRight size={14} /> Login with OpenRouter
               </>
             )}
           </button>
@@ -551,7 +554,11 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
       </div>
 
       {error && <p className="text-xs text-[#d1242f]">{error}</p>}
-      {success && <p className="text-xs text-[#3fb950]">✓ Saved</p>}
+      {success && (
+        <p className="inline-flex items-center gap-1 text-xs text-[#3fb950]">
+          <Check size={12} /> Saved
+        </p>
+      )}
 
       <button
         onClick={handleSave}

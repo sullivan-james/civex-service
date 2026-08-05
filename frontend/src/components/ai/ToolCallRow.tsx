@@ -8,6 +8,14 @@ import {
   isSaveToolName,
   parseResult,
 } from './proposals'
+import {
+  Settings,
+  ChevronUp,
+  ChevronDown,
+  ArrowRight,
+  Check,
+  ArrowDown,
+} from '../ui/icons'
 
 // Display only. The approve/cancel action lives in ApprovalBar pinned above
 // the input, so it is always the last thing shown (chronological).
@@ -25,9 +33,11 @@ export default function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center gap-2 px-3 py-2 text-left text-[#656d76] hover:bg-[#eaeef2] transition-colors"
       >
-        <span>⚙</span>
+        <Settings size={12} />
         <span className="font-mono">{entry.name}</span>
-        <span className="ml-auto text-[#adbac7]">{open ? '▲' : '▼'}</span>
+        <span className="ml-auto text-[#adbac7]">
+          {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        </span>
       </button>
 
       {open && (
@@ -59,13 +69,16 @@ export default function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 
           {/* Resolved outcome (persisted, survives reload) */}
           {entry.outcome === 'approved' && (
-            <div className="mt-2 rounded px-2 py-1 bg-[#dafbe1] text-[#1a7f37]">
+            <div className="flex items-center gap-1 mt-2 rounded px-2 py-1 bg-[#dafbe1] text-[#1a7f37]">
               {entry.name === 'save_workflow' && (
-                <Link to="/workflows" className="underline mr-2">
-                  View in Workflows →
+                <Link
+                  to="/workflows"
+                  className="inline-flex items-center gap-1 underline mr-2"
+                >
+                  View in Workflows <ArrowRight size={12} />
                 </Link>
               )}
-              ✓ {entry.outcomeLabel ?? 'Done'}
+              <Check size={12} /> {entry.outcomeLabel ?? 'Done'}
             </div>
           )}
           {entry.outcome === 'cancelled' && (
@@ -81,8 +94,8 @@ export default function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 
           {/* Awaiting resolution — the buttons are in the bar below the messages */}
           {isPendingApproval(entry) && (
-            <div className="mt-2 text-[#9a6700]">
-              Awaiting your approval below ↓
+            <div className="flex items-center gap-1 mt-2 text-[#9a6700]">
+              Awaiting your approval below <ArrowDown size={12} />
             </div>
           )}
 

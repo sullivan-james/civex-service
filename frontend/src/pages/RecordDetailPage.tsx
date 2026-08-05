@@ -23,6 +23,7 @@ import {
   LoadingState,
   ErrorState,
 } from '../components/ui'
+import { X, Play } from '../components/ui/icons'
 import { DynamicField } from '../components/records/DynamicField'
 import { RecordForm } from '../components/records/RecordForm'
 import { formatDate } from '../lib/utils'
@@ -168,10 +169,10 @@ function ChildTable({
                 ) : (
                   <button
                     onClick={() => setConfirmId(r.id)}
-                    className="text-xs text-[#656d76] hover:text-[#d1242f] transition-colors"
+                    className="text-[#656d76] hover:text-[#d1242f] transition-colors"
                     title="Delete record"
                   >
-                    ✕
+                    <X size={14} />
                   </button>
                 )}
               </Td>
@@ -498,7 +499,7 @@ export default function RecordDetailPage() {
                 onClick={() => setRunWorkflow(wf.name)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md hover:bg-[#f6f8fa] hover:border-[#0969da] transition-colors text-[#1f2328]"
               >
-                <span>▶</span>
+                <Play size={12} />
                 <span className="font-mono text-xs">{wf.name}</span>
                 {wf.inputs &&
                   Object.values(wf.inputs).some((i) => i.type === 'files') && (

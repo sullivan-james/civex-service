@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { useJobsPaged, useRerunJob } from '../../hooks/useWorkflows'
 import { type WorkflowJob } from '../../api/workflows'
 import { LoadingState, ErrorState, Badge, Button } from '../ui'
+import { Check, XCircle, RefreshCw } from '../ui/icons'
 
 const PAGE_SIZES = [25, 50, 100]
 
@@ -16,13 +17,21 @@ function duration(job: WorkflowJob): string {
 function StatusBadge({ status }: { status: WorkflowJob['status'] }) {
   switch (status) {
     case 'completed':
-      return <Badge variant="success">✓ completed</Badge>
+      return (
+        <Badge variant="success" className="gap-1">
+          <Check size={12} /> completed
+        </Badge>
+      )
     case 'failed':
-      return <Badge variant="danger">✗ failed</Badge>
+      return (
+        <Badge variant="danger" className="gap-1">
+          <XCircle size={12} /> failed
+        </Badge>
+      )
     case 'running':
       return (
         <span className="inline-flex items-center gap-1 text-xs font-medium text-[#0969da]">
-          <span className="animate-spin">↻</span> running
+          <RefreshCw size={12} className="animate-spin" /> running
         </span>
       )
     default:
@@ -248,8 +257,9 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
                     variant="default"
                     disabled={rerun.isPending}
                     onClick={() => rerun.mutate(job.id)}
+                    title="Rerun"
                   >
-                    ↻
+                    <RefreshCw size={12} />
                   </Button>
                 </td>
               </tr>

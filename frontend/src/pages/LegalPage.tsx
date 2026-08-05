@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useLicense, usePolicies } from '../hooks/useLegal'
 import { LoadingState, ErrorState } from '../components/ui'
+import { ChevronUp, ChevronDown } from '../components/ui/icons'
 import { errorMessage } from '../lib/errors'
 
 function LicenseSection() {
@@ -73,7 +74,9 @@ function PoliciesSection() {
               <span className="text-sm font-medium text-[#1f2328]">
                 {p.title}
               </span>
-              <span className="text-xs text-[#656d76]">{open ? '▲' : '▼'}</span>
+              <span className="text-[#656d76]">
+                {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </span>
             </button>
             {open && (
               <div className="border-t border-[#d0d7de] px-4 py-3 bg-[#f6f8fa]">

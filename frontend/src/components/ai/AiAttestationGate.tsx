@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import AiPanel from './AiPanel'
+import { Sparkles } from '../ui/icons'
 
 // Bump this if the attestation's substance changes materially (e.g. a new
 // data-sharing risk) -- a new key means everyone sees it again once, rather
@@ -49,7 +50,7 @@ export default function AiAttestationGate({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
       <div className="max-w-md w-full rounded-lg bg-white shadow-xl p-6 space-y-4">
         <div className="flex items-center gap-2">
-          <span className="text-[#0969da] text-xl">✦</span>
+          <Sparkles size={18} className="text-[#0969da]" />
           <h2 className="text-base font-semibold text-[#1f2328]">
             Before you use the AI assistant
           </h2>

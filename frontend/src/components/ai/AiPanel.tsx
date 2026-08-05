@@ -14,6 +14,7 @@ import HistoryPane from './HistoryPane'
 import SettingsPane from './SettingsPane'
 import ToolCallRow from './ToolCallRow'
 import { isPendingApproval } from './proposals'
+import { Sparkles } from '../ui/icons'
 
 // ---------------------------------------------------------------------------
 // Session persistence helpers
@@ -186,7 +187,7 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
         <div
           className={`flex items-center gap-2 w-full ${fullscreen ? 'max-w-3xl mx-auto' : ''}`}
         >
-          <span className="text-[#0969da]">✦</span>
+          <Sparkles size={14} className="text-[#0969da]" />
           <span className="text-sm font-semibold text-[#1f2328]">civex AI</span>
           <div className="flex-1" />
           {/* History button */}
@@ -278,7 +279,7 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
         >
           {entries.length === 0 && (
             <div className="text-center py-12 text-[#656d76] text-sm space-y-3">
-              <div className="text-3xl">✦</div>
+              <Sparkles size={28} className="mx-auto" />
               <p className="font-medium text-[#1f2328]">Ask me anything</p>
               <div className="text-xs space-y-1.5 text-left max-w-[280px] mx-auto">
                 <p className="text-[#656d76]">Try:</p>

@@ -17,6 +17,7 @@ import {
   useUploadPlugin,
 } from '../hooks/usePlugins'
 import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
+import { ChevronUp, ChevronDown } from '../components/ui/icons'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import { ContainerPluginEditor } from '../components/workflows/ContainerPluginEditor'
 import { useContainerPlugins } from '../hooks/useContainerPlugins'
@@ -767,8 +768,12 @@ export default function WorkflowsPage() {
                           {p.builtin ? 'built-in' : 'user'}
                         </span>
                       </td>
-                      <td className="py-2 px-3 text-[#656d76] text-xs">
-                        {isExpanded ? '▲' : '▼'}
+                      <td className="py-2 px-3 text-[#656d76]">
+                        {isExpanded ? (
+                          <ChevronUp size={12} />
+                        ) : (
+                          <ChevronDown size={12} />
+                        )}
                       </td>
                       <td className="py-2 px-3 text-right">
                         {p.filename && (

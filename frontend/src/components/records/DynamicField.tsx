@@ -3,6 +3,7 @@ import { api } from '../../api/client'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import type { Field } from '../../api/schemas'
 import { utcToDatetimeLocal, datetimeLocalToUTC } from '../../utils/dates'
+import { Paperclip, X } from '../ui/icons'
 
 export interface FileRef {
   sha256: string
@@ -82,7 +83,9 @@ function FileField({ field, value, onChange }: Props) {
     <div className="space-y-1">
       {ref && (
         <div className="flex items-center gap-2 text-xs text-[#656d76]">
-          <span>📎 {ref.filename}</span>
+          <span className="inline-flex items-center gap-1">
+            <Paperclip size={12} /> {ref.filename}
+          </span>
           <span>({(ref.size / 1024).toFixed(1)} KB)</span>
           <a
             href={`/api/files/${ref.sha256}`}
@@ -160,7 +163,7 @@ function FileListField({ field, value, onChange }: Props) {
             onClick={() => remove(ref.sha256)}
             className="text-[#d1242f] hover:underline shrink-0"
           >
-            ✕
+            <X size={12} />
           </button>
         </div>
       ))}
