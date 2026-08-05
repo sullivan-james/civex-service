@@ -3,6 +3,7 @@ import { api } from '../../api/client'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import type { Field } from '../../api/schemas'
 import { utcToDatetimeLocal, datetimeLocalToUTC } from '../../utils/dates'
+import { Input, Select, Checkbox } from '../ui'
 
 export interface FileRef {
   sha256: string
@@ -15,9 +16,6 @@ interface Props {
   value: unknown
   onChange: (value: unknown) => void
 }
-
-const inputClass =
-  'w-full border border-border rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent'
 
 function fileAccept(
   restrictions: Record<string, unknown> | undefined,
@@ -227,7 +225,7 @@ function ReferenceField({ field, value, onChange }: Props) {
 
   return (
     <div className="relative">
-      <input
+      <Input
         type="text"
         value={
           selectedId
@@ -246,7 +244,7 @@ function ReferenceField({ field, value, onChange }: Props) {
         placeholder={
           targetSchema ? `Search ${targetSchema} records…` : 'Record ID'
         }
-        className={inputClass}
+        className="w-full"
       />
       {open && (
         <div className="absolute z-10 mt-1 w-full bg-white border border-border rounded-md shadow-sm max-h-48 overflow-y-auto text-sm">
@@ -282,10 +280,10 @@ export function DynamicField({ field, value, onChange }: Props) {
       const choices = field.restrictions?.choices
       if (Array.isArray(choices) && choices.length) {
         return (
-          <select
+          <Select
             value={(value as string) ?? ''}
             onChange={(e) => onChange(e.target.value)}
-            className={inputClass}
+            className="w-full"
           >
             {!field.required && <option value="">— optional —</option>}
             {(choices as string[]).map((c) => (
@@ -293,7 +291,7 @@ export function DynamicField({ field, value, onChange }: Props) {
                 {c}
               </option>
             ))}
-          </select>
+          </Select>
         )
       }
       const maxLength =
@@ -301,13 +299,13 @@ export function DynamicField({ field, value, onChange }: Props) {
           ? Number(field.restrictions.max_length)
           : undefined
       return (
-        <input
+        <Input
           type="text"
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
           placeholder={field.required ? 'Required' : 'Optional'}
           maxLength={maxLength}
-          className={inputClass}
+          className="w-full"
         />
       )
     }
@@ -322,7 +320,7 @@ export function DynamicField({ field, value, onChange }: Props) {
           ? Number(field.restrictions.max)
           : undefined
       return (
-        <input
+        <Input
           type="number"
           step="1"
           min={rMin}
@@ -330,7 +328,7 @@ export function DynamicField({ field, value, onChange }: Props) {
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
           placeholder={field.required ? 'Required' : 'Optional'}
-          className={inputClass}
+          className="w-full"
         />
       )
     }
@@ -345,7 +343,7 @@ export function DynamicField({ field, value, onChange }: Props) {
           ? Number(field.restrictions.max)
           : undefined
       return (
-        <input
+        <Input
           type="number"
           step="any"
           min={rMin}
@@ -353,14 +351,14 @@ export function DynamicField({ field, value, onChange }: Props) {
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
           placeholder={field.required ? 'Required' : 'Optional'}
-          className={inputClass}
+          className="w-full"
         />
       )
     }
 
     case 'date':
       return (
-        <input
+        <Input
           type="date"
           value={(value as string) ?? ''}
           min={
@@ -374,7 +372,7 @@ export function DynamicField({ field, value, onChange }: Props) {
               : undefined
           }
           onChange={(e) => onChange(e.target.value)}
-          className={inputClass}
+          className="w-full"
         />
       )
 
@@ -388,7 +386,7 @@ export function DynamicField({ field, value, onChange }: Props) {
           ? utcToDatetimeLocal(String(field.restrictions.max))
           : undefined
       return (
-        <input
+        <Input
           type="datetime-local"
           value={value ? utcToDatetimeLocal(value as string) : ''}
           min={rMin}
@@ -396,7 +394,7 @@ export function DynamicField({ field, value, onChange }: Props) {
           onChange={(e) =>
             onChange(e.target.value ? datetimeLocalToUTC(e.target.value) : '')
           }
-          className={inputClass}
+          className="w-full"
         />
       )
     }
@@ -404,11 +402,9 @@ export function DynamicField({ field, value, onChange }: Props) {
     case 'boolean':
       return (
         <label className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={(value as boolean) ?? false}
             onChange={(e) => onChange(e.target.checked)}
-            className="rounded"
           />
           {field.required ? (
             <span>Required</span>
@@ -421,10 +417,10 @@ export function DynamicField({ field, value, onChange }: Props) {
     case 'enum': {
       const enumChoices = field.restrictions?.choices
       return (
-        <select
+        <Select
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
-          className={inputClass}
+          className="w-full"
         >
           {!field.required && <option value="">— optional —</option>}
           {Array.isArray(enumChoices)
@@ -434,18 +430,18 @@ export function DynamicField({ field, value, onChange }: Props) {
                 </option>
               ))
             : null}
-        </select>
+        </Select>
       )
     }
 
     case 'url':
       return (
-        <input
+        <Input
           type="url"
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
           placeholder={field.required ? 'https://example.com' : 'Optional URL'}
-          className={inputClass}
+          className="w-full"
         />
       )
 
@@ -454,7 +450,7 @@ export function DynamicField({ field, value, onChange }: Props) {
         ? (value as string[]).join(', ')
         : ((value as string) ?? '')
       return (
-        <input
+        <Input
           type="text"
           value={listVal}
           onChange={(e) => {
@@ -469,7 +465,7 @@ export function DynamicField({ field, value, onChange }: Props) {
             )
           }}
           placeholder="Record IDs, comma-separated"
-          className={inputClass}
+          className="w-full"
         />
       )
     }
@@ -479,7 +475,7 @@ export function DynamicField({ field, value, onChange }: Props) {
         ? (value as string[]).join(', ')
         : ((value as string) ?? '')
       return (
-        <input
+        <Input
           type="text"
           value={tagsVal}
           onChange={(e) => {
@@ -494,7 +490,7 @@ export function DynamicField({ field, value, onChange }: Props) {
             )
           }}
           placeholder="Tags, comma-separated"
-          className={inputClass}
+          className="w-full"
         />
       )
     }
@@ -510,11 +506,11 @@ export function DynamicField({ field, value, onChange }: Props) {
 
     default:
       return (
-        <input
+        <Input
           type="text"
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
-          className={inputClass}
+          className="w-full"
         />
       )
   }
