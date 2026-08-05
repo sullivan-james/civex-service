@@ -26,6 +26,7 @@ import {
 import { DynamicField } from '../components/records/DynamicField'
 import { RecordForm } from '../components/records/RecordForm'
 import { formatDate } from '../lib/utils'
+import { errorMessage } from '../lib/errors'
 import type { Schema } from '../api/schemas'
 import type { CivexRecord } from '../api/records'
 import JobsTable from '../components/jobs/JobsTable'
@@ -216,7 +217,9 @@ export default function RecordDetailPage() {
 
   if (isLoading) return <LoadingState />
   if (error || !record)
-    return <ErrorState message={error ? String(error) : 'Record not found'} />
+    return (
+      <ErrorState message={error ? errorMessage(error) : 'Record not found'} />
+    )
 
   const schema = schemas?.find((s) => s.name === record.schema_name)
   const parentSchema = schema?.parent_id
@@ -384,7 +387,7 @@ export default function RecordDetailPage() {
             </div>
             {updateRecord.error && (
               <p className="text-xs text-[#d1242f]">
-                {String(updateRecord.error)}
+                {errorMessage(updateRecord.error)}
               </p>
             )}
             <div className="flex gap-2">
@@ -463,7 +466,9 @@ export default function RecordDetailPage() {
               onSubmit={handleAddChild}
               onCancel={() => setAddingChild(false)}
               isPending={createRecord.isPending}
-              error={createRecord.error ? String(createRecord.error) : null}
+              error={
+                createRecord.error ? errorMessage(createRecord.error) : null
+              }
             />
           )}
 

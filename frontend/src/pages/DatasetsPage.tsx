@@ -18,6 +18,7 @@ import {
   Tr,
 } from '../components/ui'
 import { pluralise } from '../lib/utils'
+import { errorMessage } from '../lib/errors'
 import { dumpApi, type RestoreResult } from '../api/dump'
 
 function CreateDatasetModal({ onClose }: { onClose: () => void }) {
@@ -69,7 +70,9 @@ function CreateDatasetModal({ onClose }: { onClose: () => void }) {
             />
           </div>
           {create.error && (
-            <p className="text-xs text-[#d1242f]">{String(create.error)}</p>
+            <p className="text-xs text-[#d1242f]">
+              {errorMessage(create.error)}
+            </p>
           )}
           <div className="flex justify-end gap-2 mt-1">
             <Button type="button" variant="default" onClick={onClose}>
@@ -220,7 +223,7 @@ export default function DatasetsPage() {
       />
 
       {isLoading && <LoadingState />}
-      {error && <ErrorState message={String(error)} />}
+      {error && <ErrorState message={errorMessage(error)} />}
 
       {data?.length === 0 && (
         <EmptyState

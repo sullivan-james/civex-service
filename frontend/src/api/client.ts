@@ -15,7 +15,6 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  console.log('Making a request on', BASE, path, 'with init', init)
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
     ...init,
@@ -23,7 +22,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    console.log('Response received', res, body)
     throw new ApiError(body.detail, res.status)
   }
   if (res.status === 204) return undefined as T

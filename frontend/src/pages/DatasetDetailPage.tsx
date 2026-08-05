@@ -29,6 +29,7 @@ import {
 } from '../components/ui'
 import { RecordForm } from '../components/records/RecordForm'
 import { formatDate } from '../lib/utils'
+import { errorMessage } from '../lib/errors'
 import type { Schema } from '../api/schemas'
 
 const PAGE_SIZE = 50
@@ -91,7 +92,9 @@ export default function DatasetDetailPage() {
   if (datasetError || !dataset)
     return (
       <ErrorState
-        message={datasetError ? String(datasetError) : 'Dataset not found'}
+        message={
+          datasetError ? errorMessage(datasetError) : 'Dataset not found'
+        }
       />
     )
 
@@ -188,7 +191,7 @@ export default function DatasetDetailPage() {
           />
           {updateDataset.error && (
             <span className="text-xs text-[#d1242f]">
-              {String(updateDataset.error)}
+              {errorMessage(updateDataset.error)}
             </span>
           )}
           <Button
@@ -314,7 +317,7 @@ export default function DatasetDetailPage() {
           onSubmit={handleAddRecord}
           onCancel={() => setAddingRecord(false)}
           isPending={createRecord.isPending}
-          error={createRecord.error ? String(createRecord.error) : null}
+          error={createRecord.error ? errorMessage(createRecord.error) : null}
         />
       )}
 
@@ -322,7 +325,7 @@ export default function DatasetDetailPage() {
       {recordsLoading ? (
         <LoadingState message="Loading records…" />
       ) : recordsError ? (
-        <ErrorState message={String(recordsError)} />
+        <ErrorState message={errorMessage(recordsError)} />
       ) : records.length === 0 ? (
         <EmptyState
           title={

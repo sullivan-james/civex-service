@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router'
 import { utcToDatetimeLocal, datetimeLocalToUTC } from '../utils/dates'
+import { errorMessage } from '../lib/errors'
 import {
   useSchema,
   useUpdateSchema,
@@ -96,7 +97,9 @@ function MetaEditor({
         />
       </div>
       {updateSchema.error && (
-        <p className="text-xs text-[#d1242f]">{String(updateSchema.error)}</p>
+        <p className="text-xs text-[#d1242f]">
+          {errorMessage(updateSchema.error)}
+        </p>
       )}
       <div className="flex gap-2">
         <Button
@@ -451,7 +454,9 @@ function AddFieldForm({
       )}
 
       {addField.error && (
-        <span className="text-xs text-[#d1242f]">{String(addField.error)}</span>
+        <span className="text-xs text-[#d1242f]">
+          {errorMessage(addField.error)}
+        </span>
       )}
     </div>
   )
@@ -716,7 +721,7 @@ function FieldEditForm({
       )}
       {updateField.error && (
         <span className="text-xs text-[#d1242f]">
-          {String(updateField.error)}
+          {errorMessage(updateField.error)}
         </span>
       )}
     </div>
@@ -814,7 +819,9 @@ export default function SchemaDetailPage() {
 
   if (isLoading) return <LoadingState />
   if (error || !schema)
-    return <ErrorState message={error ? String(error) : 'Schema not found'} />
+    return (
+      <ErrorState message={error ? errorMessage(error) : 'Schema not found'} />
+    )
 
   const parentSchema = schema.parent_id
     ? allSchemas?.find((s) => s.id === schema.parent_id)
