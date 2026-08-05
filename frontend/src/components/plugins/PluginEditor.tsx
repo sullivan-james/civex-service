@@ -2,6 +2,7 @@ import { useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { usePluginSource, useSavePlugin } from '../../hooks/usePlugins'
+import { useTheme } from '../../hooks/useTheme'
 import { Button, Modal, ModalBody, ModalFooter, ModalHeader } from '../ui'
 
 const NEW_PLUGIN_TEMPLATE = `#!/usr/bin/env python3
@@ -48,6 +49,7 @@ export function PluginEditor({
     isNew ? NEW_PLUGIN_TEMPLATE : null,
   )
   const [saveError, setSaveError] = useState<string | null>(null)
+  const { resolved: theme } = useTheme()
 
   const { data: source, isLoading } = usePluginSource(
     isNew ? '' : initialFilename,
@@ -110,6 +112,7 @@ export function PluginEditor({
               <CodeMirror
                 value={code ?? ''}
                 height="100%"
+                theme={theme}
                 extensions={[python()]}
                 onChange={(value) => setCode(value)}
                 basicSetup={{ tabSize: 4 }}
@@ -120,7 +123,7 @@ export function PluginEditor({
         )}
 
         {saveError && (
-          <pre className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 whitespace-pre-wrap">
+          <pre className="text-xs text-danger bg-danger-subtle border border-danger-subtle-border rounded p-2 whitespace-pre-wrap">
             {saveError}
           </pre>
         )}

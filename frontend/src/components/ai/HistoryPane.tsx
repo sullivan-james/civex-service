@@ -24,7 +24,7 @@ export default function HistoryPane({
       <div className="p-3 border-b border-border flex-shrink-0">
         <button
           onClick={onNewChat}
-          className="w-full py-1.5 rounded-md bg-accent text-white text-sm font-medium hover:bg-accent-emphasis transition-colors"
+          className="w-full py-1.5 rounded-md bg-accent text-fg-on-emphasis text-sm font-medium hover:bg-accent-emphasis transition-colors"
         >
           + New chat
         </button>

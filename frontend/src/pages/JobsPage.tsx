@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useActiveJobCount, useDrainJobs } from '../hooks/useWorkflows'
 import { PageHeader, Button } from '../components/ui'
+import { RefreshCw } from '../components/ui/icons'
 import JobsTable from '../components/jobs/JobsTable'
 
 const STATUS_OPTIONS = [
@@ -32,7 +33,7 @@ export default function JobsPage() {
         description={
           hasActive ? (
             <span className="text-xs text-accent flex items-center gap-1">
-              <span className="animate-spin inline-block">↻</span> live
+              <RefreshCw size={12} className="animate-spin" /> live
             </span>
           ) : (
             'Workflow run history'
@@ -45,7 +46,10 @@ export default function JobsPage() {
             onClick={() => drain.mutate()}
             disabled={drain.isPending}
           >
-            {drain.isPending ? '↻ Running…' : 'Run automation'}
+            {drain.isPending && (
+              <RefreshCw size={12} className="animate-spin" />
+            )}
+            {drain.isPending ? 'Running…' : 'Run automation'}
           </Button>
         }
       />
@@ -57,8 +61,8 @@ export default function JobsPage() {
             onClick={() => handleStatusFilter(s)}
             className={`px-3 py-1 text-xs rounded-full border transition-colors ${
               (statusFilter ?? '') === s
-                ? 'bg-accent text-white border-accent'
-                : 'bg-white text-fg-muted border-border hover:bg-canvas-subtle'
+                ? 'bg-accent text-fg-on-emphasis border-accent'
+                : 'bg-canvas text-fg-muted border-border hover:bg-canvas-subtle'
             }`}
           >
             {s || 'All'}

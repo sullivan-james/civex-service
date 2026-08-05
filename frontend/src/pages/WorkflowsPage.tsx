@@ -26,6 +26,7 @@ import {
   ModalFooter,
   ModalHeader,
 } from '../components/ui'
+import { ChevronUp, ChevronDown } from '../components/ui/icons'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import { ContainerPluginEditor } from '../components/workflows/ContainerPluginEditor'
 import { useContainerPlugins } from '../hooks/useContainerPlugins'
@@ -44,6 +45,7 @@ import {
 import { ApiError } from '../api/client'
 import type { Workflow } from '../api/workflows'
 import type { PluginInfo, PluginIOSpec } from '../api/plugins'
+import { useTheme } from '../hooks/useTheme'
 
 const NEW_TEMPLATE = `name: my-workflow
 description: null
@@ -92,6 +94,7 @@ function WorkflowEditor({
   const [saveError, setSaveError] = useState<WorkflowValidationIssue[] | null>(
     null,
   )
+  const { resolved: theme } = useTheme()
 
   const { data: detail, isLoading } = useWorkflow(isNew ? '' : initialStem)
   const save = useSaveWorkflow()
@@ -299,6 +302,7 @@ function WorkflowEditor({
             >
               <CodeMirror
                 value={content ?? ''}
+                theme={theme}
                 onChange={(value) => setContent(value)}
                 onUpdate={handleUpdate}
                 onCreateEditor={(view) => {
@@ -323,7 +327,7 @@ function WorkflowEditor({
         )}
 
         {saveError && (
-          <div className="text-xs bg-red-50 border border-red-200 rounded p-2 max-h-40 overflow-auto space-y-2">
+          <div className="text-xs bg-danger-subtle border border-danger-subtle-border rounded p-2 max-h-40 overflow-auto space-y-2">
             {groupWorkflowValidationErrors(saveError).map(
               ({ step, messages }) => (
                 <div key={step ?? '__general__'}>
@@ -331,14 +335,14 @@ function WorkflowEditor({
                     <button
                       type="button"
                       onClick={() => jumpToStep(step)}
-                      className="font-mono font-semibold text-red-700 hover:underline"
+                      className="font-mono font-semibold text-danger hover:underline"
                     >
                       Step '{step}'
                     </button>
                   ) : (
-                    <span className="font-semibold text-red-700">General</span>
+                    <span className="font-semibold text-danger">General</span>
                   )}
-                  <ul className="list-disc list-inside text-red-600">
+                  <ul className="list-disc list-inside text-danger">
                     {messages.map((message, i) => (
                       <li key={i} className="whitespace-pre-wrap">
                         {message}
@@ -744,8 +748,12 @@ export default function WorkflowsPage() {
                           {p.builtin ? 'built-in' : 'user'}
                         </span>
                       </td>
-                      <td className="py-2 px-3 text-fg-muted text-xs">
-                        {isExpanded ? '▲' : '▼'}
+                      <td className="py-2 px-3 text-fg-muted">
+                        {isExpanded ? (
+                          <ChevronUp size={12} />
+                        ) : (
+                          <ChevronDown size={12} />
+                        )}
                       </td>
                       <td className="py-2 px-3 text-right">
                         {p.filename && (

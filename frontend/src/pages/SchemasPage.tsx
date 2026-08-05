@@ -75,7 +75,7 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
             <select
               value={parent}
               onChange={(e) => setParent(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-white"
+              className="w-full px-3 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-canvas"
             >
               <option value="">None</option>
               {schemas?.map((s) => (

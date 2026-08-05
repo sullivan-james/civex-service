@@ -14,6 +14,7 @@ import HistoryPane from './HistoryPane'
 import SettingsPane from './SettingsPane'
 import ToolCallRow from './ToolCallRow'
 import { isPendingApproval } from './proposals'
+import { Sparkles } from '../ui/icons'
 
 // ---------------------------------------------------------------------------
 // Session persistence helpers
@@ -161,8 +162,8 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
   }
 
   const containerClass = fullscreen
-    ? `fixed inset-0 flex flex-col bg-white z-50 ${open ? '' : 'hidden'}`
-    : `fixed inset-y-0 right-0 w-[420px] flex flex-col bg-white border-l border-border shadow-2xl z-50 ${open ? '' : 'hidden'}`
+    ? `fixed inset-0 flex flex-col bg-canvas z-50 ${open ? '' : 'hidden'}`
+    : `fixed inset-y-0 right-0 w-[420px] flex flex-col bg-canvas border-l border-border shadow-2xl z-50 ${open ? '' : 'hidden'}`
 
   const bodyClass = fullscreen
     ? 'flex-1 flex flex-col overflow-hidden max-w-3xl mx-auto w-full'
@@ -186,7 +187,7 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
         <div
           className={`flex items-center gap-2 w-full ${fullscreen ? 'max-w-3xl mx-auto' : ''}`}
         >
-          <span className="text-accent">✦</span>
+          <Sparkles size={14} className="text-accent" />
           <span className="text-sm font-semibold text-fg">civex AI</span>
           <div className="flex-1" />
           {/* History button */}
@@ -278,7 +279,7 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
         >
           {entries.length === 0 && (
             <div className="text-center py-12 text-fg-muted text-sm space-y-3">
-              <div className="text-3xl">✦</div>
+              <Sparkles size={28} className="mx-auto" />
               <p className="font-medium text-fg">Ask me anything</p>
               <div className="text-xs space-y-1.5 text-left max-w-[280px] mx-auto">
                 <p className="text-fg-muted">Try:</p>
@@ -294,7 +295,7 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
                       setInput(s)
                       textareaRef.current?.focus()
                     }}
-                    className="block w-full text-left px-3 py-1.5 rounded border border-border bg-white hover:bg-canvas-subtle text-fg transition-colors"
+                    className="block w-full text-left px-3 py-1.5 rounded border border-border bg-canvas hover:bg-canvas-subtle text-fg transition-colors"
                   >
                     {s}
                   </button>
@@ -307,7 +308,7 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
             if (entry.kind === 'user') {
               return (
                 <div key={i} className="flex justify-end">
-                  <div className="max-w-[85%] rounded-2xl rounded-tr-sm px-4 py-2 bg-nav-bg text-white text-sm whitespace-pre-wrap">
+                  <div className="max-w-[85%] rounded-2xl rounded-tr-sm px-4 py-2 bg-nav-bg text-nav-fg text-sm whitespace-pre-wrap">
                     {entry.text}
                   </div>
                 </div>
@@ -364,12 +365,12 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
                   placeholder="Ask about your data or describe a workflow…"
                   rows={2}
                   disabled={busy}
-                  className="flex-1 resize-none rounded-md border border-border bg-white px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent disabled:opacity-50"
+                  className="flex-1 resize-none rounded-md border border-border bg-canvas px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent disabled:opacity-50"
                 />
                 <button
                   onClick={handleSend}
                   disabled={busy || !input.trim()}
-                  className="flex-shrink-0 px-3 py-2 rounded-md bg-accent text-white text-sm font-medium hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="flex-shrink-0 px-3 py-2 rounded-md bg-accent text-fg-on-emphasis text-sm font-medium hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   {busy ? (
                     <svg

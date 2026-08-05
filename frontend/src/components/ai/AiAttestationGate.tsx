@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import AiPanel from './AiPanel'
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../ui'
+import { Sparkles } from '../ui/icons'
 
 // Bump this if the attestation's substance changes materially (e.g. a new
 // data-sharing risk) -- a new key means everyone sees it again once, rather
@@ -49,8 +50,10 @@ export default function AiAttestationGate({
   return (
     <Modal onClose={onClose}>
       <ModalHeader>
-        <span className="text-accent text-xl mr-2">✦</span>
-        Before you use the AI assistant
+        <span className="inline-flex items-center gap-2">
+          <Sparkles size={18} className="text-accent" />
+          Before you use the AI assistant
+        </span>
       </ModalHeader>
       <ModalBody className="text-sm text-fg space-y-2">
         <p>
@@ -85,7 +88,7 @@ export default function AiAttestationGate({
             acknowledge()
             setAcked(true)
           }}
-          className="px-3 py-1.5 rounded bg-accent text-white text-sm font-medium hover:bg-accent-emphasis"
+          className="px-3 py-1.5 rounded bg-accent text-fg-on-emphasis text-sm font-medium hover:bg-accent-emphasis"
         >
           I understand, continue
         </button>

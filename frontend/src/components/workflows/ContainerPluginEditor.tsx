@@ -94,7 +94,7 @@ export function ContainerPluginEditor({
                 className={`text-xs rounded p-2 whitespace-pre-wrap max-h-32 overflow-y-auto ${
                   buildResult.success
                     ? 'text-success bg-success-subtle border border-success/30'
-                    : 'text-red-600 bg-red-50 border border-red-200'
+                    : 'text-danger bg-danger-subtle border border-danger-subtle-border'
                 }`}
               >
                 {buildResult.success ? 'Build succeeded' : 'Build failed'}

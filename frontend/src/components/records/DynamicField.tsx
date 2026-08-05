@@ -3,6 +3,7 @@ import { api } from '../../api/client'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import type { Field } from '../../api/schemas'
 import { utcToDatetimeLocal, datetimeLocalToUTC } from '../../utils/dates'
+import { Paperclip, X } from '../ui/icons'
 
 export interface FileRef {
   sha256: string
@@ -17,7 +18,7 @@ interface Props {
 }
 
 const inputClass =
-  'w-full border border-border rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent'
+  'w-full border border-border rounded-md px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent'
 
 function fileAccept(
   restrictions: Record<string, unknown> | undefined,
@@ -82,7 +83,9 @@ function FileField({ field, value, onChange }: Props) {
     <div className="space-y-1">
       {ref && (
         <div className="flex items-center gap-2 text-xs text-fg-muted">
-          <span>📎 {ref.filename}</span>
+          <span className="inline-flex items-center gap-1">
+            <Paperclip size={12} /> {ref.filename}
+          </span>
           <span>({(ref.size / 1024).toFixed(1)} KB)</span>
           <a
             href={`/api/files/${ref.sha256}`}
@@ -101,7 +104,7 @@ function FileField({ field, value, onChange }: Props) {
         className="block w-full text-sm text-fg file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer disabled:opacity-50"
       />
       {uploading && <p className="text-xs text-fg-muted">Uploading…</p>}
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
     </div>
   )
 }
@@ -160,7 +163,7 @@ function FileListField({ field, value, onChange }: Props) {
             onClick={() => remove(ref.sha256)}
             className="text-danger hover:underline shrink-0"
           >
-            ✕
+            <X size={12} />
           </button>
         </div>
       ))}
@@ -173,7 +176,7 @@ function FileListField({ field, value, onChange }: Props) {
         className="block w-full text-sm text-fg file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer disabled:opacity-50"
       />
       {uploading && <p className="text-xs text-fg-muted">Uploading…</p>}
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
     </div>
   )
 }
@@ -249,7 +252,7 @@ function ReferenceField({ field, value, onChange }: Props) {
         className={inputClass}
       />
       {open && (
-        <div className="absolute z-10 mt-1 w-full bg-white border border-border rounded-md shadow-sm max-h-48 overflow-y-auto text-sm">
+        <div className="absolute z-10 mt-1 w-full bg-canvas border border-border rounded-md shadow-sm max-h-48 overflow-y-auto text-sm">
           {loading && <div className="px-3 py-2 text-fg-muted">Loading…</div>}
           {!loading && results.length === 0 && (
             <div className="px-3 py-2 text-fg-muted italic">
