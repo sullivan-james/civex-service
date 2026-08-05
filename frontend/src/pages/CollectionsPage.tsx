@@ -40,9 +40,7 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
         className="bg-white rounded-lg border border-border shadow-lg w-full max-w-md p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-base font-semibold text-fg mb-4">
-          New collection
-        </h2>
+        <h2 className="text-base font-semibold text-fg mb-4">New collection</h2>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div>
             <label className="block text-xs font-medium text-fg mb-1">
@@ -69,9 +67,7 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
             />
           </div>
           {create.error && (
-            <p className="text-xs text-danger">
-              {errorMessage(create.error)}
-            </p>
+            <p className="text-xs text-danger">{errorMessage(create.error)}</p>
           )}
           <div className="flex justify-end gap-2 mt-1">
             <Button type="button" variant="default" onClick={onClose}>

@@ -27,7 +27,9 @@ export function AutocompleteMenu({
             onSelect(i)
           }}
           className={`px-2 py-1 cursor-pointer flex items-baseline gap-2 ${
-            i === activeIndex ? 'bg-accent text-white' : 'hover:bg-canvas-subtle'
+            i === activeIndex
+              ? 'bg-accent text-white'
+              : 'hover:bg-canvas-subtle'
           }`}
         >
           <span className="font-mono">{s.label}</span>

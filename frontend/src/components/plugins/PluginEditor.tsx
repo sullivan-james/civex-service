@@ -121,9 +121,7 @@ export function PluginEditor({
             </div>
           ) : (
             <div className="flex-1 flex flex-col min-h-0">
-              <span className="text-xs font-medium text-fg mb-1">
-                Python
-              </span>
+              <span className="text-xs font-medium text-fg mb-1">Python</span>
               <div className="flex-1 min-h-0 border border-border rounded-md overflow-auto bg-canvas-subtle">
                 <CodeMirror
                   value={code ?? ''}

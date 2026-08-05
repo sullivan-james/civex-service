@@ -270,9 +270,7 @@ function WorkflowEditor({
         <div className="flex flex-col gap-3 p-5 flex-1 min-h-0">
           {isNew && (
             <label className="block">
-              <span className="text-xs font-medium text-fg">
-                Filename stem
-              </span>
+              <span className="text-xs font-medium text-fg">Filename stem</span>
               <div className="flex items-center gap-1 mt-1">
                 <input
                   type="text"
@@ -297,9 +295,7 @@ function WorkflowEditor({
             </div>
           ) : (
             <div className="flex-1 flex flex-col min-h-0">
-              <span className="text-xs font-medium text-fg mb-1">
-                YAML
-              </span>
+              <span className="text-xs font-medium text-fg mb-1">YAML</span>
               <div
                 ref={editorWrapRef}
                 onKeyDownCapture={handleEditorKeyDownCapture}
@@ -626,18 +622,12 @@ export default function WorkflowsPage() {
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="border-b border-border">
-              <th className="text-left py-2 px-3 font-medium text-fg">
-                Name
-              </th>
+              <th className="text-left py-2 px-3 font-medium text-fg">Name</th>
               <th className="text-left py-2 px-3 font-medium text-fg">
                 Description
               </th>
-              <th className="text-left py-2 px-3 font-medium text-fg">
-                Steps
-              </th>
-              <th className="text-left py-2 px-3 font-medium text-fg">
-                File
-              </th>
+              <th className="text-left py-2 px-3 font-medium text-fg">Steps</th>
+              <th className="text-left py-2 px-3 font-medium text-fg">File</th>
               <th className="py-2 px-3 text-right" />
             </tr>
           </thead>
@@ -647,9 +637,7 @@ export default function WorkflowsPage() {
                 key={wf.stem}
                 className="border-b border-border hover:bg-canvas-subtle"
               >
-                <td className="py-2 px-3 font-medium text-fg">
-                  {wf.name}
-                </td>
+                <td className="py-2 px-3 font-medium text-fg">{wf.name}</td>
                 <td className="py-2 px-3 text-fg-muted">
                   {wf.description ?? '—'}
                 </td>
@@ -702,9 +690,7 @@ export default function WorkflowsPage() {
           </div>
           <div className="flex items-center gap-2">
             {pluginUploadError && (
-              <span className="text-xs text-danger">
-                {pluginUploadError}
-              </span>
+              <span className="text-xs text-danger">{pluginUploadError}</span>
             )}
             <Button
               size="sm"
@@ -894,9 +880,7 @@ export default function WorkflowsPage() {
                   key={p.name}
                   className="border-b border-border hover:bg-canvas-subtle"
                 >
-                  <td className="py-2 px-3 font-medium text-fg">
-                    {p.name}
-                  </td>
+                  <td className="py-2 px-3 font-medium text-fg">{p.name}</td>
                   <td className="py-2 px-3 font-mono text-xs text-fg-muted">
                     {p.files.length}
                   </td>

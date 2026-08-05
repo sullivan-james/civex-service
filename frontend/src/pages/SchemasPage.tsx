@@ -44,9 +44,7 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
         className="bg-white rounded-lg border border-border shadow-lg w-full max-w-md p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-base font-semibold text-fg mb-4">
-          New schema
-        </h2>
+        <h2 className="text-base font-semibold text-fg mb-4">New schema</h2>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div>
             <label className="block text-xs font-medium text-fg mb-1">
@@ -90,9 +88,7 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
             </select>
           </div>
           {create.error && (
-            <p className="text-xs text-danger">
-              {errorMessage(create.error)}
-            </p>
+            <p className="text-xs text-danger">{errorMessage(create.error)}</p>
           )}
           <div className="flex justify-end gap-2 mt-1">
             <Button type="button" variant="default" onClick={onClose}>
@@ -156,9 +152,7 @@ export default function SchemasPage() {
               strokeLinecap="round"
             />
           </svg>
-          <h2 className="text-lg font-semibold text-fg mb-2">
-            No schemas yet
-          </h2>
+          <h2 className="text-lg font-semibold text-fg mb-2">No schemas yet</h2>
           <p className="text-sm text-fg-muted mb-6 max-w-sm">
             Schemas define the structure of your data — field names, types, and
             rules. Create a schema before adding records.

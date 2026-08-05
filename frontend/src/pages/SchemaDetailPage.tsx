@@ -845,9 +845,7 @@ export default function SchemaDetailPage() {
         ) : (
           <div className="flex items-start justify-between">
             <div>
-              <h1 className="text-xl font-semibold text-fg">
-                {schema.name}
-              </h1>
+              <h1 className="text-xl font-semibold text-fg">{schema.name}</h1>
               <p className="mt-0.5 text-sm text-fg-muted">
                 {schema.description ?? (
                   <span className="italic">No description</span>
@@ -1150,9 +1148,7 @@ export default function SchemaDetailPage() {
         </div>
         <div className="px-4 py-3 flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-fg">
-              Delete this schema
-            </p>
+            <p className="text-sm font-medium text-fg">Delete this schema</p>
             <p className="text-xs text-fg-muted">
               This cannot be undone. All field definitions will be removed.
             </p>

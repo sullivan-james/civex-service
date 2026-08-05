@@ -158,9 +158,7 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
             strokeLinejoin="round"
           />
         </svg>
-        <h2 className="text-lg font-semibold text-fg mb-2">
-          No runs yet
-        </h2>
+        <h2 className="text-lg font-semibold text-fg mb-2">No runs yet</h2>
         <p className="text-sm text-fg-muted max-w-sm">
           Workflow runs appear here when a workflow is triggered. Trigger a
           workflow manually from the Workflows tab.
@@ -174,9 +172,7 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
       <table className="w-full text-sm border-collapse">
         <thead>
           <tr className="border-b border-border">
-            <th className="text-left py-2 px-3 font-medium text-fg">
-              Run
-            </th>
+            <th className="text-left py-2 px-3 font-medium text-fg">Run</th>
             <th className="text-left py-2 px-3 font-medium text-fg">
               Workflow
             </th>
@@ -185,21 +181,13 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
                 Record
               </th>
             )}
-            <th className="text-left py-2 px-3 font-medium text-fg">
-              Schema
-            </th>
-            <th className="text-left py-2 px-3 font-medium text-fg">
-              Trigger
-            </th>
-            <th className="text-left py-2 px-3 font-medium text-fg">
-              Status
-            </th>
+            <th className="text-left py-2 px-3 font-medium text-fg">Schema</th>
+            <th className="text-left py-2 px-3 font-medium text-fg">Trigger</th>
+            <th className="text-left py-2 px-3 font-medium text-fg">Status</th>
             <th className="text-left py-2 px-3 font-medium text-fg">
               Duration
             </th>
-            <th className="text-left py-2 px-3 font-medium text-fg">
-              Created
-            </th>
+            <th className="text-left py-2 px-3 font-medium text-fg">Created</th>
             <th className="py-2 px-3" />
           </tr>
         </thead>

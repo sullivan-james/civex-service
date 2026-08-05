@@ -42,9 +42,7 @@ export default function HistoryPane({
               className="w-full text-left px-4 py-3 hover:bg-canvas-subtle transition-colors group"
             >
               <div className="flex items-start justify-between gap-2">
-                <p className="text-sm text-fg truncate flex-1">
-                  {s.title}
-                </p>
+                <p className="text-sm text-fg truncate flex-1">{s.title}</p>
                 <span
                   role="button"
                   onClick={(e) =>

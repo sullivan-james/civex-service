@@ -487,9 +487,7 @@ export default function RecordDetailPage() {
       {applicableWorkflows.length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-base font-semibold text-fg">
-              Workflows
-            </h2>
+            <h2 className="text-base font-semibold text-fg">Workflows</h2>
           </div>
           <div className="flex flex-wrap gap-2">
             {applicableWorkflows.map((wf) => (
@@ -527,9 +525,7 @@ export default function RecordDetailPage() {
         </div>
         <div className="px-4 py-3 flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-fg">
-              Delete this record
-            </p>
+            <p className="text-sm font-medium text-fg">Delete this record</p>
             <p className="text-xs text-fg-muted">
               Permanently removes this record and all its children.
             </p>

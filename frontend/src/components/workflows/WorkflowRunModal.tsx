@@ -93,9 +93,7 @@ export function WorkflowRunModal({
             className="space-y-4 pb-4"
           >
             <label className="block">
-              <span className="text-sm font-medium text-fg">
-                Record ID
-              </span>
+              <span className="text-sm font-medium text-fg">Record ID</span>
               {workflow.record_schema && (
                 <span className="ml-1.5 text-xs text-fg-muted">
                   ({workflow.record_schema})

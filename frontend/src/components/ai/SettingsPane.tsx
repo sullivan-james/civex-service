@@ -247,9 +247,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="p-4 space-y-4 text-sm">
       <div>
-        <p className="font-semibold text-fg mb-1">
-          AI Assistant Settings
-        </p>
+        <p className="font-semibold text-fg mb-1">AI Assistant Settings</p>
         {cfg?.configured ? (
           <p className="text-xs text-success-emphasis">
             ✓{' '}
@@ -442,9 +440,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
 
       {/* Model */}
       <div>
-        <label className="block text-xs font-medium text-fg mb-1">
-          Model
-        </label>
+        <label className="block text-xs font-medium text-fg mb-1">Model</label>
         {isOllama ? (
           ollamaLoading ? (
             <div className="flex items-center gap-2 text-xs text-fg-muted py-1.5">
@@ -467,7 +463,9 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
               <p className="text-xs text-danger">{ollamaError}</p>
               <p className="text-[10px] text-fg-subtle">
                 Make sure Ollama is running:{' '}
-                <code className="bg-border-muted px-1 rounded">ollama serve</code>
+                <code className="bg-border-muted px-1 rounded">
+                  ollama serve
+                </code>
               </p>
               <input
                 value={customModel}

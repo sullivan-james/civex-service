@@ -266,9 +266,7 @@ function ReferenceField({ field, value, onChange }: Props) {
                 {record.id.slice(0, 8)}
               </span>
               {record.natural_name && (
-                <span className="ml-2 text-fg">
-                  {record.natural_name}
-                </span>
+                <span className="ml-2 text-fg">{record.natural_name}</span>
               )}
             </button>
           ))}

@@ -45,7 +45,8 @@ function SyncMessage({
   error: string | null
   op: 'push' | 'pull'
 }) {
-  if (error) return <span className="text-danger-emphasis text-xs">{error}</span>
+  if (error)
+    return <span className="text-danger-emphasis text-xs">{error}</span>
   if (!result) return null
   return (
     <span className="text-success-emphasis text-xs">

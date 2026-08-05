@@ -81,9 +81,7 @@ export default function DatabaseSection() {
       <div className="border border-border rounded-md bg-white p-4 space-y-3">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-xs font-mono text-fg truncate">
-              {status.url}
-            </p>
+            <p className="text-xs font-mono text-fg truncate">{status.url}</p>
             <p className="text-xs text-fg-muted mt-0.5">
               {status.dialect} — managed by{' '}
               {status.docker_managed ? 'civex (Docker)' : 'you'}

@@ -110,9 +110,7 @@ function VolumeCard({
       <div className="px-4 py-3 flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-0.5">
-            <span className="font-semibold text-sm text-fg">
-              {vol.name}
-            </span>
+            <span className="font-semibold text-sm text-fg">{vol.name}</span>
             {vol.in_queue && (
               <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-subtle text-success border border-success-muted">
                 queue #{queueIndex + 1}
@@ -129,9 +127,7 @@ function VolumeCard({
               </span>
             )}
           </div>
-          <p className="text-xs text-fg-muted font-mono truncate">
-            {vol.path}
-          </p>
+          <p className="text-xs text-fg-muted font-mono truncate">{vol.path}</p>
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
@@ -423,9 +419,7 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
         </div>
       </div>
       {addVolume.error && (
-        <p className="text-xs text-danger">
-          {errorMessage(addVolume.error)}
-        </p>
+        <p className="text-xs text-danger">{errorMessage(addVolume.error)}</p>
       )}
       <div className="flex gap-2">
         <Button
@@ -511,9 +505,7 @@ export default function StorageSection() {
 
       <div className="space-y-3">
         {volumes.length === 0 && (
-          <p className="text-sm text-fg-muted italic">
-            No volumes configured.
-          </p>
+          <p className="text-sm text-fg-muted italic">No volumes configured.</p>
         )}
         {volumes.map((vol) => {
           const qi = queueNames.indexOf(vol.name)

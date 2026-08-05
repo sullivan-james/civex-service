@@ -20,7 +20,9 @@ export function Table({
 
 export function Thead({ children }: { children: ReactNode }) {
   return (
-    <thead className="bg-canvas-subtle border-b border-border">{children}</thead>
+    <thead className="bg-canvas-subtle border-b border-border">
+      {children}
+    </thead>
   )
 }
 

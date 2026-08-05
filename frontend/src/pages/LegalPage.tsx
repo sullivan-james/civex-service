@@ -70,9 +70,7 @@ function PoliciesSection() {
               onClick={() => setOpenStem(open ? null : p.stem)}
               className="w-full flex items-center justify-between px-4 py-3 text-left"
             >
-              <span className="text-sm font-medium text-fg">
-                {p.title}
-              </span>
+              <span className="text-sm font-medium text-fg">{p.title}</span>
               <span className="text-xs text-fg-muted">{open ? '▲' : '▼'}</span>
             </button>
             {open && (
