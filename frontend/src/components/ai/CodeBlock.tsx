@@ -15,12 +15,12 @@ export default function CodeBlock({
     })
   }
   return (
-    <div className="relative my-2 rounded-md border border-[#d0d7de] bg-[#f6f8fa] text-xs font-mono overflow-x-auto">
-      <div className="flex items-center justify-between px-3 py-1 border-b border-[#d0d7de] bg-[#eaeef2]">
-        <span className="text-[#656d76]">{lang}</span>
+    <div className="relative my-2 rounded-md border border-border bg-canvas-subtle text-xs font-mono overflow-x-auto">
+      <div className="flex items-center justify-between px-3 py-1 border-b border-border bg-border-muted">
+        <span className="text-fg-muted">{lang}</span>
         <button
           onClick={copy}
-          className="text-[#656d76] hover:text-[#1f2328] transition-colors"
+          className="text-fg-muted hover:text-fg transition-colors"
         >
           {copied ? '✓ Copied' : 'Copy'}
         </button>

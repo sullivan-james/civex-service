@@ -1,59 +1,32 @@
-# Writing custom plugins
+# Writing a plugin
 
 You can extend civex with your own plugins. Place a `.py` file in `_civex/plugins/` and civex discovers it automatically — no registration required.
 
 Custom plugins run as **real, isolated OS processes** (`uv run --no-project <plugin>.py`), not imported into civex's own process. Each run gets its own dependency environment (declared inline in the file — no editing civex's own `pyproject.toml`, ever), its own process group (killed as a unit if it exceeds its timeout), a throwaway working directory with no ambient path into your project data, and access to project data *only* through the RPC calls it explicitly declares.
 
+This is the Tier 1 (subprocess) path — Python only, run via `uv run`. If you need a different language, system binaries, GPU access, or stricter resource limits, see [Container plugins](container-plugins.md) instead. Both tiers speak the same [wire protocol](wire-protocol.md).
+
 ## Minimal example
 
-```python
-# _civex/plugins/compute_duration.py
-#!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.10"
-# dependencies = ["civex-plugin-sdk"]
-# ///
-from pydantic import BaseModel
-from civex_plugin_sdk import Ctx, Plugin as PluginBase, serve
-
-
-class Plugin(PluginBase):
-    id = "my_project.compute_duration"   # must be unique; use a namespace prefix
-    name = "Compute Duration"
-    category = "transforms"              # informational only
-    capabilities = ["get_context_record"]  # every ctx.* method this plugin calls
-
-    class Config(BaseModel):
-        start_field: str
-        end_field: str
-
-    def invoke(self, inputs: dict, config: Config, ctx: Ctx) -> dict:
-        record = ctx.get_context_record()
-        start = record["data"].get(config.start_field, 0)
-        end = record["data"].get(config.end_field, 0)
-        return {"duration": end - start}
-
-
-if __name__ == "__main__":
-    serve(Plugin)
+```python title="civex-plugin-sdk/examples/echo_plugin.py"
+--8<-- "civex-plugin-sdk/examples/echo_plugin.py"
 ```
 
 Use it in a workflow:
 
 ```yaml
 - id: compute
-  plugin: my_project.compute_duration
+  plugin: example.echo
   config:
-    start_field: begin_time
-    end_field: end_time
+    text: hello
   timeout: 30   # optional; overrides [plugins].default_timeout_seconds from config.toml
 
 - id: save
   plugin: civex.save_field
   config:
-    field: duration
+    field: greeting
   inputs:
-    value: compute.duration
+    value: compute.echo
 ```
 
 ## Plugin structure
@@ -61,15 +34,15 @@ Use it in a workflow:
 Every plugin file must:
 
 1. Start with a [PEP 723](https://peps.python.org/pep-0723/) inline script metadata block declaring `civex-plugin-sdk` as a dependency (plus anything else the plugin needs — `pandas`, `requests`, whatever). `uv run` resolves and caches an isolated venv for it automatically, the first time it's used.
-2. Define a class named exactly `Plugin`, subclassing the SDK's own `Plugin` ABC (import it under an alias — `Plugin as PluginBase` — to avoid the name collision).
-3. Call `serve(Plugin)` inside `if __name__ == "__main__":`.
+2. Define a class subclassing the SDK's `Plugin` ABC (import it directly, or under an alias like `Plugin as PluginBase` if you want to name your own subclass `Plugin` too).
+3. Call `serve(YourPluginClass)` inside `if __name__ == "__main__":`.
 
 | Attribute | Type | Description |
 |---|---|---|
 | `id` | string | Unique identifier used in workflow YAML. Prefix with your project name to avoid collisions. |
 | `name` | string | Human-readable name shown in the UI. |
 | `category` | string | Informational grouping. No functional effect. |
-| `capabilities` | list[string] | Every `ctx.*` method this plugin calls, by name (e.g. `"find_records"`, not the literal string `"call_tool"`). A call to an undeclared capability fails at run time with a `capability_denied` error — the host enforces this against the list your plugin declared at discovery time, not anything the running process claims about itself. |
+| `capabilities` | list[string] | Every `ctx.*` method this plugin calls, by name (e.g. `"find_records"`, not the literal string `"call_tool"`). A call to an undeclared capability fails at run time with a `capability_denied` error — the host enforces this against the list your plugin declared at discovery time, not anything the running process claims about itself. See [Capabilities](wire-protocol.md#capabilities) for how this is enforced on the wire. |
 
 ### Config
 
@@ -119,7 +92,7 @@ Return a dict of output values. These are referenced by downstream steps as `thi
 | `ctx.get_collection(name: str) → dict`, `ctx.list_collections() → list[dict]` | `get_collection`, `list_collections` | Read-only collection introspection. |
 | `ctx.commit()` | `commit` | Flush pending changes to the database. The executor also commits once at the end of a successful run; call this yourself only if you need an intermediate commit. |
 
-Declare each one you use in `capabilities` — see the table above for the exact capability name per method.
+Declare each one you use in `capabilities` — see the table above for the exact capability name per method. See the [SDK reference](sdk-reference.md) for the full generated API, including exact signatures and return types.
 
 ### Reading and writing the trigger record
 
@@ -155,14 +128,8 @@ if ref:
 - All changes are committed together at the end of the workflow run unless you call `ctx.commit()` explicitly.
 - If `invoke()` raises an exception (or the run times out), the entire workflow job is marked as failed and no changes are committed.
 
-## Container-tier (Tier 2) plugins
+## Next steps
 
-Everything above is the Tier 1 (subprocess) tier — Python only, run via `uv run`. For a plugin that needs something the subprocess tier can't give — a different language, system binaries, GPU access, stricter resource limits — civex runs it inside a Docker container instead, using the same `id`/`name`/`capabilities`/`Config`/`invoke()` shape and the same wire protocol described above, over `docker run -i <image> <mode>`. A Python starter (Dockerfile + `plugin.py` shim) lives in `templates/container-plugins/python/`; copy it into `_civex/plugins/<name>/` alongside a `civex-plugin.toml` manifest (`id`/`name`/`category`/`capabilities`) and fill in `invoke()`.
-
-The one difference from the subprocess tier: `civex_plugin_sdk.serve_container` (instead of `serve`) is called from `__main__`, since a container is invoked once per operation (`docker run -i <image> describe` or `docker run -i <image> run`) rather than as a long-lived process — it reads that mode from `sys.argv[1]` instead of from a leading control frame on stdin.
-
-The host-side runtime that drives this (`civex.plugins.container_runtime`) and builds/caches each plugin's image (`civex.plugins.container_build`) now exists, but neither is wired into the plugin registry or workflow executor yet, so a container-tier plugin still isn't something you can run through a workflow today — these are starting points to build from.
-
-### Other languages
-
-Prebuilt starters (Dockerfile + a minimal shim implementing the identical wire protocol, including the same fd-dup stdout-isolation trick) exist for several languages besides Python: `plugin-templates/r/`, `plugin-templates/java/`, `starters/c/`, `templates/plugins/go/`, and `plugin-starters/rust/`.
+- [Container plugins](container-plugins.md) — a different language, or stricter isolation than a subprocess gives you.
+- [The wire protocol](wire-protocol.md) — the frame-by-frame reference `serve()` implements underneath `invoke()`.
+- [SDK reference](sdk-reference.md) — the full generated `civex_plugin_sdk` API.

@@ -3,7 +3,7 @@
 Subclass `Plugin`, declare `id`/`name`/`inputs`/`outputs`/`Config`,
 implement `invoke()`, and call `serve()` (Tier 1) or `serve_container()`
 (Tier 2) from the plugin script's `__main__` -- see
-docs/writing-custom-plugins.md for the full authoring guide.
+docs/extending/writing-a-plugin.md for the full authoring guide.
 """
 
 from civex_plugin_sdk.ctx import Ctx

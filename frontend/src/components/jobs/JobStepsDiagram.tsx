@@ -12,9 +12,9 @@ const ROW_HEIGHT = NODE_HEIGHT + 16
 const PADDING = 12
 
 const statusColors: Record<StepExecution['status'], string> = {
-  success: 'border-[#4ac26b66] bg-[#dafbe1]',
-  failed: 'border-[#ffd7d5] bg-[#ffebe9]',
-  skipped: 'border-[#d0d7de] bg-white',
+  success: 'border-success-muted bg-success-subtle',
+  failed: 'border-danger-subtle-border bg-danger-subtle',
+  skipped: 'border-border bg-white',
 }
 
 interface Node {
@@ -76,7 +76,7 @@ export default function JobStepsDiagram({ steps }: { steps: StepExecution[] }) {
   return (
     <div className="space-y-2">
       <div
-        className="overflow-auto border border-[#d0d7de] rounded-md bg-[#f6f8fa] p-3"
+        className="overflow-auto border border-border rounded-md bg-canvas-subtle p-3"
         style={{ maxHeight: '60vh' }}
       >
         <div className="relative" style={{ width, height }}>
@@ -116,7 +116,7 @@ export default function JobStepsDiagram({ steps }: { steps: StepExecution[] }) {
               }
               className={`absolute flex flex-col justify-center px-3 rounded-md border text-left cursor-pointer transition-shadow ${statusColors[node.step.status]} ${
                 selectedId === node.step.step_id
-                  ? 'ring-2 ring-[#0969da] ring-offset-1'
+                  ? 'ring-2 ring-accent ring-offset-1'
                   : ''
               }`}
               style={{
@@ -126,10 +126,10 @@ export default function JobStepsDiagram({ steps }: { steps: StepExecution[] }) {
                 height: NODE_HEIGHT,
               }}
             >
-              <span className="font-mono text-xs text-[#1f2328] truncate w-full">
+              <span className="font-mono text-xs text-fg truncate w-full">
                 {node.step.step_id}
               </span>
-              <span className="text-xs text-[#656d76] font-mono truncate w-full">
+              <span className="text-xs text-fg-muted font-mono truncate w-full">
                 {node.step.plugin}
               </span>
             </button>

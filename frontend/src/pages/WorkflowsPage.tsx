@@ -254,13 +254,13 @@ function WorkflowEditor({
         style={{ height: '90vh' }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#d0d7de]">
-          <h2 className="text-base font-semibold text-[#1f2328]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <h2 className="text-base font-semibold text-fg">
             {isNew ? 'New workflow' : `Edit — ${initialStem}.yaml`}
           </h2>
           <button
             onClick={onClose}
-            className="text-[#656d76] hover:text-[#1f2328] text-xl leading-none"
+            className="text-fg-muted hover:text-fg text-xl leading-none"
           >
             ×
           </button>
@@ -270,9 +270,7 @@ function WorkflowEditor({
         <div className="flex flex-col gap-3 p-6 flex-1 min-h-0">
           {isNew && (
             <label className="block">
-              <span className="text-xs font-medium text-[#1f2328]">
-                Filename stem
-              </span>
+              <span className="text-xs font-medium text-fg">Filename stem</span>
               <div className="flex items-center gap-1 mt-1">
                 <input
                   type="text"
@@ -281,29 +279,27 @@ function WorkflowEditor({
                     setStem(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))
                   }
                   placeholder="my-workflow"
-                  className="border border-[#d0d7de] rounded-md px-3 py-2 text-sm w-56 focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+                  className="border border-border rounded-md px-3 py-2 text-sm w-56 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
                 />
-                <span className="text-sm text-[#656d76]">.yaml</span>
+                <span className="text-sm text-fg-muted">.yaml</span>
               </div>
-              <p className="text-xs text-[#656d76] mt-1">
+              <p className="text-xs text-fg-muted mt-1">
                 Letters, numbers, hyphens and underscores only.
               </p>
             </label>
           )}
 
           {isLoading ? (
-            <div className="flex-1 flex items-center justify-center text-sm text-[#656d76]">
+            <div className="flex-1 flex items-center justify-center text-sm text-fg-muted">
               Loading…
             </div>
           ) : (
             <div className="flex-1 flex flex-col min-h-0">
-              <span className="text-xs font-medium text-[#1f2328] mb-1">
-                YAML
-              </span>
+              <span className="text-xs font-medium text-fg mb-1">YAML</span>
               <div
                 ref={editorWrapRef}
                 onKeyDownCapture={handleEditorKeyDownCapture}
-                className="relative flex-1 min-h-0 overflow-auto border border-[#d0d7de] rounded-md bg-[#f6f8fa] focus-within:border-[#0969da] focus-within:ring-1 focus-within:ring-[#0969da]"
+                className="relative flex-1 min-h-0 overflow-auto border border-border rounded-md bg-canvas-subtle focus-within:border-accent focus-within:ring-1 focus-within:ring-accent"
                 style={{ minHeight: '200px' }}
               >
                 <CodeMirror
@@ -364,7 +360,7 @@ function WorkflowEditor({
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#d0d7de]">
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-border">
           <Button variant="default" onClick={onClose}>
             Cancel
           </Button>
@@ -389,20 +385,20 @@ function WorkflowEditor({
 
 function IOSpecList({ specs }: { specs: PluginIOSpec[] | null }) {
   if (specs === null) {
-    return <p className="text-xs text-[#656d76] italic">not declared</p>
+    return <p className="text-xs text-fg-muted italic">not declared</p>
   }
   if (specs.length === 0) {
-    return <p className="text-xs text-[#656d76]">none</p>
+    return <p className="text-xs text-fg-muted">none</p>
   }
   return (
     <ul className="text-xs space-y-1">
       {specs.map((s) => (
         <li key={s.name} className="font-mono">
-          <span className="text-[#1f2328]">{s.name}</span>
-          <span className="text-[#656d76]"> : {s.type}</span>
-          {!s.required && <span className="text-[#656d76]"> (optional)</span>}
+          <span className="text-fg">{s.name}</span>
+          <span className="text-fg-muted"> : {s.type}</span>
+          {!s.required && <span className="text-fg-muted"> (optional)</span>}
           {s.description && (
-            <span className="text-[#656d76] font-sans"> — {s.description}</span>
+            <span className="text-fg-muted font-sans"> — {s.description}</span>
           )}
         </li>
       ))}
@@ -417,28 +413,28 @@ function PluginContractDetail({ plugin }: { plugin: PluginInfo }) {
   return (
     <div className="grid grid-cols-3 gap-4">
       <div>
-        <h4 className="text-xs font-semibold text-[#1f2328] mb-1">Inputs</h4>
+        <h4 className="text-xs font-semibold text-fg mb-1">Inputs</h4>
         <IOSpecList specs={plugin.inputs} />
       </div>
       <div>
-        <h4 className="text-xs font-semibold text-[#1f2328] mb-1">Outputs</h4>
+        <h4 className="text-xs font-semibold text-fg mb-1">Outputs</h4>
         <IOSpecList specs={plugin.outputs} />
       </div>
       <div>
-        <h4 className="text-xs font-semibold text-[#1f2328] mb-1">Config</h4>
+        <h4 className="text-xs font-semibold text-fg mb-1">Config</h4>
         {configProps.length === 0 ? (
-          <p className="text-xs text-[#656d76]">none</p>
+          <p className="text-xs text-fg-muted">none</p>
         ) : (
           <ul className="text-xs space-y-1">
             {configProps.map(([key, prop]) => (
               <li key={key} className="font-mono">
-                <span className="text-[#1f2328]">{key}</span>
-                <span className="text-[#656d76]"> : {prop.type ?? 'any'}</span>
+                <span className="text-fg">{key}</span>
+                <span className="text-fg-muted"> : {prop.type ?? 'any'}</span>
                 {!required.has(key) && (
-                  <span className="text-[#656d76]"> (optional)</span>
+                  <span className="text-fg-muted"> (optional)</span>
                 )}
                 {prop.description && (
-                  <span className="text-[#656d76] font-sans">
+                  <span className="text-fg-muted font-sans">
                     {' '}
                     — {prop.description}
                   </span>
@@ -449,10 +445,10 @@ function PluginContractDetail({ plugin }: { plugin: PluginInfo }) {
         )}
         {plugin.capabilities.length > 0 && (
           <>
-            <h4 className="text-xs font-semibold text-[#1f2328] mt-2 mb-1">
+            <h4 className="text-xs font-semibold text-fg mt-2 mb-1">
               Capabilities
             </h4>
-            <p className="text-xs font-mono text-[#656d76]">
+            <p className="text-xs font-mono text-fg-muted">
               {plugin.capabilities.join(', ')}
             </p>
           </>
@@ -582,7 +578,7 @@ export default function WorkflowsPage() {
             height="40"
             viewBox="0 0 16 16"
             fill="none"
-            className="mb-4 text-[#d0d7de]"
+            className="mb-4 text-border"
             aria-hidden
           >
             <circle
@@ -613,10 +609,10 @@ export default function WorkflowsPage() {
               strokeLinecap="round"
             />
           </svg>
-          <h2 className="text-lg font-semibold text-[#1f2328] mb-2">
+          <h2 className="text-lg font-semibold text-fg mb-2">
             No workflows yet
           </h2>
-          <p className="text-sm text-[#656d76] mb-6 max-w-sm">
+          <p className="text-sm text-fg-muted mb-6 max-w-sm">
             Workflows automate data processing — they run when records are
             created or updated. Create a .yaml file in .civex/workflows/ to get
             started.
@@ -625,19 +621,13 @@ export default function WorkflowsPage() {
       ) : (
         <table className="w-full text-sm border-collapse">
           <thead>
-            <tr className="border-b border-[#d0d7de]">
-              <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
-                Name
-              </th>
-              <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
+            <tr className="border-b border-border">
+              <th className="text-left py-2 px-3 font-medium text-fg">Name</th>
+              <th className="text-left py-2 px-3 font-medium text-fg">
                 Description
               </th>
-              <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
-                Steps
-              </th>
-              <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
-                File
-              </th>
+              <th className="text-left py-2 px-3 font-medium text-fg">Steps</th>
+              <th className="text-left py-2 px-3 font-medium text-fg">File</th>
               <th className="py-2 px-3 text-right" />
             </tr>
           </thead>
@@ -645,16 +635,14 @@ export default function WorkflowsPage() {
             {workflows.map((wf) => (
               <tr
                 key={wf.stem}
-                className="border-b border-[#d0d7de] hover:bg-[#f6f8fa]"
+                className="border-b border-border hover:bg-canvas-subtle"
               >
-                <td className="py-2 px-3 font-medium text-[#1f2328]">
-                  {wf.name}
-                </td>
-                <td className="py-2 px-3 text-[#656d76]">
+                <td className="py-2 px-3 font-medium text-fg">{wf.name}</td>
+                <td className="py-2 px-3 text-fg-muted">
                   {wf.description ?? '—'}
                 </td>
-                <td className="py-2 px-3 text-[#656d76]">{wf.steps}</td>
-                <td className="py-2 px-3 font-mono text-xs text-[#656d76]">
+                <td className="py-2 px-3 text-fg-muted">{wf.steps}</td>
+                <td className="py-2 px-3 font-mono text-xs text-fg-muted">
                   {wf.filename}
                 </td>
                 <td className="py-2 px-3">
@@ -695,16 +683,14 @@ export default function WorkflowsPage() {
       <div className="mt-8">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h2 className="text-base font-semibold text-[#1f2328]">Plugins</h2>
-            <p className="text-xs text-[#656d76] mt-1">
+            <h2 className="text-base font-semibold text-fg">Plugins</h2>
+            <p className="text-xs text-fg-muted mt-1">
               Step implementations available to workflows
             </p>
           </div>
           <div className="flex items-center gap-2">
             {pluginUploadError && (
-              <span className="text-xs text-[#d1242f]">
-                {pluginUploadError}
-              </span>
+              <span className="text-xs text-danger">{pluginUploadError}</span>
             )}
             <Button
               size="sm"
@@ -720,19 +706,19 @@ export default function WorkflowsPage() {
           </div>
         </div>
         {pluginDeleteError && (
-          <p className="text-xs text-[#d1242f] mb-2">{pluginDeleteError}</p>
+          <p className="text-xs text-danger mb-2">{pluginDeleteError}</p>
         )}
         {pluginList && pluginList.length > 0 && (
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="border-b border-[#d0d7de]">
-                <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
+              <tr className="border-b border-border">
+                <th className="text-left py-2 px-3 font-medium text-fg">
                   Plugin ID
                 </th>
-                <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
+                <th className="text-left py-2 px-3 font-medium text-fg">
                   Description
                 </th>
-                <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
+                <th className="text-left py-2 px-3 font-medium text-fg">
                   Source
                 </th>
                 <th className="py-2 px-3" />
@@ -748,26 +734,26 @@ export default function WorkflowsPage() {
                       onClick={() =>
                         setExpandedPlugin(isExpanded ? null : p.id)
                       }
-                      className="border-b border-[#d0d7de] hover:bg-[#f6f8fa] cursor-pointer"
+                      className="border-b border-border hover:bg-canvas-subtle cursor-pointer"
                     >
-                      <td className="py-2 px-3 font-mono text-xs text-[#1f2328]">
+                      <td className="py-2 px-3 font-mono text-xs text-fg">
                         {p.id}
                       </td>
-                      <td className="py-2 px-3 text-[#656d76]">
+                      <td className="py-2 px-3 text-fg-muted">
                         {p.description || '—'}
                       </td>
                       <td className="py-2 px-3">
                         <span
                           className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                             p.builtin
-                              ? 'bg-[#ddf4ff] text-[#0969da]'
-                              : 'bg-[#dafbe1] text-[#1a7f37]'
+                              ? 'bg-accent-subtle text-accent'
+                              : 'bg-success-subtle text-success'
                           }`}
                         >
                           {p.builtin ? 'built-in' : 'user'}
                         </span>
                       </td>
-                      <td className="py-2 px-3 text-[#656d76] text-xs">
+                      <td className="py-2 px-3 text-fg-muted text-xs">
                         {isExpanded ? '▲' : '▼'}
                       </td>
                       <td className="py-2 px-3 text-right">
@@ -799,8 +785,8 @@ export default function WorkflowsPage() {
                       </td>
                     </tr>
                     {isExpanded && (
-                      <tr className="border-b border-[#d0d7de]">
-                        <td colSpan={5} className="bg-[#f6f8fa] px-3 py-3">
+                      <tr className="border-b border-border">
+                        <td colSpan={5} className="bg-canvas-subtle px-3 py-3">
                           <PluginContractDetail plugin={p} />
                         </td>
                       </tr>
@@ -812,16 +798,16 @@ export default function WorkflowsPage() {
           </table>
         )}
         {pluginList?.length === 0 && (
-          <p className="text-sm text-[#656d76]">No plugins loaded yet.</p>
+          <p className="text-sm text-fg-muted">No plugins loaded yet.</p>
         )}
         {pluginLoadErrors && pluginLoadErrors.length > 0 && (
           <table className="w-full text-sm border-collapse mt-3">
             <thead>
-              <tr className="border-b border-[#d0d7de]">
-                <th className="text-left py-2 px-3 font-medium text-[#d1242f]">
+              <tr className="border-b border-border">
+                <th className="text-left py-2 px-3 font-medium text-danger">
                   Failed to load
                 </th>
-                <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
+                <th className="text-left py-2 px-3 font-medium text-fg">
                   Error
                 </th>
                 <th className="py-2 px-3 text-right" />
@@ -829,11 +815,11 @@ export default function WorkflowsPage() {
             </thead>
             <tbody>
               {pluginLoadErrors.map((e) => (
-                <tr key={e.filename} className="border-b border-[#d0d7de]">
-                  <td className="py-2 px-3 font-mono text-xs text-[#1f2328]">
+                <tr key={e.filename} className="border-b border-border">
+                  <td className="py-2 px-3 font-mono text-xs text-fg">
                     {e.filename}
                   </td>
-                  <td className="py-2 px-3 text-[#d1242f] text-xs whitespace-pre-wrap">
+                  <td className="py-2 px-3 text-danger text-xs whitespace-pre-wrap">
                     {e.error}
                   </td>
                   <td className="py-2 px-3 text-right">
@@ -868,21 +854,21 @@ export default function WorkflowsPage() {
       {containerPlugins && containerPlugins.length > 0 && (
         <div className="mt-8">
           <div className="mb-3">
-            <h2 className="text-base font-semibold text-[#1f2328]">
+            <h2 className="text-base font-semibold text-fg">
               Container plugins
             </h2>
-            <p className="text-xs text-[#656d76] mt-1">
+            <p className="text-xs text-fg-muted mt-1">
               Tier 2 plugins — Dockerfile + source tree, from{' '}
               _civex/plugins/&lt;name&gt;/
             </p>
           </div>
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="border-b border-[#d0d7de]">
-                <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
+              <tr className="border-b border-border">
+                <th className="text-left py-2 px-3 font-medium text-fg">
                   Name
                 </th>
-                <th className="text-left py-2 px-3 font-medium text-[#1f2328]">
+                <th className="text-left py-2 px-3 font-medium text-fg">
                   Files
                 </th>
                 <th className="py-2 px-3 text-right" />
@@ -892,12 +878,10 @@ export default function WorkflowsPage() {
               {containerPlugins.map((p) => (
                 <tr
                   key={p.name}
-                  className="border-b border-[#d0d7de] hover:bg-[#f6f8fa]"
+                  className="border-b border-border hover:bg-canvas-subtle"
                 >
-                  <td className="py-2 px-3 font-medium text-[#1f2328]">
-                    {p.name}
-                  </td>
-                  <td className="py-2 px-3 font-mono text-xs text-[#656d76]">
+                  <td className="py-2 px-3 font-medium text-fg">{p.name}</td>
+                  <td className="py-2 px-3 font-mono text-xs text-fg-muted">
                     {p.files.length}
                   </td>
                   <td className="py-2 px-3">

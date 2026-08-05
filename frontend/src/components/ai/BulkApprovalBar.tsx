@@ -43,16 +43,16 @@ export default function BulkApprovalBar({
   }
 
   return (
-    <div className="flex items-center justify-between gap-2 rounded-md border border-[#d0d7de] bg-white px-3 py-2 text-xs">
-      <span className="text-[#656d76]">
+    <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-white px-3 py-2 text-xs">
+      <span className="text-fg-muted">
         {bulkable.length} changes from this turn can be approved together
       </span>
       <div className="flex items-center gap-2">
-        {error && <span className="text-[#d1242f]">{error}</span>}
+        {error && <span className="text-danger">{error}</span>}
         <button
           onClick={approveAll}
           disabled={busy}
-          className="flex-shrink-0 px-3 py-2 rounded-md bg-[#0969da] text-white font-medium hover:bg-[#0860ca] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="flex-shrink-0 px-3 py-2 rounded-md bg-accent text-white font-medium hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {busy ? 'Approving…' : `Approve all ${bulkable.length}`}
         </button>

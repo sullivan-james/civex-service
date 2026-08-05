@@ -41,45 +41,43 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg border border-[#d0d7de] shadow-lg w-full max-w-md p-6"
+        className="bg-white rounded-lg border border-border shadow-lg w-full max-w-md p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-base font-semibold text-[#1f2328] mb-4">
-          New schema
-        </h2>
+        <h2 className="text-base font-semibold text-fg mb-4">New schema</h2>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div>
-            <label className="block text-xs font-medium text-[#1f2328] mb-1">
-              Name <span className="text-[#d1242f]">*</span>
+            <label className="block text-xs font-medium text-fg mb-1">
+              Name <span className="text-danger">*</span>
             </label>
             <input
               autoFocus
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da]"
+              className="w-full px-3 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
               placeholder="my-schema"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-[#1f2328] mb-1">
+            <label className="block text-xs font-medium text-fg mb-1">
               Description
             </label>
             <input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da]"
+              className="w-full px-3 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
               placeholder="Optional"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-[#1f2328] mb-1">
+            <label className="block text-xs font-medium text-fg mb-1">
               Parent schema
             </label>
             <select
               value={parent}
               onChange={(e) => setParent(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da] bg-white"
+              className="w-full px-3 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-white"
             >
               <option value="">None</option>
               {schemas?.map((s) => (
@@ -90,9 +88,7 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
             </select>
           </div>
           {create.error && (
-            <p className="text-xs text-[#d1242f]">
-              {errorMessage(create.error)}
-            </p>
+            <p className="text-xs text-danger">{errorMessage(create.error)}</p>
           )}
           <div className="flex justify-end gap-2 mt-1">
             <Button type="button" variant="default" onClick={onClose}>
@@ -137,7 +133,7 @@ export default function SchemasPage() {
             height="40"
             viewBox="0 0 16 16"
             fill="none"
-            className="mb-4 text-[#d0d7de]"
+            className="mb-4 text-border"
             aria-hidden
           >
             <rect
@@ -156,10 +152,8 @@ export default function SchemasPage() {
               strokeLinecap="round"
             />
           </svg>
-          <h2 className="text-lg font-semibold text-[#1f2328] mb-2">
-            No schemas yet
-          </h2>
-          <p className="text-sm text-[#656d76] mb-6 max-w-sm">
+          <h2 className="text-lg font-semibold text-fg mb-2">No schemas yet</h2>
+          <p className="text-sm text-fg-muted mb-6 max-w-sm">
             Schemas define the structure of your data — field names, types, and
             rules. Create a schema before adding records.
           </p>
@@ -186,7 +180,7 @@ export default function SchemasPage() {
                 <Td>
                   <Link
                     to={`/schemas/${s.id}`}
-                    className="font-medium text-[#0969da] hover:underline"
+                    className="font-medium text-accent hover:underline"
                   >
                     {s.name}
                   </Link>
@@ -199,13 +193,13 @@ export default function SchemasPage() {
                       </Badge>
                     </Link>
                   ) : (
-                    <span className="text-[#818b98]">—</span>
+                    <span className="text-fg-subtle">—</span>
                   )}
                 </Td>
                 <Td>
                   <Badge>{pluralise(s.fields.length, 'field')}</Badge>
                 </Td>
-                <Td className="text-[#656d76]">{s.description ?? ''}</Td>
+                <Td className="text-fg-muted">{s.description ?? ''}</Td>
                 <Td>
                   <MonoId id={s.id} />
                 </Td>

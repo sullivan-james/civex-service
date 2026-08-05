@@ -77,11 +77,11 @@ export function WorkflowRunModal({
       >
         {/* Header */}
         <div className="px-6 pt-6 pb-4 shrink-0">
-          <h2 className="text-base font-semibold text-[#1f2328] mb-1">
+          <h2 className="text-base font-semibold text-fg mb-1">
             Run <span className="font-mono">{workflow.name}</span>
           </h2>
           {workflow.description && (
-            <p className="text-xs text-[#656d76]">{workflow.description}</p>
+            <p className="text-xs text-fg-muted">{workflow.description}</p>
           )}
         </div>
 
@@ -93,11 +93,9 @@ export function WorkflowRunModal({
             className="space-y-4 pb-4"
           >
             <label className="block">
-              <span className="text-sm font-medium text-[#1f2328]">
-                Record ID
-              </span>
+              <span className="text-sm font-medium text-fg">Record ID</span>
               {workflow.record_schema && (
-                <span className="ml-2 text-xs text-[#656d76]">
+                <span className="ml-2 text-xs text-fg-muted">
                   ({workflow.record_schema})
                 </span>
               )}
@@ -109,7 +107,7 @@ export function WorkflowRunModal({
                 placeholder="Short ID or full UUID"
                 readOnly={!!prefilled}
                 required
-                className={`mt-1 w-full border border-[#d0d7de] rounded-md px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] ${prefilled ? 'bg-[#f6f8fa] text-[#656d76]' : ''}`}
+                className={`mt-1 w-full border border-border rounded-md px-3 py-2 text-sm font-mono focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent ${prefilled ? 'bg-canvas-subtle text-fg-muted' : ''}`}
               />
             </label>
 
@@ -117,16 +115,16 @@ export function WorkflowRunModal({
               const chosen = fileInputs[inputName] ?? []
               return (
                 <div key={inputName}>
-                  <label className="block text-sm font-medium text-[#1f2328] mb-1">
+                  <label className="block text-sm font-medium text-fg mb-1">
                     {decl.label ?? inputName}
                   </label>
                   {decl.description && (
-                    <p className="text-xs text-[#656d76] mb-2">
+                    <p className="text-xs text-fg-muted mb-2">
                       {decl.description}
                     </p>
                   )}
                   <div
-                    className="border-2 border-dashed border-[#d0d7de] rounded-md px-4 py-6 text-center cursor-pointer hover:border-[#0969da] hover:bg-[#f6f8fa] transition-colors"
+                    className="border-2 border-dashed border-border rounded-md px-4 py-6 text-center cursor-pointer hover:border-accent hover:bg-canvas-subtle transition-colors"
                     onClick={() => fileRefs.current[inputName]?.click()}
                     onDragOver={(e) => {
                       e.preventDefault()
@@ -149,9 +147,9 @@ export function WorkflowRunModal({
                       }
                     />
                     {chosen.length === 0 ? (
-                      <p className="text-sm text-[#656d76]">
+                      <p className="text-sm text-fg-muted">
                         Drop files here or{' '}
-                        <span className="text-[#0969da]">browse</span>
+                        <span className="text-accent">browse</span>
                       </p>
                     ) : (
                       <div className="text-left">
@@ -159,13 +157,13 @@ export function WorkflowRunModal({
                           {chosen.map((f, i) => (
                             <p
                               key={i}
-                              className="text-xs font-mono text-[#1f2328] truncate"
+                              className="text-xs font-mono text-fg truncate"
                             >
                               {f.name}
                             </p>
                           ))}
                         </div>
-                        <p className="text-xs text-[#656d76]">
+                        <p className="text-xs text-fg-muted">
                           {chosen.length} file{chosen.length !== 1 ? 's' : ''}{' '}
                           selected · click or drop to replace
                         </p>
@@ -176,12 +174,12 @@ export function WorkflowRunModal({
               )
             })}
 
-            {error && <p className="text-sm text-[#d1242f]">{error}</p>}
+            {error && <p className="text-sm text-danger">{error}</p>}
           </form>
         </div>
 
         {/* Sticky footer */}
-        <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#d0d7de] shrink-0">
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-border shrink-0">
           <Button variant="default" onClick={onClose} type="button">
             Cancel
           </Button>

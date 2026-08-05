@@ -9,7 +9,7 @@ export function Table({
 }) {
   return (
     <div
-      className={`border border-[#d0d7de] rounded-md overflow-x-auto ${className}`}
+      className={`border border-border rounded-md overflow-x-auto ${className}`}
     >
       <table className="w-full min-w-max text-sm border-collapse">
         {children}
@@ -20,7 +20,9 @@ export function Table({
 
 export function Thead({ children }: { children: ReactNode }) {
   return (
-    <thead className="bg-[#f6f8fa] border-b border-[#d0d7de]">{children}</thead>
+    <thead className="bg-canvas-subtle border-b border-border">
+      {children}
+    </thead>
   )
 }
 
@@ -33,7 +35,7 @@ export function Th({
 }) {
   return (
     <th
-      className={`px-4 py-3 text-left text-xs font-semibold text-[#656d76] uppercase tracking-wider ${className}`}
+      className={`px-4 py-3 text-left text-xs font-semibold text-fg-muted uppercase tracking-wider ${className}`}
     >
       {children}
     </th>
@@ -54,7 +56,7 @@ export function Tr({
   return (
     <tr
       onClick={onClick}
-      className={`bg-white ${onClick ? 'hover:bg-[#f6f8fa] cursor-pointer' : ''}`}
+      className={`bg-white ${onClick ? 'hover:bg-canvas-subtle cursor-pointer' : ''}`}
     >
       {children}
     </tr>
@@ -68,5 +70,5 @@ export function Td({
   children?: ReactNode
   className?: string
 }) {
-  return <td className={`px-4 py-3 text-[#1f2328] ${className}`}>{children}</td>
+  return <td className={`px-4 py-3 text-fg ${className}`}>{children}</td>
 }

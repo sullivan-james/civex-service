@@ -55,34 +55,34 @@ export function ContainerPluginEditor({
         className="bg-white rounded-lg shadow-xl w-full max-w-5xl flex flex-col"
         style={{ height: '90vh' }}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#d0d7de]">
-          <h2 className="text-base font-semibold text-[#1f2328]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <h2 className="text-base font-semibold text-fg">
             Container plugin — {name}
           </h2>
           <button
             onClick={onClose}
-            className="text-[#656d76] hover:text-[#1f2328] text-xl leading-none"
+            className="text-fg-muted hover:text-fg text-xl leading-none"
           >
             ×
           </button>
         </div>
 
         {isLoading || contents === null ? (
-          <div className="flex-1 flex items-center justify-center text-sm text-[#656d76]">
+          <div className="flex-1 flex items-center justify-center text-sm text-fg-muted">
             Loading…
           </div>
         ) : (
           <div className="flex flex-1 min-h-0">
             {/* File tree */}
-            <div className="w-56 border-r border-[#d0d7de] overflow-y-auto py-2">
+            <div className="w-56 border-r border-border overflow-y-auto py-2">
               {filePaths.map((path) => (
                 <button
                   key={path}
                   onClick={() => setSelectedPath(path)}
                   className={`block w-full text-left px-3 py-2 text-xs font-mono truncate ${
                     path === selectedPath
-                      ? 'bg-[#ddf4ff] text-[#0969da]'
-                      : 'text-[#1f2328] hover:bg-[#f6f8fa]'
+                      ? 'bg-accent-subtle text-accent'
+                      : 'text-fg hover:bg-canvas-subtle'
                   }`}
                 >
                   {path}
@@ -92,7 +92,7 @@ export function ContainerPluginEditor({
 
             {/* Editor */}
             <div className="flex-1 flex flex-col min-h-0 p-4 gap-3">
-              <span className="text-xs font-medium text-[#1f2328]">
+              <span className="text-xs font-medium text-fg">
                 {selectedPath}
               </span>
               <textarea
@@ -102,14 +102,14 @@ export function ContainerPluginEditor({
                   setContents({ ...contents, [selectedPath]: e.target.value })
                 }
                 spellCheck={false}
-                className="flex-1 min-h-0 font-mono text-xs border border-[#d0d7de] rounded-md p-3 resize-none bg-[#f6f8fa] focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] leading-relaxed"
+                className="flex-1 min-h-0 font-mono text-xs border border-border rounded-md p-3 resize-none bg-canvas-subtle focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent leading-relaxed"
               />
 
               {buildResult && (
                 <div
                   className={`text-xs rounded-md p-2 whitespace-pre-wrap max-h-32 overflow-y-auto ${
                     buildResult.success
-                      ? 'text-[#1a7f37] bg-[#dafbe1] border border-[#1a7f37]/30'
+                      ? 'text-success bg-success-subtle border border-success/30'
                       : 'text-red-600 bg-red-50 border border-red-200'
                   }`}
                 >
@@ -121,7 +121,7 @@ export function ContainerPluginEditor({
           </div>
         )}
 
-        <div className="flex justify-end gap-2 px-6 py-4 border-t border-[#d0d7de]">
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-border">
           <Button variant="default" onClick={onClose}>
             Close
           </Button>

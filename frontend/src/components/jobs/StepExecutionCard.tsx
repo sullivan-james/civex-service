@@ -25,47 +25,47 @@ export default function StepExecutionCard({ step }: { step: StepExecution }) {
   const hasOutputs = step.outputs && Object.keys(step.outputs).length > 0
 
   return (
-    <div className="rounded-md border border-[#d0d7de] bg-white overflow-hidden">
+    <div className="rounded-md border border-border bg-white overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[#f6f8fa] transition-colors"
+        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-canvas-subtle transition-colors"
       >
-        <span className="font-mono text-sm text-[#1f2328]">{step.step_id}</span>
-        <span className="text-xs text-[#656d76] font-mono">{step.plugin}</span>
+        <span className="font-mono text-sm text-fg">{step.step_id}</span>
+        <span className="text-xs text-fg-muted font-mono">{step.plugin}</span>
         <span className="ml-auto flex items-center gap-3">
-          <span className="text-xs text-[#656d76]">
+          <span className="text-xs text-fg-muted">
             {duration(step.duration_seconds)}
           </span>
           <StatusBadge status={step.status} />
-          <span className="text-[#adbac7] text-xs">{open ? '▲' : '▼'}</span>
+          <span className="text-fg-subtle text-xs">{open ? '▲' : '▼'}</span>
         </span>
       </button>
 
       {open && (
-        <div className="border-t border-[#d0d7de] px-4 py-3 space-y-3 text-xs">
+        <div className="border-t border-border px-4 py-3 space-y-3 text-xs">
           {step.error && (
-            <div className="rounded-md px-2 py-2 bg-[#ffebe9] text-[#d1242f] font-mono whitespace-pre-wrap">
+            <div className="rounded-md px-2 py-2 bg-danger-subtle text-danger font-mono whitespace-pre-wrap">
               {step.error}
             </div>
           )}
           <div>
-            <h3 className="font-medium text-[#656d76] mb-1">Inputs</h3>
+            <h3 className="font-medium text-fg-muted mb-1">Inputs</h3>
             {hasInputs ? (
-              <pre className="font-mono text-[#1f2328] whitespace-pre-wrap break-words bg-[#f6f8fa] rounded-md p-2">
+              <pre className="font-mono text-fg whitespace-pre-wrap break-words bg-canvas-subtle rounded-md p-2">
                 {JSON.stringify(step.inputs, null, 2)}
               </pre>
             ) : (
-              <p className="text-[#656d76]">None</p>
+              <p className="text-fg-muted">None</p>
             )}
           </div>
           <div>
-            <h3 className="font-medium text-[#656d76] mb-1">Outputs</h3>
+            <h3 className="font-medium text-fg-muted mb-1">Outputs</h3>
             {hasOutputs ? (
-              <pre className="font-mono text-[#1f2328] whitespace-pre-wrap break-words bg-[#f6f8fa] rounded-md p-2">
+              <pre className="font-mono text-fg whitespace-pre-wrap break-words bg-canvas-subtle rounded-md p-2">
                 {JSON.stringify(step.outputs, null, 2)}
               </pre>
             ) : (
-              <p className="text-[#656d76]">
+              <p className="text-fg-muted">
                 {step.status === 'skipped' ? "Didn't run" : 'None'}
               </p>
             )}

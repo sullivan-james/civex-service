@@ -37,41 +37,37 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg border border-[#d0d7de] shadow-lg w-full max-w-md p-6"
+        className="bg-white rounded-lg border border-border shadow-lg w-full max-w-md p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-base font-semibold text-[#1f2328] mb-4">
-          New collection
-        </h2>
+        <h2 className="text-base font-semibold text-fg mb-4">New collection</h2>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div>
-            <label className="block text-xs font-medium text-[#1f2328] mb-1">
-              Name <span className="text-[#d1242f]">*</span>
+            <label className="block text-xs font-medium text-fg mb-1">
+              Name <span className="text-danger">*</span>
             </label>
             <input
               autoFocus
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da]"
+              className="w-full px-3 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
               placeholder="my-collection"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-[#1f2328] mb-1">
+            <label className="block text-xs font-medium text-fg mb-1">
               Description
             </label>
             <input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:border-[#0969da]"
+              className="w-full px-3 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
               placeholder="Optional"
             />
           </div>
           {create.error && (
-            <p className="text-xs text-[#d1242f]">
-              {errorMessage(create.error)}
-            </p>
+            <p className="text-xs text-danger">{errorMessage(create.error)}</p>
           )}
           <div className="flex justify-end gap-2 mt-1">
             <Button type="button" variant="default" onClick={onClose}>
@@ -100,38 +96,38 @@ function ImportResultModal({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg border border-[#d0d7de] shadow-lg w-full max-w-sm p-6"
+        className="bg-white rounded-lg border border-border shadow-lg w-full max-w-sm p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-base font-semibold text-[#1f2328] mb-3">
+        <h2 className="text-base font-semibold text-fg mb-3">
           Import complete
         </h2>
         <dl className="text-sm space-y-1">
           <div className="flex justify-between">
-            <dt className="text-[#656d76]">Schemas</dt>
+            <dt className="text-fg-muted">Schemas</dt>
             <dd className="font-medium">{result.schemas}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-[#656d76]">Collections</dt>
+            <dt className="text-fg-muted">Collections</dt>
             <dd className="font-medium">{result.datasets}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-[#656d76]">Records</dt>
+            <dt className="text-fg-muted">Records</dt>
             <dd className="font-medium">
               {result.records_restored}/{result.records_total}
               {result.records_restored < result.records_total && (
-                <span className="ml-1 text-[#9a6700]">
+                <span className="ml-1 text-attention">
                   ({result.records_total - result.records_restored} skipped)
                 </span>
               )}
             </dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-[#656d76]">Workflows</dt>
+            <dt className="text-fg-muted">Workflows</dt>
             <dd className="font-medium">{result.workflows}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-[#656d76]">Plugins</dt>
+            <dt className="text-fg-muted">Plugins</dt>
             <dd className="font-medium">{result.plugins}</dd>
           </div>
         </dl>
@@ -197,7 +193,7 @@ export default function CollectionsPage() {
         action={
           <div className="flex items-center gap-2">
             {importError && (
-              <span className="text-xs text-[#d1242f]">{importError}</span>
+              <span className="text-xs text-danger">{importError}</span>
             )}
             <Button
               variant="default"
@@ -231,7 +227,7 @@ export default function CollectionsPage() {
             height="40"
             viewBox="0 0 16 16"
             fill="none"
-            className="mb-4 text-[#d0d7de]"
+            className="mb-4 text-border"
             aria-hidden
           >
             <rect
@@ -250,10 +246,10 @@ export default function CollectionsPage() {
               strokeLinecap="round"
             />
           </svg>
-          <h2 className="text-lg font-semibold text-[#1f2328] mb-2">
+          <h2 className="text-lg font-semibold text-fg mb-2">
             No collections yet
           </h2>
-          <p className="text-sm text-[#656d76] mb-6 max-w-sm">
+          <p className="text-sm text-fg-muted mb-6 max-w-sm">
             A collection is a named container for your records. Create one to
             start adding data.
           </p>
@@ -279,7 +275,7 @@ export default function CollectionsPage() {
                 <Td>
                   <Link
                     to={`/collections/${d.id}`}
-                    className="font-medium text-[#0969da] hover:underline"
+                    className="font-medium text-accent hover:underline"
                   >
                     {d.name}
                   </Link>
@@ -289,7 +285,7 @@ export default function CollectionsPage() {
                     {pluralise(d.record_count, 'record')}
                   </Badge>
                 </Td>
-                <Td className="text-[#656d76]">{d.description ?? ''}</Td>
+                <Td className="text-fg-muted">{d.description ?? ''}</Td>
                 <Td>
                   <MonoId id={d.id} />
                 </Td>
