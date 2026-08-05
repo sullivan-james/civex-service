@@ -20,7 +20,7 @@ _civex/plugins/<name>/
 
 `Main` speaks the same newline-delimited JSON protocol over stdin/stdout as
 a Tier 1 (subprocess) plugin from `civex-plugin-sdk` — see
-[`docs/writing-custom-plugins.md`](../../docs/writing-custom-plugins.md) for
+[`docs/extending/wire-protocol.md`](../../docs/extending/wire-protocol.md) for
 the frame shapes (`describe`/`describe_result`, `run`/`result`/`error`,
 `rpc_call`/`rpc_result`). The one difference from Tier 1 is how the mode is
 selected: instead of a persistent process that dispatches on the first

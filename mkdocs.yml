@@ -78,8 +78,10 @@ nav:
       - Remote sync: guides/remote-sync.md
       - PostgreSQL: guides/postgresql.md
       - Logging & telemetry: guides/logging-and-telemetry.md
-  - Writing custom plugins: writing-custom-plugins.md
   - Extending:
+      - Writing a plugin: extending/writing-a-plugin.md
+      - Container plugins: extending/container-plugins.md
+      - Wire protocol: extending/wire-protocol.md
       - SDK reference: extending/sdk-reference.md
   - Reference:
       - CLI:
