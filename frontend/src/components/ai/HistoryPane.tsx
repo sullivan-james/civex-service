@@ -21,16 +21,16 @@ export default function HistoryPane({
 }) {
   return (
     <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
-      <div className="p-3 border-b border-[#d0d7de] flex-shrink-0">
+      <div className="p-3 border-b border-border flex-shrink-0">
         <button
           onClick={onNewChat}
-          className="w-full py-1.5 rounded-md bg-[#0969da] text-white text-sm font-medium hover:bg-[#0860ca] transition-colors"
+          className="w-full py-1.5 rounded-md bg-accent text-white text-sm font-medium hover:bg-accent-emphasis transition-colors"
         >
           + New chat
         </button>
       </div>
       {sessions.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-xs text-[#adbac7]">
+        <div className="flex-1 flex items-center justify-center text-xs text-fg-subtle">
           No saved sessions yet
         </div>
       ) : (
@@ -39,18 +39,16 @@ export default function HistoryPane({
             <button
               key={s.id}
               onClick={() => onRestore(s)}
-              className="w-full text-left px-4 py-3 hover:bg-[#f6f8fa] transition-colors group"
+              className="w-full text-left px-4 py-3 hover:bg-canvas-subtle transition-colors group"
             >
               <div className="flex items-start justify-between gap-2">
-                <p className="text-sm text-[#1f2328] truncate flex-1">
-                  {s.title}
-                </p>
+                <p className="text-sm text-fg truncate flex-1">{s.title}</p>
                 <span
                   role="button"
                   onClick={(e) =>
                     onDelete(s.id, e as unknown as React.MouseEvent)
                   }
-                  className="text-[#d0d7de] hover:text-[#d1242f] transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0 cursor-pointer"
+                  className="text-border hover:text-danger transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0 cursor-pointer"
                   title="Delete session"
                 >
                   <svg
@@ -63,7 +61,7 @@ export default function HistoryPane({
                   </svg>
                 </span>
               </div>
-              <p className="text-[10px] text-[#adbac7] mt-0.5">
+              <p className="text-[10px] text-fg-subtle mt-0.5">
                 {relativeTime(s.createdAt)}
               </p>
             </button>

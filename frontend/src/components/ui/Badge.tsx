@@ -3,10 +3,10 @@ import { type ReactNode } from 'react'
 type Variant = 'default' | 'accent' | 'success' | 'danger'
 
 const variants: Record<Variant, string> = {
-  default: 'bg-[#818b9833] text-[#656d76] border-[#818b9833]',
-  accent: 'bg-[#ddf4ff] text-[#0969da] border-[#54aeff66]',
-  success: 'bg-[#dafbe1] text-[#1a7f37] border-[#4ac26b66]',
-  danger: 'bg-[#ffebe9] text-[#d1242f] border-[#ffd7d5]',
+  default: 'bg-neutral-subtle text-fg-muted border-neutral-subtle',
+  accent: 'bg-accent-subtle text-accent border-accent-muted',
+  success: 'bg-success-subtle text-success border-success-muted',
+  danger: 'bg-danger-subtle text-danger border-danger-subtle-border',
 }
 
 export function Badge({

@@ -45,10 +45,11 @@ function SyncMessage({
   error: string | null
   op: 'push' | 'pull'
 }) {
-  if (error) return <span className="text-[#f85149] text-xs">{error}</span>
+  if (error)
+    return <span className="text-danger-emphasis text-xs">{error}</span>
   if (!result) return null
   return (
-    <span className="text-[#3fb950] text-xs">
+    <span className="text-success-emphasis text-xs">
       {op === 'push' ? 'Pushed' : 'Pulled'} — {result.records}r {result.schemas}
       s {result.datasets}d
     </span>
@@ -96,15 +97,15 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen flex flex-col">
       {/* Top navbar */}
-      <header className="bg-[#24292f] px-6 py-3 flex items-center gap-4">
-        <span className="text-[#f0f6fc] font-semibold text-base tracking-tight">
+      <header className="bg-nav-bg px-6 py-3 flex items-center gap-4">
+        <span className="text-nav-fg font-semibold text-base tracking-tight">
           civex
         </span>
 
         <button
           onClick={() => queryClient.refetchQueries({ type: 'active' })}
           title="Refresh all data"
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
         >
           <svg
             width="12"
@@ -123,8 +124,8 @@ export default function Layout({ children }: { children: ReactNode }) {
           title="Open AI assistant"
           className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
             aiOpen
-              ? 'border-[#0969da] bg-[#0969da] text-white'
-              : 'border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3]'
+              ? 'border-accent bg-accent text-white'
+              : 'border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg'
           }`}
         >
           ✦ Ask AI
@@ -135,8 +136,8 @@ export default function Layout({ children }: { children: ReactNode }) {
           title="Settings"
           className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
             settingsActive
-              ? 'border-[#0969da] bg-[#0969da] text-white'
-              : 'border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3]'
+              ? 'border-accent bg-accent text-white'
+              : 'border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg'
           }`}
         >
           <svg
@@ -156,7 +157,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <button
               onClick={() => window.pywebview!.api.open_project()}
               title="Open a different civex project"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
             >
               <svg
                 width="12"
@@ -172,7 +173,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <button
               onClick={() => window.pywebview!.api.create_project()}
               title="Create a new civex project"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
             >
               <svg
                 width="12"
@@ -191,7 +192,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 if (r?.error) window.alert(r.error)
               }}
               title={`${fileManagerLabel()} — open this project's database directory`}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
             >
               <svg
                 width="12"
@@ -217,7 +218,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               onClick={() => runSync('pull')}
               disabled={syncing !== null}
               title={`Pull from ${remote.url}`}
-              className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {syncing === 'pull' ? (
                 <Spinner />
@@ -240,7 +241,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               onClick={() => runSync('push')}
               disabled={syncing !== null}
               title={`Push to ${remote.url}`}
-              className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded border border-[#444c56] bg-[#2d333b] text-[#adbac7] hover:bg-[#373e47] hover:text-[#e6edf3] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {syncing === 'push' ? (
                 <Spinner />
@@ -263,7 +264,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </header>
 
       {/* Tab bar */}
-      <div className="border-b border-[#d0d7de] bg-white px-6">
+      <div className="border-b border-border bg-white px-6">
         <nav className="flex gap-1 -mb-px">
           {tabs.map(({ to, label }) => (
             <NavLink
@@ -272,8 +273,8 @@ export default function Layout({ children }: { children: ReactNode }) {
               className={({ isActive }) =>
                 `px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
                   isActive
-                    ? 'border-[#fd8c73] text-[#1f2328]'
-                    : 'border-transparent text-[#656d76] hover:text-[#1f2328] hover:border-[#d0d7de]'
+                    ? 'border-danger-subtle-border text-fg'
+                    : 'border-transparent text-fg-muted hover:text-fg hover:border-border'
                 }`
               }
             >
@@ -284,7 +285,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             href="/docs"
             target="_blank"
             rel="noopener noreferrer"
-            className="px-4 py-3 text-sm font-medium border-b-2 border-transparent text-[#656d76] hover:text-[#1f2328] hover:border-[#d0d7de] transition-colors"
+            className="px-4 py-3 text-sm font-medium border-b-2 border-transparent text-fg-muted hover:text-fg hover:border-border transition-colors"
           >
             API docs ↗
           </a>
@@ -297,10 +298,10 @@ export default function Layout({ children }: { children: ReactNode }) {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-[#d0d7de] bg-white px-6 py-3 text-center">
+      <footer className="border-t border-border bg-white px-6 py-3 text-center">
         <NavLink
           to="/legal"
-          className="text-xs text-[#656d76] hover:text-[#1f2328] hover:underline"
+          className="text-xs text-fg-muted hover:text-fg hover:underline"
         >
           Licenses &amp; policies
         </NavLink>

@@ -31,7 +31,7 @@ export default function JobsPage() {
         title="Runs"
         description={
           hasActive ? (
-            <span className="text-xs text-[#0969da] flex items-center gap-1">
+            <span className="text-xs text-accent flex items-center gap-1">
               <span className="animate-spin inline-block">↻</span> live
             </span>
           ) : (
@@ -57,8 +57,8 @@ export default function JobsPage() {
             onClick={() => handleStatusFilter(s)}
             className={`px-3 py-1 text-xs rounded-full border transition-colors ${
               (statusFilter ?? '') === s
-                ? 'bg-[#0969da] text-white border-[#0969da]'
-                : 'bg-white text-[#656d76] border-[#d0d7de] hover:bg-[#f6f8fa]'
+                ? 'bg-accent text-white border-accent'
+                : 'bg-white text-fg-muted border-border hover:bg-canvas-subtle'
             }`}
           >
             {s || 'All'}

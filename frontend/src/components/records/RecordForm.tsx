@@ -202,7 +202,7 @@ function FilenameExtractor({
   const hasResult = extracted !== null && !patternErr && !convertErr
 
   return (
-    <div className="mt-1.5 border border-[#b6d4fb] rounded-md bg-[#f0f6ff] p-3 space-y-2">
+    <div className="mt-1.5 border border-accent-subtle-border rounded-md bg-accent-subtle p-3 space-y-2">
       {/* File source */}
       {sources.length > 1 ? (
         <select
@@ -212,7 +212,7 @@ function FilenameExtractor({
             setExtracted(null)
             setConverted(undefined)
           }}
-          className="w-full border border-[#d0d7de] rounded px-2 py-1 text-xs bg-white focus:outline-none focus:border-[#0969da]"
+          className="w-full border border-border rounded px-2 py-1 text-xs bg-white focus:outline-none focus:border-accent"
         >
           {sources.map((s) => (
             <option key={s.filename} value={s.filename}>
@@ -222,7 +222,7 @@ function FilenameExtractor({
         </select>
       ) : (
         <code
-          className="text-xs text-[#656d76] font-mono block truncate"
+          className="text-xs text-fg-muted font-mono block truncate"
           title={source}
         >
           {source}
@@ -240,11 +240,11 @@ function FilenameExtractor({
           }}
           onKeyDown={(e) => e.key === 'Enter' && run()}
           placeholder="Regex — use a capture group ( ) to select the part you want"
-          className="flex-1 border border-[#d0d7de] rounded px-2 py-1 text-xs font-mono bg-white focus:outline-none focus:border-[#0969da]"
+          className="flex-1 border border-border rounded px-2 py-1 text-xs font-mono bg-white focus:outline-none focus:border-accent"
         />
         <button
           onClick={run}
-          className="px-3 py-1 text-xs rounded border border-[#d0d7de] bg-white hover:bg-[#f6f8fa] shrink-0"
+          className="px-3 py-1 text-xs rounded border border-border bg-white hover:bg-canvas-subtle shrink-0"
         >
           Test
         </button>
@@ -262,26 +262,26 @@ function FilenameExtractor({
             }}
             onKeyDown={(e) => e.key === 'Enter' && run()}
             placeholder={`Format, e.g. YYYYMMDD-HHmmSS  (tokens: ${FORMAT_HELP})`}
-            className="flex-1 border border-[#d0d7de] rounded px-2 py-1 text-xs font-mono bg-white focus:outline-none focus:border-[#0969da]"
+            className="flex-1 border border-border rounded px-2 py-1 text-xs font-mono bg-white focus:outline-none focus:border-accent"
           />
         </div>
       )}
 
       {/* Errors */}
-      {patternErr && <p className="text-xs text-[#d1242f]">{patternErr}</p>}
-      {convertErr && <p className="text-xs text-[#d1242f]">{convertErr}</p>}
+      {patternErr && <p className="text-xs text-danger">{patternErr}</p>}
+      {convertErr && <p className="text-xs text-danger">{convertErr}</p>}
 
       {/* Preview */}
       {hasResult && (
         <div className="flex items-center gap-2 text-xs flex-wrap">
-          <span className="text-[#656d76]">Extracted:</span>
-          <code className="bg-white border border-[#d0d7de] px-1.5 py-0.5 rounded font-mono">
+          <span className="text-fg-muted">Extracted:</span>
+          <code className="bg-white border border-border px-1.5 py-0.5 rounded font-mono">
             {extracted}
           </code>
           {converted !== extracted && converted !== undefined && (
             <>
-              <span className="text-[#656d76]">→</span>
-              <code className="bg-[#dafbe1] border border-[#4ac26b66] px-1.5 py-0.5 rounded font-mono text-[#1a7f37]">
+              <span className="text-fg-muted">→</span>
+              <code className="bg-success-subtle border border-success-muted px-1.5 py-0.5 rounded font-mono text-success">
                 {String(converted)}
               </code>
             </>
@@ -294,13 +294,13 @@ function FilenameExtractor({
         <button
           onClick={apply}
           disabled={converted === undefined}
-          className="px-3 py-1 text-xs font-medium rounded border border-[#0969da] bg-[#0969da] text-white hover:bg-[#0860ca] disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-3 py-1 text-xs font-medium rounded border border-accent bg-accent text-white hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Apply
         </button>
         <button
           onClick={onClose}
-          className="px-3 py-1 text-xs font-medium rounded border border-[#d0d7de] bg-white hover:bg-[#f6f8fa]"
+          className="px-3 py-1 text-xs font-medium rounded border border-border bg-white hover:bg-canvas-subtle"
         >
           Cancel
         </button>
@@ -394,10 +394,10 @@ export function RecordForm({
   const fileSources = collectFileSources(values, schema.fields)
 
   return (
-    <div className="border border-[#d0d7de] rounded-md bg-[#f6f8fa] p-4 space-y-4">
+    <div className="border border-border rounded-md bg-canvas-subtle p-4 space-y-4">
       {/* Schema selector */}
       <div className="flex flex-col gap-1">
-        <label className="text-xs font-semibold text-[#656d76] uppercase tracking-wide">
+        <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
           Schema
         </label>
         <div className="flex flex-wrap gap-2">
@@ -407,8 +407,8 @@ export function RecordForm({
               onClick={() => handleSchemaChange(s.id)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border transition-colors cursor-pointer ${
                 s.id === selectedSchemaId
-                  ? 'bg-[#0969da] text-white border-[#0969da]'
-                  : 'bg-white text-[#1f2328] border-[#d0d7de] hover:bg-[#eff2f5]'
+                  ? 'bg-accent text-white border-accent'
+                  : 'bg-white text-fg border-border hover:bg-canvas-inset'
               }`}
             >
               {s.name}
@@ -425,14 +425,14 @@ export function RecordForm({
       {/* Parent record selector */}
       {parentSchema && (
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold text-[#656d76] uppercase tracking-wide">
+          <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
             Parent record
             <Badge variant="accent" className="ml-1.5">
               {parentSchema.name}
             </Badge>
           </label>
           {parentCandidates.length === 0 ? (
-            <p className="text-xs text-[#d1242f]">
+            <p className="text-xs text-danger">
               No {parentSchema.name} records in this dataset yet — add one
               first.
             </p>
@@ -440,7 +440,7 @@ export function RecordForm({
             <select
               value={parentRecordId}
               onChange={(e) => setParentRecordId(e.target.value)}
-              className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] w-full max-w-sm"
+              className="border border-border rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-accent w-full max-w-sm"
             >
               <option value="">— Select a {parentSchema.name} record —</option>
               {parentCandidates.map((r) => {
@@ -471,7 +471,7 @@ export function RecordForm({
                 className={`flex flex-col gap-1 ${isExtracting ? 'sm:col-span-2' : ''}`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <label className="text-xs font-medium text-[#1f2328] flex items-center gap-1.5">
+                  <label className="text-xs font-medium text-fg flex items-center gap-1.5">
                     <span className="font-mono">{field.name}</span>
                     <Badge variant="accent">{field.type}</Badge>
                     {field.required && (
@@ -485,8 +485,8 @@ export function RecordForm({
                       }
                       className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors shrink-0 ${
                         isExtracting
-                          ? 'border-[#0969da] bg-[#dbeafe] text-[#0969da]'
-                          : 'border-[#d0d7de] text-[#656d76] hover:border-[#0969da] hover:text-[#0969da]'
+                          ? 'border-accent bg-accent-subtle text-accent'
+                          : 'border-border text-fg-muted hover:border-accent hover:text-accent'
                       }`}
                       title="Fill this field from an uploaded filename"
                     >
@@ -517,7 +517,7 @@ export function RecordForm({
         </div>
       )}
 
-      {error && <p className="text-xs text-[#d1242f]">{error}</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
 
       <div className="flex gap-2 pt-1">
         <Button

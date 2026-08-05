@@ -76,13 +76,13 @@ export function PluginEditor({
         style={{ height: '90vh' }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#d0d7de]">
-          <h2 className="text-base font-semibold text-[#1f2328]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <h2 className="text-base font-semibold text-fg">
             {isNew ? 'New plugin' : `Edit — ${initialFilename}`}
           </h2>
           <button
             onClick={onClose}
-            className="text-[#656d76] hover:text-[#1f2328] text-xl leading-none"
+            className="text-fg-muted hover:text-fg text-xl leading-none"
           >
             ×
           </button>
@@ -92,7 +92,7 @@ export function PluginEditor({
         <div className="flex flex-col gap-3 p-5 flex-1 min-h-0">
           {isNew && (
             <label className="block">
-              <span className="text-xs font-medium text-[#1f2328]">
+              <span className="text-xs font-medium text-fg">
                 Plugin filename
               </span>
               <div className="flex items-center gap-1 mt-1">
@@ -105,26 +105,24 @@ export function PluginEditor({
                     )
                   }
                   placeholder="my_plugin"
-                  className="border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm w-56 focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+                  className="border border-border rounded-md px-3 py-1.5 text-sm w-56 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
                 />
-                <span className="text-sm text-[#656d76]">.py</span>
+                <span className="text-sm text-fg-muted">.py</span>
               </div>
-              <p className="text-xs text-[#656d76] mt-1">
+              <p className="text-xs text-fg-muted mt-1">
                 Lowercase letters, digits and underscores only.
               </p>
             </label>
           )}
 
           {isLoading ? (
-            <div className="flex-1 flex items-center justify-center text-sm text-[#656d76]">
+            <div className="flex-1 flex items-center justify-center text-sm text-fg-muted">
               Loading…
             </div>
           ) : (
             <div className="flex-1 flex flex-col min-h-0">
-              <span className="text-xs font-medium text-[#1f2328] mb-1">
-                Python
-              </span>
-              <div className="flex-1 min-h-0 border border-[#d0d7de] rounded-md overflow-auto bg-[#f6f8fa]">
+              <span className="text-xs font-medium text-fg mb-1">Python</span>
+              <div className="flex-1 min-h-0 border border-border rounded-md overflow-auto bg-canvas-subtle">
                 <CodeMirror
                   value={code ?? ''}
                   height="100%"
@@ -145,7 +143,7 @@ export function PluginEditor({
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-[#d0d7de]">
+        <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
           <Button variant="default" onClick={onClose}>
             Cancel
           </Button>

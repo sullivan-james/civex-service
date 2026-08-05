@@ -33,7 +33,7 @@ import JobsTable from '../components/jobs/JobsTable'
 
 function FieldValue({ value }: { value: unknown }) {
   if (value === null || value === undefined)
-    return <span className="text-[#818b98]">—</span>
+    return <span className="text-fg-subtle">—</span>
   if (typeof value === 'boolean')
     return (
       <Badge variant={value ? 'success' : 'default'}>{String(value)}</Badge>
@@ -50,7 +50,7 @@ function FieldValue({ value }: { value: unknown }) {
         {refs.map((ref) => (
           <span
             key={ref.sha256}
-            className="inline-flex items-center gap-2 text-xs text-[#656d76]"
+            className="inline-flex items-center gap-2 text-xs text-fg-muted"
           >
             <span>
               {ref.filename} ({(ref.size / 1024).toFixed(1)} KB)
@@ -58,7 +58,7 @@ function FieldValue({ value }: { value: unknown }) {
             <a
               href={`/api/files/${ref.sha256}?filename=${encodeURIComponent(ref.filename)}`}
               download={ref.filename}
-              className="text-[#0969da] hover:underline"
+              className="text-accent hover:underline"
             >
               Download
             </a>
@@ -70,14 +70,14 @@ function FieldValue({ value }: { value: unknown }) {
   if (typeof value === 'object' && 'sha256' in (value as object)) {
     const ref = value as { filename: string; size: number; sha256: string }
     return (
-      <span className="inline-flex items-center gap-2 text-xs text-[#656d76]">
+      <span className="inline-flex items-center gap-2 text-xs text-fg-muted">
         <span>
           {ref.filename} ({(ref.size / 1024).toFixed(1)} KB)
         </span>
         <a
           href={`/api/files/${ref.sha256}?filename=${encodeURIComponent(ref.filename)}`}
           download={ref.filename}
-          className="text-[#0969da] hover:underline"
+          className="text-accent hover:underline"
         >
           Download
         </a>
@@ -104,7 +104,7 @@ function ChildTable({
 
   return (
     <div className="space-y-2">
-      <h3 className="text-sm font-semibold text-[#1f2328] flex items-center gap-2">
+      <h3 className="text-sm font-semibold text-fg flex items-center gap-2">
         {schema ? (
           <Link to={`/schemas/${schema.id}`}>
             <Badge variant="accent">{schemaName}</Badge>
@@ -112,7 +112,7 @@ function ChildTable({
         ) : (
           <Badge variant="accent">{schemaName}</Badge>
         )}
-        <span className="font-normal text-[#656d76]">
+        <span className="font-normal text-fg-muted">
           {records.length} record{records.length !== 1 ? 's' : ''}
         </span>
       </h3>
@@ -133,7 +133,7 @@ function ChildTable({
               <Td>
                 <Link
                   to={`/records/${r.id}`}
-                  className="text-xs text-[#0969da] hover:underline"
+                  className="text-xs text-accent hover:underline"
                 >
                   {r.natural_name ?? (
                     <span className="font-mono">{r.id.slice(0, 8)}</span>
@@ -145,7 +145,7 @@ function ChildTable({
                   <FieldValue value={r.data[col]} />
                 </Td>
               ))}
-              <Td className="text-[#656d76]">{formatDate(r.created_at)}</Td>
+              <Td className="text-fg-muted">{formatDate(r.created_at)}</Td>
               <Td>
                 {confirmId === r.id ? (
                   <span className="flex items-center gap-1.5">
@@ -154,13 +154,13 @@ function ChildTable({
                         onDelete(r.id)
                         setConfirmId(null)
                       }}
-                      className="text-xs text-[#d1242f] font-medium hover:underline"
+                      className="text-xs text-danger font-medium hover:underline"
                     >
                       Confirm
                     </button>
                     <button
                       onClick={() => setConfirmId(null)}
-                      className="text-xs text-[#656d76] hover:underline"
+                      className="text-xs text-fg-muted hover:underline"
                     >
                       Cancel
                     </button>
@@ -168,7 +168,7 @@ function ChildTable({
                 ) : (
                   <button
                     onClick={() => setConfirmId(r.id)}
-                    className="text-xs text-[#656d76] hover:text-[#d1242f] transition-colors"
+                    className="text-xs text-fg-muted hover:text-danger transition-colors"
                     title="Delete record"
                   >
                     ✕
@@ -279,8 +279,8 @@ export default function RecordDetailPage() {
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-sm text-[#656d76] flex-wrap">
-        <Link to="/collections" className="hover:text-[#0969da]">
+      <nav className="flex items-center gap-1.5 text-sm text-fg-muted flex-wrap">
+        <Link to="/collections" className="hover:text-accent">
           Collections
         </Link>
         <span>/</span>
@@ -288,14 +288,14 @@ export default function RecordDetailPage() {
           <>
             <Link
               to={`/collections/${record.dataset_id}`}
-              className="hover:text-[#0969da]"
+              className="hover:text-accent"
             >
               {collection.name}
             </Link>
             <span>/</span>
           </>
         )}
-        <span className="font-mono text-[#1f2328]">
+        <span className="font-mono text-fg">
           {record.natural_name ?? record.id.slice(0, 8)}
         </span>
       </nav>
@@ -304,7 +304,7 @@ export default function RecordDetailPage() {
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-[#1f2328]">
+            <h1 className="text-xl font-semibold text-fg">
               {record.natural_name ?? (
                 <span className="font-mono">{record.id.slice(0, 8)}</span>
               )}
@@ -317,8 +317,8 @@ export default function RecordDetailPage() {
               <Badge variant="accent">{record.schema_name}</Badge>
             )}
           </div>
-          <p className="mt-1 text-xs text-[#818b98] font-mono">{record.id}</p>
-          <p className="mt-1 text-sm text-[#656d76]">
+          <p className="mt-1 text-xs text-fg-subtle font-mono">{record.id}</p>
+          <p className="mt-1 text-sm text-fg-muted">
             Added {formatDate(record.created_at)}
             {record.created_at !== record.updated_at &&
               ` · Updated ${formatDate(record.updated_at)}`}
@@ -328,14 +328,14 @@ export default function RecordDetailPage() {
 
       {/* Parent record */}
       {record.parent_record_id && (
-        <div className="border border-[#d0d7de] rounded-md p-4 bg-[#f6f8fa]">
-          <p className="text-xs font-semibold text-[#656d76] uppercase tracking-wide mb-2">
+        <div className="border border-border rounded-md p-4 bg-canvas-subtle">
+          <p className="text-xs font-semibold text-fg-muted uppercase tracking-wide mb-2">
             Parent — {parentSchema?.name ?? 'unknown'}
           </p>
           {parent ? (
             <Link
               to={`/records/${parent.id}`}
-              className="text-sm text-[#0969da] hover:underline"
+              className="text-sm text-accent hover:underline"
             >
               {parent.natural_name ?? (
                 <span className="font-mono">{parent.id.slice(0, 8)}</span>
@@ -344,7 +344,7 @@ export default function RecordDetailPage() {
           ) : (
             <Link
               to={`/records/${record.parent_record_id}`}
-              className="font-mono text-sm text-[#0969da] hover:underline"
+              className="font-mono text-sm text-accent hover:underline"
             >
               {record.parent_record_id.slice(0, 8)}
             </Link>
@@ -355,7 +355,7 @@ export default function RecordDetailPage() {
       {/* Own fields */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold text-[#1f2328]">Fields</h2>
+          <h2 className="text-base font-semibold text-fg">Fields</h2>
           {!isEditing && (
             <Button size="sm" onClick={startEditing}>
               Edit
@@ -364,11 +364,11 @@ export default function RecordDetailPage() {
         </div>
 
         {isEditing ? (
-          <div className="border border-[#d0d7de] rounded-md bg-[#f6f8fa] p-4 space-y-4">
+          <div className="border border-border rounded-md bg-canvas-subtle p-4 space-y-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {(schema?.fields ?? []).map((field) => (
                 <div key={field.name} className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-[#1f2328] flex items-center gap-1.5">
+                  <label className="text-xs font-medium text-fg flex items-center gap-1.5">
                     <span className="font-mono">{field.name}</span>
                     <Badge variant="accent">{field.type}</Badge>
                     {field.required && (
@@ -386,7 +386,7 @@ export default function RecordDetailPage() {
               ))}
             </div>
             {updateRecord.error && (
-              <p className="text-xs text-[#d1242f]">
+              <p className="text-xs text-danger">
                 {errorMessage(updateRecord.error)}
               </p>
             )}
@@ -405,9 +405,9 @@ export default function RecordDetailPage() {
             </div>
           </div>
         ) : Object.keys(record.data).length === 0 ? (
-          <p className="text-sm text-[#656d76] italic">No field values.</p>
+          <p className="text-sm text-fg-muted italic">No field values.</p>
         ) : (
-          <div className="grid grid-cols-1 gap-px bg-[#d0d7de] border border-[#d0d7de] rounded-md overflow-hidden sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-px bg-border border border-border rounded-md overflow-hidden sm:grid-cols-2">
             {(
               schema?.fields ??
               Object.keys(record.data).map((name) => ({
@@ -418,7 +418,7 @@ export default function RecordDetailPage() {
               }))
             ).map((field) => (
               <div key={field.name} className="bg-white px-4 py-3">
-                <p className="text-xs text-[#656d76] font-mono mb-0.5 flex items-center gap-1.5">
+                <p className="text-xs text-fg-muted font-mono mb-0.5 flex items-center gap-1.5">
                   {field.name}
                   {'type' in field && (
                     <Badge variant="accent">
@@ -426,7 +426,7 @@ export default function RecordDetailPage() {
                     </Badge>
                   )}
                 </p>
-                <div className="text-sm text-[#1f2328]">
+                <div className="text-sm text-fg">
                   <FieldValue value={record.data[field.name]} />
                 </div>
               </div>
@@ -440,9 +440,9 @@ export default function RecordDetailPage() {
         Object.keys(childrenBySchema).length > 0) && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-[#1f2328]">
+            <h2 className="text-base font-semibold text-fg">
               Children
-              <span className="ml-2 text-sm font-normal text-[#656d76]">
+              <span className="ml-2 text-sm font-normal text-fg-muted">
                 {children.length} total
               </span>
             </h2>
@@ -487,22 +487,20 @@ export default function RecordDetailPage() {
       {applicableWorkflows.length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-base font-semibold text-[#1f2328]">
-              Workflows
-            </h2>
+            <h2 className="text-base font-semibold text-fg">Workflows</h2>
           </div>
           <div className="flex flex-wrap gap-2">
             {applicableWorkflows.map((wf) => (
               <button
                 key={wf.name}
                 onClick={() => setRunWorkflow(wf.name)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md hover:bg-[#f6f8fa] hover:border-[#0969da] transition-colors text-[#1f2328]"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-md hover:bg-canvas-subtle hover:border-accent transition-colors text-fg"
               >
                 <span>▶</span>
                 <span className="font-mono text-xs">{wf.name}</span>
                 {wf.inputs &&
                   Object.values(wf.inputs).some((i) => i.type === 'files') && (
-                    <span className="text-xs text-[#656d76]">· files</span>
+                    <span className="text-xs text-fg-muted">· files</span>
                   )}
               </button>
             ))}
@@ -521,22 +519,20 @@ export default function RecordDetailPage() {
       <JobsTable recordId={record.id} />
 
       {/* Danger zone */}
-      <div className="border border-[#d1242f33] rounded-md">
-        <div className="px-4 py-3 border-b border-[#d1242f33] bg-[#ffebe9] rounded-t-md">
-          <h2 className="text-sm font-semibold text-[#d1242f]">Danger zone</h2>
+      <div className="border border-danger-muted rounded-md">
+        <div className="px-4 py-3 border-b border-danger-muted bg-danger-subtle rounded-t-md">
+          <h2 className="text-sm font-semibold text-danger">Danger zone</h2>
         </div>
         <div className="px-4 py-3 flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-[#1f2328]">
-              Delete this record
-            </p>
-            <p className="text-xs text-[#656d76]">
+            <p className="text-sm font-medium text-fg">Delete this record</p>
+            <p className="text-xs text-fg-muted">
               Permanently removes this record and all its children.
             </p>
           </div>
           {confirmDelete ? (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-[#656d76]">Are you sure?</span>
+              <span className="text-xs text-fg-muted">Are you sure?</span>
               <Button
                 variant="danger"
                 size="sm"

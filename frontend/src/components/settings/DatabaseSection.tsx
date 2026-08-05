@@ -10,7 +10,7 @@ import { Button, LoadingState, ErrorState } from '../ui'
 import { errorMessage } from '../../lib/errors'
 
 const inputCls =
-  'border border-[#d0d7de] rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da] w-full font-mono'
+  'border border-border rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent w-full font-mono'
 
 function SchemaBadge({
   migration,
@@ -23,18 +23,18 @@ function SchemaBadge({
 }) {
   if (migration.error)
     return (
-      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#ffebe9] text-[#d1242f] border border-[#ff818255]">
+      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-danger-subtle text-danger border border-danger-muted">
         unreachable
       </span>
     )
   if (migration.up_to_date)
     return (
-      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#dafbe1] text-[#1a7f37] border border-[#4ac26b55]">
+      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-subtle text-success border border-success-muted">
         up to date
       </span>
     )
   return (
-    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#fff8c5] text-[#9a6700] border border-[#d4a72c55]">
+    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-attention-subtle text-attention border border-attention-muted">
       pending migrations
     </span>
   )
@@ -72,19 +72,17 @@ export default function DatabaseSection() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-[#1f2328]">Database</h2>
-        <p className="text-sm text-[#656d76] mt-0.5">
+        <h2 className="text-lg font-semibold text-fg">Database</h2>
+        <p className="text-sm text-fg-muted mt-0.5">
           Connection, schema, and provisioning for this project's database.
         </p>
       </div>
 
-      <div className="border border-[#d0d7de] rounded-md bg-white p-4 space-y-3">
+      <div className="border border-border rounded-md bg-white p-4 space-y-3">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-xs font-mono text-[#1f2328] truncate">
-              {status.url}
-            </p>
-            <p className="text-xs text-[#656d76] mt-0.5">
+            <p className="text-xs font-mono text-fg truncate">{status.url}</p>
+            <p className="text-xs text-fg-muted mt-0.5">
               {status.dialect} — managed by{' '}
               {status.docker_managed ? 'civex (Docker)' : 'you'}
             </p>
@@ -93,13 +91,13 @@ export default function DatabaseSection() {
         </div>
 
         {status.migration.error && (
-          <p className="text-xs text-[#d1242f] bg-[#ffebe9] border border-[#d1242f33] rounded px-3 py-2">
+          <p className="text-xs text-danger bg-danger-subtle border border-danger-muted rounded px-3 py-2">
             {status.migration.error}
           </p>
         )}
 
         {!status.migration.up_to_date && !status.migration.error && (
-          <p className="text-xs text-[#656d76]">
+          <p className="text-xs text-fg-muted">
             At {status.migration.current_revision ?? 'no revision yet'}, head is{' '}
             {status.migration.head_revision}.
           </p>
@@ -114,7 +112,7 @@ export default function DatabaseSection() {
             {migrate.isPending ? 'Migrating…' : 'Run migrations'}
           </Button>
           {migrate.error && (
-            <span className="text-xs text-[#d1242f]">
+            <span className="text-xs text-danger">
               {errorMessage(migrate.error)}
             </span>
           )}
@@ -122,11 +120,11 @@ export default function DatabaseSection() {
       </div>
 
       {/* Change URL */}
-      <div className="border border-[#d0d7de] rounded-md bg-white p-4 space-y-3">
-        <p className="text-sm font-semibold text-[#1f2328]">
+      <div className="border border-border rounded-md bg-white p-4 space-y-3">
+        <p className="text-sm font-semibold text-fg">
           Point at a different database
         </p>
-        <p className="text-xs text-[#656d76]">
+        <p className="text-xs text-fg-muted">
           Tests the connection, then migrates it to the current schema. The
           database itself is not modified — only which one civex uses.
         </p>
@@ -144,7 +142,7 @@ export default function DatabaseSection() {
               autoFocus
             />
             {setUrl.error && (
-              <p className="text-xs text-[#d1242f]">
+              <p className="text-xs text-danger">
                 {errorMessage(setUrl.error)}
               </p>
             )}
@@ -179,18 +177,18 @@ export default function DatabaseSection() {
       </div>
 
       {/* Docker management */}
-      <div className="border border-[#d0d7de] rounded-md bg-white p-4 space-y-3">
-        <p className="text-sm font-semibold text-[#1f2328]">
+      <div className="border border-border rounded-md bg-white p-4 space-y-3">
+        <p className="text-sm font-semibold text-fg">
           Docker-managed PostgreSQL
         </p>
         {status.docker_managed ? (
           <>
-            <p className="text-xs text-[#656d76]">
+            <p className="text-xs text-fg-muted">
               Container <span className="font-mono">{status.docker?.name}</span>{' '}
               — {dockerState}
             </p>
             {setupDocker.error && (
-              <p className="text-xs text-[#d1242f]">
+              <p className="text-xs text-danger">
                 {errorMessage(setupDocker.error)}
               </p>
             )}
@@ -235,19 +233,19 @@ export default function DatabaseSection() {
               )}
             </div>
             {teardownDocker.error && (
-              <p className="text-xs text-[#d1242f]">
+              <p className="text-xs text-danger">
                 {errorMessage(teardownDocker.error)}
               </p>
             )}
           </>
         ) : (
           <>
-            <p className="text-xs text-[#656d76]">
+            <p className="text-xs text-fg-muted">
               Starts (or reuses) a local postgres:16 container for this project,
               then migrates it and switches civex to use it.
             </p>
             {setupDocker.error && (
-              <p className="text-xs text-[#d1242f]">
+              <p className="text-xs text-danger">
                 {errorMessage(setupDocker.error)}
               </p>
             )}
