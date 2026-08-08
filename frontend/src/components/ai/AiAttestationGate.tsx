@@ -80,7 +80,7 @@ export default function AiAttestationGate({
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded border border-border text-sm text-fg-muted hover:bg-canvas-subtle"
+            className="px-3 py-2 rounded-md border border-border text-sm text-fg-muted hover:bg-canvas-subtle"
           >
             Not now
           </button>
@@ -89,7 +89,7 @@ export default function AiAttestationGate({
               acknowledge()
               setAcked(true)
             }}
-            className="px-3 py-1.5 rounded bg-accent text-fg-on-emphasis text-sm font-medium hover:bg-accent-emphasis"
+            className="px-3 py-2 rounded-md bg-accent text-fg-on-emphasis text-sm font-medium hover:bg-accent-emphasis"
           >
             I understand, continue
           </button>

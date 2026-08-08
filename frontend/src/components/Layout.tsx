@@ -118,7 +118,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <button
           onClick={() => queryClient.refetchQueries({ type: 'active' })}
           title="Refresh all data"
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
+          className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
         >
           <RefreshCw size={12} />
           Refresh
@@ -127,7 +127,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <button
           onClick={() => setAiOpen((o) => !o)}
           title="Open AI assistant"
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
+          className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border transition-colors ${
             aiOpen
               ? 'border-accent bg-accent text-fg-on-emphasis'
               : 'border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg'
@@ -139,7 +139,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <button
           onClick={() => navigate('/settings')}
           title="Settings"
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
+          className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border transition-colors ${
             settingsActive
               ? 'border-accent bg-accent text-fg-on-emphasis'
               : 'border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg'
@@ -154,7 +154,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <button
               onClick={() => window.pywebview!.api.open_project()}
               title="Open a different civex project"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
+              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
             >
               <FolderOpen size={12} />
               Open project
@@ -162,7 +162,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <button
               onClick={() => window.pywebview!.api.create_project()}
               title="Create a new civex project"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
+              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
             >
               <FolderPlus size={12} />
               New project
@@ -173,7 +173,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 if (r?.error) window.alert(r.error)
               }}
               title={`${fileManagerLabel()} — open this project's database directory`}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
+              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
             >
               <Folder size={12} />
               {fileManagerLabel()}
@@ -191,7 +191,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               onClick={() => runSync('pull')}
               disabled={syncing !== null}
               title={`Pull from ${remote.url}`}
-              className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {syncing === 'pull' ? <Spinner /> : <ArrowDownToLine size={12} />}
               Pull
@@ -201,7 +201,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               onClick={() => runSync('push')}
               disabled={syncing !== null}
               title={`Push to ${remote.url}`}
-              className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {syncing === 'push' ? <Spinner /> : <ArrowUpToLine size={12} />}
               Push

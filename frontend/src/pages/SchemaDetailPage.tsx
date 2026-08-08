@@ -24,6 +24,9 @@ import {
   Td,
   LoadingState,
   ErrorState,
+  Input,
+  Select,
+  Checkbox,
 } from '../components/ui'
 import {
   Star,
@@ -89,21 +92,16 @@ function MetaEditor({
         <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
           Name
         </label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="border border-border rounded-md px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
-        />
+        <Input value={name} onChange={(e) => setName(e.target.value)} />
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
           Description
         </label>
-        <input
+        <Input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="No description"
-          className="border border-border rounded-md px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
         />
       </div>
       {updateSchema.error && (
@@ -140,14 +138,11 @@ function RestrictionsSummary({
   const summary = restrictions.summarise(fieldRestrictions, type)
   if (!summary) return null
   return (
-    <span className="text-[10px] text-fg-muted leading-tight">{summary}</span>
+    <span className="text-xs text-fg-muted leading-tight">{summary}</span>
   )
 }
 
 // --- Add field form ---
-
-const inputSm =
-  'border border-border rounded-md px-2 py-1.5 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent'
 
 function AddFieldForm({
   schemaName,
@@ -230,28 +225,29 @@ function AddFieldForm({
     <div className="border-t border-border bg-canvas-subtle px-4 py-3 flex flex-col gap-3">
       {/* Row 1: name, type, required */}
       <div className="flex items-center gap-3 flex-wrap">
-        <input
+        <Input
+          size="sm"
           value={fieldName}
           onChange={(e) => setFieldName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
           placeholder="Field name"
           autoFocus
-          className={`${inputSm} w-40`}
+          className="w-40"
         />
-        <select
+        <Select
+          size="sm"
           value={type}
           onChange={(e) => handleTypeChange(e.target.value)}
-          className={inputSm}
         >
           {FIELD_TYPES.map((t) => (
             <option key={t}>{t}</option>
           ))}
-        </select>
+        </Select>
         {type === 'reference' && (
-          <select
+          <Select
+            size="sm"
             value={refSchema}
             onChange={(e) => setRefSchema(e.target.value)}
-            className={inputSm}
           >
             <option value="">— target schema —</option>
             {allSchemas
@@ -261,11 +257,10 @@ function AddFieldForm({
                   {s.name}
                 </option>
               ))}
-          </select>
+          </Select>
         )}
-        <label className="flex items-center gap-1.5 text-sm text-fg cursor-pointer select-none">
-          <input
-            type="checkbox"
+        <label className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none">
+          <Checkbox
             checked={required}
             onChange={(e) => setRequired(e.target.checked)}
           />
@@ -289,13 +284,14 @@ function AddFieldForm({
       {/* Default value */}
       {showDefault && (
         <div className="flex items-center gap-3 flex-wrap">
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Default value
-            <input
+            <Input
+              size="sm"
               value={defaultVal}
               onChange={(e) => setDefaultVal(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-40`}
+              className="w-40"
             />
           </label>
         </div>
@@ -307,26 +303,28 @@ function AddFieldForm({
           <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Min
-            <input
+            <Input
+              size="sm"
               type="number"
               step={type === 'integer' ? '1' : 'any'}
               value={minVal}
               onChange={(e) => setMinVal(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-24`}
+              className="w-24"
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Max
-            <input
+            <Input
+              size="sm"
               type="number"
               step={type === 'integer' ? '1' : 'any'}
               value={maxVal}
               onChange={(e) => setMaxVal(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-24`}
+              className="w-24"
             />
           </label>
         </div>
@@ -336,26 +334,28 @@ function AddFieldForm({
           <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Choices (comma-separated)
-            <input
+            <Input
+              size="sm"
               value={choices}
               onChange={(e) => setChoices(e.target.value)}
               placeholder="e.g. left,right,bilateral"
-              className={`${inputSm} w-52`}
+              className="w-52"
             />
           </label>
           {type === 'string' && (
-            <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+            <label className="flex items-center gap-2 text-xs text-fg-muted">
               Max length
-              <input
+              <Input
+                size="sm"
                 type="number"
                 step="1"
                 min="1"
                 value={maxLength}
                 onChange={(e) => setMaxLength(e.target.value)}
                 placeholder="none"
-                className={`${inputSm} w-24`}
+                className="w-24"
               />
             </label>
           )}
@@ -366,25 +366,27 @@ function AddFieldForm({
           <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Accept
-            <input
+            <Input
+              size="sm"
               value={accept}
               onChange={(e) => setAccept(e.target.value)}
               placeholder=".csv,.txt"
-              className={`${inputSm} w-36`}
+              className="w-36"
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Max size (bytes)
-            <input
+            <Input
+              size="sm"
               type="number"
               step="1"
               min="1"
               value={maxSize}
               onChange={(e) => setMaxSize(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-28`}
+              className="w-28"
             />
           </label>
         </div>
@@ -394,22 +396,22 @@ function AddFieldForm({
           <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Not before
-            <input
+            <Input
+              size="sm"
               type={type === 'date' ? 'date' : 'datetime-local'}
               value={minDate}
               onChange={(e) => setMinDate(e.target.value)}
-              className={inputSm}
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Not after
-            <input
+            <Input
+              size="sm"
               type={type === 'date' ? 'date' : 'datetime-local'}
               value={maxDate}
               onChange={(e) => setMaxDate(e.target.value)}
-              className={inputSm}
             />
           </label>
         </div>
@@ -479,17 +481,17 @@ function FieldEditForm({
   return (
     <div className="bg-accent-subtle border-t border-border px-4 py-3 flex flex-col gap-3">
       <div className="flex items-center gap-3 flex-wrap">
-        <input
+        <Input
+          size="sm"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSave()}
           autoFocus
-          className={`${inputSm} w-40`}
+          className="w-40"
         />
         <Badge variant="accent">{dtype}</Badge>
-        <label className="flex items-center gap-1.5 text-sm text-fg cursor-pointer select-none">
-          <input
-            type="checkbox"
+        <label className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none">
+          <Checkbox
             checked={required}
             onChange={(e) => setRequired(e.target.checked)}
           />
@@ -515,26 +517,28 @@ function FieldEditForm({
           <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Min
-            <input
+            <Input
+              size="sm"
               type="number"
               step={dtype === 'integer' ? '1' : 'any'}
               value={minVal}
               onChange={(e) => setMinVal(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-24`}
+              className="w-24"
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Max
-            <input
+            <Input
+              size="sm"
               type="number"
               step={dtype === 'integer' ? '1' : 'any'}
               value={maxVal}
               onChange={(e) => setMaxVal(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-24`}
+              className="w-24"
             />
           </label>
         </div>
@@ -544,26 +548,28 @@ function FieldEditForm({
           <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Choices (comma-separated)
-            <input
+            <Input
+              size="sm"
               value={choices}
               onChange={(e) => setChoices(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-52`}
+              className="w-52"
             />
           </label>
           {dtype === 'string' && (
-            <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+            <label className="flex items-center gap-2 text-xs text-fg-muted">
               Max length
-              <input
+              <Input
+                size="sm"
                 type="number"
                 step="1"
                 min="1"
                 value={maxLength}
                 onChange={(e) => setMaxLength(e.target.value)}
                 placeholder="none"
-                className={`${inputSm} w-24`}
+                className="w-24"
               />
             </label>
           )}
@@ -574,25 +580,27 @@ function FieldEditForm({
           <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Accept
-            <input
+            <Input
+              size="sm"
               value={accept}
               onChange={(e) => setAccept(e.target.value)}
               placeholder=".csv,.txt"
-              className={`${inputSm} w-36`}
+              className="w-36"
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Max size (bytes)
-            <input
+            <Input
+              size="sm"
               type="number"
               step="1"
               min="1"
               value={maxSize}
               onChange={(e) => setMaxSize(e.target.value)}
               placeholder="none"
-              className={`${inputSm} w-28`}
+              className="w-28"
             />
           </label>
         </div>
@@ -602,22 +610,22 @@ function FieldEditForm({
           <span className="text-xs text-fg-muted font-medium">
             Restrictions:
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Not before
-            <input
+            <Input
+              size="sm"
               type={dtype === 'date' ? 'date' : 'datetime-local'}
               value={minDate}
               onChange={(e) => setMinDate(e.target.value)}
-              className={inputSm}
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
             Not after
-            <input
+            <Input
+              size="sm"
               type={dtype === 'date' ? 'date' : 'datetime-local'}
               value={maxDate}
               onChange={(e) => setMaxDate(e.target.value)}
-              className={inputSm}
             />
           </label>
         </div>
@@ -733,7 +741,7 @@ export default function SchemaDetailPage() {
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-sm text-fg-muted">
+      <nav className="flex items-center gap-2 text-sm text-fg-muted">
         <Link to="/schemas" className="hover:text-accent">
           Schemas
         </Link>
@@ -749,7 +757,7 @@ export default function SchemaDetailPage() {
           <div className="flex items-start justify-between">
             <div>
               <h1 className="text-xl font-semibold text-fg">{schema.name}</h1>
-              <p className="mt-0.5 text-sm text-fg-muted">
+              <p className="mt-1 text-sm text-fg-muted">
                 {schema.description ?? (
                   <span className="italic">No description</span>
                 )}
@@ -839,13 +847,13 @@ export default function SchemaDetailPage() {
                 >
                   {/* Drag handle + reorder buttons */}
                   <Td className="w-8 cursor-grab text-border hover:text-fg-muted select-none">
-                    <div className="flex flex-col items-center gap-0.5">
+                    <div className="flex flex-col items-center gap-1">
                       <button
                         type="button"
                         title="Move up"
                         disabled={index === 0 || reorderFields.isPending}
                         onClick={() => moveField(index, 'up')}
-                        className="text-[10px] text-border hover:text-fg disabled:opacity-30 leading-none"
+                        className="text-xs text-border hover:text-fg disabled:opacity-30 leading-none"
                       >
                         <ChevronUp size={12} />
                       </button>
@@ -860,19 +868,19 @@ export default function SchemaDetailPage() {
                           reorderFields.isPending
                         }
                         onClick={() => moveField(index, 'down')}
-                        className="text-[10px] text-border hover:text-fg disabled:opacity-30 leading-none"
+                        className="text-xs text-border hover:text-fg disabled:opacity-30 leading-none"
                       >
                         <ChevronDown size={12} />
                       </button>
                     </div>
                   </Td>
                   <Td>
-                    <span className="flex flex-col gap-0.5">
-                      <span className="flex items-center gap-1.5">
+                    <span className="flex flex-col gap-1">
+                      <span className="flex items-center gap-2">
                         <span className="font-mono text-sm">{field.name}</span>
                         {schema.display_fields.includes(field.name) && (
                           <span
-                            className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-attention-subtle text-attention border border-attention-muted"
+                            className="text-xs font-medium px-2 py-1 rounded-full bg-attention-subtle text-attention border border-attention-muted"
                             title="Display field — included in the record's natural name"
                           >
                             display
@@ -883,15 +891,15 @@ export default function SchemaDetailPage() {
                       </span>
                       {field.default !== null &&
                         field.default !== undefined && (
-                          <span className="text-[11px] text-attention">
+                          <span className="text-xs text-attention">
                             default: {String(field.default)}
                           </span>
                         )}
                     </span>
                   </Td>
                   <Td>
-                    <div className="flex flex-col gap-0.5">
-                      <div className="flex items-center gap-1.5">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
                         <Badge variant="accent">{field.type}</Badge>
                         {field.type === 'reference' &&
                           !!field.restrictions?.schema && (
@@ -920,7 +928,7 @@ export default function SchemaDetailPage() {
                           required: !field.required,
                         })
                       }
-                      className={`text-xs font-medium px-2 py-0.5 rounded-full border cursor-pointer transition-colors ${
+                      className={`text-xs font-medium px-2 py-1 rounded-full border cursor-pointer transition-colors ${
                         field.required
                           ? 'bg-success-subtle text-success border-success-muted hover:bg-success-subtle-hover'
                           : 'bg-canvas-subtle text-fg-muted border-border hover:bg-canvas-inset'
@@ -973,7 +981,7 @@ export default function SchemaDetailPage() {
                           </button>
                           {schema.display_fields.length > 1 &&
                             schema.display_fields.includes(field.name) && (
-                              <span className="flex flex-col items-center gap-0.5">
+                              <span className="flex flex-col items-center gap-1">
                                 <button
                                   type="button"
                                   title="Move earlier in display order"
@@ -985,7 +993,7 @@ export default function SchemaDetailPage() {
                                   onClick={() =>
                                     moveDisplayField(field.name, 'up')
                                   }
-                                  className="text-[9px] text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
+                                  className="text-xs text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
                                 >
                                   <ChevronUp size={10} />
                                 </button>
@@ -1002,7 +1010,7 @@ export default function SchemaDetailPage() {
                                   onClick={() =>
                                     moveDisplayField(field.name, 'down')
                                   }
-                                  className="text-[9px] text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
+                                  className="text-xs text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
                                 >
                                   <ChevronDown size={10} />
                                 </button>

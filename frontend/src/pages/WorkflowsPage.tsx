@@ -16,7 +16,13 @@ import {
   usePluginLoadErrors,
   useUploadPlugin,
 } from '../hooks/usePlugins'
-import { PageHeader, Button, LoadingState, ErrorState } from '../components/ui'
+import {
+  PageHeader,
+  Button,
+  LoadingState,
+  ErrorState,
+  Input,
+} from '../components/ui'
 import { ChevronUp, ChevronDown } from '../components/ui/icons'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import { ContainerPluginEditor } from '../components/workflows/ContainerPluginEditor'
@@ -257,7 +263,7 @@ function WorkflowEditor({
         style={{ height: '90vh' }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <h2 className="text-base font-semibold text-fg">
             {isNew ? 'New workflow' : `Edit — ${initialStem}.yaml`}
           </h2>
@@ -270,19 +276,19 @@ function WorkflowEditor({
         </div>
 
         {/* Body */}
-        <div className="flex flex-col gap-3 p-5 flex-1 min-h-0">
+        <div className="flex flex-col gap-3 p-6 flex-1 min-h-0">
           {isNew && (
             <label className="block">
               <span className="text-xs font-medium text-fg">Filename stem</span>
               <div className="flex items-center gap-1 mt-1">
-                <input
+                <Input
                   type="text"
                   value={stem}
                   onChange={(e) =>
                     setStem(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))
                   }
                   placeholder="my-workflow"
-                  className="border border-border rounded-md px-3 py-1.5 text-sm w-56 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+                  className="w-56"
                 />
                 <span className="text-sm text-fg-muted">.yaml</span>
               </div>
@@ -332,7 +338,7 @@ function WorkflowEditor({
           )}
 
           {saveError && (
-            <div className="text-xs bg-danger-subtle border border-danger-subtle-border rounded p-2 max-h-40 overflow-auto space-y-2">
+            <div className="text-xs bg-danger-subtle border border-danger-subtle-border rounded-md p-2 max-h-40 overflow-auto space-y-2">
               {groupWorkflowValidationErrors(saveError).map(
                 ({ step, messages }) => (
                   <div key={step ?? '__general__'}>
@@ -362,7 +368,7 @@ function WorkflowEditor({
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-border">
           <Button variant="default" onClick={onClose}>
             Cancel
           </Button>
@@ -393,7 +399,7 @@ function IOSpecList({ specs }: { specs: PluginIOSpec[] | null }) {
     return <p className="text-xs text-fg-muted">none</p>
   }
   return (
-    <ul className="text-xs space-y-0.5">
+    <ul className="text-xs space-y-1">
       {specs.map((s) => (
         <li key={s.name} className="font-mono">
           <span className="text-fg">{s.name}</span>
@@ -427,7 +433,7 @@ function PluginContractDetail({ plugin }: { plugin: PluginInfo }) {
         {configProps.length === 0 ? (
           <p className="text-xs text-fg-muted">none</p>
         ) : (
-          <ul className="text-xs space-y-0.5">
+          <ul className="text-xs space-y-1">
             {configProps.map(([key, prop]) => (
               <li key={key} className="font-mono">
                 <span className="text-fg">{key}</span>
@@ -682,11 +688,11 @@ export default function WorkflowsPage() {
         className="hidden"
         onChange={handlePluginFile}
       />
-      <div className="mt-10">
+      <div className="mt-8">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h2 className="text-base font-semibold text-fg">Plugins</h2>
-            <p className="text-xs text-fg-muted mt-0.5">
+            <p className="text-xs text-fg-muted mt-1">
               Step implementations available to workflows
             </p>
           </div>
@@ -746,7 +752,7 @@ export default function WorkflowsPage() {
                       </td>
                       <td className="py-2 px-3">
                         <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                             p.builtin
                               ? 'bg-accent-subtle text-accent'
                               : 'bg-success-subtle text-success'
@@ -858,12 +864,12 @@ export default function WorkflowsPage() {
 
       {/* Container (Tier 2) plugins panel */}
       {containerPlugins && containerPlugins.length > 0 && (
-        <div className="mt-10">
+        <div className="mt-8">
           <div className="mb-3">
             <h2 className="text-base font-semibold text-fg">
               Container plugins
             </h2>
-            <p className="text-xs text-fg-muted mt-0.5">
+            <p className="text-xs text-fg-muted mt-1">
               Tier 2 plugins — Dockerfile + source tree, from{' '}
               _civex/plugins/&lt;name&gt;/
             </p>

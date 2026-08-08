@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ResolvedEntry, ToolCallEntry } from '../../types/ai'
 import { applyProposal, isSaveToolName, parseResult } from './proposals'
+import { Input } from '../ui'
 import { AlertTriangle } from '../ui/icons'
 
 // Pinned above the input while a proposal awaits the user.
@@ -64,13 +65,14 @@ export default function ApprovalBar({
       <div className="text-sm text-fg mb-2">{summary}</div>
       {isSaveTool && (
         <div className="flex items-center gap-2 mb-2">
-          <input
+          <Input
             value={stem}
             onChange={(e) => setStem(e.target.value)}
             placeholder={
               entry.name === 'save_workflow' ? 'filename-stem' : 'plugin_name'
             }
-            className="flex-1 rounded border border-border bg-canvas px-2 py-1 text-xs text-fg focus:outline-none focus:border-accent"
+            size="sm"
+            className="flex-1"
           />
           <span className="text-fg-subtle text-xs">
             {entry.name === 'save_workflow' ? '.yaml' : '.py'}
@@ -82,14 +84,14 @@ export default function ApprovalBar({
         <button
           onClick={approve}
           disabled={busy || (isSaveTool && !stem.trim())}
-          className={`px-3 py-1.5 rounded text-fg-on-emphasis text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${destructive ? 'bg-danger hover:bg-danger-emphasis' : 'bg-accent hover:bg-accent-emphasis'}`}
+          className={`px-3 py-2 rounded-md text-fg-on-emphasis text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${destructive ? 'bg-danger hover:bg-danger-emphasis' : 'bg-accent hover:bg-accent-emphasis'}`}
         >
           {busy ? 'Working…' : approveLabel}
         </button>
         <button
           onClick={() => onResolve([{ id: entry.id, outcome: 'cancelled' }])}
           disabled={busy}
-          className="px-3 py-1.5 rounded border border-border text-fg-muted text-sm hover:bg-border-muted disabled:opacity-40 transition-colors"
+          className="px-3 py-2 rounded-md border border-border text-fg-muted text-sm hover:bg-border-muted disabled:opacity-40 transition-colors"
         >
           Cancel
         </button>
