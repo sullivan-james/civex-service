@@ -3,7 +3,7 @@ import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { usePluginSource, useSavePlugin } from '../../hooks/usePlugins'
 import { useTheme } from '../../hooks/useTheme'
-import { Button } from '../ui'
+import { Button, Input } from '../ui'
 
 const NEW_PLUGIN_TEMPLATE = `#!/usr/bin/env python3
 # /// script
@@ -78,7 +78,7 @@ export function PluginEditor({
         style={{ height: '90vh' }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <h2 className="text-base font-semibold text-fg">
             {isNew ? 'New plugin' : `Edit — ${initialFilename}`}
           </h2>
@@ -91,14 +91,14 @@ export function PluginEditor({
         </div>
 
         {/* Body */}
-        <div className="flex flex-col gap-3 p-5 flex-1 min-h-0">
+        <div className="flex flex-col gap-3 p-6 flex-1 min-h-0">
           {isNew && (
             <label className="block">
               <span className="text-xs font-medium text-fg">
                 Plugin filename
               </span>
               <div className="flex items-center gap-1 mt-1">
-                <input
+                <Input
                   type="text"
                   value={name}
                   onChange={(e) =>
@@ -107,7 +107,7 @@ export function PluginEditor({
                     )
                   }
                   placeholder="my_plugin"
-                  className="border border-border rounded-md px-3 py-1.5 text-sm w-56 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+                  className="w-56"
                 />
                 <span className="text-sm text-fg-muted">.py</span>
               </div>
@@ -139,14 +139,14 @@ export function PluginEditor({
           )}
 
           {saveError && (
-            <pre className="text-xs text-danger bg-danger-subtle border border-danger-subtle-border rounded p-2 whitespace-pre-wrap">
+            <pre className="text-xs text-danger bg-danger-subtle border border-danger-subtle-border rounded-md p-2 whitespace-pre-wrap">
               {saveError}
             </pre>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-border">
           <Button variant="default" onClick={onClose}>
             Cancel
           </Button>

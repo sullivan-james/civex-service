@@ -129,7 +129,7 @@ export default function JobStepsDiagram({ steps }: { steps: StepExecution[] }) {
               <span className="font-mono text-xs text-fg truncate w-full">
                 {node.step.step_id}
               </span>
-              <span className="text-[10px] text-fg-muted font-mono truncate w-full">
+              <span className="text-xs text-fg-muted font-mono truncate w-full">
                 {node.step.plugin}
               </span>
             </button>

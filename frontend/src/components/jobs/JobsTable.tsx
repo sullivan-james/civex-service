@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { useJobsPaged, useRerunJob } from '../../hooks/useWorkflows'
 import { type WorkflowJob } from '../../api/workflows'
-import { TableSkeleton, ErrorState, Badge, Button } from '../ui'
+import { TableSkeleton, ErrorState, Badge, Button, Select } from '../ui'
 import { Check, XCircle, RefreshCw } from '../ui/icons'
 
 const RUN_COLUMNS = ['w-20', 'w-32', 'w-20', 'w-24', 'w-16', 'w-16', 'w-24']
@@ -72,28 +72,28 @@ function Pagination({
     <div className="flex items-center justify-between mt-4 text-sm text-fg-muted">
       <span>{total === 0 ? 'No results' : `${from}–${to} of ${total}`}</span>
       <div className="flex items-center gap-3">
-        <label className="flex items-center gap-1.5 text-xs">
+        <label className="flex items-center gap-2 text-xs">
           Rows
-          <select
+          <Select
+            size="sm"
             value={pageSize}
             onChange={(e) => {
               onPageSize(Number(e.target.value))
               onPage(0)
             }}
-            className="border border-border rounded px-1.5 py-0.5 text-xs bg-canvas focus:outline-none focus:border-accent"
           >
             {PAGE_SIZES.map((s) => (
               <option key={s} value={s}>
                 {s}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <div className="flex items-center gap-1">
           <button
             onClick={() => onPage(0)}
             disabled={page === 0}
-            className="px-2 py-0.5 rounded border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
+            className="px-2 py-2 rounded-md border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
             title="First page"
           >
             «
@@ -101,7 +101,7 @@ function Pagination({
           <button
             onClick={() => onPage(page - 1)}
             disabled={page === 0}
-            className="px-2 py-0.5 rounded border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
+            className="px-2 py-2 rounded-md border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
           >
             ‹ Prev
           </button>
@@ -111,14 +111,14 @@ function Pagination({
           <button
             onClick={() => onPage(page + 1)}
             disabled={page >= totalPages - 1}
-            className="px-2 py-0.5 rounded border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
+            className="px-2 py-2 rounded-md border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
           >
             Next ›
           </button>
           <button
             onClick={() => onPage(totalPages - 1)}
             disabled={page >= totalPages - 1}
-            className="px-2 py-0.5 rounded border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
+            className="px-2 py-2 rounded-md border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
             title="Last page"
           >
             »
@@ -277,7 +277,7 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
                 >
                   <td
                     colSpan={recordId ? 8 : 9}
-                    className="py-1.5 px-3 text-xs text-danger font-mono"
+                    className="py-2 px-3 text-xs text-danger font-mono"
                   >
                     {job.error}
                   </td>
