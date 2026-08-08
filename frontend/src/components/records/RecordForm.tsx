@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { Schema } from '../../api/schemas'
 import type { FileRef } from './DynamicField'
 import { useRecords } from '../../hooks/useRecords'
-import { Button, Badge } from '../ui'
+import { Button, Badge, Input, Select } from '../ui'
 import { ArrowUp, ArrowRight, ScanText } from '../ui/icons'
 import { DynamicField } from './DynamicField'
 import { datetimeLocalToUTC } from '../../utils/dates'
@@ -203,24 +203,25 @@ function FilenameExtractor({
   const hasResult = extracted !== null && !patternErr && !convertErr
 
   return (
-    <div className="mt-1.5 border border-accent-subtle-border rounded-md bg-accent-subtle p-3 space-y-2">
+    <div className="mt-2 border border-accent-subtle-border rounded-md bg-accent-subtle p-3 space-y-2">
       {/* File source */}
       {sources.length > 1 ? (
-        <select
+        <Select
+          size="sm"
           value={source}
           onChange={(e) => {
             setSource(e.target.value)
             setExtracted(null)
             setConverted(undefined)
           }}
-          className="w-full border border-border rounded px-2 py-1 text-xs bg-canvas focus:outline-none focus:border-accent"
+          className="w-full"
         >
           {sources.map((s) => (
             <option key={s.filename} value={s.filename}>
               {s.label}
             </option>
           ))}
-        </select>
+        </Select>
       ) : (
         <code
           className="text-xs text-fg-muted font-mono block truncate"
@@ -232,7 +233,8 @@ function FilenameExtractor({
 
       {/* Regex input */}
       <div className="flex gap-2">
-        <input
+        <Input
+          size="sm"
           value={pattern}
           onChange={(e) => {
             setPattern(e.target.value)
@@ -241,11 +243,11 @@ function FilenameExtractor({
           }}
           onKeyDown={(e) => e.key === 'Enter' && run()}
           placeholder="Regex — use a capture group ( ) to select the part you want"
-          className="flex-1 border border-border rounded px-2 py-1 text-xs font-mono bg-canvas focus:outline-none focus:border-accent"
+          className="flex-1 font-mono"
         />
         <button
           onClick={run}
-          className="px-3 py-1 text-xs rounded border border-border bg-canvas hover:bg-canvas-subtle shrink-0"
+          className="px-3 py-2 text-xs rounded-md border border-border bg-canvas hover:bg-canvas-subtle shrink-0"
         >
           Test
         </button>
@@ -254,7 +256,8 @@ function FilenameExtractor({
       {/* Date format (date / datetime only) */}
       {isDate && (
         <div className="flex gap-2 items-center">
-          <input
+          <Input
+            size="sm"
             value={fmt}
             onChange={(e) => {
               setFmt(e.target.value)
@@ -263,7 +266,7 @@ function FilenameExtractor({
             }}
             onKeyDown={(e) => e.key === 'Enter' && run()}
             placeholder={`Format, e.g. YYYYMMDD-HHmmSS  (tokens: ${FORMAT_HELP})`}
-            className="flex-1 border border-border rounded px-2 py-1 text-xs font-mono bg-canvas focus:outline-none focus:border-accent"
+            className="flex-1 font-mono"
           />
         </div>
       )}
@@ -276,13 +279,13 @@ function FilenameExtractor({
       {hasResult && (
         <div className="flex items-center gap-2 text-xs flex-wrap">
           <span className="text-fg-muted">Extracted:</span>
-          <code className="bg-canvas border border-border px-1.5 py-0.5 rounded font-mono">
+          <code className="bg-canvas border border-border px-2 py-1 rounded-md font-mono">
             {extracted}
           </code>
           {converted !== extracted && converted !== undefined && (
             <>
               <ArrowRight size={12} className="text-fg-muted" />
-              <code className="bg-success-subtle border border-success-muted px-1.5 py-0.5 rounded font-mono text-success">
+              <code className="bg-success-subtle border border-success-muted px-2 py-1 rounded-md font-mono text-success">
                 {String(converted)}
               </code>
             </>
@@ -295,13 +298,13 @@ function FilenameExtractor({
         <button
           onClick={apply}
           disabled={converted === undefined}
-          className="px-3 py-1 text-xs font-medium rounded border border-accent bg-accent text-fg-on-emphasis hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-3 py-2 text-xs font-medium rounded-md border border-accent bg-accent text-fg-on-emphasis hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Apply
         </button>
         <button
           onClick={onClose}
-          className="px-3 py-1 text-xs font-medium rounded border border-border bg-canvas hover:bg-canvas-subtle"
+          className="px-3 py-2 text-xs font-medium rounded-md border border-border bg-canvas hover:bg-canvas-subtle"
         >
           Cancel
         </button>
@@ -406,7 +409,7 @@ export function RecordForm({
             <button
               key={s.id}
               onClick={() => handleSchemaChange(s.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border transition-colors cursor-pointer ${
+              className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm border transition-colors cursor-pointer ${
                 s.id === selectedSchemaId
                   ? 'bg-accent text-fg-on-emphasis border-accent'
                   : 'bg-canvas text-fg border-border hover:bg-canvas-inset'
@@ -429,7 +432,7 @@ export function RecordForm({
         <div className="flex flex-col gap-1">
           <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
             Parent record
-            <Badge variant="accent" className="ml-1.5">
+            <Badge variant="accent" className="ml-2">
               {parentSchema.name}
             </Badge>
           </label>
@@ -439,10 +442,10 @@ export function RecordForm({
               first.
             </p>
           ) : (
-            <select
+            <Select
               value={parentRecordId}
               onChange={(e) => setParentRecordId(e.target.value)}
-              className="border border-border rounded-md px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:border-accent w-full max-w-sm"
+              className="w-full max-w-sm"
             >
               <option value="">— Select a {parentSchema.name} record —</option>
               {parentCandidates.map((r) => {
@@ -455,7 +458,7 @@ export function RecordForm({
                   </option>
                 )
               })}
-            </select>
+            </Select>
           )}
         </div>
       )}
@@ -473,7 +476,7 @@ export function RecordForm({
                 className={`flex flex-col gap-1 ${isExtracting ? 'sm:col-span-2' : ''}`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <label className="text-xs font-medium text-fg flex items-center gap-1.5">
+                  <label className="text-xs font-medium text-fg flex items-center gap-2">
                     <span className="font-mono">{field.name}</span>
                     <Badge variant="accent">{field.type}</Badge>
                     {field.required && (
@@ -485,7 +488,7 @@ export function RecordForm({
                       onClick={() =>
                         setExtractingField(isExtracting ? null : field.name)
                       }
-                      className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-colors shrink-0 ${
+                      className={`inline-flex items-center gap-1 text-xs px-2 py-2 rounded-md border transition-colors shrink-0 ${
                         isExtracting
                           ? 'border-accent bg-accent-subtle text-accent'
                           : 'border-border text-fg-muted hover:border-accent hover:text-accent'

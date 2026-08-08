@@ -4,7 +4,7 @@ import {
   useRunWorkflow,
   useRunWorkflowWithFiles,
 } from '../../hooks/useWorkflows'
-import { Button, Modal, ModalBody, ModalFooter, ModalHeader } from '../ui'
+import { Button, Input, Modal, ModalBody, ModalFooter, ModalHeader } from '../ui'
 import type { Workflow } from '../../api/workflows'
 
 interface Props {
@@ -82,11 +82,11 @@ export function WorkflowRunModal({
           <label className="block">
             <span className="text-sm font-medium text-fg">Record ID</span>
             {workflow.record_schema && (
-              <span className="ml-1.5 text-xs text-fg-muted">
+              <span className="ml-2 text-xs text-fg-muted">
                 ({workflow.record_schema})
               </span>
             )}
-            <input
+            <Input
               autoFocus={!prefilled}
               type="text"
               value={recordId}
@@ -94,7 +94,7 @@ export function WorkflowRunModal({
               placeholder="Short ID or full UUID"
               readOnly={!!prefilled}
               required
-              className={`mt-1 w-full border border-border rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent ${prefilled ? 'bg-canvas-subtle text-fg-muted' : ''}`}
+              className={`mt-1 w-full font-mono ${prefilled ? 'bg-canvas-subtle text-fg-muted' : ''}`}
             />
           </label>
 
@@ -111,7 +111,7 @@ export function WorkflowRunModal({
                   </p>
                 )}
                 <div
-                  className="border-2 border-dashed border-border rounded-md px-4 py-5 text-center cursor-pointer hover:border-accent hover:bg-canvas-subtle transition-colors"
+                  className="border-2 border-dashed border-border rounded-md px-4 py-6 text-center cursor-pointer hover:border-accent hover:bg-canvas-subtle transition-colors"
                   onClick={() => fileRefs.current[inputName]?.click()}
                   onDragOver={(e) => {
                     e.preventDefault()
@@ -140,7 +140,7 @@ export function WorkflowRunModal({
                     </p>
                   ) : (
                     <div className="text-left">
-                      <div className="max-h-32 overflow-y-auto space-y-0.5 mb-1">
+                      <div className="max-h-32 overflow-y-auto space-y-1 mb-1">
                         {chosen.map((f, i) => (
                           <p
                             key={i}

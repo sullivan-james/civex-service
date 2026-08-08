@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   ErrorState,
+  Input,
   LoadingState,
   Modal,
   ModalBody,
@@ -44,12 +45,12 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
             <label className="block text-xs font-medium text-fg mb-1">
               Name <span className="text-danger">*</span>
             </label>
-            <input
+            <Input
               autoFocus
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
+              className="w-full"
               placeholder="my-collection"
             />
           </div>
@@ -57,10 +58,10 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
             <label className="block text-xs font-medium text-fg mb-1">
               Description
             </label>
-            <input
+            <Input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
+              className="w-full"
               placeholder="Optional"
             />
           </div>

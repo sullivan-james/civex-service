@@ -5,6 +5,7 @@ import {
   Badge,
   Button,
   ErrorState,
+  Input,
   LoadingState,
   Modal,
   ModalBody,
@@ -12,6 +13,7 @@ import {
   ModalHeader,
   MonoId,
   PageHeader,
+  Select,
   Table,
   Tbody,
   Td,
@@ -48,12 +50,12 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
             <label className="block text-xs font-medium text-fg mb-1">
               Name <span className="text-danger">*</span>
             </label>
-            <input
+            <Input
               autoFocus
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
+              className="w-full"
               placeholder="my-schema"
             />
           </div>
@@ -61,10 +63,10 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
             <label className="block text-xs font-medium text-fg mb-1">
               Description
             </label>
-            <input
+            <Input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
+              className="w-full"
               placeholder="Optional"
             />
           </div>
@@ -72,10 +74,10 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
             <label className="block text-xs font-medium text-fg mb-1">
               Parent schema
             </label>
-            <select
+            <Select
               value={parent}
               onChange={(e) => setParent(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-canvas"
+              className="w-full"
             >
               <option value="">None</option>
               {schemas?.map((s) => (
@@ -83,7 +85,7 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
                   {s.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           {create.error && (
             <p className="text-xs text-danger">{errorMessage(create.error)}</p>

@@ -3,7 +3,7 @@ import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { usePluginSource, useSavePlugin } from '../../hooks/usePlugins'
 import { useTheme } from '../../hooks/useTheme'
-import { Button, Modal, ModalBody, ModalFooter, ModalHeader } from '../ui'
+import { Button, Input, Modal, ModalBody, ModalFooter, ModalHeader } from '../ui'
 
 const NEW_PLUGIN_TEMPLATE = `#!/usr/bin/env python3
 # /// script
@@ -82,7 +82,7 @@ export function PluginEditor({
           <label className="block">
             <span className="text-xs font-medium text-fg">Plugin filename</span>
             <div className="flex items-center gap-1 mt-1">
-              <input
+              <Input
                 type="text"
                 value={name}
                 onChange={(e) =>
@@ -91,7 +91,7 @@ export function PluginEditor({
                   )
                 }
                 placeholder="my_plugin"
-                className="border border-border rounded-md px-3 py-1.5 text-sm w-56 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+                className="w-56"
               />
               <span className="text-sm text-fg-muted">.py</span>
             </div>
@@ -123,7 +123,7 @@ export function PluginEditor({
         )}
 
         {saveError && (
-          <pre className="text-xs text-danger bg-danger-subtle border border-danger-subtle-border rounded p-2 whitespace-pre-wrap">
+          <pre className="text-xs text-danger bg-danger-subtle border border-danger-subtle-border rounded-md p-2 whitespace-pre-wrap">
             {saveError}
           </pre>
         )}

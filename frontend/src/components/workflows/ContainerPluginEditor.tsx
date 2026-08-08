@@ -3,7 +3,7 @@ import {
   useContainerPlugin,
   useSaveContainerPluginFile,
 } from '../../hooks/useContainerPlugins'
-import { Button, Modal, ModalBody, ModalFooter, ModalHeader } from '../ui'
+import { Button, Modal, ModalBody, ModalFooter, ModalHeader, Textarea } from '../ui'
 import type { BuildResult } from '../../api/containerPlugins'
 
 interface ContainerPluginEditorProps {
@@ -65,7 +65,7 @@ export function ContainerPluginEditor({
               <button
                 key={path}
                 onClick={() => setSelectedPath(path)}
-                className={`block w-full text-left px-3 py-1.5 text-xs font-mono truncate ${
+                className={`block w-full text-left px-3 py-2 text-xs font-mono truncate ${
                   path === selectedPath
                     ? 'bg-accent-subtle text-accent'
                     : 'text-fg hover:bg-canvas-subtle'
@@ -79,19 +79,20 @@ export function ContainerPluginEditor({
           {/* Editor */}
           <div className="flex-1 flex flex-col min-h-0 p-4 gap-3">
             <span className="text-xs font-medium text-fg">{selectedPath}</span>
-            <textarea
+            <Textarea
+              size="sm"
               value={selectedPath ? contents[selectedPath] : ''}
               onChange={(e) =>
                 selectedPath &&
                 setContents({ ...contents, [selectedPath]: e.target.value })
               }
               spellCheck={false}
-              className="flex-1 min-h-0 font-mono text-xs border border-border rounded-md p-3 resize-none bg-canvas-subtle focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent leading-relaxed"
+              className="flex-1 min-h-0 font-mono resize-none bg-canvas-subtle leading-relaxed"
             />
 
             {buildResult && (
               <div
-                className={`text-xs rounded p-2 whitespace-pre-wrap max-h-32 overflow-y-auto ${
+                className={`text-xs rounded-md p-2 whitespace-pre-wrap max-h-32 overflow-y-auto ${
                   buildResult.success
                     ? 'text-success bg-success-subtle border border-success/30'
                     : 'text-danger bg-danger-subtle border border-danger-subtle-border'

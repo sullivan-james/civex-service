@@ -25,6 +25,8 @@ import {
   PageHeader,
   LoadingState,
   ErrorState,
+  Input,
+  Checkbox,
 } from '../components/ui'
 import { ArrowLeft, ArrowRight } from '../components/ui/icons'
 import { RecordForm } from '../components/records/RecordForm'
@@ -179,7 +181,7 @@ export default function CollectionDetailPage() {
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-sm text-fg-muted">
+      <nav className="flex items-center gap-2 text-sm text-fg-muted">
         <Link to="/collections" className="hover:text-accent">
           Collections
         </Link>
@@ -189,7 +191,7 @@ export default function CollectionDetailPage() {
 
       {renaming ? (
         <div className="border border-border rounded-md p-4 bg-canvas-subtle flex items-center gap-3">
-          <input
+          <Input
             autoFocus
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
@@ -197,7 +199,7 @@ export default function CollectionDetailPage() {
               if (e.key === 'Enter') handleRename()
               if (e.key === 'Escape') setRenaming(false)
             }}
-            className="border border-border rounded-md px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent w-64"
+            className="w-64"
           />
           {updateCollection.error && (
             <span className="text-xs text-danger">
@@ -249,7 +251,7 @@ export default function CollectionDetailPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => selectSchema(null)}
-            className={`px-3 py-1 rounded-full text-sm border transition-colors cursor-pointer ${
+            className={`px-3 py-2 rounded-full text-sm border transition-colors cursor-pointer ${
               selectedSchema === null
                 ? 'bg-fg text-fg-on-emphasis border-fg'
                 : 'bg-canvas text-fg-muted border-border hover:border-fg hover:text-fg'
@@ -268,7 +270,7 @@ export default function CollectionDetailPage() {
                 <button
                   key={name}
                   onClick={() => selectSchema(name)}
-                  className={`px-3 py-1 rounded-full text-sm border transition-colors cursor-pointer ${
+                  className={`px-3 py-2 rounded-full text-sm border transition-colors cursor-pointer ${
                     selectedSchema === name
                       ? 'bg-fg text-fg-on-emphasis border-fg'
                       : 'bg-canvas text-fg-muted border-border hover:border-fg hover:text-fg'
@@ -321,12 +323,12 @@ export default function CollectionDetailPage() {
       </div>
 
       {/* Search */}
-      <input
+      <Input
         type="search"
         value={searchInput}
         onChange={(e) => setSearchInput(e.target.value)}
         placeholder="Search records…"
-        className="w-full border border-border rounded-md px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+        className="w-full"
       />
 
       {/* Add record form */}
@@ -410,8 +412,7 @@ export default function CollectionDetailPage() {
             <Thead>
               <tr>
                 <Th className="w-8">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={
                       selected.size === records.length && records.length > 0
                     }
@@ -421,7 +422,6 @@ export default function CollectionDetailPage() {
                           selected.size > 0 && selected.size < records.length
                     }}
                     onChange={toggleSelectAll}
-                    className="cursor-pointer"
                   />
                 </Th>
                 <Th className="w-24">ID</Th>
@@ -436,17 +436,15 @@ export default function CollectionDetailPage() {
               {records.map((r) => (
                 <Tr key={r.id}>
                   <Td>
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={selected.has(r.id)}
                       onChange={() => toggleSelect(r.id)}
-                      className="cursor-pointer"
                     />
                   </Td>
                   <Td>
                     <Link
                       to={`/records/${r.id}`}
-                      className="text-xs text-accent hover:underline"
+                      className="text-sm text-accent hover:underline"
                     >
                       {r.natural_name ?? (
                         <span className="font-mono">{r.id.slice(0, 8)}</span>

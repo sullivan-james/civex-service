@@ -47,7 +47,7 @@ export default function StepExecutionCard({ step }: { step: StepExecution }) {
     <div className="rounded-md border border-border bg-canvas overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-canvas-subtle transition-colors"
+        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-canvas-subtle transition-colors"
       >
         <span className="font-mono text-sm text-fg">{step.step_id}</span>
         <span className="text-xs text-fg-muted font-mono">{step.plugin}</span>
@@ -65,14 +65,14 @@ export default function StepExecutionCard({ step }: { step: StepExecution }) {
       {open && (
         <div className="border-t border-border px-4 py-3 space-y-3 text-xs">
           {step.error && (
-            <div className="rounded px-2 py-1.5 bg-danger-subtle text-danger font-mono whitespace-pre-wrap">
+            <div className="rounded-md px-2 py-2 bg-danger-subtle text-danger font-mono whitespace-pre-wrap">
               {step.error}
             </div>
           )}
           <div>
             <h3 className="font-medium text-fg-muted mb-1">Inputs</h3>
             {hasInputs ? (
-              <pre className="font-mono text-fg whitespace-pre-wrap break-words bg-canvas-subtle rounded p-2">
+              <pre className="font-mono text-fg whitespace-pre-wrap break-words bg-canvas-subtle rounded-md p-2">
                 {JSON.stringify(step.inputs, null, 2)}
               </pre>
             ) : (
@@ -82,7 +82,7 @@ export default function StepExecutionCard({ step }: { step: StepExecution }) {
           <div>
             <h3 className="font-medium text-fg-muted mb-1">Outputs</h3>
             {hasOutputs ? (
-              <pre className="font-mono text-fg whitespace-pre-wrap break-words bg-canvas-subtle rounded p-2">
+              <pre className="font-mono text-fg whitespace-pre-wrap break-words bg-canvas-subtle rounded-md p-2">
                 {JSON.stringify(step.outputs, null, 2)}
               </pre>
             ) : (
