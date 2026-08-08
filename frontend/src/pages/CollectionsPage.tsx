@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   ErrorState,
+  Field,
   Input,
   LoadingState,
   MonoId,
@@ -43,10 +44,7 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
       >
         <h2 className="text-base font-semibold text-fg mb-4">New collection</h2>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <div>
-            <label className="block text-xs font-medium text-fg mb-1">
-              Name <span className="text-danger">*</span>
-            </label>
+          <Field label="Name" required>
             <Input
               autoFocus
               required
@@ -55,18 +53,15 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
               className="w-full"
               placeholder="my-collection"
             />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-fg mb-1">
-              Description
-            </label>
+          </Field>
+          <Field label="Description">
             <Input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="w-full"
               placeholder="Optional"
             />
-          </div>
+          </Field>
           {create.error && (
             <p className="text-xs text-danger">{errorMessage(create.error)}</p>
           )}

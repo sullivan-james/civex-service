@@ -16,6 +16,9 @@ interface Props {
   field: Field
   value: unknown
   onChange: (value: unknown) => void
+  id?: string
+  'aria-describedby'?: string
+  'aria-invalid'?: boolean
 }
 
 function fileAccept(
@@ -48,7 +51,14 @@ function validateFileSize(
   return null
 }
 
-function FileField({ field, value, onChange }: Props) {
+function FileField({
+  field,
+  value,
+  onChange,
+  id,
+  'aria-describedby': ariaDescribedby,
+  'aria-invalid': ariaInvalid,
+}: Props) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const ref = value as FileRef | null | undefined
@@ -95,6 +105,9 @@ function FileField({ field, value, onChange }: Props) {
         </div>
       )}
       <input
+        id={id}
+        aria-describedby={ariaDescribedby}
+        aria-invalid={ariaInvalid}
         type="file"
         accept={accept}
         onChange={handleChange}
@@ -107,7 +120,14 @@ function FileField({ field, value, onChange }: Props) {
   )
 }
 
-function FileListField({ field, value, onChange }: Props) {
+function FileListField({
+  field,
+  value,
+  onChange,
+  id,
+  'aria-describedby': ariaDescribedby,
+  'aria-invalid': ariaInvalid,
+}: Props) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const existing = (value as FileRef[] | null | undefined) ?? []
@@ -166,6 +186,9 @@ function FileListField({ field, value, onChange }: Props) {
         </div>
       ))}
       <input
+        id={id}
+        aria-describedby={ariaDescribedby}
+        aria-invalid={ariaInvalid}
         type="file"
         multiple
         accept={accept}
@@ -179,7 +202,14 @@ function FileListField({ field, value, onChange }: Props) {
   )
 }
 
-function ReferenceField({ field, value, onChange }: Props) {
+function ReferenceField({
+  field,
+  value,
+  onChange,
+  id,
+  'aria-describedby': ariaDescribedby,
+  'aria-invalid': ariaInvalid,
+}: Props) {
   const targetSchema = String(field.restrictions?.schema ?? '')
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<CivexRecord[]>([])
@@ -229,6 +259,9 @@ function ReferenceField({ field, value, onChange }: Props) {
   return (
     <div className="relative">
       <Input
+        id={id}
+        aria-describedby={ariaDescribedby}
+        aria-invalid={ariaInvalid}
         type="text"
         value={
           selectedId
@@ -277,13 +310,23 @@ function ReferenceField({ field, value, onChange }: Props) {
   )
 }
 
-export function DynamicField({ field, value, onChange }: Props) {
+export function DynamicField({
+  field,
+  value,
+  onChange,
+  id,
+  'aria-describedby': ariaDescribedby,
+  'aria-invalid': ariaInvalid,
+}: Props) {
   switch (field.type) {
     case 'string': {
       const choices = field.restrictions?.choices
       if (Array.isArray(choices) && choices.length) {
         return (
           <Select
+            id={id}
+            aria-describedby={ariaDescribedby}
+            aria-invalid={ariaInvalid}
             value={(value as string) ?? ''}
             onChange={(e) => onChange(e.target.value)}
             className="w-full"
@@ -303,6 +346,9 @@ export function DynamicField({ field, value, onChange }: Props) {
           : undefined
       return (
         <Input
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
           type="text"
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
@@ -324,6 +370,9 @@ export function DynamicField({ field, value, onChange }: Props) {
           : undefined
       return (
         <Input
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
           type="number"
           step="1"
           min={rMin}
@@ -347,6 +396,9 @@ export function DynamicField({ field, value, onChange }: Props) {
           : undefined
       return (
         <Input
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
           type="number"
           step="any"
           min={rMin}
@@ -362,6 +414,9 @@ export function DynamicField({ field, value, onChange }: Props) {
     case 'date':
       return (
         <Input
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
           type="date"
           value={(value as string) ?? ''}
           min={
@@ -390,6 +445,9 @@ export function DynamicField({ field, value, onChange }: Props) {
           : undefined
       return (
         <Input
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
           type="datetime-local"
           value={value ? utcToDatetimeLocal(value as string) : ''}
           min={rMin}
@@ -404,8 +462,14 @@ export function DynamicField({ field, value, onChange }: Props) {
 
     case 'boolean':
       return (
-        <label className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none">
+        <label
+          htmlFor={id}
+          className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none"
+        >
           <Checkbox
+            id={id}
+            aria-describedby={ariaDescribedby}
+            aria-invalid={ariaInvalid}
             checked={(value as boolean) ?? false}
             onChange={(e) => onChange(e.target.checked)}
           />
@@ -421,6 +485,9 @@ export function DynamicField({ field, value, onChange }: Props) {
       const enumChoices = field.restrictions?.choices
       return (
         <Select
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
           className="w-full"
@@ -440,6 +507,9 @@ export function DynamicField({ field, value, onChange }: Props) {
     case 'url':
       return (
         <Input
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
           type="url"
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
@@ -454,6 +524,9 @@ export function DynamicField({ field, value, onChange }: Props) {
         : ((value as string) ?? '')
       return (
         <Input
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
           type="text"
           value={listVal}
           onChange={(e) => {
@@ -479,6 +552,9 @@ export function DynamicField({ field, value, onChange }: Props) {
         : ((value as string) ?? '')
       return (
         <Input
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
           type="text"
           value={tagsVal}
           onChange={(e) => {
@@ -499,17 +575,47 @@ export function DynamicField({ field, value, onChange }: Props) {
     }
 
     case 'file':
-      return <FileField field={field} value={value} onChange={onChange} />
+      return (
+        <FileField
+          field={field}
+          value={value}
+          onChange={onChange}
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
+        />
+      )
 
     case 'reference':
-      return <ReferenceField field={field} value={value} onChange={onChange} />
+      return (
+        <ReferenceField
+          field={field}
+          value={value}
+          onChange={onChange}
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
+        />
+      )
 
     case 'file_list':
-      return <FileListField field={field} value={value} onChange={onChange} />
+      return (
+        <FileListField
+          field={field}
+          value={value}
+          onChange={onChange}
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
+        />
+      )
 
     default:
       return (
         <Input
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
           type="text"
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}

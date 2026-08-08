@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import {
   type AiConfig,
   type OllamaModel,
@@ -7,7 +7,7 @@ import {
   type PresetProviderId,
   aiApi,
 } from '../../api/ai'
-import { Input, Select } from '../ui'
+import { Field, Input, Select } from '../ui'
 import { Check, RotateCcw, ArrowRight } from '../ui/icons'
 
 function detectPreset(cfg: AiConfig | null): PresetProviderId {
@@ -29,6 +29,7 @@ function detectPreset(cfg: AiConfig | null): PresetProviderId {
 }
 
 export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
+  const modelId = useId()
   const [cfg, setCfg] = useState<AiConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [preset, setPreset] = useState<PresetProviderId>('groq')
@@ -279,10 +280,38 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
       </div>
 
       {/* Provider */}
-      <div>
-        <label className="block text-xs font-medium text-fg mb-1">
-          Provider
-        </label>
+      <Field
+        label="Provider"
+        hint={
+          presetObj.docs && !isOllama ? (
+            <>
+              Get a free API key at{' '}
+              <a
+                href={presetObj.docs}
+                target="_blank"
+                rel="noreferrer"
+                className="text-accent hover:underline"
+              >
+                {presetObj.docs.replace('https://', '')}
+              </a>
+            </>
+          ) : isOllama ? (
+            <>
+              {'note' in presetObj ? (presetObj as { note: string }).note : ''}{' '}
+              <a
+                href="https://ollama.com"
+                target="_blank"
+                rel="noreferrer"
+                className="text-accent hover:underline"
+              >
+                ollama.com
+              </a>
+            </>
+          ) : isOpenRouter ? (
+            'note' in presetObj ? (presetObj as { note: string }).note : ''
+          ) : undefined
+        }
+      >
         <Select
           value={preset}
           onChange={(e) =>
@@ -296,57 +325,23 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
             </option>
           ))}
         </Select>
-        {presetObj.docs && !isOllama && (
-          <p className="mt-1 text-xs text-fg-subtle">
-            Get a free API key at{' '}
-            <a
-              href={presetObj.docs}
-              target="_blank"
-              rel="noreferrer"
-              className="text-accent hover:underline"
-            >
-              {presetObj.docs.replace('https://', '')}
-            </a>
-          </p>
-        )}
-        {isOllama && (
-          <p className="mt-1 text-xs text-fg-subtle">
-            {'note' in presetObj ? (presetObj as { note: string }).note : ''}{' '}
-            <a
-              href="https://ollama.com"
-              target="_blank"
-              rel="noreferrer"
-              className="text-accent hover:underline"
-            >
-              ollama.com
-            </a>
-          </p>
-        )}
-        {isOpenRouter && (
-          <p className="mt-1 text-xs text-fg-subtle">
-            {'note' in presetObj ? (presetObj as { note: string }).note : ''}
-          </p>
-        )}
-      </div>
+      </Field>
 
       {/* Base URL — editable for ollama and custom */}
       {(isCustom || isOllama) && (
-        <div>
-          <label className="block text-xs font-medium text-fg mb-1">
-            Base URL
-          </label>
+        <Field
+          label="Base URL"
+          hint={
+            isOllama ? 'Change if Ollama runs on a different host/port.' : undefined
+          }
+        >
           <Input
             value={customBaseUrl}
             onChange={(e) => setCustomBaseUrl(e.target.value)}
             placeholder="http://localhost:11434/v1"
             className="w-full"
           />
-          {isOllama && (
-            <p className="mt-1 text-xs text-fg-subtle">
-              Change if Ollama runs on a different host/port.
-            </p>
-          )}
-        </div>
+        </Field>
       )}
 
       {/* OpenRouter OAuth + limits */}
@@ -418,10 +413,17 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
 
       {/* API key */}
       {!isOllama && (
-        <div>
-          <label className="block text-xs font-medium text-fg mb-1">
-            API key
-          </label>
+        <Field
+          label="API key"
+          hint={
+            <>
+              {cfg?.configured
+                ? 'Leave blank to keep existing key.'
+                : 'Required.'}{' '}
+              Saved to _civex/config.toml.
+            </>
+          }
+        >
           <Input
             type="password"
             value={apiKey}
@@ -433,18 +435,14 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
             }
             className="w-full"
           />
-          <p className="mt-1 text-xs text-fg-subtle">
-            {cfg?.configured
-              ? 'Leave blank to keep existing key.'
-              : 'Required.'}{' '}
-            Saved to _civex/config.toml.
-          </p>
-        </div>
+        </Field>
       )}
 
       {/* Model */}
       <div>
-        <label className="block text-xs font-medium text-fg mb-1">Model</label>
+        <label htmlFor={modelId} className="block text-xs font-medium text-fg mb-1">
+          Model
+        </label>
         {isOllama ? (
           ollamaLoading ? (
             <div className="flex items-center gap-2 text-xs text-fg-muted py-2">
@@ -472,6 +470,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                 </code>
               </p>
               <Input
+                id={modelId}
                 value={customModel}
                 onChange={(e) => setCustomModel(e.target.value)}
                 placeholder="qwen2.5:7b"
@@ -492,6 +491,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           ) : (
             <div className="space-y-1">
               <Select
+                id={modelId}
                 value={customModel}
                 onChange={(e) => setCustomModel(e.target.value)}
                 className="w-full"
@@ -515,6 +515,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
         ) : isFreeText || presetObj.models.length === 0 ? (
           <>
             <Input
+              id={modelId}
               value={customModel}
               onChange={(e) => setCustomModel(e.target.value)}
               placeholder={
@@ -539,6 +540,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
           </>
         ) : (
           <Select
+            id={modelId}
             value={effectiveModel || presetObj.models[0]?.id || ''}
             onChange={(e) => setModel(e.target.value)}
             className="w-full"
