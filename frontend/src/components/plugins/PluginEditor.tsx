@@ -3,7 +3,14 @@ import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { usePluginSource, useSavePlugin } from '../../hooks/usePlugins'
 import { useTheme } from '../../hooks/useTheme'
-import { Button, Input, Modal, ModalBody, ModalFooter, ModalHeader } from '../ui'
+import {
+  Button,
+  Input,
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+} from '../ui'
 
 const NEW_PLUGIN_TEMPLATE = `#!/usr/bin/env python3
 # /// script
