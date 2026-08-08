@@ -308,7 +308,11 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
               </a>
             </>
           ) : isOpenRouter ? (
-            'note' in presetObj ? (presetObj as { note: string }).note : ''
+            'note' in presetObj ? (
+              (presetObj as { note: string }).note
+            ) : (
+              ''
+            )
           ) : undefined
         }
       >
@@ -332,7 +336,9 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
         <Field
           label="Base URL"
           hint={
-            isOllama ? 'Change if Ollama runs on a different host/port.' : undefined
+            isOllama
+              ? 'Change if Ollama runs on a different host/port.'
+              : undefined
           }
         >
           <Input
@@ -440,7 +446,10 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
 
       {/* Model */}
       <div>
-        <label htmlFor={modelId} className="block text-xs font-medium text-fg mb-1">
+        <label
+          htmlFor={modelId}
+          className="block text-xs font-medium text-fg mb-1"
+        >
           Model
         </label>
         {isOllama ? (

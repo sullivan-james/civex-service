@@ -120,7 +120,10 @@ export function WorkflowRunModal({
               const chosen = fileInputs[inputName] ?? []
               return (
                 <div key={inputName}>
-                  <Field label={decl.label ?? inputName} hint={decl.description}>
+                  <Field
+                    label={decl.label ?? inputName}
+                    hint={decl.description}
+                  >
                     <input
                       ref={(el) => {
                         fileRefs.current[inputName] = el
