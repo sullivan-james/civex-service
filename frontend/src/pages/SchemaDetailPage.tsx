@@ -137,9 +137,7 @@ function RestrictionsSummary({
 }) {
   const summary = restrictions.summarise(fieldRestrictions, type)
   if (!summary) return null
-  return (
-    <span className="text-xs text-fg-muted leading-tight">{summary}</span>
-  )
+  return <span className="text-xs text-fg-muted leading-tight">{summary}</span>
 }
 
 // --- Add field form ---
