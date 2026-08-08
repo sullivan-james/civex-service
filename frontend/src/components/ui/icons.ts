@@ -27,4 +27,5 @@ export {
   Folder,
   ScanText,
   Play,
+  Info,
 } from 'lucide-react'
