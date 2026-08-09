@@ -26,6 +26,7 @@ import {
   Field,
   Input,
   ConfirmDialog,
+  Page,
   FormGrid,
   NameLabelFields,
 } from '../components/ui'
@@ -205,19 +206,33 @@ export default function SchemaDetailPage() {
     reorderFields.mutate(newOrder.map((f) => f.id))
   }
 
+  const breadcrumbs = [{ label: 'Schemas', to: '/schemas' }]
+
   if (isLoading)
     return (
-      <div className="space-y-6">
-        <DetailSkeleton metadataRows={0} sections={0} />
-        <TableSkeleton
-          columns={['w-8', 'w-32', 'w-20', 'w-16', 'w-24']}
-          rows={6}
-        />
-      </div>
+      <Page
+        breadcrumbs={breadcrumbs}
+        loading={
+          <>
+            <DetailSkeleton metadataRows={0} sections={0} />
+            <TableSkeleton
+              columns={['w-8', 'w-32', 'w-20', 'w-16', 'w-24']}
+              rows={6}
+            />
+          </>
+        }
+      />
     )
   if (error || !schema)
     return (
-      <ErrorState message={error ? errorMessage(error) : 'Schema not found'} />
+      <Page
+        breadcrumbs={breadcrumbs}
+        error={
+          <ErrorState
+            message={error ? errorMessage(error) : 'Schema not found'}
+          />
+        }
+      />
     )
 
   const parentSchema = schema.parent_id
@@ -225,57 +240,49 @@ export default function SchemaDetailPage() {
     : null
 
   return (
-    <div className="space-y-6">
-      {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-sm text-fg-muted">
-        <Link to="/schemas" className="hover:text-accent">
-          Schemas
-        </Link>
-        <span>/</span>
-        <span className="text-fg font-medium">
-          {displayLabel(schema.name, schema.label)}
-        </span>
-      </nav>
-
-      {/* Header */}
-      <div>
-        {editing ? (
-          <MetaEditor schema={schema} onDone={() => setEditing(false)} />
-        ) : (
-          <div className="flex items-start justify-between">
-            <div>
-              <h1 className="text-xl font-semibold text-fg">
-                {displayLabel(schema.name, schema.label)}
-              </h1>
-              <p
-                className="mt-0.5 font-mono text-xs text-fg-subtle"
-                title="Schema name — what workflows and CSV headers reference"
+    <Page
+      breadcrumbs={[
+        ...breadcrumbs,
+        { label: displayLabel(schema.name, schema.label) },
+      ]}
+      title={displayLabel(schema.name, schema.label)}
+      description={
+        <>
+          <p
+            className="font-mono text-xs text-fg-subtle"
+            title="Schema name — what workflows and CSV headers reference"
+          >
+            {schema.name}
+          </p>
+          <p className="mt-1">
+            {schema.description ?? (
+              <span className="italic">No description</span>
+            )}
+          </p>
+          {parentSchema && (
+            <p className="mt-1">
+              Inherits from{' '}
+              <Link
+                to={`/schemas/${parentSchema.id}`}
+                className="text-accent hover:underline"
               >
-                {schema.name}
-              </p>
-              <p className="mt-1 text-sm text-fg-muted">
-                {schema.description ?? (
-                  <span className="italic">No description</span>
-                )}
-              </p>
-              {parentSchema && (
-                <p className="mt-1 text-sm text-fg-muted">
-                  Inherits from{' '}
-                  <Link
-                    to={`/schemas/${parentSchema.id}`}
-                    className="text-accent hover:underline"
-                  >
-                    {parentSchema.name}
-                  </Link>
-                </p>
-              )}
-            </div>
-            <Button size="sm" onClick={() => setEditing(true)}>
-              Edit
-            </Button>
-          </div>
-        )}
-      </div>
+                {parentSchema.name}
+              </Link>
+            </p>
+          )}
+        </>
+      }
+      action={
+        !editing && (
+          <Button size="sm" onClick={() => setEditing(true)}>
+            Edit
+          </Button>
+        )
+      }
+    >
+      {editing && (
+        <MetaEditor schema={schema} onDone={() => setEditing(false)} />
+      )}
 
       {/* Fields */}
       <div>
@@ -590,6 +597,6 @@ export default function SchemaDetailPage() {
           onClose={() => setConfirmDelete(false)}
         />
       )}
-    </div>
+    </Page>
   )
 }

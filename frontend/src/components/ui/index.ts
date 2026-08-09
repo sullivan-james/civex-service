@@ -8,7 +8,13 @@ export {
   type DataTableSort,
   type DataTableAlign,
 } from './DataTable'
-export { PageHeader } from './PageHeader'
+export {
+  Page,
+  Breadcrumb,
+  type PageProps,
+  type BreadcrumbItem,
+  type PageMenuAction,
+} from './Page'
 export { Pagination, DEFAULT_PAGE_SIZES } from './Pagination'
 export { ErrorState, EmptyState } from './States'
 export { MonoId } from './MonoId'

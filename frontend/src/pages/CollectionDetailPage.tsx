@@ -22,7 +22,7 @@ import {
   Tbody,
   Tr,
   Td,
-  PageHeader,
+  Page,
   DetailSkeleton,
   TableSkeleton,
   ErrorState,
@@ -94,23 +94,35 @@ export default function CollectionDetailPage() {
   const deleteManyRecords = useDeleteManyRecords(collection?.name ?? '')
   const deleteAllRecords = useDeleteAllRecords(collection?.name ?? '')
 
+  const breadcrumbs = [{ label: 'Collections', to: '/collections' }]
+
   if (collectionLoading)
     return (
-      <div className="space-y-6">
-        <DetailSkeleton metadataRows={0} sections={0} />
-        <TableSkeleton
-          columns={['w-8', 'w-20', 'w-32', 'w-32', 'w-24']}
-          rows={8}
-        />
-      </div>
+      <Page
+        breadcrumbs={breadcrumbs}
+        loading={
+          <>
+            <DetailSkeleton metadataRows={0} sections={0} />
+            <TableSkeleton
+              columns={['w-8', 'w-20', 'w-32', 'w-32', 'w-24']}
+              rows={8}
+            />
+          </>
+        }
+      />
     )
   if (collectionError || !collection)
     return (
-      <ErrorState
-        message={
-          collectionError
-            ? errorMessage(collectionError)
-            : 'Collection not found'
+      <Page
+        breadcrumbs={breadcrumbs}
+        error={
+          <ErrorState
+            message={
+              collectionError
+                ? errorMessage(collectionError)
+                : 'Collection not found'
+            }
+          />
         }
       />
     )
@@ -191,17 +203,35 @@ export default function CollectionDetailPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-sm text-fg-muted">
-        <Link to="/collections" className="hover:text-accent">
-          Collections
-        </Link>
-        <span>/</span>
-        <span className="text-fg font-medium">{collection.name}</span>
-      </nav>
-
-      {renaming ? (
+    <Page
+      breadcrumbs={[...breadcrumbs, { label: collection.name }]}
+      title={collection.name}
+      description={collection.description ?? undefined}
+      action={
+        !renaming && (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="default"
+              onClick={exportCsv}
+              title="Download all records as CSV"
+            >
+              Export CSV
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                setRenameValue(collection.name)
+                setRenaming(true)
+              }}
+            >
+              Rename
+            </Button>
+          </div>
+        )
+      }
+    >
+      {renaming && (
         <div className="border border-border rounded-md p-4 bg-canvas-subtle flex items-center gap-3">
           <Input
             autoFocus
@@ -229,32 +259,6 @@ export default function CollectionDetailPage() {
           <Button size="sm" onClick={() => setRenaming(false)}>
             Cancel
           </Button>
-        </div>
-      ) : (
-        <div className="flex items-start justify-between">
-          <PageHeader
-            title={collection.name}
-            description={collection.description ?? undefined}
-          />
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="default"
-              onClick={exportCsv}
-              title="Download all records as CSV"
-            >
-              Export CSV
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => {
-                setRenameValue(collection.name)
-                setRenaming(true)
-              }}
-            >
-              Rename
-            </Button>
-          </div>
         </div>
       )}
 
@@ -556,6 +560,6 @@ export default function CollectionDetailPage() {
           )}
         </div>
       </div>
-    </div>
+    </Page>
   )
 }

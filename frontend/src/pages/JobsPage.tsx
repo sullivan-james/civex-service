@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useActiveJobCount, useDrainJobs } from '../hooks/useWorkflows'
-import { PageHeader, Button } from '../components/ui'
+import { Page, Button } from '../components/ui'
 import { RefreshCw } from '../components/ui/icons'
 import JobsTable from '../components/jobs/JobsTable'
 
@@ -27,34 +27,30 @@ export default function JobsPage() {
   }
 
   return (
-    <>
-      <PageHeader
-        title="Runs"
-        description={
-          hasActive ? (
-            <span className="text-xs text-accent flex items-center gap-1">
-              <RefreshCw size={12} className="animate-spin" /> live
-            </span>
-          ) : (
-            'Workflow run history'
-          )
-        }
-        action={
-          <Button
-            size="sm"
-            variant={hasPending ? 'primary' : 'default'}
-            onClick={() => drain.mutate()}
-            disabled={drain.isPending}
-          >
-            {drain.isPending && (
-              <RefreshCw size={12} className="animate-spin" />
-            )}
-            {drain.isPending ? 'Running…' : 'Run automation'}
-          </Button>
-        }
-      />
-
-      <div className="flex items-center gap-2 mb-3">
+    <Page
+      title="Runs"
+      description={
+        hasActive ? (
+          <span className="text-xs text-accent flex items-center gap-1">
+            <RefreshCw size={12} className="animate-spin" /> live
+          </span>
+        ) : (
+          'Workflow run history'
+        )
+      }
+      action={
+        <Button
+          size="sm"
+          variant={hasPending ? 'primary' : 'default'}
+          onClick={() => drain.mutate()}
+          disabled={drain.isPending}
+        >
+          {drain.isPending && <RefreshCw size={12} className="animate-spin" />}
+          {drain.isPending ? 'Running…' : 'Run automation'}
+        </Button>
+      }
+    >
+      <div className="flex items-center gap-2">
         {STATUS_OPTIONS.map((s) => (
           <button
             key={s || 'all'}
@@ -71,6 +67,6 @@ export default function JobsPage() {
       </div>
 
       <JobsTable statusFilter={statusFilter} />
-    </>
+    </Page>
   )
 }
