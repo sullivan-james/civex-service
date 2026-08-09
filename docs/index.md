@@ -15,12 +15,12 @@ Civex is a local-first research data management tool. It gives you structured st
 
 ## How data flows
 
-```
-Schema ──defines──▶ Record
-                      │
-                      ├── stored in ──▶ Collection
-                      ├── has ──────▶ Files (content-addressed objects)
-                      └── triggers ──▶ Workflow jobs
+```mermaid
+flowchart LR
+    S[Schema] -->|defines| R[Record]
+    R -->|stored in| C[Collection]
+    R -->|has| F["Files<br>(content-addressed objects)"]
+    R -->|triggers| W[Workflow jobs]
 ```
 
 Schemas can inherit from a parent schema. A child schema's records are linked to a parent record, allowing you to model hierarchical data (e.g. an Encounter containing many Selections, each containing many Recordings).

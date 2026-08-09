@@ -2,12 +2,12 @@
 
 A local-first, command-line research data management system. Define schemas, collect records into collections, attach files, and automate processing with workflows — all on your own machine, with an optional web UI and HTTP server.
 
-```
-Schema ──defines──▶ Record
-                      │
-                      ├── stored in ──▶ Collection
-                      ├── has ──────▶ Files (content-addressed objects)
-                      └── triggers ──▶ Workflow jobs
+```mermaid
+flowchart LR
+    S[Schema] -->|defines| R[Record]
+    R -->|stored in| C[Collection]
+    R -->|has| F["Files<br>(content-addressed objects)"]
+    R -->|triggers| W[Workflow jobs]
 ```
 
 ## Install

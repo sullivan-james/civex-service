@@ -5,6 +5,15 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        exclude: ^mkdocs\.yml$
+      # mkdocs.yml carries `!!python/name:pymdownx.superfences.fence_code_format`,
+      # which Material's mermaid integration requires and a SafeLoader refuses to
+      # construct. --unsafe checks syntax without constructing tags. Scoped to this
+      # one file so every other YAML keeps the full check.
+      - id: check-yaml
+        name: check-yaml (mkdocs.yml, syntax only)
+        args: [--unsafe]
+        files: ^mkdocs\.yml$
       - id: check-toml
       - id: check-added-large-files
       - id: check-merge-conflict

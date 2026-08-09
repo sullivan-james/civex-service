@@ -1,2 +1,23 @@
-civex-hub/start.sh text eol=lf
-civex-hub/sshd_config_append.txt text eol=lf
+# Merge behaviour for files that are pure append-only registries rather
+# than code with logic in it.
+#
+# The UI barrel is one `export ... from './X'` line per component. Two
+# branches adding two different components conflict only because their
+# new lines land next to each other — never because the two changes
+# actually disagree about anything. `merge=union` keeps both sides'
+# lines instead of raising a conflict, which is the right answer in
+# every one of those cases.
+#
+# The tradeoff, accepted deliberately: if two branches do edit the *same*
+# line differently, union keeps both versions rather than flagging it.
+# That produces a duplicate or contradictory export, which fails
+# typecheck and lint immediately — a loud, obvious CI failure, not a
+# silently wrong merge. Spurious adjacency is by far the more common
+# case here, so trading a rare loud failure for the common silent
+# annoyance is worth it.
+#
+# This only helps where a real git merge runs (locally, and in
+# civex-agent's conflict-resolution runner). GitHub's own mergeable
+# calculation may still flag the file; the runner pushes the clean merge
+# when that happens, which settles it.
+frontend/src/components/ui/index.ts merge=union

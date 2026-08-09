@@ -32,6 +32,11 @@ hooks:
 
 plugins:
   - search
+  # Downloads external assets at build time and rewrites references to local
+  # copies. Material's mermaid integration otherwise pulls mermaid.min.js from
+  # unpkg.com on page load, which would send every visitor to a third-party CDN
+  # and break the "site/ works from file:// with no network" property.
+  - privacy
   - gen-files:
       scripts:
         - docs/_gen/plugin_reference.py
@@ -60,7 +65,14 @@ exclude_docs: |
 markdown_extensions:
   - admonition
   - pymdownx.details
-  - pymdownx.superfences
+  # custom_fences routes ```mermaid blocks to Material's built-in renderer
+  # (theme-aware, follows the palette toggle). GitHub renders the same fence
+  # natively, so README.md and the docs site share one diagram source.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.highlight:
