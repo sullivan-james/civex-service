@@ -605,7 +605,6 @@ export default function WorkflowsPage() {
         <p className="text-xs text-danger mb-2">{workflowDeleteError}</p>
       )}
 
-      {!workflows?.length ? (
       {isLoading ? (
         <TableSkeleton
           bordered={false}
