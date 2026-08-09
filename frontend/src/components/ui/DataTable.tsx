@@ -1,7 +1,6 @@
 import { type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { ChevronUp, ChevronDown } from './icons'
-import { LoadingState, ErrorState, EmptyState } from './States'
 
 export type DataTableAlign = 'left' | 'right' | 'center'
 
@@ -47,6 +46,33 @@ const alignClass: Record<DataTableAlign, string> = {
 
 const thBase =
   'sticky top-0 z-10 bg-canvas-subtle border-b border-border px-4 py-3 text-xs font-semibold text-fg-muted uppercase tracking-wider'
+
+function DataTableLoadingRow() {
+  return <div className="text-sm text-fg-muted py-12 text-center">Loading…</div>
+}
+
+function DataTableErrorRow({ message }: { message: string }) {
+  return (
+    <div className="bg-danger-subtle border border-danger-subtle-border rounded-md m-4 px-4 py-3 text-sm text-danger">
+      {message}
+    </div>
+  )
+}
+
+function DataTableEmptyRow({
+  title,
+  message,
+}: {
+  title: string
+  message?: string
+}) {
+  return (
+    <div className="px-6 py-16 text-center">
+      <p className="text-sm font-medium text-fg">{title}</p>
+      {message && <p className="mt-1 text-sm text-fg-muted">{message}</p>}
+    </div>
+  )
+}
 
 export function DataTable<T>({
   columns,
@@ -145,13 +171,14 @@ export function DataTable<T>({
               <tr>
                 <td colSpan={colCount} className="p-0">
                   {isLoading ? (
-                    <LoadingState />
+                    <DataTableLoadingRow />
                   ) : error ? (
-                    <div className="px-4 py-3">
-                      <ErrorState message={error} />
-                    </div>
+                    <DataTableErrorRow message={error} />
                   ) : (
-                    <EmptyState title={emptyTitle} message={emptyMessage} />
+                    <DataTableEmptyRow
+                      title={emptyTitle}
+                      message={emptyMessage}
+                    />
                   )}
                 </td>
               </tr>
