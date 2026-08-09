@@ -35,7 +35,7 @@ jobs:
         env: { CIVEX_LOG_LEVEL: WARNING }
         run: uv run mkdocs build --strict
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: { name: docs-site, path: site/ }
 
       - name: Publish

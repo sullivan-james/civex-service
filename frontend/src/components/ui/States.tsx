@@ -1,9 +1,3 @@
-export function LoadingState({ message = 'Loading…' }: { message?: string }) {
-  return (
-    <div className="text-sm text-fg-muted py-12 text-center">{message}</div>
-  )
-}
-
 export function ErrorState({ message }: { message: string }) {
   return (
     <div className="bg-danger-subtle border border-danger-subtle-border rounded-md px-4 py-3 text-sm text-danger">

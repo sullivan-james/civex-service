@@ -23,7 +23,8 @@ import {
   Tr,
   Td,
   PageHeader,
-  LoadingState,
+  DetailSkeleton,
+  TableSkeleton,
   ErrorState,
   Input,
   Checkbox,
@@ -90,7 +91,16 @@ export default function CollectionDetailPage() {
   const deleteManyRecords = useDeleteManyRecords(collection?.name ?? '')
   const deleteAllRecords = useDeleteAllRecords(collection?.name ?? '')
 
-  if (collectionLoading) return <LoadingState />
+  if (collectionLoading)
+    return (
+      <div className="space-y-6">
+        <DetailSkeleton metadataRows={0} sections={0} />
+        <TableSkeleton
+          columns={['w-8', 'w-20', 'w-32', 'w-32', 'w-24']}
+          rows={8}
+        />
+      </div>
+    )
   if (collectionError || !collection)
     return (
       <ErrorState
@@ -345,7 +355,10 @@ export default function CollectionDetailPage() {
 
       {/* Records table */}
       {recordsLoading ? (
-        <LoadingState message="Loading records…" />
+        <TableSkeleton
+          columns={['w-8', 'w-20', 'w-32', 'w-32', 'w-32', 'w-24']}
+          rows={8}
+        />
       ) : recordsError ? (
         <ErrorState message={errorMessage(recordsError)} />
       ) : records.length === 0 ? (

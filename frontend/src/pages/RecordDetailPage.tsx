@@ -21,7 +21,7 @@ import {
   Tbody,
   Tr,
   Td,
-  LoadingState,
+  DetailSkeleton,
   ErrorState,
 } from '../components/ui'
 import { X, Play } from '../components/ui/icons'
@@ -217,7 +217,7 @@ export default function RecordDetailPage() {
     hasActiveJobs ? 2000 : 5000,
   )
 
-  if (isLoading) return <LoadingState />
+  if (isLoading) return <DetailSkeleton metadataRows={4} sections={2} />
   if (error || !record)
     return (
       <ErrorState message={error ? errorMessage(error) : 'Record not found'} />
