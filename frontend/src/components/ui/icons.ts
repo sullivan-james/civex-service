@@ -28,4 +28,12 @@ export {
   ScanText,
   Play,
   Info,
+  LayoutGrid,
+  Database,
+  Workflow,
+  ListChecks,
+  SquareTerminal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Menu,
 } from 'lucide-react'
