@@ -103,6 +103,27 @@ class WorkflowContext:
     dataset: DatasetDTO
     _app_ctx: "AppContext"
     job_depth: int = 0
+    # Records this workflow run has created or updated so far, in touch
+    # order -- the job's audit trail of what it did to the data (surfaced on
+    # WorkflowJobDTO.affected_records). Keyed by record id so a record
+    # touched more than once in one run (e.g. created, then corrected by a
+    # later step) appears once, with its most recent action.
+    affected_records: list[dict[str, Any]] = field(default_factory=list)
+
+    def _note_affected(self, dto: RecordDTO, action: str) -> None:
+        for entry in self.affected_records:
+            if entry["record_id"] == str(dto.id):
+                entry["natural_name"] = dto.natural_name
+                entry["action"] = action
+                return
+        self.affected_records.append(
+            {
+                "record_id": str(dto.id),
+                "schema_name": dto.schema_name,
+                "natural_name": dto.natural_name,
+                "action": action,
+            }
+        )
 
     def get_context_record(self) -> RecordDTO:
         return self.record
@@ -117,9 +138,11 @@ class WorkflowContext:
         return self._app_ctx.file_svc.store_bytes(data, filename)
 
     def update_record(self, record_id: str, data: dict[str, Any]) -> RecordDTO:
-        return self._app_ctx.record_svc.update(
+        dto = self._app_ctx.record_svc.update(
             record_id, data, _job_depth=self.job_depth + 1
         )
+        self._note_affected(dto, "updated")
+        return dto
 
     def create_record(
         self,
@@ -128,13 +151,15 @@ class WorkflowContext:
         data: dict[str, Any],
         context_record_id: str | None = None,
     ) -> RecordDTO:
-        return self._app_ctx.record_svc.add(
+        dto = self._app_ctx.record_svc.add(
             dataset_name,
             schema_name,
             data,
             parent_record_id=context_record_id or str(self.record.id),
             _job_depth=self.job_depth + 1,
         )
+        self._note_affected(dto, "created")
+        return dto
 
     def get_record(self, record_id: str) -> RecordDTO:
         return self._app_ctx.record_svc.get(record_id)

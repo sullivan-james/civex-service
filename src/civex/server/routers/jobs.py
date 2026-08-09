@@ -17,21 +17,34 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 def count_jobs(
     status: str | None = None,
     record_id: str | None = None,
+    affected_record_id: str | None = None,
     ctx: AppContext = Depends(get_ctx),
 ):
-    return {"total": ctx.job_svc.count_jobs(status=status, record_id=record_id)}
+    return {
+        "total": ctx.job_svc.count_jobs(
+            status=status, record_id=record_id, affected_record_id=affected_record_id
+        )
+    }
 
 
 @router.get("", response_model=list[WorkflowJobResponse])
 def list_jobs(
     status: str | None = None,
     record_id: str | None = None,
+    affected_record_id: str | None = None,
     offset: int = 0,
     limit: int | None = None,
     ctx: AppContext = Depends(get_ctx),
 ):
+    """`record_id` filters to runs *triggered by* that record; `affected_record_id`
+    filters to runs that created or updated that record -- the two directions of
+    the run/record audit trail (a record can be both for different runs)."""
     jobs = ctx.job_svc.list_jobs(
-        status=status, record_id=record_id, offset=offset, limit=limit
+        status=status,
+        record_id=record_id,
+        affected_record_id=affected_record_id,
+        offset=offset,
+        limit=limit,
     )
     return [WorkflowJobResponse.from_dto(j) for j in jobs]
 

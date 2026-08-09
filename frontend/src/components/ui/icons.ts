@@ -38,4 +38,5 @@ export {
   PanelLeftOpen,
   Menu,
   MoreVertical,
+  Clock,
 } from 'lucide-react'

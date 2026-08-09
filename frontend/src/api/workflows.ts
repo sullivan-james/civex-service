@@ -31,6 +31,20 @@ export interface StepExecution {
   depends_on: string[]
 }
 
+export interface AffectedRecord {
+  record_id: string
+  schema_name: string
+  natural_name: string | null
+  action: 'created' | 'updated'
+}
+
+export interface ErrorDetails {
+  kind: string
+  message: string
+  retryable: boolean
+  step: string | null
+}
+
 export interface WorkflowJob {
   id: string
   workflow_name: string
@@ -39,8 +53,10 @@ export interface WorkflowJob {
   trigger: string
   status: 'pending' | 'running' | 'completed' | 'failed'
   error: string | null
+  error_details: ErrorDetails | null
   log: string | null
   step_executions: StepExecution[] | null
+  affected_records: AffectedRecord[] | null
   created_at: string
   started_at: string | null
   finished_at: string | null
@@ -93,19 +109,22 @@ export const jobsApi = {
     recordId?: string,
     offset?: number,
     limit?: number,
+    affectedRecordId?: string,
   ) => {
     const p = new URLSearchParams()
     if (status) p.set('status', status)
     if (recordId) p.set('record_id', recordId)
+    if (affectedRecordId) p.set('affected_record_id', affectedRecordId)
     if (offset !== undefined) p.set('offset', String(offset))
     if (limit !== undefined) p.set('limit', String(limit))
     const qs = p.toString()
     return api.get<WorkflowJob[]>(`/jobs${qs ? `?${qs}` : ''}`)
   },
-  count: (status?: string, recordId?: string) => {
+  count: (status?: string, recordId?: string, affectedRecordId?: string) => {
     const p = new URLSearchParams()
     if (status) p.set('status', status)
     if (recordId) p.set('record_id', recordId)
+    if (affectedRecordId) p.set('affected_record_id', affectedRecordId)
     const qs = p.toString()
     return api.get<{ total: number }>(`/jobs/count${qs ? `?${qs}` : ''}`)
   },

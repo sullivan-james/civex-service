@@ -447,6 +447,10 @@ class WorkflowJobDTO:
     # table (CIVEX-170): list of StepExecution.to_dict(), in execution order.
     # None for jobs still pending/running, or that have no steps recorded.
     step_executions: list[dict[str, Any]] | None = None
+    # Records this run created or updated: [{record_id, schema_name,
+    # natural_name, action}, ...] in touch order. None for jobs still
+    # pending/running, or that predate this field.
+    affected_records: list[dict[str, Any]] | None = None
 
 
 @dataclass

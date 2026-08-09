@@ -110,6 +110,14 @@ export function useJobsPaged(
   }
 }
 
+export function useJobsAffectingRecord(recordId: string) {
+  return useQuery({
+    queryKey: ['jobs', 'affecting', recordId],
+    queryFn: () => jobsApi.list(undefined, undefined, 0, 10, recordId),
+    enabled: !!recordId,
+  })
+}
+
 export function useActiveJobCount() {
   return useQuery({
     queryKey: ['jobs', 'count', 'active'],
