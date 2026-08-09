@@ -26,6 +26,7 @@ import {
   Input,
   Select,
   Checkbox,
+  ConfirmDialog,
 } from '../components/ui'
 import {
   Star,
@@ -1045,105 +1046,70 @@ export default function SchemaDetailPage() {
                   </Td>
                   <Td>
                     <span className="flex items-center gap-2">
-                      {confirmDeleteField === field.name ? (
-                        <>
-                          <button
-                            onClick={() =>
-                              deleteField.mutate(field.name, {
-                                onSuccess: () => setConfirmDeleteField(null),
-                              })
-                            }
-                            disabled={deleteField.isPending}
-                            className="text-xs text-danger font-medium hover:underline disabled:opacity-50"
-                          >
-                            Confirm
-                          </button>
-                          <button
-                            onClick={() => setConfirmDeleteField(null)}
-                            className="text-xs text-fg-muted hover:underline"
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => toggleDisplayField(field.name)}
-                            className={`text-xs transition-colors ${schema.display_fields.includes(field.name) ? 'text-attention' : 'text-border hover:text-attention'}`}
-                            title={
-                              schema.display_fields.includes(field.name)
-                                ? 'Remove from display fields'
-                                : 'Add to display fields'
-                            }
-                          >
-                            <Star
-                              size={14}
-                              fill={
-                                schema.display_fields.includes(field.name)
-                                  ? 'currentColor'
-                                  : 'none'
+                      <button
+                        onClick={() => toggleDisplayField(field.name)}
+                        className={`text-xs transition-colors ${schema.display_fields.includes(field.name) ? 'text-attention' : 'text-border hover:text-attention'}`}
+                        title={
+                          schema.display_fields.includes(field.name)
+                            ? 'Remove from display fields'
+                            : 'Add to display fields'
+                        }
+                      >
+                        <Star
+                          size={14}
+                          fill={
+                            schema.display_fields.includes(field.name)
+                              ? 'currentColor'
+                              : 'none'
+                          }
+                        />
+                      </button>
+                      {schema.display_fields.length > 1 &&
+                        schema.display_fields.includes(field.name) && (
+                          <span className="flex flex-col items-center gap-1">
+                            <button
+                              type="button"
+                              title="Move earlier in display order"
+                              disabled={
+                                schema.display_fields.indexOf(field.name) ===
+                                  0 || updateSchema.isPending
                               }
-                            />
-                          </button>
-                          {schema.display_fields.length > 1 &&
-                            schema.display_fields.includes(field.name) && (
-                              <span className="flex flex-col items-center gap-1">
-                                <button
-                                  type="button"
-                                  title="Move earlier in display order"
-                                  disabled={
-                                    schema.display_fields.indexOf(
-                                      field.name,
-                                    ) === 0 || updateSchema.isPending
-                                  }
-                                  onClick={() =>
-                                    moveDisplayField(field.name, 'up')
-                                  }
-                                  className="text-xs text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
-                                >
-                                  <ChevronUp size={10} />
-                                </button>
-                                <button
-                                  type="button"
-                                  title="Move later in display order"
-                                  disabled={
-                                    schema.display_fields.indexOf(
-                                      field.name,
-                                    ) ===
-                                      schema.display_fields.length - 1 ||
-                                    updateSchema.isPending
-                                  }
-                                  onClick={() =>
-                                    moveDisplayField(field.name, 'down')
-                                  }
-                                  className="text-xs text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
-                                >
-                                  <ChevronDown size={10} />
-                                </button>
-                              </span>
-                            )}
-                          <button
-                            onClick={() => {
-                              setConfirmDeleteField(null)
-                              setEditingField(field.name)
-                            }}
-                            className="text-xs text-fg-muted hover:text-accent transition-colors"
-                            title="Edit field"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setEditingField(null)
-                              setConfirmDeleteField(field.name)
-                            }}
-                            className="text-xs text-fg-muted hover:text-danger transition-colors"
-                            title="Remove field"
-                          >
-                            <X size={14} />
-                          </button>
-                        </>
-                      )}
+                              onClick={() => moveDisplayField(field.name, 'up')}
+                              className="text-xs text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
+                            >
+                              <ChevronUp size={10} />
+                            </button>
+                            <button
+                              type="button"
+                              title="Move later in display order"
+                              disabled={
+                                schema.display_fields.indexOf(field.name) ===
+                                  schema.display_fields.length - 1 ||
+                                updateSchema.isPending
+                              }
+                              onClick={() =>
+                                moveDisplayField(field.name, 'down')
+                              }
+                              className="text-xs text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
+                            >
+                              <ChevronDown size={10} />
+                            </button>
+                          </span>
+                        )}
+                      <button
+                        onClick={() => setEditingField(field.name)}
+                        className="text-xs text-fg-muted hover:text-accent transition-colors"
+                        title="Edit field"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteField(field.name)}
+                        className="text-xs text-fg-muted hover:text-danger transition-colors"
+                        title="Remove field"
+                      >
+                        <X size={14} />
+                      </button>
                     </span>
                   </Td>
                 </tr>
@@ -1177,36 +1143,53 @@ export default function SchemaDetailPage() {
               This cannot be undone. All field definitions will be removed.
             </p>
           </div>
-          {confirmDelete ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-fg-muted">Are you sure?</span>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() =>
-                  deleteSchema.mutate(schema.name, {
-                    onSuccess: () => navigate('/schemas'),
-                  })
-                }
-                disabled={deleteSchema.isPending}
-              >
-                {deleteSchema.isPending ? 'Deleting…' : 'Confirm delete'}
-              </Button>
-              <Button size="sm" onClick={() => setConfirmDelete(false)}>
-                Cancel
-              </Button>
-            </div>
-          ) : (
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setConfirmDelete(true)}
-            >
-              Delete schema
-            </Button>
-          )}
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => setConfirmDelete(true)}
+          >
+            Delete schema
+          </Button>
         </div>
       </div>
+
+      {confirmDeleteField && (
+        <ConfirmDialog
+          title="Remove field"
+          body={`Remove field '${confirmDeleteField}'? This cannot be undone.`}
+          confirmLabel="Remove"
+          variant="danger"
+          warning={
+            deleteField.error ? errorMessage(deleteField.error) : undefined
+          }
+          isPending={deleteField.isPending}
+          onConfirm={() =>
+            deleteField.mutate(confirmDeleteField, {
+              onSuccess: () => setConfirmDeleteField(null),
+            })
+          }
+          onClose={() => setConfirmDeleteField(null)}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete schema"
+          body={`Delete schema '${schema.name}'? This cannot be undone. All field definitions will be removed.`}
+          confirmLabel="Delete"
+          variant="danger"
+          warning={
+            deleteSchema.error ? errorMessage(deleteSchema.error) : undefined
+          }
+          isPending={deleteSchema.isPending}
+          onConfirm={() =>
+            deleteSchema.mutate(schema.name, {
+              onSuccess: () => navigate('/schemas'),
+            })
+          }
+          onClose={() => setConfirmDelete(false)}
+        />
+      )}
     </div>
   )
 }

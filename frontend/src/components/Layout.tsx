@@ -77,6 +77,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [syncError, setSyncError] = useState<string | null>(null)
   const [lastOp, setLastOp] = useState<'push' | 'pull'>('push')
   const [aiOpen, setAiOpen] = useState(false)
+  const [dataDirError, setDataDirError] = useState<string | null>(null)
 
   const { data: remote } = useQuery({
     queryKey: ['remote-status'],
@@ -169,8 +170,9 @@ export default function Layout({ children }: { children: ReactNode }) {
             </button>
             <button
               onClick={async () => {
+                setDataDirError(null)
                 const r = await window.pywebview!.api.open_data_dir()
-                if (r?.error) window.alert(r.error)
+                if (r?.error) setDataDirError(r.error)
               }}
               title={`${fileManagerLabel()} — open this project's database directory`}
               className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
@@ -178,6 +180,11 @@ export default function Layout({ children }: { children: ReactNode }) {
               <Folder size={12} />
               {fileManagerLabel()}
             </button>
+            {dataDirError && (
+              <span className="text-xs text-danger-emphasis" role="alert">
+                {dataDirError}
+              </span>
+            )}
           </div>
         )}
 
