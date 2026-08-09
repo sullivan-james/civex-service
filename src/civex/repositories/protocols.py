@@ -34,6 +34,7 @@ class SchemaRepository(Protocol):
         name: str,
         description: str | None,
         parent_id: uuid.UUID | None,
+        label: str | None = None,
     ) -> SchemaDTO: ...
     def update(
         self,
@@ -41,6 +42,7 @@ class SchemaRepository(Protocol):
         name: str | None,
         description: str | None,
         display_fields: list[str] | None = ...,
+        label: str | None = ...,
     ) -> SchemaDTO: ...
     def delete(self, id: uuid.UUID) -> None: ...
     def add_field(
@@ -52,6 +54,7 @@ class SchemaRepository(Protocol):
         restrictions: dict[str, Any],
         default_value: Any = None,
         position: int | None = None,
+        label: str | None = None,
     ) -> FieldDTO: ...
     def update_field(
         self,
@@ -61,6 +64,7 @@ class SchemaRepository(Protocol):
         required: bool | None = None,
         restrictions: dict | None = None,
         default_value: Any = ...,
+        label: str | None = ...,
     ) -> FieldDTO: ...
     def delete_field(self, field_id: uuid.UUID) -> None: ...
     def get_fields(self, schema_id: uuid.UUID) -> list[FieldDTO]: ...

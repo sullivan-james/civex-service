@@ -88,7 +88,7 @@ src/civex/
 
 ### Data model
 
-Record `data` is stored as a JSON/JSONB dict (no EAV). Field types: `integer | float | string | boolean | date | datetime | file | file_list | reference`.
+Record `data` is stored as a JSON/JSONB dict (no EAV), keyed by **field UUID** — `RecordService._names_to_ids()`/`_ids_to_names()` translate at the service boundary, so everything above that layer sees name-keyed data and renaming a field costs nothing in storage. Field types: `integer | float | string | boolean | date | datetime | file | file_list | reference`.
 
 - `file` / `file_list`: record stores `FileRef` dict(s) `{sha256, filename, size}`; bytes live in `_civex/objects/<sha256[:2]>/<sha256[2:]>` (git object store layout).
 - `date`: stored as ISO date string (`YYYY-MM-DD`). `datetime`: stored as UTC ISO string. Naive datetimes are assumed UTC on ingest (`_parse_datetime` in `record_service.py`).
@@ -98,6 +98,15 @@ Record `data` is stored as a JSON/JSONB dict (no EAV). Field types: `integer | f
 On PostgreSQL, JSON columns use `JSONB` via `with_variant`.
 
 Schema inheritance is resolved recursively by `SchemaService.collect_fields()` — parent fields are appended after own fields and labelled with their source schema.
+
+### Names vs. labels
+
+Schemas and fields each carry a `name` and a `label` (see `domain/naming.py`, mirrored in `frontend/src/utils/naming.ts`):
+
+- `name` — the machine key. Slug-validated (`^[a-z_][a-z0-9_]*$`) on create and rename only. Referenced as text by workflow YAML (`field:`, `schema:`, `reference` restrictions), CSV headers, `display_fields` and API paths.
+- `label` — free-text display name, nullable. `display_label(name, label)` derives one from the name when unset; `FieldDTO.display_name`/`SchemaDTO.display_name` wrap that.
+
+Validation is write-time only: rows predating the rule keep working, and `civex schema lint` (`SchemaService.lint_names()`) reports them. Restore/import paths pass `allow_legacy_name=True` so an old dump round-trips unchanged. UI forms collect the label first and auto-slug the name (`NameLabelFields`); editing never re-derives an existing name.
 
 ### Field restrictions
 

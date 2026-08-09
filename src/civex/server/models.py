@@ -8,9 +8,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from civex.domain.dtos import DatasetDTO, RecordDTO, SchemaDTO, WorkflowJobDTO
+from civex.domain.dtos import (
+    DatasetDTO,
+    FieldDTO,
+    RecordDTO,
+    SchemaDTO,
+    WorkflowJobDTO,
+)
 
 
 # --- Schemas ---
@@ -19,15 +25,41 @@ from civex.domain.dtos import DatasetDTO, RecordDTO, SchemaDTO, WorkflowJobDTO
 class FieldResponse(BaseModel):
     id: str
     name: str
+    label: str | None = Field(
+        default=None,
+        description=(
+            "Human-facing display name. Null means none was set — render "
+            "the name title-cased instead."
+        ),
+    )
     type: str
     required: bool
     restrictions: dict[str, Any] = {}
     default: Any | None = None
 
+    @classmethod
+    def from_dto(cls, dto: FieldDTO) -> FieldResponse:
+        return cls(
+            id=str(dto.id),
+            name=dto.name,
+            label=dto.label,
+            type=dto.dtype,
+            required=dto.required,
+            restrictions=dto.restrictions,
+            default=dto.default_value,
+        )
+
 
 class SchemaResponse(BaseModel):
     id: str
     name: str
+    label: str | None = Field(
+        default=None,
+        description=(
+            "Human-facing display name. Null means none was set — render "
+            "the name title-cased instead."
+        ),
+    )
     description: str | None
     parent_id: str | None
     display_fields: list[str]
@@ -38,25 +70,26 @@ class SchemaResponse(BaseModel):
         return cls(
             id=str(dto.id),
             name=dto.name,
+            label=dto.label,
             description=dto.description,
             parent_id=str(dto.parent_id) if dto.parent_id else None,
             display_fields=dto.display_fields,
-            fields=[
-                FieldResponse(
-                    id=str(f.id),
-                    name=f.name,
-                    type=f.dtype,
-                    required=f.required,
-                    restrictions=f.restrictions,
-                    default=f.default_value,
-                )
-                for f in dto.fields
-            ],
+            fields=[FieldResponse.from_dto(f) for f in dto.fields],
         )
 
 
 class AddFieldRequest(BaseModel):
-    name: str
+    name: str = Field(
+        description=(
+            "Machine key: lowercase letters, digits and underscores, not "
+            "starting with a digit. This is what workflows and CSV headers "
+            "reference."
+        )
+    )
+    label: str | None = Field(
+        default=None,
+        description="Optional human-facing display name; free text.",
+    )
     type: str
     required: bool = False
     restrictions: dict[str, Any] | None = None
@@ -64,7 +97,16 @@ class AddFieldRequest(BaseModel):
 
 
 class CreateSchemaRequest(BaseModel):
-    name: str
+    name: str = Field(
+        description=(
+            "Machine key: lowercase letters, digits and underscores, not "
+            "starting with a digit."
+        )
+    )
+    label: str | None = Field(
+        default=None,
+        description="Optional human-facing display name; free text.",
+    )
     description: str | None = None
     parent: str | None = None
     fields: list[AddFieldRequest] | None = None
@@ -72,12 +114,26 @@ class CreateSchemaRequest(BaseModel):
 
 class UpdateSchemaRequest(BaseModel):
     rename: str | None = None
+    label: str | None = Field(
+        default=None,
+        description=(
+            "New display name. Send an empty string to clear it and fall "
+            "back to the derived label; omit the key to leave it unchanged."
+        ),
+    )
     description: str | None = None
     display_fields: list[str] | None = None
 
 
 class UpdateFieldRequest(BaseModel):
     rename: str | None = None
+    label: str | None = Field(
+        default=None,
+        description=(
+            "New display name. Send an empty string to clear it and fall "
+            "back to the derived label; omit the key to leave it unchanged."
+        ),
+    )
     required: bool | None = None
     restrictions: dict[str, Any] | None = None
     default: Any | None = None

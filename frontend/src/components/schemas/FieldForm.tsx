@@ -3,7 +3,20 @@ import * as restrictions from '../../utils/restrictions'
 import type { Field as SchemaField } from '../../api/schemas'
 import { errorMessage } from '../../lib/errors'
 import { useAddField, useUpdateField, useSchemas } from '../../hooks/useSchemas'
-import { Button, Badge, Field, Input, Select, Checkbox } from '../ui'
+import {
+  Button,
+  Badge,
+  Field,
+  Input,
+  Select,
+  Checkbox,
+  FormGrid,
+  FormSection,
+  FormFooter,
+  NameLabelFields,
+  spanClassName,
+} from '../ui'
+import { displayLabel, nameError } from '../../utils/naming'
 
 const FIELD_TYPES = [
   'string',
@@ -42,6 +55,7 @@ export function FieldForm(props: FieldFormProps) {
   const editingField = props.mode === 'edit' ? props.field : undefined
 
   const [fieldName, setFieldName] = useState(editingField?.name ?? '')
+  const [fieldLabel, setFieldLabel] = useState(editingField?.label ?? '')
   const [type, setType] = useState(editingField?.type ?? 'string')
   const [required, setRequired] = useState(editingField?.required ?? false)
   const [defaultVal, setDefaultVal] = useState('')
@@ -70,6 +84,7 @@ export function FieldForm(props: FieldFormProps) {
 
   const canSubmit =
     !!fieldName.trim() &&
+    !nameError(fieldName.trim()) &&
     (mode === 'edit' || type !== 'reference' || !!refSchema)
   const showDefault = mode === 'create' && !NON_DEFAULT_TYPES.has(type)
 
@@ -108,12 +123,16 @@ export function FieldForm(props: FieldFormProps) {
         required,
         restrictions: builtRestrictions,
       }
+      if (fieldLabel.trim()) {
+        body.label = fieldLabel.trim()
+      }
       if (showDefault && defaultVal !== '') {
         body.default = defaultVal
       }
       addField.mutate(body, {
         onSuccess: () => {
           setFieldName('')
+          setFieldLabel('')
           handleTypeChange('string')
           setRequired(false)
           onDone()
@@ -121,10 +140,16 @@ export function FieldForm(props: FieldFormProps) {
       })
     } else {
       const trimmed = fieldName.trim()
+      const trimmedLabel = fieldLabel.trim()
       updateField.mutate(
         {
           fieldName: editingField!.name,
           rename: trimmed !== editingField!.name ? trimmed : undefined,
+          // '' clears the label; undefined leaves it untouched.
+          label:
+            trimmedLabel !== (editingField!.label ?? '')
+              ? trimmedLabel
+              : undefined,
           required,
           restrictions: builtRestrictions ?? {},
         },
@@ -136,25 +161,27 @@ export function FieldForm(props: FieldFormProps) {
   const mutation = mode === 'create' ? addField : updateField
 
   return (
-    <div
+    <FormGrid
       className={
         mode === 'create'
-          ? 'border-t border-border bg-canvas-subtle px-4 py-3 flex flex-col gap-3'
-          : 'bg-accent-subtle border-t border-border px-4 py-3 flex flex-col gap-3'
+          ? 'border-t border-border bg-canvas-subtle px-4 py-3'
+          : 'bg-accent-subtle border-t border-border px-4 py-3'
       }
     >
-      {/* Row 1: name, type, required */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <Input
-          size="sm"
-          value={fieldName}
-          onChange={(e) => setFieldName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-          placeholder={mode === 'create' ? 'Field name' : undefined}
-          autoFocus
-          className="w-40"
-        />
-        {mode === 'create' ? (
+      <NameLabelFields
+        kind="Field"
+        value={{ label: fieldLabel, name: fieldName }}
+        onChange={(next) => {
+          setFieldLabel(next.label)
+          setFieldName(next.name)
+        }}
+        // An existing name is what workflows reference — never re-derive it.
+        deriveName={mode === 'create'}
+        onEnter={handleSubmit}
+        autoFocus
+      />
+      {mode === 'create' ? (
+        <Field label="Type" span={4}>
           <Select
             size="sm"
             value={type}
@@ -164,10 +191,24 @@ export function FieldForm(props: FieldFormProps) {
               <option key={t}>{t}</option>
             ))}
           </Select>
-        ) : (
-          <Badge variant="accent">{type}</Badge>
-        )}
-        {mode === 'create' && type === 'reference' && (
+        </Field>
+      ) : (
+        <div className={`flex flex-col gap-1 ${spanClassName(4)}`}>
+          <span className="text-xs font-medium text-fg-muted">Type</span>
+          <div className="h-8 flex items-center">
+            <Badge variant="accent">{type}</Badge>
+          </div>
+        </div>
+      )}
+      <Field label="Required" layout="inline" span={4}>
+        <Checkbox
+          checked={required}
+          onChange={(e) => setRequired(e.target.checked)}
+        />
+      </Field>
+
+      {mode === 'create' && type === 'reference' && (
+        <Field label="Target schema" span={6}>
           <Select
             size="sm"
             value={refSchema}
@@ -178,60 +219,27 @@ export function FieldForm(props: FieldFormProps) {
               ?.filter((s) => s.name !== schemaName)
               .map((s) => (
                 <option key={s.id} value={s.name}>
-                  {s.name}
+                  {displayLabel(s.name, s.label)}
                 </option>
               ))}
           </Select>
-        )}
-        <Field label="Required" layout="inline">
-          <Checkbox
-            checked={required}
-            onChange={(e) => setRequired(e.target.checked)}
-          />
         </Field>
-        <div className="flex gap-2 ml-auto">
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleSubmit}
-            disabled={mutation.isPending || !canSubmit}
-          >
-            {mode === 'create'
-              ? mutation.isPending
-                ? 'Adding…'
-                : 'Add field'
-              : mutation.isPending
-                ? 'Saving…'
-                : 'Save'}
-          </Button>
-          <Button size="sm" onClick={onDone}>
-            Cancel
-          </Button>
-        </div>
-      </div>
-
-      {/* Default value */}
-      {showDefault && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <Field label="Default value">
-            <Input
-              size="sm"
-              value={defaultVal}
-              onChange={(e) => setDefaultVal(e.target.value)}
-              placeholder="none"
-              className="w-40"
-            />
-          </Field>
-        </div>
       )}
 
-      {/* Row 2: type-specific restrictions */}
+      {showDefault && (
+        <Field label="Default value" span={4}>
+          <Input
+            size="sm"
+            value={defaultVal}
+            onChange={(e) => setDefaultVal(e.target.value)}
+            placeholder="none"
+          />
+        </Field>
+      )}
+
       {(type === 'integer' || type === 'float') && (
-        <div className="flex items-end gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium pb-2">
-            Restrictions:
-          </span>
-          <Field label="Min">
+        <FormSection title="Restrictions">
+          <Field label="Min" span={6}>
             <Input
               size="sm"
               type="number"
@@ -239,10 +247,9 @@ export function FieldForm(props: FieldFormProps) {
               value={minVal}
               onChange={(e) => setMinVal(e.target.value)}
               placeholder="none"
-              className="w-24"
             />
           </Field>
-          <Field label="Max">
+          <Field label="Max" span={6}>
             <Input
               size="sm"
               type="number"
@@ -250,17 +257,16 @@ export function FieldForm(props: FieldFormProps) {
               value={maxVal}
               onChange={(e) => setMaxVal(e.target.value)}
               placeholder="none"
-              className="w-24"
             />
           </Field>
-        </div>
+        </FormSection>
       )}
       {(type === 'string' || type === 'enum') && (
-        <div className="flex items-end gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium pb-2">
-            Restrictions:
-          </span>
-          <Field label="Choices (comma-separated)">
+        <FormSection title="Restrictions">
+          <Field
+            label="Choices (comma-separated)"
+            span={type === 'string' ? 6 : 12}
+          >
             <Input
               size="sm"
               value={choices}
@@ -268,11 +274,10 @@ export function FieldForm(props: FieldFormProps) {
               placeholder={
                 mode === 'create' ? 'e.g. left,right,bilateral' : 'none'
               }
-              className="w-52"
             />
           </Field>
           {type === 'string' && (
-            <Field label="Max length">
+            <Field label="Max length" span={6}>
               <Input
                 size="sm"
                 type="number"
@@ -281,27 +286,22 @@ export function FieldForm(props: FieldFormProps) {
                 value={maxLength}
                 onChange={(e) => setMaxLength(e.target.value)}
                 placeholder="none"
-                className="w-24"
               />
             </Field>
           )}
-        </div>
+        </FormSection>
       )}
       {(type === 'file' || type === 'file_list') && (
-        <div className="flex items-end gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium pb-2">
-            Restrictions:
-          </span>
-          <Field label="Accept">
+        <FormSection title="Restrictions">
+          <Field label="Accept" span={6}>
             <Input
               size="sm"
               value={accept}
               onChange={(e) => setAccept(e.target.value)}
               placeholder=".csv,.txt"
-              className="w-36"
             />
           </Field>
-          <Field label="Max size (bytes)">
+          <Field label="Max size (bytes)" span={6}>
             <Input
               size="sm"
               type="number"
@@ -310,17 +310,13 @@ export function FieldForm(props: FieldFormProps) {
               value={maxSize}
               onChange={(e) => setMaxSize(e.target.value)}
               placeholder="none"
-              className="w-28"
             />
           </Field>
-        </div>
+        </FormSection>
       )}
       {(type === 'date' || type === 'datetime') && (
-        <div className="flex items-end gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium pb-2">
-            Restrictions:
-          </span>
-          <Field label="Not before">
+        <FormSection title="Restrictions">
+          <Field label="Not before" span={6}>
             <Input
               size="sm"
               type={type === 'date' ? 'date' : 'datetime-local'}
@@ -328,7 +324,7 @@ export function FieldForm(props: FieldFormProps) {
               onChange={(e) => setMinDate(e.target.value)}
             />
           </Field>
-          <Field label="Not after">
+          <Field label="Not after" span={6}>
             <Input
               size="sm"
               type={type === 'date' ? 'date' : 'datetime-local'}
@@ -336,14 +332,34 @@ export function FieldForm(props: FieldFormProps) {
               onChange={(e) => setMaxDate(e.target.value)}
             />
           </Field>
-        </div>
+        </FormSection>
       )}
 
       {mutation.error && (
-        <span className="text-xs text-danger">
+        <p className={`${spanClassName(12)} text-xs text-danger`}>
           {errorMessage(mutation.error)}
-        </span>
+        </p>
       )}
-    </div>
+
+      <FormFooter>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={handleSubmit}
+          disabled={mutation.isPending || !canSubmit}
+        >
+          {mode === 'create'
+            ? mutation.isPending
+              ? 'Adding…'
+              : 'Add field'
+            : mutation.isPending
+              ? 'Saving…'
+              : 'Save'}
+        </Button>
+        <Button size="sm" onClick={onDone}>
+          Cancel
+        </Button>
+      </FormFooter>
+    </FormGrid>
   )
 }

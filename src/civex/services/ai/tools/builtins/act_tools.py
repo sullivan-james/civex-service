@@ -163,7 +163,14 @@ class CreateSchemaTool(AiTool):
     input_schema = {
         "type": "object",
         "properties": {
-            "name": {"type": "string"},
+            "name": {
+                "type": "string",
+                "description": "Machine key: lowercase letters, digits and underscores, not starting with a digit (e.g. acoustic_recording). Workflows and CSV headers reference this.",
+            },
+            "label": {
+                "type": "string",
+                "description": "Human-facing display name; free text with spaces and capitals (e.g. 'Acoustic Recording'). Set this whenever the natural name is not already a slug.",
+            },
             "description": {"type": "string"},
             "parent": {
                 "type": "string",
@@ -175,7 +182,14 @@ class CreateSchemaTool(AiTool):
                 "items": {
                     "type": "object",
                     "properties": {
-                        "name": {"type": "string"},
+                        "name": {
+                            "type": "string",
+                            "description": "Machine key: lowercase letters, digits and underscores, not starting with a digit (e.g. acoustic_recording). Workflows and CSV headers reference this.",
+                        },
+                        "label": {
+                            "type": "string",
+                            "description": "Human-facing display name; free text with spaces and capitals (e.g. 'Acoustic Recording'). Set this whenever the natural name is not already a slug.",
+                        },
                         "type": {
                             "type": "string",
                             "enum": sorted(VALID_DTYPES),
@@ -218,10 +232,13 @@ class CreateSchemaTool(AiTool):
             tool_input.get("description"),
             parent,
             fields,
+            tool_input.get("label"),
         )
         if err:
             return err
         body: dict[str, Any] = {"name": name}
+        if tool_input.get("label"):
+            body["label"] = tool_input["label"]
         if tool_input.get("description"):
             body["description"] = tool_input["description"]
         if parent:
@@ -246,7 +263,7 @@ class CreateSchemaTool(AiTool):
 
 class UpdateSchemaTool(AiTool):
     name = "update_schema"
-    description = "Propose renaming a schema, changing its description, or setting its display fields. Requires user approval."
+    description = "Propose renaming a schema, changing its label or description, or setting its display fields. Requires user approval."
     mutating = True
     input_schema = {
         "type": "object",
@@ -256,6 +273,10 @@ class UpdateSchemaTool(AiTool):
                 "description": "Current schema name (must exist)",
             },
             "rename": {"type": "string"},
+            "label": {
+                "type": "string",
+                "description": "Human-facing display name; free text with spaces and capitals.",
+            },
             "description": {"type": "string"},
             "display_fields": {
                 "type": "array",
@@ -273,16 +294,18 @@ class UpdateSchemaTool(AiTool):
             return tool_error(f"Schema '{name}' does not exist.")
         body = {
             k: tool_input[k]
-            for k in ("rename", "description", "display_fields")
+            for k in ("rename", "label", "description", "display_fields")
             if tool_input.get(k) is not None
         }
         if not body:
             return tool_error(
-                "Nothing to change (provide rename, description, or display_fields)."
+                "Nothing to change (provide rename, label, description, or display_fields)."
             )
         update_kwargs: dict[str, Any] = {}
         if "rename" in body:
             update_kwargs["new_name"] = body["rename"]
+        if "label" in body:
+            update_kwargs["label"] = body["label"]
         if "description" in body:
             update_kwargs["description"] = body["description"]
         if "display_fields" in body:
@@ -348,7 +371,14 @@ class AddSchemaFieldTool(AiTool):
                 "type": "string",
                 "description": "Schema to add the field to (must exist)",
             },
-            "name": {"type": "string", "description": "New field name"},
+            "name": {
+                "type": "string",
+                "description": "Machine key: lowercase letters, digits and underscores, not starting with a digit (e.g. acoustic_recording). Workflows and CSV headers reference this.",
+            },
+            "label": {
+                "type": "string",
+                "description": "Human-facing display name; free text with spaces and capitals (e.g. 'Acoustic Recording'). Set this whenever the natural name is not already a slug.",
+            },
             "type": {
                 "type": "string",
                 "enum": sorted(VALID_DTYPES),
@@ -382,6 +412,7 @@ class AddSchemaFieldTool(AiTool):
             required=bool(tool_input.get("required", False)),
             restrictions=tool_input.get("restrictions"),
             default_value=tool_input.get("default"),
+            label=tool_input.get("label"),
         )
         if err:
             return err
@@ -390,6 +421,8 @@ class AddSchemaFieldTool(AiTool):
             "type": ftype,
             "required": bool(tool_input.get("required", False)),
         }
+        if tool_input.get("label"):
+            body["label"] = tool_input["label"]
         if tool_input.get("restrictions"):
             body["restrictions"] = tool_input["restrictions"]
         if tool_input.get("default") is not None:
@@ -416,7 +449,14 @@ class UpdateSchemaFieldTool(AiTool):
                 "type": "string",
                 "description": "Current field name (must exist on the schema)",
             },
-            "rename": {"type": "string"},
+            "rename": {
+                "type": "string",
+                "description": "Machine key: lowercase letters, digits and underscores, not starting with a digit (e.g. acoustic_recording). Workflows and CSV headers reference this.",
+            },
+            "label": {
+                "type": "string",
+                "description": "Human-facing display name; free text with spaces and capitals (e.g. 'Acoustic Recording'). Set this whenever the natural name is not already a slug.",
+            },
             "required": {"type": "boolean"},
             "restrictions": {"type": "object"},
             "default": {"description": "New default value"},
@@ -431,7 +471,7 @@ class UpdateSchemaFieldTool(AiTool):
             return tool_error(f"Schema '{schema}' does not exist.")
         body = {
             k: tool_input[k]
-            for k in ("rename", "required", "restrictions", "default")
+            for k in ("rename", "label", "required", "restrictions", "default")
             if tool_input.get(k) is not None
         }
         if not body:
@@ -439,6 +479,8 @@ class UpdateSchemaFieldTool(AiTool):
         update_field_kwargs: dict[str, Any] = {}
         if "rename" in body:
             update_field_kwargs["new_name"] = body["rename"]
+        if "label" in body:
+            update_field_kwargs["label"] = body["label"]
         if "required" in body:
             update_field_kwargs["required"] = body["required"]
         if "restrictions" in body:
