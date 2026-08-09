@@ -5,6 +5,7 @@ import {
 } from '../../hooks/useContainerPlugins'
 import {
   Button,
+  Field,
   Modal,
   ModalBody,
   ModalFooter,
@@ -86,19 +87,26 @@ export function ContainerPluginEditor({
           {/* Editor */}
           <div className="flex-1 flex flex-col min-h-0 p-4 gap-3">
             <span className="text-xs font-medium text-fg">{selectedPath}</span>
-            <Textarea
-              size="sm"
-              value={selectedPath ? contents[selectedPath] : ''}
-              onChange={(e) =>
-                selectedPath &&
-                setContents({ ...contents, [selectedPath]: e.target.value })
-              }
-              spellCheck={false}
-              className="flex-1 min-h-0 font-mono resize-none bg-canvas-subtle leading-relaxed"
-            />
+            <Field
+              label={selectedPath ?? 'File contents'}
+              hideLabel
+              className="flex-1 min-h-0"
+            >
+              <Textarea
+                size="sm"
+                value={selectedPath ? contents[selectedPath] : ''}
+                onChange={(e) =>
+                  selectedPath &&
+                  setContents({ ...contents, [selectedPath]: e.target.value })
+                }
+                spellCheck={false}
+                className="h-full font-mono resize-none bg-canvas-subtle leading-relaxed"
+              />
+            </Field>
 
             {buildResult && (
               <div
+                role="alert"
                 className={`text-xs rounded-md p-2 whitespace-pre-wrap max-h-32 overflow-y-auto ${
                   buildResult.success
                     ? 'text-success bg-success-subtle border border-success/30'

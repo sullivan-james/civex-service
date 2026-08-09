@@ -26,6 +26,7 @@ import {
   DetailSkeleton,
   TableSkeleton,
   ErrorState,
+  Field,
   Input,
   Checkbox,
   Pagination,
@@ -199,18 +200,19 @@ export default function CollectionDetailPage() {
 
       {renaming ? (
         <div className="border border-border rounded-md p-4 bg-canvas-subtle flex items-center gap-3">
-          <Input
-            autoFocus
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleRename()
-              if (e.key === 'Escape') setRenaming(false)
-            }}
-            className="flex-1"
-          />
+          <Field label="Collection name" hideLabel className="flex-1">
+            <Input
+              autoFocus
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleRename()
+                if (e.key === 'Escape') setRenaming(false)
+              }}
+            />
+          </Field>
           {updateCollection.error && (
-            <span className="text-xs text-danger">
+            <span role="alert" className="text-xs text-danger">
               {errorMessage(updateCollection.error)}
             </span>
           )}
@@ -331,13 +333,15 @@ export default function CollectionDetailPage() {
       </div>
 
       {/* Search */}
-      <Input
-        type="search"
-        value={searchInput}
-        onChange={(e) => setSearchInput(e.target.value)}
-        placeholder="Search records…"
-        className="w-full"
-      />
+      <Field label="Search records" hideLabel>
+        <Input
+          type="search"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Search records…"
+          className="w-full"
+        />
+      </Field>
 
       {/* Add record form */}
       {addingRecord && schemas && (
@@ -424,6 +428,7 @@ export default function CollectionDetailPage() {
               <tr>
                 <Th className="w-8">
                   <Checkbox
+                    aria-label="Select all records"
                     checked={
                       selected.size === records.length && records.length > 0
                     }
@@ -448,6 +453,7 @@ export default function CollectionDetailPage() {
                 <Tr key={r.id}>
                   <Td>
                     <Checkbox
+                      aria-label={`Select record ${r.natural_name ?? r.id.slice(0, 8)}`}
                       checked={selected.has(r.id)}
                       onChange={() => toggleSelect(r.id)}
                     />

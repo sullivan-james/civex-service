@@ -206,22 +206,24 @@ function FilenameExtractor({
     <div className="mt-2 border border-accent-subtle-border rounded-md bg-accent-subtle p-3 space-y-2">
       {/* File source */}
       {sources.length > 1 ? (
-        <Select
-          size="sm"
-          value={source}
-          onChange={(e) => {
-            setSource(e.target.value)
-            setExtracted(null)
-            setConverted(undefined)
-          }}
-          className="w-full"
-        >
-          {sources.map((s) => (
-            <option key={s.filename} value={s.filename}>
-              {s.label}
-            </option>
-          ))}
-        </Select>
+        <Field label="File source" hideLabel>
+          <Select
+            size="sm"
+            value={source}
+            onChange={(e) => {
+              setSource(e.target.value)
+              setExtracted(null)
+              setConverted(undefined)
+            }}
+            className="w-full"
+          >
+            {sources.map((s) => (
+              <option key={s.filename} value={s.filename}>
+                {s.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
       ) : (
         <code
           className="text-xs text-fg-muted font-mono block truncate"
@@ -233,18 +235,20 @@ function FilenameExtractor({
 
       {/* Regex input */}
       <div className="flex gap-2">
-        <Input
-          size="sm"
-          value={pattern}
-          onChange={(e) => {
-            setPattern(e.target.value)
-            setExtracted(null)
-            setConverted(undefined)
-          }}
-          onKeyDown={(e) => e.key === 'Enter' && run()}
-          placeholder="Regex — use a capture group ( ) to select the part you want"
-          className="flex-1 font-mono"
-        />
+        <Field label="Regex pattern" hideLabel className="flex-1">
+          <Input
+            size="sm"
+            value={pattern}
+            onChange={(e) => {
+              setPattern(e.target.value)
+              setExtracted(null)
+              setConverted(undefined)
+            }}
+            onKeyDown={(e) => e.key === 'Enter' && run()}
+            placeholder="Regex — use a capture group ( ) to select the part you want"
+            className="w-full font-mono"
+          />
+        </Field>
         <button
           onClick={run}
           className="px-3 py-2 text-xs rounded-md border border-border bg-canvas hover:bg-canvas-subtle shrink-0"
@@ -256,24 +260,34 @@ function FilenameExtractor({
       {/* Date format (date / datetime only) */}
       {isDate && (
         <div className="flex gap-2 items-center">
-          <Input
-            size="sm"
-            value={fmt}
-            onChange={(e) => {
-              setFmt(e.target.value)
-              setConverted(undefined)
-              setConvertErr(null)
-            }}
-            onKeyDown={(e) => e.key === 'Enter' && run()}
-            placeholder={`Format, e.g. YYYYMMDD-HHmmSS  (tokens: ${FORMAT_HELP})`}
-            className="flex-1 font-mono"
-          />
+          <Field label="Date format" hideLabel className="flex-1">
+            <Input
+              size="sm"
+              value={fmt}
+              onChange={(e) => {
+                setFmt(e.target.value)
+                setConverted(undefined)
+                setConvertErr(null)
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && run()}
+              placeholder={`Format, e.g. YYYYMMDD-HHmmSS  (tokens: ${FORMAT_HELP})`}
+              className="w-full font-mono"
+            />
+          </Field>
         </div>
       )}
 
       {/* Errors */}
-      {patternErr && <p className="text-xs text-danger">{patternErr}</p>}
-      {convertErr && <p className="text-xs text-danger">{convertErr}</p>}
+      {patternErr && (
+        <p role="alert" className="text-xs text-danger">
+          {patternErr}
+        </p>
+      )}
+      {convertErr && (
+        <p role="alert" className="text-xs text-danger">
+          {convertErr}
+        </p>
+      )}
 
       {/* Preview */}
       {hasResult && (
@@ -537,7 +551,11 @@ export function RecordForm({
         </div>
       )}
 
-      {error && <p className="text-xs text-danger">{error}</p>}
+      {error && (
+        <p role="alert" className="text-xs text-danger">
+          {error}
+        </p>
+      )}
 
       <div className="flex gap-2 pt-1">
         <Button

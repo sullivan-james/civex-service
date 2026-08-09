@@ -14,7 +14,7 @@ import HistoryPane from './HistoryPane'
 import SettingsPane from './SettingsPane'
 import ToolCallRow from './ToolCallRow'
 import { isPendingApproval } from './proposals'
-import { Textarea } from '../ui'
+import { Field, Textarea } from '../ui'
 import { Sparkles } from '../ui/icons'
 
 // ---------------------------------------------------------------------------
@@ -358,16 +358,18 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
           ) : (
             <>
               <div className="flex gap-2 items-end">
-                <Textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Ask about your data or describe a workflow…"
-                  rows={2}
-                  disabled={busy}
-                  className="flex-1 resize-none"
-                />
+                <Field label="Message" hideLabel className="flex-1">
+                  <Textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Ask about your data or describe a workflow…"
+                    rows={2}
+                    disabled={busy}
+                    className="resize-none"
+                  />
+                </Field>
                 <button
                   onClick={handleSend}
                   disabled={busy || !input.trim()}

@@ -154,7 +154,7 @@ export function FieldForm(props: FieldFormProps) {
           : 'bg-accent-subtle border-t border-border px-4 py-3'
       }
     >
-      <Field label="Field name" span={4}>
+      <Field label="Field name" span={4} required>
         <Input
           size="sm"
           value={fieldName}
@@ -192,7 +192,7 @@ export function FieldForm(props: FieldFormProps) {
       </Field>
 
       {mode === 'create' && type === 'reference' && (
-        <Field label="Target schema" span={6}>
+        <Field label="Target schema" span={6} required>
           <Select
             size="sm"
             value={refSchema}
@@ -320,7 +320,7 @@ export function FieldForm(props: FieldFormProps) {
       )}
 
       {mutation.error && (
-        <p className={`${spanClassName(12)} text-xs text-danger`}>
+        <p role="alert" className={`${spanClassName(12)} text-xs text-danger`}>
           {errorMessage(mutation.error)}
         </p>
       )}
