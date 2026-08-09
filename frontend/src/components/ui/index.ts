@@ -2,6 +2,12 @@ export { Button } from './Button'
 export { IconButton } from './IconButton'
 export { Badge } from './Badge'
 export { Table, Thead, Th, Tbody, Tr, Td } from './Table'
+export {
+  DataTable,
+  type DataTableColumn,
+  type DataTableSort,
+  type DataTableAlign,
+} from './DataTable'
 export { PageHeader } from './PageHeader'
 export { ErrorState, EmptyState } from './States'
 export { MonoId } from './MonoId'
