@@ -27,11 +27,16 @@ theme:
     - content.code.copy
     - content.code.annotate
 
+hooks:
+  - docs/_gen/openapi.py
+
 plugins:
   - search
   - gen-files:
       scripts:
         - docs/_gen/plugin_reference.py
+  - neoteroi.mkdocsoad:
+      use_pymdownx: true
   - mkdocstrings:
       handlers:
         python:
@@ -87,6 +92,7 @@ nav:
       - Wire protocol: extending/wire-protocol.md
       - SDK reference: extending/sdk-reference.md
   - Reference:
+      - HTTP API: reference/http-api.md
       - CLI:
           - Plumbing commands: reference/cli/plumbing.md
       - Plugins:
