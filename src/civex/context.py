@@ -3,7 +3,7 @@ AppContext bundles all services for a single CLI command invocation (or HTTP req
 
 build_local_context() wires together the SQLAlchemy repos and the local file store.
 If a [remote] is configured, a transport is passed to FileService for lazy object fetch.
-An optional file_store parameter lets callers (e.g. civex-hub) inject a custom object
+An optional file_store parameter lets callers inject a custom object
 store instead of the default LocalFileObjectStore.
 """
 

@@ -2,8 +2,6 @@
 
 ## Starting the server
 
-The desktop app starts the server automatically. If you're using the CLI:
-
 ```bash
 civex serve                  # production mode — serves built UI from frontend/dist/
 civex serve --reload         # development mode — auto-restarts on code changes
