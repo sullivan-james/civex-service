@@ -80,14 +80,166 @@ def _init_observability() -> None:
     init_telemetry(dsn, environment=environment)
 
 
+_OPENAPI_TAGS = [
+    {
+        "name": "schemas",
+        "description": (
+            "Define the shape of your data: schemas are named collections of "
+            "typed fields (integer, float, string, boolean, date, datetime, "
+            "file, file_list, reference), with restrictions (min/max, choices, "
+            "accepted file types, ...) and optional inheritance from a parent "
+            "schema. Create a schema before creating any records."
+        ),
+    },
+    {
+        "name": "collections",
+        "description": (
+            "Datasets are named containers of records that all conform to the "
+            "same schema. Use this to create, rename, or delete the datasets "
+            "you organize records into."
+        ),
+    },
+    {
+        "name": "records",
+        "description": (
+            "Create, read, update, delete, and bulk-import the individual rows "
+            "of data that live inside a dataset. Record data is validated "
+            "against its schema's field types and restrictions on every write."
+        ),
+    },
+    {
+        "name": "files",
+        "description": (
+            "Upload binary attachments (referenced from `file` / `file_list` "
+            "record fields) and download them back out by content hash."
+        ),
+    },
+    {
+        "name": "workflows",
+        "description": (
+            "Author and manage YAML workflow definitions: chains of plugin "
+            "steps, triggered automatically on record create/update or run "
+            "manually, that read and write record fields."
+        ),
+    },
+    {
+        "name": "jobs",
+        "description": (
+            "Inspect the queue of workflow runs — one job per trigger firing or "
+            "manual run — including their status, inputs, and outputs."
+        ),
+    },
+    {
+        "name": "plugins",
+        "description": (
+            "Discover the built-in and project-defined plugins available to "
+            "use as workflow steps, along with their declared inputs and "
+            "outputs. Also handles uploading container-tier (Tier 2) plugins."
+        ),
+    },
+    {
+        "name": "ai",
+        "description": (
+            "AI-assisted helpers layered on top of the data model — schema "
+            "suggestions, record extraction, and similar model-backed "
+            "endpoints — plus the AI provider configuration they run against."
+        ),
+    },
+    {
+        "name": "remote",
+        "description": (
+            "Push and pull a project's schemas, datasets, and records to/from "
+            "a remote civex server, and check the current sync status."
+        ),
+    },
+    {
+        "name": "store",
+        "description": (
+            "Manage the object volumes that back file storage — add, update, "
+            "or remove a volume, and inspect per-volume usage stats."
+        ),
+    },
+    {
+        "name": "db",
+        "description": (
+            "Inspect and configure the underlying database connection: "
+            "connection status, pending migrations, the configured URL, and "
+            "(when using the bundled Docker Postgres) container lifecycle. "
+            "Deliberately reachable even when the database itself is down."
+        ),
+    },
+    {
+        "name": "dump",
+        "description": (
+            "Export a full project (schemas, datasets, records) to a single "
+            "portable archive, and restore a project from one — the basis for "
+            "backups and moving a project between machines."
+        ),
+    },
+    {
+        "name": "legal",
+        "description": (
+            "Read-only endpoints for the software's own license text and "
+            "acceptable-use policy, independent of any particular project."
+        ),
+    },
+    {
+        "name": "status",
+        "description": (
+            "Live health checks, such as a round-trip database query, for "
+            "monitoring whether a running server is actually functional."
+        ),
+    },
+    {
+        "name": "terminal",
+        "description": (
+            "A WebSocket-backed interactive shell in the project directory, "
+            "used by the web UI's embedded terminal panel."
+        ),
+    },
+]
+
+_DESCRIPTION = """\
+civex is a local-first research data management system: schemas, records, \
+files, and workflow automation in one place, running on your own machine \
+against your own database.
+
+Every endpoint below is served under the `/api` prefix (e.g. `GET /api/schemas`); \
+paths in this reference omit that prefix for brevity.
+
+## Errors
+
+Errors share one envelope shape across the API. Domain errors (not found, \
+already exists, validation, misconfiguration) return a 4xx/5xx status with a \
+JSON body of `{"detail": "<message>"}`. Request body/query validation \
+failures return 422 with `{"detail": "Request validation failed", "errors": \
+[...]}`, one entry per invalid field. Anything unexpected returns a generic \
+500 with `{"detail": "Internal server error", "request_id": "<id>"}` — the \
+same id echoed on the `x-request-id` response header, for correlating with \
+server logs.
+
+See the [getting started guide](https://civexdata.github.io/civex-docs/getting-started/install.html) \
+for installing the CLI and standing up your first project.
+"""
+
+
 def create_app() -> FastAPI:
     _init_observability()
     from civex import __version__
 
     app = FastAPI(
         title="civex",
-        description="Research data management API",
+        description=_DESCRIPTION,
         version=__version__,
+        openapi_tags=_OPENAPI_TAGS,
+        contact={
+            "name": "James Sullivan",
+            "email": "sullivanj041@gmail.com",
+        },
+        license_info={
+            "name": "PolyForm Shield 1.0.0",
+            "url": "https://polyformproject.org/licenses/shield/1.0.0",
+        },
     )
 
     # Local-only guard: blocks DNS-rebinding and cross-origin (CSRF) attacks
