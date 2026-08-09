@@ -1,4 +1,10 @@
-import { type ComponentType, type ReactNode, useEffect, useRef, useState } from 'react'
+import {
+  type ComponentType,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import { NavLink } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { remoteApi } from '../api/remote'
@@ -68,7 +74,11 @@ function readCollapsed(): boolean {
 interface NavItemDef {
   to: string
   label: string
-  icon: ComponentType<{ size?: number; className?: string; 'aria-hidden'?: boolean | 'true' }>
+  icon: ComponentType<{
+    size?: number
+    className?: string
+    'aria-hidden'?: boolean | 'true'
+  }>
 }
 
 const primaryNavItems: NavItemDef[] = [
@@ -79,7 +89,11 @@ const primaryNavItems: NavItemDef[] = [
   { to: '/terminal', label: 'Terminal', icon: SquareTerminal },
 ]
 
-const settingsNavItem: NavItemDef = { to: '/settings', label: 'Settings', icon: Settings }
+const settingsNavItem: NavItemDef = {
+  to: '/settings',
+  label: 'Settings',
+  icon: Settings,
+}
 
 function NavItem({
   to,
@@ -140,7 +154,6 @@ export default function Layout({ children }: { children: ReactNode }) {
       document.body.style.overflow = previousOverflow
       document.removeEventListener('keydown', onKeyDown)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawerOpen])
 
   function closeDrawer() {
@@ -286,10 +299,14 @@ export default function Layout({ children }: { children: ReactNode }) {
             collapsed ? 'w-16 px-2' : 'w-56 px-3'
           }`}
         >
-          <div className={`flex pb-2 ${collapsed ? 'justify-center' : 'justify-end'}`}>
+          <div
+            className={`flex pb-2 ${collapsed ? 'justify-center' : 'justify-end'}`}
+          >
             <IconButton
               icon={collapsed ? PanelLeftOpen : PanelLeftClose}
-              aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+              aria-label={
+                collapsed ? 'Expand navigation' : 'Collapse navigation'
+              }
               onClick={toggleCollapsed}
             />
           </div>
