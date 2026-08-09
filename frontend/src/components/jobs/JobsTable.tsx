@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { useJobsPaged, useRerunJob } from '../../hooks/useWorkflows'
 import { type WorkflowJob } from '../../api/workflows'
-import { TableSkeleton, ErrorState, Badge, Button, Select } from '../ui'
+import { TableSkeleton, ErrorState, Badge, Button, Pagination } from '../ui'
 import { Check, XCircle, RefreshCw } from '../ui/icons'
 
 const RUN_COLUMNS = ['w-20', 'w-32', 'w-20', 'w-24', 'w-16', 'w-16', 'w-24']
@@ -16,8 +16,6 @@ const RUN_COLUMNS_WITH_RECORD = [
   'w-16',
   'w-24',
 ]
-
-const PAGE_SIZES = [25, 50, 100]
 
 function duration(job: WorkflowJob): string {
   if (!job.started_at) return '—'
@@ -49,84 +47,6 @@ function StatusBadge({ status }: { status: WorkflowJob['status'] }) {
     default:
       return <Badge variant="default">· pending</Badge>
   }
-}
-
-function Pagination({
-  page,
-  pageSize,
-  total,
-  onPage,
-  onPageSize,
-}: {
-  page: number
-  pageSize: number
-  total: number
-  onPage: (p: number) => void
-  onPageSize: (s: number) => void
-}) {
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
-  const from = total === 0 ? 0 : page * pageSize + 1
-  const to = Math.min((page + 1) * pageSize, total)
-
-  return (
-    <div className="flex items-center justify-between mt-4 text-sm text-fg-muted">
-      <span>{total === 0 ? 'No results' : `${from}–${to} of ${total}`}</span>
-      <div className="flex items-center gap-3">
-        <label className="flex items-center gap-2 text-xs">
-          Rows
-          <Select
-            size="sm"
-            value={pageSize}
-            onChange={(e) => {
-              onPageSize(Number(e.target.value))
-              onPage(0)
-            }}
-          >
-            {PAGE_SIZES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </Select>
-        </label>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => onPage(0)}
-            disabled={page === 0}
-            className="px-2 py-2 rounded-md border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
-            title="First page"
-          >
-            «
-          </button>
-          <button
-            onClick={() => onPage(page - 1)}
-            disabled={page === 0}
-            className="px-2 py-2 rounded-md border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
-          >
-            ‹ Prev
-          </button>
-          <span className="px-2 text-xs">
-            {page + 1} / {totalPages}
-          </span>
-          <button
-            onClick={() => onPage(page + 1)}
-            disabled={page >= totalPages - 1}
-            className="px-2 py-2 rounded-md border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
-          >
-            Next ›
-          </button>
-          <button
-            onClick={() => onPage(totalPages - 1)}
-            disabled={page >= totalPages - 1}
-            className="px-2 py-2 rounded-md border border-border text-xs bg-canvas disabled:opacity-40 hover:bg-canvas-subtle disabled:cursor-not-allowed"
-            title="Last page"
-          >
-            »
-          </button>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 interface Props {
