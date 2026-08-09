@@ -23,5 +23,15 @@ export { Select, type SelectProps } from './Select'
 export { Checkbox, type CheckboxProps } from './Checkbox'
 export { Field, type FieldProps } from './Field'
 export { type ControlSize } from './controlStyles'
+export {
+  FormGrid,
+  FormSection,
+  FormFooter,
+  spanClassName,
+  type FieldSpan,
+  type FormGridProps,
+  type FormSectionProps,
+  type FormFooterProps,
+} from './FormGrid'
 export { ToastProvider, useToast, type ToastOptions } from './ToastProvider'
 export { type ToastVariant, type ToastAction } from './Toast'

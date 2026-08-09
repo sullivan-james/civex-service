@@ -207,7 +207,7 @@ export default function CollectionDetailPage() {
               if (e.key === 'Enter') handleRename()
               if (e.key === 'Escape') setRenaming(false)
             }}
-            className="w-64"
+            className="flex-1"
           />
           {updateCollection.error && (
             <span className="text-xs text-danger">

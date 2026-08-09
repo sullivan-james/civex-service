@@ -287,7 +287,7 @@ function WorkflowEditor({
                   setStem(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))
                 }
                 placeholder="my-workflow"
-                className="w-56"
+                className="flex-1"
               />
               <span className="text-sm text-fg-muted">.yaml</span>
             </div>
