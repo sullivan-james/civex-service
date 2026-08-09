@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { useJob, useRerunJob } from '../hooks/useWorkflows'
+import { usePlugins } from '../hooks/usePlugins'
 import { type WorkflowJob } from '../api/workflows'
 import {
   Badge,
@@ -11,32 +12,10 @@ import {
 } from '../components/ui'
 import StepExecutionCard from '../components/jobs/StepExecutionCard'
 import JobStepsDiagram from '../components/jobs/JobStepsDiagram'
-import { Check, XCircle, RefreshCw } from '../components/ui/icons'
-
-function StatusBadge({ status }: { status: WorkflowJob['status'] }) {
-  switch (status) {
-    case 'completed':
-      return (
-        <Badge variant="success" className="gap-1">
-          <Check size={12} /> completed
-        </Badge>
-      )
-    case 'failed':
-      return (
-        <Badge variant="danger" className="gap-1">
-          <XCircle size={12} /> failed
-        </Badge>
-      )
-    case 'running':
-      return (
-        <span className="inline-flex items-center gap-1 text-sm font-medium text-accent">
-          <RefreshCw size={12} className="animate-spin" /> running
-        </span>
-      )
-    default:
-      return <Badge variant="default">· pending</Badge>
-  }
-}
+import JobStatusBadge from '../components/jobs/JobStatusBadge'
+import RunSummary from '../components/jobs/RunSummary'
+import FailureExplanation from '../components/jobs/FailureExplanation'
+import { RefreshCw } from '../components/ui/icons'
 
 function duration(job: WorkflowJob): string | null {
   if (!job.started_at) return null
@@ -49,6 +28,7 @@ export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { data: job, isLoading, error } = useJob(id ?? '')
+  const { data: plugins } = usePlugins()
   const rerun = useRerunJob()
   const [view, setView] = useState<'list' | 'diagram'>('list')
 
@@ -91,7 +71,7 @@ export default function JobDetailPage() {
           {isActive && (
             <span className="text-xs text-accent animate-pulse">live</span>
           )}
-          <StatusBadge status={job.status} />
+          <JobStatusBadge status={job.status} />
           <Button
             size="sm"
             disabled={rerun.isPending}
@@ -107,8 +87,16 @@ export default function JobDetailPage() {
         </div>
       }
     >
-      {/* Metadata grid */}
-      <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm border border-border rounded-md p-4 bg-canvas-subtle">
+      {/* What this run did, in plain language */}
+      <div className="border border-border rounded-md p-4 bg-canvas-subtle">
+        <RunSummary job={job} />
+      </div>
+
+      {/* Failure, explained */}
+      {job.status === 'failed' && <FailureExplanation job={job} />}
+
+      {/* Metadata grid -- the technical particulars */}
+      <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm border border-border rounded-md p-4">
         <div>
           <dt className="text-fg-muted font-medium">Record</dt>
           <dd>
@@ -150,17 +138,8 @@ export default function JobDetailPage() {
         )}
       </dl>
 
-      {/* Error */}
-      {job.error && (
-        <div className="border border-danger-subtle-border rounded-md bg-danger-subtle p-4">
-          <h2 className="text-sm font-semibold text-danger mb-1">Error</h2>
-          <pre className="text-xs text-danger whitespace-pre-wrap font-mono">
-            {job.error}
-          </pre>
-        </div>
-      )}
-
-      {/* Steps */}
+      {/* Steps -- the advanced/technical view; collapsed narrative by
+          default, full inputs/outputs one click away (StepExecutionCard). */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-semibold text-fg">
@@ -192,11 +171,15 @@ export default function JobDetailPage() {
         </div>
         {job.step_executions && job.step_executions.length > 0 ? (
           view === 'diagram' ? (
-            <JobStepsDiagram steps={job.step_executions} />
+            <JobStepsDiagram steps={job.step_executions} plugins={plugins} />
           ) : (
             <div className="space-y-2">
               {job.step_executions.map((step) => (
-                <StepExecutionCard key={step.step_id} step={step} />
+                <StepExecutionCard
+                  key={step.step_id}
+                  step={step}
+                  plugins={plugins}
+                />
               ))}
             </div>
           )

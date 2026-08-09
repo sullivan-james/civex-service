@@ -63,6 +63,7 @@ def run_pending_jobs() -> None:
             if job is None:
                 break
             log_buf = io.StringIO()
+            wf_ctx = None
             try:
                 with _capture_output() as log_buf:
                     # Discovery runs inside the log-capture block (rather
@@ -97,6 +98,7 @@ def run_pending_jobs() -> None:
                     job.id,
                     log=log_buf.getvalue() or None,
                     step_executions=step_executions,
+                    affected_records=wf_ctx.affected_records,
                 )
                 ctx.commit()
             except Exception as e:
@@ -105,6 +107,8 @@ def run_pending_jobs() -> None:
                 # first step -- a missing workflow or record -- is classified
                 # here instead, where there's no step to name. Same for
                 # step_executions (CIVEX-117): None if nothing ran yet.
+                # wf_ctx is None for that same before-any-step case, since it
+                # isn't built until the record/dataset/workflow are resolved.
                 envelope = getattr(e, "envelope", None) or ErrorEnvelope.from_exception(
                     e
                 )
@@ -113,6 +117,7 @@ def run_pending_jobs() -> None:
                     envelope,
                     log=log_buf.getvalue() or None,
                     step_executions=getattr(e, "step_executions", None),
+                    affected_records=wf_ctx.affected_records if wf_ctx else None,
                 )
                 ctx.commit()
     finally:

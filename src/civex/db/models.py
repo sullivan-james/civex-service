@@ -283,6 +283,15 @@ class WorkflowJob(Base):
     error_details: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     log: Mapped[str | None] = mapped_column(String, nullable=True)
     input_data: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    # Records this run created or updated: [{record_id, schema_name,
+    # natural_name, action}, ...] in touch order -- WorkflowContext builds
+    # this list live (see plugins.base.WorkflowContext._note_affected) and
+    # the run persists whatever it collected before completing or failing,
+    # same partial-progress contract as step_executions. None for jobs that
+    # predate this field or never got far enough to touch a record.
+    affected_records: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        _JSON, nullable=True
+    )
     depth: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )

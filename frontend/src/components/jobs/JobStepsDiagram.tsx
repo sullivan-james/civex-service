@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import { type StepExecution } from '../../api/workflows'
+import { type PluginInfo } from '../../api/plugins'
+import { pluginDisplayName } from '../../utils/runNarrative'
 import StepExecutionCard from './StepExecutionCard'
 
 // Read-only DAG view of a job's steps (CIVEX-132), laid out on a fixed grid
@@ -64,7 +66,13 @@ function layout(steps: StepExecution[]): {
   }
 }
 
-export default function JobStepsDiagram({ steps }: { steps: StepExecution[] }) {
+export default function JobStepsDiagram({
+  steps,
+  plugins,
+}: {
+  steps: StepExecution[]
+  plugins?: PluginInfo[]
+}) {
   const { nodes, width, height } = useMemo(() => layout(steps), [steps])
   const byId = useMemo(
     () => new Map(nodes.map((n) => [n.step.step_id, n])),
@@ -129,15 +137,15 @@ export default function JobStepsDiagram({ steps }: { steps: StepExecution[] }) {
               <span className="font-mono text-xs text-fg truncate w-full">
                 {node.step.step_id}
               </span>
-              <span className="text-xs text-fg-muted font-mono truncate w-full">
-                {node.step.plugin}
+              <span className="text-xs text-fg-muted truncate w-full">
+                {pluginDisplayName(node.step.plugin, plugins)}
               </span>
             </button>
           ))}
         </div>
       </div>
 
-      {selected && <StepExecutionCard step={selected} />}
+      {selected && <StepExecutionCard step={selected} plugins={plugins} />}
     </div>
   )
 }

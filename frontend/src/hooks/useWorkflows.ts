@@ -106,8 +106,17 @@ export function useJobsPaged(
     jobs,
     total: total.data?.total ?? 0,
     isLoading: jobs.isLoading || total.isLoading,
+    isFetching: jobs.isFetching || total.isFetching,
     error: jobs.error,
   }
+}
+
+export function useJobsAffectingRecord(recordId: string) {
+  return useQuery({
+    queryKey: ['jobs', 'affecting', recordId],
+    queryFn: () => jobsApi.list(undefined, undefined, 0, 10, recordId),
+    enabled: !!recordId,
+  })
 }
 
 export function useActiveJobCount() {

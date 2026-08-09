@@ -36,6 +36,7 @@ import { fieldErrorInfo } from '../utils/validationErrors'
 import type { Schema } from '../api/schemas'
 import type { CivexRecord } from '../api/records'
 import JobsTable from '../components/jobs/JobsTable'
+import RecordProvenance from '../components/jobs/RecordProvenance'
 
 function FieldValue({ value }: { value: unknown }) {
   if (value === null || value === undefined)
@@ -546,7 +547,12 @@ export default function RecordDetailPage() {
         />
       )}
 
-      <JobsTable recordId={record.id} />
+      <RecordProvenance recordId={record.id} />
+
+      <div>
+        <h2 className="text-base font-semibold text-fg mb-2">Runs</h2>
+        <JobsTable recordId={record.id} />
+      </div>
 
       {/* Danger zone */}
       <div className="border border-danger-muted rounded-md">

@@ -151,6 +151,75 @@ def test_create_record_explicit_context_record_id_overrides_the_default(
     assert created.parent_record_id == other_trigger.id
 
 
+def test_create_record_appends_to_affected_records(
+    ctx, make_collection, make_schema, make_record
+):
+    dataset = make_collection("study")
+    make_schema("trigger", fields=[])
+    trigger = make_record("study", "trigger", {})
+    ctx.schema_svc.create("child", parent="trigger")
+    ctx.schema_svc.add_field("child", "name", "string")
+    ctx.commit()
+    wf_ctx = _wf_ctx(ctx, trigger, dataset)
+
+    created = wf_ctx.create_record("study", "child", {"name": "auto-parented"})
+
+    assert wf_ctx.affected_records == [
+        {
+            "record_id": str(created.id),
+            "schema_name": "child",
+            "natural_name": created.natural_name,
+            "action": "created",
+        }
+    ]
+
+
+def test_update_record_appends_to_affected_records(
+    ctx, make_collection, make_schema, make_record
+):
+    dataset = make_collection("study")
+    make_schema("subject", fields=[("status", "string")])
+    trigger = make_record("study", "subject", {"status": "pending"})
+    other = make_record("study", "subject", {"status": "pending"})
+    wf_ctx = _wf_ctx(ctx, trigger, dataset)
+
+    updated = wf_ctx.update_record(str(other.id), {"status": "done"})
+
+    assert wf_ctx.affected_records == [
+        {
+            "record_id": str(other.id),
+            "schema_name": "subject",
+            "natural_name": updated.natural_name,
+            "action": "updated",
+        }
+    ]
+
+
+def test_affected_records_upgrades_created_to_updated_on_later_touch(
+    ctx, make_collection, make_schema, make_record
+):
+    dataset = make_collection("study")
+    make_schema("trigger", fields=[])
+    trigger = make_record("study", "trigger", {})
+    ctx.schema_svc.create("child", parent="trigger")
+    ctx.schema_svc.add_field("child", "name", "string")
+    ctx.commit()
+    wf_ctx = _wf_ctx(ctx, trigger, dataset)
+
+    created = wf_ctx.create_record("study", "child", {"name": "first"})
+    updated = wf_ctx.update_record(str(created.id), {"name": "corrected"})
+
+    # One entry, not two -- and it reflects the more recent action.
+    assert wf_ctx.affected_records == [
+        {
+            "record_id": str(created.id),
+            "schema_name": "child",
+            "natural_name": updated.natural_name,
+            "action": "updated",
+        }
+    ]
+
+
 def test_store_file_then_get_file_round_trips_bytes(
     ctx, make_collection, make_schema, make_record
 ):

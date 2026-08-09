@@ -315,6 +315,10 @@ class WorkflowJobResponse(BaseModel):
     # inputs, outputs, duration_seconds, error}, ...] in execution order;
     # null for jobs still pending/running or that predate this field.
     step_executions: list[dict] | None
+    # Records this run created or updated: [{record_id, schema_name,
+    # natural_name, action}, ...] in touch order; null for jobs still
+    # pending/running or that predate this field.
+    affected_records: list[dict] | None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
@@ -332,6 +336,7 @@ class WorkflowJobResponse(BaseModel):
             error_details=dto.error_details,
             log=dto.log,
             step_executions=dto.step_executions,
+            affected_records=dto.affected_records,
             created_at=dto.created_at,
             started_at=dto.started_at,
             finished_at=dto.finished_at,

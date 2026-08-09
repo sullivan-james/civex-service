@@ -40,8 +40,12 @@ def worker_run(
             f"  [dim]→ workflow '{job.workflow_name}' (trigger: {job.trigger})[/dim]"
         )
         try:
-            step_executions, _ = run_job(job, ctx)
-            ctx.job_svc.mark_completed(job.id, step_executions=step_executions)
+            step_executions, _, affected_records = run_job(job, ctx)
+            ctx.job_svc.mark_completed(
+                job.id,
+                step_executions=step_executions,
+                affected_records=affected_records,
+            )
             ctx.commit()
             console.print("    [success]✓ done[/success]")
         except Exception as e:
@@ -50,6 +54,7 @@ def worker_run(
                 job.id,
                 envelope,
                 step_executions=getattr(e, "step_executions", None),
+                affected_records=getattr(e, "affected_records", None),
             )
             ctx.commit()
             where = f" [{envelope.step}]" if envelope.step else ""

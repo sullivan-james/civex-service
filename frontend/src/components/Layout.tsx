@@ -211,6 +211,7 @@ function NavGroups({
 export default function Layout({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const [syncing, setSyncing] = useState<'push' | 'pull' | null>(null)
+  const [syncAnnouncement, setSyncAnnouncement] = useState('')
   const [aiOpen, setAiOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -255,12 +256,19 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   async function runSync(op: 'push' | 'pull') {
     setSyncing(op)
+    const verb = op === 'push' ? 'Push' : 'Pull'
+    setSyncAnnouncement(
+      op === 'push' ? 'Pushing to remote…' : 'Pulling from remote…',
+    )
     try {
       const result =
         op === 'push' ? await remoteApi.push() : await remoteApi.pull()
-      const verb = op === 'push' ? 'Pushed' : 'Pulled'
       toast.success(
-        `${verb} — ${result.records}r ${result.schemas}s ${result.datasets}d`,
+        `${verb}ed — ${result.records}r ${result.schemas}s ${result.datasets}d`,
+      )
+      setSyncAnnouncement(
+        `${verb} complete. ${result.records} record${result.records === 1 ? '' : 's'}, ` +
+          `${result.schemas} record type${result.schemas === 1 ? '' : 's'} updated.`,
       )
       // Invalidate all data queries so the UI reflects pulled changes.
       if (op === 'pull') {
@@ -268,6 +276,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       }
     } catch (e: unknown) {
       toast.error(errorMessage(e))
+      setSyncAnnouncement(`${verb} failed.`)
     } finally {
       setSyncing(null)
     }
@@ -352,7 +361,10 @@ export default function Layout({ children }: { children: ReactNode }) {
         <div className="flex-1" />
 
         {remote && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" aria-busy={syncing !== null}>
+            <span role="status" aria-live="polite" className="sr-only">
+              {syncAnnouncement}
+            </span>
             <button
               onClick={() => runSync('pull')}
               disabled={syncing !== null}

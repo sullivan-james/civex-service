@@ -81,6 +81,7 @@ export default function CollectionDetailPage() {
   const {
     data: recordsPage,
     isLoading: recordsLoading,
+    isFetching: recordsFetching,
     error: recordsError,
   } = useRecords(collection?.name ?? '', {
     schema: selectedSchema ?? undefined,
@@ -372,7 +373,11 @@ export default function CollectionDetailPage() {
       ) : recordsError ? (
         <ErrorState message={errorMessage(recordsError)} />
       ) : records.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex flex-col items-center justify-center py-16 text-center"
+        >
           <svg
             width="40"
             height="40"
@@ -407,7 +412,7 @@ export default function CollectionDetailPage() {
           </p>
         </div>
       ) : (
-        <>
+        <div aria-busy={recordsFetching}>
           {selected.size > 0 && (
             <div className="flex items-center gap-3 px-3 py-2 bg-accent-subtle border border-accent-muted rounded-md text-sm">
               <span className="text-accent font-medium">
@@ -520,7 +525,7 @@ export default function CollectionDetailPage() {
             onPage={setPage}
             onPageSize={setPageSize}
           />
-        </>
+        </div>
       )}
       {/* Danger zone */}
       <div className="border border-danger-muted rounded-md">

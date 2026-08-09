@@ -107,8 +107,14 @@ class WorkflowJobService:
         job_id: uuid.UUID,
         log: str | None = None,
         step_executions: list[dict] | None = None,
+        affected_records: list[dict] | None = None,
     ) -> None:
-        self._repo.mark_completed(job_id, log=log, step_executions=step_executions)
+        self._repo.mark_completed(
+            job_id,
+            log=log,
+            step_executions=step_executions,
+            affected_records=affected_records,
+        )
 
     def mark_failed(
         self,
@@ -116,6 +122,7 @@ class WorkflowJobService:
         envelope: ErrorEnvelope,
         log: str | None = None,
         step_executions: list[dict] | None = None,
+        affected_records: list[dict] | None = None,
     ) -> None:
         """`envelope` (CIVEX-143) is the single source for both the flat
         `error` message and the structured `error_details` -- every caller
@@ -124,29 +131,41 @@ class WorkflowJobService:
         from `envelope.message` (CIVEX-171). `step_executions` (CIVEX-117) is
         the per-step record of however far the run got before failing --
         optional because a failure before the first step ran has none to
-        report."""
+        report. `affected_records` is the same idea for the records the run
+        touched before it failed."""
         self._repo.mark_failed(
             job_id,
             envelope.to_dict(),
             log=log,
             step_executions=step_executions,
+            affected_records=affected_records,
         )
 
     def list_jobs(
         self,
         status: str | None = None,
         record_id: str | None = None,
+        affected_record_id: str | None = None,
         offset: int = 0,
         limit: int | None = None,
     ) -> list[WorkflowJobDTO]:
         return self._repo.list_all(
-            status=status, record_id=record_id, offset=offset, limit=limit
+            status=status,
+            record_id=record_id,
+            affected_record_id=affected_record_id,
+            offset=offset,
+            limit=limit,
         )
 
     def count_jobs(
-        self, status: str | None = None, record_id: str | None = None
+        self,
+        status: str | None = None,
+        record_id: str | None = None,
+        affected_record_id: str | None = None,
     ) -> int:
-        return self._repo.count(status=status, record_id=record_id)
+        return self._repo.count(
+            status=status, record_id=record_id, affected_record_id=affected_record_id
+        )
 
     def get_job(self, job_id: uuid.UUID) -> WorkflowJobDTO | None:
         return self._repo.get_by_id(job_id)
