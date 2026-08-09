@@ -1,7 +1,8 @@
 import { type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { ChevronUp, ChevronDown } from './icons'
-import { LoadingState, ErrorState, EmptyState } from './States'
+import { ErrorState, EmptyState } from './States'
+import { Skeleton } from './Skeleton'
 
 export type DataTableAlign = 'left' | 'right' | 'center'
 
@@ -45,6 +46,9 @@ const alignClass: Record<DataTableAlign, string> = {
   center: 'text-center',
 }
 
+/** Placeholder rows shown while loading; matches TableSkeleton's default. */
+const SKELETON_ROWS = 6
+
 const thBase =
   'sticky top-0 z-10 bg-canvas-subtle border-b border-border px-4 py-3 text-xs font-semibold text-fg-muted uppercase tracking-wider'
 
@@ -66,7 +70,10 @@ export function DataTable<T>({
   className = '',
 }: DataTableProps<T>) {
   const colCount = columns.length + (actions ? 1 : 0)
-  const showState = isLoading || !!error || rows.length === 0
+  // Loading is handled separately: it renders skeleton rows inside this table's
+  // own <tbody>, so the real header and column widths stay put. TableSkeleton
+  // can't be used here — it renders its own <table>.
+  const showState = !!error || rows.length === 0
 
   return (
     <div className={`border border-border rounded-md ${className}`}>
@@ -141,12 +148,28 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {showState ? (
+            {isLoading ? (
+              Array.from({ length: SKELETON_ROWS }).map((_, rowIndex) => (
+                <tr key={`skeleton-${rowIndex}`} aria-hidden="true">
+                  {columns.map((column) => (
+                    <td
+                      key={column.key}
+                      className={`px-4 py-3 ${alignClass[column.align ?? 'left']}`}
+                    >
+                      <Skeleton className="h-4 w-full max-w-32" />
+                    </td>
+                  ))}
+                  {actions && (
+                    <td className="px-4 py-3">
+                      <Skeleton className="h-4 w-16" />
+                    </td>
+                  )}
+                </tr>
+              ))
+            ) : showState ? (
               <tr>
                 <td colSpan={colCount} className="p-0">
-                  {isLoading ? (
-                    <LoadingState />
-                  ) : error ? (
+                  {error ? (
                     <div className="px-4 py-3">
                       <ErrorState message={error} />
                     </div>
