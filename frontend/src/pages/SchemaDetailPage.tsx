@@ -23,7 +23,8 @@ import {
   Tbody,
   Tr,
   Td,
-  LoadingState,
+  DetailSkeleton,
+  TableSkeleton,
   ErrorState,
   Input,
   Select,
@@ -727,7 +728,16 @@ export default function SchemaDetailPage() {
     reorderFields.mutate(newOrder.map((f) => f.id))
   }
 
-  if (isLoading) return <LoadingState />
+  if (isLoading)
+    return (
+      <div className="space-y-6">
+        <DetailSkeleton metadataRows={0} sections={0} />
+        <TableSkeleton
+          columns={['w-8', 'w-32', 'w-20', 'w-16', 'w-24']}
+          rows={6}
+        />
+      </div>
+    )
   if (error || !schema)
     return (
       <ErrorState message={error ? errorMessage(error) : 'Schema not found'} />

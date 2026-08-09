@@ -6,8 +6,8 @@ import {
   Badge,
   Button,
   ErrorState,
+  TableSkeleton,
   Input,
-  LoadingState,
   Modal,
   ModalBody,
   ModalFooter,
@@ -208,7 +208,9 @@ export default function CollectionsPage() {
         }
       />
 
-      {isLoading && <LoadingState />}
+      {isLoading && (
+        <TableSkeleton columns={['w-32', 'w-20', 'w-48', 'w-20']} rows={8} />
+      )}
       {error && <ErrorState message={errorMessage(error)} />}
 
       {data?.length === 0 && (

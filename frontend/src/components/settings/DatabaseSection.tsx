@@ -6,7 +6,7 @@ import {
   useSetupDockerDb,
   useTeardownDockerDb,
 } from '../../hooks/useDb'
-import { Button, Input, LoadingState, ErrorState } from '../ui'
+import { Button, Input, Skeleton, ErrorState } from '../ui'
 import { errorMessage } from '../../lib/errors'
 
 const inputCls = 'w-full font-mono'
@@ -50,7 +50,18 @@ export default function DatabaseSection() {
   const [urlInput, setUrlInput] = useState('')
   const [confirmTeardown, setConfirmTeardown] = useState(false)
 
-  if (isLoading) return <LoadingState />
+  if (isLoading)
+    return (
+      <div className="space-y-6" aria-hidden="true">
+        <div className="space-y-2">
+          <Skeleton className="h-5 w-24" />
+          <Skeleton className="h-4 w-80" />
+        </div>
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-28 w-full" />
+      </div>
+    )
   if (error || !status)
     return (
       <ErrorState
