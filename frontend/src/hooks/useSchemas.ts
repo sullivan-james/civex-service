@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { schemasApi } from '../api/schemas'
+import { useToast } from '../components/ui/ToastProvider'
+import { errorMessage } from '../lib/errors'
 
 export function useSchemas() {
   return useQuery({ queryKey: ['schemas'], queryFn: schemasApi.list })
@@ -15,14 +17,19 @@ export function useSchema(name: string) {
 
 export function useCreateSchema() {
   const qc = useQueryClient()
+  const toast = useToast()
   return useMutation({
     mutationFn: schemasApi.create,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
+    onSuccess: (created) => {
+      qc.invalidateQueries({ queryKey: ['schemas'] })
+      toast.success(`Schema "${created.name}" created`)
+    },
   })
 }
 
 export function useUpdateSchema(name: string) {
   const qc = useQueryClient()
+  const toast = useToast()
   return useMutation({
     mutationFn: (body: {
       rename?: string
@@ -32,12 +39,14 @@ export function useUpdateSchema(name: string) {
     onSuccess: (updated) => {
       qc.invalidateQueries({ queryKey: ['schemas'] })
       qc.setQueryData(['schemas', updated.name], updated)
+      toast.success(`Schema "${updated.name}" updated`)
     },
   })
 }
 
 export function useAddField(schemaName: string) {
   const qc = useQueryClient()
+  const toast = useToast()
   return useMutation({
     mutationFn: (body: {
       name: string
@@ -46,12 +55,17 @@ export function useAddField(schemaName: string) {
       restrictions?: Record<string, unknown>
       default?: unknown
     }) => schemasApi.addField(schemaName, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
+    onSuccess: (field) => {
+      qc.invalidateQueries({ queryKey: ['schemas'] })
+      toast.success(`Field "${field.name}" added`)
+    },
+    onError: (err) => toast.error(errorMessage(err)),
   })
 }
 
 export function useUpdateField(schemaName: string) {
   const qc = useQueryClient()
+  const toast = useToast()
   return useMutation({
     mutationFn: ({
       fieldName,
@@ -62,32 +76,51 @@ export function useUpdateField(schemaName: string) {
       required?: boolean
       restrictions?: Record<string, unknown> | null
     }) => schemasApi.updateField(schemaName, fieldName, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
+    onSuccess: (field) => {
+      qc.invalidateQueries({ queryKey: ['schemas'] })
+      toast.success(`Field "${field.name}" updated`)
+    },
+    onError: (err) => toast.error(errorMessage(err)),
   })
 }
 
 export function useDeleteSchema() {
   const qc = useQueryClient()
+  const toast = useToast()
   return useMutation({
     mutationFn: schemasApi.delete,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
+    onSuccess: (_data, schemaName) => {
+      qc.invalidateQueries({ queryKey: ['schemas'] })
+      toast.success(`Schema "${schemaName}" deleted`)
+    },
+    onError: (err) => toast.error(errorMessage(err)),
   })
 }
 
 export function useDeleteField(schemaName: string) {
   const qc = useQueryClient()
+  const toast = useToast()
   return useMutation({
     mutationFn: (fieldName: string) =>
       schemasApi.deleteField(schemaName, fieldName),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
+    onSuccess: (_data, fieldName) => {
+      qc.invalidateQueries({ queryKey: ['schemas'] })
+      toast.success(`Field "${fieldName}" deleted`)
+    },
+    onError: (err) => toast.error(errorMessage(err)),
   })
 }
 
 export function useReorderFields(schemaName: string) {
   const qc = useQueryClient()
+  const toast = useToast()
   return useMutation({
     mutationFn: (order: string[]) =>
       schemasApi.reorderFields(schemaName, order),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['schemas'] })
+      toast.success('Field order saved')
+    },
+    onError: (err) => toast.error(errorMessage(err)),
   })
 }
