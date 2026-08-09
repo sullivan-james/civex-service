@@ -125,6 +125,8 @@ def update_record(
         dto = ctx.record_svc.update(record_id, body.data)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
     ctx.commit()
     background_tasks.add_task(run_pending_jobs)
     return RecordResponse.from_dto(dto)

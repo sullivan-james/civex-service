@@ -27,6 +27,7 @@ export {
   type CreateResourceModalProps,
 } from './CreateResourceModal'
 export { ConfirmDialog } from './ConfirmDialog'
+export { FormError } from './FormError'
 export { Input, type InputProps } from './Input'
 export { Textarea, type TextareaProps } from './Textarea'
 export { Select, type SelectProps } from './Select'

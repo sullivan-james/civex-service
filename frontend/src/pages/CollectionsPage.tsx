@@ -32,6 +32,7 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
     <CreateResourceModal
       resourceLabel="collection"
       namePlaceholder="my-collection"
+      nameHint="A collection is a named container for records — e.g. one per field season or per site."
       onClose={onClose}
       isPending={create.isPending}
       error={create.error}

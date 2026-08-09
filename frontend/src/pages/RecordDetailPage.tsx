@@ -23,6 +23,7 @@ import {
   Td,
   DetailSkeleton,
   ErrorState,
+  FormError,
   Page,
 } from '../components/ui'
 import { X, Play } from '../components/ui/icons'
@@ -31,6 +32,7 @@ import { RecordForm } from '../components/records/RecordForm'
 import { formatDate } from '../lib/utils'
 import { displayLabel } from '../utils/naming'
 import { errorMessage } from '../lib/errors'
+import { fieldErrorInfo } from '../utils/validationErrors'
 import type { Schema } from '../api/schemas'
 import type { CivexRecord } from '../api/records'
 import JobsTable from '../components/jobs/JobsTable'
@@ -259,6 +261,11 @@ export default function RecordDetailPage() {
   const runWorkflowDef = runWorkflow
     ? (applicableWorkflows.find((wf) => wf.name === runWorkflow) ?? null)
     : null
+  const updateRecordErrors = fieldErrorInfo(
+    updateRecord.error,
+    (schema?.fields ?? []).map((f) => f.name),
+    errorMessage,
+  )
 
   function startEditing() {
     setEditValues({ ...record!.data })
@@ -395,6 +402,7 @@ export default function RecordDetailPage() {
                       )}
                     </span>
                   }
+                  error={updateRecordErrors.fieldErrors[field.name]}
                 >
                   <DynamicField
                     field={field}
@@ -406,11 +414,10 @@ export default function RecordDetailPage() {
                 </Field>
               ))}
             </div>
-            {updateRecord.error && (
-              <p className="text-xs text-danger">
-                {errorMessage(updateRecord.error)}
-              </p>
-            )}
+            <FormError
+              message={updateRecordErrors.generalMessage}
+              technical={updateRecordErrors.technical}
+            />
             <div className="flex gap-2">
               <Button
                 variant="primary"
@@ -491,9 +498,7 @@ export default function RecordDetailPage() {
               onSubmit={handleAddChild}
               onCancel={() => setAddingChild(false)}
               isPending={createRecord.isPending}
-              error={
-                createRecord.error ? errorMessage(createRecord.error) : null
-              }
+              error={createRecord.error}
             />
           )}
 

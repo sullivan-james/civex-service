@@ -43,7 +43,10 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
         })
       }}
       extraFields={
-        <Field label="Parent schema">
+        <Field
+          label="Parent schema"
+          hint="Optional. This schema inherits all of the parent's fields, so records of this type must belong to a parent record."
+        >
           <Select
             value={parent}
             onChange={(e) => setParent(e.target.value)}
