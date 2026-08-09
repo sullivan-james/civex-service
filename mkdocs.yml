@@ -35,6 +35,7 @@ plugins:
   - gen-files:
       scripts:
         - docs/_gen/plugin_reference.py
+        - docs/_gen/cli_reference.py
   - neoteroi.mkdocsoad:
       use_pymdownx: true
   - mkdocstrings:
@@ -94,6 +95,20 @@ nav:
   - Reference:
       - HTTP API: reference/http-api.md
       - CLI:
+          - Overview: reference/cli/index.md
+          - Top-level commands: reference/cli/top-level.md
+          - civex ai: reference/cli/ai.md
+          - civex auth: reference/cli/auth.md
+          - civex automation: reference/cli/automation.md
+          - civex collection: reference/cli/collection.md
+          - civex db: reference/cli/db.md
+          - civex plugin: reference/cli/plugin.md
+          - civex policy: reference/cli/policy.md
+          - civex record: reference/cli/record.md
+          - civex remote: reference/cli/remote.md
+          - civex schema: reference/cli/schema.md
+          - civex store: reference/cli/store.md
+          - civex workflow: reference/cli/workflow.md
           - Plumbing commands: reference/cli/plumbing.md
       - Plugins:
           - Get Field: reference/plugins/get_field.md

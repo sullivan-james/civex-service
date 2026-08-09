@@ -1,6 +1,6 @@
 # Plumbing commands
 
-These are **plumbing, not porcelain**: internal commands invoked machine-to-machine by `SSHTransport` when `civex push`, `civex pull`, or `civex clone` talk to a remote over SSH. They are declared `hidden=True` in the CLI and do not appear in `civex --help`. They are not a supported user interface — if you want to sync a project, see [Remote sync](../../guides/remote-sync.md) instead.
+These are **plumbing, not porcelain**: internal commands invoked machine-to-machine by `SSHTransport` when `civex push`, `civex pull`, or `civex clone` talk to a remote over SSH. They are declared `hidden=True` in the CLI and do not appear in `civex --help`. They are not a supported user interface — if you want to sync a project, see [Remote sync](../../guides/remote-sync.md) instead. Because they are hidden, they are excluded from the generated pages and documented by hand here; for everything else see the [CLI reference](index.md).
 
 ## The five commands
 

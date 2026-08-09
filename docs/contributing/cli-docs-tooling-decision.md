@@ -1,9 +1,9 @@
 # CLI docs tooling decision
 
-The generated CLI reference (`docs/_gen/_cli.py`, added by a later ticket in
-the Docs Epic C series) is a small custom generator instead of an existing
-mkdocs/Typer plugin. This page records why, so the two obvious "just use a
-library" options don't get re-litigated or re-discovered from scratch.
+The generated CLI reference (`docs/_gen/cli_reference.py`) is a small custom
+generator instead of an existing mkdocs/Typer plugin. This page records why,
+so the two obvious "just use a library" options don't get re-litigated or
+re-discovered from scratch.
 
 ## Rejected: `mkdocs-click`
 
@@ -36,8 +36,7 @@ as-is:
   and as full sections, with no flag to exclude them.
 - HTML-escapes apostrophes in help text.
 - Produces one monolithic page, which can't be split across nav entries
-  (one page per sub-app is required — see the parent epic's definition of
-  done).
+  (one page per sub-app is required).
 
 ## Rejected: pinning `typer<0.16` to get real Click back
 
@@ -49,7 +48,7 @@ tool that only runs at doc-build time.
 
 ## Decision
 
-Write a small custom generator (~150 lines) against `typer._click`, modelled
+Written as a small custom generator against `typer._click`, modelled
 on `typer.cli.get_docs_for_click` (importable and callable — a good
 reference implementation, just with the wrong policy for this repo) but
 with the exclusions above fixed: skip `hidden` commands, emit one page per
@@ -58,3 +57,20 @@ sub-app, and fence indented example blocks instead of relying on `\b`
 character under `rich_markup_mode="rich"`, which renders as a visible glyph
 rather than suppressing line-wrapping the way Click's own help formatter
 does).
+
+## What it produces
+
+One page per sub-app (`reference/cli/<name>.md`), one page for the bare
+top-level commands grouped by their `rich_help_panel`, and an index. The
+five hidden plumbing commands are excluded and stay hand-written in
+`reference/cli/plumbing.md`.
+
+Two drift checks keep it honest:
+
+- `tests/docs/test_cli_options_documented.py` — every visible option and
+  argument has `help=` set, so no table cell renders empty.
+- `tests/docs/test_cli_reference_nav.py` — every visible sub-app has a nav
+  entry. Pages generate automatically but `nav` is hand-written, and an
+  unlisted page is only an INFO to `mkdocs build --strict`, so a new
+  `app.add_typer(...)` would otherwise produce a page reachable by URL and
+  search but absent from navigation.
