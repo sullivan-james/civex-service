@@ -91,7 +91,13 @@ make docs        # mkdocs serve, with live reload
 make docs-build  # one-shot build into site/, what CI runs
 ```
 
-`site/` opens directly from `file://` with no network access.
+`site/` opens directly from `file://`. One caveat since diagrams were added:
+the `privacy` plugin vendors external assets (Mermaid, Google Fonts) into
+`site/assets/external/`, but rewrites the reference using `site_url`, so it
+is an absolute URL. Pages containing a `mermaid` fence therefore fetch that
+one script over the network when opened from `file://` — everything else,
+including all fonts, is genuinely local. No third-party CDN is contacted at
+page load either way.
 
 Before a change that touches what gets published, sweep the output — it is
 about to become world-readable and permanent in the mirror's history:

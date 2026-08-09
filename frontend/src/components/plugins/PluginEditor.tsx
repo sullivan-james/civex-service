@@ -106,7 +106,7 @@ export function PluginEditor({
                   )
                 }
                 placeholder="my_plugin"
-                className="w-56"
+                className="flex-1"
               />
               <span className="text-sm text-fg-muted">.py</span>
             </div>

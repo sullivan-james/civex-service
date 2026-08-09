@@ -1,5 +1,6 @@
 import { cloneElement, isValidElement, useId } from 'react'
 import type { ReactElement, ReactNode } from 'react'
+import { spanClassName, type FieldSpan } from './FormGrid'
 
 export interface FieldProps {
   label: ReactNode
@@ -9,6 +10,9 @@ export interface FieldProps {
   /** 'stack' (default) puts the label above the control; 'inline' puts the
    * control first with the label as a trailing caption (e.g. checkboxes). */
   layout?: 'stack' | 'inline'
+  /** Column span out of 12 when placed inside a `FormGrid`. Omit outside a
+   * form grid — width should never come from a `w-*` class. */
+  span?: FieldSpan
   className?: string
   children: ReactElement
 }
@@ -19,6 +23,7 @@ export function Field({
   error,
   required = false,
   layout = 'stack',
+  span,
   className = '',
   children,
 }: FieldProps) {
@@ -69,7 +74,9 @@ export function Field({
     )
 
   return (
-    <div className={`flex flex-col gap-1 ${className}`}>
+    <div
+      className={`flex flex-col gap-1 ${span ? spanClassName(span) : ''} ${className}`}
+    >
       {labelNode}
       {layout === 'stack' && control}
       {hint && (
