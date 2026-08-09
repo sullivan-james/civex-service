@@ -1,4 +1,4 @@
-import { Fragment, useState, useRef, useCallback } from 'react'
+import { Fragment, useId, useState, useRef, useCallback } from 'react'
 import CodeMirror, {
   type EditorView,
   type ViewUpdate,
@@ -90,6 +90,7 @@ function WorkflowEditor({
   onClose,
   plugins,
 }: EditorProps) {
+  const stemId = useId()
   const [stem, setStem] = useState(initialStem)
   const [content, setContent] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<WorkflowValidationIssue[] | null>(
@@ -268,10 +269,17 @@ function WorkflowEditor({
 
       <ModalBody className="flex flex-col gap-3">
         {isNew && (
-          <label className="block">
-            <span className="text-xs font-medium text-fg">Filename stem</span>
-            <div className="flex items-center gap-1 mt-1">
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor={stemId}
+              className="text-xs font-medium text-fg-muted"
+            >
+              Filename stem
+            </label>
+            <div className="flex items-center gap-1">
               <Input
+                id={stemId}
+                aria-describedby={`${stemId}-hint`}
                 type="text"
                 value={stem}
                 onChange={(e) =>
@@ -282,10 +290,10 @@ function WorkflowEditor({
               />
               <span className="text-sm text-fg-muted">.yaml</span>
             </div>
-            <p className="text-xs text-fg-muted mt-1">
+            <p id={`${stemId}-hint`} className="text-xs text-fg-subtle">
               Letters, numbers, hyphens and underscores only.
             </p>
-          </label>
+          </div>
         )}
 
         {isLoading ? (

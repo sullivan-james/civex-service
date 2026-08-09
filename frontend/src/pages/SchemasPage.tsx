@@ -5,6 +5,7 @@ import {
   Badge,
   Button,
   ErrorState,
+  Field,
   TableSkeleton,
   Input,
   Modal,
@@ -46,10 +47,7 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
       <ModalHeader>New schema</ModalHeader>
       <form onSubmit={handleSubmit}>
         <ModalBody className="flex flex-col gap-3">
-          <div>
-            <label className="block text-xs font-medium text-fg mb-1">
-              Name <span className="text-danger">*</span>
-            </label>
+          <Field label="Name" required>
             <Input
               autoFocus
               required
@@ -58,22 +56,16 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
               className="w-full"
               placeholder="my-schema"
             />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-fg mb-1">
-              Description
-            </label>
+          </Field>
+          <Field label="Description">
             <Input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="w-full"
               placeholder="Optional"
             />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-fg mb-1">
-              Parent schema
-            </label>
+          </Field>
+          <Field label="Parent schema">
             <Select
               value={parent}
               onChange={(e) => setParent(e.target.value)}
@@ -86,7 +78,7 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
                 </option>
               ))}
             </Select>
-          </div>
+          </Field>
           {create.error && (
             <p className="text-xs text-danger">{errorMessage(create.error)}</p>
           )}

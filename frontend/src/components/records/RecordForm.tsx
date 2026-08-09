@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { Schema } from '../../api/schemas'
 import type { FileRef } from './DynamicField'
 import { useRecords } from '../../hooks/useRecords'
-import { Button, Badge, Input, Select } from '../ui'
+import { Button, Badge, Field, Input, Select } from '../ui'
 import { ArrowUp, ArrowRight, ScanText } from '../ui/icons'
 import { DynamicField } from './DynamicField'
 import { datetimeLocalToUTC } from '../../utils/dates'
@@ -401,9 +401,9 @@ export function RecordForm({
     <div className="border border-border rounded-md bg-canvas-subtle p-4 space-y-4">
       {/* Schema selector */}
       <div className="flex flex-col gap-1">
-        <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
+        <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
           Schema
-        </label>
+        </span>
         <div className="flex flex-wrap gap-2">
           {pickableSchemas.map((s) => (
             <button
@@ -428,20 +428,31 @@ export function RecordForm({
       </div>
 
       {/* Parent record selector */}
-      {parentSchema && (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
-            Parent record
-            <Badge variant="accent" className="ml-2">
-              {parentSchema.name}
-            </Badge>
-          </label>
-          {parentCandidates.length === 0 ? (
+      {parentSchema &&
+        (parentCandidates.length === 0 ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
+              Parent record
+              <Badge variant="accent" className="ml-2">
+                {parentSchema.name}
+              </Badge>
+            </span>
             <p className="text-xs text-danger">
               No {parentSchema.name} records in this dataset yet — add one
               first.
             </p>
-          ) : (
+          </div>
+        ) : (
+          <Field
+            label={
+              <>
+                Parent record
+                <Badge variant="accent" className="ml-2">
+                  {parentSchema.name}
+                </Badge>
+              </>
+            }
+          >
             <Select
               value={parentRecordId}
               onChange={(e) => setParentRecordId(e.target.value)}
@@ -459,9 +470,8 @@ export function RecordForm({
                 )
               })}
             </Select>
-          )}
-        </div>
-      )}
+          </Field>
+        ))}
 
       {/* Dynamic fields */}
       {schema.fields.length > 0 && (
@@ -473,39 +483,44 @@ export function RecordForm({
             return (
               <div
                 key={field.id}
-                className={`flex flex-col gap-1 ${isExtracting ? 'sm:col-span-2' : ''}`}
+                className={isExtracting ? 'sm:col-span-2' : ''}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <label className="text-xs font-medium text-fg flex items-center gap-2">
-                    <span className="font-mono">{field.name}</span>
-                    <Badge variant="accent">{field.type}</Badge>
-                    {field.required && (
-                      <Badge variant="success">required</Badge>
-                    )}
-                  </label>
-                  {canExtract && (
-                    <button
-                      onClick={() =>
-                        setExtractingField(isExtracting ? null : field.name)
-                      }
-                      className={`inline-flex items-center gap-1 text-xs px-2 py-2 rounded-md border transition-colors shrink-0 ${
-                        isExtracting
-                          ? 'border-accent bg-accent-subtle text-accent'
-                          : 'border-border text-fg-muted hover:border-accent hover:text-accent'
-                      }`}
-                      title="Fill this field from an uploaded filename"
-                    >
-                      <ScanText size={11} /> from filename
-                    </button>
-                  )}
-                </div>
-                <DynamicField
-                  field={field}
-                  value={values[field.name]}
-                  onChange={(v) =>
-                    setValues((prev) => ({ ...prev, [field.name]: v }))
+                <Field
+                  label={
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-2">
+                        <span className="font-mono">{field.name}</span>
+                        <Badge variant="accent">{field.type}</Badge>
+                        {field.required && (
+                          <Badge variant="success">required</Badge>
+                        )}
+                      </span>
+                      {canExtract && (
+                        <button
+                          onClick={() =>
+                            setExtractingField(isExtracting ? null : field.name)
+                          }
+                          className={`inline-flex items-center gap-1 text-xs px-2 py-2 rounded-md border transition-colors shrink-0 ${
+                            isExtracting
+                              ? 'border-accent bg-accent-subtle text-accent'
+                              : 'border-border text-fg-muted hover:border-accent hover:text-accent'
+                          }`}
+                          title="Fill this field from an uploaded filename"
+                        >
+                          <ScanText size={11} /> from filename
+                        </button>
+                      )}
+                    </span>
                   }
-                />
+                >
+                  <DynamicField
+                    field={field}
+                    value={values[field.name]}
+                    onChange={(v) =>
+                      setValues((prev) => ({ ...prev, [field.name]: v }))
+                    }
+                  />
+                </Field>
                 {isExtracting && (
                   <FilenameExtractor
                     sources={fileSources}

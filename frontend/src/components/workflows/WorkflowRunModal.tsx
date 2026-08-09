@@ -6,6 +6,7 @@ import {
 } from '../../hooks/useWorkflows'
 import {
   Button,
+  Field,
   Input,
   Modal,
   ModalBody,
@@ -86,13 +87,18 @@ export function WorkflowRunModal({
               {workflow.description}
             </p>
           )}
-          <label className="block">
-            <span className="text-sm font-medium text-fg">Record ID</span>
-            {workflow.record_schema && (
-              <span className="ml-2 text-xs text-fg-muted">
-                ({workflow.record_schema})
-              </span>
-            )}
+          <Field
+            label={
+              <>
+                Record ID
+                {workflow.record_schema && (
+                  <span className="ml-2 text-xs text-fg-muted font-normal">
+                    ({workflow.record_schema})
+                  </span>
+                )}
+              </>
+            }
+          >
             <Input
               autoFocus={!prefilled}
               type="text"
@@ -101,22 +107,27 @@ export function WorkflowRunModal({
               placeholder="Short ID or full UUID"
               readOnly={!!prefilled}
               required
-              className={`mt-1 w-full font-mono ${prefilled ? 'bg-canvas-subtle text-fg-muted' : ''}`}
+              className={`w-full font-mono ${prefilled ? 'bg-canvas-subtle text-fg-muted' : ''}`}
             />
-          </label>
+          </Field>
 
           {filesInputs.map(([inputName, decl]) => {
             const chosen = fileInputs[inputName] ?? []
             return (
               <div key={inputName}>
-                <label className="block text-sm font-medium text-fg mb-1">
-                  {decl.label ?? inputName}
-                </label>
-                {decl.description && (
-                  <p className="text-xs text-fg-muted mb-2">
-                    {decl.description}
-                  </p>
-                )}
+                <Field label={decl.label ?? inputName} hint={decl.description}>
+                  <input
+                    ref={(el) => {
+                      fileRefs.current[inputName] = el
+                    }}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) =>
+                      handleFileChange(inputName, e.target.files)
+                    }
+                  />
+                </Field>
                 <div
                   className="border-2 border-dashed border-border rounded-md px-4 py-6 text-center cursor-pointer hover:border-accent hover:bg-canvas-subtle transition-colors"
                   onClick={() => fileRefs.current[inputName]?.click()}
@@ -129,17 +140,6 @@ export function WorkflowRunModal({
                     handleFileChange(inputName, e.dataTransfer.files)
                   }}
                 >
-                  <input
-                    ref={(el) => {
-                      fileRefs.current[inputName] = el
-                    }}
-                    type="file"
-                    multiple
-                    className="hidden"
-                    onChange={(e) =>
-                      handleFileChange(inputName, e.target.files)
-                    }
-                  />
                   {chosen.length === 0 ? (
                     <p className="text-sm text-fg-muted">
                       Drop files here or{' '}

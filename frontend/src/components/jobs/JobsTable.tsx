@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { useJobsPaged, useRerunJob } from '../../hooks/useWorkflows'
 import { type WorkflowJob } from '../../api/workflows'
-import { TableSkeleton, ErrorState, Badge, Button, Select } from '../ui'
+import { TableSkeleton, ErrorState, Badge, Button, Field, Select } from '../ui'
 import { Check, XCircle, RefreshCw } from '../ui/icons'
 
 const RUN_COLUMNS = ['w-20', 'w-32', 'w-20', 'w-24', 'w-16', 'w-16', 'w-24']
@@ -72,8 +72,7 @@ function Pagination({
     <div className="flex items-center justify-between mt-4 text-sm text-fg-muted">
       <span>{total === 0 ? 'No results' : `${from}–${to} of ${total}`}</span>
       <div className="flex items-center gap-3">
-        <label className="flex items-center gap-2 text-xs">
-          Rows
+        <Field label="Rows" layout="inline">
           <Select
             size="sm"
             value={pageSize}
@@ -88,7 +87,7 @@ function Pagination({
               </option>
             ))}
           </Select>
-        </label>
+        </Field>
         <div className="flex items-center gap-1">
           <button
             onClick={() => onPage(0)}

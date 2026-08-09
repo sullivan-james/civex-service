@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { usePluginSource, useSavePlugin } from '../../hooks/usePlugins'
@@ -49,6 +49,7 @@ export function PluginEditor({
   isNew,
   onClose,
 }: Props) {
+  const nameId = useId()
   const [name, setName] = useState(
     isNew ? '' : initialFilename.replace(/\.py$/, ''),
   )
@@ -86,10 +87,17 @@ export function PluginEditor({
 
       <ModalBody className="flex flex-col gap-3">
         {isNew && (
-          <label className="block">
-            <span className="text-xs font-medium text-fg">Plugin filename</span>
-            <div className="flex items-center gap-1 mt-1">
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor={nameId}
+              className="text-xs font-medium text-fg-muted"
+            >
+              Plugin filename
+            </label>
+            <div className="flex items-center gap-1">
               <Input
+                id={nameId}
+                aria-describedby={`${nameId}-hint`}
                 type="text"
                 value={name}
                 onChange={(e) =>
@@ -102,10 +110,10 @@ export function PluginEditor({
               />
               <span className="text-sm text-fg-muted">.py</span>
             </div>
-            <p className="text-xs text-fg-muted mt-1">
+            <p id={`${nameId}-hint`} className="text-xs text-fg-subtle">
               Lowercase letters, digits and underscores only.
             </p>
-          </label>
+          </div>
         )}
 
         {isLoading ? (

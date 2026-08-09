@@ -9,6 +9,7 @@ import {
 import type { VolumeStats } from '../../api/store'
 import {
   Button,
+  Field,
   IconButton,
   Input,
   Checkbox,
@@ -279,35 +280,29 @@ function VolumeCard({
       {/* Inline editor */}
       {editing && (
         <div className="border-t border-border px-4 py-3 bg-canvas-subtle space-y-2 rounded-b-md">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
-              Path
-            </label>
-            <div className="flex gap-2">
+          <div className="flex items-end gap-2">
+            <Field label="Path" className="flex-1">
               <Input
                 value={editPath}
                 onChange={(e) => setEditPath(normalizePath(e.target.value))}
                 onBlur={(e) => setEditPath(normalizePath(e.target.value))}
                 className={inputCls}
               />
-              {isDesktop && (
-                <Button
-                  size="sm"
-                  onClick={async () => {
-                    const p = await browseFolderDesktop()
-                    if (p) setEditPath(p)
-                  }}
-                >
-                  Browse…
-                </Button>
-              )}
-            </div>
+            </Field>
+            {isDesktop && (
+              <Button
+                size="sm"
+                onClick={async () => {
+                  const p = await browseFolderDesktop()
+                  if (p) setEditPath(p)
+                }}
+              >
+                Browse…
+              </Button>
+            )}
           </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
-              Allocation (GB)
-            </label>
-            <div className="flex items-center gap-2">
+          <div className="flex items-end gap-2">
+            <Field label="Allocation (GB)" className="flex-1">
               <Input
                 type="number"
                 min="0.1"
@@ -321,14 +316,17 @@ function VolumeCard({
                 className={inputCls}
                 disabled={clearAlloc}
               />
-              <label className="flex items-center gap-2 text-xs text-fg-muted whitespace-nowrap cursor-pointer select-none">
-                <Checkbox
-                  checked={clearAlloc}
-                  onChange={(e) => setClearAlloc(e.target.checked)}
-                />
-                Unlimited
-              </label>
-            </div>
+            </Field>
+            <Field
+              label="Unlimited"
+              layout="inline"
+              className="text-xs text-fg-muted whitespace-nowrap"
+            >
+              <Checkbox
+                checked={clearAlloc}
+                onChange={(e) => setClearAlloc(e.target.checked)}
+              />
+            </Field>
           </div>
           {updateVolume.error && (
             <p className="text-xs text-danger">
@@ -378,10 +376,7 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
         New volume
       </p>
       <div className="grid grid-cols-3 gap-3">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-fg-muted">
-            Name <span className="text-fg-subtle">(letters, digits, - _)</span>
-          </label>
+        <Field label="Name" hint="letters, digits, - _">
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -389,10 +384,9 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
             autoFocus
             className={inputCls}
           />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-fg-muted">Path</label>
-          <div className="flex gap-2">
+        </Field>
+        <div className="flex items-end gap-2">
+          <Field label="Path" className="flex-1">
             <Input
               value={path}
               onChange={(e) => setPath(normalizePath(e.target.value))}
@@ -400,23 +394,20 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
               placeholder="/media/WD-8TB/civex-objects"
               className={inputCls}
             />
-            {isDesktop && (
-              <Button
-                size="sm"
-                onClick={async () => {
-                  const p = await browseFolderDesktop()
-                  if (p) setPath(p)
-                }}
-              >
-                Browse…
-              </Button>
-            )}
-          </div>
+          </Field>
+          {isDesktop && (
+            <Button
+              size="sm"
+              onClick={async () => {
+                const p = await browseFolderDesktop()
+                if (p) setPath(p)
+              }}
+            >
+              Browse…
+            </Button>
+          )}
         </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-fg-muted">
-            Allocation (GB, optional)
-          </label>
+        <Field label="Allocation (GB, optional)">
           <Input
             type="number"
             min="0.1"
@@ -426,7 +417,7 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
             placeholder="unlimited"
             className={inputCls}
           />
-        </div>
+        </Field>
       </div>
       {addVolume.error && (
         <p className="text-xs text-danger">{errorMessage(addVolume.error)}</p>

@@ -14,6 +14,7 @@ import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import {
   Badge,
   Button,
+  Field,
   Table,
   Thead,
   Th,
@@ -368,14 +369,18 @@ export default function RecordDetailPage() {
           <div className="border border-border rounded-md bg-canvas-subtle p-4 space-y-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {(schema?.fields ?? []).map((field) => (
-                <div key={field.name} className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-fg flex items-center gap-2">
-                    <span className="font-mono">{field.name}</span>
-                    <Badge variant="accent">{field.type}</Badge>
-                    {field.required && (
-                      <Badge variant="success">required</Badge>
-                    )}
-                  </label>
+                <Field
+                  key={field.name}
+                  label={
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono">{field.name}</span>
+                      <Badge variant="accent">{field.type}</Badge>
+                      {field.required && (
+                        <Badge variant="success">required</Badge>
+                      )}
+                    </span>
+                  }
+                >
                   <DynamicField
                     field={field}
                     value={editValues[field.name] ?? record.data[field.name]}
@@ -383,7 +388,7 @@ export default function RecordDetailPage() {
                       setEditValues((prev) => ({ ...prev, [field.name]: v }))
                     }
                   />
-                </div>
+                </Field>
               ))}
             </div>
             {updateRecord.error && (
