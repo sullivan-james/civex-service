@@ -88,6 +88,8 @@ function FileField({
         id={id}
         aria-describedby={ariaDescribedby}
         aria-invalid={ariaInvalid}
+        required={field.required && !ref}
+        aria-required={field.required}
         type="file"
         accept={accept}
         onChange={handleChange}
@@ -95,7 +97,11 @@ function FileField({
         className="block w-full text-sm text-fg file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer disabled:opacity-50"
       />
       {uploading && <p className="text-xs text-fg-muted">Uploading…</p>}
-      {error && <p className="text-xs text-danger">{error}</p>}
+      {error && (
+        <p role="alert" className="text-xs text-danger">
+          {error}
+        </p>
+      )}
     </div>
   )
 }
@@ -168,6 +174,8 @@ function FileListField({
         id={id}
         aria-describedby={ariaDescribedby}
         aria-invalid={ariaInvalid}
+        required={field.required && existing.length === 0}
+        aria-required={field.required}
         type="file"
         multiple
         accept={accept}
@@ -176,7 +184,11 @@ function FileListField({
         className="block w-full text-sm text-fg file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer disabled:opacity-50"
       />
       {uploading && <p className="text-xs text-fg-muted">Uploading…</p>}
-      {error && <p className="text-xs text-danger">{error}</p>}
+      {error && (
+        <p role="alert" className="text-xs text-danger">
+          {error}
+        </p>
+      )}
     </div>
   )
 }
@@ -241,6 +253,8 @@ function ReferenceField({
         id={id}
         aria-describedby={ariaDescribedby}
         aria-invalid={ariaInvalid}
+        required={field.required}
+        aria-required={field.required}
         type="text"
         value={
           selectedId
@@ -306,6 +320,8 @@ export function DynamicField({
             id={id}
             aria-describedby={ariaDescribedby}
             aria-invalid={ariaInvalid}
+            required={field.required}
+            aria-required={field.required}
             value={(value as string) ?? ''}
             onChange={(e) => onChange(e.target.value)}
             className="w-full"
@@ -324,6 +340,8 @@ export function DynamicField({
           id={id}
           aria-describedby={ariaDescribedby}
           aria-invalid={ariaInvalid}
+          required={field.required}
+          aria-required={field.required}
           type="text"
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
@@ -341,6 +359,8 @@ export function DynamicField({
           id={id}
           aria-describedby={ariaDescribedby}
           aria-invalid={ariaInvalid}
+          required={field.required}
+          aria-required={field.required}
           type="number"
           step="1"
           min={rMin}
@@ -360,6 +380,8 @@ export function DynamicField({
           id={id}
           aria-describedby={ariaDescribedby}
           aria-invalid={ariaInvalid}
+          required={field.required}
+          aria-required={field.required}
           type="number"
           step="any"
           min={rMin}
@@ -379,6 +401,8 @@ export function DynamicField({
           id={id}
           aria-describedby={ariaDescribedby}
           aria-invalid={ariaInvalid}
+          required={field.required}
+          aria-required={field.required}
           type="date"
           value={(value as string) ?? ''}
           min={minDate}
@@ -396,6 +420,8 @@ export function DynamicField({
           id={id}
           aria-describedby={ariaDescribedby}
           aria-invalid={ariaInvalid}
+          required={field.required}
+          aria-required={field.required}
           type="datetime-local"
           value={value ? utcToDatetimeLocal(value as string) : ''}
           min={rMin}
@@ -436,6 +462,8 @@ export function DynamicField({
           id={id}
           aria-describedby={ariaDescribedby}
           aria-invalid={ariaInvalid}
+          required={field.required}
+          aria-required={field.required}
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
           className="w-full"
@@ -456,6 +484,8 @@ export function DynamicField({
           id={id}
           aria-describedby={ariaDescribedby}
           aria-invalid={ariaInvalid}
+          required={field.required}
+          aria-required={field.required}
           type="url"
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
@@ -473,6 +503,8 @@ export function DynamicField({
           id={id}
           aria-describedby={ariaDescribedby}
           aria-invalid={ariaInvalid}
+          required={field.required}
+          aria-required={field.required}
           type="text"
           value={listVal}
           onChange={(e) => {
@@ -501,6 +533,8 @@ export function DynamicField({
           id={id}
           aria-describedby={ariaDescribedby}
           aria-invalid={ariaInvalid}
+          required={field.required}
+          aria-required={field.required}
           type="text"
           value={tagsVal}
           onChange={(e) => {
@@ -562,6 +596,8 @@ export function DynamicField({
           id={id}
           aria-describedby={ariaDescribedby}
           aria-invalid={ariaInvalid}
+          required={field.required}
+          aria-required={field.required}
           type="text"
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}

@@ -98,6 +98,7 @@ export function WorkflowRunModal({
                 )}
               </>
             }
+            required
           >
             <Input
               autoFocus={!prefilled}
@@ -106,31 +107,44 @@ export function WorkflowRunModal({
               onChange={(e) => setRecordId(e.target.value)}
               placeholder="Short ID or full UUID"
               readOnly={!!prefilled}
-              required
               className={`w-full font-mono ${prefilled ? 'bg-canvas-subtle text-fg-muted' : ''}`}
             />
           </Field>
 
           {filesInputs.map(([inputName, decl]) => {
             const chosen = fileInputs[inputName] ?? []
+            const dropzoneLabel = decl.label ?? inputName
             return (
-              <div key={inputName}>
-                <Field label={decl.label ?? inputName} hint={decl.description}>
-                  <input
-                    ref={(el) => {
-                      fileRefs.current[inputName] = el
-                    }}
-                    type="file"
-                    multiple
-                    className="hidden"
-                    onChange={(e) =>
-                      handleFileChange(inputName, e.target.files)
-                    }
-                  />
-                </Field>
+              <div key={inputName} className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-fg-muted">
+                  {dropzoneLabel}
+                </span>
+                {decl.description && (
+                  <p className="text-xs text-fg-subtle">{decl.description}</p>
+                )}
+                <input
+                  ref={(el) => {
+                    fileRefs.current[inputName] = el
+                  }}
+                  type="file"
+                  multiple
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  className="hidden"
+                  onChange={(e) => handleFileChange(inputName, e.target.files)}
+                />
                 <div
-                  className="border-2 border-dashed border-border rounded-md px-4 py-6 text-center cursor-pointer hover:border-accent hover:bg-canvas-subtle transition-colors"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${dropzoneLabel} — drop files here or browse`}
+                  className="border-2 border-dashed border-border rounded-md px-4 py-6 text-center cursor-pointer hover:border-accent hover:bg-canvas-subtle transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   onClick={() => fileRefs.current[inputName]?.click()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      fileRefs.current[inputName]?.click()
+                    }
+                  }}
                   onDragOver={(e) => {
                     e.preventDefault()
                     e.dataTransfer.dropEffect = 'copy'
@@ -168,7 +182,11 @@ export function WorkflowRunModal({
             )
           })}
 
-          {error && <p className="text-sm text-danger">{error}</p>}
+          {error && (
+            <p role="alert" className="text-sm text-danger">
+              {error}
+            </p>
+          )}
         </form>
       </ModalBody>
 

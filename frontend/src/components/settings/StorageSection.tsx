@@ -235,7 +235,10 @@ function VolumeCard({
 
       {removeError && (
         <div className="px-4 pb-3">
-          <p className="text-xs text-danger bg-danger-subtle border border-danger-muted rounded-md px-3 py-2">
+          <p
+            role="alert"
+            className="text-xs text-danger bg-danger-subtle border border-danger-muted rounded-md px-3 py-2"
+          >
             {removeError}
           </p>
         </div>
@@ -329,7 +332,7 @@ function VolumeCard({
             </Field>
           </div>
           {updateVolume.error && (
-            <p className="text-xs text-danger">
+            <p role="alert" className="text-xs text-danger">
               {errorMessage(updateVolume.error)}
             </p>
           )}
@@ -376,7 +379,7 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
         New volume
       </p>
       <div className="grid grid-cols-3 gap-3">
-        <Field label="Name" hint="letters, digits, - _">
+        <Field label="Name" hint="letters, digits, - _" required>
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -386,7 +389,7 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
           />
         </Field>
         <div className="flex items-end gap-2">
-          <Field label="Path" className="flex-1">
+          <Field label="Path" className="flex-1" required>
             <Input
               value={path}
               onChange={(e) => setPath(normalizePath(e.target.value))}
@@ -420,7 +423,9 @@ function AddVolumeForm({ onDone }: { onDone: () => void }) {
         </Field>
       </div>
       {addVolume.error && (
-        <p className="text-xs text-danger">{errorMessage(addVolume.error)}</p>
+        <p role="alert" className="text-xs text-danger">
+          {errorMessage(addVolume.error)}
+        </p>
       )}
       <div className="flex gap-2">
         <Button

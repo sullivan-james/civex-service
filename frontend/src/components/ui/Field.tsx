@@ -13,6 +13,10 @@ export interface FieldProps {
   /** Column span out of 12 when placed inside a `FormGrid`. Omit outside a
    * form grid — width should never come from a `w-*` class. */
   span?: FieldSpan
+  /** Keeps the label in the accessibility tree but visually hides it — for
+   * search/filter controls whose purpose is conveyed by surrounding UI, so a
+   * placeholder alone isn't left standing in as the accessible name. */
+  hideLabel?: boolean
   className?: string
   children: ReactElement
 }
@@ -24,6 +28,7 @@ export function Field({
   required = false,
   layout = 'stack',
   span,
+  hideLabel = false,
   className = '',
   children,
 }: FieldProps) {
@@ -43,6 +48,10 @@ export function Field({
       : describedBy
   }
   if (error) controlOverrides['aria-invalid'] = true
+  if (required) {
+    controlOverrides.required = true
+    controlOverrides['aria-required'] = true
+  }
 
   const control = isValidElement(children)
     ? cloneElement(children, controlOverrides)
@@ -58,7 +67,11 @@ export function Field({
     layout === 'inline' ? (
       <label
         htmlFor={controlId}
-        className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none"
+        className={
+          hideLabel
+            ? 'sr-only'
+            : 'flex items-center gap-2 text-sm text-fg cursor-pointer select-none'
+        }
       >
         {control}
         <span>
@@ -67,7 +80,10 @@ export function Field({
         </span>
       </label>
     ) : (
-      <label htmlFor={controlId} className="text-xs font-medium text-fg-muted">
+      <label
+        htmlFor={controlId}
+        className={hideLabel ? 'sr-only' : 'text-xs font-medium text-fg-muted'}
+      >
         {label}
         {requiredMark}
       </label>
@@ -85,7 +101,7 @@ export function Field({
         </p>
       )}
       {error && (
-        <p id={errorId} className="text-xs text-danger">
+        <p id={errorId} role="alert" className="text-xs text-danger">
           {error}
         </p>
       )}

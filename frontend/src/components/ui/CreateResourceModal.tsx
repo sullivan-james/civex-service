@@ -95,7 +95,9 @@ export function CreateResourceModal({
           </Field>
           {extraFields}
           {error != null && (
-            <p className="text-xs text-danger">{errorMessage(error)}</p>
+            <p role="alert" className="text-xs text-danger">
+              {errorMessage(error)}
+            </p>
           )}
         </ModalBody>
         <ModalFooter>

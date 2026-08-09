@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { ResolvedEntry, ToolCallEntry } from '../../types/ai'
 import { applyProposal, isSaveToolName, parseResult } from './proposals'
-import { Input } from '../ui'
+import { Field, Input } from '../ui'
 import { AlertTriangle } from '../ui/icons'
 
 // Pinned above the input while a proposal awaits the user.
@@ -65,21 +65,26 @@ export default function ApprovalBar({
       <div className="text-sm text-fg mb-2">{summary}</div>
       {isSaveTool && (
         <div className="flex items-center gap-2 mb-2">
-          <Input
-            value={stem}
-            onChange={(e) => setStem(e.target.value)}
-            placeholder={
-              entry.name === 'save_workflow' ? 'filename-stem' : 'plugin_name'
-            }
-            size="sm"
-            className="flex-1"
-          />
+          <Field label="Filename" hideLabel className="flex-1">
+            <Input
+              value={stem}
+              onChange={(e) => setStem(e.target.value)}
+              placeholder={
+                entry.name === 'save_workflow' ? 'filename-stem' : 'plugin_name'
+              }
+              size="sm"
+            />
+          </Field>
           <span className="text-fg-subtle text-xs">
             {entry.name === 'save_workflow' ? '.yaml' : '.py'}
           </span>
         </div>
       )}
-      {error && <div className="mb-2 text-xs text-danger">{error}</div>}
+      {error && (
+        <div role="alert" className="mb-2 text-xs text-danger">
+          {error}
+        </div>
+      )}
       <div className="flex gap-2">
         <button
           onClick={approve}

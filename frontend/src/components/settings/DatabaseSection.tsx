@@ -6,7 +6,7 @@ import {
   useSetupDockerDb,
   useTeardownDockerDb,
 } from '../../hooks/useDb'
-import { Button, Input, Skeleton, ErrorState } from '../ui'
+import { Button, Field, Input, Skeleton, ErrorState } from '../ui'
 import { errorMessage } from '../../lib/errors'
 
 const inputCls = 'w-full font-mono'
@@ -144,15 +144,17 @@ export default function DatabaseSection() {
           </Button>
         ) : (
           <div className="space-y-2">
-            <Input
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="postgresql+psycopg2://user:pass@host:5432/dbname"
-              className={inputCls}
-              autoFocus
-            />
+            <Field label="Database connection URL" hideLabel>
+              <Input
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                placeholder="postgresql+psycopg2://user:pass@host:5432/dbname"
+                className={inputCls}
+                autoFocus
+              />
+            </Field>
             {setUrl.error && (
-              <p className="text-xs text-danger">
+              <p role="alert" className="text-xs text-danger">
                 {errorMessage(setUrl.error)}
               </p>
             )}

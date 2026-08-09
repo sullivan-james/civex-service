@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   type AiConfig,
   type OllamaModel,
@@ -29,7 +29,6 @@ function detectPreset(cfg: AiConfig | null): PresetProviderId {
 }
 
 export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
-  const modelId = useId()
   const [cfg, setCfg] = useState<AiConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [preset, setPreset] = useState<PresetProviderId>('groq')
@@ -446,12 +445,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
 
       {/* Model */}
       <div>
-        <label
-          htmlFor={modelId}
-          className="block text-xs font-medium text-fg mb-1"
-        >
-          Model
-        </label>
+        <span className="block text-xs font-medium text-fg mb-1">Model</span>
         {isOllama ? (
           ollamaLoading ? (
             <div className="flex items-center gap-2 text-xs text-fg-muted py-2">
@@ -471,20 +465,23 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
             </div>
           ) : ollamaError ? (
             <div className="space-y-2">
-              <p className="text-xs text-danger">{ollamaError}</p>
+              <p role="alert" className="text-xs text-danger">
+                {ollamaError}
+              </p>
               <p className="text-xs text-fg-subtle">
                 Make sure Ollama is running:{' '}
                 <code className="bg-border-muted px-1 rounded-md">
                   ollama serve
                 </code>
               </p>
-              <Input
-                id={modelId}
-                value={customModel}
-                onChange={(e) => setCustomModel(e.target.value)}
-                placeholder="qwen2.5:7b"
-                className="w-full"
-              />
+              <Field label="Model" hideLabel>
+                <Input
+                  value={customModel}
+                  onChange={(e) => setCustomModel(e.target.value)}
+                  placeholder="qwen2.5:7b"
+                  className="w-full"
+                />
+              </Field>
             </div>
           ) : ollamaModels.length === 0 ? (
             <div className="space-y-2">
@@ -498,9 +495,14 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
               </p>
             </div>
           ) : (
-            <div className="space-y-1">
+            <Field
+              label="Model"
+              hideLabel
+              hint={`${ollamaModels.length} model${
+                ollamaModels.length !== 1 ? 's' : ''
+              } installed. Tool calling requires qwen2.5, llama3.1, or mistral.`}
+            >
               <Select
-                id={modelId}
                 value={customModel}
                 onChange={(e) => setCustomModel(e.target.value)}
                 className="w-full"
@@ -514,29 +516,25 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                   </option>
                 ))}
               </Select>
-              <p className="text-xs text-fg-subtle">
-                {ollamaModels.length} model
-                {ollamaModels.length !== 1 ? 's' : ''} installed. Tool calling
-                requires qwen2.5, llama3.1, or mistral.
-              </p>
-            </div>
+            </Field>
           )
         ) : isFreeText || presetObj.models.length === 0 ? (
           <>
-            <Input
-              id={modelId}
-              value={customModel}
-              onChange={(e) => setCustomModel(e.target.value)}
-              placeholder={
-                isAnthropic
-                  ? 'claude-sonnet-4-6'
-                  : isOpenRouter
-                    ? 'e.g. anthropic/claude-3.5-sonnet (paid) or the free options below'
-                    : 'model name'
-              }
-              list={isOpenRouter ? 'openrouter-model-suggestions' : undefined}
-              className="w-full"
-            />
+            <Field label="Model" hideLabel>
+              <Input
+                value={customModel}
+                onChange={(e) => setCustomModel(e.target.value)}
+                placeholder={
+                  isAnthropic
+                    ? 'claude-sonnet-4-6'
+                    : isOpenRouter
+                      ? 'e.g. anthropic/claude-3.5-sonnet (paid) or the free options below'
+                      : 'model name'
+                }
+                list={isOpenRouter ? 'openrouter-model-suggestions' : undefined}
+                className="w-full"
+              />
+            </Field>
             {isOpenRouter && (
               <datalist id="openrouter-model-suggestions">
                 {presetObj.models.map((m) => (
@@ -548,22 +546,27 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
             )}
           </>
         ) : (
-          <Select
-            id={modelId}
-            value={effectiveModel || presetObj.models[0]?.id || ''}
-            onChange={(e) => setModel(e.target.value)}
-            className="w-full"
-          >
-            {presetObj.models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </Select>
+          <Field label="Model" hideLabel>
+            <Select
+              value={effectiveModel || presetObj.models[0]?.id || ''}
+              onChange={(e) => setModel(e.target.value)}
+              className="w-full"
+            >
+              {presetObj.models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
         )}
       </div>
 
-      {error && <p className="text-xs text-danger">{error}</p>}
+      {error && (
+        <p role="alert" className="text-xs text-danger">
+          {error}
+        </p>
+      )}
       {success && (
         <p className="inline-flex items-center gap-1 text-xs text-success-emphasis">
           <Check size={12} /> Saved
