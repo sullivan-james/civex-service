@@ -181,7 +181,11 @@ export function FieldForm(props: FieldFormProps) {
         autoFocus
       />
       {mode === 'create' ? (
-        <Field label="Type" span={4}>
+        <Field
+          label="Type"
+          span={4}
+          hint="How values are stored and validated — pick reference to link to another record type."
+        >
           <Select
             size="sm"
             value={type}
@@ -208,7 +212,12 @@ export function FieldForm(props: FieldFormProps) {
       </Field>
 
       {mode === 'create' && type === 'reference' && (
-        <Field label="Target schema" span={6} required>
+        <Field
+          label="Target schema"
+          span={6}
+          required
+          hint="Records in this field can only point to records of this type."
+        >
           <Select
             size="sm"
             value={refSchema}
@@ -293,7 +302,11 @@ export function FieldForm(props: FieldFormProps) {
       )}
       {(type === 'file' || type === 'file_list') && (
         <FormSection title="Restrictions">
-          <Field label="Accept" span={6}>
+          <Field
+            label="Accept"
+            span={6}
+            hint="Comma-separated file extensions or MIME types to allow."
+          >
             <Input
               size="sm"
               value={accept}

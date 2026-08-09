@@ -359,7 +359,7 @@ export default function CollectionDetailPage() {
           onSubmit={handleAddRecord}
           onCancel={() => setAddingRecord(false)}
           isPending={createRecord.isPending}
-          error={createRecord.error ? errorMessage(createRecord.error) : null}
+          error={createRecord.error}
         />
       )}
 

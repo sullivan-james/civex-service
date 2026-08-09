@@ -299,6 +299,11 @@ export default function SchemaDetailPage() {
             </Button>
           )}
         </div>
+        <p className="text-xs text-fg-subtle mb-2">
+          Click <Star size={11} className="inline align-text-top" /> to mark a
+          field as a display field — its value is used to name records of this
+          type wherever they're listed.
+        </p>
 
         <Table>
           <Thead>

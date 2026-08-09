@@ -2,11 +2,13 @@ import { useState } from 'react'
 import type { Schema } from '../../api/schemas'
 import type { FileRef } from './DynamicField'
 import { useRecords } from '../../hooks/useRecords'
-import { Button, Badge, Field, Input, Select } from '../ui'
+import { Button, Badge, Field, Input, Select, FormError } from '../ui'
 import { ArrowUp, ArrowRight, ScanText } from '../ui/icons'
 import { DynamicField } from './DynamicField'
 import { datetimeLocalToUTC } from '../../utils/dates'
 import { displayLabel } from '../../utils/naming'
+import { errorMessage } from '../../lib/errors'
+import { fieldErrorInfo } from '../../utils/validationErrors'
 
 interface Props {
   schemas: Schema[]
@@ -18,7 +20,8 @@ interface Props {
   ) => void
   onCancel: () => void
   isPending?: boolean
-  error?: string | null
+  /** Raw mutation error — parsed into per-field messages against `schema.fields`. */
+  error?: unknown
   selectableSchemaIds?: string[]
   lockedParentRecordId?: string
 }
@@ -409,6 +412,12 @@ export function RecordForm({
 
   if (!schema) return null
 
+  const { fieldErrors, generalMessage, technical } = fieldErrorInfo(
+    error,
+    schema.fields.map((f) => f.name),
+    errorMessage,
+  )
+
   // Collect available file sources from currently-uploaded file fields
   const fileSources = collectFileSources(values, schema.fields)
 
@@ -532,6 +541,7 @@ export function RecordForm({
                       )}
                     </span>
                   }
+                  error={fieldErrors[field.name]}
                 >
                   <DynamicField
                     field={field}
@@ -557,11 +567,7 @@ export function RecordForm({
         </div>
       )}
 
-      {error && (
-        <p role="alert" className="text-xs text-danger">
-          {error}
-        </p>
-      )}
+      <FormError message={generalMessage} technical={technical} />
 
       <div className="flex gap-2 pt-1">
         <Button
