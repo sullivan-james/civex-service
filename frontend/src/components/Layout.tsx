@@ -1,10 +1,17 @@
-import { type ReactNode, useState } from 'react'
-import { NavLink, useLocation, useNavigate } from 'react-router'
+import {
+  type ComponentType,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
+import { NavLink } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { remoteApi } from '../api/remote'
 import { errorMessage } from '../lib/errors'
 import AiAttestationGate from './ai/AiAttestationGate'
 import { useToast } from './ui/ToastProvider'
+import { IconButton } from './ui/IconButton'
 import {
   RefreshCw,
   Sparkles,
@@ -15,6 +22,15 @@ import {
   FolderOpen,
   FolderPlus,
   Folder,
+  LayoutGrid,
+  Database,
+  Workflow,
+  ListChecks,
+  SquareTerminal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Menu,
+  X,
 } from './ui/icons'
 
 declare global {
@@ -41,21 +57,82 @@ function fileManagerLabel(): string {
   return 'Open data folder'
 }
 
-const tabs = [
-  { to: '/collections', label: 'Collections' },
-  { to: '/schemas', label: 'Schemas' },
-  { to: '/workflows', label: 'Workflows' },
-  { to: '/runs', label: 'Runs' },
-  { to: '/terminal', label: 'Terminal' },
+const NAV_COLLAPSED_KEY = 'civex-nav-collapsed'
+
+// The breakpoint at which the persistent rail gives way to a drawer (not one
+// of Tailwind's default steps) is written out as the literal `min-[900px]:`
+// variant at each call site below — Tailwind's static scanner extracts class
+// candidates from the source text itself, so building the variant from a JS
+// constant at runtime would leave the styles ungenerated.
+
+function readCollapsed(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    localStorage.getItem(NAV_COLLAPSED_KEY) === '1'
+  )
+}
+
+interface NavItemDef {
+  to: string
+  label: string
+  icon: ComponentType<{
+    size?: number
+    className?: string
+    'aria-hidden'?: boolean | 'true'
+  }>
+}
+
+const primaryNavItems: NavItemDef[] = [
+  { to: '/collections', label: 'Collections', icon: LayoutGrid },
+  { to: '/schemas', label: 'Schemas', icon: Database },
+  { to: '/workflows', label: 'Workflows', icon: Workflow },
+  { to: '/runs', label: 'Runs', icon: ListChecks },
+  { to: '/terminal', label: 'Terminal', icon: SquareTerminal },
 ]
+
+const settingsNavItem: NavItemDef = {
+  to: '/settings',
+  label: 'Settings',
+  icon: Settings,
+}
+
+function NavItem({
+  to,
+  label,
+  icon: Icon,
+  collapsed,
+  onNavigate,
+}: NavItemDef & { collapsed: boolean; onNavigate?: () => void }) {
+  return (
+    <NavLink
+      to={to}
+      onClick={onNavigate}
+      title={collapsed ? label : undefined}
+      aria-label={collapsed ? label : undefined}
+      className={({ isActive }) =>
+        `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+          collapsed ? 'justify-center px-0' : ''
+        } ${
+          isActive
+            ? 'bg-accent-subtle text-accent'
+            : 'text-fg-muted hover:bg-canvas-inset hover:text-fg'
+        }`
+      }
+    >
+      <Icon size={18} className="shrink-0" aria-hidden="true" />
+      {!collapsed && <span className="truncate">{label}</span>}
+    </NavLink>
+  )
+}
 
 export default function Layout({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
-  const navigate = useNavigate()
-  const location = useLocation()
-  const settingsActive = location.pathname.startsWith('/settings')
   const [syncing, setSyncing] = useState<'push' | 'pull' | null>(null)
   const [aiOpen, setAiOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(readCollapsed)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const drawerRef = useRef<HTMLDivElement>(null)
   const toast = useToast()
 
   const { data: remote } = useQuery({
@@ -64,6 +141,34 @@ export default function Layout({ children }: { children: ReactNode }) {
     retry: false,
     staleTime: 30_000,
   })
+
+  useEffect(() => {
+    if (!drawerOpen) return
+    drawerRef.current?.focus()
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') closeDrawer()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [drawerOpen])
+
+  function closeDrawer() {
+    setDrawerOpen(false)
+    menuButtonRef.current?.focus()
+  }
+
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev
+      localStorage.setItem(NAV_COLLAPSED_KEY, next ? '1' : '0')
+      return next
+    })
+  }
 
   async function runSync(op: 'push' | 'pull') {
     setSyncing(op)
@@ -86,11 +191,21 @@ export default function Layout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Top navbar — always dark regardless of theme, so it needs its own
+    <div className="h-screen flex flex-col">
+      {/* Top bar — always dark regardless of theme, so it needs its own
           border to stay visible against a dark-theme canvas instead of
-          blending into it. */}
-      <header className="bg-nav-bg border-b border-nav-border px-6 py-3 flex items-center gap-4">
+          blending into it. Global actions only; section navigation lives
+          in the left rail below. */}
+      <header className="shrink-0 bg-nav-bg border-b border-nav-border px-4 py-2.5 flex items-center gap-3">
+        <button
+          ref={menuButtonRef}
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Open navigation"
+          className="min-[900px]:hidden inline-flex items-center justify-center h-8 w-8 rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
+        >
+          <Menu size={16} aria-hidden="true" />
+        </button>
+
         <span className="text-nav-fg font-semibold text-base tracking-tight">
           civex
         </span>
@@ -114,19 +229,6 @@ export default function Layout({ children }: { children: ReactNode }) {
           }`}
         >
           <Sparkles size={12} /> Ask AI
-        </button>
-
-        <button
-          onClick={() => navigate('/settings')}
-          title="Settings"
-          className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border transition-colors ${
-            settingsActive
-              ? 'border-accent bg-accent text-fg-on-emphasis'
-              : 'border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg'
-          }`}
-        >
-          <Settings size={12} />
-          Settings
         </button>
 
         {isDesktop && (
@@ -188,48 +290,108 @@ export default function Layout({ children }: { children: ReactNode }) {
         )}
       </header>
 
-      {/* Tab bar */}
-      <div className="border-b border-border bg-canvas px-6">
-        <nav className="flex gap-1 -mb-px">
-          {tabs.map(({ to, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) =>
-                `px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  isActive
-                    ? 'border-danger-subtle-border text-fg'
-                    : 'border-transparent text-fg-muted hover:text-fg hover:border-border'
-                }`
-              }
-            >
-              {label}
-            </NavLink>
-          ))}
-          <a
-            href="/docs"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 px-4 py-3 text-sm font-medium border-b-2 border-transparent text-fg-muted hover:text-fg hover:border-border transition-colors"
+      <div className="flex-1 flex min-h-0">
+        {/* Persistent left nav, collapsible to an icon rail. Hidden below
+            the drawer breakpoint in favour of the off-canvas nav rendered
+            further down. */}
+        <nav
+          aria-label="Primary"
+          className={`hidden min-[900px]:flex shrink-0 flex-col border-r border-border bg-canvas-subtle py-3 ${
+            collapsed ? 'w-16 px-2' : 'w-56 px-3'
+          }`}
+        >
+          <div
+            className={`flex pb-2 ${collapsed ? 'justify-center' : 'justify-end'}`}
           >
-            API docs <ExternalLink size={12} />
-          </a>
+            <IconButton
+              icon={collapsed ? PanelLeftOpen : PanelLeftClose}
+              aria-label={
+                collapsed ? 'Expand navigation' : 'Collapse navigation'
+              }
+              onClick={toggleCollapsed}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            {primaryNavItems.map((item) => (
+              <NavItem key={item.to} {...item} collapsed={collapsed} />
+            ))}
+          </div>
+          <div className="flex-1" />
+          <div className="flex flex-col gap-1 pt-2 border-t border-border-muted">
+            <NavItem {...settingsNavItem} collapsed={collapsed} />
+          </div>
         </nav>
+
+        {/* Off-canvas nav drawer for narrow viewports. */}
+        {drawerOpen && (
+          <div className="fixed inset-0 z-40 min-[900px]:hidden">
+            <div
+              className="absolute inset-0 bg-overlay-scrim"
+              onClick={closeDrawer}
+            />
+            <div
+              ref={drawerRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Primary navigation"
+              tabIndex={-1}
+              className="absolute inset-y-0 left-0 w-64 max-w-[80vw] bg-canvas border-r border-border shadow-lg flex flex-col py-3 px-3 focus:outline-none"
+            >
+              <div className="flex items-center justify-between pb-2">
+                <span className="text-sm font-semibold text-fg px-1">
+                  Navigation
+                </span>
+                <IconButton
+                  icon={X}
+                  aria-label="Close navigation"
+                  onClick={closeDrawer}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                {primaryNavItems.map((item) => (
+                  <NavItem
+                    key={item.to}
+                    {...item}
+                    collapsed={false}
+                    onNavigate={closeDrawer}
+                  />
+                ))}
+              </div>
+              <div className="flex-1" />
+              <div className="flex flex-col gap-1 pt-2 border-t border-border-muted">
+                <NavItem
+                  {...settingsNavItem}
+                  collapsed={false}
+                  onNavigate={closeDrawer}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Page content — its own scroll container, independent of the nav
+            rail and top bar. */}
+        <main className="flex-1 min-w-0 overflow-y-auto">
+          <div className="max-w-[1600px] mx-auto px-6 py-6">{children}</div>
+        </main>
       </div>
 
-      {/* Page content */}
-      <main className="flex-1 px-6 py-6 max-w-5xl w-full mx-auto">
-        {children}
-      </main>
-
       {/* Footer */}
-      <footer className="border-t border-border bg-canvas px-6 py-3 text-center">
+      <footer className="shrink-0 border-t border-border bg-canvas px-6 py-3 flex items-center justify-center gap-4">
         <NavLink
           to="/legal"
           className="text-xs text-fg-muted hover:text-fg hover:underline"
         >
           Licenses &amp; policies
         </NavLink>
+        <a
+          href="/docs"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg hover:underline"
+        >
+          API docs <ExternalLink size={12} />
+        </a>
       </footer>
 
       <AiAttestationGate open={aiOpen} onClose={() => setAiOpen(false)} />
