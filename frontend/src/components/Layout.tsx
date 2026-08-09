@@ -82,12 +82,37 @@ interface NavItemDef {
   }>
 }
 
-const primaryNavItems: NavItemDef[] = [
-  { to: '/collections', label: 'Collections', icon: LayoutGrid },
-  { to: '/schemas', label: 'Schemas', icon: Database },
-  { to: '/workflows', label: 'Workflows', icon: Workflow },
-  { to: '/runs', label: 'Runs', icon: ListChecks },
-  { to: '/terminal', label: 'Terminal', icon: SquareTerminal },
+interface NavGroupDef {
+  heading: string
+  items: NavItemDef[]
+  // De-emphasized groups are setup-time or power-user surfaces a
+  // first-time researcher doesn't need on day one (Structure, Advanced) —
+  // as opposed to the everyday surfaces (Data, Automation).
+  secondary?: boolean
+}
+
+const navGroups: NavGroupDef[] = [
+  {
+    heading: 'Data',
+    items: [{ to: '/collections', label: 'Collections', icon: LayoutGrid }],
+  },
+  {
+    heading: 'Structure',
+    items: [{ to: '/schemas', label: 'Schemas', icon: Database }],
+    secondary: true,
+  },
+  {
+    heading: 'Automation',
+    items: [
+      { to: '/workflows', label: 'Workflows', icon: Workflow },
+      { to: '/runs', label: 'Runs', icon: ListChecks },
+    ],
+  },
+  {
+    heading: 'Advanced',
+    items: [{ to: '/terminal', label: 'Terminal', icon: SquareTerminal }],
+    secondary: true,
+  },
 ]
 
 const settingsNavItem: NavItemDef = {
@@ -101,8 +126,13 @@ function NavItem({
   label,
   icon: Icon,
   collapsed,
+  secondary,
   onNavigate,
-}: NavItemDef & { collapsed: boolean; onNavigate?: () => void }) {
+}: NavItemDef & {
+  collapsed: boolean
+  secondary?: boolean
+  onNavigate?: () => void
+}) {
   return (
     <NavLink
       to={to}
@@ -115,13 +145,66 @@ function NavItem({
         } ${
           isActive
             ? 'bg-accent-subtle text-accent'
-            : 'text-fg-muted hover:bg-canvas-inset hover:text-fg'
+            : secondary
+              ? 'text-fg-subtle hover:bg-canvas-inset hover:text-fg'
+              : 'text-fg-muted hover:bg-canvas-inset hover:text-fg'
         }`
       }
     >
       <Icon size={18} className="shrink-0" aria-hidden="true" />
       {!collapsed && <span className="truncate">{label}</span>}
     </NavLink>
+  )
+}
+
+function NavGroupHeading({
+  children,
+  secondary,
+}: {
+  children: ReactNode
+  secondary?: boolean
+}) {
+  return (
+    <div
+      className={`px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wider first:pt-0 text-fg-subtle ${
+        secondary ? 'opacity-70' : ''
+      }`}
+    >
+      {children}
+    </div>
+  )
+}
+
+function NavGroups({
+  collapsed,
+  onNavigate,
+}: {
+  collapsed: boolean
+  onNavigate?: () => void
+}) {
+  return (
+    <div className="flex flex-col">
+      {navGroups.map((group) => (
+        <div key={group.heading}>
+          {!collapsed && (
+            <NavGroupHeading secondary={group.secondary}>
+              {group.heading}
+            </NavGroupHeading>
+          )}
+          <div className="flex flex-col gap-1">
+            {group.items.map((item) => (
+              <NavItem
+                key={item.to}
+                {...item}
+                collapsed={collapsed}
+                secondary={group.secondary}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -206,9 +289,12 @@ export default function Layout({ children }: { children: ReactNode }) {
           <Menu size={16} aria-hidden="true" />
         </button>
 
-        <span className="text-nav-fg font-semibold text-base tracking-tight">
+        <NavLink
+          to="/"
+          className="text-nav-fg font-semibold text-base tracking-tight"
+        >
           civex
-        </span>
+        </NavLink>
 
         <button
           onClick={() => queryClient.refetchQueries({ type: 'active' })}
@@ -311,13 +397,10 @@ export default function Layout({ children }: { children: ReactNode }) {
               onClick={toggleCollapsed}
             />
           </div>
-          <div className="flex flex-col gap-1">
-            {primaryNavItems.map((item) => (
-              <NavItem key={item.to} {...item} collapsed={collapsed} />
-            ))}
-          </div>
+          <NavGroups collapsed={collapsed} />
           <div className="flex-1" />
           <div className="flex flex-col gap-1 pt-2 border-t border-border-muted">
+            {!collapsed && <NavGroupHeading>Settings</NavGroupHeading>}
             <NavItem {...settingsNavItem} collapsed={collapsed} />
           </div>
         </nav>
@@ -347,18 +430,10 @@ export default function Layout({ children }: { children: ReactNode }) {
                   onClick={closeDrawer}
                 />
               </div>
-              <div className="flex flex-col gap-1">
-                {primaryNavItems.map((item) => (
-                  <NavItem
-                    key={item.to}
-                    {...item}
-                    collapsed={false}
-                    onNavigate={closeDrawer}
-                  />
-                ))}
-              </div>
+              <NavGroups collapsed={false} onNavigate={closeDrawer} />
               <div className="flex-1" />
               <div className="flex flex-col gap-1 pt-2 border-t border-border-muted">
+                <NavGroupHeading>Settings</NavGroupHeading>
                 <NavItem
                   {...settingsNavItem}
                   collapsed={false}
