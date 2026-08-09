@@ -9,6 +9,8 @@ This means:
 - **Files are immutable.** The SHA-256 hash is the address; the content never changes.
 - **Filenames are cosmetic.** The stored filename is the original name you uploaded, but retrieval is always by hash.
 
+Each volume also has a `manifest.jsonl` at its root — one JSON line per object (`{"sha256", "filename", "size"}`), appended the first time that object is written. Object files themselves carry no filename or extension, so the manifest is what makes a volume directory self-describing on its own: even without the database, the app, or `civex dump`, a plain copy of a volume's files tells you what each blob originally was.
+
 ## File field types
 
 | Type | Stores |

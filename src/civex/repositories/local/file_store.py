@@ -9,6 +9,13 @@ passes both gates:
   1. Civex allocation: civex_used + incoming_size <= allocated_gb
   2. Physical disk headroom: disk_free > full_below_gb
 
+Each volume also gets a <volume_path>/manifest.jsonl -- one JSON line per
+object recording {sha256, filename, size} the first time it's written. Object
+paths carry no filename or extension of their own, so this is what makes a
+copy of the volume directory self-describing without the database: someone
+with only the raw files (no civex install, no DB) can still tell what each
+blob originally was.
+
 On read, volumes are searched in definition order. The `volume` field in
 FileRef is a fast hint but resolution always falls back to scanning.
 """
@@ -17,6 +24,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import json
 import shutil
 from pathlib import Path
 
@@ -58,6 +66,7 @@ class VolumeAwareFileObjectStore:
             try:
                 dest.write_bytes(data)
                 self._used_cache.pop(vol_name, None)
+                self._append_manifest(vol_name, sha256, original_filename, size)
                 return FileRef(
                     sha256=sha256,
                     filename=original_filename,
@@ -161,6 +170,26 @@ class VolumeAwareFileObjectStore:
     def _object_path(self, sha256: str, volume: str) -> Path:
         vc = self._cfg.volumes[volume]
         return self._resolve_path(vc) / sha256[:2] / sha256[2:]
+
+    def _append_manifest(
+        self, volume: str, sha256: str, filename: str, size: int
+    ) -> None:
+        """Append one JSONL line recording this object's original filename.
+
+        Only called on first write of a given hash (the idempotent-existing
+        path in put() returns before reaching this), so each hash gets one
+        line -- or, if two different uploads race to store the same content
+        under different names, one line per name, which is useful rather
+        than a bug.
+        """
+        vc = self._cfg.volumes[volume]
+        manifest_path = self._resolve_path(vc) / "manifest.jsonl"
+        line = json.dumps(
+            {"sha256": sha256, "filename": filename, "size": size},
+            ensure_ascii=False,
+        )
+        with manifest_path.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
 
     def _find_object(self, sha256: str) -> Path | None:
         for vc in self._cfg.volumes.values():
