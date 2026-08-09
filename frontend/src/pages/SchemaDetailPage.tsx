@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router'
 import * as restrictions from '../utils/restrictions'
-import type { Field } from '../api/schemas'
+import type { Field as SchemaField } from '../api/schemas'
 import { errorMessage } from '../lib/errors'
 import {
   useSchema,
@@ -26,6 +26,7 @@ import {
   DetailSkeleton,
   TableSkeleton,
   ErrorState,
+  Field,
   Input,
   Select,
   Checkbox,
@@ -90,22 +91,16 @@ function MetaEditor({
 
   return (
     <div className="border border-border rounded-md p-4 bg-canvas-subtle mb-4 flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
-          Name
-        </label>
+      <Field label="Name">
         <Input value={name} onChange={(e) => setName(e.target.value)} />
-      </div>
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
-          Description
-        </label>
+      </Field>
+      <Field label="Description">
         <Input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="No description"
         />
-      </div>
+      </Field>
       {updateSchema.error && (
         <p className="text-xs text-danger">
           {errorMessage(updateSchema.error)}
@@ -259,13 +254,12 @@ function AddFieldForm({
               ))}
           </Select>
         )}
-        <label className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none">
+        <Field label="Required" layout="inline">
           <Checkbox
             checked={required}
             onChange={(e) => setRequired(e.target.checked)}
           />
-          Required
-        </label>
+        </Field>
         <div className="flex gap-2 ml-auto">
           <Button
             variant="primary"
@@ -284,8 +278,7 @@ function AddFieldForm({
       {/* Default value */}
       {showDefault && (
         <div className="flex items-center gap-3 flex-wrap">
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Default value
+          <Field label="Default value">
             <Input
               size="sm"
               value={defaultVal}
@@ -293,18 +286,17 @@ function AddFieldForm({
               placeholder="none"
               className="w-40"
             />
-          </label>
+          </Field>
         </div>
       )}
 
       {/* Row 2: type-specific restrictions */}
       {(type === 'integer' || type === 'float') && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium">
+        <div className="flex items-end gap-3 flex-wrap">
+          <span className="text-xs text-fg-muted font-medium pb-2">
             Restrictions:
           </span>
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Min
+          <Field label="Min">
             <Input
               size="sm"
               type="number"
@@ -314,9 +306,8 @@ function AddFieldForm({
               placeholder="none"
               className="w-24"
             />
-          </label>
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Max
+          </Field>
+          <Field label="Max">
             <Input
               size="sm"
               type="number"
@@ -326,16 +317,15 @@ function AddFieldForm({
               placeholder="none"
               className="w-24"
             />
-          </label>
+          </Field>
         </div>
       )}
       {(type === 'string' || type === 'enum') && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium">
+        <div className="flex items-end gap-3 flex-wrap">
+          <span className="text-xs text-fg-muted font-medium pb-2">
             Restrictions:
           </span>
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Choices (comma-separated)
+          <Field label="Choices (comma-separated)">
             <Input
               size="sm"
               value={choices}
@@ -343,10 +333,9 @@ function AddFieldForm({
               placeholder="e.g. left,right,bilateral"
               className="w-52"
             />
-          </label>
+          </Field>
           {type === 'string' && (
-            <label className="flex items-center gap-2 text-xs text-fg-muted">
-              Max length
+            <Field label="Max length">
               <Input
                 size="sm"
                 type="number"
@@ -357,17 +346,16 @@ function AddFieldForm({
                 placeholder="none"
                 className="w-24"
               />
-            </label>
+            </Field>
           )}
         </div>
       )}
       {(type === 'file' || type === 'file_list') && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium">
+        <div className="flex items-end gap-3 flex-wrap">
+          <span className="text-xs text-fg-muted font-medium pb-2">
             Restrictions:
           </span>
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Accept
+          <Field label="Accept">
             <Input
               size="sm"
               value={accept}
@@ -375,9 +363,8 @@ function AddFieldForm({
               placeholder=".csv,.txt"
               className="w-36"
             />
-          </label>
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Max size (bytes)
+          </Field>
+          <Field label="Max size (bytes)">
             <Input
               size="sm"
               type="number"
@@ -388,32 +375,30 @@ function AddFieldForm({
               placeholder="none"
               className="w-28"
             />
-          </label>
+          </Field>
         </div>
       )}
       {(type === 'date' || type === 'datetime') && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium">
+        <div className="flex items-end gap-3 flex-wrap">
+          <span className="text-xs text-fg-muted font-medium pb-2">
             Restrictions:
           </span>
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Not before
+          <Field label="Not before">
             <Input
               size="sm"
               type={type === 'date' ? 'date' : 'datetime-local'}
               value={minDate}
               onChange={(e) => setMinDate(e.target.value)}
             />
-          </label>
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Not after
+          </Field>
+          <Field label="Not after">
             <Input
               size="sm"
               type={type === 'date' ? 'date' : 'datetime-local'}
               value={maxDate}
               onChange={(e) => setMaxDate(e.target.value)}
             />
-          </label>
+          </Field>
         </div>
       )}
 
@@ -433,7 +418,7 @@ function FieldEditForm({
   schemaName,
   onDone,
 }: {
-  field: Field
+  field: SchemaField
   schemaName: string
   onDone: () => void
 }) {
@@ -490,13 +475,12 @@ function FieldEditForm({
           className="w-40"
         />
         <Badge variant="accent">{dtype}</Badge>
-        <label className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none">
+        <Field label="Required" layout="inline">
           <Checkbox
             checked={required}
             onChange={(e) => setRequired(e.target.checked)}
           />
-          Required
-        </label>
+        </Field>
         <div className="flex gap-2 ml-auto">
           <Button
             variant="primary"
@@ -513,12 +497,11 @@ function FieldEditForm({
       </div>
 
       {(dtype === 'integer' || dtype === 'float') && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium">
+        <div className="flex items-end gap-3 flex-wrap">
+          <span className="text-xs text-fg-muted font-medium pb-2">
             Restrictions:
           </span>
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Min
+          <Field label="Min">
             <Input
               size="sm"
               type="number"
@@ -528,9 +511,8 @@ function FieldEditForm({
               placeholder="none"
               className="w-24"
             />
-          </label>
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Max
+          </Field>
+          <Field label="Max">
             <Input
               size="sm"
               type="number"
@@ -540,16 +522,15 @@ function FieldEditForm({
               placeholder="none"
               className="w-24"
             />
-          </label>
+          </Field>
         </div>
       )}
       {(dtype === 'string' || dtype === 'enum') && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium">
+        <div className="flex items-end gap-3 flex-wrap">
+          <span className="text-xs text-fg-muted font-medium pb-2">
             Restrictions:
           </span>
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Choices (comma-separated)
+          <Field label="Choices (comma-separated)">
             <Input
               size="sm"
               value={choices}
@@ -557,10 +538,9 @@ function FieldEditForm({
               placeholder="none"
               className="w-52"
             />
-          </label>
+          </Field>
           {dtype === 'string' && (
-            <label className="flex items-center gap-2 text-xs text-fg-muted">
-              Max length
+            <Field label="Max length">
               <Input
                 size="sm"
                 type="number"
@@ -571,17 +551,16 @@ function FieldEditForm({
                 placeholder="none"
                 className="w-24"
               />
-            </label>
+            </Field>
           )}
         </div>
       )}
       {(dtype === 'file' || dtype === 'file_list') && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium">
+        <div className="flex items-end gap-3 flex-wrap">
+          <span className="text-xs text-fg-muted font-medium pb-2">
             Restrictions:
           </span>
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Accept
+          <Field label="Accept">
             <Input
               size="sm"
               value={accept}
@@ -589,9 +568,8 @@ function FieldEditForm({
               placeholder=".csv,.txt"
               className="w-36"
             />
-          </label>
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Max size (bytes)
+          </Field>
+          <Field label="Max size (bytes)">
             <Input
               size="sm"
               type="number"
@@ -602,32 +580,30 @@ function FieldEditForm({
               placeholder="none"
               className="w-28"
             />
-          </label>
+          </Field>
         </div>
       )}
       {(dtype === 'date' || dtype === 'datetime') && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium">
+        <div className="flex items-end gap-3 flex-wrap">
+          <span className="text-xs text-fg-muted font-medium pb-2">
             Restrictions:
           </span>
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Not before
+          <Field label="Not before">
             <Input
               size="sm"
               type={dtype === 'date' ? 'date' : 'datetime-local'}
               value={minDate}
               onChange={(e) => setMinDate(e.target.value)}
             />
-          </label>
-          <label className="flex items-center gap-2 text-xs text-fg-muted">
-            Not after
+          </Field>
+          <Field label="Not after">
             <Input
               size="sm"
               type={dtype === 'date' ? 'date' : 'datetime-local'}
               value={maxDate}
               onChange={(e) => setMaxDate(e.target.value)}
             />
-          </label>
+          </Field>
         </div>
       )}
       {updateField.error && (
