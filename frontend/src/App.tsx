@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router'
 import Layout from './components/Layout'
+import HomePage from './pages/HomePage'
 import CollectionsPage from './pages/CollectionsPage'
 import CollectionDetailPage from './pages/CollectionDetailPage'
 import SchemasPage from './pages/SchemasPage'
@@ -16,7 +17,7 @@ export default function App() {
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<Navigate to="/collections" replace />} />
+        <Route path="/" element={<HomePage />} />
         <Route path="/collections" element={<CollectionsPage />} />
         <Route path="/collections/:id" element={<CollectionDetailPage />} />
         {/* Legacy redirects */}
