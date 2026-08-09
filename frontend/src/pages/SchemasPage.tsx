@@ -18,6 +18,7 @@ import {
   Thead,
   Tr,
 } from '../components/ui'
+import { displayLabel } from '../utils/naming'
 import { pluralise } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 
@@ -29,13 +30,14 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
   return (
     <CreateResourceModal
       resourceLabel="schema"
-      namePlaceholder="my-schema"
+      slugKind="Schema"
       onClose={onClose}
       isPending={create.isPending}
       error={create.error}
-      onSubmit={async ({ name, description }) => {
+      onSubmit={async ({ name, label, description }) => {
         await create.mutateAsync({
           name,
+          label: label || undefined,
           description: description || undefined,
           parent: parent || undefined,
         })
@@ -50,7 +52,7 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
             <option value="">None</option>
             {schemas?.map((s) => (
               <option key={s.id} value={s.name}>
-                {s.name}
+                {displayLabel(s.name, s.label)}
               </option>
             ))}
           </Select>
@@ -64,7 +66,9 @@ export default function SchemasPage() {
   const { data, isLoading, error } = useSchemas()
   const [showCreate, setShowCreate] = useState(false)
 
-  const nameById = Object.fromEntries((data ?? []).map((s) => [s.id, s.name]))
+  const labelById = Object.fromEntries(
+    (data ?? []).map((s) => [s.id, displayLabel(s.name, s.label)]),
+  )
 
   return (
     <>
@@ -143,14 +147,20 @@ export default function SchemasPage() {
                     to={`/schemas/${s.id}`}
                     className="font-medium text-accent hover:underline"
                   >
-                    {s.name}
+                    {displayLabel(s.name, s.label)}
                   </Link>
+                  <div
+                    className="font-mono text-xs text-fg-subtle"
+                    title="Schema name — what workflows and CSV headers reference"
+                  >
+                    {s.name}
+                  </div>
                 </Td>
                 <Td>
                   {s.parent_id ? (
                     <Link to={`/schemas/${s.parent_id}`}>
                       <Badge variant="accent">
-                        {nameById[s.parent_id] ?? '—'}
+                        {labelById[s.parent_id] ?? '—'}
                       </Badge>
                     </Link>
                   ) : (

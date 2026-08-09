@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from civex.domain.naming import display_label
+
 
 def _parse_dt(s: str | None) -> datetime | None:
     if not s:
@@ -29,12 +31,20 @@ class FieldDTO:
     created_at: datetime
     default_value: Any | None = None
     position: int | None = None
+    # Free-text display name; None means "derive one from name".
+    # See civex.domain.naming for the name/label split.
+    label: str | None = None
+
+    @property
+    def display_name(self) -> str:
+        return display_label(self.name, self.label)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": str(self.id),
             "schema_id": str(self.schema_id),
             "name": self.name,
+            "label": self.label,
             "dtype": self.dtype,
             "required": self.required,
             "restrictions": self.restrictions,
@@ -49,6 +59,7 @@ class FieldDTO:
             id=uuid.UUID(d["id"]),
             schema_id=uuid.UUID(d["schema_id"]),
             name=d["name"],
+            label=d.get("label"),
             dtype=d["dtype"],
             required=d["required"],
             restrictions=d.get("restrictions") or {},
@@ -69,12 +80,19 @@ class SchemaDTO:
     # Ordered field names joined (space-separated) to form the record's natural
     # name; entries with no value on a given record are skipped at render time.
     display_fields: list[str] = field(default_factory=list)
+    # Free-text display name; None means "derive one from name".
+    label: str | None = None
+
+    @property
+    def display_name(self) -> str:
+        return display_label(self.name, self.label)
 
     def to_dict(self) -> dict[str, Any]:
         # fields excluded — it's a loaded relationship, not a scalar property
         return {
             "id": str(self.id),
             "name": self.name,
+            "label": self.label,
             "description": self.description,
             "parent_id": str(self.parent_id) if self.parent_id else None,
             "display_fields": self.display_fields,
@@ -86,6 +104,7 @@ class SchemaDTO:
         return cls(
             id=uuid.UUID(d["id"]),
             name=d["name"],
+            label=d.get("label"),
             description=d.get("description"),
             parent_id=uuid.UUID(d["parent_id"]) if d.get("parent_id") else None,
             display_fields=d.get("display_fields") or [],
@@ -102,6 +121,22 @@ class ResolvedField:
 
     field: FieldDTO
     source_schema_name: str
+
+
+@dataclass
+class NameIssue:
+    """A schema or field whose `name` predates slug validation.
+
+    Reported by `SchemaService.lint_names()` / `civex schema lint`. Nothing is
+    broken — these names still resolve — but they read badly in workflow YAML
+    and CSV headers, so they're worth renaming (with a label taking over the
+    human-facing text).
+    """
+
+    kind: str  # "schema" | "field"
+    schema_name: str
+    name: str
+    suggestion: str | None  # slugified alternative, None if undecidable
 
 
 @dataclass

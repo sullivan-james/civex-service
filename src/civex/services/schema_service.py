@@ -3,8 +3,9 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from civex.domain.dtos import FieldDTO, ResolvedField, SchemaDTO
+from civex.domain.dtos import FieldDTO, NameIssue, ResolvedField, SchemaDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
+from civex.domain.naming import is_slug, slugify, validate_name
 from civex.repositories.protocols import AuditRepository, SchemaRepository
 
 VALID_DTYPES = frozenset(
@@ -58,6 +59,14 @@ def _validate_restriction_keys(dtype: str, restrictions: dict[str, Any] | None) 
         )
 
 
+def _suggest(name: str) -> str | None:
+    """Slugified alternative for a legacy name, or None if nothing survives."""
+    try:
+        return slugify(name)
+    except ValidationError:
+        return None
+
+
 class SchemaService:
     def __init__(
         self, repo: SchemaRepository, audit_repo: AuditRepository | None = None
@@ -70,7 +79,15 @@ class SchemaService:
         name: str,
         description: str | None = None,
         parent: str | None = None,
+        label: str | None = None,
+        allow_legacy_name: bool = False,
     ) -> SchemaDTO:
+        # allow_legacy_name is for restore/import paths only: a dump taken
+        # before slug validation existed must round-trip byte-for-byte, and
+        # silently slugifying its names would break the workflow YAML in the
+        # same dump that references them.
+        if not allow_legacy_name:
+            validate_name(name, "schema name")
         if self._repo.get_by_name(name):
             raise AlreadyExistsError(f"Schema '{name}' already exists")
 
@@ -81,7 +98,12 @@ class SchemaService:
                 raise NotFoundError(f"Parent schema '{parent}' not found")
             parent_id = parent_dto.id
 
-        dto = self._repo.create(name=name, description=description, parent_id=parent_id)
+        dto = self._repo.create(
+            name=name,
+            description=description,
+            parent_id=parent_id,
+            label=label or None,
+        )
         if self._audit:
             self._audit.log_change("create", "schema", dto.id, None, dto.to_dict())
         return dto
@@ -92,13 +114,14 @@ class SchemaService:
         description: str | None = None,
         parent: str | None = None,
         fields: list[dict[str, Any]] | None = None,
+        label: str | None = None,
     ) -> SchemaDTO:
         """Create a schema and all of its fields as one unit.
 
         Lets a single caller (e.g. the AI assistant's create_schema tool) produce
         one proposal/approval instead of one per field.
         """
-        self.create(name, description=description, parent=parent)
+        self.create(name, description=description, parent=parent, label=label)
         for f in fields or []:
             self.add_field(
                 name,
@@ -107,6 +130,7 @@ class SchemaService:
                 required=f.get("required", False),
                 restrictions=f.get("restrictions"),
                 default_value=f.get("default"),
+                label=f.get("label"),
             )
         return self.get(name)
 
@@ -127,12 +151,16 @@ class SchemaService:
         required: bool = False,
         restrictions: dict[str, Any] | None = None,
         default_value: Any = None,
+        label: str | None = None,
+        allow_legacy_name: bool = False,
     ) -> FieldDTO:
         if dtype not in VALID_DTYPES:
             raise ValueError(
                 f"Unknown dtype '{dtype}'. Choose from: {', '.join(sorted(VALID_DTYPES))}"
             )
         _validate_restriction_keys(dtype, restrictions)
+        if not allow_legacy_name:  # see create() for why restore opts out
+            validate_name(field_name, "field name")
 
         schema = self.get(schema_name)
 
@@ -148,6 +176,7 @@ class SchemaService:
             required=required,
             restrictions=restrictions or {},
             default_value=default_value,
+            label=label or None,
         )
         if self._audit:
             self._audit.log_change("create", "field", field.id, None, field.to_dict())
@@ -159,9 +188,11 @@ class SchemaService:
         new_name: str | None = None,
         description: str | None = None,
         display_fields=...,
+        label=...,
     ) -> SchemaDTO:
         schema = self.get(name)
         if new_name and new_name != name:
+            validate_name(new_name, "schema name")
             if self._repo.get_by_name(new_name):
                 raise AlreadyExistsError(f"Schema '{new_name}' already exists")
         if display_fields is not ...:
@@ -171,11 +202,13 @@ class SchemaService:
             if unknown:
                 raise NotFoundError(f"Field(s) {unknown} not found on schema '{name}'")
         old_dict = schema.to_dict()
-        extra = (
+        extra: dict[str, Any] = (
             {}
             if display_fields is ...
             else {"display_fields": list(display_fields or [])}
         )
+        if label is not ...:
+            extra["label"] = label or None
         updated = self._repo.update(
             schema.id, name=new_name, description=description, **extra
         )
@@ -245,6 +278,7 @@ class SchemaService:
         required: bool | None = None,
         restrictions: dict | None = None,
         default_value: Any = ...,
+        label: Any = ...,
     ) -> FieldDTO:
         schema = self.get(schema_name)
         field = next((f for f in schema.fields if f.name == field_name), None)
@@ -254,6 +288,8 @@ class SchemaService:
             )
         renaming = bool(new_name and new_name != field_name)
         if renaming:
+            assert new_name is not None  # implied by `renaming`
+            validate_name(new_name, "field name")
             if any(f.name == new_name for f in schema.fields):
                 raise AlreadyExistsError(
                     f"Field '{new_name}' already exists on schema '{schema_name}'"
@@ -266,6 +302,8 @@ class SchemaService:
         )
         if default_value is not ...:
             kwargs["default_value"] = default_value
+        if label is not ...:
+            kwargs["label"] = label or None
         affected = self._schemas_displaying_field(field) if renaming else []
         updated = self._repo.update_field(field.id, **kwargs)
         for affected_schema, indices in affected:
@@ -310,6 +348,36 @@ class SchemaService:
     def id_to_name_map(self, schema: SchemaDTO) -> dict[str, str]:
         """str(field.id) → field name, including inherited fields."""
         return {str(rf.field.id): rf.field.name for rf in self.collect_fields(schema)}
+
+    def lint_names(self) -> list[NameIssue]:
+        """Every schema and field whose name isn't a valid slug.
+
+        Slug validation is write-time only, so anything created before it
+        existed keeps working; this is how a user finds those rows rather
+        than discovering them when a workflow reference reads badly.
+        """
+        issues: list[NameIssue] = []
+        for schema in self._repo.list_all():
+            if not is_slug(schema.name):
+                issues.append(
+                    NameIssue(
+                        kind="schema",
+                        schema_name=schema.name,
+                        name=schema.name,
+                        suggestion=_suggest(schema.name),
+                    )
+                )
+            for f in schema.fields:
+                if not is_slug(f.name):
+                    issues.append(
+                        NameIssue(
+                            kind="field",
+                            schema_name=schema.name,
+                            name=f.name,
+                            suggestion=_suggest(f.name),
+                        )
+                    )
+        return issues
 
     def collect_fields(self, schema: SchemaDTO) -> list[ResolvedField]:
         """

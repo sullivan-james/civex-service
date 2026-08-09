@@ -28,6 +28,7 @@ import { X, Play } from '../components/ui/icons'
 import { DynamicField } from '../components/records/DynamicField'
 import { RecordForm } from '../components/records/RecordForm'
 import { formatDate } from '../lib/utils'
+import { displayLabel } from '../utils/naming'
 import { errorMessage } from '../lib/errors'
 import type { Schema } from '../api/schemas'
 import type { CivexRecord } from '../api/records'
@@ -101,7 +102,10 @@ function ChildTable({
   onDelete: (id: string) => void
 }) {
   const cols =
-    schema?.fields.filter((f) => f.type !== 'file').map((f) => f.name) ?? []
+    schema?.fields
+      .filter((f) => f.type !== 'file')
+      .map((f) => ({ name: f.name, label: displayLabel(f.name, f.label) })) ??
+    []
   const [confirmId, setConfirmId] = useState<string | null>(null)
 
   return (
@@ -109,7 +113,9 @@ function ChildTable({
       <h3 className="text-sm font-semibold text-fg flex items-center gap-2">
         {schema ? (
           <Link to={`/schemas/${schema.id}`}>
-            <Badge variant="accent">{schemaName}</Badge>
+            <Badge variant="accent">
+              {displayLabel(schemaName, schema.label)}
+            </Badge>
           </Link>
         ) : (
           <Badge variant="accent">{schemaName}</Badge>
@@ -123,7 +129,9 @@ function ChildTable({
           <tr>
             <Th className="w-24">ID</Th>
             {cols.map((c) => (
-              <Th key={c}>{c}</Th>
+              <Th key={c.name} title={c.name}>
+                {c.label}
+              </Th>
             ))}
             <Th className="w-28">Added</Th>
             <Th className="w-20" />
@@ -143,8 +151,8 @@ function ChildTable({
                 </Link>
               </Td>
               {cols.map((col) => (
-                <Td key={col}>
-                  <FieldValue value={r.data[col]} />
+                <Td key={col.name}>
+                  <FieldValue value={r.data[col.name]} />
                 </Td>
               ))}
               <Td className="text-fg-muted">{formatDate(r.created_at)}</Td>
@@ -373,7 +381,9 @@ export default function RecordDetailPage() {
                   key={field.name}
                   label={
                     <span className="flex items-center gap-2">
-                      <span className="font-mono">{field.name}</span>
+                      <span title={field.name}>
+                        {displayLabel(field.name, field.label)}
+                      </span>
                       <Badge variant="accent">{field.type}</Badge>
                       {field.required && (
                         <Badge variant="success">required</Badge>
@@ -418,14 +428,18 @@ export default function RecordDetailPage() {
               schema?.fields ??
               Object.keys(record.data).map((name) => ({
                 name,
+                label: null,
                 type: 'string',
                 required: false,
                 id: name,
               }))
             ).map((field) => (
               <div key={field.name} className="bg-canvas px-4 py-3">
-                <p className="text-xs text-fg-muted font-mono mb-1 flex items-center gap-2">
-                  {field.name}
+                <p
+                  className="text-xs text-fg-muted mb-1 flex items-center gap-2"
+                  title={field.name}
+                >
+                  {displayLabel(field.name, field.label)}
                   {'type' in field && (
                     <Badge variant="accent">
                       {(field as { type: string }).type}

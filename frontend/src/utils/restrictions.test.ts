@@ -14,6 +14,7 @@ function makeField(overrides: Partial<Field>): Field {
   return {
     id: 'f1',
     name: 'field',
+    label: null,
     type: 'string',
     required: false,
     restrictions: {},
