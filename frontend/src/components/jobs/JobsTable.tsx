@@ -2,32 +2,16 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { useJobsPaged, useRerunJob } from '../../hooks/useWorkflows'
 import { type WorkflowJob } from '../../api/workflows'
-import { TableSkeleton, ErrorState, Badge, Button, Pagination } from '../ui'
+import {
+  DataTable,
+  type DataTableColumn,
+  Badge,
+  Button,
+  Pagination,
+} from '../ui'
 import { RefreshCw } from '../ui/icons'
 import JobStatusBadge from './JobStatusBadge'
 import { explainFailure, summarizeRun } from '../../utils/runNarrative'
-
-const RUN_COLUMNS = [
-  'w-20',
-  'w-32',
-  'w-40',
-  'w-20',
-  'w-24',
-  'w-16',
-  'w-16',
-  'w-24',
-]
-const RUN_COLUMNS_WITH_RECORD = [
-  'w-20',
-  'w-32',
-  'w-40',
-  'w-20',
-  'w-20',
-  'w-24',
-  'w-16',
-  'w-16',
-  'w-24',
-]
 
 function duration(job: WorkflowJob): string {
   if (!job.started_at) return '—'
@@ -132,133 +116,106 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
     </span>
   )
 
-  if (isLoading)
-    return (
-      <TableSkeleton
-        bordered={false}
-        columns={recordId ? RUN_COLUMNS_WITH_RECORD : RUN_COLUMNS}
-        rows={8}
-      />
-    )
-  if (error) return <ErrorState message={error.message} />
-
-  if (!jobs.data?.length) {
-    return (
-      <div
-        role="status"
-        aria-live="polite"
-        className="flex flex-col items-center justify-center py-16 text-center"
-      >
-        <svg
-          width="40"
-          height="40"
-          viewBox="0 0 16 16"
-          fill="none"
-          className="mb-4 text-border"
-          aria-hidden
+  const columns: DataTableColumn<WorkflowJob>[] = [
+    {
+      key: 'run',
+      header: 'Run',
+      width: '96px',
+      render: (job) => (
+        <Link
+          to={`/runs/${job.id}`}
+          className="font-mono text-xs text-accent hover:underline"
         >
-          <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
-          <path
-            d="M5.5 8l2 2 3-3"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        <h2 className="text-lg font-semibold text-fg mb-2">No runs yet</h2>
-        <p className="text-sm text-fg-muted max-w-sm">
-          Workflow runs appear here when a workflow is triggered. Trigger a
-          workflow manually from the Workflows tab.
-        </p>
-      </div>
-    )
-  }
+          {job.id.slice(0, 8)}…
+        </Link>
+      ),
+    },
+    {
+      key: 'workflow_name',
+      header: 'Workflow',
+      render: (job) => (
+        <span className="font-medium text-fg">{job.workflow_name}</span>
+      ),
+    },
+    ...(recordId
+      ? []
+      : [
+          {
+            key: 'record_id',
+            header: 'Record',
+            render: (job: WorkflowJob) => (
+              <Link
+                to={`/records/${job.record_id}`}
+                className="font-mono text-xs text-accent hover:underline"
+              >
+                {job.record_id.slice(0, 8)}…
+              </Link>
+            ),
+          },
+        ]),
+    {
+      key: 'what_happened',
+      header: 'What happened',
+      render: (job) => <WhatHappened job={job} />,
+    },
+    {
+      key: 'schema_name',
+      header: 'Schema',
+      render: (job) => <span className="text-fg-muted">{job.schema_name}</span>,
+    },
+    {
+      key: 'trigger',
+      header: 'Trigger',
+      render: (job) => <Badge variant="default">{job.trigger}</Badge>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (job) => <JobStatusBadge status={job.status} />,
+    },
+    {
+      key: 'duration',
+      header: 'Duration',
+      align: 'right',
+      width: '96px',
+      render: (job) => <span className="text-fg-muted">{duration(job)}</span>,
+    },
+    {
+      key: 'created_at',
+      header: 'Created',
+      render: (job) => (
+        <span className="text-fg-muted text-xs">
+          {new Date(job.created_at).toLocaleString()}
+        </span>
+      ),
+    },
+  ]
 
   return (
     <div aria-busy={isFetching}>
       {liveRegion}
-      <table className="w-full text-sm border-collapse">
-        <thead>
-          <tr className="border-b border-border">
-            <th className="text-left py-2 px-3 font-medium text-fg">Run</th>
-            <th className="text-left py-2 px-3 font-medium text-fg">
-              Workflow
-            </th>
-            {!recordId && (
-              <th className="text-left py-2 px-3 font-medium text-fg">
-                Record
-              </th>
-            )}
-            <th className="text-left py-2 px-3 font-medium text-fg">
-              What happened
-            </th>
-            <th className="text-left py-2 px-3 font-medium text-fg">Schema</th>
-            <th className="text-left py-2 px-3 font-medium text-fg">Trigger</th>
-            <th className="text-left py-2 px-3 font-medium text-fg">Status</th>
-            <th className="text-left py-2 px-3 font-medium text-fg">
-              Duration
-            </th>
-            <th className="text-left py-2 px-3 font-medium text-fg">Created</th>
-            <th className="py-2 px-3" />
-          </tr>
-        </thead>
-        <tbody>
-          {jobs.data.map((job) => (
-            <tr
-              key={job.id}
-              className="border-b border-border hover:bg-canvas-subtle"
-            >
-              <td className="py-2 px-3">
-                <Link
-                  to={`/runs/${job.id}`}
-                  className="font-mono text-xs text-accent hover:underline"
-                >
-                  {job.id.slice(0, 8)}…
-                </Link>
-              </td>
-              <td className="py-2 px-3 font-medium text-fg">
-                {job.workflow_name}
-              </td>
-              {!recordId && (
-                <td className="py-2 px-3">
-                  <Link
-                    to={`/records/${job.record_id}`}
-                    className="font-mono text-xs text-accent hover:underline"
-                  >
-                    {job.record_id.slice(0, 8)}…
-                  </Link>
-                </td>
-              )}
-              <td className="py-2 px-3">
-                <WhatHappened job={job} />
-              </td>
-              <td className="py-2 px-3 text-fg-muted">{job.schema_name}</td>
-              <td className="py-2 px-3">
-                <Badge variant="default">{job.trigger}</Badge>
-              </td>
-              <td className="py-2 px-3">
-                <JobStatusBadge status={job.status} />
-              </td>
-              <td className="py-2 px-3 text-fg-muted">{duration(job)}</td>
-              <td className="py-2 px-3 text-fg-muted text-xs">
-                {new Date(job.created_at).toLocaleString()}
-              </td>
-              <td className="py-2 px-3 text-right">
-                <Button
-                  size="sm"
-                  variant="default"
-                  disabled={rerun.isPending}
-                  onClick={() => rerun.mutate(job.id)}
-                  title="Rerun"
-                >
-                  <RefreshCw size={12} />
-                </Button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        columns={columns}
+        rows={jobs.data ?? []}
+        getRowId={(job) => job.id}
+        isLoading={isLoading}
+        error={error?.message}
+        emptyTitle="No runs yet"
+        emptyMessage="Workflow runs appear here when a workflow is triggered. Trigger a workflow manually from the Workflows tab."
+        actions={(job) => (
+          <Button
+            size="sm"
+            variant="default"
+            disabled={rerun.isPending}
+            onClick={() => rerun.mutate(job.id)}
+            title="Rerun"
+          >
+            <RefreshCw size={12} />
+          </Button>
+        )}
+        actionsLabel="Rerun"
+        actionsWidth="64px"
+      />
       <Pagination
         page={page}
         pageSize={pageSize}
