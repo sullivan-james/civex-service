@@ -6,6 +6,7 @@ import { Button, Badge, Field, Input, Select } from '../ui'
 import { ArrowUp, ArrowRight, ScanText } from '../ui/icons'
 import { DynamicField } from './DynamicField'
 import { datetimeLocalToUTC } from '../../utils/dates'
+import { displayLabel } from '../../utils/naming'
 
 interface Props {
   schemas: Schema[]
@@ -87,7 +88,7 @@ function collectFileSources(
       if (ref?.filename)
         out.push({
           filename: ref.filename,
-          label: `${ref.filename} (${f.name})`,
+          label: `${ref.filename} (${displayLabel(f.name, f.label)})`,
         })
     } else if (f.type === 'file_list') {
       const refs = values[f.name] as FileRef[] | undefined
@@ -95,7 +96,7 @@ function collectFileSources(
         if (ref?.filename)
           out.push({
             filename: ref.filename,
-            label: `${ref.filename} (${f.name})`,
+            label: `${ref.filename} (${displayLabel(f.name, f.label)})`,
           })
       }
     }
@@ -448,12 +449,12 @@ export function RecordForm({
             <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
               Parent record
               <Badge variant="accent" className="ml-2">
-                {parentSchema.name}
+                {displayLabel(parentSchema.name, parentSchema.label)}
               </Badge>
             </span>
             <p className="text-xs text-danger">
-              No {parentSchema.name} records in this dataset yet — add one
-              first.
+              No {displayLabel(parentSchema.name, parentSchema.label)} records
+              in this dataset yet — add one first.
             </p>
           </div>
         ) : (
@@ -462,7 +463,7 @@ export function RecordForm({
               <>
                 Parent record
                 <Badge variant="accent" className="ml-2">
-                  {parentSchema.name}
+                  {displayLabel(parentSchema.name, parentSchema.label)}
                 </Badge>
               </>
             }
@@ -472,7 +473,10 @@ export function RecordForm({
               onChange={(e) => setParentRecordId(e.target.value)}
               className="w-full max-w-sm"
             >
-              <option value="">— Select a {parentSchema.name} record —</option>
+              <option value="">
+                — Select a {displayLabel(parentSchema.name, parentSchema.label)}{' '}
+                record —
+              </option>
               {parentCandidates.map((r) => {
                 const label = recordSummary(r.data, parentSchema)
                 return (
@@ -503,7 +507,9 @@ export function RecordForm({
                   label={
                     <span className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-2">
-                        <span className="font-mono">{field.name}</span>
+                        <span title={field.name}>
+                          {displayLabel(field.name, field.label)}
+                        </span>
                         <Badge variant="accent">{field.type}</Badge>
                         {field.required && (
                           <Badge variant="success">required</Badge>

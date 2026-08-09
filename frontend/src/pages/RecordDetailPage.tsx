@@ -23,11 +23,13 @@ import {
   Td,
   DetailSkeleton,
   ErrorState,
+  Page,
 } from '../components/ui'
 import { X, Play } from '../components/ui/icons'
 import { DynamicField } from '../components/records/DynamicField'
 import { RecordForm } from '../components/records/RecordForm'
 import { formatDate } from '../lib/utils'
+import { displayLabel } from '../utils/naming'
 import { errorMessage } from '../lib/errors'
 import type { Schema } from '../api/schemas'
 import type { CivexRecord } from '../api/records'
@@ -101,7 +103,10 @@ function ChildTable({
   onDelete: (id: string) => void
 }) {
   const cols =
-    schema?.fields.filter((f) => f.type !== 'file').map((f) => f.name) ?? []
+    schema?.fields
+      .filter((f) => f.type !== 'file')
+      .map((f) => ({ name: f.name, label: displayLabel(f.name, f.label) })) ??
+    []
   const [confirmId, setConfirmId] = useState<string | null>(null)
 
   return (
@@ -109,7 +114,9 @@ function ChildTable({
       <h3 className="text-sm font-semibold text-fg flex items-center gap-2">
         {schema ? (
           <Link to={`/schemas/${schema.id}`}>
-            <Badge variant="accent">{schemaName}</Badge>
+            <Badge variant="accent">
+              {displayLabel(schemaName, schema.label)}
+            </Badge>
           </Link>
         ) : (
           <Badge variant="accent">{schemaName}</Badge>
@@ -123,7 +130,9 @@ function ChildTable({
           <tr>
             <Th className="w-24">ID</Th>
             {cols.map((c) => (
-              <Th key={c}>{c}</Th>
+              <Th key={c.name} title={c.name}>
+                {c.label}
+              </Th>
             ))}
             <Th className="w-28">Added</Th>
             <Th className="w-20" />
@@ -143,8 +152,8 @@ function ChildTable({
                 </Link>
               </Td>
               {cols.map((col) => (
-                <Td key={col}>
-                  <FieldValue value={r.data[col]} />
+                <Td key={col.name}>
+                  <FieldValue value={r.data[col.name]} />
                 </Td>
               ))}
               <Td className="text-fg-muted">{formatDate(r.created_at)}</Td>
@@ -217,10 +226,25 @@ export default function RecordDetailPage() {
     hasActiveJobs ? 2000 : 5000,
   )
 
-  if (isLoading) return <DetailSkeleton metadataRows={4} sections={2} />
+  const breadcrumbs = [{ label: 'Collections', to: '/collections' }]
+
+  if (isLoading)
+    return (
+      <Page
+        breadcrumbs={breadcrumbs}
+        loading={<DetailSkeleton metadataRows={4} sections={2} />}
+      />
+    )
   if (error || !record)
     return (
-      <ErrorState message={error ? errorMessage(error) : 'Record not found'} />
+      <Page
+        breadcrumbs={breadcrumbs}
+        error={
+          <ErrorState
+            message={error ? errorMessage(error) : 'Record not found'}
+          />
+        }
+      />
     )
 
   const schema = schemas?.find((s) => s.name === record.schema_name)
@@ -279,55 +303,44 @@ export default function RecordDetailPage() {
   )
 
   return (
-    <div className="space-y-6">
-      {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-sm text-fg-muted flex-wrap">
-        <Link to="/collections" className="hover:text-accent">
-          Collections
-        </Link>
-        <span>/</span>
-        {collection && (
-          <>
-            <Link
-              to={`/collections/${record.dataset_id}`}
-              className="hover:text-accent"
-            >
-              {collection.name}
-            </Link>
-            <span>/</span>
-          </>
-        )}
-        <span className="font-mono text-fg">
-          {record.natural_name ?? record.id.slice(0, 8)}
-        </span>
-      </nav>
-
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-fg">
-              {record.natural_name ?? (
-                <span className="font-mono">{record.id.slice(0, 8)}</span>
-              )}
-            </h1>
-            {schema ? (
-              <Link to={`/schemas/${schema.id}`}>
-                <Badge variant="accent">{record.schema_name}</Badge>
-              </Link>
-            ) : (
+    <Page
+      breadcrumbs={[
+        ...breadcrumbs,
+        ...(collection
+          ? [
+              {
+                label: collection.name,
+                to: `/collections/${record.dataset_id}`,
+              },
+            ]
+          : []),
+        { label: record.natural_name ?? record.id.slice(0, 8) },
+      ]}
+      title={
+        <span className="inline-flex items-center gap-2">
+          {record.natural_name ?? (
+            <span className="font-mono">{record.id.slice(0, 8)}</span>
+          )}
+          {schema ? (
+            <Link to={`/schemas/${schema.id}`}>
               <Badge variant="accent">{record.schema_name}</Badge>
-            )}
-          </div>
-          <p className="mt-1 text-xs text-fg-subtle font-mono">{record.id}</p>
-          <p className="mt-1 text-sm text-fg-muted">
+            </Link>
+          ) : (
+            <Badge variant="accent">{record.schema_name}</Badge>
+          )}
+        </span>
+      }
+      description={
+        <>
+          <p className="text-xs text-fg-subtle font-mono">{record.id}</p>
+          <p className="mt-1">
             Added {formatDate(record.created_at)}
             {record.created_at !== record.updated_at &&
               ` · Updated ${formatDate(record.updated_at)}`}
           </p>
-        </div>
-      </div>
-
+        </>
+      }
+    >
       {/* Parent record */}
       {record.parent_record_id && (
         <div className="border border-border rounded-md p-4 bg-canvas-subtle">
@@ -373,7 +386,9 @@ export default function RecordDetailPage() {
                   key={field.name}
                   label={
                     <span className="flex items-center gap-2">
-                      <span className="font-mono">{field.name}</span>
+                      <span title={field.name}>
+                        {displayLabel(field.name, field.label)}
+                      </span>
                       <Badge variant="accent">{field.type}</Badge>
                       {field.required && (
                         <Badge variant="success">required</Badge>
@@ -418,14 +433,18 @@ export default function RecordDetailPage() {
               schema?.fields ??
               Object.keys(record.data).map((name) => ({
                 name,
+                label: null,
                 type: 'string',
                 required: false,
                 id: name,
               }))
             ).map((field) => (
               <div key={field.name} className="bg-canvas px-4 py-3">
-                <p className="text-xs text-fg-muted font-mono mb-1 flex items-center gap-2">
-                  {field.name}
+                <p
+                  className="text-xs text-fg-muted mb-1 flex items-center gap-2"
+                  title={field.name}
+                >
+                  {displayLabel(field.name, field.label)}
                   {'type' in field && (
                     <Badge variant="accent">
                       {(field as { type: string }).type}
@@ -571,6 +590,6 @@ export default function RecordDetailPage() {
           )}
         </div>
       </div>
-    </div>
+    </Page>
   )
 }

@@ -83,6 +83,10 @@ class Schema(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    # Human-facing display name. name stays a slug because workflows, CSV
+    # headers and display_fields reference it as text; label absorbs the
+    # cosmetic churn so renames stay rare. Null → derived from name.
+    label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     description: Mapped[str | None] = mapped_column(String(1000))
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("schemas.id"), nullable=True
@@ -119,6 +123,8 @@ class Field(Base):
         ForeignKey("schemas.id"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # See Schema.label -- same split, same reason. Null → derived from name.
+    label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     dtype: Mapped[str] = mapped_column(String(50), nullable=False)
     required: Mapped[bool] = mapped_column(Boolean, default=False)
     restrictions: Mapped[dict[str, Any]] = mapped_column(_JSON, default=dict)
@@ -151,7 +157,10 @@ class Dataset(Base):
 class Record(Base):
     """
     A single data entry in a dataset, typed by its schema.
-    data is a JSON dict — keys are field names, values are the typed field values.
+    data is a JSON dict keyed by *field UUID* (RecordService translates to and
+    from field names at its boundary, see _names_to_ids/_ids_to_names), values
+    are the typed field values. Storing UUIDs means renaming a field costs
+    nothing here.
     Validation against the schema's fields happens at write time in application code.
 
     parent_record_id links child-schema records to the parent record they extend

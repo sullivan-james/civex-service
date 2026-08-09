@@ -29,28 +29,42 @@ def demo(
     ctx = build_local_context(config)
 
     # --- Schemas ---
-    ctx.schema_svc.create("Deployment", description="Field deployment site")
-    ctx.schema_svc.add_field("Deployment", "site", "string", required=True)
-    ctx.schema_svc.add_field("Deployment", "date", "date", required=True)
+    ctx.schema_svc.create(
+        "deployment", label="Deployment", description="Field deployment site"
+    )
     ctx.schema_svc.add_field(
-        "Deployment",
+        "deployment", "site", "string", required=True, label="Site"
+    )
+    ctx.schema_svc.add_field(
+        "deployment", "date", "date", required=True, label="Deployment Date"
+    )
+    ctx.schema_svc.add_field(
+        "deployment",
         "habitat",
         "enum",
         restrictions={"choices": ["forest", "grassland", "wetland", "coastal"]},
+        label="Habitat Type",
     )
-    ctx.schema_svc.add_field("Deployment", "notes", "string")
+    ctx.schema_svc.add_field("deployment", "notes", "string")
 
     ctx.schema_svc.create(
-        "Detection", description="Species detection event", parent="Deployment"
+        "detection",
+        label="Detection",
+        description="Species detection event",
+        parent="deployment",
     )
-    ctx.schema_svc.add_field("Detection", "species", "string", required=True)
+    ctx.schema_svc.add_field("detection", "species", "string", required=True)
     ctx.schema_svc.add_field(
-        "Detection", "count", "integer", required=True, restrictions={"min": 1}
+        "detection", "count", "integer", required=True, restrictions={"min": 1}
     )
     ctx.schema_svc.add_field(
-        "Detection", "confidence", "float", restrictions={"min": 0.0, "max": 1.0}
+        "detection",
+        "confidence",
+        "float",
+        restrictions={"min": 0.0, "max": 1.0},
+        label="Confidence Score",
     )
-    ctx.schema_svc.add_field("Detection", "time", "string")
+    ctx.schema_svc.add_field("detection", "time", "string")
 
     # --- Collection ---
     ctx.dataset_svc.create("amazon-survey-2024", description="Amazon field survey 2024")
@@ -58,7 +72,7 @@ def demo(
     # --- Deployment records ---
     dep1 = ctx.record_svc.add(
         "amazon-survey-2024",
-        "Deployment",
+        "deployment",
         {
             "site": "Site Alpha",
             "date": "2024-03-15",
@@ -68,7 +82,7 @@ def demo(
     )
     dep2 = ctx.record_svc.add(
         "amazon-survey-2024",
-        "Deployment",
+        "deployment",
         {
             "site": "Site Beta",
             "date": "2024-03-22",
@@ -80,19 +94,19 @@ def demo(
     # --- Detection records for Site Alpha ---
     ctx.record_svc.add(
         "amazon-survey-2024",
-        "Detection",
+        "detection",
         {"species": "Jaguar", "count": 1, "confidence": 0.95, "time": "06:32"},
         parent_record_id=str(dep1.id),
     )
     ctx.record_svc.add(
         "amazon-survey-2024",
-        "Detection",
+        "detection",
         {"species": "Tapir", "count": 3, "confidence": 0.88, "time": "08:15"},
         parent_record_id=str(dep1.id),
     )
     ctx.record_svc.add(
         "amazon-survey-2024",
-        "Detection",
+        "detection",
         {"species": "Harpy Eagle", "count": 1, "confidence": 0.72, "time": "10:47"},
         parent_record_id=str(dep1.id),
     )
@@ -100,19 +114,19 @@ def demo(
     # --- Detection records for Site Beta ---
     ctx.record_svc.add(
         "amazon-survey-2024",
-        "Detection",
+        "detection",
         {"species": "Giant Otter", "count": 2, "confidence": 0.91, "time": "07:05"},
         parent_record_id=str(dep2.id),
     )
     ctx.record_svc.add(
         "amazon-survey-2024",
-        "Detection",
+        "detection",
         {"species": "Anaconda", "count": 1, "confidence": 0.85, "time": "14:30"},
         parent_record_id=str(dep2.id),
     )
     ctx.record_svc.add(
         "amazon-survey-2024",
-        "Detection",
+        "detection",
         {
             "species": "Pink River Dolphin",
             "count": 4,
@@ -123,7 +137,7 @@ def demo(
     )
     ctx.record_svc.add(
         "amazon-survey-2024",
-        "Detection",
+        "detection",
         {"species": "Scarlet Macaw", "count": 7, "confidence": 0.99, "time": "09:22"},
         parent_record_id=str(dep2.id),
     )

@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { PageHeader } from '../components/ui'
+import { Page } from '../components/ui'
 import { useTheme } from '../hooks/useTheme'
 
 // xterm renders to canvas, which can't resolve CSS custom properties, so
@@ -104,16 +104,15 @@ export default function TerminalPage() {
   }, [theme])
 
   return (
-    <>
-      <PageHeader
-        title="Terminal"
-        description="Shell running in the civex server process"
-      />
+    <Page
+      title="Terminal"
+      description="Shell running in the civex server process"
+    >
       <div
         ref={containerRef}
         className="rounded-lg border border-border overflow-hidden"
         style={{ height: 'calc(100vh - 220px)' }}
       />
-    </>
+    </Page>
   )
 }

@@ -37,4 +37,5 @@ export {
   PanelLeftClose,
   PanelLeftOpen,
   Menu,
+  MoreVertical,
 } from 'lucide-react'

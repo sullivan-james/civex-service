@@ -22,7 +22,7 @@ import {
   Tbody,
   Tr,
   Td,
-  PageHeader,
+  Page,
   DetailSkeleton,
   TableSkeleton,
   ErrorState,
@@ -35,9 +35,13 @@ import { RecordForm } from '../components/records/RecordForm'
 import { formatDate } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 import type { Schema } from '../api/schemas'
+import { displayLabel } from '../utils/naming'
 
-function schemaColumns(schema: Schema): string[] {
-  return schema.fields.filter((f) => f.type !== 'file').map((f) => f.name)
+/** Header text comes from the label, the data lookup from the name. */
+function schemaColumns(schema: Schema): { name: string; label: string }[] {
+  return schema.fields
+    .filter((f) => f.type !== 'file')
+    .map((f) => ({ name: f.name, label: displayLabel(f.name, f.label) }))
 }
 
 export default function CollectionDetailPage() {
@@ -91,23 +95,35 @@ export default function CollectionDetailPage() {
   const deleteManyRecords = useDeleteManyRecords(collection?.name ?? '')
   const deleteAllRecords = useDeleteAllRecords(collection?.name ?? '')
 
+  const breadcrumbs = [{ label: 'Collections', to: '/collections' }]
+
   if (collectionLoading)
     return (
-      <div className="space-y-6">
-        <DetailSkeleton metadataRows={0} sections={0} />
-        <TableSkeleton
-          columns={['w-8', 'w-20', 'w-32', 'w-32', 'w-24']}
-          rows={8}
-        />
-      </div>
+      <Page
+        breadcrumbs={breadcrumbs}
+        loading={
+          <>
+            <DetailSkeleton metadataRows={0} sections={0} />
+            <TableSkeleton
+              columns={['w-8', 'w-20', 'w-32', 'w-32', 'w-24']}
+              rows={8}
+            />
+          </>
+        }
+      />
     )
   if (collectionError || !collection)
     return (
-      <ErrorState
-        message={
-          collectionError
-            ? errorMessage(collectionError)
-            : 'Collection not found'
+      <Page
+        breadcrumbs={breadcrumbs}
+        error={
+          <ErrorState
+            message={
+              collectionError
+                ? errorMessage(collectionError)
+                : 'Collection not found'
+            }
+          />
         }
       />
     )
@@ -188,17 +204,35 @@ export default function CollectionDetailPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-sm text-fg-muted">
-        <Link to="/collections" className="hover:text-accent">
-          Collections
-        </Link>
-        <span>/</span>
-        <span className="text-fg font-medium">{collection.name}</span>
-      </nav>
-
-      {renaming ? (
+    <Page
+      breadcrumbs={[...breadcrumbs, { label: collection.name }]}
+      title={collection.name}
+      description={collection.description ?? undefined}
+      action={
+        !renaming && (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="default"
+              onClick={exportCsv}
+              title="Download all records as CSV"
+            >
+              Export CSV
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                setRenameValue(collection.name)
+                setRenaming(true)
+              }}
+            >
+              Rename
+            </Button>
+          </div>
+        )
+      }
+    >
+      {renaming && (
         <div className="border border-border rounded-md p-4 bg-canvas-subtle flex items-center gap-3">
           <Field label="Collection name" hideLabel className="flex-1">
             <Input
@@ -227,32 +261,6 @@ export default function CollectionDetailPage() {
           <Button size="sm" onClick={() => setRenaming(false)}>
             Cancel
           </Button>
-        </div>
-      ) : (
-        <div className="flex items-start justify-between">
-          <PageHeader
-            title={collection.name}
-            description={collection.description ?? undefined}
-          />
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="default"
-              onClick={exportCsv}
-              title="Download all records as CSV"
-            >
-              Export CSV
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => {
-                setRenameValue(collection.name)
-                setRenaming(true)
-              }}
-            >
-              Rename
-            </Button>
-          </div>
         </div>
       )}
 
@@ -443,7 +451,9 @@ export default function CollectionDetailPage() {
                 <Th className="w-24">ID</Th>
                 {!selectedSchema && <Th className="w-32">Schema</Th>}
                 {columns.map((col) => (
-                  <Th key={col}>{col}</Th>
+                  <Th key={col.name} title={col.name}>
+                    {col.label}
+                  </Th>
                 ))}
                 <Th className="w-32">Added</Th>
               </tr>
@@ -471,23 +481,27 @@ export default function CollectionDetailPage() {
                   {!selectedSchema && (
                     <Td>
                       {(() => {
-                        const schemaId = schemas?.find(
+                        const rowSchema = schemas?.find(
                           (s) => s.name === r.schema_name,
-                        )?.id
-                        return schemaId ? (
-                          <Link to={`/schemas/${schemaId}`}>
-                            <Badge variant="accent">{r.schema_name}</Badge>
-                          </Link>
+                        )
+                        const badge = (
+                          <Badge variant="accent">
+                            {displayLabel(r.schema_name, rowSchema?.label)}
+                          </Badge>
+                        )
+                        return rowSchema ? (
+                          <Link to={`/schemas/${rowSchema.id}`}>{badge}</Link>
                         ) : (
-                          <Badge variant="accent">{r.schema_name}</Badge>
+                          badge
                         )
                       })()}
                     </Td>
                   )}
                   {columns.map((col) => (
-                    <Td key={col} className="text-fg">
-                      {r.data[col] !== undefined && r.data[col] !== null ? (
-                        String(r.data[col])
+                    <Td key={col.name} className="text-fg">
+                      {r.data[col.name] !== undefined &&
+                      r.data[col.name] !== null ? (
+                        String(r.data[col.name])
                       ) : (
                         <span className="text-fg-subtle">—</span>
                       )}
@@ -552,6 +566,6 @@ export default function CollectionDetailPage() {
           )}
         </div>
       </div>
-    </div>
+    </Page>
   )
 }

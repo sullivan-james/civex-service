@@ -33,6 +33,7 @@ export function useUpdateSchema(name: string) {
   return useMutation({
     mutationFn: (body: {
       rename?: string
+      label?: string
       description?: string
       display_fields?: string[] | null
     }) => schemasApi.update(name, body),
@@ -50,6 +51,7 @@ export function useAddField(schemaName: string) {
   return useMutation({
     mutationFn: (body: {
       name: string
+      label?: string
       type: string
       required?: boolean
       restrictions?: Record<string, unknown>
@@ -73,6 +75,7 @@ export function useUpdateField(schemaName: string) {
     }: {
       fieldName: string
       rename?: string
+      label?: string
       required?: boolean
       restrictions?: Record<string, unknown> | null
     }) => schemasApi.updateField(schemaName, fieldName, body),

@@ -51,8 +51,11 @@ class LocalSchemaRepository:
         name: str,
         description: str | None,
         parent_id: uuid.UUID | None,
+        label: str | None = None,
     ) -> SchemaDTO:
-        row = Schema(name=name, description=description, parent_id=parent_id)
+        row = Schema(
+            name=name, label=label, description=description, parent_id=parent_id
+        )
         self._s.add(row)
         self._s.flush()
         return _schema_to_dto(row)
@@ -65,6 +68,7 @@ class LocalSchemaRepository:
         name: str | None,
         description: str | None,
         display_fields=_SENTINEL,
+        label=_SENTINEL,
     ) -> SchemaDTO:
         row = self._s.query(Schema).filter_by(id=id).first()
         if row is None:
@@ -75,6 +79,8 @@ class LocalSchemaRepository:
             row.description = description
         if display_fields is not self._SENTINEL:
             row.display_fields = display_fields or []  # None/[] clears it
+        if label is not self._SENTINEL:
+            row.label = label or None  # None/"" reverts to the derived label
         self._s.flush()
         return _schema_to_dto(row)
 
@@ -93,10 +99,12 @@ class LocalSchemaRepository:
         restrictions: dict[str, Any],
         default_value: Any = None,
         position: int | None = None,
+        label: str | None = None,
     ) -> FieldDTO:
         row = Field(
             schema_id=schema_id,
             name=name,
+            label=label,
             dtype=dtype,
             required=required,
             restrictions=restrictions,
@@ -115,12 +123,15 @@ class LocalSchemaRepository:
         required: bool | None = None,
         restrictions: dict | None = None,
         default_value: Any = _SENTINEL,
+        label: Any = _SENTINEL,
     ) -> FieldDTO:
         row = self._s.query(Field).filter_by(id=field_id).first()
         if row is None:
             raise NotFoundError(f"Field '{field_id}' not found")
         if name is not None:
             row.name = name
+        if label is not self._SENTINEL:
+            row.label = label or None  # None/"" reverts to the derived label
         if required is not None:
             row.required = required
         if restrictions is not None:
@@ -157,6 +168,7 @@ def _field_to_dto(row: Field) -> FieldDTO:
         id=row.id,
         schema_id=row.schema_id,
         name=row.name,
+        label=row.label,
         dtype=row.dtype,
         required=row.required,
         restrictions=row.restrictions or {},
@@ -170,6 +182,7 @@ def _schema_to_dto(row: Schema) -> SchemaDTO:
     return SchemaDTO(
         id=row.id,
         name=row.name,
+        label=row.label,
         description=row.description,
         parent_id=row.parent_id,
         display_fields=row.display_fields or [],
