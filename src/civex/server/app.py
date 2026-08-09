@@ -20,6 +20,7 @@ from civex.server.routers import (
     records,
     remote,
     schemas,
+    settings,
     status,
     store,
     terminal,
@@ -197,6 +198,14 @@ _OPENAPI_TAGS = [
             "used by the web UI's embedded terminal panel."
         ),
     },
+    {
+        "name": "settings",
+        "description": (
+            "Per-project UI preferences, such as whether the Advanced "
+            "navigation section (terminal, YAML editing, plugin editors) "
+            "is shown by default."
+        ),
+    },
 ]
 
 _DESCRIPTION = """\
@@ -266,6 +275,7 @@ def create_app() -> FastAPI:
     app.include_router(legal.router, prefix="/api")
     app.include_router(status.router, prefix="/api")
     app.include_router(terminal.router, prefix="/api")
+    app.include_router(settings.router, prefix="/api")
 
     @app.get("/health", include_in_schema=False)
     def health():

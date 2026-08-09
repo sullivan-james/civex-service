@@ -9,6 +9,7 @@ import { NavLink } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { remoteApi } from '../api/remote'
 import { errorMessage } from '../lib/errors'
+import { useUISettings } from '../hooks/useUISettings'
 import AiAttestationGate from './ai/AiAttestationGate'
 import { useToast } from './ui/ToastProvider'
 import { IconButton } from './ui/IconButton'
@@ -27,6 +28,7 @@ import {
   Workflow,
   ListChecks,
   SquareTerminal,
+  Puzzle,
   PanelLeftClose,
   PanelLeftOpen,
   Menu,
@@ -110,7 +112,10 @@ const navGroups: NavGroupDef[] = [
   },
   {
     heading: 'Advanced',
-    items: [{ to: '/terminal', label: 'Terminal', icon: SquareTerminal }],
+    items: [
+      { to: '/plugins', label: 'Plugins', icon: Puzzle },
+      { to: '/terminal', label: 'Terminal', icon: SquareTerminal },
+    ],
     secondary: true,
   },
 ]
@@ -177,14 +182,19 @@ function NavGroupHeading({
 
 function NavGroups({
   collapsed,
+  showAdvanced,
   onNavigate,
 }: {
   collapsed: boolean
+  showAdvanced: boolean
   onNavigate?: () => void
 }) {
+  const groups = navGroups.filter(
+    (group) => showAdvanced || group.heading !== 'Advanced',
+  )
   return (
     <div className="flex flex-col">
-      {navGroups.map((group) => (
+      {groups.map((group) => (
         <div key={group.heading}>
           {!collapsed && (
             <NavGroupHeading secondary={group.secondary}>
@@ -225,6 +235,9 @@ export default function Layout({ children }: { children: ReactNode }) {
     retry: false,
     staleTime: 30_000,
   })
+
+  const { data: uiSettings } = useUISettings()
+  const showAdvanced = uiSettings?.show_advanced ?? false
 
   useEffect(() => {
     if (!drawerOpen) return
@@ -409,7 +422,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               onClick={toggleCollapsed}
             />
           </div>
-          <NavGroups collapsed={collapsed} />
+          <NavGroups collapsed={collapsed} showAdvanced={showAdvanced} />
           <div className="flex-1" />
           <div className="flex flex-col gap-1 pt-2 border-t border-border-muted">
             {!collapsed && <NavGroupHeading>Settings</NavGroupHeading>}
@@ -442,7 +455,11 @@ export default function Layout({ children }: { children: ReactNode }) {
                   onClick={closeDrawer}
                 />
               </div>
-              <NavGroups collapsed={false} onNavigate={closeDrawer} />
+              <NavGroups
+                collapsed={false}
+                showAdvanced={showAdvanced}
+                onNavigate={closeDrawer}
+              />
               <div className="flex-1" />
               <div className="flex flex-col gap-1 pt-2 border-t border-border-muted">
                 <NavGroupHeading>Settings</NavGroupHeading>

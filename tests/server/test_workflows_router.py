@@ -44,6 +44,53 @@ def test_save_then_list_and_get(client: TestClient) -> None:
     assert get_resp.json()["content"] == _VALID_YAML
 
 
+def test_get_workflow_includes_a_readable_step_summary(client: TestClient) -> None:
+    """CIVEX-263: the UI renders steps/inputs/outputs without parsing YAML
+    itself, so the detail response carries a structured step list alongside
+    the raw `content`."""
+    content = """\
+name: two-step
+description: A workflow
+triggers:
+  record_created:
+    schema: doc
+steps:
+  - id: read
+    plugin: civex.get_field
+    config:
+      field: subject
+  - id: save
+    plugin: civex.save_field
+    config:
+      field: title
+    inputs:
+      value: read.value
+"""
+    client.put("/api/workflows/two-step", json={"content": content})
+    resp = client.get("/api/workflows/two-step")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["step_list"] == [
+        {
+            "id": "read",
+            "plugin": "civex.get_field",
+            "config": {"field": "subject"},
+            "inputs": {},
+            "condition": None,
+        },
+        {
+            "id": "save",
+            "plugin": "civex.save_field",
+            "config": {"field": "title"},
+            "inputs": {"value": "read.value"},
+            "condition": None,
+        },
+    ]
+    assert body["triggers"] == {
+        "record_created": {"schema_name": "doc", "fields": None}
+    }
+
+
 def test_save_rejects_bad_stem(client: TestClient) -> None:
     resp = client.put("/api/workflows/bad stem!", json={"content": _VALID_YAML})
     assert resp.status_code == 422

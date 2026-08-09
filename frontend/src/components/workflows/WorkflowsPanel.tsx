@@ -5,10 +5,10 @@ import type { Workflow } from '../../api/workflows'
 
 interface WorkflowsPanelProps {
   onRun: (workflow: Workflow) => void
-  onEdit: (workflow: Workflow) => void
+  onView: (workflow: Workflow) => void
 }
 
-export function WorkflowsPanel({ onRun, onEdit }: WorkflowsPanelProps) {
+export function WorkflowsPanel({ onRun, onView }: WorkflowsPanelProps) {
   const { data: workflows, isLoading, error } = useWorkflows()
   const deleteWf = useDeleteWorkflow()
 
@@ -88,8 +88,8 @@ export function WorkflowsPanel({ onRun, onEdit }: WorkflowsPanelProps) {
             <Button size="sm" onClick={() => onRun(wf)}>
               Run
             </Button>
-            <Button size="sm" variant="default" onClick={() => onEdit(wf)}>
-              Edit
+            <Button size="sm" variant="default" onClick={() => onView(wf)}>
+              View
             </Button>
             <Button size="sm" variant="danger" onClick={() => openDelete(wf)}>
               Delete
