@@ -2,7 +2,13 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { useJob, useRerunJob } from '../hooks/useWorkflows'
 import { type WorkflowJob } from '../api/workflows'
-import { Badge, Button, DetailSkeleton, ErrorState } from '../components/ui'
+import {
+  Badge,
+  Button,
+  DetailSkeleton,
+  ErrorState,
+  Page,
+} from '../components/ui'
 import StepExecutionCard from '../components/jobs/StepExecutionCard'
 import JobStepsDiagram from '../components/jobs/JobStepsDiagram'
 import { Check, XCircle, RefreshCw } from '../components/ui/icons'
@@ -46,29 +52,41 @@ export default function JobDetailPage() {
   const rerun = useRerunJob()
   const [view, setView] = useState<'list' | 'diagram'>('list')
 
-  if (isLoading) return <DetailSkeleton metadataRows={6} sections={1} />
-  if (error) return <ErrorState message={error.message} />
-  if (!job) return <ErrorState message="Run not found" />
+  const breadcrumbs = [{ label: 'Runs', to: '/runs' }]
+
+  if (isLoading)
+    return (
+      <Page
+        breadcrumbs={breadcrumbs}
+        loading={<DetailSkeleton metadataRows={6} sections={1} />}
+      />
+    )
+  if (error)
+    return (
+      <Page
+        breadcrumbs={breadcrumbs}
+        error={<ErrorState message={error.message} />}
+      />
+    )
+  if (!job)
+    return (
+      <Page
+        breadcrumbs={breadcrumbs}
+        error={<ErrorState message="Run not found" />}
+      />
+    )
 
   const isActive = job.status === 'pending' || job.status === 'running'
 
   return (
-    <div className="space-y-6">
-      {/* Breadcrumb */}
-      <nav className="text-sm text-fg-muted">
-        <Link to="/runs" className="text-accent hover:underline">
-          Runs
-        </Link>
-        <span className="mx-2">/</span>
-        <span className="font-mono">{job.id.slice(0, 8)}…</span>
-      </nav>
-
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-fg">{job.workflow_name}</h1>
-          <p className="text-sm text-fg-muted mt-1 font-mono">{job.id}</p>
-        </div>
+    <Page
+      breadcrumbs={[
+        { label: 'Runs', to: '/runs' },
+        { label: `${job.id.slice(0, 8)}…` },
+      ]}
+      title={job.workflow_name}
+      description={<span className="font-mono">{job.id}</span>}
+      action={
         <div className="flex items-center gap-2">
           {isActive && (
             <span className="text-xs text-accent animate-pulse">live</span>
@@ -87,8 +105,8 @@ export default function JobDetailPage() {
             {rerun.isPending ? 'Re-running…' : 'Re-run'}
           </Button>
         </div>
-      </div>
-
+      }
+    >
       {/* Metadata grid */}
       <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm border border-border rounded-md p-4 bg-canvas-subtle">
         <div>
@@ -194,6 +212,6 @@ export default function JobDetailPage() {
           </div>
         )}
       </div>
-    </div>
+    </Page>
   )
 }

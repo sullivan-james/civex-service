@@ -1,16 +1,16 @@
+import { Page } from '../components/ui'
 import DatabaseSection from '../components/settings/DatabaseSection'
 import StorageSection from '../components/settings/StorageSection'
 import ThemeSection from '../components/settings/ThemeSection'
 
 export default function SettingsPage() {
   return (
-    <div className="space-y-8">
-      <h1 className="text-xl font-semibold text-fg">Settings</h1>
+    <Page title="Settings">
       <ThemeSection />
       <hr className="border-border" />
       <DatabaseSection />
       <hr className="border-border" />
       <StorageSection />
-    </div>
+    </Page>
   )
 }

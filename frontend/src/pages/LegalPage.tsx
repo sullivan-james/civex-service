@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLicense, usePolicies } from '../hooks/useLegal'
-import { Skeleton, ErrorState } from '../components/ui'
+import { Page, Skeleton, ErrorState } from '../components/ui'
 import { ChevronUp, ChevronDown } from '../components/ui/icons'
 import { errorMessage } from '../lib/errors'
 
@@ -111,17 +111,10 @@ function PoliciesSection() {
 
 export default function LegalPage() {
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-xl font-semibold text-fg">
-          Licenses &amp; Policies
-        </h1>
-        <p className="text-sm text-fg-muted mt-1">
-          The software license for this build, plus any data/governance policies
-          this deployment has documented.
-        </p>
-      </div>
-
+    <Page
+      title="Licenses & Policies"
+      description="The software license for this build, plus any data/governance policies this deployment has documented."
+    >
       <div className="space-y-3">
         <h2 className="text-lg font-semibold text-fg">License</h2>
         <LicenseSection />
@@ -131,6 +124,6 @@ export default function LegalPage() {
         <h2 className="text-lg font-semibold text-fg">Policies</h2>
         <PoliciesSection />
       </div>
-    </div>
+    </Page>
   )
 }

@@ -17,7 +17,7 @@ import {
   useUploadPlugin,
 } from '../hooks/usePlugins'
 import {
-  PageHeader,
+  Page,
   Button,
   TableSkeleton,
   ErrorState,
@@ -598,17 +598,15 @@ export default function WorkflowsPage() {
   }
 
   return (
-    <>
-      <PageHeader
-        title="Workflows"
-        description="YAML workflow definitions in .civex/workflows/"
-        action={
-          <Button variant="primary" size="sm" onClick={openNew}>
-            + New workflow
-          </Button>
-        }
-      />
-
+    <Page
+      title="Workflows"
+      description="YAML workflow definitions in .civex/workflows/"
+      action={
+        <Button variant="primary" size="sm" onClick={openNew}>
+          + New workflow
+        </Button>
+      }
+    >
       {workflowDeleteError && (
         <p className="text-xs text-danger mb-2">{workflowDeleteError}</p>
       )}
@@ -1017,6 +1015,6 @@ export default function WorkflowsPage() {
           }}
         />
       )}
-    </>
+    </Page>
   )
 }

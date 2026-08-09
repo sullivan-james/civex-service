@@ -23,6 +23,7 @@ import {
   Td,
   DetailSkeleton,
   ErrorState,
+  Page,
 } from '../components/ui'
 import { X, Play } from '../components/ui/icons'
 import { DynamicField } from '../components/records/DynamicField'
@@ -217,10 +218,25 @@ export default function RecordDetailPage() {
     hasActiveJobs ? 2000 : 5000,
   )
 
-  if (isLoading) return <DetailSkeleton metadataRows={4} sections={2} />
+  const breadcrumbs = [{ label: 'Collections', to: '/collections' }]
+
+  if (isLoading)
+    return (
+      <Page
+        breadcrumbs={breadcrumbs}
+        loading={<DetailSkeleton metadataRows={4} sections={2} />}
+      />
+    )
   if (error || !record)
     return (
-      <ErrorState message={error ? errorMessage(error) : 'Record not found'} />
+      <Page
+        breadcrumbs={breadcrumbs}
+        error={
+          <ErrorState
+            message={error ? errorMessage(error) : 'Record not found'}
+          />
+        }
+      />
     )
 
   const schema = schemas?.find((s) => s.name === record.schema_name)
@@ -279,55 +295,44 @@ export default function RecordDetailPage() {
   )
 
   return (
-    <div className="space-y-6">
-      {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-sm text-fg-muted flex-wrap">
-        <Link to="/collections" className="hover:text-accent">
-          Collections
-        </Link>
-        <span>/</span>
-        {collection && (
-          <>
-            <Link
-              to={`/collections/${record.dataset_id}`}
-              className="hover:text-accent"
-            >
-              {collection.name}
-            </Link>
-            <span>/</span>
-          </>
-        )}
-        <span className="font-mono text-fg">
-          {record.natural_name ?? record.id.slice(0, 8)}
-        </span>
-      </nav>
-
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-fg">
-              {record.natural_name ?? (
-                <span className="font-mono">{record.id.slice(0, 8)}</span>
-              )}
-            </h1>
-            {schema ? (
-              <Link to={`/schemas/${schema.id}`}>
-                <Badge variant="accent">{record.schema_name}</Badge>
-              </Link>
-            ) : (
+    <Page
+      breadcrumbs={[
+        ...breadcrumbs,
+        ...(collection
+          ? [
+              {
+                label: collection.name,
+                to: `/collections/${record.dataset_id}`,
+              },
+            ]
+          : []),
+        { label: record.natural_name ?? record.id.slice(0, 8) },
+      ]}
+      title={
+        <span className="inline-flex items-center gap-2">
+          {record.natural_name ?? (
+            <span className="font-mono">{record.id.slice(0, 8)}</span>
+          )}
+          {schema ? (
+            <Link to={`/schemas/${schema.id}`}>
               <Badge variant="accent">{record.schema_name}</Badge>
-            )}
-          </div>
-          <p className="mt-1 text-xs text-fg-subtle font-mono">{record.id}</p>
-          <p className="mt-1 text-sm text-fg-muted">
+            </Link>
+          ) : (
+            <Badge variant="accent">{record.schema_name}</Badge>
+          )}
+        </span>
+      }
+      description={
+        <>
+          <p className="text-xs text-fg-subtle font-mono">{record.id}</p>
+          <p className="mt-1">
             Added {formatDate(record.created_at)}
             {record.created_at !== record.updated_at &&
               ` · Updated ${formatDate(record.updated_at)}`}
           </p>
-        </div>
-      </div>
-
+        </>
+      }
+    >
       {/* Parent record */}
       {record.parent_record_id && (
         <div className="border border-border rounded-md p-4 bg-canvas-subtle">
@@ -571,6 +576,6 @@ export default function RecordDetailPage() {
           )}
         </div>
       </div>
-    </div>
+    </Page>
   )
 }

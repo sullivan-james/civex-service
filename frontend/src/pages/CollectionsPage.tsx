@@ -13,7 +13,7 @@ import {
   ModalFooter,
   ModalHeader,
   MonoId,
-  PageHeader,
+  Page,
   Table,
   Tbody,
   Td,
@@ -122,7 +122,34 @@ export default function CollectionsPage() {
   }
 
   return (
-    <>
+    <Page
+      title="Collections"
+      action={
+        <div className="flex items-center gap-2">
+          {importError && (
+            <span className="text-xs text-danger">{importError}</span>
+          )}
+          <Button
+            variant="default"
+            onClick={() => dumpApi.exportDump()}
+            title="Download a YAML dump of all schemas, collections, and records"
+          >
+            Export dump
+          </Button>
+          <Button
+            variant="default"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            title="Restore from a civex-dump.yaml file"
+          >
+            {importing ? 'Importing…' : 'Import dump'}
+          </Button>
+          <Button variant="primary" onClick={() => setShowCreate(true)}>
+            New collection
+          </Button>
+        </div>
+      }
+    >
       {showCreate && (
         <CreateCollectionModal onClose={() => setShowCreate(false)} />
       )}
@@ -140,35 +167,6 @@ export default function CollectionsPage() {
         accept=".yaml,.yml"
         className="hidden"
         onChange={handleImportFile}
-      />
-
-      <PageHeader
-        title="Collections"
-        action={
-          <div className="flex items-center gap-2">
-            {importError && (
-              <span className="text-xs text-danger">{importError}</span>
-            )}
-            <Button
-              variant="default"
-              onClick={() => dumpApi.exportDump()}
-              title="Download a YAML dump of all schemas, collections, and records"
-            >
-              Export dump
-            </Button>
-            <Button
-              variant="default"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={importing}
-              title="Restore from a civex-dump.yaml file"
-            >
-              {importing ? 'Importing…' : 'Import dump'}
-            </Button>
-            <Button variant="primary" onClick={() => setShowCreate(true)}>
-              New collection
-            </Button>
-          </div>
-        }
       />
 
       {isLoading && (
@@ -250,6 +248,6 @@ export default function CollectionsPage() {
           </Tbody>
         </Table>
       )}
-    </>
+    </Page>
   )
 }

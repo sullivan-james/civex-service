@@ -9,7 +9,7 @@ import {
   Field,
   TableSkeleton,
   MonoId,
-  PageHeader,
+  Page,
   Select,
   Table,
   Tbody,
@@ -67,17 +67,15 @@ export default function SchemasPage() {
   const nameById = Object.fromEntries((data ?? []).map((s) => [s.id, s.name]))
 
   return (
-    <>
+    <Page
+      title="Schemas"
+      action={
+        <Button variant="primary" onClick={() => setShowCreate(true)}>
+          New schema
+        </Button>
+      }
+    >
       {showCreate && <CreateSchemaModal onClose={() => setShowCreate(false)} />}
-
-      <PageHeader
-        title="Schemas"
-        action={
-          <Button variant="primary" onClick={() => setShowCreate(true)}>
-            New schema
-          </Button>
-        }
-      />
 
       {isLoading && (
         <TableSkeleton
@@ -169,6 +167,6 @@ export default function SchemasPage() {
           </Tbody>
         </Table>
       )}
-    </>
+    </Page>
   )
 }
