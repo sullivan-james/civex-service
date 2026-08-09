@@ -31,6 +31,10 @@ import {
   Select,
   Checkbox,
   ConfirmDialog,
+  FormGrid,
+  FormSection,
+  FormFooter,
+  spanClassName,
 } from '../components/ui'
 import {
   Star,
@@ -218,9 +222,8 @@ function AddFieldForm({
   }
 
   return (
-    <div className="border-t border-border bg-canvas-subtle px-4 py-3 flex flex-col gap-3">
-      {/* Row 1: name, type, required */}
-      <div className="flex items-center gap-3 flex-wrap">
+    <FormGrid className="border-t border-border bg-canvas-subtle px-4 py-3">
+      <Field label="Field name" span={4}>
         <Input
           size="sm"
           value={fieldName}
@@ -228,8 +231,9 @@ function AddFieldForm({
           onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
           placeholder="Field name"
           autoFocus
-          className="w-40"
         />
+      </Field>
+      <Field label="Type" span={4}>
         <Select
           size="sm"
           value={type}
@@ -239,7 +243,16 @@ function AddFieldForm({
             <option key={t}>{t}</option>
           ))}
         </Select>
-        {type === 'reference' && (
+      </Field>
+      <Field label="Required" layout="inline" span={4}>
+        <Checkbox
+          checked={required}
+          onChange={(e) => setRequired(e.target.checked)}
+        />
+      </Field>
+
+      {type === 'reference' && (
+        <Field label="Target schema" span={6}>
           <Select
             size="sm"
             value={refSchema}
@@ -254,50 +267,23 @@ function AddFieldForm({
                 </option>
               ))}
           </Select>
-        )}
-        <Field label="Required" layout="inline">
-          <Checkbox
-            checked={required}
-            onChange={(e) => setRequired(e.target.checked)}
-          />
         </Field>
-        <div className="flex gap-2 ml-auto">
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleAdd}
-            disabled={addField.isPending || !canAdd}
-          >
-            {addField.isPending ? 'Adding…' : 'Add field'}
-          </Button>
-          <Button size="sm" onClick={onDone}>
-            Cancel
-          </Button>
-        </div>
-      </div>
-
-      {/* Default value */}
-      {showDefault && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <Field label="Default value">
-            <Input
-              size="sm"
-              value={defaultVal}
-              onChange={(e) => setDefaultVal(e.target.value)}
-              placeholder="none"
-              className="w-40"
-            />
-          </Field>
-        </div>
       )}
 
-      {/* Row 2: type-specific restrictions */}
+      {showDefault && (
+        <Field label="Default value" span={4}>
+          <Input
+            size="sm"
+            value={defaultVal}
+            onChange={(e) => setDefaultVal(e.target.value)}
+            placeholder="none"
+          />
+        </Field>
+      )}
+
       {(type === 'integer' || type === 'float') && (
-        <div className="flex items-end gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium pb-2">
-            Restrictions:
-          </span>
-          <Field label="Min">
+        <FormSection title="Restrictions">
+          <Field label="Min" span={6}>
             <Input
               size="sm"
               type="number"
@@ -305,10 +291,9 @@ function AddFieldForm({
               value={minVal}
               onChange={(e) => setMinVal(e.target.value)}
               placeholder="none"
-              className="w-24"
             />
           </Field>
-          <Field label="Max">
+          <Field label="Max" span={6}>
             <Input
               size="sm"
               type="number"
@@ -316,27 +301,25 @@ function AddFieldForm({
               value={maxVal}
               onChange={(e) => setMaxVal(e.target.value)}
               placeholder="none"
-              className="w-24"
             />
           </Field>
-        </div>
+        </FormSection>
       )}
       {(type === 'string' || type === 'enum') && (
-        <div className="flex items-end gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium pb-2">
-            Restrictions:
-          </span>
-          <Field label="Choices (comma-separated)">
+        <FormSection title="Restrictions">
+          <Field
+            label="Choices (comma-separated)"
+            span={type === 'string' ? 6 : 12}
+          >
             <Input
               size="sm"
               value={choices}
               onChange={(e) => setChoices(e.target.value)}
               placeholder="e.g. left,right,bilateral"
-              className="w-52"
             />
           </Field>
           {type === 'string' && (
-            <Field label="Max length">
+            <Field label="Max length" span={6}>
               <Input
                 size="sm"
                 type="number"
@@ -345,27 +328,22 @@ function AddFieldForm({
                 value={maxLength}
                 onChange={(e) => setMaxLength(e.target.value)}
                 placeholder="none"
-                className="w-24"
               />
             </Field>
           )}
-        </div>
+        </FormSection>
       )}
       {(type === 'file' || type === 'file_list') && (
-        <div className="flex items-end gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium pb-2">
-            Restrictions:
-          </span>
-          <Field label="Accept">
+        <FormSection title="Restrictions">
+          <Field label="Accept" span={6}>
             <Input
               size="sm"
               value={accept}
               onChange={(e) => setAccept(e.target.value)}
               placeholder=".csv,.txt"
-              className="w-36"
             />
           </Field>
-          <Field label="Max size (bytes)">
+          <Field label="Max size (bytes)" span={6}>
             <Input
               size="sm"
               type="number"
@@ -374,17 +352,13 @@ function AddFieldForm({
               value={maxSize}
               onChange={(e) => setMaxSize(e.target.value)}
               placeholder="none"
-              className="w-28"
             />
           </Field>
-        </div>
+        </FormSection>
       )}
       {(type === 'date' || type === 'datetime') && (
-        <div className="flex items-end gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium pb-2">
-            Restrictions:
-          </span>
-          <Field label="Not before">
+        <FormSection title="Restrictions">
+          <Field label="Not before" span={6}>
             <Input
               size="sm"
               type={type === 'date' ? 'date' : 'datetime-local'}
@@ -392,7 +366,7 @@ function AddFieldForm({
               onChange={(e) => setMinDate(e.target.value)}
             />
           </Field>
-          <Field label="Not after">
+          <Field label="Not after" span={6}>
             <Input
               size="sm"
               type={type === 'date' ? 'date' : 'datetime-local'}
@@ -400,15 +374,29 @@ function AddFieldForm({
               onChange={(e) => setMaxDate(e.target.value)}
             />
           </Field>
-        </div>
+        </FormSection>
       )}
 
       {addField.error && (
-        <span className="text-xs text-danger">
+        <p className={`${spanClassName(12)} text-xs text-danger`}>
           {errorMessage(addField.error)}
-        </span>
+        </p>
       )}
-    </div>
+
+      <FormFooter>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={handleAdd}
+          disabled={addField.isPending || !canAdd}
+        >
+          {addField.isPending ? 'Adding…' : 'Add field'}
+        </Button>
+        <Button size="sm" onClick={onDone}>
+          Cancel
+        </Button>
+      </FormFooter>
+    </FormGrid>
   )
 }
 
@@ -465,44 +453,32 @@ function FieldEditForm({
   const dtype = field.type
 
   return (
-    <div className="bg-accent-subtle border-t border-border px-4 py-3 flex flex-col gap-3">
-      <div className="flex items-center gap-3 flex-wrap">
+    <FormGrid className="bg-accent-subtle border-t border-border px-4 py-3">
+      <Field label="Field name" span={4}>
         <Input
           size="sm"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSave()}
           autoFocus
-          className="w-40"
         />
-        <Badge variant="accent">{dtype}</Badge>
-        <Field label="Required" layout="inline">
-          <Checkbox
-            checked={required}
-            onChange={(e) => setRequired(e.target.checked)}
-          />
-        </Field>
-        <div className="flex gap-2 ml-auto">
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleSave}
-            disabled={updateField.isPending || !name.trim()}
-          >
-            {updateField.isPending ? 'Saving…' : 'Save'}
-          </Button>
-          <Button size="sm" onClick={onDone}>
-            Cancel
-          </Button>
+      </Field>
+      <div className={`flex flex-col gap-1 ${spanClassName(4)}`}>
+        <span className="text-xs font-medium text-fg-muted">Type</span>
+        <div className="h-8 flex items-center">
+          <Badge variant="accent">{dtype}</Badge>
         </div>
       </div>
+      <Field label="Required" layout="inline" span={4}>
+        <Checkbox
+          checked={required}
+          onChange={(e) => setRequired(e.target.checked)}
+        />
+      </Field>
 
       {(dtype === 'integer' || dtype === 'float') && (
-        <div className="flex items-end gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium pb-2">
-            Restrictions:
-          </span>
-          <Field label="Min">
+        <FormSection title="Restrictions">
+          <Field label="Min" span={6}>
             <Input
               size="sm"
               type="number"
@@ -510,10 +486,9 @@ function FieldEditForm({
               value={minVal}
               onChange={(e) => setMinVal(e.target.value)}
               placeholder="none"
-              className="w-24"
             />
           </Field>
-          <Field label="Max">
+          <Field label="Max" span={6}>
             <Input
               size="sm"
               type="number"
@@ -521,27 +496,22 @@ function FieldEditForm({
               value={maxVal}
               onChange={(e) => setMaxVal(e.target.value)}
               placeholder="none"
-              className="w-24"
             />
           </Field>
-        </div>
+        </FormSection>
       )}
       {(dtype === 'string' || dtype === 'enum') && (
-        <div className="flex items-end gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium pb-2">
-            Restrictions:
-          </span>
-          <Field label="Choices (comma-separated)">
+        <FormSection title="Restrictions">
+          <Field label="Choices (comma-separated)" span={6}>
             <Input
               size="sm"
               value={choices}
               onChange={(e) => setChoices(e.target.value)}
               placeholder="none"
-              className="w-52"
             />
           </Field>
           {dtype === 'string' && (
-            <Field label="Max length">
+            <Field label="Max length" span={6}>
               <Input
                 size="sm"
                 type="number"
@@ -550,27 +520,22 @@ function FieldEditForm({
                 value={maxLength}
                 onChange={(e) => setMaxLength(e.target.value)}
                 placeholder="none"
-                className="w-24"
               />
             </Field>
           )}
-        </div>
+        </FormSection>
       )}
       {(dtype === 'file' || dtype === 'file_list') && (
-        <div className="flex items-end gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium pb-2">
-            Restrictions:
-          </span>
-          <Field label="Accept">
+        <FormSection title="Restrictions">
+          <Field label="Accept" span={6}>
             <Input
               size="sm"
               value={accept}
               onChange={(e) => setAccept(e.target.value)}
               placeholder=".csv,.txt"
-              className="w-36"
             />
           </Field>
-          <Field label="Max size (bytes)">
+          <Field label="Max size (bytes)" span={6}>
             <Input
               size="sm"
               type="number"
@@ -579,17 +544,13 @@ function FieldEditForm({
               value={maxSize}
               onChange={(e) => setMaxSize(e.target.value)}
               placeholder="none"
-              className="w-28"
             />
           </Field>
-        </div>
+        </FormSection>
       )}
       {(dtype === 'date' || dtype === 'datetime') && (
-        <div className="flex items-end gap-3 flex-wrap">
-          <span className="text-xs text-fg-muted font-medium pb-2">
-            Restrictions:
-          </span>
-          <Field label="Not before">
+        <FormSection title="Restrictions">
+          <Field label="Not before" span={6}>
             <Input
               size="sm"
               type={dtype === 'date' ? 'date' : 'datetime-local'}
@@ -597,7 +558,7 @@ function FieldEditForm({
               onChange={(e) => setMinDate(e.target.value)}
             />
           </Field>
-          <Field label="Not after">
+          <Field label="Not after" span={6}>
             <Input
               size="sm"
               type={dtype === 'date' ? 'date' : 'datetime-local'}
@@ -605,14 +566,29 @@ function FieldEditForm({
               onChange={(e) => setMaxDate(e.target.value)}
             />
           </Field>
-        </div>
+        </FormSection>
       )}
+
       {updateField.error && (
-        <span className="text-xs text-danger">
+        <p className={`${spanClassName(12)} text-xs text-danger`}>
           {errorMessage(updateField.error)}
-        </span>
+        </p>
       )}
-    </div>
+
+      <FormFooter>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={handleSave}
+          disabled={updateField.isPending || !name.trim()}
+        >
+          {updateField.isPending ? 'Saving…' : 'Save'}
+        </Button>
+        <Button size="sm" onClick={onDone}>
+          Cancel
+        </Button>
+      </FormFooter>
+    </FormGrid>
   )
 }
 
