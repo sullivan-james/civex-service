@@ -8,6 +8,10 @@ import {
   ErrorState,
   TableSkeleton,
   Input,
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
   MonoId,
   PageHeader,
   Table,
@@ -33,16 +37,10 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay-scrim"
-      onClick={onClose}
-    >
-      <div
-        className="bg-canvas rounded-lg border border-border shadow-lg w-full max-w-md p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-base font-semibold text-fg mb-4">New collection</h2>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+    <Modal onClose={onClose}>
+      <ModalHeader>New collection</ModalHeader>
+      <form onSubmit={handleSubmit}>
+        <ModalBody className="flex flex-col gap-3">
           <div>
             <label className="block text-xs font-medium text-fg mb-1">
               Name <span className="text-danger">*</span>
@@ -70,17 +68,17 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
           {create.error && (
             <p className="text-xs text-danger">{errorMessage(create.error)}</p>
           )}
-          <div className="flex justify-end gap-2 mt-1">
-            <Button type="button" variant="default" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="primary" disabled={create.isPending}>
-              {create.isPending ? 'Creating…' : 'Create collection'}
-            </Button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </ModalBody>
+        <ModalFooter>
+          <Button type="button" variant="default" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" disabled={create.isPending}>
+            {create.isPending ? 'Creating…' : 'Create collection'}
+          </Button>
+        </ModalFooter>
+      </form>
+    </Modal>
   )
 }
 
@@ -92,17 +90,9 @@ function ImportResultModal({
   onClose: () => void
 }) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay-scrim"
-      onClick={onClose}
-    >
-      <div
-        className="bg-canvas rounded-lg border border-border shadow-lg w-full max-w-sm p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-base font-semibold text-fg mb-3">
-          Import complete
-        </h2>
+    <Modal onClose={onClose} size="sm">
+      <ModalHeader>Import complete</ModalHeader>
+      <ModalBody>
         <dl className="text-sm space-y-1">
           <div className="flex justify-between">
             <dt className="text-fg-muted">Schemas</dt>
@@ -132,13 +122,13 @@ function ImportResultModal({
             <dd className="font-medium">{result.plugins}</dd>
           </div>
         </dl>
-        <div className="flex justify-end mt-4">
-          <Button variant="primary" onClick={onClose}>
-            Done
-          </Button>
-        </div>
-      </div>
-    </div>
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="primary" onClick={onClose}>
+          Done
+        </Button>
+      </ModalFooter>
+    </Modal>
   )
 }
 

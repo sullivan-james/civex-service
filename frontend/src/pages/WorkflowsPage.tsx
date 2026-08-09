@@ -21,6 +21,10 @@ import {
   Button,
   TableSkeleton,
   ErrorState,
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
   Input,
 } from '../components/ui'
 import { ChevronUp, ChevronDown } from '../components/ui/icons'
@@ -257,131 +261,115 @@ function WorkflowEditor({
   }
 
   return (
-    <div className="fixed inset-0 bg-overlay-scrim flex items-center justify-center z-50 p-4">
-      <div
-        className="bg-canvas rounded-lg shadow-xl w-full max-w-3xl flex flex-col"
-        style={{ height: '90vh' }}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <h2 className="text-base font-semibold text-fg">
-            {isNew ? 'New workflow' : `Edit — ${initialStem}.yaml`}
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-fg-muted hover:text-fg text-xl leading-none"
-          >
-            ×
-          </button>
-        </div>
+    <Modal onClose={onClose} size="xl" className="h-[90vh]">
+      <ModalHeader onClose={onClose}>
+        {isNew ? 'New workflow' : `Edit — ${initialStem}.yaml`}
+      </ModalHeader>
 
-        {/* Body */}
-        <div className="flex flex-col gap-3 p-6 flex-1 min-h-0">
-          {isNew && (
-            <label className="block">
-              <span className="text-xs font-medium text-fg">Filename stem</span>
-              <div className="flex items-center gap-1 mt-1">
-                <Input
-                  type="text"
-                  value={stem}
-                  onChange={(e) =>
-                    setStem(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))
-                  }
-                  placeholder="my-workflow"
-                  className="w-56"
-                />
-                <span className="text-sm text-fg-muted">.yaml</span>
-              </div>
-              <p className="text-xs text-fg-muted mt-1">
-                Letters, numbers, hyphens and underscores only.
-              </p>
-            </label>
-          )}
-
-          {isLoading ? (
-            <div className="flex-1 flex items-center justify-center text-sm text-fg-muted">
-              Loading…
+      <ModalBody className="flex flex-col gap-3">
+        {isNew && (
+          <label className="block">
+            <span className="text-xs font-medium text-fg">Filename stem</span>
+            <div className="flex items-center gap-1 mt-1">
+              <Input
+                type="text"
+                value={stem}
+                onChange={(e) =>
+                  setStem(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))
+                }
+                placeholder="my-workflow"
+                className="w-56"
+              />
+              <span className="text-sm text-fg-muted">.yaml</span>
             </div>
-          ) : (
-            <div className="flex-1 flex flex-col min-h-0">
-              <span className="text-xs font-medium text-fg mb-1">YAML</span>
-              <div
-                ref={editorWrapRef}
-                onKeyDownCapture={handleEditorKeyDownCapture}
-                className="relative flex-1 min-h-0 overflow-auto border border-border rounded-md bg-canvas-subtle focus-within:border-accent focus-within:ring-1 focus-within:ring-accent"
-                style={{ minHeight: '200px' }}
-              >
-                <CodeMirror
-                  value={content ?? ''}
-                  theme={theme}
-                  onChange={(value) => setContent(value)}
-                  onUpdate={handleUpdate}
-                  onCreateEditor={(view) => {
-                    viewRef.current = view
-                  }}
-                  onBlur={() => setSuggestions([])}
-                  extensions={[yaml()]}
-                  basicSetup={{ tabSize: 2 }}
-                  indentWithTab
-                  height="100%"
-                  className="h-full text-xs"
-                  style={{ height: '100%' }}
-                />
-                <AutocompleteMenu
-                  suggestions={suggestions}
-                  activeIndex={activeIndex}
-                  position={menuPos}
-                  onSelect={applySuggestion}
-                />
-              </div>
-            </div>
-          )}
+            <p className="text-xs text-fg-muted mt-1">
+              Letters, numbers, hyphens and underscores only.
+            </p>
+          </label>
+        )}
 
-          {saveError && (
-            <div className="text-xs bg-danger-subtle border border-danger-subtle-border rounded-md p-2 max-h-40 overflow-auto space-y-2">
-              {groupWorkflowValidationErrors(saveError).map(
-                ({ step, messages }) => (
-                  <div key={step ?? '__general__'}>
-                    {step ? (
-                      <button
-                        type="button"
-                        onClick={() => jumpToStep(step)}
-                        className="font-mono font-semibold text-danger hover:underline"
-                      >
-                        Step '{step}'
-                      </button>
-                    ) : (
-                      <span className="font-semibold text-danger">General</span>
-                    )}
-                    <ul className="list-disc list-inside text-danger">
-                      {messages.map((message, i) => (
-                        <li key={i} className="whitespace-pre-wrap">
-                          {message}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ),
-              )}
+        {isLoading ? (
+          <div className="flex-1 flex items-center justify-center text-sm text-fg-muted">
+            Loading…
+          </div>
+        ) : (
+          <div className="flex-1 flex flex-col min-h-0">
+            <span className="text-xs font-medium text-fg mb-1">YAML</span>
+            <div
+              ref={editorWrapRef}
+              onKeyDownCapture={handleEditorKeyDownCapture}
+              className="relative flex-1 min-h-0 overflow-auto border border-border rounded-md bg-canvas-subtle focus-within:border-accent focus-within:ring-1 focus-within:ring-accent"
+              style={{ minHeight: '200px' }}
+            >
+              <CodeMirror
+                value={content ?? ''}
+                theme={theme}
+                onChange={(value) => setContent(value)}
+                onUpdate={handleUpdate}
+                onCreateEditor={(view) => {
+                  viewRef.current = view
+                }}
+                onBlur={() => setSuggestions([])}
+                extensions={[yaml()]}
+                basicSetup={{ tabSize: 2 }}
+                indentWithTab
+                height="100%"
+                className="h-full text-xs"
+                style={{ height: '100%' }}
+              />
+              <AutocompleteMenu
+                suggestions={suggestions}
+                activeIndex={activeIndex}
+                position={menuPos}
+                onSelect={applySuggestion}
+              />
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Footer */}
-        <div className="flex justify-end gap-2 px-6 py-4 border-t border-border">
-          <Button variant="default" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={handleSave}
-            disabled={save.isPending || !stem.trim()}
-          >
-            {save.isPending ? 'Saving…' : 'Save'}
-          </Button>
-        </div>
-      </div>
-    </div>
+        {saveError && (
+          <div className="text-xs bg-danger-subtle border border-danger-subtle-border rounded-md p-2 max-h-40 overflow-auto space-y-2">
+            {groupWorkflowValidationErrors(saveError).map(
+              ({ step, messages }) => (
+                <div key={step ?? '__general__'}>
+                  {step ? (
+                    <button
+                      type="button"
+                      onClick={() => jumpToStep(step)}
+                      className="font-mono font-semibold text-danger hover:underline"
+                    >
+                      Step '{step}'
+                    </button>
+                  ) : (
+                    <span className="font-semibold text-danger">General</span>
+                  )}
+                  <ul className="list-disc list-inside text-danger">
+                    {messages.map((message, i) => (
+                      <li key={i} className="whitespace-pre-wrap">
+                        {message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ),
+            )}
+          </div>
+        )}
+      </ModalBody>
+
+      <ModalFooter>
+        <Button variant="default" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          onClick={handleSave}
+          disabled={save.isPending || !stem.trim()}
+        >
+          {save.isPending ? 'Saving…' : 'Save'}
+        </Button>
+      </ModalFooter>
+    </Modal>
   )
 }
 
