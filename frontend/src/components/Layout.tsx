@@ -59,10 +59,11 @@ function fileManagerLabel(): string {
 
 const NAV_COLLAPSED_KEY = 'civex-nav-collapsed'
 
-// The breakpoint at which the persistent rail gives way to a drawer. Not one
-// of Tailwind's default steps, so it's expressed as an arbitrary variant
-// everywhere it's used below rather than added to the theme for one caller.
-const NAV_BREAKPOINT = 'min-[900px]'
+// The breakpoint at which the persistent rail gives way to a drawer (not one
+// of Tailwind's default steps) is written out as the literal `min-[900px]:`
+// variant at each call site below — Tailwind's static scanner extracts class
+// candidates from the source text itself, so building the variant from a JS
+// constant at runtime would leave the styles ungenerated.
 
 function readCollapsed(): boolean {
   return (
@@ -200,7 +201,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           ref={menuButtonRef}
           onClick={() => setDrawerOpen(true)}
           aria-label="Open navigation"
-          className={`${NAV_BREAKPOINT}:hidden inline-flex items-center justify-center h-8 w-8 rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors`}
+          className="min-[900px]:hidden inline-flex items-center justify-center h-8 w-8 rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
         >
           <Menu size={16} aria-hidden="true" />
         </button>
@@ -295,7 +296,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             further down. */}
         <nav
           aria-label="Primary"
-          className={`hidden ${NAV_BREAKPOINT}:flex shrink-0 flex-col border-r border-border bg-canvas-subtle py-3 ${
+          className={`hidden min-[900px]:flex shrink-0 flex-col border-r border-border bg-canvas-subtle py-3 ${
             collapsed ? 'w-16 px-2' : 'w-56 px-3'
           }`}
         >
@@ -323,7 +324,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 
         {/* Off-canvas nav drawer for narrow viewports. */}
         {drawerOpen && (
-          <div className={`fixed inset-0 z-40 ${NAV_BREAKPOINT}:hidden`}>
+          <div className="fixed inset-0 z-40 min-[900px]:hidden">
             <div
               className="absolute inset-0 bg-overlay-scrim"
               onClick={closeDrawer}
