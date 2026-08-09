@@ -1,4 +1,5 @@
 export { Button } from './Button'
+export { IconButton } from './IconButton'
 export { Badge } from './Badge'
 export { Table, Thead, Th, Tbody, Tr, Td } from './Table'
 export { PageHeader } from './PageHeader'

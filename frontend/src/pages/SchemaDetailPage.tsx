@@ -15,6 +15,7 @@ import {
 } from '../hooks/useSchemas'
 import {
   Button,
+  IconButton,
   Badge,
   Table,
   Thead,
@@ -846,30 +847,26 @@ export default function SchemaDetailPage() {
                   {/* Drag handle + reorder buttons */}
                   <Td className="w-8 cursor-grab text-border hover:text-fg-muted select-none">
                     <div className="flex flex-col items-center gap-1">
-                      <button
-                        type="button"
-                        title="Move up"
+                      <IconButton
+                        icon={ChevronUp}
+                        aria-label="Move field up"
+                        variant="subtle"
                         disabled={index === 0 || reorderFields.isPending}
                         onClick={() => moveField(index, 'up')}
-                        className="text-xs text-border hover:text-fg disabled:opacity-30 leading-none"
-                      >
-                        <ChevronUp size={12} />
-                      </button>
+                      />
                       <span title="Drag to reorder">
                         <GripVertical size={12} />
                       </span>
-                      <button
-                        type="button"
-                        title="Move down"
+                      <IconButton
+                        icon={ChevronDown}
+                        aria-label="Move field down"
+                        variant="subtle"
                         disabled={
                           index === schema.fields.length - 1 ||
                           reorderFields.isPending
                         }
                         onClick={() => moveField(index, 'down')}
-                        className="text-xs text-border hover:text-fg disabled:opacity-30 leading-none"
-                      >
-                        <ChevronDown size={12} />
-                      </button>
+                      />
                     </div>
                   </Td>
                   <Td>
@@ -959,30 +956,34 @@ export default function SchemaDetailPage() {
                         </>
                       ) : (
                         <>
-                          <button
-                            onClick={() => toggleDisplayField(field.name)}
-                            className={`text-xs transition-colors ${schema.display_fields.includes(field.name) ? 'text-attention' : 'text-border hover:text-attention'}`}
-                            title={
+                          <IconButton
+                            icon={Star}
+                            aria-label={
                               schema.display_fields.includes(field.name)
                                 ? 'Remove from display fields'
                                 : 'Add to display fields'
                             }
-                          >
-                            <Star
-                              size={14}
-                              fill={
-                                schema.display_fields.includes(field.name)
-                                  ? 'currentColor'
-                                  : 'none'
-                              }
-                            />
-                          </button>
+                            variant="subtle"
+                            className={
+                              schema.display_fields.includes(field.name)
+                                ? '!text-attention hover:!text-attention-emphasis'
+                                : ''
+                            }
+                            iconProps={{
+                              fill: schema.display_fields.includes(field.name)
+                                ? 'currentColor'
+                                : 'none',
+                            }}
+                            onClick={() => toggleDisplayField(field.name)}
+                          />
                           {schema.display_fields.length > 1 &&
                             schema.display_fields.includes(field.name) && (
                               <span className="flex flex-col items-center gap-1">
-                                <button
-                                  type="button"
-                                  title="Move earlier in display order"
+                                <IconButton
+                                  icon={ChevronUp}
+                                  aria-label="Move earlier in display order"
+                                  variant="subtle"
+                                  className="!text-attention hover:!text-attention-emphasis"
                                   disabled={
                                     schema.display_fields.indexOf(
                                       field.name,
@@ -991,13 +992,12 @@ export default function SchemaDetailPage() {
                                   onClick={() =>
                                     moveDisplayField(field.name, 'up')
                                   }
-                                  className="text-xs text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
-                                >
-                                  <ChevronUp size={10} />
-                                </button>
-                                <button
-                                  type="button"
-                                  title="Move later in display order"
+                                />
+                                <IconButton
+                                  icon={ChevronDown}
+                                  aria-label="Move later in display order"
+                                  variant="subtle"
+                                  className="!text-attention hover:!text-attention-emphasis"
                                   disabled={
                                     schema.display_fields.indexOf(
                                       field.name,
@@ -1008,32 +1008,28 @@ export default function SchemaDetailPage() {
                                   onClick={() =>
                                     moveDisplayField(field.name, 'down')
                                   }
-                                  className="text-xs text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
-                                >
-                                  <ChevronDown size={10} />
-                                </button>
+                                />
                               </span>
                             )}
-                          <button
+                          <IconButton
+                            icon={Pencil}
+                            aria-label="Edit field"
+                            variant="default"
+                            className="hover:!text-accent"
                             onClick={() => {
                               setConfirmDeleteField(null)
                               setEditingField(field.name)
                             }}
-                            className="text-xs text-fg-muted hover:text-accent transition-colors"
-                            title="Edit field"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
+                          />
+                          <IconButton
+                            icon={X}
+                            aria-label="Remove field"
+                            variant="danger"
                             onClick={() => {
                               setEditingField(null)
                               setConfirmDeleteField(field.name)
                             }}
-                            className="text-xs text-fg-muted hover:text-danger transition-colors"
-                            title="Remove field"
-                          >
-                            <X size={14} />
-                          </button>
+                          />
                         </>
                       )}
                     </span>
