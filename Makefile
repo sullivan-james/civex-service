@@ -1,4 +1,4 @@
-.PHONY: install install-all lock lint format format-check typecheck test secrets audit migrations-check check pre-commit serve dev docs docs-build clean frontend-install frontend-lint frontend-lint-check frontend-format frontend-format-check frontend-build
+.PHONY: install install-all lock lint format format-check typecheck test secrets audit migrations-check check pre-commit serve dev docs docs-build clean frontend-install frontend-lint frontend-lint-check frontend-format frontend-format-check frontend-build frontend-test
 
 install: ## Sync the dev environment (server + workflows + dev + docs extras)
 	uv sync --extra server --extra workflows --extra dev --extra docs
@@ -39,13 +39,13 @@ migrations-check: ## Check for Alembic migration drift (what CI runs)
 
 # format-check/ruff/typecheck/test/secrets/audit/migrations-check mirror
 # ci.yml's lint/test/audit/migrations jobs; frontend-lint-check/
-# frontend-format-check/frontend-build mirror frontend-ci.yml's lint/build
-# jobs; docs-build mirrors docs.yml's build job. Keep this list in lockstep
-# with all three workflow files — this target's whole point is that a green
-# `make check` locally means CI will be green too, so agent-driven commits
-# stop landing PRs that pass this and then fail the real pipeline. Requires
-# frontend deps installed (frontend-install or npm ci) in addition to
-# `make install`.
+# frontend-format-check/frontend-test/frontend-build mirror frontend-ci.yml's
+# lint/test/build jobs; docs-build mirrors docs.yml's build job. Keep this
+# list in lockstep with all three workflow files — this target's whole point
+# is that a green `make check` locally means CI will be green too, so
+# agent-driven commits stop landing PRs that pass this and then fail the real
+# pipeline. Requires frontend deps installed (frontend-install or npm ci) in
+# addition to `make install`.
 check: format-check ## Everything CI checks, in one shot
 	uv run ruff check src/ civex-plugin-sdk/src/
 	$(MAKE) typecheck
@@ -55,6 +55,7 @@ check: format-check ## Everything CI checks, in one shot
 	$(MAKE) migrations-check
 	$(MAKE) frontend-lint-check
 	$(MAKE) frontend-format-check
+	$(MAKE) frontend-test
 	$(MAKE) frontend-build
 	$(MAKE) docs-build
 
@@ -87,6 +88,9 @@ frontend-format: ## Prettier
 
 frontend-format-check: ## Prettier, check only
 	cd frontend && npm run format:check
+
+frontend-test: ## Vitest, run once (what CI runs)
+	cd frontend && npm run test
 
 frontend-build: ## Type-check + build frontend (what CI runs)
 	cd frontend && npm run build
