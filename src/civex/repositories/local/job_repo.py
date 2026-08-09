@@ -62,12 +62,14 @@ class LocalWorkflowJobRepository:
         job_id: uuid.UUID,
         log: str | None = None,
         step_executions: list[dict] | None = None,
+        affected_records: list[dict] | None = None,
     ) -> None:
         row = self._s.query(WorkflowJob).filter_by(id=job_id).first()
         if row:
             row.status = "completed"
             row.finished_at = _now()
             row.log = log
+            row.affected_records = affected_records or None
             _replace_step_executions(self._s, job_id, step_executions)
             self._s.flush()
 
@@ -77,6 +79,7 @@ class LocalWorkflowJobRepository:
         error_details: dict,
         log: str | None = None,
         step_executions: list[dict] | None = None,
+        affected_records: list[dict] | None = None,
     ) -> None:
         row = self._s.query(WorkflowJob).filter_by(id=job_id).first()
         if row:
@@ -88,6 +91,10 @@ class LocalWorkflowJobRepository:
             row.error = error_details["message"][:2000]
             row.error_details = error_details
             row.log = log
+            # A failed run may still have created/updated records before the
+            # step that failed -- same partial-progress contract as
+            # step_executions, so the audit trail doesn't hide real writes.
+            row.affected_records = affected_records or None
             _replace_step_executions(self._s, job_id, step_executions)
             self._s.flush()
 
@@ -95,6 +102,7 @@ class LocalWorkflowJobRepository:
         self,
         status: str | None = None,
         record_id: str | None = None,
+        affected_record_id: str | None = None,
         offset: int = 0,
         limit: int | None = None,
     ) -> list[WorkflowJobDTO]:
@@ -108,12 +116,26 @@ class LocalWorkflowJobRepository:
                 q = q.filter_by(record_id=uuid.UUID(record_id))
             except ValueError:
                 return []
-        q = q.order_by(WorkflowJob.created_at.desc()).offset(offset)
+        q = q.order_by(WorkflowJob.created_at.desc())
+        if affected_record_id:
+            # affected_records is a small per-job JSON list -- no index to
+            # filter on, so this scans and checks in Python rather than
+            # adding a JSON containment query (mirrors record_repo's SQLite
+            # fallback for the same tradeoff, CIVEX-169).
+            rows = [r for r in q.all() if _touches(r, affected_record_id)]
+            rows = rows[offset : offset + limit if limit is not None else None]
+            return [_to_dto(r) for r in rows]
+        q = q.offset(offset)
         if limit is not None:
             q = q.limit(limit)
         return [_to_dto(r) for r in q.all()]
 
-    def count(self, status: str | None = None, record_id: str | None = None) -> int:
+    def count(
+        self,
+        status: str | None = None,
+        record_id: str | None = None,
+        affected_record_id: str | None = None,
+    ) -> int:
         q = self._s.query(WorkflowJob)
         if status:
             q = q.filter_by(status=status)
@@ -122,6 +144,8 @@ class LocalWorkflowJobRepository:
                 q = q.filter_by(record_id=uuid.UUID(record_id))
             except ValueError:
                 return 0
+        if affected_record_id:
+            return sum(1 for r in q.all() if _touches(r, affected_record_id))
         return q.count()
 
     def get_by_id(self, job_id: uuid.UUID) -> WorkflowJobDTO | None:
@@ -157,6 +181,10 @@ class LocalWorkflowJobRepository:
             .all()
         )
         return {plugin: count for plugin, count in rows}
+
+
+def _touches(row: WorkflowJob, record_id: str) -> bool:
+    return any(e.get("record_id") == record_id for e in row.affected_records or [])
 
 
 def _replace_step_executions(
@@ -222,4 +250,5 @@ def _to_dto(row: WorkflowJob) -> WorkflowJobDTO:
         finished_at=row.finished_at,
         depth=row.depth,
         step_executions=step_executions,
+        affected_records=row.affected_records,
     )

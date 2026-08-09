@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { type StepExecution } from '../../api/workflows'
+import { type PluginInfo } from '../../api/plugins'
 import { Badge } from '../ui'
 import {
   Check,
@@ -8,6 +9,8 @@ import {
   ChevronUp,
   ChevronDown,
 } from '../ui/icons'
+import { pluginDisplayName, stepStory } from '../../utils/runNarrative'
+import StepValueDisplay from './StepValueDisplay'
 
 function StatusBadge({ status }: { status: StepExecution['status'] }) {
   switch (status) {
@@ -38,7 +41,30 @@ function duration(seconds: number): string {
     : `${(seconds / 60).toFixed(2)}m`
 }
 
-export default function StepExecutionCard({ step }: { step: StepExecution }) {
+function ValueList({ values }: { values: Record<string, unknown> }) {
+  const entries = Object.entries(values)
+  if (entries.length === 0) return <p className="text-fg-muted">None</p>
+  return (
+    <div className="space-y-2">
+      {entries.map(([key, value]) => (
+        <div key={key}>
+          <span className="font-mono text-fg-muted">{key}</span>
+          <div className="mt-0.5">
+            <StepValueDisplay value={value} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export default function StepExecutionCard({
+  step,
+  plugins,
+}: {
+  step: StepExecution
+  plugins?: PluginInfo[]
+}) {
   const [open, setOpen] = useState(step.status === 'failed')
   const hasInputs = step.inputs && Object.keys(step.inputs).length > 0
   const hasOutputs = step.outputs && Object.keys(step.outputs).length > 0
@@ -47,19 +73,23 @@ export default function StepExecutionCard({ step }: { step: StepExecution }) {
     <div className="rounded-md border border-border bg-canvas overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-canvas-subtle transition-colors"
+        className="w-full flex flex-col gap-1 px-4 py-3 text-left hover:bg-canvas-subtle transition-colors"
       >
-        <span className="font-mono text-sm text-fg">{step.step_id}</span>
-        <span className="text-xs text-fg-muted font-mono">{step.plugin}</span>
-        <span className="ml-auto flex items-center gap-3">
-          <span className="text-xs text-fg-muted">
-            {duration(step.duration_seconds)}
+        <span className="flex items-center gap-3">
+          <span className="text-sm font-medium text-fg">
+            {pluginDisplayName(step.plugin, plugins)}
           </span>
-          <StatusBadge status={step.status} />
-          <span className="text-fg-subtle">
-            {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          <span className="ml-auto flex items-center gap-3">
+            <span className="text-xs text-fg-muted">
+              {duration(step.duration_seconds)}
+            </span>
+            <StatusBadge status={step.status} />
+            <span className="text-fg-subtle">
+              {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </span>
           </span>
         </span>
+        <span className="text-xs text-fg-muted">{stepStory(step)}</span>
       </button>
 
       {open && (
@@ -69,12 +99,15 @@ export default function StepExecutionCard({ step }: { step: StepExecution }) {
               {step.error}
             </div>
           )}
+          <div className="flex items-center gap-2 text-fg-subtle">
+            <span className="font-mono">{step.step_id}</span>
+            <span aria-hidden>·</span>
+            <span className="font-mono">{step.plugin}</span>
+          </div>
           <div>
             <h3 className="font-medium text-fg-muted mb-1">Inputs</h3>
             {hasInputs ? (
-              <pre className="font-mono text-fg whitespace-pre-wrap break-words bg-canvas-subtle rounded-md p-2">
-                {JSON.stringify(step.inputs, null, 2)}
-              </pre>
+              <ValueList values={step.inputs} />
             ) : (
               <p className="text-fg-muted">None</p>
             )}
@@ -82,9 +115,7 @@ export default function StepExecutionCard({ step }: { step: StepExecution }) {
           <div>
             <h3 className="font-medium text-fg-muted mb-1">Outputs</h3>
             {hasOutputs ? (
-              <pre className="font-mono text-fg whitespace-pre-wrap break-words bg-canvas-subtle rounded-md p-2">
-                {JSON.stringify(step.outputs, null, 2)}
-              </pre>
+              <ValueList values={step.outputs!} />
             ) : (
               <p className="text-fg-muted">
                 {step.status === 'skipped' ? "Didn't run" : 'None'}

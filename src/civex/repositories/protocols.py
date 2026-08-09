@@ -147,6 +147,7 @@ class WorkflowJobRepository(Protocol):
         job_id: uuid.UUID,
         log: str | None = None,
         step_executions: list[dict] | None = None,
+        affected_records: list[dict] | None = None,
     ) -> None: ...
     def mark_failed(
         self,
@@ -154,15 +155,22 @@ class WorkflowJobRepository(Protocol):
         error_details: dict,
         log: str | None = None,
         step_executions: list[dict] | None = None,
+        affected_records: list[dict] | None = None,
     ) -> None: ...
     def list_all(
         self,
         status: str | None = None,
         record_id: str | None = None,
+        affected_record_id: str | None = None,
         offset: int = 0,
         limit: int | None = None,
     ) -> list[WorkflowJobDTO]: ...
-    def count(self, status: str | None = None, record_id: str | None = None) -> int: ...
+    def count(
+        self,
+        status: str | None = None,
+        record_id: str | None = None,
+        affected_record_id: str | None = None,
+    ) -> int: ...
     def get_by_id(self, job_id: uuid.UUID) -> WorkflowJobDTO | None: ...
     def count_active_for_workflow(self, workflow_name: str) -> int: ...
     def failure_counts_by_plugin(self) -> dict[str, int]: ...

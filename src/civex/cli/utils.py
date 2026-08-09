@@ -73,10 +73,11 @@ def get_ctx() -> AppContext:
     return build_local_context(cli_load_config())
 
 
-def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[list[dict], str]:
-    """Execute one workflow job. Returns (per-step execution records, captured
-    log output). Raises on failure -- the exception carries whatever
-    per-step records did complete as `.step_executions` (CIVEX-117)."""
+def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[list[dict], str, list[dict]]:
+    """Execute one workflow job. Returns (per-step execution records,
+    captured log output, affected records). Raises on failure -- the
+    exception carries whatever per-step records did complete as
+    `.step_executions` (CIVEX-117)."""
     import contextlib
     import io
     import logging as _logging
@@ -137,18 +138,25 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[list[dict], str]:
             plugin_registry.discover_user_plugins(config.civex_dir / "plugins")
             plugins = plugin_registry.all_plugins()
             wf_ctx = WorkflowContext(record=record, dataset=dataset, _app_ctx=ctx)
-            step_executions = executor.run(
-                wf_def,
-                wf_ctx,
-                plugins,
-                initial_outputs=job.input_data or None,
-                default_timeout_seconds=config.plugins.default_timeout_seconds,
-            )
+            try:
+                step_executions = executor.run(
+                    wf_def,
+                    wf_ctx,
+                    plugins,
+                    initial_outputs=job.input_data or None,
+                    default_timeout_seconds=config.plugins.default_timeout_seconds,
+                )
+            except Exception as e:
+                # Mirrors executor.run()'s own .step_executions attachment --
+                # whatever records the run touched before the failing step
+                # are still real writes the caller's mark_failed() should see.
+                e.affected_records = wf_ctx.affected_records  # type: ignore[attr-defined]
+                raise
     finally:
         root.removeHandler(handler)
         root.setLevel(prev_level)
 
-    return step_executions, buf.getvalue()
+    return step_executions, buf.getvalue(), wf_ctx.affected_records
 
 
 def drain_jobs(ctx: AppContext) -> None:
@@ -161,9 +169,12 @@ def drain_jobs(ctx: AppContext) -> None:
             f"  [dim]→ workflow '{job.workflow_name}' (trigger: {job.trigger})[/dim]"
         )
         try:
-            step_executions, log = run_job(job, ctx)
+            step_executions, log, affected_records = run_job(job, ctx)
             ctx.job_svc.mark_completed(
-                job.id, log=log or None, step_executions=step_executions
+                job.id,
+                log=log or None,
+                step_executions=step_executions,
+                affected_records=affected_records,
             )
             ctx.commit()
             console.print("    [success]✓ done[/success]")
@@ -173,6 +184,7 @@ def drain_jobs(ctx: AppContext) -> None:
                 job.id,
                 envelope,
                 step_executions=getattr(e, "step_executions", None),
+                affected_records=getattr(e, "affected_records", None),
             )
             ctx.commit()
             where = f" [{envelope.step}]" if envelope.step else ""
