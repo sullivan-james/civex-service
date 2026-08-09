@@ -64,7 +64,9 @@ export function CreateResourceModal({
             />
           </Field>
           {extraFields}
-          {error && <p className="text-xs text-danger">{errorMessage(error)}</p>}
+          {error != null && (
+            <p className="text-xs text-danger">{errorMessage(error)}</p>
+          )}
         </ModalBody>
         <ModalFooter>
           <Button type="button" variant="default" onClick={onClose}>

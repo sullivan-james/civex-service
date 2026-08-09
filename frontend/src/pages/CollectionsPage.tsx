@@ -36,7 +36,10 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
       isPending={create.isPending}
       error={create.error}
       onSubmit={async ({ name, description }) => {
-        await create.mutateAsync({ name, description: description || undefined })
+        await create.mutateAsync({
+          name,
+          description: description || undefined,
+        })
       }}
     />
   )
