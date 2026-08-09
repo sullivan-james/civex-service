@@ -127,6 +127,7 @@ export default function SchemaDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [dragSrcIndex, setDragSrcIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const [announcement, setAnnouncement] = useState('')
 
   // Fetch by UUID — name changes don't affect the URL
   const { data: schema, isLoading, error } = useSchema(id!)
@@ -161,6 +162,11 @@ export default function SchemaDetailPage() {
       current[index],
     ]
     updateSchema.mutate({ display_fields: current })
+    const field = schema.fields.find((f) => f.name === fieldName)
+    const label = field ? displayLabel(field.name, field.label) : fieldName
+    setAnnouncement(
+      `${label} moved to position ${targetIndex + 1} of ${current.length} in display order.`,
+    )
   }
 
   const handleDragStart = useCallback((index: number) => {
@@ -183,6 +189,9 @@ export default function SchemaDetailPage() {
       const [moved] = newOrder.splice(dragSrcIndex, 1)
       newOrder.splice(index, 0, moved)
       reorderFields.mutate(newOrder.map((f) => f.id))
+      setAnnouncement(
+        `${displayLabel(moved.name, moved.label)} moved to position ${index + 1} of ${newOrder.length}.`,
+      )
       setDragSrcIndex(null)
       setDragOverIndex(null)
     },
@@ -199,11 +208,29 @@ export default function SchemaDetailPage() {
     const newOrder = [...schema.fields]
     const targetIndex = direction === 'up' ? index - 1 : index + 1
     if (targetIndex < 0 || targetIndex >= newOrder.length) return
+    const moved = newOrder[index]
     ;[newOrder[index], newOrder[targetIndex]] = [
       newOrder[targetIndex],
       newOrder[index],
     ]
     reorderFields.mutate(newOrder.map((f) => f.id))
+    setAnnouncement(
+      `${displayLabel(moved.name, moved.label)} moved to position ${targetIndex + 1} of ${newOrder.length}.`,
+    )
+  }
+
+  function handleRowKeyDown(
+    e: React.KeyboardEvent<HTMLTableRowElement>,
+    index: number,
+  ) {
+    if (!(e.altKey || e.metaKey)) return
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      moveField(index, 'up')
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      moveField(index, 'down')
+    }
   }
 
   const breadcrumbs = [{ label: 'Schemas', to: '/schemas' }]
@@ -304,6 +331,13 @@ export default function SchemaDetailPage() {
           field as a display field — its value is used to name records of this
           type wherever they're listed.
         </p>
+        <p className="text-xs text-fg-subtle mb-2">
+          Focus a field row and press Alt/Cmd + Arrow Up/Down to reorder it with
+          the keyboard.
+        </p>
+        <div role="status" aria-live="polite" className="sr-only">
+          {announcement}
+        </div>
 
         <Table>
           <Thead>
@@ -341,12 +375,11 @@ export default function SchemaDetailPage() {
               ) : (
                 <tr
                   key={field.id}
-                  draggable
-                  onDragStart={() => handleDragStart(index)}
+                  tabIndex={0}
+                  onKeyDown={(e) => handleRowKeyDown(e, index)}
                   onDragOver={(e: React.DragEvent) => handleDragOver(e, index)}
                   onDrop={() => handleDrop(index)}
-                  onDragEnd={handleDragEnd}
-                  className={`bg-canvas transition-colors ${
+                  className={`bg-canvas transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent ${
                     dragOverIndex === index && dragSrcIndex !== index
                       ? 'bg-accent-subtle outline outline-2 outline-accent'
                       : dragSrcIndex === index
@@ -355,21 +388,28 @@ export default function SchemaDetailPage() {
                   }`}
                 >
                   {/* Drag handle + reorder buttons */}
-                  <Td className="w-8 cursor-grab text-border hover:text-fg-muted select-none">
+                  <Td className="w-8 text-border hover:text-fg-muted select-none">
                     <div className="flex flex-col items-center gap-1">
                       <IconButton
                         icon={ChevronUp}
-                        aria-label="Move field up"
+                        aria-label={`Move ${displayLabel(field.name, field.label)} up`}
                         variant="subtle"
                         disabled={index === 0 || reorderFields.isPending}
                         onClick={() => moveField(index, 'up')}
                       />
-                      <span title="Drag to reorder">
+                      <span
+                        draggable
+                        onDragStart={() => handleDragStart(index)}
+                        onDragEnd={handleDragEnd}
+                        title="Drag to reorder"
+                        aria-hidden="true"
+                        className="cursor-grab active:cursor-grabbing"
+                      >
                         <GripVertical size={12} />
                       </span>
                       <IconButton
                         icon={ChevronDown}
-                        aria-label="Move field down"
+                        aria-label={`Move ${displayLabel(field.name, field.label)} down`}
                         variant="subtle"
                         disabled={
                           index === schema.fields.length - 1 ||
@@ -477,7 +517,7 @@ export default function SchemaDetailPage() {
                           <span className="flex flex-col items-center gap-1">
                             <IconButton
                               icon={ChevronUp}
-                              aria-label="Move earlier in display order"
+                              aria-label={`Move ${displayLabel(field.name, field.label)} earlier in display order`}
                               variant="subtle"
                               className="!text-attention hover:!text-attention-emphasis"
                               disabled={
@@ -488,7 +528,7 @@ export default function SchemaDetailPage() {
                             />
                             <IconButton
                               icon={ChevronDown}
-                              aria-label="Move later in display order"
+                              aria-label={`Move ${displayLabel(field.name, field.label)} later in display order`}
                               variant="subtle"
                               className="!text-attention hover:!text-attention-emphasis"
                               disabled={
