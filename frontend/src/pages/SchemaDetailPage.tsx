@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router'
 import * as restrictions from '../utils/restrictions'
-import type { Field } from '../api/schemas'
+import type { Field as SchemaField } from '../api/schemas'
 import { errorMessage } from '../lib/errors'
 import {
   useSchema,
@@ -416,7 +416,7 @@ function FieldEditForm({
   schemaName,
   onDone,
 }: {
-  field: Field
+  field: SchemaField
   schemaName: string
   onDone: () => void
 }) {
