@@ -29,6 +29,7 @@ export {
   ScanText,
   Play,
   Info,
+  Upload,
   LayoutGrid,
   Database,
   Workflow,
