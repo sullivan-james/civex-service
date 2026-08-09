@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import AiPanel from './AiPanel'
+import { Modal, ModalBody, ModalFooter, ModalHeader } from '../ui'
 import { Sparkles } from '../ui/icons'
 
 // Bump this if the attestation's substance changes materially (e.g. a new
@@ -47,54 +48,51 @@ export default function AiAttestationGate({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay-scrim px-4">
-      <div className="max-w-md w-full rounded-lg bg-canvas shadow-xl p-6 space-y-4">
-        <div className="flex items-center gap-2">
+    <Modal onClose={onClose}>
+      <ModalHeader>
+        <span className="inline-flex items-center gap-2">
           <Sparkles size={18} className="text-accent" />
-          <h2 className="text-base font-semibold text-fg">
-            Before you use the AI assistant
-          </h2>
-        </div>
-        <div className="text-sm text-fg space-y-2">
-          <p>
-            Depending on how it&apos;s configured, the AI assistant sends
-            conversation content — including schema, record, and workflow data
-            it looks up on your behalf — to a third-party API (Anthropic,
-            OpenRouter, or another provider you&apos;ve configured). That
-            provider&apos;s own data handling and retention terms apply to
-            whatever gets sent.
-          </p>
-          <p>
-            If it&apos;s configured to use a local Ollama model instead, nothing
-            leaves this machine — check AI settings to see which provider is
-            currently active.
-          </p>
-          <p className="text-fg-muted text-xs">
-            Review this project&apos;s data-handling policies under{' '}
-            <a href="/legal" className="text-accent hover:underline">
-              Licenses &amp; policies
-            </a>{' '}
-            before enabling this with sensitive data.
-          </p>
-        </div>
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-2 rounded-md border border-border text-sm text-fg-muted hover:bg-canvas-subtle"
-          >
-            Not now
-          </button>
-          <button
-            onClick={() => {
-              acknowledge()
-              setAcked(true)
-            }}
-            className="px-3 py-2 rounded-md bg-accent text-fg-on-emphasis text-sm font-medium hover:bg-accent-emphasis"
-          >
-            I understand, continue
-          </button>
-        </div>
-      </div>
-    </div>
+          Before you use the AI assistant
+        </span>
+      </ModalHeader>
+      <ModalBody className="text-sm text-fg space-y-2">
+        <p>
+          Depending on how it&apos;s configured, the AI assistant sends
+          conversation content — including schema, record, and workflow data it
+          looks up on your behalf — to a third-party API (Anthropic, OpenRouter,
+          or another provider you&apos;ve configured). That provider&apos;s own
+          data handling and retention terms apply to whatever gets sent.
+        </p>
+        <p>
+          If it&apos;s configured to use a local Ollama model instead, nothing
+          leaves this machine — check AI settings to see which provider is
+          currently active.
+        </p>
+        <p className="text-fg-muted text-xs">
+          Review this project&apos;s data-handling policies under{' '}
+          <a href="/legal" className="text-accent hover:underline">
+            Licenses &amp; policies
+          </a>{' '}
+          before enabling this with sensitive data.
+        </p>
+      </ModalBody>
+      <ModalFooter>
+        <button
+          onClick={onClose}
+          className="px-3 py-1.5 rounded border border-border text-sm text-fg-muted hover:bg-canvas-subtle"
+        >
+          Not now
+        </button>
+        <button
+          onClick={() => {
+            acknowledge()
+            setAcked(true)
+          }}
+          className="px-3 py-1.5 rounded bg-accent text-fg-on-emphasis text-sm font-medium hover:bg-accent-emphasis"
+        >
+          I understand, continue
+        </button>
+      </ModalFooter>
+    </Modal>
   )
 }
