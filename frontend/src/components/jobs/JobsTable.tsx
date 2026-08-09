@@ -68,13 +68,63 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
     setPage(0)
   }
 
-  const { jobs, total, isLoading, error } = useJobsPaged(
+  const { jobs, total, isLoading, isFetching, error } = useJobsPaged(
     page,
     pageSize,
     statusFilter,
     recordId,
   )
   const rerun = useRerunJob()
+
+  // Announce a run's completion once, when it transitions out of
+  // pending/running — not on every poll while it's still in flight. Detected
+  // during render (see the prevFilters pattern above) rather than an effect,
+  // so it settles in the same pass instead of scheduling an extra render.
+  const [previousStatuses, setPreviousStatuses] = useState<
+    Record<string, WorkflowJob['status']>
+  >({})
+  const [completionAnnouncement, setCompletionAnnouncement] = useState('')
+
+  if (jobs.data) {
+    const finished: WorkflowJob[] = []
+    const nextStatuses: Record<string, WorkflowJob['status']> = {}
+    for (const job of jobs.data) {
+      nextStatuses[job.id] = job.status
+      const prevStatus = previousStatuses[job.id]
+      if (
+        (prevStatus === 'pending' || prevStatus === 'running') &&
+        (job.status === 'completed' || job.status === 'failed')
+      ) {
+        finished.push(job)
+      }
+    }
+    if (
+      jobs.data.some((job) => previousStatuses[job.id] !== job.status) ||
+      Object.keys(previousStatuses).length !== jobs.data.length
+    ) {
+      setPreviousStatuses(nextStatuses)
+    }
+    if (finished.length === 1) {
+      setCompletionAnnouncement(
+        `${finished[0].workflow_name} ${finished[0].status}.`,
+      )
+    } else if (finished.length > 1) {
+      const completed = finished.filter((j) => j.status === 'completed').length
+      const failed = finished.filter((j) => j.status === 'failed').length
+      const parts = []
+      if (completed) parts.push(`${completed} completed`)
+      if (failed) parts.push(`${failed} failed`)
+      setCompletionAnnouncement(
+        `${finished.length} runs finished: ${parts.join(', ')}.`,
+      )
+    }
+  }
+
+  const liveRegion = (
+    <span role="status" aria-live="polite" className="sr-only">
+      {completionAnnouncement}
+    </span>
+  )
 
   if (isLoading)
     return (
@@ -88,7 +138,11 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
 
   if (!jobs.data?.length) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex flex-col items-center justify-center py-16 text-center"
+      >
         <svg
           width="40"
           height="40"
@@ -116,7 +170,8 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
   }
 
   return (
-    <>
+    <div aria-busy={isFetching}>
+      {liveRegion}
       <table className="w-full text-sm border-collapse">
         <thead>
           <tr className="border-b border-border">
@@ -214,6 +269,6 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
         onPage={setPage}
         onPageSize={setPageSize}
       />
-    </>
+    </div>
   )
 }
