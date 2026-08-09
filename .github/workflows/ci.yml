@@ -62,7 +62,7 @@ jobs:
         run: uv sync --extra server --extra workflows --extra dev
 
       - name: Run tests
-        run: uv run pytest tests/ -q --cov=civex --cov-report=term-missing
+        run: uv run pytest tests/ -q -n auto --cov=civex --cov-report=term-missing
 
   audit:
     runs-on: ubuntu-latest
