@@ -106,6 +106,7 @@ export function useJobsPaged(
     jobs,
     total: total.data?.total ?? 0,
     isLoading: jobs.isLoading || total.isLoading,
+    isFetching: jobs.isFetching || total.isFetching,
     error: jobs.error,
   }
 }
