@@ -1,8 +1,10 @@
 import { type ReactNode, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { remoteApi, type SyncResult } from '../api/remote'
+import { remoteApi } from '../api/remote'
+import { errorMessage } from '../lib/errors'
 import AiAttestationGate from './ai/AiAttestationGate'
+import { useToast } from './ui/ToastProvider'
 import {
   RefreshCw,
   Sparkles,
@@ -47,37 +49,14 @@ const tabs = [
   { to: '/terminal', label: 'Terminal' },
 ]
 
-function SyncMessage({
-  result,
-  error,
-  op,
-}: {
-  result: SyncResult | null
-  error: string | null
-  op: 'push' | 'pull'
-}) {
-  if (error)
-    return <span className="text-danger-emphasis text-xs">{error}</span>
-  if (!result) return null
-  return (
-    <span className="text-success-emphasis text-xs">
-      {op === 'push' ? 'Pushed' : 'Pulled'} — {result.records}r {result.schemas}
-      s {result.datasets}d
-    </span>
-  )
-}
-
 export default function Layout({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const location = useLocation()
   const settingsActive = location.pathname.startsWith('/settings')
   const [syncing, setSyncing] = useState<'push' | 'pull' | null>(null)
-  const [syncResult, setSyncResult] = useState<SyncResult | null>(null)
-  const [syncError, setSyncError] = useState<string | null>(null)
-  const [lastOp, setLastOp] = useState<'push' | 'pull'>('push')
   const [aiOpen, setAiOpen] = useState(false)
-  const [dataDirError, setDataDirError] = useState<string | null>(null)
+  const toast = useToast()
 
   const { data: remote } = useQuery({
     queryKey: ['remote-status'],
@@ -88,19 +67,19 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   async function runSync(op: 'push' | 'pull') {
     setSyncing(op)
-    setSyncResult(null)
-    setSyncError(null)
-    setLastOp(op)
     try {
       const result =
         op === 'push' ? await remoteApi.push() : await remoteApi.pull()
-      setSyncResult(result)
+      const verb = op === 'push' ? 'Pushed' : 'Pulled'
+      toast.success(
+        `${verb} — ${result.records}r ${result.schemas}s ${result.datasets}d`,
+      )
       // Invalidate all data queries so the UI reflects pulled changes.
       if (op === 'pull') {
         queryClient.invalidateQueries()
       }
     } catch (e: unknown) {
-      setSyncError(e instanceof Error ? e.message : String(e))
+      toast.error(errorMessage(e))
     } finally {
       setSyncing(null)
     }
@@ -170,9 +149,8 @@ export default function Layout({ children }: { children: ReactNode }) {
             </button>
             <button
               onClick={async () => {
-                setDataDirError(null)
                 const r = await window.pywebview!.api.open_data_dir()
-                if (r?.error) setDataDirError(r.error)
+                if (r?.error) toast.error(r.error)
               }}
               title={`${fileManagerLabel()} — open this project's database directory`}
               className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
@@ -180,11 +158,6 @@ export default function Layout({ children }: { children: ReactNode }) {
               <Folder size={12} />
               {fileManagerLabel()}
             </button>
-            {dataDirError && (
-              <span className="text-xs text-danger-emphasis" role="alert">
-                {dataDirError}
-              </span>
-            )}
           </div>
         )}
 
@@ -192,8 +165,6 @@ export default function Layout({ children }: { children: ReactNode }) {
 
         {remote && (
           <div className="flex items-center gap-2">
-            <SyncMessage result={syncResult} error={syncError} op={lastOp} />
-
             <button
               onClick={() => runSync('pull')}
               disabled={syncing !== null}

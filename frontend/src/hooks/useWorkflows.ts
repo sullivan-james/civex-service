@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { jobsApi, workflowsApi, type WorkflowJob } from '../api/workflows'
+import { useToast } from '../components/ui/ToastProvider'
 
 export function useWorkflows() {
   return useQuery({ queryKey: ['workflows'], queryFn: workflowsApi.list })
@@ -15,19 +16,27 @@ export function useWorkflow(stem: string) {
 
 export function useSaveWorkflow() {
   const qc = useQueryClient()
+  const toast = useToast()
   return useMutation({
     mutationFn: ({ stem, content }: { stem: string; content: string }) =>
       workflowsApi.save(stem, content),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['workflows'] }),
+    onSuccess: (saved) => {
+      qc.invalidateQueries({ queryKey: ['workflows'] })
+      toast.success(`Workflow "${saved.name}" saved`)
+    },
   })
 }
 
 export function useDeleteWorkflow() {
   const qc = useQueryClient()
+  const toast = useToast()
   return useMutation({
     mutationFn: ({ stem, force }: { stem: string; force?: boolean }) =>
       workflowsApi.delete(stem, force),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['workflows'] }),
+    onSuccess: (_data, { stem }) => {
+      qc.invalidateQueries({ queryKey: ['workflows'] })
+      toast.success(`Workflow "${stem}" deleted`)
+    },
   })
 }
 

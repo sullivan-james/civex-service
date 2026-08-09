@@ -3,6 +3,7 @@ import { api } from '../../api/client'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import type { Field } from '../../api/schemas'
 import { utcToDatetimeLocal, datetimeLocalToUTC } from '../../utils/dates'
+import { formatBytes, toInputProps } from '../../utils/restrictions'
 import { Input, Select, Checkbox } from '../ui'
 import { Paperclip, X } from '../ui/icons'
 
@@ -18,32 +19,12 @@ interface Props {
   onChange: (value: unknown) => void
 }
 
-function fileAccept(
-  restrictions: Record<string, unknown> | undefined,
-): string | undefined {
-  const acc = restrictions?.accept
-  return typeof acc === 'string' ? acc : undefined
-}
-
-function fileMaxSize(
-  restrictions: Record<string, unknown> | undefined,
-): number | undefined {
-  const ms = restrictions?.max_size
-  return ms !== undefined ? Number(ms) : undefined
-}
-
 function validateFileSize(
   file: File,
   maxSize: number | undefined,
 ): string | null {
   if (maxSize !== undefined && file.size > maxSize) {
-    const limit =
-      maxSize >= 1_048_576
-        ? `${(maxSize / 1_048_576).toFixed(1)} MB`
-        : maxSize >= 1024
-          ? `${(maxSize / 1024).toFixed(0)} KB`
-          : `${maxSize} B`
-    return `File too large (${(file.size / 1024).toFixed(0)} KB) — max ${limit}`
+    return `File too large (${(file.size / 1024).toFixed(0)} KB) — max ${formatBytes(maxSize)}`
   }
   return null
 }
@@ -52,8 +33,7 @@ function FileField({ field, value, onChange }: Props) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const ref = value as FileRef | null | undefined
-  const accept = fileAccept(field.restrictions)
-  const maxSize = fileMaxSize(field.restrictions)
+  const { accept, maxSize } = toInputProps(field)
 
   async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -111,8 +91,7 @@ function FileListField({ field, value, onChange }: Props) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const existing = (value as FileRef[] | null | undefined) ?? []
-  const accept = fileAccept(field.restrictions)
-  const maxSize = fileMaxSize(field.restrictions)
+  const { accept, maxSize } = toInputProps(field)
 
   async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
@@ -180,7 +159,7 @@ function FileListField({ field, value, onChange }: Props) {
 }
 
 function ReferenceField({ field, value, onChange }: Props) {
-  const targetSchema = String(field.restrictions?.schema ?? '')
+  const targetSchema = toInputProps(field).targetSchema ?? ''
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<CivexRecord[]>([])
   const [open, setOpen] = useState(false)
@@ -280,8 +259,8 @@ function ReferenceField({ field, value, onChange }: Props) {
 export function DynamicField({ field, value, onChange }: Props) {
   switch (field.type) {
     case 'string': {
-      const choices = field.restrictions?.choices
-      if (Array.isArray(choices) && choices.length) {
+      const { choices, maxLength } = toInputProps(field)
+      if (choices && choices.length) {
         return (
           <Select
             value={(value as string) ?? ''}
@@ -289,7 +268,7 @@ export function DynamicField({ field, value, onChange }: Props) {
             className="w-full"
           >
             {!field.required && <option value="">— optional —</option>}
-            {(choices as string[]).map((c) => (
+            {choices.map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>
@@ -297,10 +276,6 @@ export function DynamicField({ field, value, onChange }: Props) {
           </Select>
         )
       }
-      const maxLength =
-        field.restrictions?.max_length !== undefined
-          ? Number(field.restrictions.max_length)
-          : undefined
       return (
         <Input
           type="text"
@@ -314,14 +289,7 @@ export function DynamicField({ field, value, onChange }: Props) {
     }
 
     case 'integer': {
-      const rMin =
-        field.restrictions?.min !== undefined
-          ? Number(field.restrictions.min)
-          : undefined
-      const rMax =
-        field.restrictions?.max !== undefined
-          ? Number(field.restrictions.max)
-          : undefined
+      const { min: rMin, max: rMax } = toInputProps(field)
       return (
         <Input
           type="number"
@@ -337,14 +305,7 @@ export function DynamicField({ field, value, onChange }: Props) {
     }
 
     case 'float': {
-      const rMin =
-        field.restrictions?.min !== undefined
-          ? Number(field.restrictions.min)
-          : undefined
-      const rMax =
-        field.restrictions?.max !== undefined
-          ? Number(field.restrictions.max)
-          : undefined
+      const { min: rMin, max: rMax } = toInputProps(field)
       return (
         <Input
           type="number"
@@ -359,35 +320,22 @@ export function DynamicField({ field, value, onChange }: Props) {
       )
     }
 
-    case 'date':
+    case 'date': {
+      const { minDate, maxDate } = toInputProps(field)
       return (
         <Input
           type="date"
           value={(value as string) ?? ''}
-          min={
-            field.restrictions?.min !== undefined
-              ? String(field.restrictions.min)
-              : undefined
-          }
-          max={
-            field.restrictions?.max !== undefined
-              ? String(field.restrictions.max)
-              : undefined
-          }
+          min={minDate}
+          max={maxDate}
           onChange={(e) => onChange(e.target.value)}
           className="w-full"
         />
       )
+    }
 
     case 'datetime': {
-      const rMin =
-        field.restrictions?.min !== undefined
-          ? utcToDatetimeLocal(String(field.restrictions.min))
-          : undefined
-      const rMax =
-        field.restrictions?.max !== undefined
-          ? utcToDatetimeLocal(String(field.restrictions.max))
-          : undefined
+      const { minDate: rMin, maxDate: rMax } = toInputProps(field)
       return (
         <Input
           type="datetime-local"
@@ -418,7 +366,7 @@ export function DynamicField({ field, value, onChange }: Props) {
       )
 
     case 'enum': {
-      const enumChoices = field.restrictions?.choices
+      const { choices: enumChoices } = toInputProps(field)
       return (
         <Select
           value={(value as string) ?? ''}
@@ -426,13 +374,11 @@ export function DynamicField({ field, value, onChange }: Props) {
           className="w-full"
         >
           {!field.required && <option value="">— optional —</option>}
-          {Array.isArray(enumChoices)
-            ? (enumChoices as string[]).map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))
-            : null}
+          {enumChoices?.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
         </Select>
       )
     }

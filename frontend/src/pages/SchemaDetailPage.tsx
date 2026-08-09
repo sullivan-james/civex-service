@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router'
-import { utcToDatetimeLocal, datetimeLocalToUTC } from '../utils/dates'
+import * as restrictions from '../utils/restrictions'
+import type { Field } from '../api/schemas'
 import { errorMessage } from '../lib/errors'
 import {
   useSchema,
@@ -14,6 +15,7 @@ import {
 } from '../hooks/useSchemas'
 import {
   Button,
+  IconButton,
   Badge,
   Table,
   Thead,
@@ -129,43 +131,15 @@ function MetaEditor({
 // --- Restrictions summary chip ---
 
 function RestrictionsSummary({
-  restrictions,
+  restrictions: fieldRestrictions,
   type,
 }: {
   restrictions: Record<string, unknown>
   type: string
 }) {
-  if (!restrictions || !Object.keys(restrictions).length) return null
-  const parts: string[] = []
-  if (type === 'integer' || type === 'float') {
-    if (restrictions.min !== undefined) parts.push(`min ${restrictions.min}`)
-    if (restrictions.max !== undefined) parts.push(`max ${restrictions.max}`)
-  }
-  if (type === 'string' || type === 'enum') {
-    if (Array.isArray(restrictions.choices))
-      parts.push(`choices: ${(restrictions.choices as string[]).join(', ')}`)
-    if (restrictions.max_length !== undefined)
-      parts.push(`max ${restrictions.max_length} chars`)
-  }
-  if (type === 'file' || type === 'file_list') {
-    if (restrictions.accept) parts.push(`accept ${restrictions.accept}`)
-    if (restrictions.max_size !== undefined) {
-      const bytes = Number(restrictions.max_size)
-      parts.push(
-        `max ${bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : bytes >= 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${bytes} B`}`,
-      )
-    }
-  }
-  if (type === 'date' || type === 'datetime') {
-    if (restrictions.min !== undefined) parts.push(`from ${restrictions.min}`)
-    if (restrictions.max !== undefined) parts.push(`until ${restrictions.max}`)
-  }
-  if (!parts.length) return null
-  return (
-    <span className="text-xs text-fg-muted leading-tight">
-      {parts.join(' · ')}
-    </span>
-  )
+  const summary = restrictions.summarise(fieldRestrictions, type)
+  if (!summary) return null
+  return <span className="text-xs text-fg-muted leading-tight">{summary}</span>
 }
 
 // --- Add field form ---
@@ -216,45 +190,23 @@ function AddFieldForm({
     setMaxDate('')
   }
 
-  function buildRestrictions(): Record<string, unknown> | undefined {
-    const r: Record<string, unknown> = {}
-    if (type === 'reference' && refSchema) r.schema = refSchema
-    if (type === 'integer' || type === 'float') {
-      if (minVal !== '')
-        r.min = type === 'integer' ? parseInt(minVal) : parseFloat(minVal)
-      if (maxVal !== '')
-        r.max = type === 'integer' ? parseInt(maxVal) : parseFloat(maxVal)
-    }
-    if (type === 'string' || type === 'enum') {
-      if (choices.trim())
-        r.choices = choices
-          .split(',')
-          .map((c) => c.trim())
-          .filter(Boolean)
-      if (maxLength !== '') r.max_length = parseInt(maxLength)
-    }
-    if (type === 'file' || type === 'file_list') {
-      if (accept.trim()) r.accept = accept.trim()
-      if (maxSize !== '') r.max_size = parseInt(maxSize)
-    }
-    if (type === 'date') {
-      if (minDate) r.min = minDate
-      if (maxDate) r.max = maxDate
-    }
-    if (type === 'datetime') {
-      if (minDate) r.min = datetimeLocalToUTC(minDate)
-      if (maxDate) r.max = datetimeLocalToUTC(maxDate)
-    }
-    return Object.keys(r).length ? r : undefined
-  }
-
   function handleAdd() {
     if (!canAdd) return
     const body: Parameters<typeof addField.mutate>[0] = {
       name: fieldName.trim(),
       type,
       required,
-      restrictions: buildRestrictions(),
+      restrictions: restrictions.build(type, {
+        min: minVal,
+        max: maxVal,
+        choices,
+        maxLength,
+        accept,
+        maxSize,
+        minDate,
+        maxDate,
+        refSchema,
+      }),
     }
     if (showDefault && defaultVal !== '') {
       body.default = defaultVal
@@ -481,94 +433,24 @@ function FieldEditForm({
   schemaName,
   onDone,
 }: {
-  field: {
-    id: string
-    name: string
-    type: string
-    required: boolean
-    restrictions: Record<string, unknown>
-  }
+  field: Field
   schemaName: string
   onDone: () => void
 }) {
   const [name, setName] = useState(field.name)
   const [required, setRequired] = useState(field.required)
-  const [minVal, setMinVal] = useState(
-    field.restrictions?.min !== undefined ? String(field.restrictions.min) : '',
-  )
-  const [maxVal, setMaxVal] = useState(
-    field.restrictions?.max !== undefined ? String(field.restrictions.max) : '',
-  )
-  const [choices, setChoices] = useState(
-    Array.isArray(field.restrictions?.choices)
-      ? (field.restrictions.choices as string[]).join(', ')
-      : '',
-  )
-  const [maxLength, setMaxLength] = useState(
-    field.restrictions?.max_length !== undefined
-      ? String(field.restrictions.max_length)
-      : '',
-  )
-  const [accept, setAccept] = useState(
-    typeof field.restrictions?.accept === 'string'
-      ? field.restrictions.accept
-      : '',
-  )
-  const [maxSize, setMaxSize] = useState(
-    field.restrictions?.max_size !== undefined
-      ? String(field.restrictions.max_size)
-      : '',
-  )
+  const initialRestrictions = restrictions.parse(field)
+  const [minVal, setMinVal] = useState(initialRestrictions.min)
+  const [maxVal, setMaxVal] = useState(initialRestrictions.max)
+  const [choices, setChoices] = useState(initialRestrictions.choices)
+  const [maxLength, setMaxLength] = useState(initialRestrictions.maxLength)
+  const [accept, setAccept] = useState(initialRestrictions.accept)
+  const [maxSize, setMaxSize] = useState(initialRestrictions.maxSize)
   // date/datetime — stored as UTC ISO; display in datetime-local format
-  const [minDate, setMinDate] = useState(
-    field.restrictions?.min !== undefined
-      ? field.type === 'datetime'
-        ? utcToDatetimeLocal(String(field.restrictions.min))
-        : String(field.restrictions.min)
-      : '',
-  )
-  const [maxDate, setMaxDate] = useState(
-    field.restrictions?.max !== undefined
-      ? field.type === 'datetime'
-        ? utcToDatetimeLocal(String(field.restrictions.max))
-        : String(field.restrictions.max)
-      : '',
-  )
+  const [minDate, setMinDate] = useState(initialRestrictions.minDate)
+  const [maxDate, setMaxDate] = useState(initialRestrictions.maxDate)
 
   const updateField = useUpdateField(schemaName)
-
-  function buildRestrictions(): Record<string, unknown> {
-    const r: Record<string, unknown> = {}
-    if (field.type === 'reference' && field.restrictions?.schema)
-      r.schema = field.restrictions.schema
-    if (field.type === 'integer' || field.type === 'float') {
-      if (minVal !== '')
-        r.min = field.type === 'integer' ? parseInt(minVal) : parseFloat(minVal)
-      if (maxVal !== '')
-        r.max = field.type === 'integer' ? parseInt(maxVal) : parseFloat(maxVal)
-    }
-    if (field.type === 'string' || field.type === 'enum') {
-      if (choices.trim())
-        r.choices = choices
-          .split(',')
-          .map((c) => c.trim())
-          .filter(Boolean)
-      if (maxLength !== '') r.max_length = parseInt(maxLength)
-    }
-    if (field.type === 'file' || field.type === 'file_list') {
-      if (accept.trim()) r.accept = accept.trim()
-      if (maxSize !== '') r.max_size = parseInt(maxSize)
-    }
-    if (field.type === 'date') {
-      if (minDate) r.min = minDate
-      if (maxDate) r.max = maxDate
-    }
-    if (field.type === 'datetime') {
-      if (minDate) r.min = datetimeLocalToUTC(minDate)
-      if (maxDate) r.max = datetimeLocalToUTC(maxDate)
-    }
-    return r
-  }
 
   function handleSave() {
     const trimmed = name.trim()
@@ -577,7 +459,18 @@ function FieldEditForm({
         fieldName: field.name,
         rename: trimmed !== field.name ? trimmed : undefined,
         required,
-        restrictions: buildRestrictions(),
+        restrictions:
+          restrictions.build(field.type, {
+            min: minVal,
+            max: maxVal,
+            choices,
+            maxLength,
+            accept,
+            maxSize,
+            minDate,
+            maxDate,
+            refSchema: initialRestrictions.refSchema,
+          }) ?? {},
       },
       { onSuccess: onDone },
     )
@@ -955,30 +848,26 @@ export default function SchemaDetailPage() {
                   {/* Drag handle + reorder buttons */}
                   <Td className="w-8 cursor-grab text-border hover:text-fg-muted select-none">
                     <div className="flex flex-col items-center gap-1">
-                      <button
-                        type="button"
-                        title="Move up"
+                      <IconButton
+                        icon={ChevronUp}
+                        aria-label="Move field up"
+                        variant="subtle"
                         disabled={index === 0 || reorderFields.isPending}
                         onClick={() => moveField(index, 'up')}
-                        className="text-xs text-border hover:text-fg disabled:opacity-30 leading-none"
-                      >
-                        <ChevronUp size={12} />
-                      </button>
+                      />
                       <span title="Drag to reorder">
                         <GripVertical size={12} />
                       </span>
-                      <button
-                        type="button"
-                        title="Move down"
+                      <IconButton
+                        icon={ChevronDown}
+                        aria-label="Move field down"
+                        variant="subtle"
                         disabled={
                           index === schema.fields.length - 1 ||
                           reorderFields.isPending
                         }
                         onClick={() => moveField(index, 'down')}
-                        className="text-xs text-border hover:text-fg disabled:opacity-30 leading-none"
-                      >
-                        <ChevronDown size={12} />
-                      </button>
+                      />
                     </div>
                   </Td>
                   <Td>
@@ -1046,42 +935,45 @@ export default function SchemaDetailPage() {
                   </Td>
                   <Td>
                     <span className="flex items-center gap-2">
-                      <button
-                        onClick={() => toggleDisplayField(field.name)}
-                        className={`text-xs transition-colors ${schema.display_fields.includes(field.name) ? 'text-attention' : 'text-border hover:text-attention'}`}
-                        title={
+                      <IconButton
+                        icon={Star}
+                        aria-label={
                           schema.display_fields.includes(field.name)
                             ? 'Remove from display fields'
                             : 'Add to display fields'
                         }
-                      >
-                        <Star
-                          size={14}
-                          fill={
-                            schema.display_fields.includes(field.name)
-                              ? 'currentColor'
-                              : 'none'
-                          }
-                        />
-                      </button>
+                        variant="subtle"
+                        className={
+                          schema.display_fields.includes(field.name)
+                            ? '!text-attention hover:!text-attention-emphasis'
+                            : ''
+                        }
+                        iconProps={{
+                          fill: schema.display_fields.includes(field.name)
+                            ? 'currentColor'
+                            : 'none',
+                        }}
+                        onClick={() => toggleDisplayField(field.name)}
+                      />
                       {schema.display_fields.length > 1 &&
                         schema.display_fields.includes(field.name) && (
                           <span className="flex flex-col items-center gap-1">
-                            <button
-                              type="button"
-                              title="Move earlier in display order"
+                            <IconButton
+                              icon={ChevronUp}
+                              aria-label="Move earlier in display order"
+                              variant="subtle"
+                              className="!text-attention hover:!text-attention-emphasis"
                               disabled={
                                 schema.display_fields.indexOf(field.name) ===
                                   0 || updateSchema.isPending
                               }
                               onClick={() => moveDisplayField(field.name, 'up')}
-                              className="text-xs text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
-                            >
-                              <ChevronUp size={10} />
-                            </button>
-                            <button
-                              type="button"
-                              title="Move later in display order"
+                            />
+                            <IconButton
+                              icon={ChevronDown}
+                              aria-label="Move later in display order"
+                              variant="subtle"
+                              className="!text-attention hover:!text-attention-emphasis"
                               disabled={
                                 schema.display_fields.indexOf(field.name) ===
                                   schema.display_fields.length - 1 ||
@@ -1090,26 +982,28 @@ export default function SchemaDetailPage() {
                               onClick={() =>
                                 moveDisplayField(field.name, 'down')
                               }
-                              className="text-xs text-attention hover:text-attention-emphasis disabled:opacity-30 leading-none"
-                            >
-                              <ChevronDown size={10} />
-                            </button>
+                            />
                           </span>
                         )}
-                      <button
-                        onClick={() => setEditingField(field.name)}
-                        className="text-xs text-fg-muted hover:text-accent transition-colors"
-                        title="Edit field"
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        onClick={() => setConfirmDeleteField(field.name)}
-                        className="text-xs text-fg-muted hover:text-danger transition-colors"
-                        title="Remove field"
-                      >
-                        <X size={14} />
-                      </button>
+                      <IconButton
+                        icon={Pencil}
+                        aria-label="Edit field"
+                        variant="default"
+                        className="hover:!text-accent"
+                        onClick={() => {
+                          setConfirmDeleteField(null)
+                          setEditingField(field.name)
+                        }}
+                      />
+                      <IconButton
+                        icon={X}
+                        aria-label="Remove field"
+                        variant="danger"
+                        onClick={() => {
+                          setEditingField(null)
+                          setConfirmDeleteField(field.name)
+                        }}
+                      />
                     </span>
                   </Td>
                 </tr>
