@@ -39,18 +39,35 @@ Use `http://localhost:5173` (the Vite dev server) while iterating on the fronten
 
 ```bash
 make lint          # ruff check --fix src/ civex-plugin-sdk/src/
+make lint-check    # ruff check src/ civex-plugin-sdk/src/ (what CI runs)
 make format        # ruff format src/
 make format-check  # ruff format --check src/ (what CI runs)
 make typecheck     # mypy src/civex civex-plugin-sdk/src/civex_plugin_sdk
-make test          # uv run pytest tests/ -q --cov=civex --cov-report=term-missing
+make test          # uv run pytest tests/ -q -n auto --cov=civex --cov-report=term-missing
+make test-fast     # the same suite without coverage
 make secrets       # gitleaks git --redact -v (requires the gitleaks binary, see above)
 make audit         # pip-audit + npm audit --audit-level=high
 make check         # everything CI runs, in one shot — see below
+make check-fast    # the subset worth iterating on — see below
 make pre-commit    # run all pre-commit hooks against the whole tree
 make clean         # remove .venv, ruff/mypy/pytest caches, coverage output
 ```
 
-`make check` runs `format-check`, `ruff check`, `typecheck`, `test`, `secrets`, `audit`, `migrations-check`, `frontend-lint-check`, `frontend-format-check`, `frontend-build`, and `docs-build` — the same jobs CI runs, so a green `make check` locally means CI will be green too. It requires frontend deps installed (`make frontend-install`) in addition to `make install`.
+`make check` runs `format-check`, `lint-check`, `typecheck`, `test`, `secrets`, `audit`, `migrations-check`, `frontend-lint-check`, `frontend-format-check`, `frontend-test`, `frontend-build`, and `docs-build` — the same jobs CI runs, so a green `make check` locally means CI will be green too. It requires frontend deps installed (`make frontend-install`) in addition to `make install`.
+
+Those targets have no ordering between them, so `make check` runs them in
+parallel (it re-invokes itself with `-j --output-sync=target`; you don't
+need to pass anything). It costs roughly its slowest single target rather
+than the sum: 59s wall for 10 minutes of CPU on a 22-core machine, against
+249s for the old serial shape in civex-agent's runner container.
+
+`make check-fast` is the same idea minus the repo-wide invariants a single
+change won't break — the secret scan over git history, the two network
+dependency audits, Alembic drift, and the docs build — and without
+coverage. Roughly half the wall time (34s on that same machine). It's the
+loop to iterate on; `make check` stays the gate that has to be green
+before anything is pushed, and it's what CI and civex-agent both run. Don't
+point CI at `check-fast`.
 
 ## Architecture
 
