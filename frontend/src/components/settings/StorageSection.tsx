@@ -7,7 +7,14 @@ import {
   useSetQueue,
 } from '../../hooks/useStore'
 import type { VolumeStats } from '../../api/store'
-import { Button, Input, Checkbox, Skeleton, ErrorState } from '../ui'
+import {
+  Button,
+  IconButton,
+  Input,
+  Checkbox,
+  Skeleton,
+  ErrorState,
+} from '../ui'
 import {
   AlertTriangle,
   ChevronUp,
@@ -140,22 +147,20 @@ function VolumeCard({
         <div className="flex items-center gap-1 shrink-0">
           {vol.in_queue && (
             <>
-              <button
+              <IconButton
+                icon={ChevronUp}
+                aria-label="Move up in queue"
+                variant="subtle"
                 onClick={onMoveUp}
                 disabled={queueIndex === 0}
-                className="text-xs px-2 py-2 rounded-md text-fg-muted hover:text-fg hover:bg-canvas-subtle disabled:opacity-30 disabled:cursor-not-allowed"
-                title="Move up in queue"
-              >
-                <ChevronUp size={12} />
-              </button>
-              <button
+              />
+              <IconButton
+                icon={ChevronDown}
+                aria-label="Move down in queue"
+                variant="subtle"
                 onClick={onMoveDown}
                 disabled={queueIndex === queueLength - 1}
-                className="text-xs px-2 py-2 rounded-md text-fg-muted hover:text-fg hover:bg-canvas-subtle disabled:opacity-30 disabled:cursor-not-allowed"
-                title="Move down in queue"
-              >
-                <ChevronDown size={12} />
-              </button>
+              />
               <button
                 onClick={onRemoveFromQueue}
                 className="inline-flex items-center gap-1 text-xs px-2 py-2 rounded-md text-fg-muted hover:text-danger hover:bg-canvas-subtle"
@@ -174,16 +179,16 @@ function VolumeCard({
               + queue
             </button>
           )}
-          <button
+          <IconButton
+            icon={Pencil}
+            aria-label="Edit volume"
+            variant="default"
+            className="hover:!text-accent"
             onClick={() => {
               setEditing((e) => !e)
               setConfirmRemove(false)
             }}
-            className="text-xs px-2 py-2 rounded-md text-fg-muted hover:text-accent hover:bg-canvas-subtle"
-            title="Edit volume"
-          >
-            <Pencil size={12} />
-          </button>
+          />
           {confirmRemove ? (
             <>
               <button
@@ -213,17 +218,16 @@ function VolumeCard({
               </button>
             </>
           ) : (
-            <button
+            <IconButton
+              icon={X}
+              aria-label="Delete volume from config (does not delete files)"
+              variant="danger"
               onClick={() => {
                 setConfirmRemove(true)
                 setEditing(false)
                 setRemoveError(null)
               }}
-              className="text-xs px-2 py-2 rounded-md text-fg-muted hover:text-danger hover:bg-canvas-subtle"
-              title="Delete volume from config (does not delete files)"
-            >
-              <X size={12} />
-            </button>
+            />
           )}
         </div>
       </div>
