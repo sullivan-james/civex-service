@@ -52,9 +52,7 @@ export function FormSection({
     <>
       <div className="col-span-1 md:col-span-6 lg:col-span-12 flex flex-col gap-0.5 border-t border-border-muted pt-3 first:border-t-0 first:pt-0">
         <h3 className="text-sm font-semibold text-fg">{title}</h3>
-        {description && (
-          <p className="text-xs text-fg-subtle">{description}</p>
-        )}
+        {description && <p className="text-xs text-fg-subtle">{description}</p>}
       </div>
       {children}
     </>
