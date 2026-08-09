@@ -3,7 +3,6 @@
 [Writing a plugin](writing-a-plugin.md) covers Tier 1: Python only, run via `uv run` as a subprocess. For a plugin that needs something the subprocess tier can't give — a different language, system binaries, GPU access, stricter resource limits — civex builds and runs it inside a Docker container instead: Tier 2. Both tiers speak the identical [wire protocol](wire-protocol.md) — the same `id`/`name`/`capabilities`/`Config`/`invoke()` shape, the same frame types — over `docker run -i <image> <mode>` rather than a persistent subprocess.
 
 !!! warning "Tier 2 is not wired into workflow execution yet"
-    Everything below — writing a container plugin, building its image, the manifest format — works today. Running one as a step in a workflow does not: see [Current state](#current-state) at the end of this page before you invest time expecting a working end-to-end plugin.
 
 ## The plugin directory
 
@@ -86,13 +85,3 @@ Starter: `plugin-starters/rust/`.
 `src/shim.c` (protocol runtime: stdout isolation, frame I/O, `describe`/`run` dispatch, RPC calls) and `src/json.c` (a minimal dependency-free JSON value tree) are the plumbing; `src/plugin.c` is the example plugin you replace. Compiles with a C++ compiler unmodified, so a C++ plugin can reuse the same shim as-is.
 
 Starter: `starters/c/`.
-
-## Current state
-
-Being upfront about what actually works today, since it's easy to assume more is wired up than is:
-
-- **No `PluginRegistration` resolves to tier `CONTAINER` yet.** `civex.plugins.registry` has `_registration_for_tier0` (built-ins) and `_registration_for_subprocess` (Tier 1) — there is no `_registration_for_container` counterpart. A container plugin's `id` is not something a workflow step can reference and have execute, no matter how correct its `Dockerfile`/`civex-plugin.toml`/`invoke()` are.
-- **`ContainerPluginService`, which backs the plugin editor, is edit-and-build only.** It lists container-plugin directories, reads/writes their files, and runs `docker build` on save — but by its own admission there is no host-side container-tier registry or executor yet; wiring a built image into workflow execution is future work.
-- **The runtime pieces that *would* wire this up already exist and are independently tested**, just not connected to each other: `civex.plugins.container_runtime` drives the `docker run -i <image> <mode>` protocol exchange (reusing the exact same frame-parsing and RPC-dispatch functions Tier 1's `subprocess_runtime` uses, so the two tiers can't drift in how they interpret a frame), and `civex.plugins.container_build` is the `ensure_image_built()` content-hash caching described above. Nothing calls either of them from plugin discovery or the workflow executor.
-
-In short: you can write a container plugin today, build its image, and exercise it by hand with `docker run -i <image> describe`/`run` — but you cannot yet reference it from a workflow YAML file and have civex run it as a step.
