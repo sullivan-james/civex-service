@@ -4,14 +4,10 @@ import { useSchemas, useCreateSchema } from '../hooks/useSchemas'
 import {
   Badge,
   Button,
+  CreateResourceModal,
   ErrorState,
   Field,
   TableSkeleton,
-  Input,
-  Modal,
-  ModalBody,
-  ModalFooter,
-  ModalHeader,
   MonoId,
   PageHeader,
   Select,
@@ -26,73 +22,41 @@ import { pluralise } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 
 function CreateSchemaModal({ onClose }: { onClose: () => void }) {
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
   const [parent, setParent] = useState('')
   const create = useCreateSchema()
   const { data: schemas } = useSchemas()
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    await create.mutateAsync({
-      name,
-      description: description || undefined,
-      parent: parent || undefined,
-    })
-    onClose()
-  }
-
   return (
-    <Modal onClose={onClose}>
-      <ModalHeader>New schema</ModalHeader>
-      <form onSubmit={handleSubmit}>
-        <ModalBody className="flex flex-col gap-3">
-          <Field label="Name" required>
-            <Input
-              autoFocus
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full"
-              placeholder="my-schema"
-            />
-          </Field>
-          <Field label="Description">
-            <Input
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full"
-              placeholder="Optional"
-            />
-          </Field>
-          <Field label="Parent schema">
-            <Select
-              value={parent}
-              onChange={(e) => setParent(e.target.value)}
-              className="w-full"
-            >
-              <option value="">None</option>
-              {schemas?.map((s) => (
-                <option key={s.id} value={s.name}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {create.error && (
-            <p className="text-xs text-danger">{errorMessage(create.error)}</p>
-          )}
-        </ModalBody>
-        <ModalFooter>
-          <Button type="button" variant="default" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" variant="primary" disabled={create.isPending}>
-            {create.isPending ? 'Creating…' : 'Create schema'}
-          </Button>
-        </ModalFooter>
-      </form>
-    </Modal>
+    <CreateResourceModal
+      resourceLabel="schema"
+      namePlaceholder="my-schema"
+      onClose={onClose}
+      isPending={create.isPending}
+      error={create.error}
+      onSubmit={async ({ name, description }) => {
+        await create.mutateAsync({
+          name,
+          description: description || undefined,
+          parent: parent || undefined,
+        })
+      }}
+      extraFields={
+        <Field label="Parent schema">
+          <Select
+            value={parent}
+            onChange={(e) => setParent(e.target.value)}
+            className="w-full"
+          >
+            <option value="">None</option>
+            {schemas?.map((s) => (
+              <option key={s.id} value={s.name}>
+                {s.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      }
+    />
   )
 }
 
