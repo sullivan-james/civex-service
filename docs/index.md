@@ -27,7 +27,7 @@ Schemas can inherit from a parent schema. A child schema's records are linked to
 
 ## Two interfaces
 
-Everything is available via both the **CLI** and the **web UI + HTTP API**. The CLI is useful for scripting and batch operations; the UI is better for exploring and editing data interactively. The **`civex-desktop`** app bundles both: a native window around the web UI that starts its own server automatically, alongside the `civex` CLI binary — no separate server setup required.
+Everything is available via both the **CLI** and the **web UI + HTTP API**. The CLI is useful for scripting and batch operations; the UI is better for exploring and editing data interactively.
 
 ## Next steps
 

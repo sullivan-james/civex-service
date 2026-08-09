@@ -7,7 +7,7 @@ import typer
 
 from civex.console import console
 
-app = typer.Typer(help="Authenticate with a civex-hub server.")
+app = typer.Typer(help="Authenticate with a remote civex server.")
 
 _TOKENS_PATH = Path.home() / ".civex" / "tokens.toml"
 
@@ -33,14 +33,14 @@ def _write_tokens(data: dict) -> None:
 @app.command("login")
 def login(
     hub_url: str = typer.Argument(
-        ..., help="civex-hub base URL (e.g. https://civexhub.example.com)"
+        ..., help="Remote server base URL (e.g. https://civex.example.com)"
     ),
     username: str = typer.Option(None, "--username", "-u", help="Your username"),
     token_name: str = typer.Option(
         "default", "--token-name", help="Label for this token"
     ),
 ) -> None:
-    """Log in to a civex-hub server and store an API token."""
+    """Log in to a remote civex server and store an API token."""
     import urllib.request
     import urllib.error
     import json
@@ -90,7 +90,7 @@ def logout(
         None, help="Hub URL to log out from (omit to log out of all)"
     ),
 ) -> None:
-    """Remove stored credentials for a civex-hub server."""
+    """Remove stored credentials for a remote civex server."""
     tokens = _read_tokens()
     if not tokens:
         console.print("[dim]Not logged in to any hub.[/dim]")
@@ -111,7 +111,7 @@ def logout(
 
 @app.command("status")
 def status() -> None:
-    """Show which civex-hub servers you are logged in to."""
+    """Show which remote civex servers you are logged in to."""
     tokens = _read_tokens()
     if not tokens:
         console.print("[dim]Not logged in to any hub.[/dim]")

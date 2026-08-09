@@ -40,8 +40,7 @@ Deliberately coarse: a step input/output is a live Python object (a
 DataFrame, raw bytes, a list of FileRef dicts), so this names the *shape a
 workflow author needs to know when wiring one step into the next*, not a
 validatable type. Nothing ever validates a runtime value against it --
-host-side contract checking (CIVEX-142) matches input and output *names*,
-never types.
+host-side contract checking matches input and output *names*, never types.
 
     any      no constraint / plugin-specific
     string   text scalar
@@ -96,7 +95,7 @@ class PluginBase:
     # Schema for `describe`.
     #
     # `None` and `[]` mean genuinely different things, and the host enforces
-    # the difference (CIVEX-142): `[]` is a declaration -- "this plugin takes
+    # the difference: `[]` is a declaration -- "this plugin takes
     # no inputs" -- and wiring anything into it is an error, which is what
     # makes `<save_field_step>.result` a catchable mistake. `None` is the
     # absence of a declaration, and disables name checking in that direction

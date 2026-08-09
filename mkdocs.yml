@@ -1,9 +1,8 @@
 site_name: Civex
 site_description: Research data management — schemas, records, files, and workflows.
-site_url: https://docs.civex.dev/
-repo_url: https://github.com/CivexData/civex-service
-repo_name: civex
-edit_uri: edit/main/docs/
+site_url: https://civexdata.github.io/civex-docs/
+# No repo_url/edit_uri: the source repo is private, so a header repo link and an
+# "Edit this page" pencil would 404 for every visitor to the public site.
 use_directory_urls: false
 
 theme:
@@ -31,7 +30,7 @@ theme:
 plugins:
   - search
   - gen-files:
-      scripts:              # more populated by C2, D2
+      scripts:
         - docs/_gen/plugin_reference.py
   - mkdocstrings:
       handlers:
@@ -44,9 +43,13 @@ plugins:
             members_order: source
             filters: ["!^_"]
 
+# Block scalar — every line is a literal gitignore-style pattern. Do not add
+# trailing `#` comments here; they become part of the pattern and match nothing.
+# contributing/ is maintainer-only: it stays in the repo, never ships to the site.
 exclude_docs: |
   _gen/
   _prose/
+  contributing/
 
 markdown_extensions:
   - admonition
@@ -98,9 +101,3 @@ nav:
           - Load CSV: reference/plugins/load_csv.md
           - Rows to Records: reference/plugins/rows_to_records.md
           - Upsert Records: reference/plugins/upsert_records.md
-  - Contributing:
-      - Dev setup: contributing/dev-setup.md
-      - Architecture: contributing/architecture.md
-      - Testing: contributing/testing.md
-      - Release process: contributing/release.md
-      - Publishing the docs site: contributing/publishing-docs.md

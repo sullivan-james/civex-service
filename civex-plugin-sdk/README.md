@@ -35,7 +35,7 @@ if __name__ == "__main__":
     serve(Plugin)
 ```
 
-Drop the file in `_civex/plugins/` in a civex project and it's discovered automatically. See [Writing a plugin](https://docs.civex.dev/extending/writing-a-plugin.html) for the full authoring guide (the `Ctx` API, isolation/timeouts, constraints), [Container plugins](https://docs.civex.dev/extending/container-plugins.html) for the Tier 2 path, and the [SDK reference](https://docs.civex.dev/extending/sdk-reference.html) for the complete public API.
+Drop the file in `_civex/plugins/` in a civex project and it's discovered automatically. See [Writing a plugin](https://civexdata.github.io/civex-docs/extending/writing-a-plugin.html) for the full authoring guide (the `Ctx` API, isolation/timeouts, constraints), [Container plugins](https://civexdata.github.io/civex-docs/extending/container-plugins.html) for the Tier 2 path, and the [SDK reference](https://civexdata.github.io/civex-docs/extending/sdk-reference.html) for the complete public API.
 
 ## This package is not on PyPI
 

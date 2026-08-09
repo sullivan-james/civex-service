@@ -55,37 +55,37 @@ Reuses `civex-plugin-sdk` directly — the same `Plugin`/`Ctx` classes Tier 1 us
 --8<-- "templates/container-plugins/python/plugin.py"
 ```
 
-Starter: [`templates/container-plugins/python/`](https://github.com/CivexData/civex-service/tree/main/templates/container-plugins/python).
+Starter: `templates/container-plugins/python/`.
 
 ### R
 
 A hand-rolled shim (`plugin.R`, using `jsonlite`) implements the frame I/O and RPC round-trip directly; `entrypoint.sh` does the fd-dup isolation before `Rscript` starts, writing every protocol frame to `/dev/fd/3` rather than through R's own stdout.
 
-Starter: [`plugin-templates/r/`](https://github.com/CivexData/civex-service/tree/main/plugin-templates/r).
+Starter: `plugin-templates/r/`.
 
 ### Java
 
 `Main.java` speaks the protocol directly (`id`/`name`/`capabilities`/`configSchema()`/`invoke()`). Since Java has no portable `dup2()`, the stdout-isolation trick is done in `entrypoint.sh` instead of in-process — `exec 3>&1; exec 1>/dev/null` before the JVM starts — and `Main` writes frames through `/proc/self/fd/3` rather than `System.out`.
 
-Starter: [`plugin-templates/java/`](https://github.com/CivexData/civex-service/tree/main/plugin-templates/java).
+Starter: `plugin-templates/java/`.
 
 ### Go
 
 `shim.go` is the reusable protocol plumbing (frame I/O, the `Ctx` capability client, stdout isolation); `main.go` is the part you replace, implementing a small `Plugin` interface (`ID`/`Name`/`Description`/`Category`/`Capabilities`/`ConfigSchema`/`Invoke`).
 
-Starter: [`templates/plugins/go/`](https://github.com/CivexData/civex-service/tree/main/templates/plugins/go).
+Starter: `templates/plugins/go/`.
 
 ### Rust
 
 Split into `protocol.rs` (frame shapes, mirroring `civex_plugin_sdk.protocol`), `io.rs` (fd-dup isolation + newline-delimited JSON I/O), `ctx.rs` (the `Ctx` capability client), and `plugin.rs` — the only file you edit, everything below its `Shim plumbing` marker stays as-is.
 
-Starter: [`plugin-starters/rust/`](https://github.com/CivexData/civex-service/tree/main/plugin-starters/rust).
+Starter: `plugin-starters/rust/`.
 
 ### C / C++
 
 `src/shim.c` (protocol runtime: stdout isolation, frame I/O, `describe`/`run` dispatch, RPC calls) and `src/json.c` (a minimal dependency-free JSON value tree) are the plumbing; `src/plugin.c` is the example plugin you replace. Compiles with a C++ compiler unmodified, so a C++ plugin can reuse the same shim as-is.
 
-Starter: [`starters/c/`](https://github.com/CivexData/civex-service/tree/main/starters/c).
+Starter: `starters/c/`.
 
 ## Current state
 

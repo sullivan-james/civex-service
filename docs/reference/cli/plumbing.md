@@ -16,7 +16,7 @@ These are **plumbing, not porcelain**: internal commands invoked machine-to-mach
 
 ## When you'd see these
 
-- Configuring an SSH `authorized_keys` forced-command restriction (as CivexHub's `civexhub-shell` does) that dispatches to one of these commands based on `SSH_ORIGINAL_COMMAND`.
+- Configuring an SSH `authorized_keys` forced-command restriction that dispatches to one of these commands based on `SSH_ORIGINAL_COMMAND`.
 - Debugging a failed `push`/`pull`/`clone` — the SSH client invokes these on the remote, so their stderr shows up in the transport error.
 - Reading server-side SSH or process logs, where the invoked command line will name one of these instead of a porcelain command.
 

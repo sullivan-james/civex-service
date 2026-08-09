@@ -38,9 +38,32 @@ jobs:
       - uses: actions/upload-artifact@v7
         with: { name: docs-site, path: site/ }
 
-      - name: Publish
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.DOCS_HOST != '' }}
-        run: rsync -az --delete site/ "$DOCS_HOST:$DOCS_PATH"
+      # Force-pushes the built site to the public CivexData/civex-docs mirror, which
+      # GitHub Pages serves. This repo is private, so Pages cannot serve it directly
+      # without a paid plan — the mirror holds generated HTML only, never source.
+      - name: Publish to docs mirror
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          # No `secrets.X != ''` guard here on purpose: the previous rsync publish step
+          # was gated that way, the secret was never set, and it no-opped silently for
+          # months. A missing token must fail this job loudly.
+          test -n "${DOCS_PUSH_TOKEN:?DOCS_PUSH_TOKEN is not set — see docs/contributing/publishing-docs.md}"
+          cd site
+          # Pages runs Jekyll by default, which silently drops paths containing
+          # underscores — without this, Material's assets/ tree 404s and the site
+          # renders unstyled.
+          touch .nojekyll
+          git init -q -b gh-pages
+          git config user.name "civex-docs-bot"
+          git config user.email "noreply@civex.dev"
+          git add -A
+          # Deliberately no ${GITHUB_SHA}: that would publish this private repo's
+          # commit SHAs into a public repo's permanent history.
+          git commit -qm "Docs build"
+          # Fresh history each run keeps the mirror from growing without bound and
+          # guarantees deleted pages actually disappear.
+          git push -q --force \
+            "https://x-access-token:${DOCS_PUSH_TOKEN}@github.com/CivexData/civex-docs.git" \
+            gh-pages
         env:
-          DOCS_HOST: ${{ secrets.DOCS_HOST }}
-          DOCS_PATH: ${{ secrets.DOCS_PATH }}
+          DOCS_PUSH_TOKEN: ${{ secrets.DOCS_PUSH_TOKEN }}

@@ -4,10 +4,10 @@ Transport layer for remote sync.
 Three implementations:
   LocalTransport  — file:// or absolute path; opens the bare repo's SQLite directly.
   SSHTransport    — ssh://user@host/path; spawns civex plumbing commands on the remote.
-  HttpTransport   — https://hub/owner/repo; talks to a civex-hub server via HTTP(S).
+  HttpTransport   — https://host/owner/repo; talks to a remote civex server via HTTP(S).
 
 Usage:
-  transport = get_transport("https://civexhub.example.com/alice/myrepo")
+  transport = get_transport("https://civex.example.com/alice/myrepo")
   bundle = transport.transfer_pack(since_seq=0)    # full clone
   transport.receive_pack(bundle)                   # push bundle to remote
   remote_seq = transport.get_head_seq()            # highest commit seq on remote
@@ -132,7 +132,7 @@ class SSHTransport:
 
 
 class HttpTransport:
-    """Accesses a civex-hub repo over HTTP(S)."""
+    """Accesses a remote civex repo over HTTP(S)."""
 
     def __init__(self, base_url: str, owner: str, repo: str, token: str) -> None:
         self._base = base_url.rstrip("/")
@@ -209,8 +209,8 @@ def get_transport(
     Parse a remote URL and return (transport, remote_path).
 
     Supported schemes:
-      https://civexhub.example.com/owner/repo  (civex-hub)
-      http://localhost:8001/owner/repo          (civex-hub, local dev)
+      https://civex.example.com/owner/repo     (remote server)
+      http://localhost:8001/owner/repo         (remote server, local dev)
       ssh://[user@]host[:port]/path
       file:///path
       /abs/path  (treated as file://)
@@ -228,7 +228,7 @@ def get_transport(
         parts = parsed.path.strip("/").split("/")
         if len(parts) < 2:
             raise SyncError(
-                f"Invalid civex-hub URL '{url}'. Expected https://hub/owner/repo"
+                f"Invalid remote URL '{url}'. Expected https://host/owner/repo"
             )
         owner, repo_name = parts[0], parts[1]
         token = _load_token(base_url)
