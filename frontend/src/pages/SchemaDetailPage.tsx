@@ -26,7 +26,10 @@ import {
   Field,
   Input,
   ConfirmDialog,
+  FormGrid,
+  NameLabelFields,
 } from '../components/ui'
+import { displayLabel, nameError } from '../utils/naming'
 import {
   Star,
   Pencil,
@@ -45,16 +48,22 @@ function MetaEditor({
   schema,
   onDone,
 }: {
-  schema: { name: string; description: string | null }
+  schema: { name: string; label: string | null; description: string | null }
   onDone: () => void
 }) {
   const [name, setName] = useState(schema.name)
+  const [label, setLabel] = useState(schema.label ?? '')
   const [description, setDescription] = useState(schema.description ?? '')
   const updateSchema = useUpdateSchema(schema.name)
 
   function handleSave() {
-    const body: { rename?: string; description?: string } = {}
-    if (name !== schema.name) body.rename = name
+    const trimmedName = name.trim()
+    if (nameError(trimmedName)) return
+    const trimmedLabel = label.trim()
+    const body: { rename?: string; label?: string; description?: string } = {}
+    if (trimmedName !== schema.name) body.rename = trimmedName
+    // '' clears the label; omitting the key leaves it untouched.
+    if (trimmedLabel !== (schema.label ?? '')) body.label = trimmedLabel
     if (description !== (schema.description ?? ''))
       body.description = description
     if (!Object.keys(body).length) {
@@ -66,9 +75,18 @@ function MetaEditor({
 
   return (
     <div className="border border-border rounded-md p-4 bg-canvas-subtle mb-4 flex flex-col gap-3">
-      <Field label="Name">
-        <Input value={name} onChange={(e) => setName(e.target.value)} />
-      </Field>
+      <FormGrid>
+        <NameLabelFields
+          kind="Schema"
+          value={{ label, name }}
+          onChange={(next) => {
+            setLabel(next.label)
+            setName(next.name)
+          }}
+          deriveName={false}
+          onEnter={handleSave}
+        />
+      </FormGrid>
       <Field label="Description">
         <Input
           value={description}
@@ -214,7 +232,9 @@ export default function SchemaDetailPage() {
           Schemas
         </Link>
         <span>/</span>
-        <span className="text-fg font-medium">{schema.name}</span>
+        <span className="text-fg font-medium">
+          {displayLabel(schema.name, schema.label)}
+        </span>
       </nav>
 
       {/* Header */}
@@ -224,7 +244,15 @@ export default function SchemaDetailPage() {
         ) : (
           <div className="flex items-start justify-between">
             <div>
-              <h1 className="text-xl font-semibold text-fg">{schema.name}</h1>
+              <h1 className="text-xl font-semibold text-fg">
+                {displayLabel(schema.name, schema.label)}
+              </h1>
+              <p
+                className="mt-0.5 font-mono text-xs text-fg-subtle"
+                title="Schema name — what workflows and CSV headers reference"
+              >
+                {schema.name}
+              </p>
               <p className="mt-1 text-sm text-fg-muted">
                 {schema.description ?? (
                   <span className="italic">No description</span>
@@ -342,7 +370,9 @@ export default function SchemaDetailPage() {
                   <Td>
                     <span className="flex flex-col gap-1">
                       <span className="flex items-center gap-2">
-                        <span className="font-mono text-sm">{field.name}</span>
+                        <span className="text-sm font-medium">
+                          {displayLabel(field.name, field.label)}
+                        </span>
                         {schema.display_fields.includes(field.name) && (
                           <span
                             className="text-xs font-medium px-2 py-1 rounded-full bg-attention-subtle text-attention border border-attention-muted"
@@ -353,6 +383,12 @@ export default function SchemaDetailPage() {
                               ` #${schema.display_fields.indexOf(field.name) + 1}`}
                           </span>
                         )}
+                      </span>
+                      <span
+                        className="font-mono text-xs text-fg-subtle"
+                        title="Field name — what workflows and CSV headers reference"
+                      >
+                        {field.name}
                       </span>
                       {field.default !== null &&
                         field.default !== undefined && (

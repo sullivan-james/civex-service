@@ -39,10 +39,16 @@ def export_dump(
         schemas_out.append(
             {
                 "name": schema.name,
+                "label": schema.label,
                 "description": schema.description,
                 "parent": parent_name,
                 "fields": [
-                    {"name": f.name, "type": f.dtype, "required": f.required}
+                    {
+                        "name": f.name,
+                        "label": f.label,
+                        "type": f.dtype,
+                        "required": f.required,
+                    }
                     for f in schema.fields
                 ],
             }
@@ -136,7 +142,13 @@ async def import_dump(
     for s in doc.get("schemas", []):
         try:
             ctx.schema_svc.create(
-                s["name"], description=s.get("description"), parent=s.get("parent")
+                s["name"],
+                description=s.get("description"),
+                parent=s.get("parent"),
+                label=s.get("label"),
+                # A dump predating slug validation must restore as-is; see
+                # SchemaService.create.
+                allow_legacy_name=True,
             )
             ctx.commit()
             schemas_restored += 1
@@ -146,7 +158,12 @@ async def import_dump(
         for f in s.get("fields", []):
             try:
                 ctx.schema_svc.add_field(
-                    s["name"], f["name"], f["type"], required=f.get("required", False)
+                    s["name"],
+                    f["name"],
+                    f["type"],
+                    required=f.get("required", False),
+                    label=f.get("label"),
+                    allow_legacy_name=True,
                 )
                 ctx.commit()
             except AlreadyExistsError:

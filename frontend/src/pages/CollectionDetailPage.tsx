@@ -34,9 +34,13 @@ import { RecordForm } from '../components/records/RecordForm'
 import { formatDate } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 import type { Schema } from '../api/schemas'
+import { displayLabel } from '../utils/naming'
 
-function schemaColumns(schema: Schema): string[] {
-  return schema.fields.filter((f) => f.type !== 'file').map((f) => f.name)
+/** Header text comes from the label, the data lookup from the name. */
+function schemaColumns(schema: Schema): { name: string; label: string }[] {
+  return schema.fields
+    .filter((f) => f.type !== 'file')
+    .map((f) => ({ name: f.name, label: displayLabel(f.name, f.label) }))
 }
 
 export default function CollectionDetailPage() {
@@ -438,7 +442,9 @@ export default function CollectionDetailPage() {
                 <Th className="w-24">ID</Th>
                 {!selectedSchema && <Th className="w-32">Schema</Th>}
                 {columns.map((col) => (
-                  <Th key={col}>{col}</Th>
+                  <Th key={col.name} title={col.name}>
+                    {col.label}
+                  </Th>
                 ))}
                 <Th className="w-32">Added</Th>
               </tr>
@@ -465,23 +471,27 @@ export default function CollectionDetailPage() {
                   {!selectedSchema && (
                     <Td>
                       {(() => {
-                        const schemaId = schemas?.find(
+                        const rowSchema = schemas?.find(
                           (s) => s.name === r.schema_name,
-                        )?.id
-                        return schemaId ? (
-                          <Link to={`/schemas/${schemaId}`}>
-                            <Badge variant="accent">{r.schema_name}</Badge>
-                          </Link>
+                        )
+                        const badge = (
+                          <Badge variant="accent">
+                            {displayLabel(r.schema_name, rowSchema?.label)}
+                          </Badge>
+                        )
+                        return rowSchema ? (
+                          <Link to={`/schemas/${rowSchema.id}`}>{badge}</Link>
                         ) : (
-                          <Badge variant="accent">{r.schema_name}</Badge>
+                          badge
                         )
                       })()}
                     </Td>
                   )}
                   {columns.map((col) => (
-                    <Td key={col} className="text-fg">
-                      {r.data[col] !== undefined && r.data[col] !== null ? (
-                        String(r.data[col])
+                    <Td key={col.name} className="text-fg">
+                      {r.data[col.name] !== undefined &&
+                      r.data[col.name] !== null ? (
+                        String(r.data[col.name])
                       ) : (
                         <span className="text-fg-subtle">—</span>
                       )}

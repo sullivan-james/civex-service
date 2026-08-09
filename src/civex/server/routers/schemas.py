@@ -34,11 +34,14 @@ def create_schema(body: CreateSchemaRequest, ctx: AppContext = Depends(get_ctx))
             description=body.description,
             parent=body.parent,
             fields=fields,
+            label=body.label,
         )
     except AlreadyExistsError as e:
         raise HTTPException(409, detail=str(e))
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
     except ValueError as e:
         raise HTTPException(422, detail=str(e))
     return SchemaResponse.from_dto(dto)
@@ -66,18 +69,22 @@ def update_schema(
     display_fields = (
         body.display_fields if "display_fields" in body.model_fields_set else ...
     )
+    label = body.label if "label" in body.model_fields_set else ...
     try:
         dto = ctx.schema_svc.update(
             name,
             new_name=body.rename,
             description=body.description,
             display_fields=display_fields,
+            label=label,
         )
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except AlreadyExistsError as e:
         raise HTTPException(409, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
     return SchemaResponse.from_dto(dto)
 
 
@@ -99,20 +106,14 @@ def add_field(name: str, body: AddFieldRequest, ctx: AppContext = Depends(get_ct
             required=body.required,
             restrictions=body.restrictions,
             default_value=body.default,
+            label=body.label,
         )
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
-    except (AlreadyExistsError, ValueError) as e:
+    except (AlreadyExistsError, ValidationError, ValueError) as e:
         raise HTTPException(422, detail=str(e))
-    return FieldResponse(
-        id=str(field.id),
-        name=field.name,
-        type=field.dtype,
-        required=field.required,
-        restrictions=field.restrictions,
-        default=field.default_value,
-    )
+    return FieldResponse.from_dto(field)
 
 
 @router.delete("/{name}/fields/{field_name}", status_code=204)
@@ -136,15 +137,22 @@ def update_field(
         and body.required is None
         and body.restrictions is None
         and "default" not in body.model_fields_set
+        and "label" not in body.model_fields_set
     ):
         raise HTTPException(
             422,
-            detail="Provide at least one of: rename, required, restrictions, default",
+            detail=(
+                "Provide at least one of: rename, label, required, "
+                "restrictions, default"
+            ),
         )
-    # Pass default_value only if explicitly included in the request
-    default_kwarg: dict = {}
+    # Pass default_value/label only if explicitly included in the request —
+    # an absent key means "leave unchanged", an explicit null means "clear".
+    optional_kwargs: dict = {}
     if "default" in body.model_fields_set:
-        default_kwarg["default_value"] = body.default
+        optional_kwargs["default_value"] = body.default
+    if "label" in body.model_fields_set:
+        optional_kwargs["label"] = body.label
     try:
         field = ctx.schema_svc.update_field(
             name,
@@ -152,21 +160,16 @@ def update_field(
             new_name=body.rename,
             required=body.required,
             restrictions=body.restrictions,
-            **default_kwarg,
+            **optional_kwargs,
         )
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except AlreadyExistsError as e:
         raise HTTPException(409, detail=str(e))
-    return FieldResponse(
-        id=str(field.id),
-        name=field.name,
-        type=field.dtype,
-        required=field.required,
-        restrictions=field.restrictions,
-        default=field.default_value,
-    )
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return FieldResponse.from_dto(field)
 
 
 @router.put("/{name}/fields/reorder", response_model=SchemaResponse)

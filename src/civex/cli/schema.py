@@ -7,14 +7,24 @@ from rich.table import Table
 
 from civex.cli.utils import get_ctx as _ctx
 from civex.console import console
-from civex.domain.exceptions import AlreadyExistsError, NotFoundError
+from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 
 app = typer.Typer(help="Manage schemas (data structure definitions)")
 
 
 @app.command("create")
 def schema_create(
-    name: str = typer.Argument(..., help="Schema name"),
+    name: str = typer.Argument(
+        ...,
+        help="Schema name — the machine key used by workflows and CSV headers "
+        "(lowercase, underscores, e.g. acoustic_recording)",
+    ),
+    label: Optional[str] = typer.Option(
+        None,
+        "--label",
+        "-l",
+        help="Human-facing display name, free text (e.g. 'Acoustic Recording')",
+    ),
     description: Optional[str] = typer.Option(
         None, "--description", "-d", help="Schema description"
     ),
@@ -22,13 +32,20 @@ def schema_create(
         None, "--parent", "-p", help="Inherit fields from this schema"
     ),
 ) -> None:
-    """Define a new schema."""
+    """Define a new schema.
+
+    The name is a slug because workflow YAML, CSV headers and display fields
+    all reference it as text. Put spaces and capitals in --label instead —
+    that is what the UI and CLI show, and it can be changed freely.
+    """
     ctx = _ctx()
     try:
-        schema = ctx.schema_svc.create(name, description=description, parent=parent)
+        schema = ctx.schema_svc.create(
+            name, description=description, parent=parent, label=label
+        )
         ctx.commit()
         console.print(f"[success]Created schema '{schema.name}'.[/success]")
-    except (AlreadyExistsError, NotFoundError) as e:
+    except (AlreadyExistsError, NotFoundError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
@@ -44,14 +61,20 @@ def schema_list() -> None:
         )
         return
 
-    table = Table("Name", "Parent", "Fields", "Description")
+    table = Table("Label", "Name", "Parent", "Fields", "Description")
     for s in schemas:
         parent_name = "-"
         if s.parent_id:
             parent_dto = ctx.schema_svc._repo.get_by_id(s.parent_id)
             parent_name = parent_dto.name if parent_dto else "-"
         all_fields = ctx.schema_svc.collect_fields(s)
-        table.add_row(s.name, parent_name, str(len(all_fields)), s.description or "")
+        table.add_row(
+            s.display_name,
+            s.name,
+            parent_name,
+            str(len(all_fields)),
+            s.description or "",
+        )
     console.print(table)
 
 
@@ -65,7 +88,7 @@ def schema_show(name: str = typer.Argument(..., help="Schema name")) -> None:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
-    console.print(f"[bold]{schema.name}[/bold]")
+    console.print(f"[bold]{schema.display_name}[/bold] ([dim]{schema.name}[/dim])")
     if schema.description:
         console.print(f"  {schema.description}")
     if schema.parent_id:
@@ -78,9 +101,10 @@ def schema_show(name: str = typer.Argument(..., help="Schema name")) -> None:
         console.print("  No fields defined.")
         return
 
-    table = Table("Field", "Type", "Required", "Source")
+    table = Table("Label", "Field", "Type", "Required", "Source")
     for rf in fields:
         table.add_row(
+            rf.field.display_name,
             rf.field.name,
             rf.field.dtype,
             "yes" if rf.field.required else "",
@@ -94,7 +118,17 @@ def schema_show(name: str = typer.Argument(..., help="Schema name")) -> None:
 @app.command("add-field")
 def schema_add_field(
     schema_name: str = typer.Argument(..., help="Schema to add the field to"),
-    field_name: str = typer.Argument(..., help="Field name"),
+    field_name: str = typer.Argument(
+        ...,
+        help="Field name — the machine key used by workflows and CSV headers "
+        "(lowercase, underscores, e.g. recording_date)",
+    ),
+    label: Optional[str] = typer.Option(
+        None,
+        "--label",
+        "-l",
+        help="Human-facing display name, free text (e.g. 'Recording Date')",
+    ),
     dtype: str = typer.Option(
         ...,
         "--type",
@@ -131,6 +165,10 @@ def schema_add_field(
     ),
 ) -> None:
     """Add a field to a schema.
+
+    The field name is a slug because workflow steps reference it by name
+    (e.g. civex.get_field's field:). Use --label for the human-readable
+    version shown in the UI and in `civex schema show`.
 
     Restriction examples:
       --type integer --min 0 --max 100
@@ -194,6 +232,7 @@ def schema_add_field(
             dtype,
             required=required,
             restrictions=restrictions or None,
+            label=label,
         )
         ctx.commit()
         req = " (required)" if field.required else ""
@@ -202,7 +241,7 @@ def schema_add_field(
         console.print(
             f"[success]Added '{field.name}' ({field.dtype}{ref}{req}){restr} to schema '{schema_name}'.[/success]"
         )
-    except (NotFoundError, AlreadyExistsError, ValueError) as e:
+    except (NotFoundError, AlreadyExistsError, ValidationError, ValueError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
@@ -211,7 +250,13 @@ def schema_add_field(
 def schema_update(
     name: str = typer.Argument(..., help="Schema name"),
     rename: Optional[str] = typer.Option(
-        None, "--rename", help="New name for the schema"
+        None, "--rename", help="New name (slug) for the schema"
+    ),
+    label: Optional[str] = typer.Option(
+        None,
+        "--label",
+        "-l",
+        help="New display name for the schema; pass '' to clear it",
     ),
     description: Optional[str] = typer.Option(
         None, "--description", "-d", help="New description for the schema"
@@ -228,15 +273,16 @@ def schema_update(
         help="Remove all display fields (revert to auto)",
     ),
 ) -> None:
-    """Update a schema's name, description, or display fields."""
+    """Update a schema's name, label, description, or display fields."""
     if (
         rename is None
+        and label is None
         and description is None
         and not display_field
         and not clear_display_fields
     ):
         console.print(
-            "[error]Provide at least one of --rename, --description, --display-field, or --clear-display-fields.[/error]"
+            "[error]Provide at least one of --rename, --label, --description, --display-field, or --clear-display-fields.[/error]"
         )
         raise typer.Exit(1)
     df: Any = ...
@@ -247,11 +293,15 @@ def schema_update(
     ctx = _ctx()
     try:
         schema = ctx.schema_svc.update(
-            name, new_name=rename, description=description, display_fields=df
+            name,
+            new_name=rename,
+            description=description,
+            display_fields=df,
+            label=... if label is None else label,
         )
         ctx.commit()
         console.print(f"[success]Updated schema '{schema.name}'.[/success]")
-    except (NotFoundError, AlreadyExistsError) as e:
+    except (NotFoundError, AlreadyExistsError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
@@ -261,7 +311,13 @@ def schema_update_field(
     schema_name: str = typer.Argument(..., help="Schema containing the field"),
     field_name: str = typer.Argument(..., help="Field name"),
     rename: Optional[str] = typer.Option(
-        None, "--rename", help="New name for the field"
+        None, "--rename", help="New name (slug) for the field"
+    ),
+    label: Optional[str] = typer.Option(
+        None,
+        "--label",
+        "-l",
+        help="New display name for the field; pass '' to clear it",
     ),
     required: Optional[bool] = typer.Option(
         None, "--required/--optional", help="Set required/optional"
@@ -291,19 +347,20 @@ def schema_update_field(
         False, "--clear-restrictions", help="Remove all restrictions"
     ),
 ) -> None:
-    """Update a field's name, required flag, or restrictions."""
+    """Update a field's name, label, required flag, or restrictions."""
     has_restriction_flags = any(
         v is not None for v in [min_val, max_val, choices, max_length, accept, max_size]
     )
 
     if (
         rename is None
+        and label is None
         and required is None
         and not has_restriction_flags
         and not clear_restrictions
     ):
         console.print(
-            "[error]Provide at least one of: --rename, --required/--optional, restriction flags, --clear-restrictions.[/error]"
+            "[error]Provide at least one of: --rename, --label, --required/--optional, restriction flags, --clear-restrictions.[/error]"
         )
         raise typer.Exit(1)
 
@@ -373,6 +430,7 @@ def schema_update_field(
             new_name=rename,
             required=required,
             restrictions=new_restrictions,
+            label=... if label is None else label,
         )
         ctx.commit()
         parts = [f"'{updated.name}'"]
@@ -380,7 +438,7 @@ def schema_update_field(
         if updated.restrictions:
             parts.append(str(updated.restrictions))
         console.print(f"[success]Updated field: {' · '.join(parts)}[/success]")
-    except (NotFoundError, AlreadyExistsError) as e:
+    except (NotFoundError, AlreadyExistsError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
@@ -424,3 +482,35 @@ def schema_delete(
     except NotFoundError as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
+
+
+@app.command("lint")
+def schema_lint() -> None:
+    """Report schema and field names that aren't valid slugs.
+
+    Names are validated when they're created or renamed, so anything listed
+    here predates that rule. Nothing is broken — these names still resolve —
+    but they read badly in workflow YAML and CSV headers. Rename with
+    `civex schema update --rename` / `civex schema update-field --rename`
+    and move the human-readable text to `--label`.
+    """
+    ctx = _ctx()
+    issues = ctx.schema_svc.lint_names()
+    if not issues:
+        console.print("[success]All schema and field names are valid slugs.[/success]")
+        return
+
+    table = Table("Kind", "Schema", "Name", "Suggested")
+    for issue in issues:
+        table.add_row(
+            issue.kind,
+            issue.schema_name,
+            issue.name,
+            issue.suggestion or "[dim]—[/dim]",
+        )
+    console.print(table)
+    console.print(
+        f"\n[warning]{len(issues)} name(s) are not valid slugs.[/warning] "
+        "Renaming is safe for stored records (record data is keyed by field "
+        "UUID), but update any workflow YAML that references the old name."
+    )

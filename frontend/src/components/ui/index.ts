@@ -26,6 +26,11 @@ export { Textarea, type TextareaProps } from './Textarea'
 export { Select, type SelectProps } from './Select'
 export { Checkbox, type CheckboxProps } from './Checkbox'
 export { Field, type FieldProps } from './Field'
+export {
+  NameLabelFields,
+  type NameLabelValue,
+  type NameLabelFieldsProps,
+} from './NameLabelFields'
 export { type ControlSize } from './controlStyles'
 export {
   FormGrid,

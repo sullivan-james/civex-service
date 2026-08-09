@@ -13,8 +13,10 @@ import {
   FormGrid,
   FormSection,
   FormFooter,
+  NameLabelFields,
   spanClassName,
 } from '../ui'
+import { displayLabel, nameError } from '../../utils/naming'
 
 const FIELD_TYPES = [
   'string',
@@ -53,6 +55,7 @@ export function FieldForm(props: FieldFormProps) {
   const editingField = props.mode === 'edit' ? props.field : undefined
 
   const [fieldName, setFieldName] = useState(editingField?.name ?? '')
+  const [fieldLabel, setFieldLabel] = useState(editingField?.label ?? '')
   const [type, setType] = useState(editingField?.type ?? 'string')
   const [required, setRequired] = useState(editingField?.required ?? false)
   const [defaultVal, setDefaultVal] = useState('')
@@ -81,6 +84,7 @@ export function FieldForm(props: FieldFormProps) {
 
   const canSubmit =
     !!fieldName.trim() &&
+    !nameError(fieldName.trim()) &&
     (mode === 'edit' || type !== 'reference' || !!refSchema)
   const showDefault = mode === 'create' && !NON_DEFAULT_TYPES.has(type)
 
@@ -119,12 +123,16 @@ export function FieldForm(props: FieldFormProps) {
         required,
         restrictions: builtRestrictions,
       }
+      if (fieldLabel.trim()) {
+        body.label = fieldLabel.trim()
+      }
       if (showDefault && defaultVal !== '') {
         body.default = defaultVal
       }
       addField.mutate(body, {
         onSuccess: () => {
           setFieldName('')
+          setFieldLabel('')
           handleTypeChange('string')
           setRequired(false)
           onDone()
@@ -132,10 +140,16 @@ export function FieldForm(props: FieldFormProps) {
       })
     } else {
       const trimmed = fieldName.trim()
+      const trimmedLabel = fieldLabel.trim()
       updateField.mutate(
         {
           fieldName: editingField!.name,
           rename: trimmed !== editingField!.name ? trimmed : undefined,
+          // '' clears the label; undefined leaves it untouched.
+          label:
+            trimmedLabel !== (editingField!.label ?? '')
+              ? trimmedLabel
+              : undefined,
           required,
           restrictions: builtRestrictions ?? {},
         },
@@ -154,16 +168,18 @@ export function FieldForm(props: FieldFormProps) {
           : 'bg-accent-subtle border-t border-border px-4 py-3'
       }
     >
-      <Field label="Field name" span={4}>
-        <Input
-          size="sm"
-          value={fieldName}
-          onChange={(e) => setFieldName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-          placeholder={mode === 'create' ? 'Field name' : undefined}
-          autoFocus
-        />
-      </Field>
+      <NameLabelFields
+        kind="Field"
+        value={{ label: fieldLabel, name: fieldName }}
+        onChange={(next) => {
+          setFieldLabel(next.label)
+          setFieldName(next.name)
+        }}
+        // An existing name is what workflows reference — never re-derive it.
+        deriveName={mode === 'create'}
+        onEnter={handleSubmit}
+        autoFocus
+      />
       {mode === 'create' ? (
         <Field label="Type" span={4}>
           <Select
@@ -203,7 +219,7 @@ export function FieldForm(props: FieldFormProps) {
               ?.filter((s) => s.name !== schemaName)
               .map((s) => (
                 <option key={s.id} value={s.name}>
-                  {s.name}
+                  {displayLabel(s.name, s.label)}
                 </option>
               ))}
           </Select>

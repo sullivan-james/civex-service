@@ -29,12 +29,16 @@ export function Thead({ children }: { children: ReactNode }) {
 export function Th({
   children,
   className = '',
+  title,
 }: {
   children?: ReactNode
   className?: string
+  /** Tooltip — used to surface a column's machine name behind its label. */
+  title?: string
 }) {
   return (
     <th
+      title={title}
       className={`px-4 py-3 text-left text-xs font-semibold text-fg-muted uppercase tracking-wider ${className}`}
     >
       {children}
