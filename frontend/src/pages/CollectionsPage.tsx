@@ -5,10 +5,9 @@ import { useCollections, useCreateCollection } from '../hooks/useCollections'
 import {
   Badge,
   Button,
+  CreateResourceModal,
   ErrorState,
-  Field,
   TableSkeleton,
-  Input,
   Modal,
   ModalBody,
   ModalFooter,
@@ -27,53 +26,22 @@ import { errorMessage } from '../lib/errors'
 import { dumpApi, type RestoreResult } from '../api/dump'
 
 function CreateCollectionModal({ onClose }: { onClose: () => void }) {
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
   const create = useCreateCollection()
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    await create.mutateAsync({ name, description: description || undefined })
-    onClose()
-  }
-
   return (
-    <Modal onClose={onClose}>
-      <ModalHeader>New collection</ModalHeader>
-      <form onSubmit={handleSubmit}>
-        <ModalBody className="flex flex-col gap-3">
-          <Field label="Name" required>
-            <Input
-              autoFocus
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full"
-              placeholder="my-collection"
-            />
-          </Field>
-          <Field label="Description">
-            <Input
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full"
-              placeholder="Optional"
-            />
-          </Field>
-          {create.error && (
-            <p className="text-xs text-danger">{errorMessage(create.error)}</p>
-          )}
-        </ModalBody>
-        <ModalFooter>
-          <Button type="button" variant="default" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" variant="primary" disabled={create.isPending}>
-            {create.isPending ? 'Creating…' : 'Create collection'}
-          </Button>
-        </ModalFooter>
-      </form>
-    </Modal>
+    <CreateResourceModal
+      resourceLabel="collection"
+      namePlaceholder="my-collection"
+      onClose={onClose}
+      isPending={create.isPending}
+      error={create.error}
+      onSubmit={async ({ name, description }) => {
+        await create.mutateAsync({
+          name,
+          description: description || undefined,
+        })
+      }}
+    />
   )
 }
 

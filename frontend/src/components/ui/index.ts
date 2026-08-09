@@ -16,6 +16,10 @@ export { Skeleton } from './Skeleton'
 export { TableSkeleton } from './TableSkeleton'
 export { DetailSkeleton } from './DetailSkeleton'
 export { Modal, ModalHeader, ModalBody, ModalFooter } from './Modal'
+export {
+  CreateResourceModal,
+  type CreateResourceModalProps,
+} from './CreateResourceModal'
 export { ConfirmDialog } from './ConfirmDialog'
 export { Input, type InputProps } from './Input'
 export { Textarea, type TextareaProps } from './Textarea'
