@@ -28,14 +28,12 @@ import {
   ErrorState,
   Input,
   Checkbox,
+  Pagination,
 } from '../components/ui'
-import { ArrowLeft, ArrowRight } from '../components/ui/icons'
 import { RecordForm } from '../components/records/RecordForm'
 import { formatDate } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 import type { Schema } from '../api/schemas'
-
-const PAGE_SIZE = 50
 
 function schemaColumns(schema: Schema): string[] {
   return schema.fields.filter((f) => f.type !== 'file').map((f) => f.name)
@@ -45,7 +43,8 @@ export default function CollectionDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [selectedSchema, setSelectedSchema] = useState<string | null>(null)
-  const [offset, setOffset] = useState(0)
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(50)
   const [addingRecord, setAddingRecord] = useState(false)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
@@ -58,7 +57,7 @@ export default function CollectionDetailPage() {
   useEffect(() => {
     const t = setTimeout(() => {
       setSearch(searchInput)
-      setOffset(0)
+      setPage(0)
     }, 300)
     return () => clearTimeout(t)
   }, [searchInput])
@@ -75,14 +74,14 @@ export default function CollectionDetailPage() {
 
   // Paginated records — only what's needed for the current page
   const {
-    data: page,
+    data: recordsPage,
     isLoading: recordsLoading,
     error: recordsError,
   } = useRecords(collection?.name ?? '', {
     schema: selectedSchema ?? undefined,
     search: search || undefined,
-    limit: PAGE_SIZE,
-    offset,
+    limit: pageSize,
+    offset: page * pageSize,
   })
 
   const createRecord = useCreateRecord(collection?.name ?? '')
@@ -112,16 +111,15 @@ export default function CollectionDetailPage() {
       />
     )
 
-  const total = page?.total ?? 0
-  const records = page?.items ?? []
-  const totalPages = Math.ceil(total / PAGE_SIZE)
+  const total = recordsPage?.total ?? 0
+  const records = recordsPage?.items ?? []
 
   const activeSchema = schemas?.find((s) => s.name === selectedSchema) ?? null
   const columns = activeSchema ? schemaColumns(activeSchema) : []
 
   function selectSchema(name: string | null) {
     setSelectedSchema(name)
-    setOffset(0)
+    setPage(0)
     setSelected(new Set())
   }
 
@@ -495,30 +493,13 @@ export default function CollectionDetailPage() {
             </Tbody>
           </Table>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between text-sm text-fg-muted">
-              <span>
-                {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  disabled={offset === 0}
-                  onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-                >
-                  <ArrowLeft size={12} /> Previous
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={offset + PAGE_SIZE >= total}
-                  onClick={() => setOffset((o) => o + PAGE_SIZE)}
-                >
-                  Next <ArrowRight size={12} />
-                </Button>
-              </div>
-            </div>
-          )}
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            onPage={setPage}
+            onPageSize={setPageSize}
+          />
         </>
       )}
       {/* Danger zone */}

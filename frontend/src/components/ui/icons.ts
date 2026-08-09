@@ -5,6 +5,7 @@ export {
   XCircle,
   ChevronUp,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   GripVertical,
   RefreshCw,

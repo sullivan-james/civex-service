@@ -9,6 +9,7 @@ export {
   type DataTableAlign,
 } from './DataTable'
 export { PageHeader } from './PageHeader'
+export { Pagination, DEFAULT_PAGE_SIZES } from './Pagination'
 export { ErrorState, EmptyState } from './States'
 export { MonoId } from './MonoId'
 export { Skeleton } from './Skeleton'
