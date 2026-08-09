@@ -2,7 +2,12 @@ import { type ComponentType } from 'react'
 import { Link } from 'react-router'
 import { useJobsPaged } from '../hooks/useWorkflows'
 import { Badge, Page } from '../components/ui'
-import { ArrowRight, Database, ListChecks, Upload } from '../components/ui/icons'
+import {
+  ArrowRight,
+  Database,
+  ListChecks,
+  Upload,
+} from '../components/ui/icons'
 
 interface StartTileProps {
   to: string
