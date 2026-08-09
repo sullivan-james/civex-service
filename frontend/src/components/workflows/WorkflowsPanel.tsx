@@ -1,11 +1,6 @@
 import { useState } from 'react'
 import { useWorkflows, useDeleteWorkflow } from '../../hooks/useWorkflows'
-import {
-  DataTable,
-  type DataTableColumn,
-  Button,
-  ConfirmDialog,
-} from '../ui'
+import { DataTable, type DataTableColumn, Button, ConfirmDialog } from '../ui'
 import type { Workflow } from '../../api/workflows'
 
 interface WorkflowsPanelProps {

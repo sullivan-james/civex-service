@@ -22,7 +22,9 @@ export function ContainerPluginsPanel() {
       align: 'right',
       width: '80px',
       render: (p) => (
-        <span className="font-mono text-xs text-fg-muted">{p.files.length}</span>
+        <span className="font-mono text-xs text-fg-muted">
+          {p.files.length}
+        </span>
       ),
     },
   ]
@@ -43,7 +45,11 @@ export function ContainerPluginsPanel() {
         emptyTitle="No container plugins"
         actions={(p) => (
           <div className="flex justify-end">
-            <Button size="sm" variant="default" onClick={() => setEditorTarget(p.name)}>
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => setEditorTarget(p.name)}
+            >
               Edit
             </Button>
           </div>

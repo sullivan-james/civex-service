@@ -2,7 +2,13 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { useJobsPaged, useRerunJob } from '../../hooks/useWorkflows'
 import { type WorkflowJob } from '../../api/workflows'
-import { DataTable, type DataTableColumn, Badge, Button, Pagination } from '../ui'
+import {
+  DataTable,
+  type DataTableColumn,
+  Badge,
+  Button,
+  Pagination,
+} from '../ui'
 import { Check, XCircle, RefreshCw, Clock } from '../ui/icons'
 
 function duration(job: WorkflowJob): string {

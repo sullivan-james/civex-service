@@ -5,10 +5,20 @@ import {
   usePluginLoadErrors,
   useUploadPlugin,
 } from '../../hooks/usePlugins'
-import { DataTable, type DataTableColumn, Badge, Button, ConfirmDialog } from '../ui'
+import {
+  DataTable,
+  type DataTableColumn,
+  Badge,
+  Button,
+  ConfirmDialog,
+} from '../ui'
 import { ChevronUp, ChevronDown } from '../ui/icons'
 import { PluginEditor } from '../plugins/PluginEditor'
-import type { PluginInfo, PluginIOSpec, PluginLoadError } from '../../api/plugins'
+import type {
+  PluginInfo,
+  PluginIOSpec,
+  PluginLoadError,
+} from '../../api/plugins'
 
 function IOSpecList({ specs }: { specs: PluginIOSpec[] | null }) {
   if (specs === null) {
@@ -201,7 +211,9 @@ export function PluginsPanel() {
     {
       key: 'filename',
       header: 'Failed to load',
-      render: (e) => <span className="font-mono text-xs text-fg">{e.filename}</span>,
+      render: (e) => (
+        <span className="font-mono text-xs text-fg">{e.filename}</span>
+      ),
     },
     {
       key: 'error',
@@ -226,7 +238,9 @@ export function PluginsPanel() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {uploadError && <span className="text-xs text-danger">{uploadError}</span>}
+          {uploadError && (
+            <span className="text-xs text-danger">{uploadError}</span>
+          )}
           <Button
             size="sm"
             variant="default"
@@ -265,7 +279,9 @@ export function PluginsPanel() {
                 <Button
                   size="sm"
                   variant="default"
-                  onClick={() => setPluginEditor({ filename: p.filename!, isNew: false })}
+                  onClick={() =>
+                    setPluginEditor({ filename: p.filename!, isNew: false })
+                  }
                 >
                   Edit
                 </Button>
@@ -294,7 +310,11 @@ export function PluginsPanel() {
             <span className="text-xs font-semibold text-fg font-mono">
               {expandedPluginInfo.id}
             </span>
-            <Button size="sm" variant="default" onClick={() => setExpandedPlugin(null)}>
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => setExpandedPlugin(null)}
+            >
               Close
             </Button>
           </div>
@@ -314,7 +334,9 @@ export function PluginsPanel() {
                 <Button
                   size="sm"
                   variant="default"
-                  onClick={() => setPluginEditor({ filename: e.filename, isNew: false })}
+                  onClick={() =>
+                    setPluginEditor({ filename: e.filename, isNew: false })
+                  }
                 >
                   Edit
                 </Button>
