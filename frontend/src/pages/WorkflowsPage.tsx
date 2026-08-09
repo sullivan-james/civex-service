@@ -26,6 +26,7 @@ import {
   ModalFooter,
   ModalHeader,
   Input,
+  ConfirmDialog,
 } from '../components/ui'
 import { ChevronUp, ChevronDown } from '../components/ui/icons'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
@@ -479,11 +480,26 @@ export default function WorkflowsPage() {
   const [pluginDeleteError, setPluginDeleteError] = useState<string | null>(
     null,
   )
+  const [pluginDeleteTarget, setPluginDeleteTarget] = useState<{
+    id: string
+    filename: string
+  } | null>(null)
+  const [pluginDeleteWarning, setPluginDeleteWarning] = useState<string | null>(
+    null,
+  )
 
   const [editor, setEditor] = useState<{ stem: string; isNew: boolean } | null>(
     null,
   )
   const [runTarget, setRunTarget] = useState<Workflow | null>(null)
+  const [workflowDeleteTarget, setWorkflowDeleteTarget] =
+    useState<Workflow | null>(null)
+  const [workflowDeleteWarning, setWorkflowDeleteWarning] = useState<
+    string | null
+  >(null)
+  const [workflowDeleteError, setWorkflowDeleteError] = useState<string | null>(
+    null,
+  )
   const [pluginUploadError, setPluginUploadError] = useState<string | null>(
     null,
   )
@@ -523,35 +539,56 @@ export default function WorkflowsPage() {
     setPluginEditor({ filename, isNew: false })
   }
 
-  async function handleDeletePlugin(id: string, filename: string) {
-    if (!confirm(`Delete plugin '${id}'? This cannot be undone.`)) return
+  function openDeletePlugin(id: string, filename: string) {
     setPluginDeleteError(null)
+    setPluginDeleteWarning(null)
+    setPluginDeleteTarget({ id, filename })
+  }
+
+  async function confirmDeletePlugin() {
+    if (!pluginDeleteTarget) return
     try {
-      await deletePlugin.mutateAsync({ filename })
+      await deletePlugin.mutateAsync({
+        filename: pluginDeleteTarget.filename,
+        force: pluginDeleteWarning !== null,
+      })
+      setPluginDeleteTarget(null)
+      setPluginDeleteWarning(null)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Delete failed'
-      if (confirm(`${message}\n\nDelete anyway?`)) {
-        try {
-          await deletePlugin.mutateAsync({ filename, force: true })
-        } catch (err2) {
-          setPluginDeleteError(
-            err2 instanceof Error ? err2.message : String(err2),
-          )
-        }
+      if (pluginDeleteWarning === null) {
+        setPluginDeleteWarning(message)
       } else {
         setPluginDeleteError(message)
+        setPluginDeleteTarget(null)
+        setPluginDeleteWarning(null)
       }
     }
   }
 
-  async function handleDelete(wf: Workflow) {
-    if (!confirm(`Delete workflow '${wf.name}'? This cannot be undone.`)) return
+  function openDeleteWorkflow(wf: Workflow) {
+    setWorkflowDeleteError(null)
+    setWorkflowDeleteWarning(null)
+    setWorkflowDeleteTarget(wf)
+  }
+
+  async function confirmDeleteWorkflow() {
+    if (!workflowDeleteTarget) return
     try {
-      await deleteWf.mutateAsync({ stem: wf.stem })
+      await deleteWf.mutateAsync({
+        stem: workflowDeleteTarget.stem,
+        force: workflowDeleteWarning !== null,
+      })
+      setWorkflowDeleteTarget(null)
+      setWorkflowDeleteWarning(null)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Delete failed'
-      if (confirm(`${message}\n\nDelete anyway?`)) {
-        await deleteWf.mutateAsync({ stem: wf.stem, force: true })
+      if (workflowDeleteWarning === null) {
+        setWorkflowDeleteWarning(message)
+      } else {
+        setWorkflowDeleteError(message)
+        setWorkflowDeleteTarget(null)
+        setWorkflowDeleteWarning(null)
       }
     }
   }
@@ -571,6 +608,10 @@ export default function WorkflowsPage() {
           </Button>
         }
       />
+
+      {workflowDeleteError && (
+        <p className="text-xs text-danger mb-2">{workflowDeleteError}</p>
+      )}
 
       {isLoading ? (
         <TableSkeleton
@@ -669,7 +710,7 @@ export default function WorkflowsPage() {
                     <Button
                       size="sm"
                       variant="danger"
-                      onClick={() => handleDelete(wf)}
+                      onClick={() => openDeleteWorkflow(wf)}
                     >
                       Delete
                     </Button>
@@ -788,7 +829,7 @@ export default function WorkflowsPage() {
                               disabled={deletePlugin.isPending}
                               onClick={(e) => {
                                 e.stopPropagation()
-                                handleDeletePlugin(p.id, p.filename!)
+                                openDeletePlugin(p.id, p.filename!)
                               }}
                             >
                               Delete
@@ -848,9 +889,7 @@ export default function WorkflowsPage() {
                         size="sm"
                         variant="danger"
                         disabled={deletePlugin.isPending}
-                        onClick={() =>
-                          handleDeletePlugin(e.filename, e.filename)
-                        }
+                        onClick={() => openDeletePlugin(e.filename, e.filename)}
                       >
                         Delete
                       </Button>
@@ -944,6 +983,38 @@ export default function WorkflowsPage() {
         <ContainerPluginEditor
           name={containerEditorTarget}
           onClose={() => setContainerEditorTarget(null)}
+        />
+      )}
+
+      {workflowDeleteTarget && (
+        <ConfirmDialog
+          title="Delete workflow"
+          body={`Delete workflow '${workflowDeleteTarget.name}'? This cannot be undone.`}
+          confirmLabel={workflowDeleteWarning ? 'Delete anyway' : 'Delete'}
+          variant="danger"
+          warning={workflowDeleteWarning}
+          isPending={deleteWf.isPending}
+          onConfirm={confirmDeleteWorkflow}
+          onClose={() => {
+            setWorkflowDeleteTarget(null)
+            setWorkflowDeleteWarning(null)
+          }}
+        />
+      )}
+
+      {pluginDeleteTarget && (
+        <ConfirmDialog
+          title="Delete plugin"
+          body={`Delete plugin '${pluginDeleteTarget.id}'? This cannot be undone.`}
+          confirmLabel={pluginDeleteWarning ? 'Delete anyway' : 'Delete'}
+          variant="danger"
+          warning={pluginDeleteWarning}
+          isPending={deletePlugin.isPending}
+          onConfirm={confirmDeletePlugin}
+          onClose={() => {
+            setPluginDeleteTarget(null)
+            setPluginDeleteWarning(null)
+          }}
         />
       )}
     </>

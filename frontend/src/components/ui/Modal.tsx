@@ -26,6 +26,9 @@ interface ModalProps {
   size?: ModalSize
   children: ReactNode
   className?: string
+  /** Set false to block Escape and backdrop-click dismissal, e.g. while a
+   * confirmation's request is in flight. Defaults to true. */
+  dismissible?: boolean
 }
 
 /** Accessible modal built on native <dialog>/showModal(), which supplies the
@@ -38,6 +41,7 @@ export function Modal({
   size = 'md',
   children,
   className = '',
+  dismissible = true,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const titleId = useId()
@@ -58,9 +62,18 @@ export function Modal({
   useLayoutEffect(() => {
     const dialog = dialogRef.current
     if (!dialog) return
+    // 'cancel' fires (Escape) before 'close' and is the only one cancelable --
+    // blocking it keeps the dialog open without touching the onClose wiring.
+    const handleCancel = (e: Event) => {
+      if (!dismissible) e.preventDefault()
+    }
+    dialog.addEventListener('cancel', handleCancel)
     dialog.addEventListener('close', onClose)
-    return () => dialog.removeEventListener('close', onClose)
-  }, [onClose])
+    return () => {
+      dialog.removeEventListener('cancel', handleCancel)
+      dialog.removeEventListener('close', onClose)
+    }
+  }, [onClose, dismissible])
 
   return (
     <dialog
@@ -69,7 +82,8 @@ export function Modal({
       aria-modal="true"
       aria-labelledby={titleId}
       onMouseDown={(e) => {
-        if (e.target === dialogRef.current) dialogRef.current?.close()
+        if (dismissible && e.target === dialogRef.current)
+          dialogRef.current?.close()
       }}
       className="fixed inset-0 m-0 h-full max-h-none w-full max-w-none border-0 bg-transparent p-4 flex items-center justify-center backdrop:bg-overlay-scrim"
     >
