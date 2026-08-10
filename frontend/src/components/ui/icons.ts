@@ -40,4 +40,6 @@ export {
   Menu,
   MoreVertical,
   Clock,
+  FileCode,
+  Puzzle,
 } from 'lucide-react'
