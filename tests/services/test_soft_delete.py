@@ -2,6 +2,7 @@
 including the cascades documented on SchemaRepository.delete/restore and
 DatasetRepository.delete/restore.
 """
+
 from __future__ import annotations
 
 import pytest
