@@ -25,9 +25,42 @@ from civex.server.models import (
     WorkflowJobResponse,
     WorkflowResponse,
     WorkflowSaveRequest,
+    WorkflowStepResponse,
+    WorkflowTriggerResponse,
 )
+from civex.workflows.definition import WorkflowDef
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
+
+
+def _step_list(wf: WorkflowDef) -> list[WorkflowStepResponse]:
+    return [
+        WorkflowStepResponse(
+            id=s.id,
+            plugin=s.plugin,
+            config=s.config,
+            inputs=s.inputs,
+            condition=s.if_,
+        )
+        for s in wf.steps
+    ]
+
+
+def _triggers(wf: WorkflowDef) -> dict[str, WorkflowTriggerResponse] | None:
+    if wf.triggers is None:
+        return None
+    triggers = {}
+    if wf.triggers.record_created:
+        triggers["record_created"] = WorkflowTriggerResponse(
+            schema_name=wf.triggers.record_created.schema_name,
+            fields=wf.triggers.record_created.fields,
+        )
+    if wf.triggers.record_updated:
+        triggers["record_updated"] = WorkflowTriggerResponse(
+            schema_name=wf.triggers.record_updated.schema_name,
+            fields=wf.triggers.record_updated.fields,
+        )
+    return triggers or None
 
 
 @router.get("", response_model=list[WorkflowResponse])
@@ -66,7 +99,10 @@ def get_workflow(stem: str, ctx: AppContext = Depends(get_ctx)):
         steps=len(wf.steps),
         filename=path.name,
         stem=path.stem,
+        record_schema=wf.record_schema,
         content=content,
+        step_list=_step_list(wf),
+        triggers=_triggers(wf),
     )
 
 
@@ -86,7 +122,10 @@ def save_workflow(
         steps=len(wf.steps),
         filename=path.name,
         stem=stem,
+        record_schema=wf.record_schema,
         content=body.content,
+        step_list=_step_list(wf),
+        triggers=_triggers(wf),
     )
 
 

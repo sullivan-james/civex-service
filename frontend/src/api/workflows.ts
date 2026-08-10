@@ -16,8 +16,23 @@ export interface Workflow {
   inputs: Record<string, WorkflowInput> | null
 }
 
+export interface WorkflowTrigger {
+  schema_name: string
+  fields: string[] | null
+}
+
+export interface WorkflowStep {
+  id: string
+  plugin: string
+  config: Record<string, unknown>
+  inputs: Record<string, string>
+  condition: string | null
+}
+
 export interface WorkflowDetail extends Workflow {
   content: string
+  step_list: WorkflowStep[]
+  triggers: Record<string, WorkflowTrigger> | null
 }
 
 export interface StepExecution {

@@ -9,6 +9,10 @@ import { datetimeLocalToUTC } from '../../utils/dates'
 import { displayLabel } from '../../utils/naming'
 import { errorMessage } from '../../lib/errors'
 import { fieldErrorInfo } from '../../utils/validationErrors'
+import {
+  FILENAME_FORMAT_TOKENS_HELP,
+  parseFilenameByTokenFormat,
+} from '../../utils/filenamePattern'
 
 interface Props {
   schemas: Schema[]
@@ -28,52 +32,8 @@ interface Props {
 
 // ── Filename extraction helpers ────────────────────────────────────────────
 
-const FORMAT_HELP = 'YYYY MM DD HH mm SS'
-
-/**
- * Parse `str` according to a strptime-like `format` string using the tokens
- * YYYY, MM, DD, HH, mm, SS. Returns an ISO date or datetime string, or null.
- */
-function parseByFormat(str: string, fmt: string): string | null {
-  const TOKENS = [
-    { token: 'YYYY', re: '(\\d{4})', key: 'year' },
-    { token: 'MM', re: '(\\d{2})', key: 'month' },
-    { token: 'DD', re: '(\\d{2})', key: 'day' },
-    { token: 'HH', re: '(\\d{2})', key: 'hour' },
-    { token: 'mm', re: '(\\d{2})', key: 'minute' },
-    { token: 'SS', re: '(\\d{2})', key: 'second' },
-  ]
-  let reStr = ''
-  const groups: string[] = []
-  let i = 0
-  while (i < fmt.length) {
-    let found = false
-    for (const { token, re, key } of TOKENS) {
-      if (fmt.slice(i, i + token.length) === token) {
-        reStr += re
-        groups.push(key)
-        i += token.length
-        found = true
-        break
-      }
-    }
-    if (!found) {
-      reStr += fmt[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      i++
-    }
-  }
-  const m = new RegExp(`^${reStr}$`).exec(str)
-  if (!m) return null
-  const v: Record<string, string> = {}
-  groups.forEach((k, idx) => {
-    v[k] = m[idx + 1]
-  })
-  const { year, month, day, hour, minute = '00', second = '00' } = v
-  if (!year || !month || !day) return null
-  return hour !== undefined
-    ? `${year}-${month}-${day}T${hour}:${minute}:${second}`
-    : `${year}-${month}-${day}`
-}
+const FORMAT_HELP = FILENAME_FORMAT_TOKENS_HELP
+const parseByFormat = parseFilenameByTokenFormat
 
 interface FileSource {
   filename: string

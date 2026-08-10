@@ -3,14 +3,14 @@ import { usePlugins } from '../hooks/usePlugins'
 import { Page, Button } from '../components/ui'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import { WorkflowEditorModal } from '../components/workflows/WorkflowEditorModal'
+import { WorkflowSummaryModal } from '../components/workflows/WorkflowSummaryModal'
 import { WorkflowsPanel } from '../components/workflows/WorkflowsPanel'
-import { PluginsPanel } from '../components/workflows/PluginsPanel'
-import { ContainerPluginsPanel } from '../components/workflows/ContainerPluginsPanel'
 import type { Workflow } from '../api/workflows'
 
 export default function WorkflowsPage() {
   const { data: pluginList } = usePlugins()
 
+  const [summaryTarget, setSummaryTarget] = useState<Workflow | null>(null)
   const [editor, setEditor] = useState<{ stem: string; isNew: boolean } | null>(
     null,
   )
@@ -19,7 +19,7 @@ export default function WorkflowsPage() {
   return (
     <Page
       title="Workflows"
-      description="YAML workflow definitions in .civex/workflows/"
+      description="Automations that run when records are created or updated. Plugins live under Advanced."
       action={
         <Button
           variant="primary"
@@ -32,12 +32,20 @@ export default function WorkflowsPage() {
     >
       <WorkflowsPanel
         onRun={(wf) => setRunTarget(wf)}
-        onEdit={(wf) => setEditor({ stem: wf.stem, isNew: false })}
+        onView={(wf) => setSummaryTarget(wf)}
       />
 
-      <PluginsPanel />
-
-      <ContainerPluginsPanel />
+      {summaryTarget && (
+        <WorkflowSummaryModal
+          workflow={summaryTarget}
+          plugins={pluginList ?? []}
+          onClose={() => setSummaryTarget(null)}
+          onEditYaml={() => {
+            setEditor({ stem: summaryTarget.stem, isNew: false })
+            setSummaryTarget(null)
+          }}
+        />
+      )}
 
       {editor && (
         <WorkflowEditorModal

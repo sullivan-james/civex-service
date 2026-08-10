@@ -297,6 +297,21 @@ class WorkflowResponse(BaseModel):
     inputs: dict[str, WorkflowInputResponse] | None = None
 
 
+class WorkflowTriggerResponse(BaseModel):
+    schema_name: str
+    fields: list[str] | None = None
+
+
+# Readable-summary counterpart to the raw YAML `content` — lets the UI
+# render steps/inputs/outputs without parsing YAML client-side.
+class WorkflowStepResponse(BaseModel):
+    id: str
+    plugin: str
+    config: dict
+    inputs: dict[str, str]  # input_name -> "step_id.output_name"
+    condition: str | None = None
+
+
 class WorkflowDetailResponse(BaseModel):
     name: str
     description: str | None
@@ -306,6 +321,8 @@ class WorkflowDetailResponse(BaseModel):
     record_schema: str | None = None
     inputs: dict[str, WorkflowInputResponse] | None = None
     content: str  # raw YAML
+    step_list: list[WorkflowStepResponse] = []
+    triggers: dict[str, WorkflowTriggerResponse] | None = None
 
 
 class WorkflowSaveRequest(BaseModel):
@@ -406,3 +423,14 @@ class PolicyResponse(BaseModel):
     stem: str
     title: str
     content: str
+
+
+# --- UI settings ---
+
+
+class UISettingsResponse(BaseModel):
+    show_advanced: bool
+
+
+class UpdateUISettingsRequest(BaseModel):
+    show_advanced: bool

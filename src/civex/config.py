@@ -55,6 +55,14 @@ class PluginsConfig:
 
 
 @dataclass
+class UIConfig:
+    # Surfaces the Terminal/YAML-workflow-editor/plugin-editor nav group by
+    # default. Off for new projects — those are power-user escape hatches,
+    # not the researcher-facing front door.
+    show_advanced: bool = False
+
+
+@dataclass
 class DBConfig:
     url: str
     docker_managed: bool = False
@@ -108,6 +116,7 @@ class Config:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
     plugins: PluginsConfig = field(default_factory=PluginsConfig)
+    ui: UIConfig = field(default_factory=UIConfig)
 
     @property
     def civex_dir(self) -> Path:
@@ -226,6 +235,9 @@ def load_config() -> Config:
         ),
     )
 
+    ui_data = data.get("ui", {})
+    ui_cfg = UIConfig(show_advanced=bool(ui_data.get("show_advanced", False)))
+
     return Config(
         project_root=root,
         db=DBConfig(
@@ -238,6 +250,7 @@ def load_config() -> Config:
         logging=logging_cfg,
         telemetry=telemetry_cfg,
         plugins=plugins_cfg,
+        ui=ui_cfg,
     )
 
 
@@ -316,6 +329,9 @@ def save_config(config: Config) -> None:
             "\n[plugins]\n",
             f"default_timeout_seconds = {config.plugins.default_timeout_seconds}\n",
         ]
+
+    if config.ui.show_advanced:
+        lines += ["\n[ui]\n", "show_advanced = true\n"]
 
     config_path = config.civex_dir / "config.toml"
     content = "".join(lines)
