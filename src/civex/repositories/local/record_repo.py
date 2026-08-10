@@ -110,6 +110,14 @@ class LocalRecordRepository:
         rows = q.order_by(Record.created_at.desc()).limit(limit).all()
         return [_to_dto(r) for r in rows]
 
+    def list_ids_by_schema_ids(self, schema_ids: list[uuid.UUID]) -> list[uuid.UUID]:
+        if not schema_ids:
+            return []
+        rows = (
+            self._s.query(Record.id).filter(Record.schema_id.in_(schema_ids)).all()
+        )
+        return [r[0] for r in rows]
+
     def list_children(self, parent_id: uuid.UUID) -> list[RecordDTO]:
         rows = self._s.query(Record).filter_by(parent_record_id=parent_id).all()
         return [_to_dto(r) for r in rows]
