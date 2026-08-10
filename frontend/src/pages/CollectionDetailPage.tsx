@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router'
+import { Upload } from '../components/ui/icons'
 import {
   useCollection,
   useUpdateCollection,
@@ -212,6 +213,11 @@ export default function CollectionDetailPage() {
       action={
         !renaming && (
           <div className="flex items-center gap-2">
+            <Link to={`/collections/${id}/import`}>
+              <Button size="sm" variant="primary">
+                <Upload size={14} /> Guided import
+              </Button>
+            </Link>
             <Button
               size="sm"
               variant="default"
@@ -406,9 +412,20 @@ export default function CollectionDetailPage() {
             {selectedSchema ? `No ${selectedSchema} records` : 'No records'}
           </h2>
           <p className="text-sm text-fg-muted mb-6 max-w-sm">
-            {!selectedSchema
-              ? 'Add your first record using the button above, or set up a workflow to import data automatically.'
-              : `No ${selectedSchema} records in this collection yet.`}
+            {!selectedSchema ? (
+              <>
+                Add your first record using the button above, or use{' '}
+                <Link
+                  to={`/collections/${id}/import`}
+                  className="text-accent hover:underline"
+                >
+                  guided import
+                </Link>{' '}
+                to bring in a folder of files or a spreadsheet.
+              </>
+            ) : (
+              `No ${selectedSchema} records in this collection yet.`
+            )}
           </p>
         </div>
       ) : (

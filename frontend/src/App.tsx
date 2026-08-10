@@ -3,6 +3,7 @@ import Layout from './components/Layout'
 import HomePage from './pages/HomePage'
 import CollectionsPage from './pages/CollectionsPage'
 import CollectionDetailPage from './pages/CollectionDetailPage'
+import ImportPage from './pages/ImportPage'
 import SchemasPage from './pages/SchemasPage'
 import SchemaDetailPage from './pages/SchemaDetailPage'
 import RecordDetailPage from './pages/RecordDetailPage'
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/collections" element={<CollectionsPage />} />
         <Route path="/collections/:id" element={<CollectionDetailPage />} />
+        <Route path="/collections/:id/import" element={<ImportPage />} />
         {/* Legacy redirects */}
         <Route
           path="/datasets"
