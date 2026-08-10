@@ -94,7 +94,43 @@ export function useDeleteSchema() {
     mutationFn: schemasApi.delete,
     onSuccess: (_data, schemaName) => {
       qc.invalidateQueries({ queryKey: ['schemas'] })
-      toast.success(`Schema "${schemaName}" deleted`)
+      qc.invalidateQueries({ queryKey: ['schemas-deleted'] })
+      toast.success(`Schema "${schemaName}" moved to Recently Deleted`)
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
+}
+
+export function useDeletedSchemas() {
+  return useQuery({
+    queryKey: ['schemas-deleted'],
+    queryFn: schemasApi.listDeleted,
+  })
+}
+
+export function useRestoreSchema() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: schemasApi.restore,
+    onSuccess: (restored) => {
+      qc.invalidateQueries({ queryKey: ['schemas'] })
+      qc.invalidateQueries({ queryKey: ['schemas-deleted'] })
+      toast.success(`Schema "${restored.name}" restored`)
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
+}
+
+export function usePurgeSchema() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: schemasApi.purge,
+    onSuccess: (_data, schemaName) => {
+      qc.invalidateQueries({ queryKey: ['schemas'] })
+      qc.invalidateQueries({ queryKey: ['schemas-deleted'] })
+      toast.success(`Schema "${schemaName}" permanently deleted`)
     },
     onError: (err) => toast.error(errorMessage(err)),
   })

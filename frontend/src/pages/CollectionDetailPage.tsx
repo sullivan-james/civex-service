@@ -538,7 +538,8 @@ export default function CollectionDetailPage() {
               Delete this collection
             </p>
             <p className="text-xs text-fg-muted">
-              Permanently removes this collection and all its records.
+              Moves this collection (and all its records) to Recently Deleted —
+              restore it any time before it's permanently purged.
             </p>
           </div>
           {confirmDelete ? (

@@ -33,6 +33,7 @@ import {
   PanelLeftOpen,
   Menu,
   X,
+  Trash2,
 } from './ui/icons'
 
 declare global {
@@ -96,7 +97,10 @@ interface NavGroupDef {
 const navGroups: NavGroupDef[] = [
   {
     heading: 'Data',
-    items: [{ to: '/collections', label: 'Collections', icon: LayoutGrid }],
+    items: [
+      { to: '/collections', label: 'Collections', icon: LayoutGrid },
+      { to: '/trash', label: 'Recently Deleted', icon: Trash2 },
+    ],
   },
   {
     heading: 'Structure',

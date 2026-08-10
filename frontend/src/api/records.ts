@@ -9,6 +9,8 @@ export interface CivexRecord {
   natural_name: string | null
   created_at: string
   updated_at: string
+  /** When this record was soft-deleted. Null means live. */
+  deleted_at: string | null
 }
 
 export interface PaginatedRecords {
@@ -80,4 +82,13 @@ export const recordsApi = {
     qs.set('limit', String(limit))
     return api.get<CivexRecord[]>(`/records?${qs}`)
   },
+
+  listDeleted: (datasetName?: string) => {
+    const qs = datasetName ? `?dataset=${encodeURIComponent(datasetName)}` : ''
+    return api.get<CivexRecord[]>(`/records/deleted${qs}`)
+  },
+
+  restore: (id: string) => api.post<CivexRecord>(`/records/${id}/restore`, {}),
+
+  purge: (id: string) => api.delete<void>(`/records/${id}/purge`),
 }

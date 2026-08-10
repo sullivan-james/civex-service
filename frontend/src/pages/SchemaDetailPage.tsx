@@ -592,7 +592,8 @@ export default function SchemaDetailPage() {
           <div>
             <p className="text-sm font-medium text-fg">Delete this schema</p>
             <p className="text-xs text-fg-muted">
-              This cannot be undone. All field definitions will be removed.
+              Moves this schema (and the records typed by it) to Recently
+              Deleted — restore it any time before it's permanently purged.
             </p>
           </div>
           <Button
@@ -627,7 +628,7 @@ export default function SchemaDetailPage() {
       {confirmDelete && (
         <ConfirmDialog
           title="Delete schema"
-          body={`Delete schema '${schema.name}'? This cannot be undone. All field definitions will be removed.`}
+          body={`Delete schema '${schema.name}' and the records typed by it? They'll move to Recently Deleted and can be restored.`}
           confirmLabel="Delete"
           variant="danger"
           warning={
