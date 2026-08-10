@@ -660,7 +660,7 @@ export default function SchemaDetailPage() {
           // lost -- with dependents gone too there's nothing safe to recreate.
           const canUndo = impactReady && childCount === 0 && recordCount === 0
 
-          async function recreateDeletedSchema() {
+          const recreateDeletedSchema = async () => {
             await schemasApi.create({
               name: schema.name,
               label: schema.label ?? undefined,

@@ -403,12 +403,12 @@ class SchemaService:
                     self._records.delete(record_id)
 
         for schema_id in order:
-            dto = self._repo.get_by_id(schema_id)
-            if dto is None:
+            schema_dto = self._repo.get_by_id(schema_id)
+            if schema_dto is None:
                 continue
             if self._audit:
                 self._audit.log_change(
-                    "delete", "schema", schema_id, dto.to_dict(), None
+                    "delete", "schema", schema_id, schema_dto.to_dict(), None
                 )
             self._repo.delete(schema_id)
 
