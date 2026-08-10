@@ -401,7 +401,9 @@ class RecordService:
                 raise ValidationError(
                     f"Parent record must belong to dataset '{dataset_name}'"
                 )
-            expected_parent = self._schema_svc._repo.get_by_id(schema.parent_id, include_deleted=True)
+            expected_parent = self._schema_svc._repo.get_by_id(
+                schema.parent_id, include_deleted=True
+            )
             if parent_record.schema_id != schema.parent_id:
                 raise ValidationError(
                     f"Parent record uses schema '{parent_record.schema_name}', "
@@ -632,9 +634,7 @@ class RecordService:
             if not dataset:
                 raise NotFoundError(f"Dataset '{dataset_name}' not found")
             dataset_id = dataset.id
-        return [
-            self._with_names(r) for r in self._records.list_deleted(dataset_id)
-        ]
+        return [self._with_names(r) for r in self._records.list_deleted(dataset_id)]
 
     def restore(self, record_id: str) -> RecordDTO:
         """Undo delete(): the record and every descendant cascade-deleted

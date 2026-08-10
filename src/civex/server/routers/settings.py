@@ -41,9 +41,7 @@ def update_ui_settings(body: UpdateUISettingsRequest):
 def get_retention_settings():
     """Return this project's soft-delete retention policy."""
     config = _load_config()
-    return RetentionSettingsResponse(
-        purge_after_days=config.retention.purge_after_days
-    )
+    return RetentionSettingsResponse(purge_after_days=config.retention.purge_after_days)
 
 
 @router.patch("/retention", response_model=RetentionSettingsResponse)
@@ -53,6 +51,4 @@ def update_retention_settings(body: UpdateRetentionSettingsRequest):
     config = _load_config()
     config.retention.purge_after_days = body.purge_after_days
     save_config(config)
-    return RetentionSettingsResponse(
-        purge_after_days=config.retention.purge_after_days
-    )
+    return RetentionSettingsResponse(purge_after_days=config.retention.purge_after_days)

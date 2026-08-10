@@ -149,7 +149,9 @@ def dataset_purge(
 ) -> None:
     """Permanently delete a collection that's already in Recently Deleted. Irreversible."""
     if not yes:
-        typer.confirm(f"Permanently delete '{name}'? This cannot be undone.", abort=True)
+        typer.confirm(
+            f"Permanently delete '{name}'? This cannot be undone.", abort=True
+        )
     ctx = _ctx()
     try:
         ctx.dataset_svc.purge(name)

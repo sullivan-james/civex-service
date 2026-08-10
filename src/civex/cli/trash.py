@@ -7,6 +7,7 @@ from rich.table import Table
 
 from civex.cli.utils import cli_load_config, get_ctx as _ctx
 from civex.console import console
+from civex.domain.dtos import DatasetDTO, RecordDTO, SchemaDTO
 from civex.domain.exceptions import NotFoundError
 
 app = typer.Typer(
@@ -18,6 +19,12 @@ app = typer.Typer(
 def _age(deleted_at: datetime) -> str:
     days = (datetime.now(timezone.utc) - deleted_at).days
     return "today" if days <= 0 else f"{days}d ago"
+
+
+def _deleted_at(dto: SchemaDTO | DatasetDTO | RecordDTO) -> datetime:
+    """dto.deleted_at, narrowed: everything list_deleted() returns is deleted."""
+    assert dto.deleted_at is not None
+    return dto.deleted_at
 
 
 @app.command("list")
@@ -38,9 +45,12 @@ def trash_list() -> None:
     table = Table("Type", "Name / ID", "Deleted", "Purge eligible")
     now = datetime.now(timezone.utc)
     rows = (
-        [("schema", s.name, s.deleted_at) for s in schemas]
-        + [("collection", d.name, d.deleted_at) for d in collections]
-        + [("record", f"{r.schema_name} {str(r.id)[:8]}…", r.deleted_at) for r in records]
+        [("schema", s.name, _deleted_at(s)) for s in schemas]
+        + [("collection", d.name, _deleted_at(d)) for d in collections]
+        + [
+            ("record", f"{r.schema_name} {str(r.id)[:8]}…", _deleted_at(r))
+            for r in records
+        ]
     )
     rows.sort(key=lambda r: r[2], reverse=True)
     for kind, label, deleted_at in rows:
@@ -69,12 +79,14 @@ def trash_purge_expired(
         days=config.retention.purge_after_days
     )
 
-    expired_schemas = [s for s in ctx.schema_svc.list_deleted() if s.deleted_at <= cutoff]
+    expired_schemas = [
+        s for s in ctx.schema_svc.list_deleted() if _deleted_at(s) <= cutoff
+    ]
     expired_collections = [
-        d for d in ctx.dataset_svc.list_deleted() if d.deleted_at <= cutoff
+        d for d in ctx.dataset_svc.list_deleted() if _deleted_at(d) <= cutoff
     ]
     expired_records = [
-        r for r in ctx.record_svc.list_deleted() if r.deleted_at <= cutoff
+        r for r in ctx.record_svc.list_deleted() if _deleted_at(r) <= cutoff
     ]
     total = len(expired_schemas) + len(expired_collections) + len(expired_records)
     if total == 0:
