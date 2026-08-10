@@ -113,6 +113,15 @@ class SchemaDTO:
 
 
 @dataclass
+class SchemaDeleteImpactDTO:
+    """What deleting a schema would take with it, computed up front so the
+    caller can warn before the delete happens rather than after it fails."""
+
+    child_schema_count: int
+    record_count: int
+
+
+@dataclass
 class ResolvedField:
     """
     A field together with the name of the schema it was defined on.

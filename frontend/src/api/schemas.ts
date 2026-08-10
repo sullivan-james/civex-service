@@ -23,14 +23,29 @@ export interface Schema {
   fields: Field[]
 }
 
+export interface SchemaDeleteImpact {
+  child_schema_count: number
+  record_count: number
+}
+
 export const schemasApi = {
   list: () => api.get<Schema[]>('/schemas'),
   get: (name: string) => api.get<Schema>(`/schemas/${name}`),
+  getDeleteImpact: (name: string) =>
+    api.get<SchemaDeleteImpact>(`/schemas/${name}/delete-impact`),
   create: (body: {
     name: string
     label?: string
     description?: string
     parent?: string
+    fields?: {
+      name: string
+      label?: string
+      type: string
+      required?: boolean
+      restrictions?: Record<string, unknown>
+      default?: unknown
+    }[]
   }) => api.post<Schema>('/schemas', body),
   update: (
     name: string,

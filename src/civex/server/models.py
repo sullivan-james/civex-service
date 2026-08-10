@@ -14,6 +14,7 @@ from civex.domain.dtos import (
     DatasetDTO,
     FieldDTO,
     RecordDTO,
+    SchemaDeleteImpactDTO,
     SchemaDTO,
     WorkflowJobDTO,
 )
@@ -75,6 +76,21 @@ class SchemaResponse(BaseModel):
             parent_id=str(dto.parent_id) if dto.parent_id else None,
             display_fields=dto.display_fields,
             fields=[FieldResponse.from_dto(f) for f in dto.fields],
+        )
+
+
+class SchemaDeleteImpactResponse(BaseModel):
+    child_schema_count: int = Field(
+        description="Schemas that inherit from this one, directly or transitively — they are deleted along with it."
+    )
+    record_count: int = Field(
+        description="Records of this schema, a descendant schema, or nested under one of those records — all deleted along with it."
+    )
+
+    @classmethod
+    def from_dto(cls, dto: SchemaDeleteImpactDTO) -> SchemaDeleteImpactResponse:
+        return cls(
+            child_schema_count=dto.child_schema_count, record_count=dto.record_count
         )
 
 
