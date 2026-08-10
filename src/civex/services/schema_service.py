@@ -334,12 +334,53 @@ class SchemaService:
         return self._repo.reorder_fields(schema.id, field_ids)
 
     def delete(self, name: str) -> None:
+        """Soft-delete: the schema (and every record typed by it, across
+        every collection — see SchemaRepository.delete) moves to Recently
+        Deleted, reversible via restore() within the retention window."""
         schema = self.get(name)
         if self._audit:
             self._audit.log_change(
                 "delete", "schema", schema.id, schema.to_dict(), None
             )
         self._repo.delete(schema.id)
+
+    def list_deleted(self) -> list[SchemaDTO]:
+        return self._repo.list_deleted()
+
+    def restore(self, name: str) -> SchemaDTO:
+        """Undo delete(): the schema and the records cascade-deleted with it
+        become live again (see SchemaRepository.restore)."""
+        schema = self._repo.get_by_name(name, include_deleted=True)
+        if schema is None:
+            raise NotFoundError(f"Schema '{name}' not found")
+        if schema.deleted_at is None:
+            raise ValidationError(f"Schema '{name}' is not deleted")
+        restored = self._repo.restore(schema.id)
+        if self._audit:
+            self._audit.log_change(
+                "restore", "schema", restored.id, schema.to_dict(), restored.to_dict()
+            )
+        return restored
+
+    def purge(self, name: str) -> None:
+        """Permanently remove a schema that's already in Recently Deleted —
+        a separate, explicit action from delete(). Irreversible."""
+        schema = self._repo.get_by_name(name, include_deleted=True)
+        if schema is None:
+            raise NotFoundError(f"Schema '{name}' not found")
+        if schema.deleted_at is None:
+            raise ValidationError(
+                f"Schema '{name}' must be deleted before it can be purged"
+            )
+        children = [s.name for s in self._repo.list_all() if s.parent_id == schema.id]
+        if children:
+            raise ValidationError(
+                f"Cannot purge '{name}': schema(s) {children} still inherit from it. "
+                "Delete or repoint them first."
+            )
+        if self._audit:
+            self._audit.log_change("purge", "schema", schema.id, schema.to_dict(), None)
+        self._repo.purge(schema.id)
 
     def name_to_id_map(self, schema: SchemaDTO) -> dict[str, str]:
         """field name → str(field.id), including inherited fields."""
@@ -393,7 +434,11 @@ class SchemaService:
 
         inherited: list[ResolvedField] = []
         if schema.parent_id:
-            parent = self._repo.get_by_id(schema.parent_id)
+            # include_deleted: a soft-deleted parent schema must keep
+            # resolving here, or a live child schema would silently lose its
+            # inherited fields the moment its parent is trashed (restorable,
+            # not gone, until purged).
+            parent = self._repo.get_by_id(schema.parent_id, include_deleted=True)
             if parent:
                 for resolved in self.collect_fields(parent):
                     if resolved.field.name not in seen_names:

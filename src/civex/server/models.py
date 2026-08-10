@@ -64,6 +64,10 @@ class SchemaResponse(BaseModel):
     parent_id: str | None
     display_fields: list[str]
     fields: list[FieldResponse]
+    deleted_at: datetime | None = Field(
+        default=None,
+        description="When this schema was soft-deleted. Null means live.",
+    )
 
     @classmethod
     def from_dto(cls, dto: SchemaDTO) -> SchemaResponse:
@@ -75,6 +79,7 @@ class SchemaResponse(BaseModel):
             parent_id=str(dto.parent_id) if dto.parent_id else None,
             display_fields=dto.display_fields,
             fields=[FieldResponse.from_dto(f) for f in dto.fields],
+            deleted_at=dto.deleted_at,
         )
 
 
@@ -151,6 +156,10 @@ class DatasetResponse(BaseModel):
     name: str
     description: str | None
     record_count: int
+    deleted_at: datetime | None = Field(
+        default=None,
+        description="When this collection was soft-deleted. Null means live.",
+    )
 
     @classmethod
     def from_dto(cls, dto: DatasetDTO) -> DatasetResponse:
@@ -159,6 +168,7 @@ class DatasetResponse(BaseModel):
             name=dto.name,
             description=dto.description,
             record_count=dto.record_count,
+            deleted_at=dto.deleted_at,
         )
 
 
@@ -190,6 +200,10 @@ class RecordResponse(BaseModel):
     natural_name: str | None
     created_at: datetime
     updated_at: datetime
+    deleted_at: datetime | None = Field(
+        default=None,
+        description="When this record was soft-deleted. Null means live.",
+    )
 
     @classmethod
     def from_dto(cls, dto: RecordDTO) -> RecordResponse:
@@ -204,6 +218,7 @@ class RecordResponse(BaseModel):
             natural_name=dto.natural_name,
             created_at=dto.created_at,
             updated_at=dto.updated_at,
+            deleted_at=dto.deleted_at,
         )
 
 
@@ -418,3 +433,14 @@ class UISettingsResponse(BaseModel):
 
 class UpdateUISettingsRequest(BaseModel):
     show_advanced: bool
+
+
+class RetentionSettingsResponse(BaseModel):
+    purge_after_days: int = Field(
+        description="Soft-deleted items become eligible for permanent "
+        "deletion this many days after being deleted."
+    )
+
+
+class UpdateRetentionSettingsRequest(BaseModel):
+    purge_after_days: int = Field(ge=1)

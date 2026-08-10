@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import cast, func, literal, or_, String
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlalchemy.orm import Session
 
-from civex.db.models import Record, Schema
+from civex.db.models import Record, Schema, WorkflowJob
 from civex.domain.dtos import RecordDTO
 from civex.domain.exceptions import NotFoundError
 
@@ -26,30 +27,51 @@ class LocalRecordRepository:
         self._s = session
         self._pg = is_postgres
 
-    def get_by_id(self, id: uuid.UUID) -> RecordDTO | None:
-        row = self._s.query(Record).filter_by(id=id).first()
+    def get_by_id(
+        self, id: uuid.UUID, include_deleted: bool = False
+    ) -> RecordDTO | None:
+        q = self._s.query(Record).filter_by(id=id)
+        if not include_deleted:
+            q = q.filter(Record.deleted_at.is_(None))
+        row = q.first()
         return _to_dto(row) if row else None
 
-    def get_by_prefix(self, prefix: str) -> RecordDTO | None:
+    def get_by_prefix(
+        self, prefix: str, include_deleted: bool = False
+    ) -> RecordDTO | None:
         try:
             uid = uuid.UUID(prefix)
-            row = self._s.query(Record).filter(Record.id == uid).first()
+            q = self._s.query(Record).filter(Record.id == uid)
         except ValueError:
-            row = (
-                self._s.query(Record)
-                .filter(cast(Record.id, String).like(f"{prefix.lower()}%"))
-                .first()
+            q = self._s.query(Record).filter(
+                cast(Record.id, String).like(f"{prefix.lower()}%")
             )
+        if not include_deleted:
+            q = q.filter(Record.deleted_at.is_(None))
+        row = q.first()
         return _to_dto(row) if row else None
 
     def list_all(self) -> list[RecordDTO]:
-        rows = self._s.query(Record).order_by(Record.created_at).all()
+        rows = (
+            self._s.query(Record)
+            .filter(Record.deleted_at.is_(None))
+            .order_by(Record.created_at)
+            .all()
+        )
+        return [_to_dto(r) for r in rows]
+
+    def list_deleted(self, dataset_id: uuid.UUID | None = None) -> list[RecordDTO]:
+        q = self._s.query(Record).filter(Record.deleted_at.is_not(None))
+        if dataset_id is not None:
+            q = q.filter(Record.dataset_id == dataset_id)
+        rows = q.order_by(Record.deleted_at.desc()).all()
         return [_to_dto(r) for r in rows]
 
     def list_by_dataset(self, dataset_id: uuid.UUID) -> list[RecordDTO]:
         rows = (
             self._s.query(Record)
             .filter_by(dataset_id=dataset_id)
+            .filter(Record.deleted_at.is_(None))
             .order_by(Record.created_at)
             .all()
         )
@@ -99,7 +121,9 @@ class LocalRecordRepository:
     def list_by_schema(
         self, schema_id: uuid.UUID, search: str | None = None, limit: int = 20
     ) -> list[RecordDTO]:
-        q = self._s.query(Record).filter(Record.schema_id == schema_id)
+        q = self._s.query(Record).filter(
+            Record.schema_id == schema_id, Record.deleted_at.is_(None)
+        )
         if search:
             q = q.filter(
                 or_(
@@ -110,9 +134,13 @@ class LocalRecordRepository:
         rows = q.order_by(Record.created_at.desc()).limit(limit).all()
         return [_to_dto(r) for r in rows]
 
-    def list_children(self, parent_id: uuid.UUID) -> list[RecordDTO]:
-        rows = self._s.query(Record).filter_by(parent_record_id=parent_id).all()
-        return [_to_dto(r) for r in rows]
+    def list_children(
+        self, parent_id: uuid.UUID, include_deleted: bool = False
+    ) -> list[RecordDTO]:
+        q = self._s.query(Record).filter_by(parent_record_id=parent_id)
+        if not include_deleted:
+            q = q.filter(Record.deleted_at.is_(None))
+        return [_to_dto(r) for r in q.all()]
 
     def list_referencing(
         self,
@@ -141,7 +169,12 @@ class LocalRecordRepository:
                 for fid in reference_list_field_ids
                 for t in target_strs
             ]
-            rows = self._s.query(Record).filter(or_(*clauses)).all()
+            rows = (
+                self._s.query(Record)
+                .filter(Record.deleted_at.is_(None))
+                .filter(or_(*clauses))
+                .all()
+            )
             return [_to_dto(r) for r in rows]
 
         # SQLite has no JSONB containment operator -- scan and check in Python.
@@ -150,7 +183,7 @@ class LocalRecordRepository:
         ref_ids = {str(fid) for fid in reference_field_ids}
         ref_list_ids = {str(fid) for fid in reference_list_field_ids}
         result = []
-        for row in self._s.query(Record).all():
+        for row in self._s.query(Record).filter(Record.deleted_at.is_(None)).all():
             data = row.data or {}
             hit = any(data.get(fid) in target_set for fid in ref_ids)
             if not hit:
@@ -166,7 +199,7 @@ class LocalRecordRepository:
         rows = (
             self._s.query(Schema.name, func.count(Record.id))
             .join(Schema, Record.schema_id == Schema.id)
-            .filter(Record.dataset_id == dataset_id)
+            .filter(Record.dataset_id == dataset_id, Record.deleted_at.is_(None))
             .group_by(Schema.name)
             .all()
         )
@@ -202,9 +235,30 @@ class LocalRecordRepository:
 
     def delete(self, id: uuid.UUID) -> None:
         row = self._s.query(Record).filter_by(id=id).first()
-        if row:
-            self._s.delete(row)
+        if row and row.deleted_at is None:
+            row.deleted_at = datetime.now(timezone.utc)
             self._s.flush()
+
+    def restore(self, id: uuid.UUID) -> RecordDTO:
+        row = self._s.query(Record).filter_by(id=id).first()
+        if row is None:
+            raise NotFoundError(f"Record '{id}' not found")
+        row.deleted_at = None
+        self._s.flush()
+        return _to_dto(row)
+
+    def purge(self, id: uuid.UUID) -> None:
+        """Permanently remove a single (already soft-deleted) record and its
+        workflow jobs. Descendant purging is the caller's job (RecordService
+        mirrors the recursion it already does for delete())."""
+        row = self._s.query(Record).filter_by(id=id).first()
+        if row is None:
+            return
+        self._s.query(WorkflowJob).filter_by(record_id=id).delete(
+            synchronize_session=False
+        )
+        self._s.delete(row)
+        self._s.flush()
 
 
 def _base_query(
@@ -216,7 +270,9 @@ def _base_query(
     search: str | None = None,
     is_postgres: bool = False,
 ):
-    q = session.query(Record).filter(Record.dataset_id == dataset_id)
+    q = session.query(Record).filter(
+        Record.dataset_id == dataset_id, Record.deleted_at.is_(None)
+    )
     if schema_id is not None:
         q = q.filter(Record.schema_id == schema_id)
     if parent_record_id is not None:
@@ -254,4 +310,5 @@ def _to_dto(row: Record) -> RecordDTO:
         data=row.data or {},
         created_at=row.created_at,
         updated_at=row.updated_at,
+        deleted_at=row.deleted_at,
     )

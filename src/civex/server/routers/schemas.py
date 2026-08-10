@@ -25,6 +25,12 @@ def list_schemas(ctx: AppContext = Depends(get_ctx)):
     return [SchemaResponse.from_dto(s) for s in ctx.schema_svc.list_all()]
 
 
+@router.get("/deleted", response_model=list[SchemaResponse])
+def list_deleted_schemas(ctx: AppContext = Depends(get_ctx)):
+    """Schemas currently in Recently Deleted, most recently deleted first."""
+    return [SchemaResponse.from_dto(s) for s in ctx.schema_svc.list_deleted()]
+
+
 @router.post("", response_model=SchemaResponse, status_code=201)
 def create_schema(body: CreateSchemaRequest, ctx: AppContext = Depends(get_ctx)):
     fields = [f.model_dump() for f in body.fields] if body.fields else None
@@ -94,6 +100,30 @@ def delete_schema(name: str, ctx: AppContext = Depends(get_ctx)):
         ctx.schema_svc.delete(name)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+    ctx.commit()
+
+
+@router.post("/{name}/restore", response_model=SchemaResponse)
+def restore_schema(name: str, ctx: AppContext = Depends(get_ctx)):
+    try:
+        dto = ctx.schema_svc.restore(name)
+        ctx.commit()
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return SchemaResponse.from_dto(dto)
+
+
+@router.delete("/{name}/purge", status_code=204)
+def purge_schema(name: str, ctx: AppContext = Depends(get_ctx)):
+    try:
+        ctx.schema_svc.purge(name)
+        ctx.commit()
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
 
 
 @router.post("/{name}/fields", response_model=FieldResponse, status_code=201)

@@ -40,7 +40,10 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
             parent_id=r.parent_id,
             created_at=r.created_at or now,
         ).to_dict()
-        for r in session.query(Schema).order_by(Schema.created_at).all()
+        for r in session.query(Schema)
+        .filter(Schema.deleted_at.is_(None))
+        .order_by(Schema.created_at)
+        .all()
     ]
     fields = [
         FieldDTO(
@@ -62,7 +65,10 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
             record_count=0,
             created_at=r.created_at or now,
         ).to_dict()
-        for r in session.query(Dataset).order_by(Dataset.created_at).all()
+        for r in session.query(Dataset)
+        .filter(Dataset.deleted_at.is_(None))
+        .order_by(Dataset.created_at)
+        .all()
     ]
 
     # Commits not yet seen by the receiver.
@@ -106,7 +112,9 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
             updated_at=r.updated_at or now,
         ).to_dict()
         for r in (
-            session.query(Record).filter(Record.id.in_(live_record_ids)).all()
+            session.query(Record)
+            .filter(Record.id.in_(live_record_ids), Record.deleted_at.is_(None))
+            .all()
             if live_record_ids
             else []
         )

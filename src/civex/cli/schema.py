@@ -471,7 +471,11 @@ def schema_delete(
     name: str = typer.Argument(..., help="Schema name"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
 ) -> None:
-    """Delete a schema and its fields."""
+    """Delete a schema (and the records typed by it) to Recently Deleted.
+
+    Reversible with `civex schema restore` within the retention window
+    (see `civex trash list`); `civex schema purge` deletes permanently.
+    """
     if not yes:
         typer.confirm(f"Delete schema '{name}'?", abort=True)
     ctx = _ctx()
@@ -480,6 +484,37 @@ def schema_delete(
         ctx.commit()
         console.print(f"[success]Deleted '{name}'.[/success]")
     except NotFoundError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+
+
+@app.command("restore")
+def schema_restore(name: str = typer.Argument(..., help="Schema name")) -> None:
+    """Restore a soft-deleted schema (and the records cascade-deleted with it)."""
+    ctx = _ctx()
+    try:
+        ctx.schema_svc.restore(name)
+        ctx.commit()
+        console.print(f"[success]Restored '{name}'.[/success]")
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+
+
+@app.command("purge")
+def schema_purge(
+    name: str = typer.Argument(..., help="Schema name"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+) -> None:
+    """Permanently delete a schema that's already in Recently Deleted. Irreversible."""
+    if not yes:
+        typer.confirm(f"Permanently delete '{name}'? This cannot be undone.", abort=True)
+    ctx = _ctx()
+    try:
+        ctx.schema_svc.purge(name)
+        ctx.commit()
+        console.print(f"[success]Permanently deleted '{name}'.[/success]")
+    except (NotFoundError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
