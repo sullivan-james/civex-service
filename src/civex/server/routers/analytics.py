@@ -186,11 +186,19 @@ def audit_event_counts(
 @router.get("/ai/usage", response_model=AiTokenUsageResponse)
 def ai_token_usage(
     filters: AnalyticsFilters = Depends(analytics_filters),
+    provider: str | None = Query(
+        default=None, description="AI provider to scope to, e.g. 'anthropic'."
+    ),
+    model: str | None = Query(
+        default=None, description="AI model to scope to, e.g. 'claude-sonnet-5'."
+    ),
     ctx: AppContext = Depends(get_ctx),
 ):
     """AI provider token usage over time, broken out by provider and model.
-    Applies `start`, `end`, `bucket`."""
-    items = ctx.analytics_svc.ai_token_usage(filters)
+    Applies `start`, `end`, `bucket`, plus this endpoint's own `provider`
+    and `model` params -- not part of the shared filter contract since no
+    other endpoint has a use for them."""
+    items = ctx.analytics_svc.ai_token_usage(filters, provider=provider, model=model)
     return AiTokenUsageResponse(
         bucket=filters.bucket,
         items=[TokenUsageBucketResponse.from_dto(i) for i in items],

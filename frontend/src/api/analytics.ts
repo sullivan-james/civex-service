@@ -57,6 +57,19 @@ export interface TriggerBreakdown {
   items: TriggerBreakdownPoint[]
 }
 
+export interface TokenUsageBucket {
+  bucket: string
+  provider: string
+  model: string
+  input_tokens: number
+  output_tokens: number
+}
+
+export interface AiTokenUsageResponse {
+  bucket: string
+  items: TokenUsageBucket[]
+}
+
 function qs(filters: AnalyticsFiltersState): string {
   return toAnalyticsQueryParams(filters).toString()
 }
@@ -72,4 +85,17 @@ export const analyticsApi = {
     ),
   jobTriggerBreakdown: (filters: AnalyticsFiltersState) =>
     api.get<TriggerBreakdown>(`/analytics/jobs/by-trigger?${qs(filters)}`),
+  /** AI provider token usage over time, broken out by provider and model.
+   * `provider`/`model` narrow to a single provider/model -- omit either to
+   * include every value for that dimension. */
+  aiTokenUsage: (
+    filters: AnalyticsFiltersState,
+    provider?: string | null,
+    model?: string | null,
+  ) => {
+    const params = toAnalyticsQueryParams(filters)
+    if (provider) params.set('provider', provider)
+    if (model) params.set('model', model)
+    return api.get<AiTokenUsageResponse>(`/analytics/ai/usage?${params}`)
+  },
 }

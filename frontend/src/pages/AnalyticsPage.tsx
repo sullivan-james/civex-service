@@ -5,6 +5,7 @@ import {
   PluginFailuresWidget,
   DurationDistributionWidget,
   TriggerBreakdownWidget,
+  AiTokenUsageWidget,
 } from '../components/analytics'
 import { useAnalyticsFilters } from '../hooks/useAnalyticsFilters'
 import { useWorkflows } from '../hooks/useWorkflows'
@@ -35,7 +36,7 @@ export default function AnalyticsPage() {
   return (
     <Page
       title="Analytics"
-      description="Workflow reliability over the selected range"
+      description="Workflow reliability and usage over the selected range"
     >
       <AnalyticsFilterBar
         filters={filters}
@@ -59,6 +60,7 @@ export default function AnalyticsPage() {
         <DurationDistributionWidget filters={filters} />
         <TriggerBreakdownWidget filters={filters} />
       </div>
+      <AiTokenUsageWidget filters={filters} />
     </Page>
   )
 }

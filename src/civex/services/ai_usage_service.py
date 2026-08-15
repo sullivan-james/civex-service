@@ -97,14 +97,20 @@ class AiUsageService:
         start: datetime | None = None,
         end: datetime | None = None,
         bucket: str = "day",
+        provider: str | None = None,
+        model: str | None = None,
     ) -> list[TokenUsageBucket]:
         """Token totals per bucket, broken out by provider and model -- backs
-        the AI token-usage-over-time widget. Buckets in Python (this service
-        already fetches the full matching event list for `by_model`'s sake,
-        and events are a low-volume append-only log -- see class docstring)
-        rather than adding a second, SQL-side aggregate path."""
+        the AI token-usage-over-time widget. `provider`/`model` optionally
+        scope to a single provider/model rather than every combination.
+        Buckets in Python (this service already fetches the full matching
+        event list for `by_model`'s sake, and events are a low-volume
+        append-only log -- see class docstring) rather than adding a
+        second, SQL-side aggregate path."""
         with Session(self._engine) as session:
-            events = LocalAiUsageRepository(session).list_all(since=start, until=end)
+            events = LocalAiUsageRepository(session).list_all(
+                since=start, until=end, provider=provider, model=model
+            )
         merged: dict[tuple[str, str, str], list[int]] = {}
         for e in events:
             key = (bucket_start(e.created_at.date(), bucket), e.provider, e.model)

@@ -34,3 +34,7 @@ export { JobSuccessRateWidget } from './widgets/JobSuccessRateWidget'
 export { PluginFailuresWidget } from './widgets/PluginFailuresWidget'
 export { DurationDistributionWidget } from './widgets/DurationDistributionWidget'
 export { TriggerBreakdownWidget } from './widgets/TriggerBreakdownWidget'
+export {
+  AiTokenUsageWidget,
+  type AiTokenUsageWidgetProps,
+} from './AiTokenUsageWidget'

@@ -255,7 +255,11 @@ class AiUsageRepository(Protocol):
         self, provider: str, model: str, input_tokens: int, output_tokens: int
     ) -> AiUsageEventDTO: ...
     def list_all(
-        self, since: datetime | None = None, until: datetime | None = None
+        self,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> list[AiUsageEventDTO]: ...
 
 

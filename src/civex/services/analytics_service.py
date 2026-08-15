@@ -236,11 +236,18 @@ class AnalyticsService:
             for b, action, entity_type, count in rebucket(rows, filters.bucket)
         ]
 
-    def ai_token_usage(self, filters: AnalyticsFilters) -> list[TokenUsageBucket]:
+    def ai_token_usage(
+        self,
+        filters: AnalyticsFilters,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> list[TokenUsageBucket]:
         """AI token usage over time, by provider + model. Applies `start`,
-        `end`, `bucket`."""
+        `end`, `bucket`, plus this endpoint's own `provider`/`model` scoping
+        params -- those two aren't part of the shared filter contract since
+        no other analytics endpoint has a use for them."""
         return self._ai_usage.usage_by_period(
-            filters.start, filters.end, filters.bucket
+            filters.start, filters.end, filters.bucket, provider=provider, model=model
         )
 
 

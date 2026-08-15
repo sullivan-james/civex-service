@@ -43,6 +43,7 @@ import {
   Menu,
   X,
   Trash2,
+  BarChart3,
 } from './ui/icons'
 
 declare global {
@@ -110,6 +111,10 @@ const navGroups: NavGroupDef[] = [
       { to: '/collections', label: 'Collections', icon: LayoutGrid },
       { to: '/trash', label: 'Recently Deleted', icon: Trash2 },
     ],
+  },
+  {
+    heading: 'Insights',
+    items: [{ to: '/analytics', label: 'Analytics', icon: BarChart3 }],
   },
   {
     heading: 'Structure',

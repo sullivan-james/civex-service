@@ -50,4 +50,5 @@ export {
   Send,
   Square,
   PanelRightClose,
+  BarChart3,
 } from 'lucide-react'
