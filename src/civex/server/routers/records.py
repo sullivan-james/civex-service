@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import csv
 import io
+import zipfile
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from civex.context import AppContext
 from civex.domain.exceptions import NotFoundError, ValidationError
@@ -127,6 +128,45 @@ def get_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
         return RecordResponse.from_dto(ctx.record_svc.get(record_id))
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+
+
+@router.get("/records/{record_id}/files.zip")
+def export_record_files_zip(
+    record_id: str,
+    field: Optional[str] = Query(
+        default=None,
+        description="Limit the export to a single file/file_list field; omit for every file on the record",
+    ),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Bundle a record's files into a zip, one entry per file, named with the
+    same `resolved_filename` used for single-file download. Entries that
+    would collide (e.g. two files resolving to the same template output) get
+    a numeric suffix rather than overwriting each other in the archive."""
+    try:
+        entries = ctx.record_svc.files_for_zip(record_id, field_name=field or None)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, ref in entries:
+            try:
+                data = ctx.file_svc.retrieve(ref.sha256)
+            except Exception:
+                raise HTTPException(
+                    404, detail=f"Object {ref.sha256} not found locally or on remote"
+                )
+            zf.writestr(name, data)
+
+    zip_name = f"{record_id}-{field}.zip" if field else f"{record_id}-files.zip"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
+    )
 
 
 @router.patch("/records/{record_id}", response_model=RecordResponse)

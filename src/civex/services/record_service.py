@@ -206,6 +206,30 @@ def _with_resolved_filename(
     return {**ref_dict, "resolved_filename": resolved}
 
 
+# Guardrails for GET /records/{id}/files.zip -- file_list has no built-in
+# count restriction (schema_service.VALID_RESTRICTION_KEYS), so without a
+# cap here a single record could demand an unboundedly large in-memory zip.
+MAX_ZIP_FILE_COUNT = 2000
+MAX_ZIP_TOTAL_SIZE = 500 * 1024 * 1024  # 500 MB, summed from stored FileRef.size
+
+
+def _unique_zip_name(name: str, used: set[str]) -> str:
+    """Append a numeric suffix on collision so files that resolve to the same
+    name (e.g. two files on one record, or an under-specific filename_template)
+    don't silently overwrite each other as zip entries."""
+    if name not in used:
+        used.add(name)
+        return name
+    stem, suffix = Path(name).stem, Path(name).suffix
+    n = 1
+    while True:
+        candidate = f"{stem} ({n}){suffix}"
+        if candidate not in used:
+            used.add(candidate)
+            return candidate
+        n += 1
+
+
 def _apply_filename_templates(
     data: dict[str, Any], fields: list[ResolvedField]
 ) -> dict[str, Any]:
@@ -522,6 +546,71 @@ class RecordService:
         if not record:
             raise NotFoundError(f"Record '{record_id}' not found")
         return self._with_names(record)
+
+    def files_for_zip(
+        self, record_id: str, field_name: str | None = None
+    ) -> list[tuple[str, FileRef]]:
+        """(zip_entry_name, FileRef) pairs for every file/file_list value on
+        this record, or just on one named field. `zip_entry_name` is each
+        file's resolved filename (see `resolve_filename`), collision-suffixed
+        against every other entry so two files never overwrite each other."""
+        record = self.get(record_id)
+        schema = self._schema_svc._repo.get_by_id(
+            record.schema_id, include_deleted=True
+        )
+        if schema is None:
+            raise NotFoundError(f"Record '{record_id}' not found")
+        fields = self._schema_svc.collect_fields(schema)
+        file_fields = [
+            rf.field for rf in fields if rf.field.dtype in ("file", "file_list")
+        ]
+
+        if field_name is not None:
+            target = next(
+                (rf.field for rf in fields if rf.field.name == field_name), None
+            )
+            if target is None:
+                raise NotFoundError(
+                    f"Field '{field_name}' not found on schema '{schema.name}'"
+                )
+            if target.dtype not in ("file", "file_list"):
+                raise ValidationError(
+                    f"Field '{field_name}' is type '{target.dtype}', not file/file_list"
+                )
+            file_fields = [target]
+
+        refs: list[dict[str, Any]] = []
+        for f in file_fields:
+            value = record.data.get(f.name)
+            if isinstance(value, dict):
+                refs.append(value)
+            elif isinstance(value, list):
+                refs.extend(v for v in value if isinstance(v, dict))
+
+        if len(refs) > MAX_ZIP_FILE_COUNT:
+            raise ValidationError(
+                f"Record has {len(refs)} files, exceeding the zip export limit "
+                f"of {MAX_ZIP_FILE_COUNT}"
+            )
+        total_size = sum(int(r.get("size", 0)) for r in refs)
+        if total_size > MAX_ZIP_TOTAL_SIZE:
+            raise ValidationError(
+                f"Total file size ({total_size} bytes) exceeds the zip export "
+                f"limit of {MAX_ZIP_TOTAL_SIZE} bytes"
+            )
+
+        used_names: set[str] = set()
+        entries: list[tuple[str, FileRef]] = []
+        for ref_dict in refs:
+            name = ref_dict.get("resolved_filename") or ref_dict["filename"]
+            # resolved_filename is already sanitised by resolve_filename(); the raw
+            # `filename` fallback (an unsanitised, user-supplied upload name) is not
+            # -- clean it here so a "/" or ".." in it can't escape the zip entry.
+            name = _UNSAFE_FILENAME_CHARS_RE.sub("_", name).strip() or "file"
+            entries.append(
+                (_unique_zip_name(name, used_names), FileRef.from_dict(ref_dict))
+            )
+        return entries
 
     def update(
         self, record_id: str, data: dict[str, Any], _job_depth: int = 0
