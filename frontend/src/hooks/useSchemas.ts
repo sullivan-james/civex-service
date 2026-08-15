@@ -67,6 +67,14 @@ export function useSchemaDeleteImpact(name: string, enabled: boolean) {
   })
 }
 
+export function useSchemaAudit(name: string, page: number, pageSize: number) {
+  return useQuery({
+    queryKey: ['schemas', name, 'audit', page, pageSize],
+    queryFn: () => schemasApi.getAudit(name, page * pageSize, pageSize),
+    enabled: !!name,
+  })
+}
+
 export function useCreateSchema() {
   const qc = useQueryClient()
   const toast = useToast()

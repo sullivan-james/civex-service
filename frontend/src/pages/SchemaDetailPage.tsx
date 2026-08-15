@@ -44,6 +44,7 @@ import {
 } from '../components/ui/icons'
 import { FieldForm } from '../components/schemas/FieldForm'
 import { RestrictionsSummary } from '../components/schemas/RestrictionsSummary'
+import { SchemaHistory } from '../components/schemas/SchemaHistory'
 
 // Above this many records, or with any child schema, deleting is treated as
 // high-impact: the confirm button stays disabled until the user types the
@@ -606,6 +607,8 @@ export default function SchemaDetailPage() {
           )}
         </Table>
       </div>
+
+      <SchemaHistory schemaName={schema.name} />
 
       {/* Danger zone */}
       <div className="border border-danger-muted rounded-md">
