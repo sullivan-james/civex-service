@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useAiChat } from '../../hooks/useAiChat'
+import { useDialogA11y } from '../../hooks/useDialogA11y'
 import type {
   ChatEntry,
   ResolvedEntry,
@@ -80,6 +81,10 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
   )
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+
+  useDialogA11y({ open, onClose, rootRef: panelRef })
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -182,14 +187,23 @@ export default function AiPanel({ open, onClose }: AiPanelProps) {
       )
 
   return (
-    <div className={containerClass}>
+    <div
+      ref={panelRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      tabIndex={-1}
+      className={containerClass}
+    >
       {/* Header */}
       <div className="flex items-center border-b border-border bg-canvas-subtle px-4 py-3">
         <div
           className={`flex items-center gap-2 w-full ${fullscreen ? 'max-w-3xl mx-auto' : ''}`}
         >
           <Sparkles size={14} className="text-accent" />
-          <span className="text-sm font-semibold text-fg">civex AI</span>
+          <span id={titleId} className="text-sm font-semibold text-fg">
+            civex AI
+          </span>
           <div className="flex-1" />
           {/* History button */}
           <button
