@@ -19,11 +19,6 @@ from pathlib import Path
 import typer
 
 from civex.sync.bundle import SyncBundle
-from civex.sync.exporter import export_bundle
-from civex.sync.importer import apply_bundle
-
-from sqlalchemy import create_engine, func
-from sqlalchemy.orm import Session
 
 
 def transfer_pack(
@@ -33,6 +28,11 @@ def transfer_pack(
     ),
 ) -> None:
     """[Plumbing] Export repository data to stdout as JSON (called by SSH client)."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from civex.sync.exporter import export_bundle
+
     bare_path = bare_path.resolve()
     _require_bare(bare_path)
 
@@ -49,6 +49,11 @@ def receive_pack(
     bare_path: Path = typer.Argument(..., help="Path to the bare repository directory"),
 ) -> None:
     """[Plumbing] Apply a JSON bundle from stdin to the bare repository (called by SSH client)."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from civex.sync.importer import apply_bundle
+
     bare_path = bare_path.resolve()
     _require_bare(bare_path)
 
@@ -66,10 +71,13 @@ def head_seq(
     bare_path: Path = typer.Argument(..., help="Path to the bare repository directory"),
 ) -> None:
     """[Plumbing] Print the maximum commit sequence number to stdout (called by SSH client)."""
-    bare_path = bare_path.resolve()
-    _require_bare(bare_path)
+    from sqlalchemy import create_engine, func
+    from sqlalchemy.orm import Session
 
     from civex.db.models import Commit
+
+    bare_path = bare_path.resolve()
+    _require_bare(bare_path)
 
     engine = create_engine(f"sqlite:///{bare_path / 'civex.db'}")
     with Session(engine) as session:

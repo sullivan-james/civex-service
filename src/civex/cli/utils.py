@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import typer
 
 from civex.config import Config, load_config
 from civex.console import console
-from civex.context import AppContext, build_local_context
 from civex.domain.dtos import ErrorEnvelope, WorkflowJobDTO
 from civex.domain.exceptions import ConfigError
+
+if TYPE_CHECKING:
+    from civex.context import AppContext
 
 
 def _ensure_container_ready(project_name: str) -> None:
@@ -70,6 +74,8 @@ def cli_load_config() -> Config:
 
 
 def get_ctx() -> AppContext:
+    from civex.context import build_local_context
+
     return build_local_context(cli_load_config())
 
 

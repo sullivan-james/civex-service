@@ -13,38 +13,38 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterator
-
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING, Iterator
 
 from civex.config import Config
-from civex.db.engine import enable_sqlite_foreign_keys
-from civex.repositories.local.audit_repo import LocalAuditRepository
-from civex.repositories.local.dataset_repo import LocalDatasetRepository
-from civex.repositories.local.file_store import VolumeAwareFileObjectStore
-from civex.repositories.local.job_repo import LocalWorkflowJobRepository
-from civex.repositories.local.record_repo import LocalRecordRepository
-from civex.repositories.local.schema_repo import LocalSchemaRepository
-from civex.services.ai.service import AiService
-from civex.services.ai_usage_service import AiUsageService
-from civex.services.analytics_service import AnalyticsService
-from civex.services.container_plugin_service import ContainerPluginService
-from civex.services.dataset_service import DatasetService
-from civex.services.file_service import FileService
-from civex.services.plugin_service import PluginService
-from civex.services.policy_service import PolicyService
-from civex.services.record_service import RecordService
-from civex.services.schema_service import SchemaService
-from civex.services.store_service import StoreService
-from civex.services.workflow_job_service import WorkflowJobService
-from civex.services.workflow_service import WorkflowService
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Engine
+    from sqlalchemy.orm import Session
+
+    from civex.repositories.local.audit_repo import LocalAuditRepository
+    from civex.repositories.local.file_store import VolumeAwareFileObjectStore
+    from civex.services.ai.service import AiService
+    from civex.services.ai_usage_service import AiUsageService
+    from civex.services.analytics_service import AnalyticsService
+    from civex.services.container_plugin_service import ContainerPluginService
+    from civex.services.dataset_service import DatasetService
+    from civex.services.file_service import FileService
+    from civex.services.plugin_service import PluginService
+    from civex.services.policy_service import PolicyService
+    from civex.services.record_service import RecordService
+    from civex.services.schema_service import SchemaService
+    from civex.services.store_service import StoreService
+    from civex.services.workflow_job_service import WorkflowJobService
+    from civex.services.workflow_service import WorkflowService
 
 
 @lru_cache(maxsize=None)
 def _get_engine(url: str) -> Engine:
     """Return a cached engine for the given DB URL."""
+    from sqlalchemy import create_engine
+
+    from civex.db.engine import enable_sqlite_foreign_keys
+
     return enable_sqlite_foreign_keys(create_engine(url))
 
 
@@ -107,7 +107,28 @@ def build_local_context(
     config: Config,
     file_store: VolumeAwareFileObjectStore | None = None,
 ) -> AppContext:
+    from sqlalchemy.orm import Session
+
     from civex.db.migrate import ensure_schema_current
+    from civex.repositories.local.audit_repo import LocalAuditRepository
+    from civex.repositories.local.dataset_repo import LocalDatasetRepository
+    from civex.repositories.local.file_store import VolumeAwareFileObjectStore
+    from civex.repositories.local.job_repo import LocalWorkflowJobRepository
+    from civex.repositories.local.record_repo import LocalRecordRepository
+    from civex.repositories.local.schema_repo import LocalSchemaRepository
+    from civex.services.ai.service import AiService
+    from civex.services.ai_usage_service import AiUsageService
+    from civex.services.analytics_service import AnalyticsService
+    from civex.services.container_plugin_service import ContainerPluginService
+    from civex.services.dataset_service import DatasetService
+    from civex.services.file_service import FileService
+    from civex.services.plugin_service import PluginService
+    from civex.services.policy_service import PolicyService
+    from civex.services.record_service import RecordService
+    from civex.services.schema_service import SchemaService
+    from civex.services.store_service import StoreService
+    from civex.services.workflow_job_service import WorkflowJobService
+    from civex.services.workflow_service import WorkflowService
 
     engine = _get_engine(config.db.url)
     ensure_schema_current(engine)

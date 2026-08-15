@@ -22,11 +22,7 @@ import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
-from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, inspect, text
-
 from civex.config import Config, DBConfig, save_config
-from civex.db.migrate import _MIGRATIONS_DIR, ensure_schema_current
 from civex.docker_manager import (
     container_exists,
     container_name,
@@ -112,6 +108,8 @@ def redact_url(url: str) -> str:
 
 def test_connection(url: str) -> str | None:
     """Return None on success, or an error message string."""
+    from sqlalchemy import create_engine, text
+
     try:
         engine = create_engine(url)
         with engine.connect() as conn:
@@ -129,6 +127,11 @@ def migration_status(url: str) -> MigrationStatus:
     reported as MigrationStatus.error rather than propagated. create_engine()
     itself can raise (ModuleNotFoundError for a missing driver) in addition
     to the connection attempt, so it has to be inside the try too."""
+    from alembic.script import ScriptDirectory
+    from sqlalchemy import create_engine, inspect
+
+    from civex.db.migrate import _MIGRATIONS_DIR
+
     script = ScriptDirectory(str(_MIGRATIONS_DIR))
     head = script.get_current_head()
     engine = None
@@ -151,6 +154,10 @@ def migration_status(url: str) -> MigrationStatus:
 
 
 def apply_migrations(url: str) -> None:
+    from sqlalchemy import create_engine
+
+    from civex.db.migrate import ensure_schema_current
+
     engine = create_engine(url)
     try:
         ensure_schema_current(engine)

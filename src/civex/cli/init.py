@@ -3,10 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
-from sqlalchemy import create_engine
 
 from civex.console import console
-from civex.db.migrate import ensure_schema_current
 from civex.domain.exceptions import ValidationError
 from civex.project import scaffold_project
 from civex.services import db_service
@@ -95,6 +93,10 @@ def _display_url(db_url: str) -> str:
 
 
 def _init_bare(target: Path) -> None:
+    from sqlalchemy import create_engine
+
+    from civex.db.migrate import ensure_schema_current
+
     marker = target / "CIVEX_BARE"
     if marker.exists():
         console.print("[warning]Already a bare repository.[/warning]")

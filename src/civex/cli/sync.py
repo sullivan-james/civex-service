@@ -9,8 +9,6 @@ import typer
 
 from civex.cli.utils import cli_load_config
 from civex.console import console
-from civex.services.sync_service import SyncService
-from civex.sync.transport import SyncError
 
 
 def push() -> None:
@@ -25,6 +23,8 @@ def push() -> None:
     console.print(f"Pushing to [bold]{config.remote.url}[/bold] ...")
 
     from civex.context import build_local_context
+    from civex.services.sync_service import SyncService
+    from civex.sync.transport import SyncError
 
     ctx = build_local_context(config)
     try:
@@ -60,6 +60,8 @@ def pull() -> None:
     console.print(f"Pulling from [bold]{config.remote.url}[/bold] ...")
 
     from civex.context import build_local_context
+    from civex.services.sync_service import SyncService
+    from civex.sync.transport import SyncError
 
     ctx = build_local_context(config)
     try:

@@ -24,16 +24,27 @@ format-check: ## Ruff format, check only (what CI runs)
 typecheck: ## Mypy
 	uv run mypy src/civex civex-plugin-sdk/src/civex_plugin_sdk
 
-test: ## Run the test suite with coverage
-	uv run pytest tests/ -q -n auto --cov=civex --cov-report=term-missing
+# `-n auto` sizes itself off the host's full core count with no regard for
+# anything else contending for it — civex-agent's own runner can have up to
+# max_concurrent_runs containers each running `make check` at once, so
+# `auto` on a 22-core host means up to three concurrent 22-worker pytest
+# runs stacked on top of the other check-all targets. Confirmed live: that
+# combination exhausted --pids-limit mid-run and crashed pytest-xdist's own
+# worker teardown with "RuntimeError: can't start new thread", which then
+# left the run's container full of unreaped zombies (see dispatcher.py's
+# --init). Fixed at PYTEST_JOBS instead — override on a machine that's
+# never running more than one check at a time.
+PYTEST_JOBS ?= 4
 
-# Coverage costs much less under `-n auto` than it did serially, and how
-# much depends on the machine: measured at 47s vs 41s in the civex-agent
-# runner container, but 51s vs 30s on a 22-core workstation. Either way
-# `check` keeps coverage (CI consumes the report) and only `check-fast`
-# drops it.
+test: ## Run the test suite with coverage
+	uv run pytest tests/ -q -n $(PYTEST_JOBS) --cov=civex --cov-report=term-missing
+
+# Coverage costs much less under `-n` than it did serially, and how much
+# depends on the machine: measured at 47s vs 41s in the civex-agent runner
+# container, but 51s vs 30s on a 22-core workstation. Either way `check`
+# keeps coverage (CI consumes the report) and only `check-fast` drops it.
 test-fast: ## Test suite without coverage — for tight iteration loops
-	uv run pytest tests/ -q -n auto
+	uv run pytest tests/ -q -n $(PYTEST_JOBS)
 
 secrets: ## Scan the repo (working tree + history) for leaked secrets
 	@command -v gitleaks >/dev/null 2>&1 || { echo "gitleaks not found — install via 'brew install gitleaks' or https://github.com/gitleaks/gitleaks#installing"; exit 1; }
@@ -83,15 +94,24 @@ migrations-check: ## Check for Alembic migration drift (what CI runs)
 # parallel shape costs about as long as its slowest single target (the
 # test suite, 47s) since everything else lands in 0-7s.
 #
-# Bounded, not bare `-j`. The fan-out here multiplies with the one inside
-# `test` (pytest's own `-n auto`, one worker per core), and the product is
-# set by core count while the ceiling that matters is memory: a 22-core
-# box with 7GB gets 22 pytest workers plus eleven other targets at once
-# and the kernel starts killing things. Four lanes is enough to hide
-# every non-test target behind the test suite — that's all the
-# parallelism this target can actually use, since after `test` the next
-# slowest is 7s. Raise CHECK_JOBS on a machine with memory to spare.
-CHECK_JOBS ?= 4
+# Bounded, not bare `-j`. This target's own fan-out multiplies with the one
+# inside `test` (pytest, PYTEST_JOBS above) — the ceiling that matters is
+# memory, not core count. Even with pytest itself bounded, this still
+# stacks CHECK_JOBS-many *other* heavy toolchains (ruff, mypy, frontend
+# build/test, etc.) on top of PYTEST_JOBS-many pytest workers, all inside
+# whatever memory the runner container is capped to. Confirmed live at the
+# old default of 4: two civex-agent runner containers each running `make
+# check` at once (its own recorded expected case — max_concurrent_runs is
+# sized for concurrent runs) drove the host into genuine memory exhaustion
+# severe enough that thread creation started failing for `ruff`, `mypy`,
+# and even `git bundle create` — not just pytest.
+#
+# 2, not 4: after `test` the next-slowest target is ~7s, so serializing
+# more of them into fewer lanes costs little wall-clock (`test` dominates
+# regardless) while roughly halving how many heavy toolchains run at once
+# in a single `make check`. Raise on a machine with memory to spare, or
+# if you know only one `make check` will ever run at a time on it.
+CHECK_JOBS ?= 2
 
 check: ## Everything CI checks, in one shot
 	@$(MAKE) --no-print-directory --output-sync=target -j$(CHECK_JOBS) check-all
