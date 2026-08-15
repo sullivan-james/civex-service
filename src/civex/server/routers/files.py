@@ -21,6 +21,15 @@ async def upload_file(file: UploadFile, ctx: AppContext = Depends(get_ctx)):
 
 @router.get("/{sha256}")
 def download_file(sha256: str, filename: str = "", ctx: AppContext = Depends(get_ctx)):
+    """Fetch raw file bytes by content hash.
+
+    This endpoint is content-addressed only — it has no notion of which
+    record/field a download is "for", so it can't apply a `filename_template`
+    resolution itself. Callers that want a resolved `Content-Disposition`
+    filename (e.g. scripted access) should read `resolved_filename` off the
+    record via the records API and pass it as `?filename=`; the record-UI
+    download link does this implicitly via the `download` attribute.
+    """
     try:
         data = ctx.file_svc.retrieve(sha256)
     except Exception:

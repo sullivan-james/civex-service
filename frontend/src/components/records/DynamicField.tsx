@@ -11,6 +11,7 @@ export interface FileRef {
   sha256: string
   filename: string
   size: number
+  resolved_filename?: string
 }
 
 interface Props {
@@ -77,7 +78,7 @@ function FileField({
           <span>({(ref.size / 1024).toFixed(1)} KB)</span>
           <a
             href={`/api/files/${ref.sha256}`}
-            download={ref.filename}
+            download={ref.resolved_filename ?? ref.filename}
             className="text-accent hover:underline"
           >
             Download
