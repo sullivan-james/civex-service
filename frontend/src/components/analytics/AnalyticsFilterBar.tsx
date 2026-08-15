@@ -1,6 +1,9 @@
 import { Field, Select, Input, Button, FormGrid, FormFooter } from '../ui'
 import { utcToDatetimeLocal, datetimeLocalToUTC } from '../../utils/dates'
-import type { AnalyticsBucket, AnalyticsFiltersState } from '../../utils/analyticsFilters'
+import type {
+  AnalyticsBucket,
+  AnalyticsFiltersState,
+} from '../../utils/analyticsFilters'
 
 export interface AnalyticsFilterOption {
   value: string

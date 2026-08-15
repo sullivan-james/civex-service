@@ -75,7 +75,10 @@ describe('applyAnalyticsFilterPatch', () => {
   })
 
   it('clears a param back to its implicit default on null or empty string', () => {
-    const params = new URLSearchParams({ dataset: 'invoices', status: 'failed' })
+    const params = new URLSearchParams({
+      dataset: 'invoices',
+      status: 'failed',
+    })
     const next = applyAnalyticsFilterPatch(params, {
       dataset: null,
       status: '',
