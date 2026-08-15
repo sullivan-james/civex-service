@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from civex.db.models import AuditLog, Commit
 from civex.domain.dtos import AuditLogDTO, CommitDTO
+from civex.repositories.local._bucketing import day_bucket
+from civex.repositories.protocols import AuditEventRow
 
 
 class LocalAuditRepository:
@@ -37,6 +39,26 @@ class LocalAuditRepository:
                 timestamp=datetime.now(timezone.utc),
             )
         )
+
+    def event_counts_by_period(
+        self, start: datetime | None, end: datetime | None
+    ) -> list[AuditEventRow]:
+        """Audit entries per day, broken out by action and entity_type --
+        backs the activity-over-time widget."""
+        day = day_bucket(AuditLog.timestamp)
+        q = self._s.query(
+            day, AuditLog.action, AuditLog.entity_type, func.count(AuditLog.id)
+        )
+        if start is not None:
+            q = q.filter(AuditLog.timestamp >= start)
+        if end is not None:
+            q = q.filter(AuditLog.timestamp < end)
+        rows = (
+            q.group_by(day, AuditLog.action, AuditLog.entity_type).order_by(day).all()
+        )
+        return [
+            (d, action, entity_type, count) for d, action, entity_type, count in rows
+        ]
 
     # ------------------------------------------------------------------
     # Commit management (used by AuditService / CLI)

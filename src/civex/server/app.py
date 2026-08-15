@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from civex.server.errors import RequestContextMiddleware, register_error_handlers
 from civex.server.routers import (
     ai,
+    analytics,
     audit,
     datasets,
     db,
@@ -215,6 +216,17 @@ _OPENAPI_TAGS = [
             "is shown by default."
         ),
     },
+    {
+        "name": "analytics",
+        "description": (
+            "Aggregate, filterable, time-bucketed reads over records, "
+            "workflow jobs, audit events, and AI usage — the read path "
+            "dashboard widgets call. Every endpoint shares one query-param "
+            "filter contract (date range, dataset, schema, workflow_id, "
+            "plugin_id, status, trigger); each documents which of those it "
+            "actually applies."
+        ),
+    },
 ]
 
 _DESCRIPTION = """\
@@ -286,6 +298,7 @@ def create_app() -> FastAPI:
     app.include_router(status.router, prefix="/api")
     app.include_router(terminal.router, prefix="/api")
     app.include_router(settings.router, prefix="/api")
+    app.include_router(analytics.router, prefix="/api")
 
     @app.get("/health", include_in_schema=False)
     def health():

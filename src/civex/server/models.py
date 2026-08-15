@@ -19,6 +19,15 @@ from civex.domain.dtos import (
     SchemaDTO,
     WorkflowJobDTO,
 )
+from civex.services.ai_usage_service import TokenUsageBucket
+from civex.services.analytics_service import (
+    AuditEventPoint,
+    DurationStats,
+    JobStatusPoint,
+    PluginFailurePoint,
+    RecordCount,
+    RecordGrowthPoint,
+)
 
 
 # --- Schemas ---
@@ -504,3 +513,129 @@ class RetentionSettingsResponse(BaseModel):
 
 class UpdateRetentionSettingsRequest(BaseModel):
     purge_after_days: int = Field(ge=1)
+
+
+# --- Analytics ---
+
+
+class RecordCountResponse(BaseModel):
+    dataset: str
+    schema_name: str
+    count: int
+
+    @classmethod
+    def from_dto(cls, d: RecordCount) -> RecordCountResponse:
+        return cls(dataset=d.dataset, schema_name=d.schema, count=d.count)
+
+
+class RecordCountsResponse(BaseModel):
+    items: list[RecordCountResponse]
+
+
+class RecordGrowthPointResponse(BaseModel):
+    bucket: str = Field(description="ISO date the bucket starts on.")
+    dataset: str
+    schema_name: str
+    count: int
+
+    @classmethod
+    def from_dto(cls, d: RecordGrowthPoint) -> RecordGrowthPointResponse:
+        return cls(
+            bucket=d.bucket, dataset=d.dataset, schema_name=d.schema, count=d.count
+        )
+
+
+class RecordGrowthResponse(BaseModel):
+    bucket: str = Field(description="Bucket size applied: day, week, or month.")
+    items: list[RecordGrowthPointResponse]
+
+
+class JobStatusPointResponse(BaseModel):
+    bucket: str
+    status: str
+    count: int
+
+    @classmethod
+    def from_dto(cls, d: JobStatusPoint) -> JobStatusPointResponse:
+        return cls(bucket=d.bucket, status=d.status, count=d.count)
+
+
+class JobStatusCountsResponse(BaseModel):
+    bucket: str
+    items: list[JobStatusPointResponse]
+
+
+class JobDurationStatsResponse(BaseModel):
+    count: int = Field(description="Number of step executions the stats are over.")
+    avg_seconds: float | None
+    min_seconds: float | None
+    max_seconds: float | None
+    p50_seconds: float | None
+    p95_seconds: float | None
+
+    @classmethod
+    def from_dto(cls, d: DurationStats) -> JobDurationStatsResponse:
+        return cls(
+            count=d.count,
+            avg_seconds=d.avg_seconds,
+            min_seconds=d.min_seconds,
+            max_seconds=d.max_seconds,
+            p50_seconds=d.p50_seconds,
+            p95_seconds=d.p95_seconds,
+        )
+
+
+class PluginFailurePointResponse(BaseModel):
+    bucket: str
+    plugin: str
+    count: int
+
+    @classmethod
+    def from_dto(cls, d: PluginFailurePoint) -> PluginFailurePointResponse:
+        return cls(bucket=d.bucket, plugin=d.plugin, count=d.count)
+
+
+class PluginFailureCountsResponse(BaseModel):
+    bucket: str
+    items: list[PluginFailurePointResponse]
+
+
+class AuditEventPointResponse(BaseModel):
+    bucket: str
+    action: str = Field(description="One of: create, update, delete, purge.")
+    entity_type: str = Field(description="One of: record, schema, field, dataset.")
+    count: int
+
+    @classmethod
+    def from_dto(cls, d: AuditEventPoint) -> AuditEventPointResponse:
+        return cls(
+            bucket=d.bucket, action=d.action, entity_type=d.entity_type, count=d.count
+        )
+
+
+class AuditEventCountsResponse(BaseModel):
+    bucket: str
+    items: list[AuditEventPointResponse]
+
+
+class TokenUsageBucketResponse(BaseModel):
+    bucket: str
+    provider: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+
+    @classmethod
+    def from_dto(cls, d: TokenUsageBucket) -> TokenUsageBucketResponse:
+        return cls(
+            bucket=d.bucket,
+            provider=d.provider,
+            model=d.model,
+            input_tokens=d.input_tokens,
+            output_tokens=d.output_tokens,
+        )
+
+
+class AiTokenUsageResponse(BaseModel):
+    bucket: str
+    items: list[TokenUsageBucketResponse]

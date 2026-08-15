@@ -176,4 +176,6 @@ class WorkflowJobService:
 
     def failure_counts_by_plugin(self) -> dict[str, int]:
         """Failed step-execution count per plugin, most failures first."""
-        return self._repo.failure_counts_by_plugin()
+        counts = self._repo.failure_counts_by_plugin()
+        assert isinstance(counts, dict)  # no bucket passed -> always the flat form
+        return counts

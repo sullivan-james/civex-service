@@ -6,7 +6,17 @@ from datetime import datetime
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from civex.repositories.local._bucketing import bucket_start
 from civex.repositories.local.ai_usage_repo import LocalAiUsageRepository
+
+
+@dataclass
+class TokenUsageBucket:
+    bucket: str  # ISO date string, the bucket's start
+    provider: str
+    model: str
+    input_tokens: int
+    output_tokens: int
 
 
 @dataclass
@@ -81,3 +91,33 @@ class AiUsageService:
         ]
         result.sort(key=lambda m: m.totals.total_tokens, reverse=True)
         return result
+
+    def usage_by_period(
+        self,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        bucket: str = "day",
+    ) -> list[TokenUsageBucket]:
+        """Token totals per bucket, broken out by provider and model -- backs
+        the AI token-usage-over-time widget. Buckets in Python (this service
+        already fetches the full matching event list for `by_model`'s sake,
+        and events are a low-volume append-only log -- see class docstring)
+        rather than adding a second, SQL-side aggregate path."""
+        with Session(self._engine) as session:
+            events = LocalAiUsageRepository(session).list_all(since=start, until=end)
+        merged: dict[tuple[str, str, str], list[int]] = {}
+        for e in events:
+            key = (bucket_start(e.created_at.date(), bucket), e.provider, e.model)
+            totals = merged.setdefault(key, [0, 0])
+            totals[0] += e.input_tokens
+            totals[1] += e.output_tokens
+        return [
+            TokenUsageBucket(
+                bucket=b,
+                provider=provider,
+                model=model,
+                input_tokens=inp,
+                output_tokens=out,
+            )
+            for (b, provider, model), (inp, out) in sorted(merged.items())
+        ]

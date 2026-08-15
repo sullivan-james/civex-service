@@ -25,10 +25,14 @@ class LocalAiUsageRepository:
         self._s.flush()
         return _to_dto(row)
 
-    def list_all(self, since: datetime | None = None) -> list[AiUsageEventDTO]:
+    def list_all(
+        self, since: datetime | None = None, until: datetime | None = None
+    ) -> list[AiUsageEventDTO]:
         q = self._s.query(AiUsageEvent)
         if since is not None:
             q = q.filter(AiUsageEvent.created_at >= since)
+        if until is not None:
+            q = q.filter(AiUsageEvent.created_at < until)
         q = q.order_by(AiUsageEvent.created_at)
         return [_to_dto(r) for r in q.all()]
 

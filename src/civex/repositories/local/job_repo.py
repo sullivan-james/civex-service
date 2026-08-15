@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from civex.db.models import Record, StepExecution, WorkflowJob
 from civex.domain.dtos import WorkflowJobDTO
+from civex.repositories.local._bucketing import day_bucket, rebucket
+from civex.repositories.protocols import JobStatusRow, PluginFailureRow
 
 # schema_name isn't a column (CIVEX-171) -- every query needs the record's
 # schema loaded so _to_dto can resolve it via the join.
@@ -168,19 +170,91 @@ class LocalWorkflowJobRepository:
             .count()
         )
 
-    def failure_counts_by_plugin(self) -> dict[str, int]:
-        """Number of failed step executions per plugin, across every job --
-        the aggregate query the JSON blob made expensive (CIVEX-170): this
-        is a GROUP BY on an indexed-able column instead of a full scan
-        parsing every job's JSON."""
-        rows = (
-            self._s.query(StepExecution.plugin, func.count(StepExecution.id))
+    def failure_counts_by_plugin(
+        self,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        bucket: str | None = None,
+    ) -> dict[str, int] | list[PluginFailureRow]:
+        """Number of failed step executions per plugin -- the aggregate query
+        the JSON blob made expensive (CIVEX-170): this is a GROUP BY on a
+        plain column instead of a full scan parsing every job's JSON.
+
+        With `bucket` left as None (the original call shape, still used by
+        `civex worker stats`), returns the all-time flat `plugin -> count`
+        dict, optionally scoped to `[start, end)`. Pass a bucket size
+        ("day"/"week"/"month") to get the same counts broken into a time
+        series instead, for the analytics endpoint.
+        """
+        day = day_bucket(WorkflowJob.created_at)
+        q = (
+            self._s.query(day, StepExecution.plugin, func.count(StepExecution.id))
+            .join(WorkflowJob, StepExecution.job_id == WorkflowJob.id)
             .filter(StepExecution.status == "failed")
-            .group_by(StepExecution.plugin)
-            .order_by(func.count(StepExecution.id).desc())
-            .all()
         )
-        return {plugin: count for plugin, count in rows}
+        if start is not None:
+            q = q.filter(WorkflowJob.created_at >= start)
+        if end is not None:
+            q = q.filter(WorkflowJob.created_at < end)
+        rows = q.group_by(day, StepExecution.plugin).all()
+        if bucket is None:
+            totals: dict[str, int] = {}
+            for _, plugin, count in rows:
+                totals[plugin] = totals.get(plugin, 0) + count
+            return dict(sorted(totals.items(), key=lambda kv: kv[1], reverse=True))
+        return rebucket([(d, plugin, count) for d, plugin, count in rows], bucket)
+
+    def status_counts_by_period(
+        self,
+        start: datetime | None,
+        end: datetime | None,
+        workflow_name: str | None,
+        trigger: str | None,
+        status: str | None,
+    ) -> list[JobStatusRow]:
+        """Job counts per day, broken out by status -- backs the job-status
+        trend widget. Filters directly on `workflow_jobs` columns, no join
+        needed."""
+        day = day_bucket(WorkflowJob.created_at)
+        q = self._s.query(day, WorkflowJob.status, func.count(WorkflowJob.id))
+        if start is not None:
+            q = q.filter(WorkflowJob.created_at >= start)
+        if end is not None:
+            q = q.filter(WorkflowJob.created_at < end)
+        if workflow_name is not None:
+            q = q.filter(WorkflowJob.workflow_name == workflow_name)
+        if trigger is not None:
+            q = q.filter(WorkflowJob.trigger == trigger)
+        if status is not None:
+            q = q.filter(WorkflowJob.status == status)
+        rows = q.group_by(day, WorkflowJob.status).order_by(day).all()
+        return [(d, s, count) for d, s, count in rows]
+
+    def step_durations(
+        self,
+        start: datetime | None,
+        end: datetime | None,
+        plugin: str | None,
+        status: str | None,
+    ) -> list[float]:
+        """Raw `duration_seconds` values for step executions matching the
+        filters -- the analytics service turns this into avg/min/max/
+        percentile stats. Reads the column directly (CIVEX-170 normalized it
+        out of the old per-job JSON blob), rather than parsing JSON per row."""
+        q = (
+            self._s.query(StepExecution.duration_seconds)
+            .join(WorkflowJob, StepExecution.job_id == WorkflowJob.id)
+            .filter(StepExecution.duration_seconds.isnot(None))
+        )
+        if plugin is not None:
+            q = q.filter(StepExecution.plugin == plugin)
+        if status is not None:
+            q = q.filter(StepExecution.status == status)
+        if start is not None:
+            q = q.filter(WorkflowJob.created_at >= start)
+        if end is not None:
+            q = q.filter(WorkflowJob.created_at < end)
+        return [d for (d,) in q.all()]
 
 
 def _touches(row: WorkflowJob, record_id: str) -> bool:

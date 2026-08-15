@@ -9,7 +9,7 @@ Services only import from here, never from civex.db.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -22,6 +22,16 @@ from civex.domain.dtos import (
     SchemaDTO,
     WorkflowJobDTO,
 )
+
+# (day, dataset_name, schema_name, count) -- see LocalRecordRepository.growth_by_period
+RecordGrowthRow = tuple[date, str, str, int]
+# (day, status, count) -- see LocalWorkflowJobRepository.status_counts_by_period
+JobStatusRow = tuple[date, str, int]
+# (bucket_start, plugin, count) -- already bucketed, see
+# LocalWorkflowJobRepository.failure_counts_by_plugin
+PluginFailureRow = tuple[str, str, int]
+# (day, action, entity_type, count) -- see LocalAuditRepository.event_counts_by_period
+AuditEventRow = tuple[date, str, str, int]
 
 
 @runtime_checkable
@@ -129,6 +139,13 @@ class RecordRepository(Protocol):
         search: str | None,
     ) -> int: ...
     def count_by_schema(self, dataset_id: uuid.UUID) -> dict[str, int]: ...
+    def growth_by_period(
+        self,
+        dataset_id: uuid.UUID | None,
+        schema_id: uuid.UUID | None,
+        start: datetime | None,
+        end: datetime | None,
+    ) -> list[RecordGrowthRow]: ...
     def list_by_schema(
         self, schema_id: uuid.UUID, search: str | None = None, limit: int = 20
     ) -> list[RecordDTO]: ...
@@ -199,7 +216,27 @@ class WorkflowJobRepository(Protocol):
     ) -> int: ...
     def get_by_id(self, job_id: uuid.UUID) -> WorkflowJobDTO | None: ...
     def count_active_for_workflow(self, workflow_name: str) -> int: ...
-    def failure_counts_by_plugin(self) -> dict[str, int]: ...
+    def failure_counts_by_plugin(
+        self,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        bucket: str | None = None,
+    ) -> dict[str, int] | list[PluginFailureRow]: ...
+    def status_counts_by_period(
+        self,
+        start: datetime | None,
+        end: datetime | None,
+        workflow_name: str | None,
+        trigger: str | None,
+        status: str | None,
+    ) -> list[JobStatusRow]: ...
+    def step_durations(
+        self,
+        start: datetime | None,
+        end: datetime | None,
+        plugin: str | None,
+        status: str | None,
+    ) -> list[float]: ...
 
 
 @runtime_checkable
@@ -207,7 +244,9 @@ class AiUsageRepository(Protocol):
     def add(
         self, provider: str, model: str, input_tokens: int, output_tokens: int
     ) -> AiUsageEventDTO: ...
-    def list_all(self, since: datetime | None = None) -> list[AiUsageEventDTO]: ...
+    def list_all(
+        self, since: datetime | None = None, until: datetime | None = None
+    ) -> list[AiUsageEventDTO]: ...
 
 
 @runtime_checkable
@@ -222,6 +261,9 @@ class AuditRepository(Protocol):
         old_data: dict | None,
         new_data: dict | None,
     ) -> None: ...
+    def event_counts_by_period(
+        self, start: datetime | None, end: datetime | None
+    ) -> list[AuditEventRow]: ...
 
 
 @runtime_checkable

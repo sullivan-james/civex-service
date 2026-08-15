@@ -482,3 +482,29 @@ class AiUsageEventDTO:
     input_tokens: int
     output_tokens: int
     created_at: datetime
+
+
+@dataclass
+class AnalyticsFilters:
+    """The one query-param contract shared by every `/analytics` endpoint
+    (server/routers/analytics.py). Each endpoint documents which of these it
+    actually applies -- unused fields are simply ignored rather than
+    rejected, so the frontend filter bar can send the same params to every
+    widget without per-widget special cases.
+
+    `dataset`/`schema` are names (not ids), matching how every other
+    endpoint in this API addresses them. `workflow_id`/`plugin_id` are the
+    string identifiers used elsewhere too (WorkflowDef.name and the plugin
+    registry key, e.g. "civex.load_file") -- neither resource has a separate
+    numeric/uuid id.
+    """
+
+    start: datetime | None = None
+    end: datetime | None = None
+    bucket: str = "day"  # day | week | month
+    dataset: str | None = None
+    schema: str | None = None
+    workflow_id: str | None = None
+    plugin_id: str | None = None
+    status: str | None = None
+    trigger: str | None = None
