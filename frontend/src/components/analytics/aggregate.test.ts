@@ -76,9 +76,24 @@ describe('sumFailuresByPlugin', () => {
 describe('auditActivitySeries', () => {
   it('pivots per-bucket-per-action counts into one series per action', () => {
     const { series, actions, total } = auditActivitySeries([
-      { bucket: '2026-08-01', action: 'create', entity_type: 'record', count: 3 },
-      { bucket: '2026-08-01', action: 'update', entity_type: 'record', count: 1 },
-      { bucket: '2026-08-02', action: 'create', entity_type: 'schema', count: 2 },
+      {
+        bucket: '2026-08-01',
+        action: 'create',
+        entity_type: 'record',
+        count: 3,
+      },
+      {
+        bucket: '2026-08-01',
+        action: 'update',
+        entity_type: 'record',
+        count: 1,
+      },
+      {
+        bucket: '2026-08-02',
+        action: 'create',
+        entity_type: 'schema',
+        count: 2,
+      },
     ])
     expect(actions).toEqual(['create', 'update'])
     expect(series).toEqual([
@@ -89,16 +104,35 @@ describe('auditActivitySeries', () => {
   })
 
   it('returns an empty summary for no data', () => {
-    expect(auditActivitySeries([])).toEqual({ series: [], actions: [], total: 0 })
+    expect(auditActivitySeries([])).toEqual({
+      series: [],
+      actions: [],
+      total: 0,
+    })
   })
 })
 
 describe('sumAuditByEntityType', () => {
   it('sums counts across buckets and actions, busiest entity type first', () => {
     const bars = sumAuditByEntityType([
-      { bucket: '2026-08-01', action: 'create', entity_type: 'record', count: 3 },
-      { bucket: '2026-08-02', action: 'update', entity_type: 'record', count: 2 },
-      { bucket: '2026-08-01', action: 'create', entity_type: 'schema', count: 1 },
+      {
+        bucket: '2026-08-01',
+        action: 'create',
+        entity_type: 'record',
+        count: 3,
+      },
+      {
+        bucket: '2026-08-02',
+        action: 'update',
+        entity_type: 'record',
+        count: 2,
+      },
+      {
+        bucket: '2026-08-01',
+        action: 'create',
+        entity_type: 'schema',
+        count: 1,
+      },
     ])
     expect(bars).toEqual([
       { label: 'record', value: 5 },

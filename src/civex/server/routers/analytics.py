@@ -64,8 +64,7 @@ def analytics_filters(
     ),
     entity_type: str | None = Query(
         default=None,
-        description="Audit entity type to scope to: record, schema, field, "
-        "or dataset.",
+        description="Audit entity type to scope to: record, schema, field, or dataset.",
     ),
     action: str | None = Query(
         default=None,

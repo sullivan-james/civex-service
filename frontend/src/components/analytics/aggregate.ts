@@ -74,7 +74,9 @@ export interface AuditActivitySummary {
 /** Pivots per-bucket-per-action audit counts into a per-bucket, per-action
  * series -- the activity-over-time widget's shape, so the breakdown by
  * action survives instead of collapsing into a single count. */
-export function auditActivitySeries(items: AuditEventPoint[]): AuditActivitySummary {
+export function auditActivitySeries(
+  items: AuditEventPoint[],
+): AuditActivitySummary {
   const byBucket = new Map<string, Record<string, number>>()
   const actions = new Set<string>()
   let total = 0
@@ -99,10 +101,15 @@ export function auditActivitySeries(items: AuditEventPoint[]): AuditActivitySumm
 /** Sums per-bucket-per-entity-type audit counts into one total per entity
  * type, most active first -- the entity-type breakdown widget cares about
  * "what's being changed most in this range", not a per-bucket trend. */
-export function sumAuditByEntityType(items: AuditEventPoint[]): BarBreakdownDatum[] {
+export function sumAuditByEntityType(
+  items: AuditEventPoint[],
+): BarBreakdownDatum[] {
   const totals = new Map<string, number>()
   for (const item of items) {
-    totals.set(item.entity_type, (totals.get(item.entity_type) ?? 0) + item.count)
+    totals.set(
+      item.entity_type,
+      (totals.get(item.entity_type) ?? 0) + item.count,
+    )
   }
   return [...totals.entries()]
     .sort(([, a], [, b]) => b - a)
