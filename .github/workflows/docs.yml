@@ -33,7 +33,18 @@ jobs:
 
       - name: Build docs
         env: { CIVEX_LOG_LEVEL: WARNING }
-        run: uv run mkdocs build --strict
+        # The `privacy` plugin fetches third-party assets (mermaid.js, Google Fonts)
+        # at build time so the site never calls out to a third-party CDN at page
+        # load. Those fetches occasionally 404 transiently (e.g. Google rotating a
+        # font subset's hash) with no fault in our docs content, so retry the whole
+        # build a couple of times before failing the job.
+        run: |
+          for attempt in 1 2 3; do
+            uv run mkdocs build --strict && exit 0
+            echo "mkdocs build failed (attempt $attempt/3)"
+            [ "$attempt" = 3 ] && exit 1
+            sleep 10
+          done
 
       - uses: actions/upload-artifact@v7
         with: { name: docs-site, path: site/ }
