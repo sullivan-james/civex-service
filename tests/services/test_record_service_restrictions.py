@@ -5,8 +5,13 @@ from __future__ import annotations
 
 import pytest
 
+from civex.domain.dtos import FileRef
 from civex.domain.exceptions import ValidationError
-from civex.services.record_service import _check_restrictions, _parse_datetime
+from civex.services.record_service import (
+    _check_restrictions,
+    _parse_datetime,
+    resolve_filename,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +162,63 @@ def test_file_list_checks_every_ref() -> None:
 # ---------------------------------------------------------------------------
 # naive datetimes are assumed UTC on ingest
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# filename_template resolution (resolve_filename)
+# ---------------------------------------------------------------------------
+
+
+def _ref(filename: str) -> FileRef:
+    return FileRef(sha256="a" * 64, filename=filename, size=10)
+
+
+def test_resolve_filename_no_template_returns_original() -> None:
+    assert resolve_filename(_ref("original.pdf"), None, {}) == "original.pdf"
+
+
+def test_resolve_filename_substitutes_field_and_ext() -> None:
+    ref = _ref("upload.pdf")
+    result = resolve_filename(
+        ref, "{invoice_number}.{ext}", {"invoice_number": "INV-42"}
+    )
+    assert result == "INV-42.pdf"
+
+
+def test_resolve_filename_falls_back_when_field_blank() -> None:
+    ref = _ref("upload.pdf")
+    result = resolve_filename(
+        ref, "{invoice_number}.{ext}", {"invoice_number": None}
+    )
+    assert result == "upload.pdf"
+
+
+def test_resolve_filename_falls_back_when_field_missing() -> None:
+    ref = _ref("upload.pdf")
+    assert resolve_filename(ref, "{invoice_number}.{ext}", {}) == "upload.pdf"
+
+
+def test_resolve_filename_falls_back_when_field_blank_string() -> None:
+    ref = _ref("upload.pdf")
+    result = resolve_filename(
+        ref, "{invoice_number}.{ext}", {"invoice_number": "   "}
+    )
+    assert result == "upload.pdf"
+
+
+def test_resolve_filename_sanitizes_path_separators_from_field_value() -> None:
+    ref = _ref("upload.pdf")
+    result = resolve_filename(
+        ref, "{invoice_number}.{ext}", {"invoice_number": "../../etc/passwd"}
+    )
+    assert "/" not in result
+    assert result == ".._.._etc_passwd.pdf"
+
+
+def test_resolve_filename_ext_reflects_original_extension() -> None:
+    ref = _ref("scan.JPEG")
+    result = resolve_filename(ref, "photo.{ext}", {})
+    assert result == "photo.JPEG"
+
 
 def test_naive_datetime_assumed_utc() -> None:
     assert _parse_datetime("2024-01-01T12:00:00") == "2024-01-01T12:00:00+00:00"

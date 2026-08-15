@@ -117,8 +117,10 @@ Each field carries a `restrictions: dict[str, Any]` validated at write time by `
 | `integer`, `float` | `min`, `max` |
 | `string` | `choices` (list), `max_length` |
 | `date`, `datetime` | `min`, `max` (ISO strings; compared as parsed objects, not strings) |
-| `file`, `file_list` | `accept` (comma-separated MIME/ext), `max_size` (bytes) |
+| `file`, `file_list` | `accept` (comma-separated MIME/ext), `max_size` (bytes), `filename_template` (see below) |
 | `reference` | `schema` (target schema name) |
+
+`filename_template` is a `{field_name}` placeholder string (plus the reserved `{ext}` token for the original file extension) resolved server-side by `resolve_filename()` in `record_service.py` — rejected at field-save time if it references a field not on the schema (`SchemaService._validate_filename_template()`). `RecordService._with_names()` resolves it against each record's own field values and stamps the result onto every `file`/`file_list` value in API responses as `resolved_filename`, alongside the unchanged original `filename`; a blank/missing referenced field falls back to the original filename rather than emitting a partial name.
 
 ### Workflow execution
 

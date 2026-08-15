@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 import uuid
 from datetime import date as _date, datetime as _dt, timezone as _tz
 from pathlib import Path
 from typing import Any
 
-from civex.domain.dtos import RecordDTO, ResolvedField
+from civex.domain.dtos import FileRef, RecordDTO, ResolvedField
 from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
 from civex.repositories.protocols import (
     AuditRepository,
@@ -158,6 +159,77 @@ def _check_restrictions(
                 )
 
 
+# `{field_name}` placeholders in a `filename_template` restriction, plus the
+# reserved `{ext}` token — kept in sync with schema_service.TEMPLATE_TOKEN_RE,
+# which validates these references at field-save time.
+_TEMPLATE_TOKEN_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+# Path separators and characters invalid in filenames on common filesystems —
+# template values come from user-entered field data, so they're untrusted.
+_UNSAFE_FILENAME_CHARS_RE = re.compile(r'[\\/\x00-\x1f:*?"<>|]')
+
+
+def resolve_filename(
+    ref: FileRef, template: str | None, field_values: dict[str, Any]
+) -> str:
+    """Resolve a `filename_template` restriction against a record's
+    (name-keyed) field values. Falls back to the file's original name if no
+    template is set, or if any referenced field is blank/unset — a
+    partially-substituted name (e.g. "_.pdf") is worse than the original.
+    """
+    if not template:
+        return ref.filename
+    ext = Path(ref.filename).suffix.lstrip(".")
+    missing = False
+
+    def substitute(match: re.Match[str]) -> str:
+        nonlocal missing
+        token = match.group(1)
+        if token == "ext":
+            return ext
+        value = field_values.get(token)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            missing = True
+            return ""
+        return str(value)
+
+    resolved = _TEMPLATE_TOKEN_RE.sub(substitute, template)
+    if missing:
+        return ref.filename
+    resolved = _UNSAFE_FILENAME_CHARS_RE.sub("_", resolved).strip()
+    return resolved or ref.filename
+
+
+def _with_resolved_filename(
+    ref_dict: dict[str, Any], template: str | None, field_values: dict[str, Any]
+) -> dict[str, Any]:
+    resolved = resolve_filename(FileRef.from_dict(ref_dict), template, field_values)
+    return {**ref_dict, "resolved_filename": resolved}
+
+
+def _apply_filename_templates(
+    data: dict[str, Any], fields: list[ResolvedField]
+) -> dict[str, Any]:
+    """Annotate every file/file_list value in `data` with `resolved_filename`,
+    derived from that field's `filename_template` restriction (if any)."""
+    result = dict(data)
+    for rf in fields:
+        f = rf.field
+        if f.dtype not in ("file", "file_list"):
+            continue
+        template = (f.restrictions or {}).get("filename_template")
+        value = result.get(f.name)
+        if isinstance(value, dict):
+            result[f.name] = _with_resolved_filename(value, template, data)
+        elif isinstance(value, list):
+            result[f.name] = [
+                _with_resolved_filename(item, template, data)
+                if isinstance(item, dict)
+                else item
+                for item in value
+            ]
+    return result
+
+
 # Types that skip the generic _COERCE path (handled explicitly in coerce_value)
 # and are also excluded from natural-name computation (they're collection/blob types).
 _SKIP_TYPES = {"reference", "reference_list", "file", "file_list", "tags"}
@@ -245,6 +317,7 @@ class RecordService:
         named_data = {id_map.get(k, k): v for k, v in dto.data.items()}
         fields = self._schema_svc.collect_fields(schema)
         natural_name = _natural_name(named_data, fields, schema.display_fields)
+        named_data = _apply_filename_templates(named_data, fields)
         return dataclasses.replace(dto, data=named_data, natural_name=natural_name)
 
     def _apply_defaults(

@@ -68,3 +68,66 @@ steps:
     ctx.record_svc.add("study", "trial", {"subject": "S02", "status": "enrolled"})
     ctx.commit()
     assert ctx.job_svc.count_jobs() == 1
+
+
+def test_record_data_carries_resolved_filename_for_file_field(
+    ctx: AppContext, make_schema, make_collection
+):
+    make_schema(
+        "invoice",
+        fields=[("invoice_number", "string"), ("scan", "file")],
+    )
+    ctx.schema_svc.update_field(
+        "invoice", "scan", restrictions={"filename_template": "{invoice_number}.{ext}"}
+    )
+    make_collection("study")
+
+    ref = {"sha256": "a" * 64, "filename": "upload.pdf", "size": 10}
+    record = ctx.record_svc.add(
+        "study", "invoice", {"invoice_number": "INV-42", "scan": ref}
+    )
+    ctx.commit()
+
+    assert record.data["scan"]["filename"] == "upload.pdf"
+    assert record.data["scan"]["resolved_filename"] == "INV-42.pdf"
+
+    fetched = ctx.record_svc.get(str(record.id))
+    assert fetched.data["scan"]["resolved_filename"] == "INV-42.pdf"
+
+
+def test_record_data_file_field_falls_back_without_template(
+    ctx: AppContext, make_schema, make_collection
+):
+    make_schema("invoice", fields=[("scan", "file")])
+    make_collection("study")
+
+    ref = {"sha256": "a" * 64, "filename": "upload.pdf", "size": 10}
+    record = ctx.record_svc.add("study", "invoice", {"scan": ref})
+    ctx.commit()
+
+    assert record.data["scan"]["resolved_filename"] == "upload.pdf"
+
+
+def test_record_data_carries_resolved_filename_for_file_list_field(
+    ctx: AppContext, make_schema, make_collection
+):
+    make_schema(
+        "invoice",
+        fields=[("invoice_number", "string"), ("scans", "file_list")],
+    )
+    ctx.schema_svc.update_field(
+        "invoice", "scans", restrictions={"filename_template": "{invoice_number}.{ext}"}
+    )
+    make_collection("study")
+
+    refs = [
+        {"sha256": "a" * 64, "filename": "a.pdf", "size": 10},
+        {"sha256": "b" * 64, "filename": "b.png", "size": 10},
+    ]
+    record = ctx.record_svc.add(
+        "study", "invoice", {"invoice_number": "INV-7", "scans": refs}
+    )
+    ctx.commit()
+
+    resolved = [item["resolved_filename"] for item in record.data["scans"]]
+    assert resolved == ["INV-7.pdf", "INV-7.png"]

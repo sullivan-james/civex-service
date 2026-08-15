@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any
 
@@ -46,8 +47,8 @@ VALID_RESTRICTION_KEYS: dict[str, frozenset[str]] = {
     "string": frozenset({"choices", "max_length"}),
     "date": frozenset({"min", "max"}),
     "datetime": frozenset({"min", "max"}),
-    "file": frozenset({"accept", "max_size"}),
-    "file_list": frozenset({"accept", "max_size"}),
+    "file": frozenset({"accept", "max_size", "filename_template"}),
+    "file_list": frozenset({"accept", "max_size", "filename_template"}),
     "reference": frozenset({"schema"}),
     "reference_list": frozenset({"schema"}),
     "enum": frozenset({"choices"}),
@@ -66,6 +67,25 @@ def _validate_restriction_keys(dtype: str, restrictions: dict[str, Any] | None) 
         valid = ", ".join(sorted(allowed)) if allowed else "(none)"
         raise ValidationError(
             f"Unknown restriction key(s) {unknown} for type '{dtype}'. Valid keys: {valid}"
+        )
+
+
+# `{field_name}` placeholders in a `filename_template` restriction; `{ext}`
+# is the one reserved token that isn't a field name (see record_service.py).
+TEMPLATE_TOKEN_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+
+
+def _validate_filename_template(
+    restrictions: dict[str, Any] | None, known_field_names: set[str]
+) -> None:
+    template = (restrictions or {}).get("filename_template")
+    if not template:
+        return
+    referenced = set(TEMPLATE_TOKEN_RE.findall(template)) - {"ext"}
+    unknown = sorted(referenced - known_field_names)
+    if unknown:
+        raise ValidationError(
+            f"filename_template references unknown field(s) {unknown}"
         )
 
 
@@ -182,6 +202,9 @@ class SchemaService:
             raise AlreadyExistsError(
                 f"Field '{field_name}' already exists on schema '{schema_name}'"
             )
+
+        known_field_names = {rf.field.name for rf in self.collect_fields(schema)}
+        _validate_filename_template(restrictions, known_field_names)
 
         field = self._repo.add_field(
             schema_id=schema.id,
@@ -310,6 +333,8 @@ class SchemaService:
                 )
         if restrictions is not None:
             _validate_restriction_keys(field.dtype, restrictions)
+            known_field_names = {rf.field.name for rf in self.collect_fields(schema)}
+            _validate_filename_template(restrictions, known_field_names)
         old_dict = field.to_dict()
         kwargs: dict[str, Any] = dict(
             name=new_name, required=required, restrictions=restrictions

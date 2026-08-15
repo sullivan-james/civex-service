@@ -59,3 +59,81 @@ def test_boolean_field_rejects_any_restriction_key(ctx: AppContext, make_schema)
     make_schema("trial")
     with pytest.raises(ValidationError, match="min"):
         ctx.schema_svc.add_field("trial", "is_enrolled", "boolean", restrictions={"min": 1})
+
+
+# ---------------------------------------------------------------------------
+# filename_template: references must resolve to fields on the schema
+# ---------------------------------------------------------------------------
+
+
+def test_add_field_accepts_filename_template_referencing_known_field(
+    ctx: AppContext, make_schema
+):
+    make_schema("invoice", fields=[("invoice_number", "string")])
+    field = ctx.schema_svc.add_field(
+        "invoice",
+        "scan",
+        "file",
+        restrictions={"filename_template": "{invoice_number}.{ext}"},
+    )
+    assert field.restrictions == {"filename_template": "{invoice_number}.{ext}"}
+
+
+def test_add_field_accepts_filename_template_using_only_reserved_ext_token(
+    ctx: AppContext, make_schema
+):
+    make_schema("invoice")
+    field = ctx.schema_svc.add_field(
+        "invoice", "scan", "file", restrictions={"filename_template": "scan.{ext}"}
+    )
+    assert field.restrictions == {"filename_template": "scan.{ext}"}
+
+
+def test_add_field_rejects_filename_template_referencing_unknown_field(
+    ctx: AppContext, make_schema
+):
+    make_schema("invoice", fields=[("invoice_number", "string")])
+    with pytest.raises(ValidationError, match="nonexistent_field"):
+        ctx.schema_svc.add_field(
+            "invoice",
+            "scan",
+            "file",
+            restrictions={"filename_template": "{nonexistent_field}.{ext}"},
+        )
+
+
+def test_add_field_rejects_filename_template_on_file_list(ctx: AppContext, make_schema):
+    make_schema("invoice", fields=[("invoice_number", "string")])
+    with pytest.raises(ValidationError, match="missing_field"):
+        ctx.schema_svc.add_field(
+            "invoice",
+            "scans",
+            "file_list",
+            restrictions={"filename_template": "{missing_field}.{ext}"},
+        )
+
+
+def test_update_field_rejects_filename_template_referencing_unknown_field(
+    ctx: AppContext, make_schema
+):
+    make_schema(
+        "invoice", fields=[("invoice_number", "string"), ("scan", "file")]
+    )
+    with pytest.raises(ValidationError, match="nope"):
+        ctx.schema_svc.update_field(
+            "invoice", "scan", restrictions={"filename_template": "{nope}.{ext}"}
+        )
+
+
+def test_update_field_accepts_filename_template_referencing_known_field(
+    ctx: AppContext, make_schema
+):
+    make_schema(
+        "invoice", fields=[("invoice_number", "string"), ("scan", "file")]
+    )
+    field = ctx.schema_svc.update_field(
+        "invoice",
+        "scan",
+        restrictions={"filename_template": "{invoice_number}.{ext}"},
+    )
+    assert field.restrictions == {"filename_template": "{invoice_number}.{ext}"}
