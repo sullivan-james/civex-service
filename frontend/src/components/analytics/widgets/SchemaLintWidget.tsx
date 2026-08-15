@@ -2,7 +2,16 @@ import { useMemo } from 'react'
 import { Link } from 'react-router'
 import { useSchemaLint, useSchemas } from '../../../hooks/useSchemas'
 import { errorMessage } from '../../../lib/errors'
-import { ErrorState, EmptyState, Table, Thead, Th, Tbody, Tr, Td } from '../../ui'
+import {
+  ErrorState,
+  EmptyState,
+  Table,
+  Thead,
+  Th,
+  Tbody,
+  Tr,
+  Td,
+} from '../../ui'
 import { StatTile } from '../StatTile'
 import { WidgetCard } from '../WidgetCard'
 
@@ -41,7 +50,11 @@ export function SchemaLintWidget() {
         />
       ) : (
         <>
-          <StatTile label="Legacy names" value={issues.length} goodDirection="down" />
+          <StatTile
+            label="Legacy names"
+            value={issues.length}
+            goodDirection="down"
+          />
           <Table>
             <Thead>
               <tr>
@@ -55,7 +68,9 @@ export function SchemaLintWidget() {
               {issues.map((issue, i) => {
                 const schemaId = schemaIdByName.get(issue.schema_name)
                 return (
-                  <Tr key={`${issue.kind}-${issue.schema_name}-${issue.name}-${i}`}>
+                  <Tr
+                    key={`${issue.kind}-${issue.schema_name}-${issue.name}-${i}`}
+                  >
                     <Td>{issue.kind}</Td>
                     <Td>
                       {schemaId ? (

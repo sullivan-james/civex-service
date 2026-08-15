@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { formatDurationSeconds, formatCompactNumber, formatBytes } from './format'
+import {
+  formatDurationSeconds,
+  formatCompactNumber,
+  formatBytes,
+} from './format'
 
 describe('formatDurationSeconds', () => {
   it('formats sub-second durations as ms', () => {

@@ -18,10 +18,7 @@ export interface RecordCountsWidgetProps {
 export function RecordCountsWidget({ filters }: RecordCountsWidgetProps) {
   const { data, isLoading, error } = useRecordCounts(filters)
 
-  const bars = useMemo(
-    () => sumRecordCountsBySchema(data?.items ?? []),
-    [data],
-  )
+  const bars = useMemo(() => sumRecordCountsBySchema(data?.items ?? []), [data])
 
   return (
     <WidgetCard
