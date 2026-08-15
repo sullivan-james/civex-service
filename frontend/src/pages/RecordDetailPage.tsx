@@ -357,7 +357,13 @@ export default function RecordDetailPage() {
                 >
                   <DynamicField
                     field={field}
-                    value={editValues[field.name] ?? record.data[field.name]}
+                    // startEditing() seeds editValues with a full copy of
+                    // record.data, so this key is always present — no `??`
+                    // fallback here, or clearing a value (e.g. to search a
+                    // reference field for a replacement) would immediately
+                    // snap back to the original since `undefined` reads as
+                    // "unset" under `??`.
+                    value={editValues[field.name]}
                     onChange={(v) =>
                       setEditValues((prev) => ({ ...prev, [field.name]: v }))
                     }

@@ -82,10 +82,11 @@ export function FieldForm(props: FieldFormProps) {
   const updateField = useUpdateField(schemaName)
   const { data: allSchemas } = useSchemas()
 
+  const needsTargetSchema = type === 'reference' || type === 'reference_list'
   const canSubmit =
     !!fieldName.trim() &&
     !nameError(fieldName.trim()) &&
-    (mode === 'edit' || type !== 'reference' || !!refSchema)
+    (!needsTargetSchema || !!refSchema)
   const showDefault = mode === 'create' && !NON_DEFAULT_TYPES.has(type)
 
   function handleTypeChange(t: string) {
@@ -211,7 +212,7 @@ export function FieldForm(props: FieldFormProps) {
         />
       </Field>
 
-      {mode === 'create' && type === 'reference' && (
+      {needsTargetSchema && (
         <Field
           label="Target schema"
           span={6}
