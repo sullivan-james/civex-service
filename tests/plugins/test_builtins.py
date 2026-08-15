@@ -161,7 +161,15 @@ def test_load_file_list_returns_raw_file_refs(
     config = registration.config_model(field="attachments")
     result = registration.invoke({}, config, wf_ctx, 60.0)
 
-    assert result.outputs == {"files": [ref1.to_dict(), ref2.to_dict()]}
+    # Record reads stamp `resolved_filename` onto every file/file_list value
+    # (see RecordService._apply_filename_templates) -- with no
+    # filename_template restriction set, it just echoes the original name.
+    assert result.outputs == {
+        "files": [
+            {**ref1.to_dict(), "resolved_filename": ref1.filename},
+            {**ref2.to_dict(), "resolved_filename": ref2.filename},
+        ]
+    }
 
 
 def test_load_file_list_returns_empty_list_when_field_missing_no_raise(
