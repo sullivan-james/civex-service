@@ -30,11 +30,33 @@ export interface SchemaDeleteImpact {
   record_count: number
 }
 
+export interface AuditLogEntry {
+  id: string
+  commit_id: string | null
+  action: string
+  entity_type: string
+  entity_id: string
+  old_data: Record<string, unknown> | null
+  new_data: Record<string, unknown> | null
+  timestamp: string
+}
+
+export interface PaginatedAuditLog {
+  items: AuditLogEntry[]
+  total: number
+  offset: number
+  limit: number
+}
+
 export const schemasApi = {
   list: () => api.get<Schema[]>('/schemas'),
   get: (name: string) => api.get<Schema>(`/schemas/${name}`),
   getDeleteImpact: (name: string) =>
     api.get<SchemaDeleteImpact>(`/schemas/${name}/delete-impact`),
+  getAudit: (name: string, offset = 0, limit = 50) =>
+    api.get<PaginatedAuditLog>(
+      `/schemas/${name}/audit?offset=${offset}&limit=${limit}`,
+    ),
   create: (body: {
     name: string
     label?: string
