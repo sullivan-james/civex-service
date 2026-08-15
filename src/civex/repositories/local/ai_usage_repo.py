@@ -26,13 +26,21 @@ class LocalAiUsageRepository:
         return _to_dto(row)
 
     def list_all(
-        self, since: datetime | None = None, until: datetime | None = None
+        self,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> list[AiUsageEventDTO]:
         q = self._s.query(AiUsageEvent)
         if since is not None:
             q = q.filter(AiUsageEvent.created_at >= since)
         if until is not None:
             q = q.filter(AiUsageEvent.created_at < until)
+        if provider is not None:
+            q = q.filter(AiUsageEvent.provider == provider)
+        if model is not None:
+            q = q.filter(AiUsageEvent.model == model)
         q = q.order_by(AiUsageEvent.created_at)
         return [_to_dto(r) for r in q.all()]
 

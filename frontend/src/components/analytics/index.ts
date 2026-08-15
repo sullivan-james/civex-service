@@ -29,3 +29,7 @@ export {
   type AnalyticsFilterBarProps,
   type AnalyticsFilterOption,
 } from './AnalyticsFilterBar'
+export {
+  AiTokenUsageWidget,
+  type AiTokenUsageWidgetProps,
+} from './AiTokenUsageWidget'
