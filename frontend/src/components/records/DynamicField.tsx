@@ -11,6 +11,7 @@ export interface FileRef {
   sha256: string
   filename: string
   size: number
+  resolved_filename?: string
 }
 
 interface Props {
@@ -71,8 +72,15 @@ function FileField({
     <div className="space-y-1">
       {ref && (
         <div className="flex items-center gap-2 text-xs text-fg-muted">
-          <span className="inline-flex items-center gap-1">
-            <Paperclip size={12} /> {ref.filename}
+          <span
+            className="inline-flex items-center gap-1"
+            title={
+              ref.resolved_filename && ref.resolved_filename !== ref.filename
+                ? `Original: ${ref.filename}`
+                : undefined
+            }
+          >
+            <Paperclip size={12} /> {ref.resolved_filename ?? ref.filename}
           </span>
           <span>({(ref.size / 1024).toFixed(1)} KB)</span>
           <a
@@ -158,8 +166,16 @@ function FileListField({
           key={ref.sha256}
           className="flex items-center gap-2 text-xs text-fg-muted"
         >
-          <span className="truncate">
-            {ref.filename} ({(ref.size / 1024).toFixed(1)} KB)
+          <span
+            className="truncate"
+            title={
+              ref.resolved_filename && ref.resolved_filename !== ref.filename
+                ? `Original: ${ref.filename}`
+                : undefined
+            }
+          >
+            {ref.resolved_filename ?? ref.filename} (
+            {(ref.size / 1024).toFixed(1)} KB)
           </span>
           <button
             type="button"
