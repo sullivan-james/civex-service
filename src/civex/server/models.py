@@ -18,6 +18,7 @@ from civex.domain.dtos import (
     RecordDTO,
     SchemaDeleteImpactDTO,
     SchemaDTO,
+    ViewDTO,
     WorkflowJobDTO,
 )
 from civex.services.ai_usage_service import TokenUsageBucket
@@ -192,6 +193,81 @@ class UpdateFieldRequest(BaseModel):
 
 class ReorderFieldsRequest(BaseModel):
     order: list[str]  # list of field UUIDs as strings
+
+
+# --- Views ---
+
+
+class ViewResponse(BaseModel):
+    id: str
+    schema_id: str
+    schema_name: str
+    name: str
+    columns: list[str] = Field(
+        description="Base schema field names to show, in order. Own or "
+        "inherited fields only -- joined/reference-field columns aren't "
+        "supported yet."
+    )
+    filter_tree: dict[str, Any] | None = Field(
+        default=None,
+        description="AND/OR filter tree over the base schema's own fields, "
+        "same shape as the records 'filter' query parameter.",
+    )
+    sort: list[dict[str, Any]] = Field(
+        description="Ordered list of {field, direction} entries; direction "
+        "is 'asc' or 'desc'."
+    )
+
+    @classmethod
+    def from_dto(cls, dto: ViewDTO) -> ViewResponse:
+        return cls(
+            id=str(dto.id),
+            schema_id=str(dto.schema_id),
+            schema_name=dto.schema_name,
+            name=dto.name,
+            columns=dto.columns,
+            filter_tree=dto.filter_tree,
+            sort=dto.sort,
+        )
+
+
+class CreateViewRequest(BaseModel):
+    name: str = Field(
+        description=(
+            "Machine key: lowercase letters, digits and underscores, not "
+            "starting with a digit."
+        )
+    )
+    columns: list[str] | None = Field(
+        default=None, description="Base schema field names to show, in order."
+    )
+    filter_tree: dict[str, Any] | None = Field(
+        default=None,
+        description="AND/OR filter tree over the base schema's own fields, "
+        "same shape as the records 'filter' query parameter.",
+    )
+    sort: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Ordered list of {field, direction} entries; direction "
+        "is 'asc' or 'desc'.",
+    )
+
+
+class UpdateViewRequest(BaseModel):
+    rename: str | None = None
+    columns: list[str] | None = Field(
+        default=None,
+        description="Replace the column list; omit the key to leave it unchanged.",
+    )
+    filter_tree: dict[str, Any] | None = Field(
+        default=None,
+        description="Replace the filter tree; send null to clear it, omit "
+        "the key to leave it unchanged.",
+    )
+    sort: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Replace the sort order; omit the key to leave it unchanged.",
+    )
 
 
 # --- Datasets ---

@@ -20,6 +20,7 @@ from civex.domain.dtos import (
     FileRef,
     RecordDTO,
     SchemaDTO,
+    ViewDTO,
     WorkflowJobDTO,
 )
 from civex.domain.filters import FilterNode
@@ -110,6 +111,30 @@ class DatasetRepository(Protocol):
     def delete(self, id: uuid.UUID) -> None: ...
     def restore(self, id: uuid.UUID) -> DatasetDTO: ...
     def purge(self, id: uuid.UUID) -> None: ...
+
+
+@runtime_checkable
+class ViewRepository(Protocol):
+    def get_by_id(self, id: uuid.UUID) -> ViewDTO | None: ...
+    def get_by_name(self, schema_id: uuid.UUID, name: str) -> ViewDTO | None: ...
+    def list_by_schema(self, schema_id: uuid.UUID) -> list[ViewDTO]: ...
+    def create(
+        self,
+        schema_id: uuid.UUID,
+        name: str,
+        columns: list[str],
+        filter_tree: dict[str, Any] | None,
+        sort: list[dict[str, Any]],
+    ) -> ViewDTO: ...
+    def update(
+        self,
+        id: uuid.UUID,
+        name: str | None,
+        columns: list[str] = ...,
+        filter_tree: dict[str, Any] | None = ...,
+        sort: list[dict[str, Any]] = ...,
+    ) -> ViewDTO: ...
+    def delete(self, id: uuid.UUID) -> None: ...
 
 
 @runtime_checkable
