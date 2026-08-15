@@ -206,10 +206,10 @@ export function WorkflowSummaryModal({
 
             <div>
               <h3 className="text-sm font-semibold text-fg mb-2">
-                Steps ({detail.step_list.length})
+                Steps ({(detail.step_list ?? []).length})
               </h3>
               <ul className="space-y-3">
-                {detail.step_list.map((step, i) => (
+                {(detail.step_list ?? []).map((step, i) => (
                   <StepCard
                     key={step.id}
                     step={step}

@@ -7,10 +7,17 @@ import {
 } from 'react'
 import { NavLink } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  Group,
+  Panel,
+  Separator,
+  useDefaultLayout,
+} from 'react-resizable-panels'
 import { remoteApi } from '../api/remote'
 import { errorMessage } from '../lib/errors'
 import { useUISettings } from '../hooks/useUISettings'
 import AiAttestationGate from './ai/AiAttestationGate'
+import AiPanel from './ai/AiPanel'
 import { useToast } from './ui/ToastProvider'
 import { IconButton } from './ui/IconButton'
 import {
@@ -238,6 +245,12 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const { data: uiSettings } = useUISettings()
   const showAdvanced = uiSettings?.show_advanced ?? false
+
+  const aiSplitLayout = useDefaultLayout({
+    id: 'civex-ai-split',
+    storage: localStorage,
+    panelIds: ['main', 'ai'],
+  })
 
   useEffect(() => {
     if (!drawerOpen) return
@@ -474,10 +487,38 @@ export default function Layout({ children }: { children: ReactNode }) {
         )}
 
         {/* Page content — its own scroll container, independent of the nav
-            rail and top bar. */}
-        <main className="flex-1 min-w-0 overflow-y-auto">
-          <div className="max-w-[1600px] mx-auto px-6 py-6">{children}</div>
-        </main>
+            rail and top bar. Split with the AI panel (instead of it
+            overlaying the page) when open, so both stay usable at once;
+            the split ratio is remembered across reloads. */}
+        {aiOpen ? (
+          <Group
+            orientation="horizontal"
+            className="flex-1 min-w-0"
+            defaultLayout={aiSplitLayout.defaultLayout}
+            onLayoutChanged={aiSplitLayout.onLayoutChanged}
+          >
+            <Panel id="main" minSize="30%" className="h-full flex flex-col">
+              <main className="flex-1 min-h-0 overflow-y-auto">
+                <div className="max-w-[1600px] mx-auto px-6 py-6">
+                  {children}
+                </div>
+              </main>
+            </Panel>
+            <Separator
+              aria-label="Resize AI panel"
+              className="w-1 bg-border hover:bg-accent active:bg-accent transition-colors cursor-col-resize"
+            />
+            <Panel id="ai" defaultSize="32%" minSize="22%" maxSize="60%">
+              <AiAttestationGate open={aiOpen} onClose={() => setAiOpen(false)}>
+                <AiPanel onClose={() => setAiOpen(false)} />
+              </AiAttestationGate>
+            </Panel>
+          </Group>
+        ) : (
+          <main className="flex-1 min-w-0 overflow-y-auto">
+            <div className="max-w-[1600px] mx-auto px-6 py-6">{children}</div>
+          </main>
+        )}
       </div>
 
       {/* Footer */}
@@ -497,8 +538,6 @@ export default function Layout({ children }: { children: ReactNode }) {
           API docs <ExternalLink size={12} />
         </a>
       </footer>
-
-      <AiAttestationGate open={aiOpen} onClose={() => setAiOpen(false)} />
     </div>
   )
 }

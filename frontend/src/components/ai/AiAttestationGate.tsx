@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import AiPanel from './AiPanel'
+import { useState, type ReactNode } from 'react'
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../ui'
 import { Sparkles } from '../ui/icons'
 
@@ -27,23 +26,22 @@ function acknowledge(): void {
 interface AiAttestationGateProps {
   open: boolean
   onClose: () => void
+  children: ReactNode
 }
 
-// Wraps AiPanel with a one-time, client-side-only consent gate. Once
-// acknowledged, this always renders <AiPanel open={open} .../> -- same as
-// if this wrapper didn't exist -- so AiPanel's own "stay mounted, toggle via
-// CSS" behavior (see its containerClass comment) is preserved for the rest
-// of the session. Only the pre-acknowledgment path early-returns based on
-// `open`, since there's nothing to keep mounted yet.
+// One-time, client-side-only consent gate wrapping any AI surface (the
+// docked panel, the standalone /ai tab). Once acknowledged, this always
+// renders `children` -- same as if this wrapper didn't exist. Only the
+// pre-acknowledgment path early-returns based on `open`, since there's
+// nothing to keep mounted yet.
 export default function AiAttestationGate({
   open,
   onClose,
+  children,
 }: AiAttestationGateProps) {
   const [acked, setAcked] = useState(hasAcknowledged)
 
-  if (acked) {
-    return <AiPanel open={open} onClose={onClose} />
-  }
+  if (acked) return <>{children}</>
 
   if (!open) return null
 

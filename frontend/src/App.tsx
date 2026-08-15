@@ -11,6 +11,7 @@ import WorkflowsPage from './pages/WorkflowsPage'
 import JobsPage from './pages/JobsPage'
 import JobDetailPage from './pages/JobDetailPage'
 import TerminalPage from './pages/TerminalPage'
+import AiPage from './pages/AiPage'
 import PluginsPage from './pages/PluginsPage'
 import SettingsPage from './pages/SettingsPage'
 import LegalPage from './pages/LegalPage'
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/jobs" element={<Navigate to="/runs" replace />} />
         <Route path="/jobs/:id" element={<Navigate to="/runs" replace />} />
         <Route path="/terminal" element={<TerminalPage />} />
+        <Route path="/ai" element={<AiPage />} />
         <Route path="/plugins" element={<PluginsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         {/* Legacy redirect — Storage moved into Settings */}

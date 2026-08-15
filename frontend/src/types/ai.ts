@@ -6,6 +6,10 @@ export type AssistantEntry = {
   kind: 'assistant'
   text: string
   streaming: boolean
+  // Set when this entry is reporting a failure (stream error, timeout,
+  // cancellation) rather than model output, so it can be styled distinctly
+  // instead of relying on a symbol embedded in the text itself.
+  error?: boolean
 }
 export type ToolCallEntry = {
   kind: 'tool_call'
