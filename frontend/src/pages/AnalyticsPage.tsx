@@ -8,10 +8,16 @@ import {
   AuditActivityWidget,
   AuditEntityBreakdownWidget,
   AiTokenUsageWidget,
+  RecordGrowthWidget,
+  RecordCountsWidget,
+  StorageUsageWidget,
+  SchemaLintWidget,
 } from '../components/analytics'
 import { useAnalyticsFilters } from '../hooks/useAnalyticsFilters'
 import { useWorkflows } from '../hooks/useWorkflows'
 import { usePlugins } from '../hooks/usePlugins'
+import { useCollections } from '../hooks/useCollections'
+import { useSchemas } from '../hooks/useSchemas'
 
 const STATUS_OPTIONS = [
   { value: 'pending', label: 'Pending' },
@@ -40,26 +46,37 @@ const ACTION_OPTIONS = [
   { value: 'purge', label: 'Purge' },
 ]
 
-/** Analytics dashboard: workflow reliability (success/failure rate,
- * failures by plugin, step duration distribution, runs by trigger),
- * activity/audit trail (events over time and by entity type), and AI
- * usage -- each widget summarizes over the shared, URL-synced filter bar
- * and links out to the Runs view for row-level detail rather than
+/** Analytics dashboard: data/schema growth (record growth and counts,
+ * storage usage, schema-naming health), workflow reliability
+ * (success/failure rate, failures by plugin, step duration distribution,
+ * runs by trigger), activity/audit trail (events over time and by entity
+ * type), and AI usage -- each widget summarizes over the shared,
+ * URL-synced filter bar and links out to its own detail view rather than
  * duplicating it here. */
 export default function AnalyticsPage() {
   const { filters, setFilters, resetFilters } = useAnalyticsFilters()
   const { data: workflows } = useWorkflows()
   const { data: plugins } = usePlugins()
+  const { data: collections } = useCollections()
+  const { data: schemas } = useSchemas()
 
   return (
     <Page
       title="Analytics"
-      description="Workflow reliability, activity, and usage over the selected range"
+      description="Data growth, schema health, workflow reliability, and activity over the selected range"
     >
       <AnalyticsFilterBar
         filters={filters}
         onChange={setFilters}
         onReset={resetFilters}
+        datasetOptions={(collections ?? []).map((c) => ({
+          value: c.name,
+          label: c.name,
+        }))}
+        schemaOptions={(schemas ?? []).map((s) => ({
+          value: s.name,
+          label: s.name,
+        }))}
         workflowOptions={(workflows ?? []).map((w) => ({
           value: w.name,
           label: w.name,
@@ -73,6 +90,13 @@ export default function AnalyticsPage() {
         entityTypeOptions={ENTITY_TYPE_OPTIONS}
         actionOptions={ACTION_OPTIONS}
       />
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <RecordGrowthWidget filters={filters} />
+        <RecordCountsWidget filters={filters} />
+        <StorageUsageWidget />
+        <SchemaLintWidget />
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <JobSuccessRateWidget filters={filters} />

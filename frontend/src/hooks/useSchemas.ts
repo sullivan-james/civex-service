@@ -51,6 +51,15 @@ export function useSchemas() {
   return useQuery({ queryKey: ['schemas'], queryFn: schemasApi.list })
 }
 
+// Deliberately not under the ['schemas', ...] prefix: optimisticUpdateSchema
+// above scans every query cached under that prefix for array entries whose
+// `.name` matches a renamed schema, and a NameIssue also carries a `name`
+// field -- nesting this here would risk it being mistaken for a Schema and
+// overwritten by that logic.
+export function useSchemaLint() {
+  return useQuery({ queryKey: ['schema-lint'], queryFn: schemasApi.lint })
+}
+
 export function useSchema(name: string) {
   return useQuery({
     queryKey: ['schemas', name],

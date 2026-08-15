@@ -9,6 +9,7 @@ from typing import Any
 
 from civex.domain.dtos import FileRef, RecordDTO, ResolvedField
 from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
+from civex.domain.filters import FilterNode, map_fields, parse_filter_tree
 from civex.repositories.protocols import (
     AuditRepository,
     DatasetRepository,
@@ -649,12 +650,15 @@ class RecordService:
         schema_name: str | None = None,
         parent_record_id: str | None = None,
         filters: list[str] | None = None,
+        filter_tree: dict[str, Any] | None = None,
         search: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[RecordDTO]:
-        dataset, schema_id, parent_uuid, field_filters = self._resolve_query_params(
-            dataset_name, schema_name, parent_record_id, filters or []
+        dataset, schema_id, parent_uuid, field_filters, resolved_tree = (
+            self._resolve_query_params(
+                dataset_name, schema_name, parent_record_id, filters or [], filter_tree
+            )
         )
         records = self._records.list_filtered(
             dataset_id=dataset.id,
@@ -664,6 +668,7 @@ class RecordService:
             search=search or None,
             offset=offset,
             limit=limit,
+            filter_tree=resolved_tree,
         )
         return [self._with_names(r) for r in records]
 
@@ -673,10 +678,13 @@ class RecordService:
         schema_name: str | None = None,
         parent_record_id: str | None = None,
         filters: list[str] | None = None,
+        filter_tree: dict[str, Any] | None = None,
         search: str | None = None,
     ) -> int:
-        dataset, schema_id, parent_uuid, field_filters = self._resolve_query_params(
-            dataset_name, schema_name, parent_record_id, filters or []
+        dataset, schema_id, parent_uuid, field_filters, resolved_tree = (
+            self._resolve_query_params(
+                dataset_name, schema_name, parent_record_id, filters or [], filter_tree
+            )
         )
         return self._records.count(
             dataset_id=dataset.id,
@@ -684,6 +692,7 @@ class RecordService:
             parent_record_id=parent_uuid,
             field_filters=field_filters,
             search=search or None,
+            filter_tree=resolved_tree,
         )
 
     def schema_counts(self, dataset_name: str) -> dict[str, int]:
@@ -698,6 +707,7 @@ class RecordService:
         schema_name: str | None,
         parent_record_id: str | None,
         filters: list[str],
+        filter_tree: dict[str, Any] | None = None,
     ):
         dataset = self._datasets.get_by_name(dataset_name)
         if not dataset:
@@ -724,7 +734,11 @@ class RecordService:
             key, _, value = condition.partition("=")
             field_filters.append((name_map.get(key, key), value))
 
-        return dataset, schema_id, parent_uuid, field_filters
+        resolved_tree: FilterNode | None = None
+        if filter_tree is not None:
+            resolved_tree = map_fields(parse_filter_tree(filter_tree), name_map)
+
+        return dataset, schema_id, parent_uuid, field_filters, resolved_tree
 
     def find_by_schema(
         self,

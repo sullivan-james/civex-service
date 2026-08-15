@@ -36,6 +36,10 @@ export { DurationDistributionWidget } from './widgets/DurationDistributionWidget
 export { TriggerBreakdownWidget } from './widgets/TriggerBreakdownWidget'
 export { AuditActivityWidget } from './widgets/AuditActivityWidget'
 export { AuditEntityBreakdownWidget } from './widgets/AuditEntityBreakdownWidget'
+export { RecordGrowthWidget } from './widgets/RecordGrowthWidget'
+export { RecordCountsWidget } from './widgets/RecordCountsWidget'
+export { StorageUsageWidget } from './widgets/StorageUsageWidget'
+export { SchemaLintWidget } from './widgets/SchemaLintWidget'
 export {
   AiTokenUsageWidget,
   type AiTokenUsageWidgetProps,

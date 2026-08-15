@@ -11,6 +11,7 @@ from civex.server.models import (
     AddFieldRequest,
     CreateSchemaRequest,
     FieldResponse,
+    NameIssueResponse,
     ReorderFieldsRequest,
     SchemaDeleteImpactResponse,
     SchemaResponse,
@@ -30,6 +31,14 @@ def list_schemas(ctx: AppContext = Depends(get_ctx)):
 def list_deleted_schemas(ctx: AppContext = Depends(get_ctx)):
     """Schemas currently in Recently Deleted, most recently deleted first."""
     return [SchemaResponse.from_dto(s) for s in ctx.schema_svc.list_deleted()]
+
+
+@router.get("/lint", response_model=list[NameIssueResponse])
+def lint_schema_names(ctx: AppContext = Depends(get_ctx)):
+    """Schema and field names that predate slug validation -- the same
+    report `civex schema lint` prints, exposed for the analytics
+    naming-health widget. Nothing is broken; these names still resolve."""
+    return [NameIssueResponse.from_dto(i) for i in ctx.schema_svc.lint_names()]
 
 
 @router.post("", response_model=SchemaResponse, status_code=201)

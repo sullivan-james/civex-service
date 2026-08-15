@@ -4,6 +4,8 @@ import {
   sumFailuresByPlugin,
   auditActivitySeries,
   sumAuditByEntityType,
+  recordGrowthSeries,
+  sumRecordCountsBySchema,
 } from './aggregate'
 
 describe('jobSuccessRateSeries', () => {
@@ -112,6 +114,33 @@ describe('auditActivitySeries', () => {
   })
 })
 
+describe('recordGrowthSeries', () => {
+  it('pivots into one point per bucket with one key per dataset/schema combo', () => {
+    const { series, seriesKeys, total } = recordGrowthSeries([
+      { bucket: '2026-08-01', dataset: 'study', schema_name: 'doc', count: 2 },
+      { bucket: '2026-08-01', dataset: 'study', schema_name: 'note', count: 1 },
+      { bucket: '2026-08-02', dataset: 'study', schema_name: 'doc', count: 3 },
+    ])
+    expect(series).toEqual([
+      { date: '2026-08-01', 'study/doc': 2, 'study/note': 1 },
+      { date: '2026-08-02', 'study/doc': 3 },
+    ])
+    expect(seriesKeys).toEqual([
+      { key: 'study/doc', label: 'study/doc' },
+      { key: 'study/note', label: 'study/note' },
+    ])
+    expect(total).toBe(6)
+  })
+
+  it('returns an empty summary for no data', () => {
+    expect(recordGrowthSeries([])).toEqual({
+      series: [],
+      seriesKeys: [],
+      total: 0,
+    })
+  })
+})
+
 describe('sumAuditByEntityType', () => {
   it('sums counts across buckets and actions, busiest entity type first', () => {
     const bars = sumAuditByEntityType([
@@ -142,5 +171,23 @@ describe('sumAuditByEntityType', () => {
 
   it('returns an empty list for no data', () => {
     expect(sumAuditByEntityType([])).toEqual([])
+  })
+})
+
+describe('sumRecordCountsBySchema', () => {
+  it('sums counts across datasets, most records first', () => {
+    const bars = sumRecordCountsBySchema([
+      { dataset: 'study', schema_name: 'doc', count: 2 },
+      { dataset: 'other', schema_name: 'doc', count: 3 },
+      { dataset: 'study', schema_name: 'note', count: 1 },
+    ])
+    expect(bars).toEqual([
+      { label: 'doc', value: 5 },
+      { label: 'note', value: 1 },
+    ])
+  })
+
+  it('returns an empty list for no data', () => {
+    expect(sumRecordCountsBySchema([])).toEqual([])
   })
 })

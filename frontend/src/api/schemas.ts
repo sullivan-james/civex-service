@@ -30,6 +30,14 @@ export interface SchemaDeleteImpact {
   record_count: number
 }
 
+export interface NameIssue {
+  kind: 'schema' | 'field'
+  schema_name: string
+  name: string
+  /** Slugified alternative; null if undecidable. */
+  suggestion: string | null
+}
+
 export interface AuditLogEntry {
   id: string
   commit_id: string | null
@@ -50,6 +58,7 @@ export interface PaginatedAuditLog {
 
 export const schemasApi = {
   list: () => api.get<Schema[]>('/schemas'),
+  lint: () => api.get<NameIssue[]>('/schemas/lint'),
   get: (name: string) => api.get<Schema>(`/schemas/${name}`),
   getDeleteImpact: (name: string) =>
     api.get<SchemaDeleteImpact>(`/schemas/${name}/delete-impact`),

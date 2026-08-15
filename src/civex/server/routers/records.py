@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import zipfile
 from typing import Optional
 
@@ -48,17 +49,46 @@ def list_records(
     search: Optional[str] = Query(
         default=None, description="Full-text search across all field values"
     ),
-    where: list[str] = Query(default=[]),
+    where: list[str] = Query(
+        default=[],
+        description="Simple equality filter, repeatable: 'field=value'. "
+        "AND-combined with each other and with 'filter'. Kept for backwards "
+        "compatibility -- prefer 'filter' for anything beyond plain equality.",
+    ),
+    filter_: Optional[str] = Query(
+        default=None,
+        alias="filter",
+        description="JSON-encoded filter tree, AND/OR groups of field "
+        "conditions against the base schema's own fields (joined/reference "
+        "fields aren't supported here). "
+        'Leaf: {"field": "<name>", "op": "eq"|"ne"|"gt"|"gte"|'
+        '"lt"|"lte"|"contains"|"in"|"is_null", "value": ...}. '
+        'Group: {"and": [<node>, ...]} or {"or": [<node>, ...]}, nestable. '
+        "'value' must be a list for 'in' and is optional (default true) for "
+        "'is_null'. Example: "
+        '{"and": [{"field": "status", "op": "eq", "value": "active"}, '
+        '{"field": "age", "op": "gte", "value": 18}]}',
+    ),
     limit: int = Query(default=50, le=1000),
     offset: int = Query(default=0, ge=0),
     ctx: AppContext = Depends(get_ctx),
 ):
+    """List records in a collection, paginated and optionally filtered.
+
+    'where' and 'filter' can be combined -- the equality checks from 'where'
+    are AND-combined with the 'filter' tree, if both are given.
+    """
+    try:
+        filter_tree = json.loads(filter_) if filter_ else None
+    except json.JSONDecodeError as e:
+        raise HTTPException(422, detail=f"Invalid 'filter' JSON: {e}")
     try:
         items = ctx.record_svc.find(
             dataset_name,
             schema_name=schema,
             parent_record_id=parent_record_id or None,
             filters=where,
+            filter_tree=filter_tree,
             search=search or None,
             limit=limit,
             offset=offset,
@@ -68,9 +98,10 @@ def list_records(
             schema_name=schema,
             parent_record_id=parent_record_id or None,
             filters=where,
+            filter_tree=filter_tree,
             search=search or None,
         )
-    except (NotFoundError, ValueError) as e:
+    except (NotFoundError, ValueError, ValidationError) as e:
         raise HTTPException(404 if isinstance(e, NotFoundError) else 422, detail=str(e))
     return PaginatedRecordResponse(
         items=[RecordResponse.from_dto(r) for r in items],
@@ -254,13 +285,27 @@ def delete_all_records(
 @router.get("/collections/{collection_name}/export.csv")
 def export_records_csv(
     collection_name: str,
+    schema: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(
+        default=None, description="Full-text search across all field values"
+    ),
+    where: list[str] = Query(default=[]),
     ctx: AppContext = Depends(get_ctx),
 ):
-    """Export all records in a collection as a CSV file."""
+    """Export records in a collection as a CSV file, honoring the same
+    schema/where/search filters as the record list endpoint."""
     try:
-        records = ctx.record_svc.find(collection_name, limit=100_000)
+        records = ctx.record_svc.find(
+            collection_name,
+            schema_name=schema,
+            filters=where,
+            search=search or None,
+            limit=100_000,
+        )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(422, detail=str(e))
 
     # Gather unique field names in encounter order across all records
     field_names: list[str] = []
