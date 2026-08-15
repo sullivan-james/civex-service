@@ -20,6 +20,26 @@ export interface PaginatedRecords {
   limit: number
 }
 
+export interface AuditLogEntry {
+  id: string
+  commit_id: string | null
+  action: string
+  entity_type: string
+  entity_id: string
+  /** Full record snapshot before the change (record id/data/timestamps). Null on create. */
+  old_data: Record<string, unknown> | null
+  /** Full record snapshot after the change. Null on delete. */
+  new_data: Record<string, unknown> | null
+  timestamp: string
+}
+
+export interface PaginatedAuditLog {
+  items: AuditLogEntry[]
+  total: number
+  offset: number
+  limit: number
+}
+
 export interface ListParams {
   schema?: string
   parent_record_id?: string
@@ -91,4 +111,7 @@ export const recordsApi = {
   restore: (id: string) => api.post<CivexRecord>(`/records/${id}/restore`, {}),
 
   purge: (id: string) => api.delete<void>(`/records/${id}/purge`),
+
+  audit: (id: string, limit = 50) =>
+    api.get<PaginatedAuditLog>(`/records/${id}/audit?limit=${limit}`),
 }
