@@ -5,6 +5,8 @@ import {
   PluginFailuresWidget,
   DurationDistributionWidget,
   TriggerBreakdownWidget,
+  AuditActivityWidget,
+  AuditEntityBreakdownWidget,
   AiTokenUsageWidget,
 } from '../components/analytics'
 import { useAnalyticsFilters } from '../hooks/useAnalyticsFilters'
@@ -24,10 +26,26 @@ const TRIGGER_OPTIONS = [
   { value: 'manual', label: 'Manual' },
 ]
 
-/** Workflow reliability dashboard: success/failure rate, failures by
- * plugin, step duration distribution, and runs by trigger -- each widget
- * summarizes over the shared, URL-synced filter bar and links out to the
- * Runs view for row-level detail rather than duplicating it here. */
+const ENTITY_TYPE_OPTIONS = [
+  { value: 'record', label: 'Record' },
+  { value: 'schema', label: 'Schema' },
+  { value: 'field', label: 'Field' },
+  { value: 'dataset', label: 'Dataset' },
+]
+
+const ACTION_OPTIONS = [
+  { value: 'create', label: 'Create' },
+  { value: 'update', label: 'Update' },
+  { value: 'delete', label: 'Delete' },
+  { value: 'purge', label: 'Purge' },
+]
+
+/** Analytics dashboard: workflow reliability (success/failure rate,
+ * failures by plugin, step duration distribution, runs by trigger),
+ * activity/audit trail (events over time and by entity type), and AI
+ * usage -- each widget summarizes over the shared, URL-synced filter bar
+ * and links out to the Runs view for row-level detail rather than
+ * duplicating it here. */
 export default function AnalyticsPage() {
   const { filters, setFilters, resetFilters } = useAnalyticsFilters()
   const { data: workflows } = useWorkflows()
@@ -36,7 +54,7 @@ export default function AnalyticsPage() {
   return (
     <Page
       title="Analytics"
-      description="Workflow reliability and usage over the selected range"
+      description="Workflow reliability, activity, and usage over the selected range"
     >
       <AnalyticsFilterBar
         filters={filters}
@@ -52,6 +70,8 @@ export default function AnalyticsPage() {
         }))}
         statusOptions={STATUS_OPTIONS}
         triggerOptions={TRIGGER_OPTIONS}
+        entityTypeOptions={ENTITY_TYPE_OPTIONS}
+        actionOptions={ACTION_OPTIONS}
       />
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -59,6 +79,8 @@ export default function AnalyticsPage() {
         <PluginFailuresWidget filters={filters} />
         <DurationDistributionWidget filters={filters} />
         <TriggerBreakdownWidget filters={filters} />
+        <AuditActivityWidget filters={filters} />
+        <AuditEntityBreakdownWidget filters={filters} />
       </div>
       <AiTokenUsageWidget filters={filters} />
     </Page>

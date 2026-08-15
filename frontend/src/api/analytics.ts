@@ -57,6 +57,18 @@ export interface TriggerBreakdown {
   items: TriggerBreakdownPoint[]
 }
 
+export interface AuditEventPoint {
+  bucket: string
+  action: string
+  entity_type: string
+  count: number
+}
+
+export interface AuditEventCounts {
+  bucket: string
+  items: AuditEventPoint[]
+}
+
 export interface TokenUsageBucket {
   bucket: string
   provider: string
@@ -85,6 +97,11 @@ export const analyticsApi = {
     ),
   jobTriggerBreakdown: (filters: AnalyticsFiltersState) =>
     api.get<TriggerBreakdown>(`/analytics/jobs/by-trigger?${qs(filters)}`),
+  /** Audit log entry counts over time, broken out by action + entity_type.
+   * `AuditLog` has no actor/user field, so there's no per-user variant of
+   * this call. */
+  auditEventCounts: (filters: AnalyticsFiltersState) =>
+    api.get<AuditEventCounts>(`/analytics/audit/events?${qs(filters)}`),
   /** AI provider token usage over time, broken out by provider and model.
    * `provider`/`model` narrow to a single provider/model -- omit either to
    * include every value for that dimension. */

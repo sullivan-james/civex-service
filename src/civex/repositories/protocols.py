@@ -276,7 +276,11 @@ class AuditRepository(Protocol):
         new_data: dict | None,
     ) -> None: ...
     def event_counts_by_period(
-        self, start: datetime | None, end: datetime | None
+        self,
+        start: datetime | None,
+        end: datetime | None,
+        entity_type: str | None = None,
+        action: str | None = None,
     ) -> list[AuditEventRow]: ...
 
 
