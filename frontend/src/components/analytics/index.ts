@@ -24,3 +24,8 @@ export {
   durationHistogramFixtureBins,
   durationHistogramFixturePercentiles,
 } from './fixtures'
+export {
+  AnalyticsFilterBar,
+  type AnalyticsFilterBarProps,
+  type AnalyticsFilterOption,
+} from './AnalyticsFilterBar'
