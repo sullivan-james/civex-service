@@ -82,6 +82,8 @@ class SchemaDTO:
     display_fields: list[str] = field(default_factory=list)
     # Free-text display name; None means "derive one from name".
     label: str | None = None
+    # Soft-delete marker; None means live. See SchemaRepository.delete/restore.
+    deleted_at: datetime | None = None
 
     @property
     def display_name(self) -> str:
@@ -97,6 +99,7 @@ class SchemaDTO:
             "parent_id": str(self.parent_id) if self.parent_id else None,
             "display_fields": self.display_fields,
             "created_at": self.created_at.isoformat(),
+            "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
 
     @classmethod
@@ -109,6 +112,7 @@ class SchemaDTO:
             parent_id=uuid.UUID(d["parent_id"]) if d.get("parent_id") else None,
             display_fields=d.get("display_fields") or [],
             created_at=datetime.fromisoformat(d["created_at"]),
+            deleted_at=_parse_dt(d.get("deleted_at")),
         )
 
 
@@ -155,6 +159,8 @@ class DatasetDTO:
     description: str | None
     record_count: int
     created_at: datetime
+    # Soft-delete marker; None means live. See DatasetRepository.delete/restore.
+    deleted_at: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
         # record_count excluded — it's a computed value, not stored on the entity
@@ -163,6 +169,7 @@ class DatasetDTO:
             "name": self.name,
             "description": self.description,
             "created_at": self.created_at.isoformat(),
+            "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
 
     @classmethod
@@ -173,6 +180,7 @@ class DatasetDTO:
             description=d.get("description"),
             record_count=0,
             created_at=datetime.fromisoformat(d["created_at"]),
+            deleted_at=_parse_dt(d.get("deleted_at")),
         )
 
 
@@ -219,6 +227,8 @@ class RecordDTO:
     natural_name: str | None = (
         None  # first meaningful field value; computed by RecordService
     )
+    # Soft-delete marker; None means live. See RecordRepository.delete/restore.
+    deleted_at: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
         # schema_name excluded — denormalized display field, not stored on the entity
@@ -232,6 +242,7 @@ class RecordDTO:
             "data": self.data,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
+            "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
 
     @classmethod
@@ -247,6 +258,7 @@ class RecordDTO:
             data=d.get("data") or {},
             created_at=datetime.fromisoformat(d["created_at"]),
             updated_at=datetime.fromisoformat(d["updated_at"]),
+            deleted_at=_parse_dt(d.get("deleted_at")),
         )
 
 

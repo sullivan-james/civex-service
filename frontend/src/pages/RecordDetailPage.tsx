@@ -563,7 +563,8 @@ export default function RecordDetailPage() {
           <div>
             <p className="text-sm font-medium text-fg">Delete this record</p>
             <p className="text-xs text-fg-muted">
-              Permanently removes this record and all its children.
+              Moves this record (and its children) to Recently Deleted — restore
+              it any time before it's permanently purged.
             </p>
           </div>
           {confirmDelete ? (

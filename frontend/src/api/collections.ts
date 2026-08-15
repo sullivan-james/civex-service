@@ -5,6 +5,8 @@ export interface Collection {
   name: string
   description: string | null
   record_count: number
+  /** When this collection was soft-deleted. Null means live. */
+  deleted_at: string | null
 }
 
 export const collectionsApi = {
@@ -15,4 +17,8 @@ export const collectionsApi = {
   update: (name: string, body: { rename?: string; description?: string }) =>
     api.patch<Collection>(`/collections/${name}`, body),
   delete: (name: string) => api.delete<void>(`/collections/${name}`),
+  listDeleted: () => api.get<Collection[]>('/collections/deleted'),
+  restore: (name: string) =>
+    api.post<Collection>(`/collections/${name}/restore`, {}),
+  purge: (name: string) => api.delete<void>(`/collections/${name}/purge`),
 }

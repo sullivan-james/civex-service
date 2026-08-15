@@ -92,6 +92,7 @@ nav:
   - Guides:
       - Schemas & fields: guides/schemas-and-fields.md
       - Collections & records: guides/collections-and-records.md
+      - Deleting & restoring data: guides/deleting-and-restoring.md
       - Files: guides/files.md
       - Workflows: guides/workflows.md
       - Automation: guides/automation.md
@@ -120,6 +121,7 @@ nav:
           - civex remote: reference/cli/remote.md
           - civex schema: reference/cli/schema.md
           - civex store: reference/cli/store.md
+          - civex trash: reference/cli/trash.md
           - civex workflow: reference/cli/workflow.md
           - Plumbing commands: reference/cli/plumbing.md
       - Plugins:

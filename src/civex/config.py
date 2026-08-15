@@ -55,6 +55,15 @@ class PluginsConfig:
 
 
 @dataclass
+class RetentionConfig:
+    # Soft-deleted schemas/collections/records are eligible for permanent
+    # purge once this many days have passed since deletion. Purging itself
+    # is a separate, explicit action (`civex trash purge` / the API) --
+    # this only controls what counts as "eligible".
+    purge_after_days: int = 30
+
+
+@dataclass
 class UIConfig:
     # Surfaces the Terminal/YAML-workflow-editor/plugin-editor nav group by
     # default. Off for new projects — those are power-user escape hatches,
@@ -117,6 +126,7 @@ class Config:
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
     plugins: PluginsConfig = field(default_factory=PluginsConfig)
     ui: UIConfig = field(default_factory=UIConfig)
+    retention: RetentionConfig = field(default_factory=RetentionConfig)
 
     @property
     def civex_dir(self) -> Path:
@@ -238,6 +248,11 @@ def load_config() -> Config:
     ui_data = data.get("ui", {})
     ui_cfg = UIConfig(show_advanced=bool(ui_data.get("show_advanced", False)))
 
+    retention_data = data.get("retention", {})
+    retention_cfg = RetentionConfig(
+        purge_after_days=int(retention_data.get("purge_after_days", 30)),
+    )
+
     return Config(
         project_root=root,
         db=DBConfig(
@@ -251,6 +266,7 @@ def load_config() -> Config:
         telemetry=telemetry_cfg,
         plugins=plugins_cfg,
         ui=ui_cfg,
+        retention=retention_cfg,
     )
 
 
@@ -332,6 +348,12 @@ def save_config(config: Config) -> None:
 
     if config.ui.show_advanced:
         lines += ["\n[ui]\n", "show_advanced = true\n"]
+
+    if config.retention.purge_after_days != 30:
+        lines += [
+            "\n[retention]\n",
+            f"purge_after_days = {config.retention.purge_after_days}\n",
+        ]
 
     config_path = config.civex_dir / "config.toml"
     content = "".join(lines)

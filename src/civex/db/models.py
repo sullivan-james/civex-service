@@ -95,6 +95,12 @@ class Schema(Base):
         _JSON, nullable=False, default=list, server_default="[]"
     )
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    # Soft-delete marker. NULL = live. Set instead of a hard DELETE so a
+    # schema (and, via SchemaRepository's cascade, the records typed by it)
+    # can be restored within the retention window (see RetentionConfig).
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        _UTCDateTime(), nullable=True, default=None
+    )
 
     fields: Mapped[list[Field]] = relationship(
         "Field",
@@ -148,6 +154,11 @@ class Dataset(Base):
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(String(1000))
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    # See Schema.deleted_at -- same soft-delete marker, same reason. Deleting
+    # a dataset cascades to soft-delete its records (DatasetRepository).
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        _UTCDateTime(), nullable=True, default=None
+    )
 
     records: Mapped[list[Record]] = relationship(
         "Record", back_populates="dataset", cascade="all, delete-orphan"
@@ -183,6 +194,7 @@ class Record(Base):
         Index("ix_records_dataset_schema", "dataset_id", "schema_id"),
         Index("ix_records_dataset_created", "dataset_id", "created_at"),
         Index("ix_records_dataset_parent", "dataset_id", "parent_record_id"),
+        Index("ix_records_deleted_at", "deleted_at"),
         # GIN index enables containment (@>) queries on JSONB data fields.
         # On SQLite this degrades to a plain B-tree on the JSON text column (harmless).
         Index("ix_records_data_gin", "data", postgresql_using="gin"),
@@ -203,6 +215,13 @@ class Record(Base):
     )
     search_vector: Mapped[str | None] = mapped_column(
         _TSVECTOR, nullable=True, default=None
+    )
+    # See Schema.deleted_at -- same soft-delete marker. Also set by cascade
+    # when the owning dataset or schema is deleted (see DatasetRepository /
+    # SchemaRepository), and recursively when an ancestor record is deleted
+    # (RecordService._delete_recursive).
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        _UTCDateTime(), nullable=True, default=None
     )
 
     dataset: Mapped[Dataset] = relationship("Dataset", back_populates="records")

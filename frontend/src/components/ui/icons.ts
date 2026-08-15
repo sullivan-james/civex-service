@@ -42,4 +42,5 @@ export {
   Clock,
   FileCode,
   Puzzle,
+  Trash2,
 } from 'lucide-react'

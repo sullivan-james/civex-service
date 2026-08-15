@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from civex.domain.dtos import DatasetDTO
-from civex.domain.exceptions import AlreadyExistsError, NotFoundError
+from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.repositories.protocols import AuditRepository, DatasetRepository
 
 
@@ -50,9 +50,50 @@ class DatasetService:
         return updated
 
     def delete(self, name: str) -> None:
+        """Soft-delete: the collection (and every record in it — see
+        DatasetRepository.delete) moves to Recently Deleted, reversible via
+        restore() within the retention window."""
         dataset = self.get(name)
         if self._audit:
             self._audit.log_change(
                 "delete", "dataset", dataset.id, dataset.to_dict(), None
             )
         self._datasets.delete(dataset.id)
+
+    def list_deleted(self) -> list[DatasetDTO]:
+        return self._datasets.list_deleted()
+
+    def restore(self, name: str) -> DatasetDTO:
+        """Undo delete(): the collection and the records cascade-deleted
+        with it become live again (see DatasetRepository.restore)."""
+        dataset = self._datasets.get_by_name(name, include_deleted=True)
+        if dataset is None:
+            raise NotFoundError(f"Dataset '{name}' not found")
+        if dataset.deleted_at is None:
+            raise ValidationError(f"Dataset '{name}' is not deleted")
+        restored = self._datasets.restore(dataset.id)
+        if self._audit:
+            self._audit.log_change(
+                "restore",
+                "dataset",
+                restored.id,
+                dataset.to_dict(),
+                restored.to_dict(),
+            )
+        return restored
+
+    def purge(self, name: str) -> None:
+        """Permanently remove a collection that's already in Recently
+        Deleted — a separate, explicit action from delete(). Irreversible."""
+        dataset = self._datasets.get_by_name(name, include_deleted=True)
+        if dataset is None:
+            raise NotFoundError(f"Dataset '{name}' not found")
+        if dataset.deleted_at is None:
+            raise ValidationError(
+                f"Dataset '{name}' must be deleted before it can be purged"
+            )
+        if self._audit:
+            self._audit.log_change(
+                "purge", "dataset", dataset.id, dataset.to_dict(), None
+            )
+        self._datasets.purge(dataset.id)

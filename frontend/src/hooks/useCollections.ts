@@ -52,7 +52,43 @@ export function useDeleteCollection() {
     mutationFn: collectionsApi.delete,
     onSuccess: (_data, collectionName) => {
       qc.invalidateQueries({ queryKey: ['collections'] })
-      toast.success(`Collection "${collectionName}" deleted`)
+      qc.invalidateQueries({ queryKey: ['collections-deleted'] })
+      toast.success(`Collection "${collectionName}" moved to Recently Deleted`)
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
+}
+
+export function useDeletedCollections() {
+  return useQuery({
+    queryKey: ['collections-deleted'],
+    queryFn: collectionsApi.listDeleted,
+  })
+}
+
+export function useRestoreCollection() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: collectionsApi.restore,
+    onSuccess: (restored) => {
+      qc.invalidateQueries({ queryKey: ['collections'] })
+      qc.invalidateQueries({ queryKey: ['collections-deleted'] })
+      toast.success(`Collection "${restored.name}" restored`)
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
+}
+
+export function usePurgeCollection() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: collectionsApi.purge,
+    onSuccess: (_data, collectionName) => {
+      qc.invalidateQueries({ queryKey: ['collections'] })
+      qc.invalidateQueries({ queryKey: ['collections-deleted'] })
+      toast.success(`Collection "${collectionName}" permanently deleted`)
     },
     onError: (err) => toast.error(errorMessage(err)),
   })

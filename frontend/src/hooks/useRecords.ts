@@ -77,7 +77,44 @@ export function useDeleteRecord(datasetName: string) {
       qc.invalidateQueries({ queryKey: ['records', datasetName] })
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
       qc.invalidateQueries({ queryKey: ['collections'] })
-      toast.success('Record deleted')
+      qc.invalidateQueries({ queryKey: ['records-deleted'] })
+      toast.success('Record moved to Recently Deleted')
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
+}
+
+export function useDeletedRecords(datasetName?: string) {
+  return useQuery({
+    queryKey: ['records-deleted', datasetName],
+    queryFn: () => recordsApi.listDeleted(datasetName),
+  })
+}
+
+export function useRestoreRecord() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: recordsApi.restore,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['records'] })
+      qc.invalidateQueries({ queryKey: ['record-counts'] })
+      qc.invalidateQueries({ queryKey: ['collections'] })
+      qc.invalidateQueries({ queryKey: ['records-deleted'] })
+      toast.success('Record restored')
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
+}
+
+export function usePurgeRecord() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: recordsApi.purge,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['records-deleted'] })
+      toast.success('Record permanently deleted')
     },
     onError: (err) => toast.error(errorMessage(err)),
   })

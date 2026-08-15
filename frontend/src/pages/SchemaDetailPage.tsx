@@ -54,15 +54,15 @@ function describeDeleteImpact(childCount: number, recordCount: number): string {
   const records = `${recordCount.toLocaleString()} record${recordCount === 1 ? '' : 's'}`
   const children = `${childCount} child type${childCount === 1 ? '' : 's'}`
   if (childCount > 0 && recordCount > 0) {
-    return `This record type has ${children} and ${records}. Deleting it will also delete those records.`
+    return `Deleting it will also delete ${records} typed by it. This record type has ${children} that inherit from it — they'll keep working, pointing at a hidden parent, until it's restored.`
   }
   if (childCount > 0) {
-    return `This record type has ${children} that inherit from it. Deleting it will also delete those schemas.`
+    return `This record type has ${children} that inherit from it — they'll keep working, pointing at a hidden parent, until it's restored.`
   }
   if (recordCount > 0) {
     return `Deleting it will also delete ${records}.`
   }
-  return 'This cannot be undone. All field definitions will be removed.'
+  return "It moves to Recently Deleted and can be restored until it's purged."
 }
 
 // --- Inline metadata editor ---
@@ -616,7 +616,8 @@ export default function SchemaDetailPage() {
           <div>
             <p className="text-sm font-medium text-fg">Delete this schema</p>
             <p className="text-xs text-fg-muted">
-              This cannot be undone. All field definitions will be removed.
+              Moves this schema (and the records typed by it) to Recently
+              Deleted — restore it any time before it's permanently purged.
             </p>
           </div>
           <Button
@@ -656,31 +657,6 @@ export default function SchemaDetailPage() {
           const highImpact =
             impactReady &&
             (childCount > 0 || recordCount > HIGH_IMPACT_RECORD_THRESHOLD)
-          // Only offer "undo" when nothing besides the schema itself was
-          // lost -- with dependents gone too there's nothing safe to recreate.
-          const canUndo = impactReady && childCount === 0 && recordCount === 0
-
-          const recreateDeletedSchema = async () => {
-            await schemasApi.create({
-              name: schema.name,
-              label: schema.label ?? undefined,
-              description: schema.description ?? undefined,
-              parent: parentSchema?.name,
-              fields: schema.fields.map((f) => ({
-                name: f.name,
-                label: f.label ?? undefined,
-                type: f.type,
-                required: f.required,
-                restrictions: f.restrictions,
-                default: f.default,
-              })),
-            })
-            if (schema.display_fields.length) {
-              await schemasApi.update(schema.name, {
-                display_fields: schema.display_fields,
-              })
-            }
-          }
 
           return (
             <ConfirmDialog
@@ -715,7 +691,7 @@ export default function SchemaDetailPage() {
                 deleteSchema.mutate(
                   {
                     name: schema.name,
-                    undo: canUndo ? recreateDeletedSchema : undefined,
+                    undo: () => schemasApi.restore(schema.name),
                   },
                   { onSuccess: () => navigate('/schemas') },
                 )

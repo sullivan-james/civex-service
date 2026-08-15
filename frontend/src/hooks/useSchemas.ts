@@ -103,7 +103,8 @@ export function useDeleteSchema() {
       schemasApi.delete(vars.name),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['schemas'] })
-      toast.success(`Schema "${vars.name}" deleted`, {
+      qc.invalidateQueries({ queryKey: ['schemas-deleted'] })
+      toast.success(`Schema "${vars.name}" moved to Recently Deleted`, {
         action: vars.undo
           ? {
               label: 'Undo',
@@ -111,6 +112,7 @@ export function useDeleteSchema() {
                 vars.undo!().then(
                   () => {
                     qc.invalidateQueries({ queryKey: ['schemas'] })
+                    qc.invalidateQueries({ queryKey: ['schemas-deleted'] })
                     toast.success(`Schema "${vars.name}" restored`)
                   },
                   (err) => toast.error(errorMessage(err)),
@@ -119,6 +121,41 @@ export function useDeleteSchema() {
             }
           : undefined,
       })
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
+}
+
+export function useDeletedSchemas() {
+  return useQuery({
+    queryKey: ['schemas-deleted'],
+    queryFn: schemasApi.listDeleted,
+  })
+}
+
+export function useRestoreSchema() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: schemasApi.restore,
+    onSuccess: (restored) => {
+      qc.invalidateQueries({ queryKey: ['schemas'] })
+      qc.invalidateQueries({ queryKey: ['schemas-deleted'] })
+      toast.success(`Schema "${restored.name}" restored`)
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
+}
+
+export function usePurgeSchema() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: schemasApi.purge,
+    onSuccess: (_data, schemaName) => {
+      qc.invalidateQueries({ queryKey: ['schemas'] })
+      qc.invalidateQueries({ queryKey: ['schemas-deleted'] })
+      toast.success(`Schema "${schemaName}" permanently deleted`)
     },
     onError: (err) => toast.error(errorMessage(err)),
   })

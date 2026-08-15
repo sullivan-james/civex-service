@@ -10,11 +10,12 @@ A **collection** is a named container for records. One project might have a sing
     civex collection create study-2024 --description "Brazil field season 2024"
     civex collection list
     civex collection show study-2024
-    civex collection delete study-2024   # also deletes all records inside
+    civex collection delete study-2024   # moves it + every record inside to Recently Deleted
+    civex collection restore study-2024  # undoes it
     ```
 
 === "Web UI"
-    Go to **Collections → New collection**. On a collection's detail page, **Delete collection** removes it and every record inside.
+    Go to **Collections → New collection**. On a collection's detail page, **Delete collection** moves it and every record inside to Recently Deleted — see [Deleting & restoring data](deleting-and-restoring.md).
 
 ## Adding records
 
@@ -85,6 +86,7 @@ Every record has a UUID. You can refer to any record by its full UUID or by any 
 === "CLI"
     ```bash
     civex record delete <record-id>
+    civex record restore <record-id>     # undo, within the retention window
 
     # Delete every record in a collection (optionally filtered by schema)
     civex record delete-all study-2024 --schema trial
@@ -92,6 +94,8 @@ Every record has a UUID. You can refer to any record by its full UUID or by any 
 
 === "Web UI"
     Select one or more rows in a collection's record list and click **Delete**, or use **Delete all** (scoped to the current schema filter) on the collection's detail page.
+
+Deleting a record moves it (and its children, if any) to **Recently Deleted** rather than removing it outright — see [Deleting & restoring data](deleting-and-restoring.md).
 
 ## Exporting and restoring
 

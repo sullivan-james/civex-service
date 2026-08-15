@@ -222,7 +222,7 @@ class RecordService:
     def _names_to_ids(
         self, data: dict[str, Any], schema_id: uuid.UUID
     ) -> dict[str, Any]:
-        schema = self._schema_svc._repo.get_by_id(schema_id)
+        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
         if schema is None:
             return data
         name_map = self._schema_svc.name_to_id_map(schema)
@@ -231,14 +231,14 @@ class RecordService:
     def _ids_to_names(
         self, data: dict[str, Any], schema_id: uuid.UUID
     ) -> dict[str, Any]:
-        schema = self._schema_svc._repo.get_by_id(schema_id)
+        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
         if schema is None:
             return data
         id_map = self._schema_svc.id_to_name_map(schema)
         return {id_map.get(k, k): v for k, v in data.items()}
 
     def _with_names(self, dto: RecordDTO) -> RecordDTO:
-        schema = self._schema_svc._repo.get_by_id(dto.schema_id)
+        schema = self._schema_svc._repo.get_by_id(dto.schema_id, include_deleted=True)
         if schema is None:
             return dataclasses.replace(dto)
         id_map = self._schema_svc.id_to_name_map(schema)
@@ -251,7 +251,7 @@ class RecordService:
         self, data: dict[str, Any], schema_id: uuid.UUID
     ) -> dict[str, Any]:
         """For any field with a default_value that is absent from data, insert the default."""
-        schema = self._schema_svc._repo.get_by_id(schema_id)
+        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
         if schema is None:
             return data
         all_fields = self._schema_svc.collect_fields(schema)
@@ -336,7 +336,7 @@ class RecordService:
 
     def _validate_data(self, data: dict[str, Any], schema_id: uuid.UUID) -> None:
         """Validate all field values in data against their restrictions."""
-        schema = self._schema_svc._repo.get_by_id(schema_id)
+        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
         if schema is None:
             return
         fields_by_name = {
@@ -401,7 +401,9 @@ class RecordService:
                 raise ValidationError(
                     f"Parent record must belong to dataset '{dataset_name}'"
                 )
-            expected_parent = self._schema_svc._repo.get_by_id(schema.parent_id)
+            expected_parent = self._schema_svc._repo.get_by_id(
+                schema.parent_id, include_deleted=True
+            )
             if parent_record.schema_id != schema.parent_id:
                 raise ValidationError(
                     f"Parent record uses schema '{parent_record.schema_name}', "
@@ -624,6 +626,67 @@ class RecordService:
             self._delete_recursive(r.id)
             deleted += 1
         return deleted
+
+    def list_deleted(self, dataset_name: str | None = None) -> list[RecordDTO]:
+        dataset_id = None
+        if dataset_name:
+            dataset = self._datasets.get_by_name(dataset_name)
+            if not dataset:
+                raise NotFoundError(f"Dataset '{dataset_name}' not found")
+            dataset_id = dataset.id
+        return [self._with_names(r) for r in self._records.list_deleted(dataset_id)]
+
+    def restore(self, record_id: str) -> RecordDTO:
+        """Undo delete(): the record and every descendant cascade-deleted
+        with it (see _restore_recursive) become live again."""
+        record = self._records.get_by_prefix(record_id, include_deleted=True)
+        if record is None:
+            raise NotFoundError(f"Record '{record_id}' not found")
+        if record.deleted_at is None:
+            raise ValidationError(f"Record '{record_id}' is not deleted")
+        self._restore_recursive(record.id)
+        return self.get(str(record.id))
+
+    def purge(self, record_id: str) -> None:
+        """Permanently remove a record (and its cascade-deleted descendants)
+        that's already in Recently Deleted — a separate, explicit action
+        from delete(). Irreversible."""
+        record = self._records.get_by_prefix(record_id, include_deleted=True)
+        if record is None:
+            raise NotFoundError(f"Record '{record_id}' not found")
+        if record.deleted_at is None:
+            raise ValidationError(
+                f"Record '{record_id}' must be deleted before it can be purged"
+            )
+        self._purge_recursive(record.id)
+
+    def _restore_recursive(self, id: uuid.UUID) -> None:
+        for child in self._records.list_children(id, include_deleted=True):
+            if child.deleted_at is not None:
+                self._restore_recursive(child.id)
+        record_dto = self._records.get_by_id(id, include_deleted=True)
+        restored = self._records.restore(id)
+        if self._audit and record_dto:
+            old_named = dataclasses.replace(
+                record_dto, schema_name=self._with_names(record_dto).schema_name
+            )
+            self._audit.log_change(
+                "restore",
+                "record",
+                id,
+                old_named.to_dict(),
+                self._with_names(restored).to_dict(),
+            )
+
+    def _purge_recursive(self, id: uuid.UUID) -> None:
+        for child in self._records.list_children(id, include_deleted=True):
+            self._purge_recursive(child.id)
+        record_dto = self._records.get_by_id(id, include_deleted=True)
+        if self._audit and record_dto:
+            self._audit.log_change(
+                "purge", "record", id, self._with_names(record_dto).to_dict(), None
+            )
+        self._records.purge(id)
 
     def _delete_recursive(self, id: uuid.UUID) -> None:
         for child in self._records.list_children(id):
