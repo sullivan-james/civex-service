@@ -129,6 +129,7 @@ export function useUpdateRecord() {
     },
     onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: ['record', vars.id] })
+      qc.invalidateQueries({ queryKey: ['record-audit', vars.id] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
     },
   })
@@ -145,6 +146,7 @@ export function useDeleteRecord(datasetName: string) {
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
       qc.invalidateQueries({ queryKey: ['collections'] })
       qc.invalidateQueries({ queryKey: ['records-deleted'] })
+      qc.invalidateQueries({ queryKey: ['record-audit', vars.id] })
       toast.success('Record moved to Recently Deleted', {
         action: vars.undo
           ? {
@@ -183,11 +185,12 @@ export function useRestoreRecord() {
   const toast = useToast()
   return useMutation({
     mutationFn: recordsApi.restore,
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: ['records'] })
       qc.invalidateQueries({ queryKey: ['record-counts'] })
       qc.invalidateQueries({ queryKey: ['collections'] })
       qc.invalidateQueries({ queryKey: ['records-deleted'] })
+      qc.invalidateQueries({ queryKey: ['record-audit', id] })
       toast.success('Record restored')
     },
     onError: (err) => toast.error(errorMessage(err)),
@@ -221,6 +224,14 @@ export function useDeleteManyRecords(datasetName: string) {
       )
     },
     onError: (err) => toast.error(errorMessage(err)),
+  })
+}
+
+export function useRecordAudit(recordId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['record-audit', recordId],
+    queryFn: () => recordsApi.audit(recordId!),
+    enabled: !!recordId,
   })
 }
 
