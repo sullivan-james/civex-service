@@ -7,6 +7,7 @@ import {
   useCreateRecord,
   useDeleteRecord,
 } from '../hooks/useRecords'
+import { recordsApi } from '../api/records'
 import { useCollection } from '../hooks/useCollections'
 import { useSchemas } from '../hooks/useSchemas'
 import { useWorkflows, useJobs } from '../hooks/useWorkflows'
@@ -509,7 +510,12 @@ export default function RecordDetailPage() {
               schemaName={schemaName}
               schema={schemas?.find((s) => s.name === schemaName)}
               records={recs}
-              onDelete={(childId) => deleteRecord.mutate(childId)}
+              onDelete={(childId) =>
+                deleteRecord.mutate({
+                  id: childId,
+                  undo: () => recordsApi.restore(childId),
+                })
+              }
             />
           ))}
         </div>
@@ -574,14 +580,20 @@ export default function RecordDetailPage() {
                 variant="danger"
                 size="sm"
                 onClick={() =>
-                  deleteRecord.mutate(record.id, {
-                    onSuccess: () =>
-                      navigate(
-                        collection
-                          ? `/collections/${record.dataset_id}`
-                          : '/collections',
-                      ),
-                  })
+                  deleteRecord.mutate(
+                    {
+                      id: record.id,
+                      undo: () => recordsApi.restore(record.id),
+                    },
+                    {
+                      onSuccess: () =>
+                        navigate(
+                          collection
+                            ? `/collections/${record.dataset_id}`
+                            : '/collections',
+                        ),
+                    },
+                  )
                 }
                 disabled={deleteRecord.isPending}
               >
