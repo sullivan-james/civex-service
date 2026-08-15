@@ -5,6 +5,7 @@ import { useRecords } from '../../hooks/useRecords'
 import { Button, Badge, Field, Input, Select, FormError } from '../ui'
 import { ArrowUp, ArrowRight, ScanText } from '../ui/icons'
 import { DynamicField } from './DynamicField'
+import { RecordSearchPicker } from './RecordSearchPicker'
 import { datetimeLocalToUTC } from '../../utils/dates'
 import { displayLabel } from '../../utils/naming'
 import { errorMessage } from '../../lib/errors'
@@ -301,15 +302,6 @@ const EXTRACTABLE_TYPES = new Set([
   'datetime',
 ])
 
-function recordSummary(data: Record<string, unknown>, schema: Schema): string {
-  const parts = schema.fields
-    .filter((f) => f.type !== 'file' && f.type !== 'boolean')
-    .slice(0, 2)
-    .map((f) => data[f.name])
-    .filter((v) => v !== undefined && v !== '')
-  return parts.length ? parts.join(' · ') : ''
-}
-
 export function RecordForm({
   schemas,
   datasetName,
@@ -336,11 +328,13 @@ export function RecordForm({
       ? schemas.find((s) => s.id === schema.parent_id)
       : null
 
+  // Only need to know whether *any* parent-schema records exist — the
+  // picker itself searches on demand rather than listing every candidate.
   const { data: parentPage } = useRecords(
     datasetName,
-    parentSchema ? { schema: parentSchema.name, limit: 200 } : undefined,
+    parentSchema ? { schema: parentSchema.name, limit: 1 } : undefined,
   )
-  const parentCandidates = parentPage?.items ?? []
+  const hasParentCandidates = (parentPage?.total ?? 0) > 0
 
   function handleSchemaChange(id: string) {
     setSelectedSchemaId(id)
@@ -413,7 +407,7 @@ export function RecordForm({
 
       {/* Parent record selector */}
       {parentSchema &&
-        (parentCandidates.length === 0 ? (
+        (!hasParentCandidates ? (
           <div className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
               Parent record
@@ -437,26 +431,13 @@ export function RecordForm({
               </>
             }
           >
-            <Select
-              value={parentRecordId}
-              onChange={(e) => setParentRecordId(e.target.value)}
+            <RecordSearchPicker
+              schemaName={parentSchema.name}
+              value={parentRecordId || undefined}
+              onChange={(id) => setParentRecordId(id ?? '')}
+              placeholder={`Search ${displayLabel(parentSchema.name, parentSchema.label)} records…`}
               className="w-full max-w-sm"
-            >
-              <option value="">
-                — Select a {displayLabel(parentSchema.name, parentSchema.label)}{' '}
-                record —
-              </option>
-              {parentCandidates.map((r) => {
-                const label = recordSummary(r.data, parentSchema)
-                return (
-                  <option key={r.id} value={r.id}>
-                    {label
-                      ? `${label} (${r.id.slice(0, 8)})`
-                      : r.id.slice(0, 8)}
-                  </option>
-                )
-              })}
-            </Select>
+            />
           </Field>
         ))}
 
@@ -537,7 +518,7 @@ export function RecordForm({
           disabled={
             isPending ||
             (!!parentSchema && !parentRecordId) ||
-            (!!parentSchema && parentCandidates.length === 0)
+            (!!parentSchema && !hasParentCandidates)
           }
         >
           {isPending ? 'Adding…' : 'Add record'}
