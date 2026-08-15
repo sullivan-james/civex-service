@@ -22,6 +22,7 @@ from civex.domain.dtos import (
     SchemaDTO,
     WorkflowJobDTO,
 )
+from civex.domain.filters import FilterNode
 
 # (day, dataset_name, schema_name, count) -- see LocalRecordRepository.growth_by_period
 RecordGrowthRow = tuple[date, str, str, int]
@@ -131,6 +132,7 @@ class RecordRepository(Protocol):
         search: str | None,
         offset: int,
         limit: int,
+        filter_tree: FilterNode | None = None,
     ) -> list[RecordDTO]: ...
     def count(
         self,
@@ -139,6 +141,7 @@ class RecordRepository(Protocol):
         parent_record_id: uuid.UUID | None,
         field_filters: list[tuple[str, str]],
         search: str | None,
+        filter_tree: FilterNode | None = None,
     ) -> int: ...
     def count_by_schema(self, dataset_id: uuid.UUID) -> dict[str, int]: ...
     def growth_by_period(

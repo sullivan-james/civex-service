@@ -5,13 +5,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import cast, func, literal, or_, String
+from sqlalchemy import and_, cast, func, literal, or_, String
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlalchemy.orm import Session
 
 from civex.db.models import Dataset, Record, Schema, WorkflowJob
 from civex.domain.dtos import RecordDTO
-from civex.domain.exceptions import NotFoundError
+from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.domain.filters import FilterCondition, FilterGroup, FilterNode
 from civex.repositories.local._bucketing import day_bucket
 from civex.repositories.protocols import RecordGrowthRow
 
@@ -88,6 +89,7 @@ class LocalRecordRepository:
         search: str | None,
         offset: int,
         limit: int,
+        filter_tree: FilterNode | None = None,
     ) -> list[RecordDTO]:
         q = _base_query(
             self._s,
@@ -97,6 +99,7 @@ class LocalRecordRepository:
             field_filters,
             search,
             self._pg,
+            filter_tree,
         )
         rows = q.order_by(Record.created_at).offset(offset).limit(limit).all()
         return [_to_dto(r) for r in rows]
@@ -108,6 +111,7 @@ class LocalRecordRepository:
         parent_record_id: uuid.UUID | None,
         field_filters: list[tuple[str, str]],
         search: str | None,
+        filter_tree: FilterNode | None = None,
     ) -> int:
         q = _base_query(
             self._s,
@@ -117,6 +121,7 @@ class LocalRecordRepository:
             field_filters,
             search,
             self._pg,
+            filter_tree,
         )
         return q.count()
 
@@ -310,6 +315,7 @@ def _base_query(
     field_filters: list[tuple[str, str]],
     search: str | None = None,
     is_postgres: bool = False,
+    filter_tree: FilterNode | None = None,
 ):
     q = session.query(Record).filter(
         Record.dataset_id == dataset_id, Record.deleted_at.is_(None)
@@ -331,6 +337,8 @@ def _base_query(
             # both strings and numbers to match the string filter value.
             # (Plain cast(data[key], String) would instead yield the JSON form '"S02"'.)
             q = q.filter(cast(Record.data[key].as_string(), String) == value)
+    if filter_tree is not None:
+        q = q.filter(_build_filter_condition(filter_tree))
     if search:
         if is_postgres:
             q = q.filter(
@@ -339,6 +347,56 @@ def _base_query(
         else:
             q = q.filter(cast(Record.data, String).ilike(f"%{search}%"))
     return q
+
+
+def _build_filter_condition(node: FilterNode):
+    if isinstance(node, FilterGroup):
+        clauses = [_build_filter_condition(c) for c in node.conditions]
+        return and_(*clauses) if node.op == "and" else or_(*clauses)
+    return _build_leaf_condition(node)
+
+
+def _build_leaf_condition(node: FilterCondition):
+    col = Record.data[node.field]
+    if node.op == "is_null":
+        # `.as_string()` (->>` on PG, plain json_extract on SQLite) collapses
+        # "key absent" and "key present with JSON null" to the same SQL NULL
+        # on both backends -- the bare accessor doesn't: SQLite's JSON_QUOTE
+        # wrapper turns a missing key into the *string* "null" rather than
+        # SQL NULL, and PG's `->` returns a non-NULL jsonb 'null' for an
+        # explicit null value.
+        return col.as_string().is_(None) if node.value else col.as_string().isnot(None)
+    if node.op == "contains":
+        return col.as_string().ilike(f"%{node.value}%")
+    if node.op == "in":
+        return or_(*[_typed_comparison(col, "eq", v) for v in node.value])
+    return _typed_comparison(col, node.op, node.value)
+
+
+def _typed_comparison(col, op: str, value: Any):
+    """Compare a JSON field against `value`, dispatching to the JSON
+    accessor variant matching value's own type (as parsed from the filter's
+    JSON body) so e.g. 30 compares numerically rather than lexically."""
+    typed_value: Any
+    if isinstance(value, bool):
+        typed_col, typed_value = col.as_boolean(), value
+    elif isinstance(value, (int, float)):
+        typed_col, typed_value = col.as_float(), float(value)
+    else:
+        typed_col, typed_value = col.as_string(), value
+    if op == "eq":
+        return typed_col == typed_value
+    if op == "ne":
+        return typed_col != typed_value
+    if op == "gt":
+        return typed_col > typed_value
+    if op == "gte":
+        return typed_col >= typed_value
+    if op == "lt":
+        return typed_col < typed_value
+    if op == "lte":
+        return typed_col <= typed_value
+    raise ValidationError(f"Unsupported filter operator '{op}'")
 
 
 def _to_dto(row: Record) -> RecordDTO:
