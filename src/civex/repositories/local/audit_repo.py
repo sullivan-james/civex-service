@@ -99,7 +99,10 @@ class LocalAuditRepository:
         q = self._audit_query(entity_id, entity_type, commit_id, entity_ids)
         return [
             _audit_dto(r)
-            for r in q.order_by(AuditLog.timestamp.desc()).offset(offset).limit(limit).all()
+            for r in q.order_by(AuditLog.timestamp.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
         ]
 
     def count_audit(

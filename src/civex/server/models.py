@@ -402,15 +402,15 @@ class AuditLogResponse(BaseModel):
         description="Sync commit this entry was bundled into. Null until the next push.",
     )
     action: str = Field(description="One of: create, update, delete, purge.")
-    entity_type: str = Field(
-        description="One of: record, schema, field, dataset."
-    )
+    entity_type: str = Field(description="One of: record, schema, field, dataset.")
     entity_id: str
     old_data: dict[str, Any] | None = Field(
-        default=None, description="Full entity snapshot before the change. Null on create."
+        default=None,
+        description="Full entity snapshot before the change. Null on create.",
     )
     new_data: dict[str, Any] | None = Field(
-        default=None, description="Full entity snapshot after the change. Null on delete."
+        default=None,
+        description="Full entity snapshot after the change. Null on delete.",
     )
     timestamp: datetime
 

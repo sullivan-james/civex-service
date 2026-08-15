@@ -15,7 +15,8 @@ router = APIRouter(tags=["audit"])
 @router.get("/audit", response_model=PaginatedAuditLogResponse)
 def list_audit(
     entity_type: str | None = Query(
-        default=None, description="Filter to one entity type: record, schema, field, dataset."
+        default=None,
+        description="Filter to one entity type: record, schema, field, dataset.",
     ),
     entity_id: str | None = Query(
         default=None, description="Filter to a single entity's audit trail."
