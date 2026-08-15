@@ -39,9 +39,15 @@ secrets: ## Scan the repo (working tree + history) for leaked secrets
 	@command -v gitleaks >/dev/null 2>&1 || { echo "gitleaks not found — install via 'brew install gitleaks' or https://github.com/gitleaks/gitleaks#installing"; exit 1; }
 	gitleaks git --redact -v
 
+# Both commands call out to a registry (PyPI's advisory API, npm's) with no
+# client-side timeout of their own. In civex-agent's unattended runner a
+# network stall here has no human to Ctrl-C it, so it silently burns the
+# whole run's wall-clock budget instead of failing fast — confirmed live:
+# a run sat with zero output for the better part of an hour with nothing
+# to show but this step never returning.
 audit: ## Scan Python + frontend dependencies for known vulnerabilities
-	uv run pip-audit
-	cd frontend && npm audit --audit-level=high
+	timeout 120 uv run pip-audit
+	cd frontend && timeout 120 npm audit --audit-level=high
 
 migrations-check: ## Check for Alembic migration drift (what CI runs)
 	$(eval DBFILE := $(shell mktemp -u --suffix=.db))
