@@ -561,10 +561,14 @@ class RecordService:
         if schema is None:
             raise NotFoundError(f"Record '{record_id}' not found")
         fields = self._schema_svc.collect_fields(schema)
-        file_fields = [rf.field for rf in fields if rf.field.dtype in ("file", "file_list")]
+        file_fields = [
+            rf.field for rf in fields if rf.field.dtype in ("file", "file_list")
+        ]
 
         if field_name is not None:
-            target = next((rf.field for rf in fields if rf.field.name == field_name), None)
+            target = next(
+                (rf.field for rf in fields if rf.field.name == field_name), None
+            )
             if target is None:
                 raise NotFoundError(
                     f"Field '{field_name}' not found on schema '{schema.name}'"
@@ -603,7 +607,9 @@ class RecordService:
             # `filename` fallback (an unsanitised, user-supplied upload name) is not
             # -- clean it here so a "/" or ".." in it can't escape the zip entry.
             name = _UNSAFE_FILENAME_CHARS_RE.sub("_", name).strip() or "file"
-            entries.append((_unique_zip_name(name, used_names), FileRef.from_dict(ref_dict)))
+            entries.append(
+                (_unique_zip_name(name, used_names), FileRef.from_dict(ref_dict))
+            )
         return entries
 
     def update(
