@@ -57,6 +57,28 @@ export interface TriggerBreakdown {
   items: TriggerBreakdownPoint[]
 }
 
+export interface RecordCount {
+  dataset: string
+  schema_name: string
+  count: number
+}
+
+export interface RecordCounts {
+  items: RecordCount[]
+}
+
+export interface RecordGrowthPoint {
+  bucket: string
+  dataset: string
+  schema_name: string
+  count: number
+}
+
+export interface RecordGrowth {
+  bucket: string
+  items: RecordGrowthPoint[]
+}
+
 export interface TokenUsageBucket {
   bucket: string
   provider: string
@@ -75,6 +97,10 @@ function qs(filters: AnalyticsFiltersState): string {
 }
 
 export const analyticsApi = {
+  recordCounts: (filters: AnalyticsFiltersState) =>
+    api.get<RecordCounts>(`/analytics/records/counts?${qs(filters)}`),
+  recordGrowth: (filters: AnalyticsFiltersState) =>
+    api.get<RecordGrowth>(`/analytics/records/growth?${qs(filters)}`),
   jobStatusCounts: (filters: AnalyticsFiltersState) =>
     api.get<JobStatusCounts>(`/analytics/jobs/status?${qs(filters)}`),
   jobDurationStats: (filters: AnalyticsFiltersState) =>
