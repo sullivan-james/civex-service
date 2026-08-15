@@ -230,6 +230,31 @@ class LocalWorkflowJobRepository:
         rows = q.group_by(day, WorkflowJob.status).order_by(day).all()
         return [(d, s, count) for d, s, count in rows]
 
+    def trigger_counts(
+        self,
+        start: datetime | None,
+        end: datetime | None,
+        workflow_name: str | None,
+        status: str | None,
+        trigger: str | None,
+    ) -> list[tuple[str, int]]:
+        """Job counts grouped by trigger type -- backs the trigger-breakdown
+        widget. Filters directly on `workflow_jobs` columns, no join
+        needed."""
+        q = self._s.query(WorkflowJob.trigger, func.count(WorkflowJob.id))
+        if start is not None:
+            q = q.filter(WorkflowJob.created_at >= start)
+        if end is not None:
+            q = q.filter(WorkflowJob.created_at < end)
+        if workflow_name is not None:
+            q = q.filter(WorkflowJob.workflow_name == workflow_name)
+        if status is not None:
+            q = q.filter(WorkflowJob.status == status)
+        if trigger is not None:
+            q = q.filter(WorkflowJob.trigger == trigger)
+        rows = q.group_by(WorkflowJob.trigger).all()
+        return [(t, count) for t, count in rows]
+
     def step_durations(
         self,
         start: datetime | None,

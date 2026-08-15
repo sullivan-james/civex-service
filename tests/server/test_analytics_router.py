@@ -169,7 +169,18 @@ def test_job_duration_stats(client: TestClient) -> None:
     assert body["min_seconds"] is not None
     assert body["max_seconds"] is not None
     assert body["p50_seconds"] is not None
-    assert body["p95_seconds"] is not None
+    assert body["p90_seconds"] is not None
+    assert body["p99_seconds"] is not None
+    assert sum(b["count"] for b in body["bins"]) == 3
+    assert [b["label"] for b in body["bins"]] == [
+        "0-1s",
+        "1-2s",
+        "2-5s",
+        "5-10s",
+        "10-30s",
+        "30s+",
+    ]
+    assert {m["label"] for m in body["percentile_markers"]} == {"p50", "p90", "p99"}
 
     resp = client.get(
         "/api/analytics/jobs/duration", params={"plugin_id": "civex.get_field"}
@@ -183,14 +194,33 @@ def test_job_duration_stats(client: TestClient) -> None:
 def test_job_duration_stats_empty_is_all_nulls(client: TestClient) -> None:
     resp = client.get("/api/analytics/jobs/duration")
     assert resp.status_code == 200
-    assert resp.json() == {
-        "count": 0,
-        "avg_seconds": None,
-        "min_seconds": None,
-        "max_seconds": None,
-        "p50_seconds": None,
-        "p95_seconds": None,
-    }
+    body = resp.json()
+    assert body["count"] == 0
+    assert body["avg_seconds"] is None
+    assert body["min_seconds"] is None
+    assert body["max_seconds"] is None
+    assert body["p50_seconds"] is None
+    assert body["p90_seconds"] is None
+    assert body["p99_seconds"] is None
+    assert body["percentile_markers"] == []
+    assert all(b["count"] == 0 for b in body["bins"])
+
+
+def test_job_trigger_breakdown(client: TestClient) -> None:
+    _setup_schema_and_collection(client)
+    _run_workflows(client)
+
+    resp = client.get("/api/analytics/jobs/by-trigger")
+    assert resp.status_code == 200
+    by_trigger = {item["trigger"]: item["count"] for item in resp.json()["items"]}
+    # _run_workflows triggers every job manually.
+    assert by_trigger == {"manual": 3}
+
+    resp = client.get(
+        "/api/analytics/jobs/by-trigger", params={"status": "failed"}
+    )
+    by_trigger = {item["trigger"]: item["count"] for item in resp.json()["items"]}
+    assert by_trigger == {"manual": 2}
 
 
 def test_audit_event_counts_by_action_and_entity_type(client: TestClient) -> None:

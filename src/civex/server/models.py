@@ -22,11 +22,12 @@ from civex.domain.dtos import (
 from civex.services.ai_usage_service import TokenUsageBucket
 from civex.services.analytics_service import (
     AuditEventPoint,
-    DurationStats,
+    DurationDistribution,
     JobStatusPoint,
     PluginFailurePoint,
     RecordCount,
     RecordGrowthPoint,
+    TriggerBreakdownPoint,
 )
 
 
@@ -565,23 +566,52 @@ class JobStatusCountsResponse(BaseModel):
     items: list[JobStatusPointResponse]
 
 
+class DurationHistogramBinResponse(BaseModel):
+    label: str = Field(description="Duration bucket, e.g. '1-2s' or '30s+'.")
+    count: int
+
+
+class DurationPercentileMarkerResponse(BaseModel):
+    label: str = Field(description="e.g. 'p50', 'p90', 'p99'.")
+    bin_label: str = Field(
+        description="Which histogram bucket this percentile falls in."
+    )
+
+
 class JobDurationStatsResponse(BaseModel):
     count: int = Field(description="Number of step executions the stats are over.")
     avg_seconds: float | None
     min_seconds: float | None
     max_seconds: float | None
     p50_seconds: float | None
-    p95_seconds: float | None
+    p90_seconds: float | None
+    p99_seconds: float | None
+    bins: list[DurationHistogramBinResponse] = Field(
+        description="Duration distribution, bucketed into fixed-width ranges."
+    )
+    percentile_markers: list[DurationPercentileMarkerResponse] = Field(
+        description="Which bucket each of p50/p90/p99 falls in, for a chart "
+        "to draw as reference lines over `bins`."
+    )
 
     @classmethod
-    def from_dto(cls, d: DurationStats) -> JobDurationStatsResponse:
+    def from_dto(cls, d: DurationDistribution) -> JobDurationStatsResponse:
         return cls(
-            count=d.count,
-            avg_seconds=d.avg_seconds,
-            min_seconds=d.min_seconds,
-            max_seconds=d.max_seconds,
-            p50_seconds=d.p50_seconds,
-            p95_seconds=d.p95_seconds,
+            count=d.stats.count,
+            avg_seconds=d.stats.avg_seconds,
+            min_seconds=d.stats.min_seconds,
+            max_seconds=d.stats.max_seconds,
+            p50_seconds=d.stats.p50_seconds,
+            p90_seconds=d.stats.p90_seconds,
+            p99_seconds=d.stats.p99_seconds,
+            bins=[
+                DurationHistogramBinResponse(label=b.label, count=b.count)
+                for b in d.bins
+            ],
+            percentile_markers=[
+                DurationPercentileMarkerResponse(label=m.label, bin_label=m.bin_label)
+                for m in d.percentile_markers
+            ],
         )
 
 
@@ -598,6 +628,19 @@ class PluginFailurePointResponse(BaseModel):
 class PluginFailureCountsResponse(BaseModel):
     bucket: str
     items: list[PluginFailurePointResponse]
+
+
+class TriggerBreakdownPointResponse(BaseModel):
+    trigger: str = Field(description="One of: record_created, record_updated, manual.")
+    count: int
+
+    @classmethod
+    def from_dto(cls, d: TriggerBreakdownPoint) -> TriggerBreakdownPointResponse:
+        return cls(trigger=d.trigger, count=d.count)
+
+
+class TriggerBreakdownResponse(BaseModel):
+    items: list[TriggerBreakdownPointResponse]
 
 
 class AuditEventPointResponse(BaseModel):
