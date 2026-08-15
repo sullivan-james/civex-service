@@ -14,12 +14,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
 
 from civex.console import console
-from civex.db.migrate import ensure_schema_current
-from civex.sync.importer import apply_bundle
 from civex.sync.transport import SyncError, get_transport
 
 
@@ -37,6 +33,12 @@ def clone(
     ),
 ) -> None:
     """Clone a remote bare repository into a new local project."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from civex.db.migrate import ensure_schema_current
+    from civex.sync.importer import apply_bundle
+
     try:
         transport, _remote_path = get_transport(url, remote_civex=remote_civex)
     except SyncError as e:

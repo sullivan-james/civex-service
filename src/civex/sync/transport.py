@@ -21,13 +21,7 @@ import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 
-from sqlalchemy import create_engine, func
-from sqlalchemy.orm import Session
-
-from civex.db.models import Commit
 from civex.sync.bundle import SyncBundle
-from civex.sync.exporter import export_bundle
-from civex.sync.importer import apply_bundle
 
 
 class SyncError(RuntimeError):
@@ -41,6 +35,11 @@ class LocalTransport:
         self._path = bare_path.resolve()
 
     def transfer_pack(self, since_seq: int = 0) -> SyncBundle:
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        from civex.sync.exporter import export_bundle
+
         engine = create_engine(f"sqlite:///{self._path / 'civex.db'}")
         with Session(engine) as session:
             bundle = export_bundle(session, since_seq)
@@ -48,6 +47,11 @@ class LocalTransport:
         return bundle
 
     def receive_pack(self, bundle: SyncBundle) -> None:
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        from civex.sync.importer import apply_bundle
+
         engine = create_engine(f"sqlite:///{self._path / 'civex.db'}")
         with Session(engine) as session:
             apply_bundle(session, bundle)
@@ -55,6 +59,11 @@ class LocalTransport:
         engine.dispose()
 
     def get_head_seq(self) -> int:
+        from sqlalchemy import create_engine, func
+        from sqlalchemy.orm import Session
+
+        from civex.db.models import Commit
+
         engine = create_engine(f"sqlite:///{self._path / 'civex.db'}")
         with Session(engine) as session:
             seq = session.query(func.max(Commit.seq)).scalar() or 0
