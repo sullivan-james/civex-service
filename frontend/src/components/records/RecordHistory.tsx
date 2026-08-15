@@ -74,9 +74,7 @@ function HistoryEntry({ entry }: { entry: AuditLogEntry }) {
               key={field}
               className="flex flex-wrap items-center gap-1.5 text-xs text-fg-muted"
             >
-              <span className="font-medium text-fg">
-                {displayLabel(field)}
-              </span>
+              <span className="font-medium text-fg">{displayLabel(field)}</span>
               {entry.action === 'create' ? (
                 <FieldValue value={after} />
               ) : (
