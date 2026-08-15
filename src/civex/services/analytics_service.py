@@ -45,13 +45,39 @@ class PluginFailurePoint:
 
 
 @dataclass
+class TriggerBreakdownPoint:
+    trigger: str
+    count: int
+
+
+@dataclass
 class DurationStats:
     count: int
     avg_seconds: float | None
     min_seconds: float | None
     max_seconds: float | None
     p50_seconds: float | None
-    p95_seconds: float | None
+    p90_seconds: float | None
+    p99_seconds: float | None
+
+
+@dataclass
+class DurationHistogramBin:
+    label: str
+    count: int
+
+
+@dataclass
+class DurationPercentileMarker:
+    label: str
+    bin_label: str
+
+
+@dataclass
+class DurationDistribution:
+    stats: DurationStats
+    bins: list[DurationHistogramBin]
+    percentile_markers: list[DurationPercentileMarker]
 
 
 @dataclass
@@ -145,15 +171,22 @@ class AnalyticsService:
             for b, status, count in rebucket(rows, filters.bucket)
         ]
 
-    def job_duration_stats(self, filters: AnalyticsFilters) -> DurationStats:
-        """Step execution duration distribution (count/avg/min/max/p50/p95).
-        Applies `start`, `end`, `plugin_id` (matched against
-        `StepExecution.plugin`), `status` (matched against
+    def job_duration_stats(self, filters: AnalyticsFilters) -> DurationDistribution:
+        """Step execution duration distribution: summary stats
+        (count/avg/min/max/p50/p90/p99), a histogram of counts by duration
+        bucket, and which bucket each percentile falls in (for a chart to
+        draw as a reference line). Applies `start`, `end`, `plugin_id`
+        (matched against `StepExecution.plugin`), `status` (matched against
         `StepExecution.status`, e.g. "success"/"failed"/"skipped")."""
         durations = self._jobs.step_durations(
             filters.start, filters.end, filters.plugin_id, filters.status
         )
-        return _duration_stats(durations)
+        ordered = sorted(durations)
+        return DurationDistribution(
+            stats=_duration_stats(ordered),
+            bins=_duration_histogram(ordered),
+            percentile_markers=_percentile_markers(ordered),
+        )
 
     def plugin_failure_counts(
         self, filters: AnalyticsFilters
@@ -175,6 +208,22 @@ class AnalyticsService:
             PluginFailurePoint(bucket=b, plugin=plugin, count=count)
             for b, plugin, count in rows
         ]
+
+    def trigger_breakdown(
+        self, filters: AnalyticsFilters
+    ) -> list[TriggerBreakdownPoint]:
+        """Job counts grouped by trigger type (record_created /
+        record_updated / manual) -- a snapshot over the filtered range, not
+        a time series. Applies `start`, `end`, `workflow_id`, `status`,
+        `trigger` (narrows to a single trigger)."""
+        rows = self._jobs.trigger_counts(
+            filters.start,
+            filters.end,
+            filters.workflow_id,
+            filters.status,
+            filters.trigger,
+        )
+        return [TriggerBreakdownPoint(trigger=t, count=c) for t, c in rows]
 
     def audit_event_counts(self, filters: AnalyticsFilters) -> list[AuditEventPoint]:
         """Audit log entries over time, by action + entity_type. Applies
@@ -202,24 +251,27 @@ class AnalyticsService:
         )
 
 
-def _duration_stats(durations: list[float]) -> DurationStats:
-    if not durations:
+def _duration_stats(ordered: list[float]) -> DurationStats:
+    """`ordered` must already be sorted ascending -- callers share it with
+    `_duration_histogram`/`_percentile_markers` rather than each re-sorting."""
+    if not ordered:
         return DurationStats(
             count=0,
             avg_seconds=None,
             min_seconds=None,
             max_seconds=None,
             p50_seconds=None,
-            p95_seconds=None,
+            p90_seconds=None,
+            p99_seconds=None,
         )
-    ordered = sorted(durations)
     return DurationStats(
         count=len(ordered),
         avg_seconds=sum(ordered) / len(ordered),
         min_seconds=ordered[0],
         max_seconds=ordered[-1],
         p50_seconds=_percentile(ordered, 0.50),
-        p95_seconds=_percentile(ordered, 0.95),
+        p90_seconds=_percentile(ordered, 0.90),
+        p99_seconds=_percentile(ordered, 0.99),
     )
 
 
@@ -228,3 +280,45 @@ def _percentile(ordered: list[float], p: float) -> float:
     numpy/pandas dependency for four numbers."""
     index = min(len(ordered) - 1, max(0, round(p * (len(ordered) - 1))))
     return ordered[index]
+
+
+# Bucket edges (in seconds) for the duration histogram -- open-ended above
+# the last edge. Fixed rather than derived from the data's own min/max so a
+# bucket's meaning (and its position on screen) doesn't shift from one
+# filtered view to the next.
+_DURATION_BIN_EDGES: list[tuple[float, float | None, str]] = [
+    (0, 1, "0-1s"),
+    (1, 2, "1-2s"),
+    (2, 5, "2-5s"),
+    (5, 10, "5-10s"),
+    (10, 30, "10-30s"),
+    (30, None, "30s+"),
+]
+
+
+def _bin_label(seconds: float) -> str:
+    for _, hi, label in _DURATION_BIN_EDGES:
+        if hi is None or seconds < hi:
+            return label
+    return _DURATION_BIN_EDGES[-1][2]  # pragma: no cover -- last edge is open-ended
+
+
+def _duration_histogram(ordered: list[float]) -> list[DurationHistogramBin]:
+    counts = {label: 0 for _, _, label in _DURATION_BIN_EDGES}
+    for seconds in ordered:
+        counts[_bin_label(seconds)] += 1
+    return [
+        DurationHistogramBin(label=label, count=counts[label])
+        for _, _, label in _DURATION_BIN_EDGES
+    ]
+
+
+def _percentile_markers(ordered: list[float]) -> list[DurationPercentileMarker]:
+    if not ordered:
+        return []
+    return [
+        DurationPercentileMarker(
+            label=label, bin_label=_bin_label(_percentile(ordered, p))
+        )
+        for label, p in (("p50", 0.50), ("p90", 0.90), ("p99", 0.99))
+    ]

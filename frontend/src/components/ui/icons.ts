@@ -35,6 +35,7 @@ export {
   Database,
   Workflow,
   ListChecks,
+  BarChart3,
   SquareTerminal,
   PanelLeftClose,
   PanelLeftOpen,
@@ -49,5 +50,4 @@ export {
   Send,
   Square,
   PanelRightClose,
-  BarChart3,
 } from 'lucide-react'

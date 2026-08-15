@@ -35,6 +35,7 @@ import {
   Database,
   Workflow,
   ListChecks,
+  BarChart3,
   SquareTerminal,
   Puzzle,
   PanelLeftClose,
@@ -42,7 +43,6 @@ import {
   Menu,
   X,
   Trash2,
-  BarChart3,
 } from './ui/icons'
 
 declare global {

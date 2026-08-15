@@ -23,6 +23,8 @@ from civex.server.models import (
     RecordGrowthPointResponse,
     RecordGrowthResponse,
     TokenUsageBucketResponse,
+    TriggerBreakdownPointResponse,
+    TriggerBreakdownResponse,
 )
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -129,9 +131,11 @@ def job_duration_stats(
     filters: AnalyticsFilters = Depends(analytics_filters),
     ctx: AppContext = Depends(get_ctx),
 ):
-    """Step execution duration distribution (count, avg, min, max, p50,
-    p95), in seconds. Applies `start`, `end`, `plugin_id`, `status`
-    (matched against the step's own status, not the parent job's)."""
+    """Step execution duration distribution: summary stats (count, avg,
+    min, max, p50, p90, p99, in seconds), a histogram of counts by
+    duration bucket, and which bucket each percentile falls in. Applies
+    `start`, `end`, `plugin_id`, `status` (matched against the step's own
+    status, not the parent job's)."""
     stats = ctx.analytics_svc.job_duration_stats(filters)
     return JobDurationStatsResponse.from_dto(stats)
 
@@ -148,6 +152,20 @@ def plugin_failure_counts(
     return PluginFailureCountsResponse(
         bucket=filters.bucket,
         items=[PluginFailurePointResponse.from_dto(i) for i in items],
+    )
+
+
+@router.get("/jobs/by-trigger", response_model=TriggerBreakdownResponse)
+def job_trigger_breakdown(
+    filters: AnalyticsFilters = Depends(analytics_filters),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Job counts grouped by trigger type (record_created, record_updated,
+    manual) -- a snapshot over the filtered range, not a time series.
+    Applies `start`, `end`, `workflow_id`, `status`, `trigger`."""
+    items = ctx.analytics_svc.trigger_breakdown(filters)
+    return TriggerBreakdownResponse(
+        items=[TriggerBreakdownPointResponse.from_dto(i) for i in items]
     )
 
 

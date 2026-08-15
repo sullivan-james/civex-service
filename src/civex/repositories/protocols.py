@@ -32,6 +32,8 @@ JobStatusRow = tuple[date, str, int]
 PluginFailureRow = tuple[str, str, int]
 # (day, action, entity_type, count) -- see LocalAuditRepository.event_counts_by_period
 AuditEventRow = tuple[date, str, str, int]
+# (trigger, count) -- see LocalWorkflowJobRepository.trigger_counts
+TriggerCountRow = tuple[str, int]
 
 
 @runtime_checkable
@@ -237,6 +239,14 @@ class WorkflowJobRepository(Protocol):
         plugin: str | None,
         status: str | None,
     ) -> list[float]: ...
+    def trigger_counts(
+        self,
+        start: datetime | None,
+        end: datetime | None,
+        workflow_name: str | None,
+        status: str | None,
+        trigger: str | None,
+    ) -> list[TriggerCountRow]: ...
 
 
 @runtime_checkable
