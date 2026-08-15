@@ -551,3 +551,5 @@ class AnalyticsFilters:
     plugin_id: str | None = None
     status: str | None = None
     trigger: str | None = None
+    entity_type: str | None = None
+    action: str | None = None

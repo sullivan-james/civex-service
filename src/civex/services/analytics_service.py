@@ -227,8 +227,13 @@ class AnalyticsService:
 
     def audit_event_counts(self, filters: AnalyticsFilters) -> list[AuditEventPoint]:
         """Audit log entries over time, by action + entity_type. Applies
-        `start`, `end`, `bucket`."""
-        rows = self._audit.event_counts_by_period(filters.start, filters.end)
+        `start`, `end`, `bucket`, `entity_type`, `action`. There is no actor/
+        user field on `AuditLog` (see `db/models.py`), so per-user attribution
+        isn't available here -- out of scope for this widget until auth/
+        multi-user tracking lands."""
+        rows = self._audit.event_counts_by_period(
+            filters.start, filters.end, filters.entity_type, filters.action
+        )
         return [
             AuditEventPoint(
                 bucket=b, action=action, entity_type=entity_type, count=count

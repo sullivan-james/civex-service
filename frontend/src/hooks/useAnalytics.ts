@@ -43,3 +43,10 @@ export function useJobTriggerBreakdown(filters: AnalyticsFiltersState) {
     queryFn: () => analyticsApi.jobTriggerBreakdown(filters),
   })
 }
+
+export function useAuditEventCounts(filters: AnalyticsFiltersState) {
+  return useQuery({
+    queryKey: ['analytics', 'audit', 'events', filters],
+    queryFn: () => analyticsApi.auditEventCounts(filters),
+  })
+}

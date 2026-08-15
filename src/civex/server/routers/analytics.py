@@ -62,6 +62,14 @@ def analytics_filters(
         description="Workflow trigger to scope to: record_created, "
         "record_updated, or manual.",
     ),
+    entity_type: str | None = Query(
+        default=None,
+        description="Audit entity type to scope to: record, schema, field, or dataset.",
+    ),
+    action: str | None = Query(
+        default=None,
+        description="Audit action to scope to: create, update, delete, or purge.",
+    ),
 ) -> AnalyticsFilters:
     """The one query-param contract shared by every endpoint below (see
     `AnalyticsFilters`). Each endpoint's docstring says which of these
@@ -77,6 +85,8 @@ def analytics_filters(
         plugin_id=plugin_id,
         status=status,
         trigger=trigger,
+        entity_type=entity_type,
+        action=action,
     )
 
 
@@ -175,7 +185,9 @@ def audit_event_counts(
     ctx: AppContext = Depends(get_ctx),
 ):
     """Audit log entry counts over time, broken out by action and
-    entity_type. Applies `start`, `end`, `bucket`."""
+    entity_type. Applies `start`, `end`, `bucket`, `entity_type`, `action`.
+    `AuditLog` carries no actor/user field, so this endpoint has no
+    per-user breakdown."""
     items = ctx.analytics_svc.audit_event_counts(filters)
     return AuditEventCountsResponse(
         bucket=filters.bucket,

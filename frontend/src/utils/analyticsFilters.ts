@@ -18,6 +18,8 @@ export interface AnalyticsFiltersState {
   pluginId: string | null
   status: string | null
   trigger: string | null
+  entityType: string | null
+  action: string | null
 }
 
 const BUCKETS: readonly AnalyticsBucket[] = ['day', 'week', 'month']
@@ -37,6 +39,8 @@ const PARAM_KEYS: Record<keyof AnalyticsFiltersState, string> = {
   pluginId: 'plugin_id',
   status: 'status',
   trigger: 'trigger',
+  entityType: 'entity_type',
+  action: 'action',
 }
 
 /** Last 30 days, all datasets/schemas/workflows/plugins/statuses/triggers. */
@@ -53,6 +57,8 @@ export function defaultAnalyticsFilters(now: Date): AnalyticsFiltersState {
     pluginId: null,
     status: null,
     trigger: null,
+    entityType: null,
+    action: null,
   }
 }
 
@@ -85,6 +91,8 @@ export function parseAnalyticsFilters(
     pluginId: params.get(PARAM_KEYS.pluginId) || defaults.pluginId,
     status: params.get(PARAM_KEYS.status) || defaults.status,
     trigger: params.get(PARAM_KEYS.trigger) || defaults.trigger,
+    entityType: params.get(PARAM_KEYS.entityType) || defaults.entityType,
+    action: params.get(PARAM_KEYS.action) || defaults.action,
   }
 }
 
@@ -123,5 +131,7 @@ export function toAnalyticsQueryParams(
   if (filters.pluginId) params.set(PARAM_KEYS.pluginId, filters.pluginId)
   if (filters.status) params.set(PARAM_KEYS.status, filters.status)
   if (filters.trigger) params.set(PARAM_KEYS.trigger, filters.trigger)
+  if (filters.entityType) params.set(PARAM_KEYS.entityType, filters.entityType)
+  if (filters.action) params.set(PARAM_KEYS.action, filters.action)
   return params
 }
