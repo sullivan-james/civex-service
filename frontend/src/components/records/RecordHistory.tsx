@@ -31,11 +31,11 @@ interface FieldChange {
 }
 
 // old_data/new_data are full record snapshots ({id, data, created_at, ...})
-// -- only the `data` sub-object holds field values, and only for
-// create/update/restore is it name-keyed (delete/purge log the raw,
-// id-keyed record data), so those two are shown without a field diff.
+// -- only the `data` sub-object holds field values, and only create/update
+// log it name-keyed on both sides (delete/purge/restore mix in a raw,
+// id-keyed snapshot), so only those two get a field diff.
 function diffData(entry: AuditLogEntry): FieldChange[] {
-  if (entry.action === 'delete' || entry.action === 'purge') return []
+  if (entry.action !== 'create' && entry.action !== 'update') return []
   const before =
     (entry.old_data?.data as Record<string, unknown> | undefined) ?? null
   const after =
