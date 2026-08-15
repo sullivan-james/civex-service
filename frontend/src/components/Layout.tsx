@@ -35,6 +35,7 @@ import {
   Database,
   Workflow,
   ListChecks,
+  BarChart3,
   SquareTerminal,
   Puzzle,
   PanelLeftClose,
@@ -120,6 +121,7 @@ const navGroups: NavGroupDef[] = [
     items: [
       { to: '/workflows', label: 'Workflows', icon: Workflow },
       { to: '/runs', label: 'Runs', icon: ListChecks },
+      { to: '/analytics', label: 'Analytics', icon: BarChart3 },
     ],
   },
   {

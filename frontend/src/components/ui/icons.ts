@@ -35,6 +35,7 @@ export {
   Database,
   Workflow,
   ListChecks,
+  BarChart3,
   SquareTerminal,
   PanelLeftClose,
   PanelLeftOpen,

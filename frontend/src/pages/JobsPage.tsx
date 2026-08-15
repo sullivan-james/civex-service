@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { useActiveJobCount, useDrainJobs } from '../hooks/useWorkflows'
 import { Page, Button } from '../components/ui'
 import { RefreshCw } from '../components/ui/icons'
@@ -13,8 +14,12 @@ const STATUS_OPTIONS = [
 ] as const
 
 export default function JobsPage() {
+  // Seeds from `?status=` so an analytics widget's "View runs" link lands
+  // pre-filtered -- read once on mount, same as any other uncontrolled
+  // initial state (the buttons below are the source of truth afterwards).
+  const [searchParams] = useSearchParams()
   const [statusFilter, setStatusFilter] = useState<string | undefined>(
-    undefined,
+    () => searchParams.get('status') || undefined,
   )
   const { data: activeJobs } = useActiveJobCount()
   const drain = useDrainJobs()
