@@ -33,16 +33,23 @@ import {
   Pagination,
 } from '../components/ui'
 import { RecordForm } from '../components/records/RecordForm'
+import { FieldValue } from '../components/records/FieldValue'
 import { formatDate } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 import type { Schema } from '../api/schemas'
 import { displayLabel } from '../utils/naming'
 
 /** Header text comes from the label, the data lookup from the name. */
-function schemaColumns(schema: Schema): { name: string; label: string }[] {
+function schemaColumns(
+  schema: Schema,
+): { name: string; label: string; type: string }[] {
   return schema.fields
     .filter((f) => f.type !== 'file')
-    .map((f) => ({ name: f.name, label: displayLabel(f.name, f.label) }))
+    .map((f) => ({
+      name: f.name,
+      label: displayLabel(f.name, f.label),
+      type: f.type,
+    }))
 }
 
 export default function CollectionDetailPage() {
@@ -525,12 +532,7 @@ export default function CollectionDetailPage() {
                   )}
                   {columns.map((col) => (
                     <Td key={col.name} className="text-fg">
-                      {r.data[col.name] !== undefined &&
-                      r.data[col.name] !== null ? (
-                        String(r.data[col.name])
-                      ) : (
-                        <span className="text-fg-subtle">—</span>
-                      )}
+                      <FieldValue value={r.data[col.name]} field={col} />
                     </Td>
                   ))}
                   <Td className="text-fg-muted">{formatDate(r.created_at)}</Td>

@@ -55,8 +55,11 @@ function ChildTable({
   const cols =
     schema?.fields
       .filter((f) => f.type !== 'file')
-      .map((f) => ({ name: f.name, label: displayLabel(f.name, f.label) })) ??
-    []
+      .map((f) => ({
+        name: f.name,
+        label: displayLabel(f.name, f.label),
+        type: f.type,
+      })) ?? []
   const [confirmId, setConfirmId] = useState<string | null>(null)
 
   return (
@@ -103,7 +106,7 @@ function ChildTable({
               </Td>
               {cols.map((col) => (
                 <Td key={col.name}>
-                  <FieldValue value={r.data[col.name]} />
+                  <FieldValue value={r.data[col.name]} field={col} />
                 </Td>
               ))}
               <Td className="text-fg-muted">{formatDate(r.created_at)}</Td>
@@ -407,7 +410,7 @@ export default function RecordDetailPage() {
                   )}
                 </p>
                 <div className="text-sm text-fg">
-                  <FieldValue value={record.data[field.name]} />
+                  <FieldValue value={record.data[field.name]} field={field} />
                 </div>
               </div>
             ))}
@@ -501,7 +504,7 @@ export default function RecordDetailPage() {
 
       <RecordProvenance recordId={record.id} />
 
-      <RecordHistory recordId={record.id} />
+      <RecordHistory recordId={record.id} schema={schema} />
 
       <div>
         <h2 className="text-base font-semibold text-fg mb-2">Runs</h2>

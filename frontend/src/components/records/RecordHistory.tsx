@@ -4,6 +4,7 @@ import { formatDate } from '../../lib/utils'
 import { displayLabel } from '../../utils/naming'
 import { FieldValue } from './FieldValue'
 import type { AuditLogEntry } from '../../api/records'
+import type { Schema } from '../../api/schemas'
 
 const ACTION_LABEL: Record<string, string> = {
   create: 'created',
@@ -55,7 +56,13 @@ function diffData(entry: AuditLogEntry): FieldChange[] {
   return changes.sort((x, y) => x.field.localeCompare(y.field))
 }
 
-function HistoryEntry({ entry }: { entry: AuditLogEntry }) {
+function HistoryEntry({
+  entry,
+  schema,
+}: {
+  entry: AuditLogEntry
+  schema: Schema | undefined
+}) {
   const changes = diffData(entry)
   return (
     <li className="text-sm">
@@ -69,30 +76,41 @@ function HistoryEntry({ entry }: { entry: AuditLogEntry }) {
       </div>
       {changes.length > 0 && (
         <ul className="mt-1.5 space-y-1 border-l-2 border-border pl-3">
-          {changes.map(({ field, before, after }) => (
-            <li
-              key={field}
-              className="flex flex-wrap items-center gap-1.5 text-xs text-fg-muted"
-            >
-              <span className="font-medium text-fg">{displayLabel(field)}</span>
-              {entry.action === 'create' ? (
-                <FieldValue value={after} />
-              ) : (
-                <>
-                  <FieldValue value={before} />
-                  <span>→</span>
-                  <FieldValue value={after} />
-                </>
-              )}
-            </li>
-          ))}
+          {changes.map(({ field, before, after }) => {
+            const fieldDef = schema?.fields.find((f) => f.name === field)
+            return (
+              <li
+                key={field}
+                className="flex flex-wrap items-center gap-1.5 text-xs text-fg-muted"
+              >
+                <span className="font-medium text-fg">
+                  {displayLabel(field)}
+                </span>
+                {entry.action === 'create' ? (
+                  <FieldValue value={after} field={fieldDef} />
+                ) : (
+                  <>
+                    <FieldValue value={before} field={fieldDef} />
+                    <span>→</span>
+                    <FieldValue value={after} field={fieldDef} />
+                  </>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
     </li>
   )
 }
 
-export default function RecordHistory({ recordId }: { recordId: string }) {
+export default function RecordHistory({
+  recordId,
+  schema,
+}: {
+  recordId: string
+  schema?: Schema
+}) {
   const { data } = useRecordAudit(recordId)
   const entries = data?.items ?? []
   if (entries.length === 0) return null
@@ -102,7 +120,7 @@ export default function RecordHistory({ recordId }: { recordId: string }) {
       <h2 className="text-base font-semibold text-fg mb-2">History</h2>
       <ul className="space-y-3">
         {entries.map((entry) => (
-          <HistoryEntry key={entry.id} entry={entry} />
+          <HistoryEntry key={entry.id} entry={entry} schema={schema} />
         ))}
       </ul>
     </div>
