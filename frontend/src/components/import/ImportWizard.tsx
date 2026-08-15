@@ -8,6 +8,7 @@ import {
   type Field as SchemaField,
 } from '../../api/schemas'
 import { recordsApi, type CivexRecord } from '../../api/records'
+import { RecordSearchPicker } from '../records/RecordSearchPicker'
 import { filesApi } from '../../api/files'
 import { workflowsApi } from '../../api/workflows'
 import {
@@ -237,11 +238,13 @@ export default function ImportWizard({ datasetName }: Props) {
       ? (schemas?.find((s) => s.id === effectiveSchema.parent_id) ?? null)
       : null
   const [parentRecordId, setParentRecordId] = useState('')
+  // Only need to know whether *any* parent-schema records exist — the
+  // picker itself searches on demand rather than listing every candidate.
   const { data: parentPage } = useRecords(
     parentSchema ? datasetName : '',
-    parentSchema ? { schema: parentSchema.name, limit: 200 } : undefined,
+    parentSchema ? { schema: parentSchema.name, limit: 1 } : undefined,
   )
-  const parentCandidates = parentPage?.items ?? []
+  const hasParentCandidates = (parentPage?.total ?? 0) > 0
   const needsParent = !!parentSchema
 
   // ── CSV column mapping ───────────────────────────────────────────────
@@ -850,24 +853,19 @@ export default function ImportWizard({ datasetName }: Props) {
                   {displayLabel(parentSchema.name, parentSchema.label)}
                 </Badge>
               </span>
-              {parentCandidates.length === 0 ? (
+              {!hasParentCandidates ? (
                 <p className="text-xs text-danger">
                   No {displayLabel(parentSchema.name, parentSchema.label)}{' '}
                   records in this collection yet — add one first.
                 </p>
               ) : (
-                <Select
-                  value={parentRecordId}
-                  onChange={(e) => setParentRecordId(e.target.value)}
+                <RecordSearchPicker
+                  schemaName={parentSchema.name}
+                  value={parentRecordId || undefined}
+                  onChange={(id) => setParentRecordId(id ?? '')}
+                  placeholder="Search records…"
                   className="w-full max-w-sm"
-                >
-                  <option value="">— Select a record —</option>
-                  {parentCandidates.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {recordLabel(r)}
-                    </option>
-                  ))}
-                </Select>
+                />
               )}
             </div>
           )}

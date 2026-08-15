@@ -1,11 +1,14 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { api } from '../../api/client'
-import { recordsApi, type CivexRecord } from '../../api/records'
 import type { Field } from '../../api/schemas'
 import { utcToDatetimeLocal, datetimeLocalToUTC } from '../../utils/dates'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
 import { Input, Select, Checkbox } from '../ui'
 import { Paperclip, X } from '../ui/icons'
+import {
+  RecordSearchPicker,
+  MultiRecordSearchPicker,
+} from './RecordSearchPicker'
 
 export interface FileRef {
   sha256: string
@@ -209,116 +212,6 @@ function FileListField({
   )
 }
 
-function ReferenceField({
-  field,
-  value,
-  onChange,
-  id,
-  'aria-describedby': ariaDescribedby,
-  'aria-invalid': ariaInvalid,
-}: Props) {
-  const targetSchema = toInputProps(field).targetSchema ?? ''
-  const [search, setSearch] = useState('')
-  const [results, setResults] = useState<CivexRecord[]>([])
-  const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const selectedId = value as string | undefined
-
-  useEffect(() => {
-    if (!targetSchema) return
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(async () => {
-      setLoading(true)
-      try {
-        const records = await recordsApi.searchBySchema(
-          targetSchema,
-          search || undefined,
-        )
-        setResults(records)
-      } finally {
-        setLoading(false)
-      }
-    }, 250)
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [search, targetSchema])
-
-  function handleFocus() {
-    setOpen(true)
-    if (!results.length && targetSchema) {
-      recordsApi.searchBySchema(targetSchema).then(setResults)
-    }
-  }
-
-  function handleSelect(record: CivexRecord) {
-    onChange(record.id)
-    setOpen(false)
-    setSearch('')
-  }
-
-  function labelFor(record: CivexRecord) {
-    return record.natural_name ?? record.id.slice(0, 8)
-  }
-
-  return (
-    <div className="relative">
-      <Input
-        id={id}
-        aria-describedby={ariaDescribedby}
-        aria-invalid={ariaInvalid}
-        required={field.required}
-        aria-required={field.required}
-        type="text"
-        value={
-          selectedId
-            ? results.find((r) => r.id === selectedId)
-              ? labelFor(results.find((r) => r.id === selectedId)!)
-              : selectedId.slice(0, 8)
-            : search
-        }
-        onChange={(e) => {
-          setSearch(e.target.value)
-          onChange(undefined)
-          setOpen(true)
-        }}
-        onFocus={handleFocus}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        placeholder={
-          targetSchema ? `Search ${targetSchema} records…` : 'Record ID'
-        }
-        className="w-full"
-      />
-      {open && (
-        <div className="absolute z-10 mt-1 w-full bg-canvas border border-border rounded-md shadow-sm max-h-48 overflow-y-auto text-sm">
-          {loading && <div className="px-3 py-2 text-fg-muted">Loading…</div>}
-          {!loading && results.length === 0 && (
-            <div className="px-3 py-2 text-fg-muted italic">
-              No records found
-            </div>
-          )}
-          {results.map((record) => (
-            <button
-              key={record.id}
-              onMouseDown={() => handleSelect(record)}
-              className="w-full text-left px-3 py-2 hover:bg-canvas-subtle truncate"
-            >
-              <span className="font-mono text-xs text-fg-muted">
-                {record.id.slice(0, 8)}
-              </span>
-              {record.natural_name && (
-                <span className="ml-2 text-fg">{record.natural_name}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 export function DynamicField({
   field,
   value,
@@ -511,31 +404,16 @@ export function DynamicField({
       )
 
     case 'reference_list': {
-      const listVal = Array.isArray(value)
-        ? (value as string[]).join(', ')
-        : ((value as string) ?? '')
+      const targetSchema = toInputProps(field).targetSchema ?? ''
+      const listVal = Array.isArray(value) ? (value as string[]) : []
       return (
-        <Input
+        <MultiRecordSearchPicker
+          schemaName={targetSchema}
+          value={listVal}
+          onChange={onChange}
           id={id}
           aria-describedby={ariaDescribedby}
           aria-invalid={ariaInvalid}
-          required={field.required}
-          aria-required={field.required}
-          type="text"
-          value={listVal}
-          onChange={(e) => {
-            const raw = e.target.value
-            onChange(
-              raw
-                ? raw
-                    .split(',')
-                    .map((s) => s.trim())
-                    .filter(Boolean)
-                : [],
-            )
-          }}
-          placeholder="Record IDs, comma-separated"
-          className="w-full"
         />
       )
     }
@@ -582,17 +460,23 @@ export function DynamicField({
         />
       )
 
-    case 'reference':
+    case 'reference': {
+      const targetSchema = toInputProps(field).targetSchema ?? ''
       return (
-        <ReferenceField
-          field={field}
-          value={value}
+        <RecordSearchPicker
+          schemaName={targetSchema}
+          value={value as string | undefined}
           onChange={onChange}
           id={id}
           aria-describedby={ariaDescribedby}
           aria-invalid={ariaInvalid}
+          required={field.required}
+          placeholder={
+            targetSchema ? `Search ${targetSchema} records…` : 'Record ID'
+          }
         />
       )
+    }
 
     case 'file_list':
       return (
