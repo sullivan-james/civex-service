@@ -94,6 +94,15 @@
   --color-neutral-subtle: rgb(131 122 108 / 16%);
   --color-neutral-muted: rgb(131 122 108 / 24%);
 
+  /* --- Chart series palette: qualitative, for multi-series data (not
+     status). Distinct from --color-success/-attention/-danger, which are
+     reserved for status semantics and always pair with an icon + word. --- */
+  --color-chart-1: #17569e;
+  --color-chart-2: #1a7f37;
+  --color-chart-3: #9a6700;
+  --color-chart-4: #8250df;
+  --color-chart-5: #cf222e;
+
   /* Overlay scrim behind modals/dialogs — was inconsistently bg-black/40
      vs bg-black/50 inline. */
   --color-overlay-scrim: rgb(33 29 26 / 50%);
@@ -162,6 +171,12 @@
     --color-neutral-subtle: rgb(181 170 156 / 16%);
     --color-neutral-muted: rgb(181 170 156 / 24%);
 
+    --color-chart-1: #5b9bf0;
+    --color-chart-2: #4ad17a;
+    --color-chart-3: #e3b341;
+    --color-chart-4: #a371f7;
+    --color-chart-5: #f0656d;
+
     --color-overlay-scrim: rgb(0 0 0 / 60%);
   }
 }
@@ -209,6 +224,12 @@
 
   --color-neutral-subtle: rgb(181 170 156 / 16%);
   --color-neutral-muted: rgb(181 170 156 / 24%);
+
+  --color-chart-1: #5b9bf0;
+  --color-chart-2: #4ad17a;
+  --color-chart-3: #e3b341;
+  --color-chart-4: #a371f7;
+  --color-chart-5: #f0656d;
 
   --color-overlay-scrim: rgb(0 0 0 / 60%);
 }

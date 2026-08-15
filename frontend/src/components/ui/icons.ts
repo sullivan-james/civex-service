@@ -23,6 +23,7 @@ export {
   ArrowDown,
   ArrowDownToLine,
   ArrowUpToLine,
+  Minus,
   FolderOpen,
   FolderPlus,
   Folder,
