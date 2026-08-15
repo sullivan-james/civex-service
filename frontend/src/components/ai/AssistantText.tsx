@@ -1,14 +1,26 @@
 import CodeBlock from './CodeBlock'
+import { AlertTriangle } from '../ui/icons'
 
 // Splits assistant text on code fences so fenced blocks render via
 // CodeBlock (with its own copy button) instead of as plain text.
 export default function AssistantText({
   text,
   streaming,
+  error,
 }: {
   text: string
   streaming: boolean
+  error?: boolean
 }) {
+  if (error) {
+    return (
+      <div className="flex items-start gap-2 text-sm text-danger">
+        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+        <span className="whitespace-pre-wrap">{text}</span>
+      </div>
+    )
+  }
+
   const parts: Array<{ type: 'text' | 'code'; lang: string; content: string }> =
     []
   const fenceRe = /```(\w*)\n([\s\S]*?)```/g

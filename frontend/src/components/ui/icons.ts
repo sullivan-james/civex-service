@@ -42,5 +42,10 @@ export {
   Clock,
   FileCode,
   Puzzle,
+  History,
   Trash2,
+  Loader2,
+  Send,
+  Square,
+  PanelRightClose,
 } from 'lucide-react'

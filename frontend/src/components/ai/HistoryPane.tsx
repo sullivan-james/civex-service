@@ -1,4 +1,5 @@
 import type { StoredSession } from '../../types/ai'
+import { Trash2 } from '../ui/icons'
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
@@ -16,7 +17,7 @@ export default function HistoryPane({
 }: {
   sessions: StoredSession[]
   onRestore: (s: StoredSession) => void
-  onDelete: (id: string, e: React.MouseEvent) => void
+  onDelete: (id: string, e: React.MouseEvent | React.KeyboardEvent) => void
   onNewChat: () => void
 }) {
   return (
@@ -45,20 +46,19 @@ export default function HistoryPane({
                 <p className="text-sm text-fg truncate flex-1">{s.title}</p>
                 <span
                   role="button"
-                  onClick={(e) =>
-                    onDelete(s.id, e as unknown as React.MouseEvent)
-                  }
-                  className="text-border hover:text-danger transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0 cursor-pointer"
+                  tabIndex={0}
+                  onClick={(e) => onDelete(s.id, e)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      onDelete(s.id, e)
+                    }
+                  }}
+                  aria-label={`Delete session: ${s.title}`}
+                  className="text-border hover:text-danger transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100 flex-shrink-0 cursor-pointer"
                   title="Delete session"
                 >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 16 16"
-                    fill="currentColor"
-                  >
-                    <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
-                  </svg>
+                  <Trash2 size={12} />
                 </span>
               </div>
               <p className="text-xs text-fg-subtle mt-1">

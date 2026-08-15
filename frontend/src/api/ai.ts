@@ -156,11 +156,13 @@ export type AiEvent =
 
 export async function* streamChat(
   messages: ChatMessage[],
+  signal?: AbortSignal,
 ): AsyncGenerator<AiEvent> {
   const res = await fetch('/api/ai/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages }),
+    signal,
   })
   if (!res.ok) {
     const err = (await res.json().catch(() => ({}))) as Record<string, unknown>
