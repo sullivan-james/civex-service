@@ -254,13 +254,27 @@ def delete_all_records(
 @router.get("/collections/{collection_name}/export.csv")
 def export_records_csv(
     collection_name: str,
+    schema: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(
+        default=None, description="Full-text search across all field values"
+    ),
+    where: list[str] = Query(default=[]),
     ctx: AppContext = Depends(get_ctx),
 ):
-    """Export all records in a collection as a CSV file."""
+    """Export records in a collection as a CSV file, honoring the same
+    schema/where/search filters as the record list endpoint."""
     try:
-        records = ctx.record_svc.find(collection_name, limit=100_000)
+        records = ctx.record_svc.find(
+            collection_name,
+            schema_name=schema,
+            filters=where,
+            search=search or None,
+            limit=100_000,
+        )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(422, detail=str(e))
 
     # Gather unique field names in encounter order across all records
     field_names: list[str] = []

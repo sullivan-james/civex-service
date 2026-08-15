@@ -199,8 +199,12 @@ export default function CollectionDetailPage() {
 
   function exportCsv() {
     if (!collection) return
+    const qs = new URLSearchParams()
+    if (selectedSchema) qs.set('schema', selectedSchema)
+    if (search) qs.set('search', search)
+    const query = qs.toString() ? `?${qs}` : ''
     window.open(
-      `/api/collections/${encodeURIComponent(collection.name)}/export.csv`,
+      `/api/collections/${encodeURIComponent(collection.name)}/export.csv${query}`,
       '_blank',
     )
   }
