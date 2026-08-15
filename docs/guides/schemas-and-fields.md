@@ -179,8 +179,11 @@ When you add a `selection` record, civex prompts for the parent `encounter` reco
 === "CLI"
     ```bash
     civex schema remove-field trial score
-    civex schema delete trial          # deletes the schema; does not delete records
+    civex schema delete trial          # moves the schema + its records to Recently Deleted
+    civex schema restore trial         # undoes it
     ```
 
 === "Web UI"
-    Click the **✕** on a field row to remove it, or **Delete schema** on the schema's detail page. Deleting a schema does not delete its records.
+    Click the **✕** on a field row to remove it, or **Delete schema** on the schema's detail page.
+
+Deleting a schema is reversible: it (and every record typed by it, across every collection) moves to **Recently Deleted** rather than being removed outright. See [Deleting & restoring data](deleting-and-restoring.md) for the full cascade and retention rules.

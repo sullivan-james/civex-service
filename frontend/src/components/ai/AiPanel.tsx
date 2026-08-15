@@ -12,13 +12,23 @@ interface AiPanelProps {
 // (see Layout.tsx) rather than as a fixed overlay, so it shares screen
 // space with the current page instead of covering it. The full-page /ai
 // tab (AiPage.tsx) is the same AiChatBody with different chrome around it.
+//
+// This is a landmark region, not a dialog: unlike the off-canvas nav
+// drawer (which still uses useDialogA11y), the panel sits side-by-side
+// with the main content rather than over it, so trapping focus or marking
+// the rest of the page inert would make the split view it's meant to
+// enable unusable with a keyboard.
 export default function AiPanel({ onClose }: AiPanelProps) {
   const session = useAiSession()
   const [showSettings, setShowSettings] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
 
   return (
-    <div className="h-full flex flex-col bg-canvas border-l border-border">
+    <div
+      role="complementary"
+      aria-label="AI assistant"
+      className="h-full flex flex-col bg-canvas border-l border-border"
+    >
       <div className="flex items-center gap-2 border-b border-border bg-canvas-subtle px-4 py-3">
         <Sparkles size={14} className="text-accent" />
         <span className="text-sm font-semibold text-fg">civex AI</span>

@@ -226,7 +226,11 @@ def record_delete(
         "instead of blocking the delete",
     ),
 ) -> None:
-    """Delete a record."""
+    """Delete a record (and its children) to Recently Deleted.
+
+    Reversible with `civex record restore` within the retention window
+    (see `civex trash list`); `civex record purge` deletes permanently.
+    """
     if not yes:
         typer.confirm(f"Delete record '{record_id}'?", abort=True)
     ctx = _ctx()
@@ -234,6 +238,42 @@ def record_delete(
         ctx.record_svc.delete(record_id, force=force)
         ctx.commit()
         console.print(f"[success]Deleted record '{record_id}'.[/success]")
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+
+
+@app.command("restore")
+def record_restore(
+    record_id: str = typer.Argument(..., help="Record ID or short prefix"),
+) -> None:
+    """Restore a soft-deleted record (and the children cascade-deleted with it)."""
+    ctx = _ctx()
+    try:
+        ctx.record_svc.restore(record_id)
+        ctx.commit()
+        console.print(f"[success]Restored record '{record_id}'.[/success]")
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+
+
+@app.command("purge")
+def record_purge(
+    record_id: str = typer.Argument(..., help="Record ID or short prefix"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+) -> None:
+    """Permanently delete a record that's already in Recently Deleted. Irreversible."""
+    if not yes:
+        typer.confirm(
+            f"Permanently delete record '{record_id}'? This cannot be undone.",
+            abort=True,
+        )
+    ctx = _ctx()
+    try:
+        ctx.record_svc.purge(record_id)
+        ctx.commit()
+        console.print(f"[success]Permanently deleted record '{record_id}'.[/success]")
     except (NotFoundError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)

@@ -21,6 +21,8 @@ export interface Schema {
   parent_id: string | null
   display_fields: string[]
   fields: Field[]
+  /** When this schema was soft-deleted. Null means live. */
+  deleted_at: string | null
 }
 
 export interface SchemaDeleteImpact {
@@ -58,6 +60,9 @@ export const schemasApi = {
     },
   ) => api.patch<Schema>(`/schemas/${name}`, body),
   delete: (name: string) => api.delete<void>(`/schemas/${name}`),
+  listDeleted: () => api.get<Schema[]>('/schemas/deleted'),
+  restore: (name: string) => api.post<Schema>(`/schemas/${name}/restore`, {}),
+  purge: (name: string) => api.delete<void>(`/schemas/${name}/purge`),
   addField: (
     name: string,
     body: {

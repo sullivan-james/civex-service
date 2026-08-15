@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import nulls_last
 from sqlalchemy.orm import Session
 
-from civex.db.models import Field, Schema
+from civex.db.models import Field, Record, Schema, WorkflowJob
 from civex.domain.dtos import FieldDTO, SchemaDTO
 from civex.domain.exceptions import NotFoundError
 
@@ -19,18 +20,38 @@ class LocalSchemaRepository:
     # Queries
     # ------------------------------------------------------------------
 
-    def get_by_name(self, name: str) -> SchemaDTO | None:
-        row = self._s.query(Schema).filter_by(name=name).first()
+    def get_by_name(self, name: str, include_deleted: bool = False) -> SchemaDTO | None:
+        q = self._s.query(Schema).filter_by(name=name)
+        if not include_deleted:
+            q = q.filter(Schema.deleted_at.is_(None))
+        row = q.first()
         return _schema_to_dto(row) if row else None
 
-    def get_by_id(self, id: uuid.UUID) -> SchemaDTO | None:
-        row = self._s.query(Schema).filter_by(id=id).first()
+    def get_by_id(
+        self, id: uuid.UUID, include_deleted: bool = False
+    ) -> SchemaDTO | None:
+        q = self._s.query(Schema).filter_by(id=id)
+        if not include_deleted:
+            q = q.filter(Schema.deleted_at.is_(None))
+        row = q.first()
         return _schema_to_dto(row) if row else None
 
     def list_all(self) -> list[SchemaDTO]:
         return [
             _schema_to_dto(r)
-            for r in self._s.query(Schema).order_by(Schema.created_at).all()
+            for r in self._s.query(Schema)
+            .filter(Schema.deleted_at.is_(None))
+            .order_by(Schema.created_at)
+            .all()
+        ]
+
+    def list_deleted(self) -> list[SchemaDTO]:
+        return [
+            _schema_to_dto(r)
+            for r in self._s.query(Schema)
+            .filter(Schema.deleted_at.is_not(None))
+            .order_by(Schema.deleted_at.desc())
+            .all()
         ]
 
     def get_fields(self, schema_id: uuid.UUID) -> list[FieldDTO]:
@@ -85,10 +106,61 @@ class LocalSchemaRepository:
         return _schema_to_dto(row)
 
     def delete(self, id: uuid.UUID) -> None:
+        """Soft-delete: mark the schema deleted and cascade to every record
+        typed by it (across every collection) so it doesn't silently orphan
+        its own records. Does not touch records of other schemas that hang
+        off a now-hidden record via parent_record_id -- those stay visible,
+        pointing at a soft-deleted parent, until it's restored or that
+        record is individually restored too."""
         row = self._s.query(Schema).filter_by(id=id).first()
-        if row:
-            self._s.delete(row)
-            self._s.flush()
+        if row is None or row.deleted_at is not None:
+            return
+        now = datetime.now(timezone.utc)
+        row.deleted_at = now
+        self._s.query(Record).filter(
+            Record.schema_id == id, Record.deleted_at.is_(None)
+        ).update({"deleted_at": now}, synchronize_session=False)
+        self._s.flush()
+
+    def restore(self, id: uuid.UUID) -> SchemaDTO:
+        """Undo delete(): clears the schema's deleted_at and restores every
+        record that was cascade-deleted with it. If any of those records had
+        already been deleted independently *before* the schema was deleted,
+        this restores them too -- a documented simplification (see
+        docs/guide/soft-delete.md) rather than tracking each cascade as a
+        distinct, separately-undoable batch."""
+        row = self._s.query(Schema).filter_by(id=id).first()
+        if row is None:
+            raise NotFoundError(f"Schema '{id}' not found")
+        row.deleted_at = None
+        self._s.query(Record).filter(
+            Record.schema_id == id, Record.deleted_at.is_not(None)
+        ).update({"deleted_at": None}, synchronize_session=False)
+        self._s.flush()
+        return _schema_to_dto(row)
+
+    def purge(self, id: uuid.UUID) -> None:
+        """Permanently remove a soft-deleted schema: its fields (ORM
+        cascade), every record it typed, those records' workflow jobs, and
+        parent_record_id links from other records pointing at them."""
+        row = self._s.query(Schema).filter_by(id=id).first()
+        if row is None:
+            return
+        record_ids = [
+            r.id for r in self._s.query(Record.id).filter_by(schema_id=id).all()
+        ]
+        if record_ids:
+            self._s.query(Record).filter(
+                Record.parent_record_id.in_(record_ids)
+            ).update({"parent_record_id": None}, synchronize_session=False)
+            self._s.query(WorkflowJob).filter(
+                WorkflowJob.record_id.in_(record_ids)
+            ).delete(synchronize_session=False)
+            self._s.query(Record).filter_by(schema_id=id).delete(
+                synchronize_session=False
+            )
+        self._s.delete(row)  # cascades to Field rows via ORM relationship
+        self._s.flush()
 
     def add_field(
         self,
@@ -188,4 +260,5 @@ def _schema_to_dto(row: Schema) -> SchemaDTO:
         display_fields=row.display_fields or [],
         created_at=row.created_at,
         fields=[_field_to_dto(f) for f in row.fields],
+        deleted_at=row.deleted_at,
     )

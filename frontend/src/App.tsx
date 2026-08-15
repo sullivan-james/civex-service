@@ -7,6 +7,7 @@ import ImportPage from './pages/ImportPage'
 import SchemasPage from './pages/SchemasPage'
 import SchemaDetailPage from './pages/SchemaDetailPage'
 import RecordDetailPage from './pages/RecordDetailPage'
+import RecentlyDeletedPage from './pages/RecentlyDeletedPage'
 import WorkflowsPage from './pages/WorkflowsPage'
 import JobsPage from './pages/JobsPage'
 import JobDetailPage from './pages/JobDetailPage'
@@ -36,6 +37,7 @@ export default function App() {
         <Route path="/schemas" element={<SchemasPage />} />
         <Route path="/schemas/:id" element={<SchemaDetailPage />} />
         <Route path="/records/:id" element={<RecordDetailPage />} />
+        <Route path="/trash" element={<RecentlyDeletedPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
         <Route path="/runs" element={<JobsPage />} />
         <Route path="/runs/:id" element={<JobDetailPage />} />

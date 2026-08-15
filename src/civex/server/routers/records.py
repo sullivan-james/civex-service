@@ -106,6 +106,21 @@ def create_record(
     return RecordResponse.from_dto(dto)
 
 
+@router.get("/records/deleted", response_model=list[RecordResponse])
+def list_deleted_records(
+    dataset: Optional[str] = Query(
+        default=None, description="Limit to records from this collection"
+    ),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Records currently in Recently Deleted, most recently deleted first."""
+    try:
+        items = ctx.record_svc.list_deleted(dataset_name=dataset or None)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    return [RecordResponse.from_dto(r) for r in items]
+
+
 @router.get("/records/{record_id}", response_model=RecordResponse)
 def get_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
     try:
@@ -143,6 +158,29 @@ def delete_record(
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     ctx.commit()
+
+
+@router.post("/records/{record_id}/restore", response_model=RecordResponse)
+def restore_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
+    try:
+        dto = ctx.record_svc.restore(record_id)
+        ctx.commit()
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return RecordResponse.from_dto(dto)
+
+
+@router.delete("/records/{record_id}/purge", status_code=204)
+def purge_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
+    try:
+        ctx.record_svc.purge(record_id)
+        ctx.commit()
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
 
 
 @router.post("/records/bulk-delete")

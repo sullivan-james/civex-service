@@ -11,7 +11,7 @@ from rich.tree import Tree
 from civex.cli.utils import get_ctx as _ctx
 from civex.console import console
 from civex.domain.dtos import SchemaDTO
-from civex.domain.exceptions import AlreadyExistsError, NotFoundError
+from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 
 app = typer.Typer(
     help="Manage collections (named containers for studies or investigations)"
@@ -112,7 +112,11 @@ def dataset_delete(
     name: str = typer.Argument(..., help="Collection name"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
 ) -> None:
-    """Delete a collection and all its records."""
+    """Delete a collection and all its records to Recently Deleted.
+
+    Reversible with `civex collection restore` within the retention window
+    (see `civex trash list`); `civex collection purge` deletes permanently.
+    """
     if not yes:
         typer.confirm(f"Delete collection '{name}' and all its records?", abort=True)
     ctx = _ctx()
@@ -121,6 +125,39 @@ def dataset_delete(
         ctx.commit()
         console.print(f"[success]Deleted '{name}'.[/success]")
     except NotFoundError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+
+
+@app.command("restore")
+def dataset_restore(name: str = typer.Argument(..., help="Collection name")) -> None:
+    """Restore a soft-deleted collection (and the records cascade-deleted with it)."""
+    ctx = _ctx()
+    try:
+        ctx.dataset_svc.restore(name)
+        ctx.commit()
+        console.print(f"[success]Restored '{name}'.[/success]")
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+
+
+@app.command("purge")
+def dataset_purge(
+    name: str = typer.Argument(..., help="Collection name"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+) -> None:
+    """Permanently delete a collection that's already in Recently Deleted. Irreversible."""
+    if not yes:
+        typer.confirm(
+            f"Permanently delete '{name}'? This cannot be undone.", abort=True
+        )
+    ctx = _ctx()
+    try:
+        ctx.dataset_svc.purge(name)
+        ctx.commit()
+        console.print(f"[success]Permanently deleted '{name}'.[/success]")
+    except (NotFoundError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 

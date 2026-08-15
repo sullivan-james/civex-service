@@ -16,3 +16,21 @@ export function useSetShowAdvanced() {
     onSuccess: (settings) => qc.setQueryData(['settings', 'ui'], settings),
   })
 }
+
+export function useRetentionSettings() {
+  return useQuery({
+    queryKey: ['settings', 'retention'],
+    queryFn: settingsApi.getRetention,
+    staleTime: 30_000,
+  })
+}
+
+export function useSetRetention() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (purgeAfterDays: number) =>
+      settingsApi.updateRetention(purgeAfterDays),
+    onSuccess: (settings) =>
+      qc.setQueryData(['settings', 'retention'], settings),
+  })
+}

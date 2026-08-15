@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from civex.server.errors import RequestContextMiddleware, register_error_handlers
 from civex.server.routers import (
     ai,
+    audit,
     datasets,
     db,
     dump,
@@ -128,6 +129,14 @@ _OPENAPI_TAGS = [
         "description": (
             "Inspect the queue of workflow runs — one job per trigger firing or "
             "manual run — including their status, inputs, and outputs."
+        ),
+    },
+    {
+        "name": "audit",
+        "description": (
+            "Read the change history recorded for records, schemas, fields, "
+            "and datasets — every create/update/delete with a full before/"
+            "after data snapshot and timestamp."
         ),
     },
     {
@@ -269,6 +278,7 @@ def create_app() -> FastAPI:
     app.include_router(files.router, prefix="/api")
     app.include_router(workflows.router, prefix="/api")
     app.include_router(jobs.router, prefix="/api")
+    app.include_router(audit.router, prefix="/api")
     app.include_router(remote.router, prefix="/api")
     app.include_router(store.router, prefix="/api")
     app.include_router(db.router, prefix="/api")

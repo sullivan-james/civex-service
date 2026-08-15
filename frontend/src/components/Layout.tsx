@@ -1,7 +1,7 @@
 import {
   type ComponentType,
   type ReactNode,
-  useEffect,
+  useId,
   useRef,
   useState,
 } from 'react'
@@ -16,6 +16,7 @@ import {
 import { remoteApi } from '../api/remote'
 import { errorMessage } from '../lib/errors'
 import { useUISettings } from '../hooks/useUISettings'
+import { useDialogA11y } from '../hooks/useDialogA11y'
 import AiAttestationGate from './ai/AiAttestationGate'
 import AiPanel from './ai/AiPanel'
 import { useToast } from './ui/ToastProvider'
@@ -40,6 +41,7 @@ import {
   PanelLeftOpen,
   Menu,
   X,
+  Trash2,
 } from './ui/icons'
 
 declare global {
@@ -103,7 +105,10 @@ interface NavGroupDef {
 const navGroups: NavGroupDef[] = [
   {
     heading: 'Data',
-    items: [{ to: '/collections', label: 'Collections', icon: LayoutGrid }],
+    items: [
+      { to: '/collections', label: 'Collections', icon: LayoutGrid },
+      { to: '/trash', label: 'Recently Deleted', icon: Trash2 },
+    ],
   },
   {
     heading: 'Structure',
@@ -232,8 +237,9 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [aiOpen, setAiOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const drawerWrapperRef = useRef<HTMLDivElement>(null)
   const drawerRef = useRef<HTMLDivElement>(null)
+  const drawerTitleId = useId()
   const toast = useToast()
 
   const { data: remote } = useQuery({
@@ -252,24 +258,15 @@ export default function Layout({ children }: { children: ReactNode }) {
     panelIds: ['main', 'ai'],
   })
 
-  useEffect(() => {
-    if (!drawerOpen) return
-    drawerRef.current?.focus()
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') closeDrawer()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.body.style.overflow = previousOverflow
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [drawerOpen])
+  useDialogA11y({
+    open: drawerOpen,
+    onClose: closeDrawer,
+    rootRef: drawerWrapperRef,
+    dialogRef: drawerRef,
+  })
 
   function closeDrawer() {
     setDrawerOpen(false)
-    menuButtonRef.current?.focus()
   }
 
   function toggleCollapsed() {
@@ -316,7 +313,6 @@ export default function Layout({ children }: { children: ReactNode }) {
           in the left rail below. */}
       <header className="shrink-0 bg-nav-bg border-b border-nav-border px-4 py-2.5 flex items-center gap-3">
         <button
-          ref={menuButtonRef}
           onClick={() => setDrawerOpen(true)}
           aria-label="Open navigation"
           className="min-[900px]:hidden inline-flex items-center justify-center h-8 w-8 rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
@@ -445,7 +441,10 @@ export default function Layout({ children }: { children: ReactNode }) {
 
         {/* Off-canvas nav drawer for narrow viewports. */}
         {drawerOpen && (
-          <div className="fixed inset-0 z-40 min-[900px]:hidden">
+          <div
+            ref={drawerWrapperRef}
+            className="fixed inset-0 z-40 min-[900px]:hidden"
+          >
             <div
               className="absolute inset-0 bg-overlay-scrim"
               onClick={closeDrawer}
@@ -454,12 +453,15 @@ export default function Layout({ children }: { children: ReactNode }) {
               ref={drawerRef}
               role="dialog"
               aria-modal="true"
-              aria-label="Primary navigation"
+              aria-labelledby={drawerTitleId}
               tabIndex={-1}
               className="absolute inset-y-0 left-0 w-64 max-w-[80vw] bg-canvas border-r border-border shadow-lg flex flex-col py-3 px-3 focus:outline-none"
             >
               <div className="flex items-center justify-between pb-2">
-                <span className="text-sm font-semibold text-fg px-1">
+                <span
+                  id={drawerTitleId}
+                  className="text-sm font-semibold text-fg px-1"
+                >
                   Navigation
                 </span>
                 <IconButton

@@ -5,7 +5,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 
 from civex.context import AppContext
-from civex.domain.exceptions import AlreadyExistsError, NotFoundError
+from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.server.deps import get_ctx
 from civex.server.models import (
     CreateDatasetRequest,
@@ -19,6 +19,12 @@ router = APIRouter(prefix="/collections", tags=["collections"])
 @router.get("", response_model=list[DatasetResponse])
 def list_datasets(ctx: AppContext = Depends(get_ctx)):
     return [DatasetResponse.from_dto(d) for d in ctx.dataset_svc.list_all()]
+
+
+@router.get("/deleted", response_model=list[DatasetResponse])
+def list_deleted_datasets(ctx: AppContext = Depends(get_ctx)):
+    """Collections currently in Recently Deleted, most recently deleted first."""
+    return [DatasetResponse.from_dto(d) for d in ctx.dataset_svc.list_deleted()]
 
 
 @router.post("", response_model=DatasetResponse, status_code=201)
@@ -97,3 +103,26 @@ def delete_dataset(name: str, ctx: AppContext = Depends(get_ctx)):
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+
+
+@router.post("/{name}/restore", response_model=DatasetResponse)
+def restore_dataset(name: str, ctx: AppContext = Depends(get_ctx)):
+    try:
+        dto = ctx.dataset_svc.restore(name)
+        ctx.commit()
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return DatasetResponse.from_dto(dto)
+
+
+@router.delete("/{name}/purge", status_code=204)
+def purge_dataset(name: str, ctx: AppContext = Depends(get_ctx)):
+    try:
+        ctx.dataset_svc.purge(name)
+        ctx.commit()
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
