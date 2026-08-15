@@ -92,17 +92,42 @@ class LocalAuditRepository:
         entity_id: uuid.UUID | None = None,
         entity_type: str | None = None,
         commit_id: uuid.UUID | None = None,
+        entity_ids: list[uuid.UUID] | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[AuditLogDTO]:
-        q = self._s.query(AuditLog).order_by(AuditLog.timestamp.desc())
-        if entity_id is not None:
+        q = self._audit_query(entity_id, entity_type, commit_id, entity_ids)
+        return [
+            _audit_dto(r)
+            for r in q.order_by(AuditLog.timestamp.desc()).offset(offset).limit(limit).all()
+        ]
+
+    def count_audit(
+        self,
+        entity_id: uuid.UUID | None = None,
+        entity_type: str | None = None,
+        commit_id: uuid.UUID | None = None,
+        entity_ids: list[uuid.UUID] | None = None,
+    ) -> int:
+        return self._audit_query(entity_id, entity_type, commit_id, entity_ids).count()
+
+    def _audit_query(
+        self,
+        entity_id: uuid.UUID | None,
+        entity_type: str | None,
+        commit_id: uuid.UUID | None,
+        entity_ids: list[uuid.UUID] | None,
+    ):
+        q = self._s.query(AuditLog)
+        if entity_ids is not None:
+            q = q.filter(AuditLog.entity_id.in_(entity_ids))
+        elif entity_id is not None:
             q = q.filter(AuditLog.entity_id == entity_id)
         if entity_type is not None:
             q = q.filter(AuditLog.entity_type == entity_type)
         if commit_id is not None:
             q = q.filter(AuditLog.commit_id == commit_id)
-        return [_audit_dto(r) for r in q.offset(offset).limit(limit).all()]
+        return q
 
     def list_unpushed_commits(self) -> list[CommitDTO]:
         rows = (

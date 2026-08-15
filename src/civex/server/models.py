@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from civex.domain.dtos import (
+    AuditLogDTO,
     DatasetDTO,
     FieldDTO,
     RecordDTO,
@@ -389,6 +390,49 @@ class WorkflowJobResponse(BaseModel):
             started_at=dto.started_at,
             finished_at=dto.finished_at,
         )
+
+
+# --- Audit ---
+
+
+class AuditLogResponse(BaseModel):
+    id: str
+    commit_id: str | None = Field(
+        default=None,
+        description="Sync commit this entry was bundled into. Null until the next push.",
+    )
+    action: str = Field(description="One of: create, update, delete, purge.")
+    entity_type: str = Field(
+        description="One of: record, schema, field, dataset."
+    )
+    entity_id: str
+    old_data: dict[str, Any] | None = Field(
+        default=None, description="Full entity snapshot before the change. Null on create."
+    )
+    new_data: dict[str, Any] | None = Field(
+        default=None, description="Full entity snapshot after the change. Null on delete."
+    )
+    timestamp: datetime
+
+    @classmethod
+    def from_dto(cls, dto: AuditLogDTO) -> AuditLogResponse:
+        return cls(
+            id=str(dto.id),
+            commit_id=str(dto.commit_id) if dto.commit_id else None,
+            action=dto.action,
+            entity_type=dto.entity_type,
+            entity_id=str(dto.entity_id),
+            old_data=dto.old_data,
+            new_data=dto.new_data,
+            timestamp=dto.timestamp,
+        )
+
+
+class PaginatedAuditLogResponse(BaseModel):
+    items: list[AuditLogResponse]
+    total: int
+    offset: int
+    limit: int
 
 
 # --- Status ---
