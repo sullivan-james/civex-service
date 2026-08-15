@@ -185,6 +185,49 @@ class DatasetDTO:
 
 
 @dataclass
+class ViewDTO:
+    """A saved column/filter/sort definition against a base schema's own
+    fields -- what a table view in the UI reads back to reconstruct itself.
+    Reference-field joins in columns and actually running the view against
+    records are separate, later stories (see the filter tree shape in
+    civex.domain.filters, which this reuses unchanged)."""
+
+    id: uuid.UUID
+    schema_id: uuid.UUID
+    schema_name: str  # denormalised for display, resolved by the repo
+    name: str
+    columns: list[str]  # base schema field names, in display order
+    filter_tree: dict[str, Any] | None  # civex.domain.filters wire shape
+    sort: list[dict[str, Any]]  # [{"field": <name>, "direction": "asc"|"desc"}, ...]
+    created_at: datetime
+
+    def to_dict(self) -> dict[str, Any]:
+        # schema_name excluded -- denormalized display field, not stored on the entity
+        return {
+            "id": str(self.id),
+            "schema_id": str(self.schema_id),
+            "name": self.name,
+            "columns": self.columns,
+            "filter_tree": self.filter_tree,
+            "sort": self.sort,
+            "created_at": self.created_at.isoformat(),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ViewDTO:
+        return cls(
+            id=uuid.UUID(d["id"]),
+            schema_id=uuid.UUID(d["schema_id"]),
+            schema_name="",
+            name=d["name"],
+            columns=d.get("columns") or [],
+            filter_tree=d.get("filter_tree"),
+            sort=d.get("sort") or [],
+            created_at=datetime.fromisoformat(d["created_at"]),
+        )
+
+
+@dataclass
 class FileRef:
     """
     Stored as a dict in record.data for 'file' dtype fields.

@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from civex.services.record_service import RecordService
     from civex.services.schema_service import SchemaService
     from civex.services.store_service import StoreService
+    from civex.services.view_service import ViewService
     from civex.services.workflow_job_service import WorkflowJobService
     from civex.services.workflow_service import WorkflowService
 
@@ -78,6 +79,7 @@ class AppContext:
     plugin_svc: PluginService
     container_plugin_svc: ContainerPluginService
     policy_svc: PolicyService
+    view_svc: ViewService
     _session: Session
 
     def commit(self) -> None:
@@ -116,6 +118,7 @@ def build_local_context(
     from civex.repositories.local.job_repo import LocalWorkflowJobRepository
     from civex.repositories.local.record_repo import LocalRecordRepository
     from civex.repositories.local.schema_repo import LocalSchemaRepository
+    from civex.repositories.local.view_repo import LocalViewRepository
     from civex.services.ai.service import AiService
     from civex.services.ai_usage_service import AiUsageService
     from civex.services.analytics_service import AnalyticsService
@@ -127,6 +130,7 @@ def build_local_context(
     from civex.services.record_service import RecordService
     from civex.services.schema_service import SchemaService
     from civex.services.store_service import StoreService
+    from civex.services.view_service import ViewService
     from civex.services.workflow_job_service import WorkflowJobService
     from civex.services.workflow_service import WorkflowService
 
@@ -140,6 +144,7 @@ def build_local_context(
     )
     job_repo = LocalWorkflowJobRepository(session)
     audit_repo = LocalAuditRepository(session)
+    view_repo = LocalViewRepository(session)
     if file_store is None:
         file_store = VolumeAwareFileObjectStore(
             config.store_config, config.project_root
@@ -176,6 +181,7 @@ def build_local_context(
     )
     container_plugin_svc = ContainerPluginService(config.civex_dir)
     policy_svc = PolicyService(config.civex_dir)
+    view_svc = ViewService(view_repo, schema_svc, audit_repo)
 
     ctx = AppContext(
         schema_svc=schema_svc,
@@ -192,6 +198,7 @@ def build_local_context(
         plugin_svc=plugin_svc,
         container_plugin_svc=container_plugin_svc,
         policy_svc=policy_svc,
+        view_svc=view_svc,
         _session=session,
     )
     ai_svc._app_ctx = ctx

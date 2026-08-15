@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import nulls_last
 from sqlalchemy.orm import Session
 
-from civex.db.models import Field, Record, Schema, WorkflowJob
+from civex.db.models import Field, Record, Schema, View, WorkflowJob
 from civex.domain.dtos import FieldDTO, SchemaDTO
 from civex.domain.exceptions import NotFoundError
 
@@ -141,11 +141,13 @@ class LocalSchemaRepository:
 
     def purge(self, id: uuid.UUID) -> None:
         """Permanently remove a soft-deleted schema: its fields (ORM
-        cascade), every record it typed, those records' workflow jobs, and
-        parent_record_id links from other records pointing at them."""
+        cascade), every view defined against it, every record it typed,
+        those records' workflow jobs, and parent_record_id links from other
+        records pointing at them."""
         row = self._s.query(Schema).filter_by(id=id).first()
         if row is None:
             return
+        self._s.query(View).filter_by(schema_id=id).delete(synchronize_session=False)
         record_ids = [
             r.id for r in self._s.query(Record.id).filter_by(schema_id=id).all()
         ]

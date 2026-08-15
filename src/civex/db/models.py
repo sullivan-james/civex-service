@@ -141,6 +141,34 @@ class Field(Base):
     schema: Mapped[Schema] = relationship("Schema", back_populates="fields")
 
 
+class View(Base):
+    """
+    A saved column/filter/sort definition against a base schema's own
+    fields -- the definition a table view in the UI reads back to
+    reconstruct itself. filter_tree is the same AND/OR shape records
+    queries use (civex.domain.filters); columns/sort reference field names
+    the way Schema.display_fields does, not field ids, so renaming a field
+    on the schema is not reflected here automatically.
+    """
+
+    __tablename__ = "views"
+    __table_args__ = (UniqueConstraint("schema_id", "name"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    schema_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("schemas.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    columns: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    filter_tree: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    sort: Mapped[list[dict[str, Any]]] = mapped_column(
+        _JSON, nullable=False, default=list
+    )
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+
+    schema: Mapped[Schema] = relationship("Schema")
+
+
 class Dataset(Base):
     """
     A named container for a study or investigation.
