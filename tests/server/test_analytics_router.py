@@ -240,6 +240,37 @@ def test_audit_event_counts_by_action_and_entity_type(client: TestClient) -> Non
     assert {item["action"] for item in body["items"]} == {"create"}
 
 
+def test_audit_event_counts_filters_by_entity_type_and_action(
+    client: TestClient,
+) -> None:
+    client.post("/api/schemas", json={"name": "doc"})
+    client.post("/api/collections", json={"name": "study"})
+    client.post(
+        "/api/collections/study/records",
+        json={"schema_name": "doc", "data": {}},
+    )
+
+    resp = client.get(
+        "/api/analytics/audit/events", params={"entity_type": "record"}
+    )
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert {item["entity_type"] for item in items} == {"record"}
+    assert sum(item["count"] for item in items) == 1
+
+    resp = client.get("/api/analytics/audit/events", params={"action": "update"})
+    assert resp.json()["items"] == []
+
+    resp = client.get(
+        "/api/analytics/audit/events",
+        params={"entity_type": "dataset", "action": "create"},
+    )
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["entity_type"] == "dataset"
+    assert items[0]["action"] == "create"
+
+
 def test_ai_token_usage_by_provider_and_model(client: TestClient, ctx) -> None:
     ctx.ai_usage_svc.record("anthropic", "claude-sonnet-5", 100, 50)
     ctx.ai_usage_svc.record("anthropic", "claude-sonnet-5", 10, 5)

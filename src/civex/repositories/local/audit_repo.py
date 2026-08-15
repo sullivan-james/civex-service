@@ -41,10 +41,15 @@ class LocalAuditRepository:
         )
 
     def event_counts_by_period(
-        self, start: datetime | None, end: datetime | None
+        self,
+        start: datetime | None,
+        end: datetime | None,
+        entity_type: str | None = None,
+        action: str | None = None,
     ) -> list[AuditEventRow]:
         """Audit entries per day, broken out by action and entity_type --
-        backs the activity-over-time widget."""
+        backs the activity-over-time widget. `entity_type`/`action` narrow
+        to a single value each; the breakdown itself is never collapsed."""
         day = day_bucket(AuditLog.timestamp)
         q = self._s.query(
             day, AuditLog.action, AuditLog.entity_type, func.count(AuditLog.id)
@@ -53,6 +58,10 @@ class LocalAuditRepository:
             q = q.filter(AuditLog.timestamp >= start)
         if end is not None:
             q = q.filter(AuditLog.timestamp < end)
+        if entity_type is not None:
+            q = q.filter(AuditLog.entity_type == entity_type)
+        if action is not None:
+            q = q.filter(AuditLog.action == action)
         rows = (
             q.group_by(day, AuditLog.action, AuditLog.entity_type).order_by(day).all()
         )

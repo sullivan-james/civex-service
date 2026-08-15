@@ -20,6 +20,8 @@ describe('defaultAnalyticsFilters', () => {
     expect(defaults.pluginId).toBeNull()
     expect(defaults.status).toBeNull()
     expect(defaults.trigger).toBeNull()
+    expect(defaults.entityType).toBeNull()
+    expect(defaults.action).toBeNull()
   })
 })
 
@@ -40,6 +42,8 @@ describe('parseAnalyticsFilters', () => {
       plugin_id: 'civex.load_file',
       status: 'failed',
       trigger: 'record_created',
+      entity_type: 'record',
+      action: 'update',
     })
     const filters = parseAnalyticsFilters(params, NOW)
     expect(filters).toEqual({
@@ -52,6 +56,8 @@ describe('parseAnalyticsFilters', () => {
       pluginId: 'civex.load_file',
       status: 'failed',
       trigger: 'record_created',
+      entityType: 'record',
+      action: 'update',
     })
   })
 
@@ -112,9 +118,13 @@ describe('toAnalyticsQueryParams', () => {
       ...defaultAnalyticsFilters(NOW),
       dataset: 'invoices',
       workflowId: 'extract-invoice',
+      entityType: 'record',
+      action: 'update',
     }
     const params = toAnalyticsQueryParams(filters)
     expect(params.get('dataset')).toBe('invoices')
     expect(params.get('workflow_id')).toBe('extract-invoice')
+    expect(params.get('entity_type')).toBe('record')
+    expect(params.get('action')).toBe('update')
   })
 })

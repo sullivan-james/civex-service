@@ -26,6 +26,8 @@ export interface AnalyticsFilterBarProps {
   pluginOptions?: AnalyticsFilterOption[]
   statusOptions?: AnalyticsFilterOption[]
   triggerOptions?: AnalyticsFilterOption[]
+  entityTypeOptions?: AnalyticsFilterOption[]
+  actionOptions?: AnalyticsFilterOption[]
   className?: string
 }
 
@@ -74,6 +76,8 @@ export function AnalyticsFilterBar({
   pluginOptions = [],
   statusOptions = [],
   triggerOptions = [],
+  entityTypeOptions = [],
+  actionOptions = [],
   className = '',
 }: AnalyticsFilterBarProps) {
   return (
@@ -152,6 +156,18 @@ export function AnalyticsFilterBar({
         value={filters.trigger}
         options={triggerOptions}
         onChange={(trigger) => onChange({ trigger })}
+      />
+      <DimensionSelect
+        label="Entity type"
+        value={filters.entityType}
+        options={entityTypeOptions}
+        onChange={(entityType) => onChange({ entityType })}
+      />
+      <DimensionSelect
+        label="Action"
+        value={filters.action}
+        options={actionOptions}
+        onChange={(action) => onChange({ action })}
       />
 
       {onReset && (
