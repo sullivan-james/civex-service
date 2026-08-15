@@ -1,6 +1,9 @@
-"""SchemaService.delete() cascades to descendant schemas and their records;
-get_delete_impact() reports the same counts up front so the UI can warn
-before the delete happens.
+"""SchemaService.delete() soft-deletes a schema and the records typed by it,
+but leaves schemas that inherit from it (and their own records) alone --
+see SchemaRepository.delete() and docs/guides/deleting-and-restoring.md.
+get_delete_impact() reports that same record count up front, plus an
+informational count of inheriting descendant schemas -- not deleted with
+it, but what blocks a later purge().
 
 A record can only carry a parent_record_id if its own schema inherits from
 its parent's -- RecordService.add() requires and validates this -- so the
@@ -44,7 +47,7 @@ def test_impact_counts_records_of_the_schema_itself(
     assert impact.record_count == 2
 
 
-def test_impact_counts_inheriting_child_schemas_and_their_records(
+def test_impact_reports_descendant_schema_count_and_own_record_count(
     ctx: AppContext, make_schema, make_collection, make_record
 ):
     make_schema("base")
@@ -57,7 +60,7 @@ def test_impact_counts_inheriting_child_schemas_and_their_records(
 
     impact = ctx.schema_svc.get_delete_impact("base")
     assert impact.child_schema_count == 2
-    assert impact.record_count == 3
+    assert impact.record_count == 1
 
 
 def test_impact_for_a_middle_schema_excludes_its_ancestor(
@@ -97,7 +100,7 @@ def test_delete_cascades_to_records_of_the_schema(
     assert _record_gone(ctx, record.id)
 
 
-def test_delete_cascades_to_child_schemas_and_their_records(
+def test_delete_leaves_child_schemas_and_their_records_untouched(
     ctx: AppContext, make_schema, make_collection, make_record
 ):
     make_schema("base")
@@ -113,13 +116,12 @@ def test_delete_cascades_to_child_schemas_and_their_records(
 
     with pytest.raises(NotFoundError):
         ctx.schema_svc.get("base")
-    with pytest.raises(NotFoundError):
-        ctx.schema_svc.get("derived")
+    assert ctx.schema_svc.get("derived")
     assert _record_gone(ctx, base_record.id)
-    assert _record_gone(ctx, derived_record.id)
+    assert not _record_gone(ctx, derived_record.id)
 
 
-def test_delete_cascades_through_multi_level_inheritance(
+def test_delete_leaves_multi_level_descendants_and_their_records_untouched(
     ctx: AppContext, make_schema, make_collection, make_record
 ):
     make_schema("base")
@@ -135,12 +137,13 @@ def test_delete_cascades_through_multi_level_inheritance(
     ctx.schema_svc.delete("base")
     ctx.commit()
 
-    for name in ("base", "derived", "grandchild"):
-        with pytest.raises(NotFoundError):
-            ctx.schema_svc.get(name)
+    with pytest.raises(NotFoundError):
+        ctx.schema_svc.get("base")
+    assert ctx.schema_svc.get("derived")
+    assert ctx.schema_svc.get("grandchild")
     assert _record_gone(ctx, base.id)
-    assert _record_gone(ctx, derived.id)
-    assert _record_gone(ctx, grandchild.id)
+    assert not _record_gone(ctx, derived.id)
+    assert not _record_gone(ctx, grandchild.id)
 
 
 def test_delete_of_a_middle_schema_leaves_its_ancestor_intact(

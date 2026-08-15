@@ -54,15 +54,15 @@ function describeDeleteImpact(childCount: number, recordCount: number): string {
   const records = `${recordCount.toLocaleString()} record${recordCount === 1 ? '' : 's'}`
   const children = `${childCount} child type${childCount === 1 ? '' : 's'}`
   if (childCount > 0 && recordCount > 0) {
-    return `This record type has ${children} and ${records}. Deleting it will also delete those records.`
+    return `Deleting it will also delete ${records} typed by it. This record type has ${children} that inherit from it — they'll keep working, pointing at a hidden parent, until it's restored.`
   }
   if (childCount > 0) {
-    return `This record type has ${children} that inherit from it. Deleting it will also delete those schemas.`
+    return `This record type has ${children} that inherit from it — they'll keep working, pointing at a hidden parent, until it's restored.`
   }
   if (recordCount > 0) {
     return `Deleting it will also delete ${records}.`
   }
-  return 'This cannot be undone. All field definitions will be removed.'
+  return "It moves to Recently Deleted and can be restored until it's purged."
 }
 
 // --- Inline metadata editor ---

@@ -354,66 +354,49 @@ class SchemaService:
                 by_parent.setdefault(s.parent_id, []).append(s)
         return by_parent
 
-    def _post_order_ids(
+    def _descendant_count(
         self, schema_id: uuid.UUID, children_by_parent: dict[uuid.UUID, list[SchemaDTO]]
-    ) -> list[uuid.UUID]:
-        """schema_id's descendants, deepest first, with schema_id itself
-        last. A record can only carry a parent_record_id if its own schema
-        inherits from its parent's (RecordService.add() requires and
-        validates this), so a record's ancestor chain always mirrors its
-        schema's -- deleting schemas (and their records) in this order never
-        trips the parent_record_id FK on a still-referenced row."""
-        ids: list[uuid.UUID] = []
-        for child in children_by_parent.get(schema_id, []):
-            ids.extend(self._post_order_ids(child.id, children_by_parent))
-        ids.append(schema_id)
-        return ids
+    ) -> int:
+        """How many schemas (transitively) inherit from schema_id. Purely
+        informational for get_delete_impact() -- delete() does not touch
+        them, see SchemaRepository.delete() -- but it's what blocks purge()
+        until they're gone or repointed."""
+        children = children_by_parent.get(schema_id, [])
+        return len(children) + sum(
+            self._descendant_count(c.id, children_by_parent) for c in children
+        )
 
     def get_delete_impact(self, name: str) -> SchemaDeleteImpactDTO:
-        """What deleting this schema would take with it: schemas that inherit
-        from it (transitively), and every record typed with this schema or
-        one of those descendants -- the same set that delete() actually
-        removes, computed up front so the UI can warn before the delete
-        happens."""
+        """What deleting this schema would take with it: every record it
+        types itself, across every collection -- the same set delete()
+        actually moves to Recently Deleted, computed up front so the UI can
+        warn before the delete happens. child_schema_count is informational
+        only -- see _descendant_count."""
         schema = self.get(name)
-        order = self._post_order_ids(schema.id, self._children_by_parent())
         record_count = (
-            len(self._records.list_ids_by_schema_ids(order))
+            len(self._records.list_ids_by_schema_ids([schema.id]))
             if self._records is not None
             else 0
         )
         return SchemaDeleteImpactDTO(
-            child_schema_count=len(order) - 1, record_count=record_count
+            child_schema_count=self._descendant_count(
+                schema.id, self._children_by_parent()
+            ),
+            record_count=record_count,
         )
 
     def delete(self, name: str) -> None:
         """Soft-delete: the schema (and every record typed by it, across
         every collection — see SchemaRepository.delete) moves to Recently
-        Deleted, reversible via restore() within the retention window."""
+        Deleted, reversible via restore() within the retention window.
+        Schemas that inherit from this one are left untouched and keep
+        resolving its fields; see docs/guides/deleting-and-restoring.md."""
         schema = self.get(name)
-        order = self._post_order_ids(schema.id, self._children_by_parent())
-
-        if self._records is not None:
-            for schema_id in order:
-                for record_id in self._records.list_ids_by_schema_ids([schema_id]):
-                    dto = self._records.get_by_id(record_id)
-                    if dto is None:
-                        continue
-                    if self._audit:
-                        self._audit.log_change(
-                            "delete", "record", record_id, dto.to_dict(), None
-                        )
-                    self._records.delete(record_id)
-
-        for schema_id in order:
-            schema_dto = self._repo.get_by_id(schema_id)
-            if schema_dto is None:
-                continue
-            if self._audit:
-                self._audit.log_change(
-                    "delete", "schema", schema_id, schema_dto.to_dict(), None
-                )
-            self._repo.delete(schema_id)
+        if self._audit:
+            self._audit.log_change(
+                "delete", "schema", schema.id, schema.to_dict(), None
+            )
+        self._repo.delete(schema.id)
 
     def list_deleted(self) -> list[SchemaDTO]:
         return self._repo.list_deleted()

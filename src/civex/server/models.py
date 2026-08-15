@@ -86,10 +86,10 @@ class SchemaResponse(BaseModel):
 
 class SchemaDeleteImpactResponse(BaseModel):
     child_schema_count: int = Field(
-        description="Schemas that inherit from this one, directly or transitively — they are deleted along with it."
+        description="Schemas that inherit from this one, directly or transitively — informational only, they are not deleted along with it, but their presence blocks a later purge."
     )
     record_count: int = Field(
-        description="Records of this schema, a descendant schema, or nested under one of those records — all deleted along with it."
+        description="Records typed by this schema itself, across every collection — deleted along with it."
     )
 
     @classmethod
