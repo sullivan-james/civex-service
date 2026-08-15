@@ -15,3 +15,18 @@ export function formatCompactNumber(value: number): string {
   if (abs < 1_000_000) return `${(value / 1000).toFixed(abs < 10_000 ? 1 : 0)}k`
   return `${(value / 1_000_000).toFixed(1)}M`
 }
+
+const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+
+/** Formats a byte count as a compact human string, e.g. 1_500_000 ->
+ * "1.4 MB", for storage stat tiles. */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  let value = bytes
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < BYTE_UNITS.length - 1) {
+    value /= 1024
+    unitIndex++
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${BYTE_UNITS[unitIndex]}`
+}

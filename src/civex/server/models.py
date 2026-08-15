@@ -14,6 +14,7 @@ from civex.domain.dtos import (
     AuditLogDTO,
     DatasetDTO,
     FieldDTO,
+    NameIssue,
     RecordDTO,
     SchemaDeleteImpactDTO,
     SchemaDTO,
@@ -107,6 +108,24 @@ class SchemaDeleteImpactResponse(BaseModel):
     def from_dto(cls, dto: SchemaDeleteImpactDTO) -> SchemaDeleteImpactResponse:
         return cls(
             child_schema_count=dto.child_schema_count, record_count=dto.record_count
+        )
+
+
+class NameIssueResponse(BaseModel):
+    kind: str = Field(description="'schema' or 'field'.")
+    schema_name: str
+    name: str
+    suggestion: str | None = Field(
+        default=None, description="Slugified alternative; null if undecidable."
+    )
+
+    @classmethod
+    def from_dto(cls, dto: NameIssue) -> NameIssueResponse:
+        return cls(
+            kind=dto.kind,
+            schema_name=dto.schema_name,
+            name=dto.name,
+            suggestion=dto.suggestion,
         )
 
 
