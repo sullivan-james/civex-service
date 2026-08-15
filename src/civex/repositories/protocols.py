@@ -132,6 +132,9 @@ class RecordRepository(Protocol):
     def list_by_schema(
         self, schema_id: uuid.UUID, search: str | None = None, limit: int = 20
     ) -> list[RecordDTO]: ...
+    def list_ids_by_schema_ids(
+        self, schema_ids: list[uuid.UUID]
+    ) -> list[uuid.UUID]: ...
     def list_children(
         self, parent_id: uuid.UUID, include_deleted: bool = False
     ) -> list[RecordDTO]: ...

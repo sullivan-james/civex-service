@@ -3,10 +3,20 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from civex.domain.dtos import FieldDTO, NameIssue, ResolvedField, SchemaDTO
+from civex.domain.dtos import (
+    FieldDTO,
+    NameIssue,
+    ResolvedField,
+    SchemaDeleteImpactDTO,
+    SchemaDTO,
+)
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.domain.naming import is_slug, slugify, validate_name
-from civex.repositories.protocols import AuditRepository, SchemaRepository
+from civex.repositories.protocols import (
+    AuditRepository,
+    RecordRepository,
+    SchemaRepository,
+)
 
 VALID_DTYPES = frozenset(
     [
@@ -69,10 +79,14 @@ def _suggest(name: str) -> str | None:
 
 class SchemaService:
     def __init__(
-        self, repo: SchemaRepository, audit_repo: AuditRepository | None = None
+        self,
+        repo: SchemaRepository,
+        audit_repo: AuditRepository | None = None,
+        record_repo: RecordRepository | None = None,
     ) -> None:
         self._repo = repo
         self._audit = audit_repo
+        self._records = record_repo
 
     def create(
         self,
@@ -333,16 +347,73 @@ class SchemaService:
             )
         return self._repo.reorder_fields(schema.id, field_ids)
 
+    def _children_by_parent(self) -> dict[uuid.UUID, list[SchemaDTO]]:
+        by_parent: dict[uuid.UUID, list[SchemaDTO]] = {}
+        for s in self._repo.list_all():
+            if s.parent_id:
+                by_parent.setdefault(s.parent_id, []).append(s)
+        return by_parent
+
+    def _post_order_ids(
+        self, schema_id: uuid.UUID, children_by_parent: dict[uuid.UUID, list[SchemaDTO]]
+    ) -> list[uuid.UUID]:
+        """schema_id's descendants, deepest first, with schema_id itself
+        last. A record can only carry a parent_record_id if its own schema
+        inherits from its parent's (RecordService.add() requires and
+        validates this), so a record's ancestor chain always mirrors its
+        schema's -- deleting schemas (and their records) in this order never
+        trips the parent_record_id FK on a still-referenced row."""
+        ids: list[uuid.UUID] = []
+        for child in children_by_parent.get(schema_id, []):
+            ids.extend(self._post_order_ids(child.id, children_by_parent))
+        ids.append(schema_id)
+        return ids
+
+    def get_delete_impact(self, name: str) -> SchemaDeleteImpactDTO:
+        """What deleting this schema would take with it: schemas that inherit
+        from it (transitively), and every record typed with this schema or
+        one of those descendants -- the same set that delete() actually
+        removes, computed up front so the UI can warn before the delete
+        happens."""
+        schema = self.get(name)
+        order = self._post_order_ids(schema.id, self._children_by_parent())
+        record_count = (
+            len(self._records.list_ids_by_schema_ids(order))
+            if self._records is not None
+            else 0
+        )
+        return SchemaDeleteImpactDTO(
+            child_schema_count=len(order) - 1, record_count=record_count
+        )
+
     def delete(self, name: str) -> None:
         """Soft-delete: the schema (and every record typed by it, across
         every collection — see SchemaRepository.delete) moves to Recently
         Deleted, reversible via restore() within the retention window."""
         schema = self.get(name)
-        if self._audit:
-            self._audit.log_change(
-                "delete", "schema", schema.id, schema.to_dict(), None
-            )
-        self._repo.delete(schema.id)
+        order = self._post_order_ids(schema.id, self._children_by_parent())
+
+        if self._records is not None:
+            for schema_id in order:
+                for record_id in self._records.list_ids_by_schema_ids([schema_id]):
+                    dto = self._records.get_by_id(record_id)
+                    if dto is None:
+                        continue
+                    if self._audit:
+                        self._audit.log_change(
+                            "delete", "record", record_id, dto.to_dict(), None
+                        )
+                    self._records.delete(record_id)
+
+        for schema_id in order:
+            schema_dto = self._repo.get_by_id(schema_id)
+            if schema_dto is None:
+                continue
+            if self._audit:
+                self._audit.log_change(
+                    "delete", "schema", schema_id, schema_dto.to_dict(), None
+                )
+            self._repo.delete(schema_id)
 
     def list_deleted(self) -> list[SchemaDTO]:
         return self._repo.list_deleted()

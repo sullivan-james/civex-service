@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Modal, ModalHeader, ModalBody, ModalFooter } from './Modal'
 import { Button } from './Button'
+import { Input } from './Input'
 
 interface ConfirmDialogProps {
   title: string
@@ -13,6 +14,13 @@ interface ConfirmDialogProps {
    * dialog. */
   warning?: ReactNode
   isPending?: boolean
+  /** Disable confirm for a reason other than isPending -- e.g. impact data
+   * that's still loading and would otherwise let the button fire early. */
+  confirmDisabled?: boolean
+  /** Require the user to type this value verbatim before confirm is
+   * enabled -- gates high-impact destructive actions behind an explicit,
+   * hard-to-fat-finger acknowledgement instead of a single click. */
+  typedConfirmationValue?: string
   onConfirm: () => void
   onClose: () => void
 }
@@ -24,9 +32,16 @@ export function ConfirmDialog({
   variant = 'default',
   warning,
   isPending = false,
+  confirmDisabled = false,
+  typedConfirmationValue,
   onConfirm,
   onClose,
 }: ConfirmDialogProps) {
+  const [typed, setTyped] = useState('')
+  const typedMismatch =
+    typedConfirmationValue != null && typed !== typedConfirmationValue
+  const disabled = isPending || confirmDisabled || typedMismatch
+
   return (
     <Modal onClose={onClose} size="sm" dismissible={!isPending}>
       <ModalHeader onClose={isPending ? undefined : onClose}>
@@ -39,20 +54,42 @@ export function ConfirmDialog({
             {warning}
           </div>
         )}
+        {typedConfirmationValue != null && (
+          <div>
+            <label
+              htmlFor="confirm-dialog-typed-value"
+              className="block text-xs text-fg-muted mb-1"
+            >
+              Type{' '}
+              <span className="font-mono font-medium text-fg">
+                {typedConfirmationValue}
+              </span>{' '}
+              to confirm
+            </label>
+            <Input
+              id="confirm-dialog-typed-value"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              disabled={isPending}
+              autoComplete="off"
+              autoFocus
+            />
+          </div>
+        )}
       </ModalBody>
       <ModalFooter>
         <Button
           variant="default"
           onClick={onClose}
           disabled={isPending}
-          autoFocus={variant === 'danger'}
+          autoFocus={variant === 'danger' && typedConfirmationValue == null}
         >
           Cancel
         </Button>
         <Button
           variant={variant === 'danger' ? 'danger' : 'primary'}
           onClick={onConfirm}
-          disabled={isPending}
+          disabled={disabled}
           autoFocus={variant !== 'danger'}
         >
           {isPending ? 'Working…' : confirmLabel}

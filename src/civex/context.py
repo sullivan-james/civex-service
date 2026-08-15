@@ -130,7 +130,7 @@ def build_local_context(
             config.remote.url, remote_civex=config.remote.remote_civex
         )
 
-    schema_svc = SchemaService(schema_repo, audit_repo)
+    schema_svc = SchemaService(schema_repo, audit_repo, record_repo)
     dataset_svc = DatasetService(dataset_repo, audit_repo)
     job_svc = WorkflowJobService(job_repo, config.civex_dir)
     record_svc = RecordService(

@@ -12,6 +12,7 @@ from civex.server.models import (
     CreateSchemaRequest,
     FieldResponse,
     ReorderFieldsRequest,
+    SchemaDeleteImpactResponse,
     SchemaResponse,
     UpdateFieldRequest,
     UpdateSchemaRequest,
@@ -92,6 +93,17 @@ def update_schema(
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
     return SchemaResponse.from_dto(dto)
+
+
+@router.get("/{name}/delete-impact", response_model=SchemaDeleteImpactResponse)
+def get_schema_delete_impact(name: str, ctx: AppContext = Depends(get_ctx)):
+    """What deleting this schema would take with it, so the caller can warn
+    before the delete happens rather than after it fails or silently loses data."""
+    try:
+        impact = ctx.schema_svc.get_delete_impact(name)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    return SchemaDeleteImpactResponse.from_dto(impact)
 
 
 @router.delete("/{name}", status_code=204)

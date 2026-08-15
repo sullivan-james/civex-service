@@ -15,6 +15,14 @@ export function useSchema(name: string) {
   })
 }
 
+export function useSchemaDeleteImpact(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['schemas', name, 'delete-impact'],
+    queryFn: () => schemasApi.getDeleteImpact(name),
+    enabled: enabled && !!name,
+  })
+}
+
 export function useCreateSchema() {
   const qc = useQueryClient()
   const toast = useToast()
@@ -91,11 +99,28 @@ export function useDeleteSchema() {
   const qc = useQueryClient()
   const toast = useToast()
   return useMutation({
-    mutationFn: schemasApi.delete,
-    onSuccess: (_data, schemaName) => {
+    mutationFn: (vars: { name: string; undo?: () => Promise<unknown> }) =>
+      schemasApi.delete(vars.name),
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['schemas'] })
       qc.invalidateQueries({ queryKey: ['schemas-deleted'] })
-      toast.success(`Schema "${schemaName}" moved to Recently Deleted`)
+      toast.success(`Schema "${vars.name}" moved to Recently Deleted`, {
+        action: vars.undo
+          ? {
+              label: 'Undo',
+              onClick: () => {
+                vars.undo!().then(
+                  () => {
+                    qc.invalidateQueries({ queryKey: ['schemas'] })
+                    qc.invalidateQueries({ queryKey: ['schemas-deleted'] })
+                    toast.success(`Schema "${vars.name}" restored`)
+                  },
+                  (err) => toast.error(errorMessage(err)),
+                )
+              },
+            }
+          : undefined,
+      })
     },
     onError: (err) => toast.error(errorMessage(err)),
   })

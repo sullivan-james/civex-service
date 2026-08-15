@@ -1,8 +1,10 @@
 import { useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router'
 import { errorMessage } from '../lib/errors'
+import { schemasApi } from '../api/schemas'
 import {
   useSchema,
+  useSchemaDeleteImpact,
   useUpdateSchema,
   useUpdateField,
   useDeleteSchema,
@@ -42,6 +44,26 @@ import {
 } from '../components/ui/icons'
 import { FieldForm } from '../components/schemas/FieldForm'
 import { RestrictionsSummary } from '../components/schemas/RestrictionsSummary'
+
+// Above this many records, or with any child schema, deleting is treated as
+// high-impact: the confirm button stays disabled until the user types the
+// schema name, instead of a single click.
+const HIGH_IMPACT_RECORD_THRESHOLD = 25
+
+function describeDeleteImpact(childCount: number, recordCount: number): string {
+  const records = `${recordCount.toLocaleString()} record${recordCount === 1 ? '' : 's'}`
+  const children = `${childCount} child type${childCount === 1 ? '' : 's'}`
+  if (childCount > 0 && recordCount > 0) {
+    return `This record type has ${children} and ${records}. Deleting it will also delete those records.`
+  }
+  if (childCount > 0) {
+    return `This record type has ${children} that inherit from it. Deleting it will also delete those schemas.`
+  }
+  if (recordCount > 0) {
+    return `Deleting it will also delete ${records}.`
+  }
+  return 'This cannot be undone. All field definitions will be removed.'
+}
 
 // --- Inline metadata editor ---
 
@@ -132,6 +154,8 @@ export default function SchemaDetailPage() {
   // Fetch by UUID — name changes don't affect the URL
   const { data: schema, isLoading, error } = useSchema(id!)
   const { data: allSchemas } = useSchemas()
+  const { data: deleteImpact, isLoading: deleteImpactLoading } =
+    useSchemaDeleteImpact(schema?.name ?? '', confirmDelete)
   const updateField = useUpdateField(schema?.name ?? '')
   const deleteField = useDeleteField(schema?.name ?? '')
   const deleteSchema = useDeleteSchema()
@@ -625,24 +649,57 @@ export default function SchemaDetailPage() {
         />
       )}
 
-      {confirmDelete && (
-        <ConfirmDialog
-          title="Delete schema"
-          body={`Delete schema '${schema.name}' and the records typed by it? They'll move to Recently Deleted and can be restored.`}
-          confirmLabel="Delete"
-          variant="danger"
-          warning={
-            deleteSchema.error ? errorMessage(deleteSchema.error) : undefined
-          }
-          isPending={deleteSchema.isPending}
-          onConfirm={() =>
-            deleteSchema.mutate(schema.name, {
-              onSuccess: () => navigate('/schemas'),
-            })
-          }
-          onClose={() => setConfirmDelete(false)}
-        />
-      )}
+      {confirmDelete &&
+        (() => {
+          const childCount = deleteImpact?.child_schema_count ?? 0
+          const recordCount = deleteImpact?.record_count ?? 0
+          const impactReady = !!deleteImpact && !deleteImpactLoading
+          const highImpact =
+            impactReady &&
+            (childCount > 0 || recordCount > HIGH_IMPACT_RECORD_THRESHOLD)
+
+          return (
+            <ConfirmDialog
+              title="Delete schema"
+              body={
+                <>
+                  <p>
+                    Delete schema '{schema.name}'?{' '}
+                    {impactReady
+                      ? describeDeleteImpact(childCount, recordCount)
+                      : 'Checking what depends on this schema…'}
+                  </p>
+                </>
+              }
+              confirmLabel={
+                impactReady
+                  ? recordCount > 0
+                    ? `Delete schema and ${recordCount.toLocaleString()} record${recordCount === 1 ? '' : 's'}`
+                    : 'Delete schema'
+                  : 'Checking…'
+              }
+              variant="danger"
+              confirmDisabled={!impactReady}
+              typedConfirmationValue={highImpact ? schema.name : undefined}
+              warning={
+                deleteSchema.error
+                  ? errorMessage(deleteSchema.error)
+                  : undefined
+              }
+              isPending={deleteSchema.isPending}
+              onConfirm={() =>
+                deleteSchema.mutate(
+                  {
+                    name: schema.name,
+                    undo: () => schemasApi.restore(schema.name),
+                  },
+                  { onSuccess: () => navigate('/schemas') },
+                )
+              }
+              onClose={() => setConfirmDelete(false)}
+            />
+          )
+        })()}
     </Page>
   )
 }
