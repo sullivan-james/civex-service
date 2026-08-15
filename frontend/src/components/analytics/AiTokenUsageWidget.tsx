@@ -129,7 +129,10 @@ export function AiTokenUsageWidget({ filters }: AiTokenUsageWidgetProps) {
       {!usageQuery.isLoading && !usageQuery.error && points.length > 0 && (
         <>
           <div className="grid grid-cols-2 gap-3 sm:max-w-md">
-            <StatTile label="Input tokens" value={formatCompactNumber(totalInput)} />
+            <StatTile
+              label="Input tokens"
+              value={formatCompactNumber(totalInput)}
+            />
             <StatTile
               label="Output tokens"
               value={formatCompactNumber(totalOutput)}
@@ -147,8 +150,8 @@ export function AiTokenUsageWidget({ filters }: AiTokenUsageWidgetProps) {
         </>
       )}
       <p className="text-xs text-fg-subtle">
-        Showing token counts only -- estimated cost isn&apos;t shown because
-        no per-model pricing source exists in this project yet.
+        Showing token counts only -- estimated cost isn&apos;t shown because no
+        per-model pricing source exists in this project yet.
       </p>
     </div>
   )

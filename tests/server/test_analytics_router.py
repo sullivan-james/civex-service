@@ -223,3 +223,25 @@ def test_ai_token_usage_by_provider_and_model(client: TestClient, ctx) -> None:
     assert by_model[("anthropic", "claude-sonnet-5")]["input_tokens"] == 110
     assert by_model[("anthropic", "claude-sonnet-5")]["output_tokens"] == 55
     assert by_model[("openai-compat", "llama-3")]["input_tokens"] == 7
+
+
+def test_ai_token_usage_scoped_to_provider_and_model(client: TestClient, ctx) -> None:
+    ctx.ai_usage_svc.record("anthropic", "claude-sonnet-5", 100, 50)
+    ctx.ai_usage_svc.record("anthropic", "claude-haiku-4-5", 20, 10)
+    ctx.ai_usage_svc.record("openai-compat", "llama-3", 7, 3)
+
+    resp = client.get("/api/analytics/ai/usage", params={"provider": "anthropic"})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert {i["provider"] for i in items} == {"anthropic"}
+    assert {i["model"] for i in items} == {"claude-sonnet-5", "claude-haiku-4-5"}
+
+    resp = client.get(
+        "/api/analytics/ai/usage",
+        params={"provider": "anthropic", "model": "claude-sonnet-5"},
+    )
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["input_tokens"] == 100
+    assert items[0]["output_tokens"] == 50
