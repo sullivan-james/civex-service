@@ -34,6 +34,10 @@ export { JobSuccessRateWidget } from './widgets/JobSuccessRateWidget'
 export { PluginFailuresWidget } from './widgets/PluginFailuresWidget'
 export { DurationDistributionWidget } from './widgets/DurationDistributionWidget'
 export { TriggerBreakdownWidget } from './widgets/TriggerBreakdownWidget'
+export { RecordGrowthWidget } from './widgets/RecordGrowthWidget'
+export { RecordCountsWidget } from './widgets/RecordCountsWidget'
+export { StorageUsageWidget } from './widgets/StorageUsageWidget'
+export { SchemaLintWidget } from './widgets/SchemaLintWidget'
 export {
   AiTokenUsageWidget,
   type AiTokenUsageWidgetProps,

@@ -2,6 +2,20 @@ import { useQuery } from '@tanstack/react-query'
 import { analyticsApi } from '../api/analytics'
 import type { AnalyticsFiltersState } from '../utils/analyticsFilters'
 
+export function useRecordCounts(filters: AnalyticsFiltersState) {
+  return useQuery({
+    queryKey: ['analytics', 'records', 'counts', filters],
+    queryFn: () => analyticsApi.recordCounts(filters),
+  })
+}
+
+export function useRecordGrowth(filters: AnalyticsFiltersState) {
+  return useQuery({
+    queryKey: ['analytics', 'records', 'growth', filters],
+    queryFn: () => analyticsApi.recordGrowth(filters),
+  })
+}
+
 export function useJobStatusCounts(filters: AnalyticsFiltersState) {
   return useQuery({
     queryKey: ['analytics', 'jobs', 'status', filters],
