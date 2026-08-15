@@ -29,6 +29,7 @@ from civex.repositories.local.record_repo import LocalRecordRepository
 from civex.repositories.local.schema_repo import LocalSchemaRepository
 from civex.services.ai.service import AiService
 from civex.services.ai_usage_service import AiUsageService
+from civex.services.analytics_service import AnalyticsService
 from civex.services.container_plugin_service import ContainerPluginService
 from civex.services.dataset_service import DatasetService
 from civex.services.file_service import FileService
@@ -72,6 +73,7 @@ class AppContext:
     audit_svc: LocalAuditRepository
     ai_svc: AiService
     ai_usage_svc: AiUsageService
+    analytics_svc: AnalyticsService
     workflow_svc: WorkflowService
     plugin_svc: PluginService
     container_plugin_svc: ContainerPluginService
@@ -140,6 +142,9 @@ def build_local_context(
     store_svc = StoreService(config, file_store)
     ai_svc = AiService(schema_svc, dataset_svc, record_svc, job_svc)
     ai_usage_svc = AiUsageService(engine)
+    analytics_svc = AnalyticsService(
+        record_repo, job_repo, audit_repo, ai_usage_svc, schema_svc, dataset_svc
+    )
     workflow_svc = WorkflowService(
         config.civex_dir,
         plugins_provider=_plugins_provider(config.civex_dir),
@@ -161,6 +166,7 @@ def build_local_context(
         audit_svc=audit_repo,
         ai_svc=ai_svc,
         ai_usage_svc=ai_usage_svc,
+        analytics_svc=analytics_svc,
         workflow_svc=workflow_svc,
         plugin_svc=plugin_svc,
         container_plugin_svc=container_plugin_svc,

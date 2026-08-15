@@ -9,9 +9,11 @@ from sqlalchemy import cast, func, literal, or_, String
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlalchemy.orm import Session
 
-from civex.db.models import Record, Schema, WorkflowJob
+from civex.db.models import Dataset, Record, Schema, WorkflowJob
 from civex.domain.dtos import RecordDTO
 from civex.domain.exceptions import NotFoundError
+from civex.repositories.local._bucketing import day_bucket
+from civex.repositories.protocols import RecordGrowthRow
 
 
 def _coerce_json_value(v: str) -> Any:
@@ -210,6 +212,39 @@ class LocalRecordRepository:
             .all()
         )
         return {name: count for name, count in rows}
+
+    def growth_by_period(
+        self,
+        dataset_id: uuid.UUID | None,
+        schema_id: uuid.UUID | None,
+        start: datetime | None,
+        end: datetime | None,
+    ) -> list[RecordGrowthRow]:
+        """Record creation counts per day, broken out by dataset and schema
+        name -- the raw series backing the record-growth-over-time widget.
+        Scoping by `dataset_id` (as the analytics endpoint's `dataset` filter
+        does) lets this use `ix_records_dataset_created`; an unscoped,
+        wide-open-ended call falls back to a plain `created_at` scan."""
+        day = day_bucket(Record.created_at)
+        q = (
+            self._s.query(day, Dataset.name, Schema.name, func.count(Record.id))
+            .join(Dataset, Record.dataset_id == Dataset.id)
+            .join(Schema, Record.schema_id == Schema.id)
+            .filter(Record.deleted_at.is_(None))
+        )
+        if dataset_id is not None:
+            q = q.filter(Record.dataset_id == dataset_id)
+        if schema_id is not None:
+            q = q.filter(Record.schema_id == schema_id)
+        if start is not None:
+            q = q.filter(Record.created_at >= start)
+        if end is not None:
+            q = q.filter(Record.created_at < end)
+        rows = q.group_by(day, Dataset.name, Schema.name).order_by(day).all()
+        return [
+            (d, dataset_name, schema_name, count)
+            for d, dataset_name, schema_name, count in rows
+        ]
 
     def create(
         self,
