@@ -1,4 +1,5 @@
 """HTTP contract for the views CRUD API."""
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient

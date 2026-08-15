@@ -1,5 +1,6 @@
 """ViewService: create/get/list/update/delete for saved column/filter/sort
 definitions against a base schema's own fields."""
+
 from __future__ import annotations
 
 import pytest
@@ -8,9 +9,7 @@ from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 
 
-def test_create_view_returns_defaults_for_omitted_fields(
-    ctx: AppContext, make_schema
-):
+def test_create_view_returns_defaults_for_omitted_fields(ctx: AppContext, make_schema):
     make_schema("trial", fields=[("subject", "string"), ("status", "string")])
     ctx.commit()
 
@@ -184,9 +183,7 @@ def test_update_view_renames_and_replaces_columns_filter_sort(
     assert fetched.columns == ["status"]
 
 
-def test_update_view_omitting_a_field_leaves_it_unchanged(
-    ctx: AppContext, make_schema
-):
+def test_update_view_omitting_a_field_leaves_it_unchanged(ctx: AppContext, make_schema):
     make_schema("trial", fields=[("subject", "string")])
     ctx.commit()
     ctx.view_svc.create("trial", "view1", columns=["subject"])

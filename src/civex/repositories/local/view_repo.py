@@ -56,9 +56,9 @@ class LocalViewRepository:
         self,
         id: uuid.UUID,
         name: str | None,
-        columns: list[str] = _SENTINEL,
-        filter_tree: dict[str, Any] | None = _SENTINEL,
-        sort: list[dict[str, Any]] = _SENTINEL,
+        columns=_SENTINEL,
+        filter_tree=_SENTINEL,
+        sort=_SENTINEL,
     ) -> ViewDTO:
         row = self._s.query(View).filter_by(id=id).first()
         if row is None:

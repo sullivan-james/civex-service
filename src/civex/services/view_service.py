@@ -32,7 +32,9 @@ class ViewService:
         self._schemas = schema_svc
         self._audit = audit_repo
 
-    def _validate_columns(self, columns: list[str] | None, known: set[str]) -> list[str]:
+    def _validate_columns(
+        self, columns: list[str] | None, known: set[str]
+    ) -> list[str]:
         cols = list(columns or [])
         unknown = sorted(set(cols) - known)
         if unknown:
@@ -116,9 +118,9 @@ class ViewService:
         schema_name: str,
         view_name: str,
         new_name: str | None = None,
-        columns: list[str] | None = ...,
-        filter_tree: dict[str, Any] | None = ...,
-        sort: list[dict[str, Any]] | None = ...,
+        columns=...,
+        filter_tree=...,
+        sort=...,
     ) -> ViewDTO:
         schema = self._schemas.get(schema_name)
         view = self._views.get_by_name(schema.id, view_name)
