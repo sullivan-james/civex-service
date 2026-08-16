@@ -20,6 +20,64 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## v1.0.5 (2026-08-16)
+
+### Breaking
+- Schema and field `name`s are now slug-validated on create/rename
+  (`^[a-z_][a-z0-9_]*$`); a new, optional `label` carries the free-text
+  display name instead. Existing names created before this change keep
+  working — `civex schema lint` reports any that don't conform.
+
+### Features
+- **Views** — save a column/filter/sort selection against a schema as a
+  named view (web UI: column picker, AND/OR filter builder, live
+  preview); export as CSV/JSON via the web UI or `civex view export`,
+  with any file/file_list columns bundled into a zip. Columns can join
+  one hop through a `reference` field (e.g. `customer.email`). A
+  top-level **Views** page lists every saved view across all schemas,
+  and a **Views** button on a collection's record list jumps to the
+  views for whichever schema is currently filtered.
+- **Analytics dashboard** — filterable, time-bucketed charts for data &
+  schema growth, workflow reliability, AI usage, and the activity/audit
+  trail, behind a shared URL-synced filter bar.
+- **Advanced record filtering** — multi-operator, AND/OR grouped filters
+  for record queries (web UI and API), plus a reusable search picker for
+  reference-field and parent-record selection.
+- **Soft-delete everywhere** — schemas, collections, and records now move
+  to Recently Deleted instead of being removed outright, with restore and
+  a typed-confirmation + blast-radius warning before cascading deletes.
+- **Filename templates** — a `filename_template` restriction on
+  `file`/`file_list` fields resolves a per-record download name from
+  other field values; reflected in the record API's `resolved_filename`,
+  single-file downloads, and bulk zip export.
+- **Guided import wizard** — import a folder of files or a spreadsheet
+  into a collection through a step-by-step wizard.
+- **Change history everywhere** — schema and record detail pages show a
+  collapsible change history; the audit log is also exposed via HTTP API.
+- **Tier 2 container plugins** — `docker run` execution with memory/CPU
+  limits and a timeout/kill wrapper, plus starter Dockerfiles + language
+  shims for Go, Python, Rust, R, Java, and C/C++.
+- Workflow YAML editor now autocompletes plugin ids, config keys, and
+  step output references.
+- Navigation restructured around researcher tasks (Collections, Views,
+  Schemas, Workflows, Runs, Analytics) instead of raw database tables;
+  Runs rebuilt as a readable audit trail.
+
+### Other
+- Internal data-model hardening, applied automatically via Alembic on
+  upgrade: composite FK enforcing record parent/dataset consistency,
+  normalized `workflow_jobs.step_executions`, referential integrity for
+  `display_field`, and a `search_vector` trigger fix.
+- Dark mode via token overrides; hardcoded color literals swept from the
+  frontend and lint-blocked going forward.
+- Broad frontend UI-primitive consolidation (Page template, Field/Input/
+  Select/Checkbox, ConfirmDialog, Modal, Toast, IconButton, DataTable)
+  applied across every route, plus aria-live regions and dialog semantics
+  for sync/job/empty states and panels.
+
+### Installation
+See [README.md](README.md) for `pipx` install instructions.
+
 ## v1.0.4 (2026-07-16)
 
 Consolidated summary of everything shipped since the original v0.0.3
