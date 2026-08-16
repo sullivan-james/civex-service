@@ -183,10 +183,24 @@ def serve(
             "Dev mode: for frontend HMR run `cd frontend && npm run dev` "
             "and browse to http://localhost:5173"
         )
+    # reload_dirs pinned to the installed package source: uvicorn otherwise
+    # falls back to watching Path.cwd(), which is wherever `civex serve` was
+    # launched from (e.g. a _civex project dir with no Python source at all)
+    # rather than wherever the editable install actually lives -- silently
+    # never reloading on code changes.
+    from pathlib import Path
+
+    reload_dirs = [str(Path(__file__).resolve().parent)] if reload else None
+
     # log_config=None: defer all logging to civex's own structlog pipeline
     # (configured in create_app) so uvicorn's records flow through the same sinks.
     uvicorn.run(
-        "civex.server.app:app", host=host, port=port, reload=reload, log_config=None
+        "civex.server.app:app",
+        host=host,
+        port=port,
+        reload=reload,
+        reload_dirs=reload_dirs,
+        log_config=None,
     )
 
 

@@ -75,7 +75,9 @@ def rerun_job(
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
 
-    job = ctx.job_svc.enqueue_manual(original.workflow_name, record)
+    job = ctx.job_svc.enqueue_manual(
+        original.workflow_name, record, input_data=original.input_data
+    )
     ctx.commit()
     background_tasks.add_task(run_pending_jobs)
     return WorkflowJobResponse.from_dto(job)
