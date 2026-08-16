@@ -432,6 +432,45 @@ class SetQueueRequest(BaseModel):
     queue: list[str]
 
 
+class GCRequest(BaseModel):
+    apply: bool = Field(
+        default=False,
+        description="Actually delete collectible objects. False (default) only reports what would be deleted.",
+    )
+    grace_days: int = Field(
+        default=14,
+        description="Skip unreferenced objects written more recently than this many days.",
+    )
+
+
+class StoredObjectResponse(BaseModel):
+    sha256: str = Field(description="Content hash identifying the object.")
+    volume: str = Field(description="Volume the object was found on.")
+    size: int = Field(description="Object size in bytes.")
+    mtime: float = Field(description="Unix timestamp the object was written.")
+
+
+class GCReportResponse(BaseModel):
+    dry_run: bool = Field(description="True if no objects were actually deleted.")
+    grace_days: int
+    scanned: int = Field(description="Total objects found in the store.")
+    referenced: int = Field(
+        description="Distinct content hashes reachable from a live record or workflow job."
+    )
+    protected_by_grace: int = Field(
+        description="Unreferenced objects skipped for being younger than the grace period."
+    )
+    deleted_count: int = Field(
+        description="Objects deleted (or, if dry_run, collectible)."
+    )
+    deleted_bytes: int
+    deleted: list[StoredObjectResponse]
+    stale_scratch_removed: int = Field(
+        description="Abandoned upload scratch files (from an interrupted "
+        "streamed upload) removed, or if dry_run, collectible."
+    )
+
+
 # --- Workflows ---
 
 

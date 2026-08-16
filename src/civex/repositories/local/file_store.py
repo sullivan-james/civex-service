@@ -25,12 +25,18 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
+import os
 import shutil
+import time
+import uuid
 from pathlib import Path
+from typing import AsyncIterable
 
 from civex.config import StoreConfig, VolumeConfig
-from civex.domain.dtos import FileRef
+from civex.domain.dtos import FileRef, StoredObjectInfo
 from civex.domain.exceptions import AllVolumesFull, VolumeUnavailableError
+
+_SCRATCH_DIRNAME = ".tmp"
 
 
 class VolumeAwareFileObjectStore:
@@ -86,6 +92,93 @@ class VolumeAwareFileObjectStore:
             + "; ".join(reasons)
         )
 
+    async def put_stream(
+        self,
+        chunks: AsyncIterable[bytes],
+        original_filename: str,
+        size_hint: int | None = None,
+    ) -> FileRef:
+        """Stream-write `chunks` straight to disk, hashing incrementally so
+        the full content never has to fit in memory at once -- unlike put(),
+        which needs the whole object in a single `bytes` up front. Chunks
+        are written to a scratch file on the chosen volume and the file is
+        renamed into its content-addressed path once the digest is known;
+        same-filesystem rename is atomic, so a reader can never observe a
+        partially-written object at its final path.
+
+        Unlike put(), volume selection can't fall back mid-stream: once
+        bytes have been consumed from `chunks` (typically a live HTTP
+        request body), they can't be replayed against a different volume.
+        `size_hint` (e.g. a Content-Length header), when known upfront,
+        still lets the allocation/headroom gate reject an unsuitable volume
+        before a single byte is written; without it, running out of space
+        partway through fails the upload outright instead of retrying on
+        the next volume in queue.
+        """
+        reasons: list[str] = []
+        for vol_name in self._cfg.volume_queue:
+            can, reason = self._can_write(vol_name, size_hint or 0)
+            if not can:
+                reasons.append(f"{vol_name}: {reason}")
+                continue
+
+            vc = self._cfg.volumes[vol_name]
+            scratch_dir = self._resolve_path(vc) / _SCRATCH_DIRNAME
+            scratch_dir.mkdir(parents=True, exist_ok=True)
+            tmp_path = scratch_dir / f"{uuid.uuid4().hex}.part"
+
+            hasher = hashlib.sha256()
+            size = 0
+            try:
+                with tmp_path.open("wb") as f:
+                    async for chunk in chunks:
+                        if not chunk:
+                            continue
+                        hasher.update(chunk)
+                        f.write(chunk)
+                        size += len(chunk)
+            except OSError as e:
+                tmp_path.unlink(missing_ok=True)
+                if e.errno == errno.ENOSPC:
+                    raise VolumeUnavailableError(
+                        f"Volume '{vol_name}' ran out of space mid-upload "
+                        f"({size / 1_048_576:.1f} MB written); the upload "
+                        "can't resume on another volume once bytes have "
+                        "been streamed -- retry the upload from the start."
+                    ) from e
+                raise VolumeUnavailableError(
+                    f"Cannot write to volume '{vol_name}': {e}"
+                ) from e
+
+            sha256 = hasher.hexdigest()
+
+            existing = self._find_object(sha256)
+            if existing is not None:
+                tmp_path.unlink(missing_ok=True)
+                vol_of_existing = self._volume_of(sha256) or vol_name
+                return FileRef(
+                    sha256=sha256,
+                    filename=original_filename,
+                    size=size,
+                    volume=vol_of_existing,
+                )
+
+            dest = self._object_path(sha256, vol_name)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(tmp_path, dest)
+            self._used_cache.pop(vol_name, None)
+            self._append_manifest(vol_name, sha256, original_filename, size)
+            return FileRef(
+                sha256=sha256, filename=original_filename, size=size, volume=vol_name
+            )
+
+        raise AllVolumesFull(
+            "No volume in queue has space"
+            + (f" for {size_hint / 1_048_576:.1f} MB" if size_hint else "")
+            + ". "
+            + "; ".join(reasons)
+        )
+
     def get(self, sha256: str) -> bytes:
         path = self._find_object(sha256)
         if path is None:
@@ -100,6 +193,84 @@ class VolumeAwareFileObjectStore:
         if path is None:
             raise FileNotFoundError(f"Object {sha256} not found in any volume")
         return path
+
+    def list_objects(self) -> list[StoredObjectInfo]:
+        """Every object actually on disk, across every configured volume --
+        including volumes no longer in the write queue. Walks the volume
+        directories rather than trusting manifest.jsonl: the manifest is
+        append-only and best-effort (a crash between write and append would
+        leave it short), so it's fine for display metadata but not as the
+        authoritative existence check GC sweeps against.
+        """
+        results = []
+        for name, vc in self._cfg.volumes.items():
+            root = self._resolve_path(vc)
+            if not root.exists():
+                continue
+            for f in root.rglob("*"):
+                if not f.is_file() or f.name == "manifest.jsonl":
+                    continue
+                if _SCRATCH_DIRNAME in f.relative_to(root).parts:
+                    continue  # in-progress put_stream() upload, not a real object
+                sha256 = f.parent.name + f.name
+                stat = f.stat()
+                results.append(
+                    StoredObjectInfo(
+                        sha256=sha256,
+                        volume=name,
+                        size=stat.st_size,
+                        mtime=stat.st_mtime,
+                    )
+                )
+        return results
+
+    def sweep_stale_scratch(
+        self, older_than_seconds: float, dry_run: bool = False
+    ) -> int:
+        """Count (and, unless dry_run, remove) put_stream() scratch files
+        (`.tmp/*.part`) older than `older_than_seconds` -- left behind when
+        an upload was interrupted (client disconnect, process kill) before
+        the rename into place. These are invisible to list_objects(), so
+        nothing else cleans them up. Age is judged conservatively: an
+        in-progress upload keeps writing to its part file, which bumps its
+        mtime, so anything past the threshold is one that stopped
+        receiving bytes, not just a slow one."""
+        cutoff = time.time() - older_than_seconds
+        count = 0
+        for vc in self._cfg.volumes.values():
+            scratch_dir = self._resolve_path(vc) / _SCRATCH_DIRNAME
+            if not scratch_dir.exists():
+                continue
+            for f in scratch_dir.glob("*.part"):
+                try:
+                    if f.stat().st_mtime < cutoff:
+                        count += 1
+                        if not dry_run:
+                            f.unlink()
+                except OSError:
+                    continue
+        return count
+
+    def delete(self, sha256: str, volume: str | None = None) -> bool:
+        """Remove a stored object. `volume` is an optional hint (e.g. from
+        list_objects) to skip the full-volume scan; falls back to searching
+        every volume if the hint misses. Returns False if not found."""
+        path = None
+        if volume is not None:
+            vc = self._cfg.volumes.get(volume)
+            if vc is not None:
+                candidate = self._resolve_path(vc) / sha256[:2] / sha256[2:]
+                if candidate.exists():
+                    path = candidate
+        if path is None:
+            volume = self._volume_of(sha256)
+            path = self._find_object(sha256)
+        if path is None:
+            return False
+        path.unlink()
+        if volume is not None:
+            self._used_cache.pop(volume, None)
+        return True
 
     # ------------------------------------------------------------------
     # Stats (for CLI / UI)

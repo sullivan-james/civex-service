@@ -25,6 +25,7 @@ import {
   ArrowRight,
 } from '../ui/icons'
 import { errorMessage } from '../../lib/errors'
+import GCPanel from './GCPanel'
 
 const isDesktop = typeof window !== 'undefined' && !!window.pywebview
 
@@ -565,6 +566,8 @@ export default function StorageSection() {
           allocation is full or disk space is below the headroom threshold.
         </p>
       </div>
+
+      <GCPanel />
     </div>
   )
 }

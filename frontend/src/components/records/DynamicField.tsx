@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { api } from '../../api/client'
+import { filesApi } from '../../api/files'
 import type { Field } from '../../api/schemas'
 import { utcToDatetimeLocal, datetimeLocalToUTC } from '../../utils/dates'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
@@ -36,6 +36,29 @@ function validateFileSize(
   return null
 }
 
+/** `label` overrides the percentage text, e.g. "Uploading 2 of 3… 45%" for a
+ * multi-file batch. */
+function UploadProgress({
+  fraction,
+  label,
+}: {
+  fraction: number
+  label?: string
+}) {
+  const pct = Math.round(fraction * 100)
+  return (
+    <div className="space-y-1">
+      <div className="h-1.5 w-full bg-border-muted rounded-full overflow-hidden">
+        <div
+          className="h-full bg-accent transition-all"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <p className="text-xs text-fg-muted">{label ?? `Uploading… ${pct}%`}</p>
+    </div>
+  )
+}
+
 function FileField({
   field,
   value,
@@ -45,6 +68,7 @@ function FileField({
   'aria-invalid': ariaInvalid,
 }: Props) {
   const [uploading, setUploading] = useState(false)
+  const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const ref = value as FileRef | null | undefined
   const { accept, maxSize } = toInputProps(field)
@@ -58,11 +82,10 @@ function FileField({
       return
     }
     setUploading(true)
+    setProgress(0)
     setError(null)
     try {
-      const fd = new FormData()
-      fd.append('file', file)
-      const result = await api.upload<FileRef>('/files', fd)
+      const result = await filesApi.uploadStreaming(file, setProgress)
       onChange(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed')
@@ -107,7 +130,7 @@ function FileField({
         disabled={uploading}
         className="block w-full text-sm text-fg file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer disabled:opacity-50"
       />
-      {uploading && <p className="text-xs text-fg-muted">Uploading…</p>}
+      {uploading && <UploadProgress fraction={progress} />}
       {error && (
         <p role="alert" className="text-xs text-danger">
           {error}
@@ -126,6 +149,11 @@ function FileListField({
   'aria-invalid': ariaInvalid,
 }: Props) {
   const [uploading, setUploading] = useState(false)
+  const [progress, setProgress] = useState<{
+    index: number
+    total: number
+    fraction: number
+  } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const existing = (value as FileRef[] | null | undefined) ?? []
   const { accept, maxSize } = toInputProps(field)
@@ -144,10 +172,10 @@ function FileListField({
     setError(null)
     try {
       const newRefs: FileRef[] = []
-      for (const file of files) {
-        const fd = new FormData()
-        fd.append('file', file)
-        const ref = await api.upload<FileRef>('/files', fd)
+      for (let i = 0; i < files.length; i++) {
+        const ref = await filesApi.uploadStreaming(files[i], (fraction) =>
+          setProgress({ index: i, total: files.length, fraction }),
+        )
         newRefs.push(ref)
       }
       onChange([...existing, ...newRefs])
@@ -155,6 +183,7 @@ function FileListField({
       setError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
       setUploading(false)
+      setProgress(null)
     }
   }
 
@@ -202,7 +231,16 @@ function FileListField({
         disabled={uploading}
         className="block w-full text-sm text-fg file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer disabled:opacity-50"
       />
-      {uploading && <p className="text-xs text-fg-muted">Uploading…</p>}
+      {uploading && progress && (
+        <UploadProgress
+          fraction={progress.fraction}
+          label={
+            progress.total > 1
+              ? `Uploading ${progress.index + 1} of ${progress.total}… ${Math.round(progress.fraction * 100)}%`
+              : undefined
+          }
+        />
+      )}
       {error && (
         <p role="alert" className="text-xs text-danger">
           {error}

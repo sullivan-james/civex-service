@@ -155,3 +155,70 @@ def store_queue(
         raise typer.Exit(1)
     finally:
         ctx.close()
+
+
+@app.command("gc")
+def store_gc(
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Actually delete collectible objects. Without this flag, only reports what would be deleted.",
+    ),
+    grace_days: int = typer.Option(
+        14,
+        "--grace-days",
+        help="Skip unreferenced objects written more recently than this "
+        "many days, to avoid racing an in-flight upload whose record/job "
+        "write hasn't committed yet.",
+    ),
+    show: int = typer.Option(
+        20, "--show", help="Max collectible objects to list individually"
+    ),
+) -> None:
+    """Reclaim object-store blobs no longer referenced by any record or workflow job.
+
+    Not a root: audit history and job step logs, which retain FileRef
+    snapshots forever -- treating them as roots would leave almost nothing
+    collectible. Old audit diffs may reference a sha256 that GC has since
+    removed; that's the accepted tradeoff of running this at all.
+
+    Defaults to a dry run. Pass --apply to actually delete.
+    """
+    ctx = get_ctx()
+    try:
+        report = ctx.gc_svc.run(dry_run=not apply, grace_days=grace_days)
+    finally:
+        ctx.close()
+
+    def _fmt(b: int) -> str:
+        if b >= 1_073_741_824:
+            return f"{b / 1_073_741_824:.1f} GB"
+        if b >= 1_048_576:
+            return f"{b / 1_048_576:.1f} MB"
+        return f"{b} B"
+
+    console.print(f"Scanned {report.scanned} object(s) in the store.")
+    console.print(f"  {report.referenced} referenced by a live record or job")
+    console.print(
+        f"  {report.protected_by_grace} unreferenced but within the "
+        f"{report.grace_days}-day grace period"
+    )
+    verb = "Deleted" if apply else "Collectible"
+    console.print(
+        f"  [bold]{verb} {report.deleted_count} object(s), {_fmt(report.deleted_bytes)}[/bold]"
+    )
+
+    for obj in report.deleted[:show]:
+        console.print(f"    {obj.sha256[:12]}…  {_fmt(obj.size):>10}  ({obj.volume})")
+    if report.deleted_count > show:
+        console.print(f"    … and {report.deleted_count - show} more")
+
+    if report.stale_scratch_removed:
+        console.print(
+            f"  {verb} {report.stale_scratch_removed} abandoned upload scratch file(s)"
+        )
+
+    if not apply and (report.deleted_count or report.stale_scratch_removed):
+        console.print(
+            "\n[dim]Dry run -- re-run with --apply to actually delete these.[/dim]"
+        )
