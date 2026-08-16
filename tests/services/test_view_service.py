@@ -409,6 +409,108 @@ def test_resolve_rows_returns_none_for_unset_reference(
     assert rows == [{"amount": 50, "customer.email": None}]
 
 
+# --- preview: live rows for an unsaved column/filter/sort selection ---
+
+
+def test_preview_joins_and_filters_across_collections(
+    ctx: AppContext, make_schema, make_collection
+):
+    _make_invoice_customer_schemas(ctx, make_schema)
+    make_collection("study_a")
+    make_collection("study_b")
+    ctx.commit()
+    customer = ctx.record_svc.add(
+        "study_a", "customer", {"email": "a@example.com", "region": "west"}
+    )
+    ctx.record_svc.add(
+        "study_a", "invoice", {"amount": 100, "customer": str(customer.id)}
+    )
+    ctx.record_svc.add(
+        "study_b", "invoice", {"amount": 5, "customer": str(customer.id)}
+    )
+    ctx.commit()
+
+    rows, total = ctx.view_svc.preview(
+        "invoice",
+        columns=["amount", "customer.email"],
+        filter_tree={"field": "amount", "op": "gte", "value": 10},
+    )
+
+    assert total == 1
+    assert rows == [{"amount": 100, "customer.email": "a@example.com"}]
+
+
+def test_preview_sorts_by_joined_column(ctx: AppContext, make_schema, make_collection):
+    _make_invoice_customer_schemas(ctx, make_schema)
+    make_collection("study")
+    ctx.commit()
+    alice = ctx.record_svc.add(
+        "study", "customer", {"email": "alice@example.com", "region": "west"}
+    )
+    bob = ctx.record_svc.add(
+        "study", "customer", {"email": "bob@example.com", "region": "east"}
+    )
+    ctx.record_svc.add(
+        "study", "invoice", {"amount": 1, "customer": str(bob.id)}
+    )
+    ctx.record_svc.add(
+        "study", "invoice", {"amount": 2, "customer": str(alice.id)}
+    )
+    ctx.commit()
+
+    rows, total = ctx.view_svc.preview(
+        "invoice",
+        columns=["amount", "customer.email"],
+        sort=[{"field": "amount", "direction": "asc"}],
+    )
+
+    assert total == 2
+    assert [r["customer.email"] for r in rows] == [
+        "bob@example.com",
+        "alice@example.com",
+    ]
+
+
+def test_preview_paginates_while_total_reflects_full_match(
+    ctx: AppContext, make_schema, make_collection
+):
+    make_schema("trial", fields=[("subject", "integer")])
+    make_collection("study")
+    ctx.commit()
+    for i in range(5):
+        ctx.record_svc.add("study", "trial", {"subject": i})
+    ctx.commit()
+
+    rows, total = ctx.view_svc.preview(
+        "trial",
+        columns=["subject"],
+        sort=[{"field": "subject", "direction": "asc"}],
+        limit=2,
+        offset=1,
+    )
+
+    assert total == 5
+    assert [r["subject"] for r in rows] == [1, 2]
+
+
+def test_preview_rejects_unknown_column(ctx: AppContext, make_schema):
+    make_schema("trial", fields=[("subject", "string")])
+    ctx.commit()
+
+    with pytest.raises(ValidationError):
+        ctx.view_svc.preview("trial", columns=["nope"])
+
+
+def test_preview_rejects_unknown_filter_field(ctx: AppContext, make_schema):
+    make_schema("trial", fields=[("subject", "string")])
+    ctx.commit()
+
+    with pytest.raises(ValidationError):
+        ctx.view_svc.preview(
+            "trial", filter_tree={"field": "nope", "op": "eq", "value": "x"}
+        )
+
+
 def test_resolve_rows_returns_none_for_dangling_reference(
     ctx: AppContext, make_schema, make_collection
 ):

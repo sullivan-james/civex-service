@@ -5,7 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.server.deps import get_ctx
-from civex.server.models import CreateViewRequest, UpdateViewRequest, ViewResponse
+from civex.server.models import (
+    CreateViewRequest,
+    PreviewViewRequest,
+    PreviewViewResponse,
+    UpdateViewRequest,
+    ViewResponse,
+)
 
 router = APIRouter(prefix="/schemas/{schema_name}/views", tags=["views"])
 
@@ -40,6 +46,28 @@ def create_view(
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
     return ViewResponse.from_dto(dto)
+
+
+@router.post("/preview", response_model=PreviewViewResponse)
+def preview_view(
+    schema_name: str, body: PreviewViewRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """Rows + total count for a column/filter/sort selection without saving
+    it as a view -- backs the view builder's live preview."""
+    try:
+        rows, total = ctx.view_svc.preview(
+            schema_name,
+            columns=body.columns,
+            filter_tree=body.filter_tree,
+            sort=body.sort,
+            limit=body.limit,
+            offset=body.offset,
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return PreviewViewResponse(rows=rows, total=total)
 
 
 @router.get("/{view_name}", response_model=ViewResponse)

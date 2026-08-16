@@ -272,6 +272,37 @@ class UpdateViewRequest(BaseModel):
     )
 
 
+class PreviewViewRequest(BaseModel):
+    columns: list[str] | None = Field(
+        default=None,
+        description="Same shape as a view's 'columns' -- base schema field "
+        "names and/or single-hop reference-field joins. Validated the same "
+        "way, but not persisted.",
+    )
+    filter_tree: dict[str, Any] | None = Field(
+        default=None,
+        description="Same shape as a view's 'filter_tree', over the base "
+        "schema's own fields.",
+    )
+    sort: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Same shape as a view's 'sort'. Applied to the "
+        "flattened preview rows, so it can order by a joined column too.",
+    )
+    limit: int = Field(default=50, le=1000, ge=1)
+    offset: int = Field(default=0, ge=0)
+
+
+class PreviewViewResponse(BaseModel):
+    rows: list[dict[str, Any]] = Field(
+        description="One dict per matching record, keyed by column (joined "
+        "columns use the 'ref_field.target_field' key)."
+    )
+    total: int = Field(
+        description="Total matching records regardless of 'limit'/'offset'."
+    )
+
+
 # --- Datasets ---
 
 

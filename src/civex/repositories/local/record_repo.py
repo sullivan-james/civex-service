@@ -82,7 +82,7 @@ class LocalRecordRepository:
 
     def list_filtered(
         self,
-        dataset_id: uuid.UUID,
+        dataset_id: uuid.UUID | None,
         schema_id: uuid.UUID | None,
         parent_record_id: uuid.UUID | None,
         field_filters: list[tuple[str, str]],
@@ -106,7 +106,7 @@ class LocalRecordRepository:
 
     def count(
         self,
-        dataset_id: uuid.UUID,
+        dataset_id: uuid.UUID | None,
         schema_id: uuid.UUID | None,
         parent_record_id: uuid.UUID | None,
         field_filters: list[tuple[str, str]],
@@ -309,7 +309,7 @@ class LocalRecordRepository:
 
 def _base_query(
     session: Session,
-    dataset_id: uuid.UUID,
+    dataset_id: uuid.UUID | None,
     schema_id: uuid.UUID | None,
     parent_record_id: uuid.UUID | None,
     field_filters: list[tuple[str, str]],
@@ -317,9 +317,9 @@ def _base_query(
     is_postgres: bool = False,
     filter_tree: FilterNode | None = None,
 ):
-    q = session.query(Record).filter(
-        Record.dataset_id == dataset_id, Record.deleted_at.is_(None)
-    )
+    q = session.query(Record).filter(Record.deleted_at.is_(None))
+    if dataset_id is not None:
+        q = q.filter(Record.dataset_id == dataset_id)
     if schema_id is not None:
         q = q.filter(Record.schema_id == schema_id)
     if parent_record_id is not None:

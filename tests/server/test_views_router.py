@@ -133,6 +133,45 @@ def test_create_view_with_single_hop_join_column_via_api(client: TestClient):
     assert response.json()["columns"] == ["amount", "customer.email"]
 
 
+def test_preview_view_via_api(client: TestClient):
+    _make_schema(client, "trial", fields=[("subject", "string"), ("age", "integer")])
+    client.post("/api/collections", json={"name": "study"})
+    for data in [
+        {"subject": "s1", "age": 10},
+        {"subject": "s2", "age": 20},
+    ]:
+        resp = client.post(
+            "/api/collections/study/records",
+            json={"schema_name": "trial", "data": data},
+        )
+        assert resp.status_code == 201, resp.text
+
+    response = client.post(
+        "/api/schemas/trial/views/preview",
+        json={
+            "columns": ["subject", "age"],
+            "filter_tree": {"field": "age", "op": "gte", "value": 15},
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 1
+    assert body["rows"] == [{"subject": "s2", "age": 20}]
+
+
+def test_preview_view_on_missing_schema_returns_404(client: TestClient):
+    response = client.post("/api/schemas/missing/views/preview", json={})
+    assert response.status_code == 404
+
+
+def test_preview_view_with_unknown_column_returns_422(client: TestClient):
+    _make_schema(client, "trial")
+    response = client.post(
+        "/api/schemas/trial/views/preview", json={"columns": ["nope"]}
+    )
+    assert response.status_code == 422
+
+
 def test_create_view_with_multi_hop_join_column_returns_422(client: TestClient):
     _make_schema(client, "customer", fields=[("email", "string")])
     _make_schema(client, "invoice")

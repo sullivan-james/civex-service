@@ -150,7 +150,7 @@ class RecordRepository(Protocol):
     def list_by_dataset(self, dataset_id: uuid.UUID) -> list[RecordDTO]: ...
     def list_filtered(
         self,
-        dataset_id: uuid.UUID,
+        dataset_id: uuid.UUID | None,
         schema_id: uuid.UUID | None,
         parent_record_id: uuid.UUID | None,
         field_filters: list[tuple[str, str]],
@@ -161,7 +161,7 @@ class RecordRepository(Protocol):
     ) -> list[RecordDTO]: ...
     def count(
         self,
-        dataset_id: uuid.UUID,
+        dataset_id: uuid.UUID | None,
         schema_id: uuid.UUID | None,
         parent_record_id: uuid.UUID | None,
         field_filters: list[tuple[str, str]],
