@@ -14,6 +14,7 @@ from civex.cli import (
     schema,
     store,
     trash,
+    view,
     workflow,
     worker,
 )
@@ -85,6 +86,7 @@ app.add_typer(plugin.app, name="plugin", rich_help_panel=_WORK)
 app.add_typer(policy.app, name="policy", rich_help_panel=_WORK)
 app.add_typer(worker.app, name="automation", rich_help_panel=_WORK)
 app.add_typer(trash.app, name="trash", rich_help_panel=_WORK)
+app.add_typer(view.app, name="view", rich_help_panel=_WORK)
 app.command("resolve", rich_help_panel=_WORK)(resolve)
 app.command("doctor", rich_help_panel=_WORK)(doctor)
 
