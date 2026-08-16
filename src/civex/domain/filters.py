@@ -79,6 +79,47 @@ def parse_filter_tree(raw: Any) -> FilterNode:
     return FilterCondition(field=field_name, op=op, value=value)
 
 
+def evaluate_filter_tree(node: FilterNode, data: dict[str, Any]) -> bool:
+    """In-memory counterpart to the SQL filter (`_build_filter_condition` in
+    civex.repositories.local.record_repo) for callers that already have
+    name-keyed record data in hand rather than a query to attach a WHERE
+    clause to (e.g. view export, which spans every dataset for a schema).
+    Mirrors SQL NULL semantics: a comparison against a missing/None field is
+    never true, matching the way `WHERE data->>'field' > x` excludes NULLs."""
+    if isinstance(node, FilterGroup):
+        results = (evaluate_filter_tree(c, data) for c in node.conditions)
+        return any(results) if node.op == "or" else all(results)
+    return _evaluate_condition(node, data)
+
+
+def _evaluate_condition(node: FilterCondition, data: dict[str, Any]) -> bool:
+    value = data.get(node.field)
+    if node.op == "is_null":
+        return (value is None) if node.value else (value is not None)
+    if value is None:
+        return False
+    if node.op == "contains":
+        return str(node.value).lower() in str(value).lower()
+    if node.op == "in":
+        return value in node.value
+    try:
+        if node.op == "eq":
+            return value == node.value
+        if node.op == "ne":
+            return value != node.value
+        if node.op == "gt":
+            return value > node.value
+        if node.op == "gte":
+            return value >= node.value
+        if node.op == "lt":
+            return value < node.value
+        if node.op == "lte":
+            return value <= node.value
+    except TypeError:
+        return False
+    raise ValidationError(f"Unknown filter operator '{node.op}'")
+
+
 def map_fields(node: FilterNode, name_to_id: dict[str, str]) -> FilterNode:
     """Return a copy of the tree with each condition's `field` resolved
     through `name_to_id` (unresolved names pass through unchanged)."""

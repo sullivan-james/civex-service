@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import csv
+import io
+import json
 import uuid
-from typing import Any
+from dataclasses import dataclass
+from functools import cmp_to_key
+from typing import TYPE_CHECKING, Any
 
-from civex.domain.dtos import FieldDTO, RecordDTO, SchemaDTO, ViewDTO
+from civex.domain.dtos import FieldDTO, FileRef, RecordDTO, SchemaDTO, ViewDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
-from civex.domain.filters import FilterGroup, FilterNode, parse_filter_tree
+from civex.domain.filters import (
+    FilterGroup,
+    FilterNode,
+    evaluate_filter_tree,
+    parse_filter_tree,
+)
 from civex.domain.naming import validate_name
 from civex.repositories.protocols import (
     AuditRepository,
@@ -14,7 +24,54 @@ from civex.repositories.protocols import (
 )
 from civex.services.schema_service import SchemaService
 
+if TYPE_CHECKING:
+    from civex.services.record_service import RecordService
+
 SORT_DIRECTIONS = frozenset({"asc", "desc"})
+
+# GET /collections/{name}/export.csv uses the same ceiling -- a view spans
+# every dataset for its schema, so export has no natural pagination point.
+EXPORT_RECORD_LIMIT = 100_000
+
+
+def _compare_values(a: Any, b: Any) -> int:
+    if a is None and b is None:
+        return 0
+    if a is None:
+        return 1
+    if b is None:
+        return -1
+    if a < b:
+        return -1
+    if a > b:
+        return 1
+    return 0
+
+
+def _sort_records(
+    records: list[RecordDTO], sort_spec: list[dict[str, Any]]
+) -> list[RecordDTO]:
+    def cmp(r1: RecordDTO, r2: RecordDTO) -> int:
+        for entry in sort_spec:
+            c = _compare_values(
+                r1.data.get(entry["field"]), r2.data.get(entry["field"])
+            )
+            if entry.get("direction") == "desc":
+                c = -c
+            if c != 0:
+                return c
+        return 0
+
+    return sorted(records, key=cmp_to_key(cmp))
+
+
+@dataclass
+class ViewExport:
+    view: ViewDTO
+    rows: list[dict[str, Any]]
+    # (zip entry path, blob) for every file/file_list value in a file-bearing
+    # column -- empty when the view has no such columns.
+    file_entries: list[tuple[str, FileRef]]
 
 
 def _filter_tree_field_names(node: FilterNode) -> set[str]:
@@ -33,11 +90,16 @@ class ViewService:
         schema_svc: SchemaService,
         record_repo: RecordRepository,
         audit_repo: AuditRepository | None = None,
+        record_svc: RecordService | None = None,
     ) -> None:
         self._views = view_repo
         self._schemas = schema_svc
         self._records = record_repo
         self._audit = audit_repo
+        # Only needed by export() -- a RecordService (not just RecordRepository)
+        # because export queries span every dataset for the view's schema and
+        # need name-keyed data, both of which live above the raw repo layer.
+        self._record_svc = record_svc
 
     def _validate_columns(
         self, columns: list[str] | None, schema: SchemaDTO
@@ -282,3 +344,107 @@ class ViewService:
                     row[col] = record.data.get(col)
             rows.append(row)
         return rows
+
+    def _file_columns(self, schema: SchemaDTO, columns: list[str]) -> list[str]:
+        """Base-schema (non-joined) columns whose field is file/file_list --
+        the ones export bundles as a zip. Joined file columns aren't
+        supported: resolve_rows reads join targets straight off the raw
+        repo, bypassing the filename-template resolution that only runs for
+        the view's own base-schema records."""
+        fields_by_name = {
+            rf.field.name: rf.field for rf in self._schemas.collect_fields(schema)
+        }
+        return [
+            c
+            for c in columns
+            if "." not in c
+            and (f := fields_by_name.get(c)) is not None
+            and f.dtype in ("file", "file_list")
+        ]
+
+    def export(self, schema_name: str, view_name: str) -> ViewExport:
+        """Every record for the view's schema (across all datasets -- a view
+        isn't dataset-scoped), filtered/sorted per the view's own definition
+        and flattened into `columns` via resolve_rows. When any column is a
+        file/file_list field, its row value is swapped for the same
+        `resolved_filename` the record API stamps on file values (falling
+        back to the original filename), and `file_entries` carries the
+        matching zip path (record id + collision-suffixed name, via
+        RecordService.files_for_zip) and FileRef for every file to bundle
+        alongside the CSV/JSON."""
+        if self._record_svc is None:
+            raise RuntimeError("ViewService.export() requires a record_svc")
+        view = self.get(schema_name, view_name)
+        schema = self._schemas.get(schema_name)
+
+        records = self._record_svc.find_by_schema(
+            schema_name, limit=EXPORT_RECORD_LIMIT
+        )
+        if view.filter_tree is not None:
+            node = parse_filter_tree(view.filter_tree)
+            records = [r for r in records if evaluate_filter_tree(node, r.data)]
+        if view.sort:
+            records = _sort_records(records, view.sort)
+
+        rows = self.resolve_rows(schema_name, view_name, records)
+
+        file_entries: list[tuple[str, FileRef]] = []
+        file_columns = self._file_columns(schema, view.columns)
+        if file_columns:
+            for record, row in zip(records, rows):
+                entries = self._record_svc.files_for_zip(
+                    str(record.id), field_names=file_columns
+                )
+                for name, ref in entries:
+                    file_entries.append((f"{record.id}/{name}", ref))
+                for col in file_columns:
+                    row[col] = _display_filename(row.get(col))
+
+        return ViewExport(view=view, rows=rows, file_entries=file_entries)
+
+
+def _display_filename(value: Any) -> Any:
+    """A file/file_list cell's raw FileRef dict(s) -> the resolved
+    filename(s) already stamped on them by RecordService -- rows are
+    display/export data, not a second copy of the file metadata."""
+    if isinstance(value, dict):
+        return value.get("resolved_filename") or value.get("filename")
+    if isinstance(value, list):
+        return [
+            v.get("resolved_filename") or v.get("filename")
+            for v in value
+            if isinstance(v, dict)
+        ]
+    return value
+
+
+def _nest_row(row: dict[str, Any]) -> dict[str, Any]:
+    """{"amount": 100, "customer.email": "a@x"} -> {"amount": 100, "customer":
+    {"email": "a@x"}} -- JSON export keeps joined columns nested instead of
+    repeating the CSV's flat dotted-header convention."""
+    nested: dict[str, Any] = {}
+    for key, value in row.items():
+        if "." in key:
+            head, _, tail = key.partition(".")
+            nested.setdefault(head, {})[tail] = value
+        else:
+            nested[key] = value
+    return nested
+
+
+def rows_to_csv(columns: list[str], rows: list[dict[str, Any]]) -> str:
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(
+            {
+                k: v if not isinstance(v, (list, dict)) else json.dumps(v)
+                for k, v in row.items()
+            }
+        )
+    return buf.getvalue()
+
+
+def rows_to_json(rows: list[dict[str, Any]]) -> str:
+    return json.dumps([_nest_row(r) for r in rows], indent=2, default=str)

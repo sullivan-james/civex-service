@@ -549,12 +549,20 @@ class RecordService:
         return self._with_names(record)
 
     def files_for_zip(
-        self, record_id: str, field_name: str | None = None
+        self,
+        record_id: str,
+        field_name: str | None = None,
+        field_names: list[str] | None = None,
     ) -> list[tuple[str, FileRef]]:
         """(zip_entry_name, FileRef) pairs for every file/file_list value on
-        this record, or just on one named field. `zip_entry_name` is each
-        file's resolved filename (see `resolve_filename`), collision-suffixed
-        against every other entry so two files never overwrite each other."""
+        this record, or restricted to specific field(s): `field_name` for a
+        single field (404s if it doesn't resolve to a file/file_list field),
+        or `field_names` for a set (silently ignoring any that don't --
+        for callers like view export where the column list was validated
+        once at save time and may have drifted since). `zip_entry_name` is
+        each file's resolved filename (see `resolve_filename`),
+        collision-suffixed against every other entry so two files never
+        overwrite each other."""
         record = self.get(record_id)
         schema = self._schema_svc._repo.get_by_id(
             record.schema_id, include_deleted=True
@@ -566,7 +574,10 @@ class RecordService:
             rf.field for rf in fields if rf.field.dtype in ("file", "file_list")
         ]
 
-        if field_name is not None:
+        if field_names is not None:
+            wanted = set(field_names)
+            file_fields = [f for f in file_fields if f.name in wanted]
+        elif field_name is not None:
             target = next(
                 (rf.field for rf in fields if rf.field.name == field_name), None
             )
