@@ -44,6 +44,8 @@ export interface PreviewViewBody {
 }
 
 export const viewsApi = {
+  listAll: () => api.get<View[]>('/views'),
+
   list: (schemaName: string) =>
     api.get<View[]>(`/schemas/${encodeURIComponent(schemaName)}/views`),
 

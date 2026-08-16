@@ -45,6 +45,8 @@ Opening [http://localhost:8000](http://localhost:8000) (or wherever you configur
 
 **Collections** — Create collections, browse records within them, filter by schema, search, and paginate.
 
+**Views** — Saved column/filter/sort selections for a schema's records, listed across every schema on one page (or from the **Views** button on a collection's schema-filtered record list). See [Views](views.md).
+
 **Records** — Each record has a detail page showing its field values, attached files, child records (for parent schemas), workflow jobs that have run against it, and a form to edit field values.
 
 - File fields show a file picker for upload and a download link for existing attachments.

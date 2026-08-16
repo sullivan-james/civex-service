@@ -92,6 +92,7 @@ nav:
   - Guides:
       - Schemas & fields: guides/schemas-and-fields.md
       - Collections & records: guides/collections-and-records.md
+      - Views: guides/views.md
       - Deleting & restoring data: guides/deleting-and-restoring.md
       - Files: guides/files.md
       - Workflows: guides/workflows.md

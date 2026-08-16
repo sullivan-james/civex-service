@@ -6,6 +6,7 @@ import CollectionDetailPage from './pages/CollectionDetailPage'
 import ImportPage from './pages/ImportPage'
 import SchemasPage from './pages/SchemasPage'
 import SchemaDetailPage from './pages/SchemaDetailPage'
+import ViewsIndexPage from './pages/ViewsIndexPage'
 import ViewsPage from './pages/ViewsPage'
 import ViewBuilderPage from './pages/ViewBuilderPage'
 import RecordDetailPage from './pages/RecordDetailPage'
@@ -37,6 +38,7 @@ export default function App() {
           path="/datasets/:id"
           element={<Navigate to="/collections" replace />}
         />
+        <Route path="/views" element={<ViewsIndexPage />} />
         <Route path="/schemas" element={<SchemasPage />} />
         <Route path="/schemas/:id" element={<SchemaDetailPage />} />
         <Route path="/schemas/:id/views" element={<ViewsPage />} />

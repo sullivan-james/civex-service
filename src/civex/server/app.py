@@ -301,6 +301,7 @@ def create_app() -> FastAPI:
     app.include_router(settings.router, prefix="/api")
     app.include_router(analytics.router, prefix="/api")
     app.include_router(views.router, prefix="/api")
+    app.include_router(views.all_views_router, prefix="/api")
 
     @app.get("/health", include_in_schema=False)
     def health():

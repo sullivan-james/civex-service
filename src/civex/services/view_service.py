@@ -229,6 +229,11 @@ class ViewService:
         schema = self._schemas.get(schema_name)
         return self._views.list_by_schema(schema.id)
 
+    def list_across_schemas(self) -> list[ViewDTO]:
+        """Every saved view across every schema, for the top-level Views
+        index -- unlike `list_all`, not scoped to one schema."""
+        return self._views.list_all()
+
     def update(
         self,
         schema_name: str,

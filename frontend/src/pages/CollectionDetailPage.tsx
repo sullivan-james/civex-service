@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router'
-import { Upload } from '../components/ui/icons'
+import { Upload, Table as TableIcon } from '../components/ui/icons'
 import {
   useCollection,
   useUpdateCollection,
@@ -16,25 +16,17 @@ import {
 import { useSchemas } from '../hooks/useSchemas'
 import {
   Button,
-  Badge,
-  Table,
-  Thead,
-  Th,
-  Tbody,
-  Tr,
-  Td,
   Page,
   DetailSkeleton,
   TableSkeleton,
   ErrorState,
   Field,
   Input,
-  Checkbox,
   Pagination,
 } from '../components/ui'
 import { RecordForm } from '../components/records/RecordForm'
+import { RecordsTable } from '../components/records/RecordsTable'
 import { CollectionHistory } from '../components/collections/CollectionHistory'
-import { formatDate } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 import type { Schema } from '../api/schemas'
 import { displayLabel } from '../utils/naming'
@@ -313,6 +305,16 @@ export default function CollectionDetailPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
+          {activeSchema && (
+            <Link to={`/schemas/${activeSchema.id}/views`}>
+              <Button
+                size="sm"
+                title={`Saved views for ${displayLabel(activeSchema.name, activeSchema.label)}`}
+              >
+                <TableIcon size={14} /> Views
+              </Button>
+            </Link>
+          )}
           {selectedSchema &&
             (confirmDeleteAll ? (
               <div className="flex items-center gap-2">
@@ -458,87 +460,18 @@ export default function CollectionDetailPage() {
               </button>
             </div>
           )}
-          <Table>
-            <Thead>
-              <tr>
-                <Th className="w-8">
-                  <Checkbox
-                    aria-label="Select all records"
-                    checked={
-                      selected.size === records.length && records.length > 0
-                    }
-                    ref={(el) => {
-                      if (el)
-                        el.indeterminate =
-                          selected.size > 0 && selected.size < records.length
-                    }}
-                    onChange={toggleSelectAll}
-                  />
-                </Th>
-                <Th className="w-24">ID</Th>
-                {!selectedSchema && <Th className="w-32">Schema</Th>}
-                {columns.map((col) => (
-                  <Th key={col.name} title={col.name}>
-                    {col.label}
-                  </Th>
-                ))}
-                <Th className="w-32">Added</Th>
-              </tr>
-            </Thead>
-            <Tbody>
-              {records.map((r) => (
-                <Tr key={r.id}>
-                  <Td>
-                    <Checkbox
-                      aria-label={`Select record ${r.natural_name ?? r.id.slice(0, 8)}`}
-                      checked={selected.has(r.id)}
-                      onChange={() => toggleSelect(r.id)}
-                    />
-                  </Td>
-                  <Td>
-                    <Link
-                      to={`/records/${r.id}`}
-                      className="text-sm text-accent hover:underline"
-                    >
-                      {r.natural_name ?? (
-                        <span className="font-mono">{r.id.slice(0, 8)}</span>
-                      )}
-                    </Link>
-                  </Td>
-                  {!selectedSchema && (
-                    <Td>
-                      {(() => {
-                        const rowSchema = schemas?.find(
-                          (s) => s.name === r.schema_name,
-                        )
-                        const badge = (
-                          <Badge variant="accent">
-                            {displayLabel(r.schema_name, rowSchema?.label)}
-                          </Badge>
-                        )
-                        return rowSchema ? (
-                          <Link to={`/schemas/${rowSchema.id}`}>{badge}</Link>
-                        ) : (
-                          badge
-                        )
-                      })()}
-                    </Td>
-                  )}
-                  {columns.map((col) => (
-                    <Td key={col.name} className="text-fg">
-                      {r.data[col.name] !== undefined &&
-                      r.data[col.name] !== null ? (
-                        String(r.data[col.name])
-                      ) : (
-                        <span className="text-fg-subtle">—</span>
-                      )}
-                    </Td>
-                  ))}
-                  <Td className="text-fg-muted">{formatDate(r.created_at)}</Td>
-                </Tr>
-              ))}
-            </Tbody>
-          </Table>
+          <RecordsTable
+            columns={columns}
+            rows={records}
+            schemas={schemas}
+            showSchemaColumn={!selectedSchema}
+            recordLink={(r) => `/records/${r.id}`}
+            selection={{
+              selected,
+              onToggle: toggleSelect,
+              onToggleAll: toggleSelectAll,
+            }}
+          />
 
           <Pagination
             page={page}

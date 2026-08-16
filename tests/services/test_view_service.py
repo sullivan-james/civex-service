@@ -156,6 +156,23 @@ def test_list_all_returns_views_for_schema_only(ctx: AppContext, make_schema):
     assert names == {"view1", "view2"}
 
 
+def test_list_across_schemas_returns_views_from_every_schema(
+    ctx: AppContext, make_schema
+):
+    make_schema("trial_a")
+    make_schema("trial_b")
+    ctx.commit()
+    ctx.view_svc.create("trial_a", "view1")
+    ctx.view_svc.create("trial_b", "view2")
+    ctx.commit()
+
+    views = ctx.view_svc.list_across_schemas()
+    assert {(v.schema_name, v.name) for v in views} == {
+        ("trial_a", "view1"),
+        ("trial_b", "view2"),
+    }
+
+
 def test_update_view_renames_and_replaces_columns_filter_sort(
     ctx: AppContext, make_schema
 ):

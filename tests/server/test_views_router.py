@@ -23,6 +23,18 @@ def test_list_views_empty(client: TestClient):
     assert response.json() == []
 
 
+def test_list_all_views_across_schemas(client: TestClient):
+    _make_schema(client, "trial_a")
+    _make_schema(client, "trial_b")
+    client.post("/api/schemas/trial_a/views", json={"name": "view1"})
+    client.post("/api/schemas/trial_b/views", json={"name": "view2"})
+
+    response = client.get("/api/views")
+    assert response.status_code == 200
+    names = {(v["schema_name"], v["name"]) for v in response.json()}
+    assert names == {("trial_a", "view1"), ("trial_b", "view2")}
+
+
 def test_create_view_via_api(client: TestClient):
     _make_schema(client, "trial", fields=[("subject", "string"), ("status", "string")])
 

@@ -19,10 +19,19 @@ from civex.server.models import (
 from civex.services.view_service import rows_to_csv, rows_to_json
 
 router = APIRouter(prefix="/schemas/{schema_name}/views", tags=["views"])
+all_views_router = APIRouter(prefix="/views", tags=["views"])
+
+
+@all_views_router.get("", response_model=list[ViewResponse])
+def list_all_views(ctx: AppContext = Depends(get_ctx)):
+    """Every saved view across every schema, sorted by schema then view
+    name -- backs the top-level Views index page."""
+    return [ViewResponse.from_dto(v) for v in ctx.view_svc.list_across_schemas()]
 
 
 @router.get("", response_model=list[ViewResponse])
 def list_views(schema_name: str, ctx: AppContext = Depends(get_ctx)):
+    """Saved views for a single schema."""
     try:
         return [ViewResponse.from_dto(v) for v in ctx.view_svc.list_all(schema_name)]
     except NotFoundError as e:
@@ -77,6 +86,7 @@ def preview_view(
 
 @router.get("/{view_name}", response_model=ViewResponse)
 def get_view(schema_name: str, view_name: str, ctx: AppContext = Depends(get_ctx)):
+    """A single saved view by name."""
     try:
         return ViewResponse.from_dto(ctx.view_svc.get(schema_name, view_name))
     except NotFoundError as e:
@@ -90,6 +100,7 @@ def update_view(
     body: UpdateViewRequest,
     ctx: AppContext = Depends(get_ctx),
 ):
+    """Rename a view and/or replace its columns/filter_tree/sort."""
     # Present-but-null vs. absent matters here: an absent key means "leave
     # unchanged", an explicit null clears filter_tree (columns/sort keep
     # their prior value instead, since [] already means "no columns").
@@ -117,6 +128,7 @@ def update_view(
 
 @router.delete("/{view_name}", status_code=204)
 def delete_view(schema_name: str, view_name: str, ctx: AppContext = Depends(get_ctx)):
+    """Delete a saved view. Does not affect the underlying records."""
     try:
         ctx.view_svc.delete(schema_name, view_name)
         ctx.commit()

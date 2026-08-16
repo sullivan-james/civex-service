@@ -13,15 +13,18 @@ import {
   Button,
   Input,
   Field,
-  DataTable,
   Pagination,
   DEFAULT_PAGE_SIZES,
   ConfirmDialog,
   DetailSkeleton,
+  TableSkeleton,
   ErrorState,
-  type DataTableColumn,
-  type DataTableSort,
+  EmptyState,
 } from '../components/ui'
+import {
+  RecordsTable,
+  type RecordsTableSort,
+} from '../components/records/RecordsTable'
 import { ColumnPicker, columnLabel } from '../components/views/ColumnPicker'
 import { FilterBuilder } from '../components/views/FilterBuilder'
 import { collectFields, joinableColumns } from '../utils/viewFields'
@@ -45,12 +48,6 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   return debounced
 }
 
-function formatCellValue(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'object') return JSON.stringify(value)
-  return String(value)
-}
-
 export default function ViewBuilderPage() {
   const { id, viewName } = useParams<{ id: string; viewName?: string }>()
   const isEdit = !!viewName
@@ -71,7 +68,7 @@ export default function ViewBuilderPage() {
   const [filterRoot, setFilterRoot] = useState<FilterGroupNode>(() =>
     emptyGroup(),
   )
-  const [sort, setSort] = useState<DataTableSort | undefined>(undefined)
+  const [sort, setSort] = useState<RecordsTableSort | undefined>(undefined)
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZES[0])
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -237,18 +234,15 @@ export default function ViewBuilderPage() {
     )
   }
 
-  const previewColumns: DataTableColumn<Record<string, unknown>>[] =
-    columns.map((col) => ({
-      key: col,
-      header: columnLabel(col, baseFields, joinable),
-      sortable: true,
-      render: (row) => formatCellValue(row[col]),
-    }))
+  const previewColumns = columns.map((col) => ({
+    name: col,
+    label: columnLabel(col, baseFields, joinable),
+  }))
   // Preview rows carry no record id (they're flattened column projections,
-  // not records) -- __key gives DataTable a stable identity per row.
+  // not records) -- the row's index gives RecordsTable a stable identity.
   const previewRows = (preview.data?.rows ?? []).map((row, index) => ({
-    ...row,
-    __key: index,
+    id: String(index),
+    data: row,
   }))
 
   return (
@@ -327,15 +321,25 @@ export default function ViewBuilderPage() {
           <p className="text-sm text-fg-subtle italic">
             Pick at least one column above to preview matching records.
           </p>
+        ) : preview.isLoading ? (
+          <TableSkeleton
+            columns={previewColumns.map(() => 'w-32')}
+            rows={pageSize}
+          />
+        ) : preview.error ? (
+          <ErrorState message={errorMessage(preview.error)} />
+        ) : previewRows.length === 0 ? (
+          <EmptyState
+            title="No matching records"
+            message="No records match the current filters."
+          />
         ) : (
           <>
-            <DataTable
+            <RecordsTable
               columns={previewColumns}
               rows={previewRows}
-              getRowId={(row) => String(row.__key)}
-              isLoading={preview.isLoading}
-              error={preview.error ? errorMessage(preview.error) : undefined}
-              emptyMessage="No records match the current filters."
+              showIdColumn={false}
+              showAddedColumn={false}
               sort={sort}
               onSortChange={handleSortChange}
             />
