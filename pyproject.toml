@@ -36,7 +36,6 @@ dependencies = [
     # validate a schema that came from an arbitrary out-of-process plugin --
     # not somewhere to hand-roll a subset of the spec.
     "jsonschema>=4.0",
-    "civex-plugin-sdk",
 ]
 
 [project.scripts]
@@ -70,10 +69,24 @@ members = ["civex-plugin-sdk"]
 civex-plugin-sdk = { workspace = true }
 
 [tool.setuptools.packages.find]
-where = ["src"]
+# civex-plugin-sdk isn't published to PyPI yet, so it can't be a real
+# dependency of the published `civex` wheel (pip has nothing to resolve it
+# against). Vendor its source into this wheel instead, for now -- the uv
+# workspace member is still what local dev (`uv sync`/`uv run`) resolves
+# against; this only affects what `python -m build` bundles.
+where = ["src", "civex-plugin-sdk/src"]
+
+[tool.setuptools.package-dir]
+civex_plugin_sdk = "civex-plugin-sdk/src/civex_plugin_sdk"
 
 [tool.setuptools.package-data]
-civex = ["server/static/**", "db/migrations/script.py.mako"]
+# _vendor/sdk/*.whl: a prebuilt civex-plugin-sdk wheel, built from
+# civex-plugin-sdk/ into src/civex/_vendor/sdk/ just before this package is
+# built (see docs/contributing/release.md). subprocess_runtime.py's
+# _bundled_sdk_wheel_dir() hands it to `uv run --find-links` when spawning a
+# subprocess-tier plugin, so plugin environments resolve civex-plugin-sdk
+# from this install instead of needing it on PyPI or a sibling dev checkout.
+civex = ["server/static/**", "db/migrations/script.py.mako", "_vendor/sdk/*.whl"]
 
 [tool.coverage.run]
 source = ["civex"]

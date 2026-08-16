@@ -310,7 +310,6 @@ name = "civex"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
-    { name = "civex-plugin-sdk" },
     { name = "jsonschema" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -365,7 +364,6 @@ workflows = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
     { name = "anthropic", marker = "extra == 'ai'", specifier = ">=0.40" },
-    { name = "civex-plugin-sdk", editable = "civex-plugin-sdk" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.111" },
     { name = "httpx2", marker = "extra == 'dev'", specifier = ">=0.28" },
     { name = "jinja2", marker = "extra == 'server'", specifier = ">=3.1" },

@@ -98,32 +98,52 @@ def _find_sdk_source() -> Path | None:
     return None
 
 
+def _bundled_sdk_wheel_dir() -> Path | None:
+    """The prebuilt civex_plugin_sdk-*.whl shipped as package data at
+    civex/_vendor/sdk/ (see [tool.setuptools.package-data] in
+    pyproject.toml) -- present in a real `pip install civex` (no dev
+    checkout, no sibling source directory to build from), absent in an
+    editable/dev install run straight out of src/."""
+    vendor_dir = Path(__file__).resolve().parent.parent / "_vendor" / "sdk"
+    if next(vendor_dir.glob("civex_plugin_sdk-*.whl"), None) is not None:
+        return vendor_dir
+    return None
+
+
 @lru_cache(maxsize=1)
 def _sdk_find_links_dir() -> Path | None:
     """civex-plugin-sdk isn't published to PyPI yet, so `uv run --no-project`
     can't resolve a script's plain `dependencies = ["civex-plugin-sdk"]` PEP
     723 header on its own -- `--with-editable`/`--with` only *add* a
     requirement, they don't substitute a source for one the script's own
-    metadata already declares by name. The fix: build a real wheel from the
-    local source (once per process, memoized -- `uv build` takes ~1s) into a
-    scratch dir and pass that as `--find-links`, so uv's resolver finds
-    `civex-plugin-sdk` locally under the exact name the script asks for.
+    metadata already declares by name. The fix: point `--find-links` at a
+    directory containing a real `civex-plugin-sdk` wheel, so uv's resolver
+    finds it locally under the exact name the script asks for.
 
-    Returns None when no local SDK source is found (a real install, SDK
-    published to PyPI) -- resolution then proceeds against a real index with
-    no override at all. This whole function is a pre-launch/dev-only hook,
-    not a permanent mechanism."""
+    Prefers building fresh from a sibling dev checkout (`_find_sdk_source()`)
+    when one is present, since that reflects whatever's currently being
+    worked on; otherwise falls back to the wheel this install bundled at
+    build time (`_bundled_sdk_wheel_dir()`). Returns None only if neither is
+    available (unexpected outside a stripped-down build) -- resolution then
+    proceeds against a real index with no override at all."""
     sdk_source = _find_sdk_source()
-    if sdk_source is None:
-        return None
-    wheel_dir = Path(tempfile.mkdtemp(prefix="civex-plugin-sdk-wheel-"))
-    subprocess.run(
-        [find_uv_binary(), "build", "--wheel", "-o", str(wheel_dir), str(sdk_source)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return wheel_dir
+    if sdk_source is not None:
+        wheel_dir = Path(tempfile.mkdtemp(prefix="civex-plugin-sdk-wheel-"))
+        subprocess.run(
+            [
+                find_uv_binary(),
+                "build",
+                "--wheel",
+                "-o",
+                str(wheel_dir),
+                str(sdk_source),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return wheel_dir
+    return _bundled_sdk_wheel_dir()
 
 
 def _local_sdk_version(wheel_dir: Path) -> str | None:

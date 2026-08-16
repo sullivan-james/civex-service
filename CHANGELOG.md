@@ -20,6 +20,33 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## v1.0.6 — packaging fix (2026-08-16)
+
+### Fixes
+- `civex-plugin-sdk` was declared as a hard runtime dependency of `civex`
+  in `pyproject.toml`, but was never published to PyPI in its own right.
+  Since pip cannot resolve a nonexistent dependency, every
+  `pip install civex` / `pipx install civex` since v1.0.5 shipped silently
+  fell back to the last version that *did* resolve (v1.0.4) instead of
+  installing the version actually requested, with no error shown. Fixed by
+  bundling `civex-plugin-sdk` with `civex` itself instead of depending on it
+  externally: its source is vendored directly into the `civex` wheel
+  (`[tool.setuptools.packages.find]` / `[tool.setuptools.package-dir]` in
+  `pyproject.toml`) for `civex`'s own imports, and a prebuilt SDK wheel now
+  ships as package data at `civex/_vendor/sdk/` so subprocess-tier (Tier 1)
+  plugins — which run in their own separate `uv run --no-project`
+  environment per plugin — can resolve `civex-plugin-sdk` from this install
+  instead of needing it on PyPI or a sibling dev checkout
+  (`subprocess_runtime.py`'s `_bundled_sdk_wheel_dir()`).
+
+### Known limitation
+- This is a stopgap, not the real fix: every `civex` release now carries
+  its own frozen copy of whatever SDK version was current at build time,
+  rather than plugin authors being able to depend on `civex-plugin-sdk`
+  independently or find it on PyPI. Publishing `civex-plugin-sdk` to PyPI
+  as its own project is still separate, not-yet-done work. See
+  [`docs/contributing/release.md`](contributing/release.md).
+
 ## v1.0.5 (2026-08-16)
 
 ### Breaking

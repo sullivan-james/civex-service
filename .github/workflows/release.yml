@@ -46,6 +46,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Bundle civex-plugin-sdk wheel
+        # civex-plugin-sdk isn't published to PyPI -- ship a prebuilt wheel
+        # as civex package data so the subprocess plugin runtime can resolve
+        # it locally (see docs/contributing/release.md and
+        # subprocess_runtime.py's _bundled_sdk_wheel_dir()).
+        run: uv build --wheel -o src/civex/_vendor/sdk civex-plugin-sdk
+
       - name: Build wheel
         run: |
           pip install build
