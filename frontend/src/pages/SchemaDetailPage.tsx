@@ -321,9 +321,14 @@ export default function SchemaDetailPage() {
       }
       action={
         !editing && (
-          <Button size="sm" onClick={() => setEditing(true)}>
-            Edit
-          </Button>
+          <div className="flex items-center gap-2">
+            <Link to={`/schemas/${schema.id}/views`}>
+              <Button size="sm">Views</Button>
+            </Link>
+            <Button size="sm" onClick={() => setEditing(true)}>
+              Edit
+            </Button>
+          </div>
         )
       }
     >

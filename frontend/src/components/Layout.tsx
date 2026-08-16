@@ -32,6 +32,7 @@ import {
   FolderPlus,
   Folder,
   LayoutGrid,
+  Table,
   Database,
   Workflow,
   ListChecks,
@@ -108,6 +109,7 @@ const navGroups: NavGroupDef[] = [
     heading: 'Data',
     items: [
       { to: '/collections', label: 'Collections', icon: LayoutGrid },
+      { to: '/views', label: 'Views', icon: Table },
       { to: '/trash', label: 'Recently Deleted', icon: Trash2 },
     ],
   },

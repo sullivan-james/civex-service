@@ -32,6 +32,7 @@ export {
   Info,
   Upload,
   LayoutGrid,
+  Table,
   Database,
   Workflow,
   ListChecks,

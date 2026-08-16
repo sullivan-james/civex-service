@@ -761,6 +761,54 @@ class RecordService:
         records = self._records.list_by_schema(schema.id, search=search, limit=limit)
         return [self._with_names(r) for r in records]
 
+    def _resolved_tree_for_schema(
+        self, schema_name: str, filter_tree: dict[str, Any] | None
+    ) -> FilterNode | None:
+        if filter_tree is None:
+            return None
+        schema = self._schema_svc.get(schema_name)
+        name_map = self._schema_svc.name_to_id_map(schema)
+        return map_fields(parse_filter_tree(filter_tree), name_map)
+
+    def find_by_schema_filtered(
+        self,
+        schema_name: str,
+        filter_tree: dict[str, Any] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[RecordDTO]:
+        """Records of `schema_name` across every collection, matching
+        `filter_tree` (base schema's own fields only) -- unlike `find`, this
+        isn't scoped to one collection, which is what a schema-level view
+        needs to preview against."""
+        schema = self._schema_svc.get(schema_name)
+        resolved_tree = self._resolved_tree_for_schema(schema_name, filter_tree)
+        records = self._records.list_filtered(
+            dataset_id=None,
+            schema_id=schema.id,
+            parent_record_id=None,
+            field_filters=[],
+            search=None,
+            offset=offset,
+            limit=limit,
+            filter_tree=resolved_tree,
+        )
+        return [self._with_names(r) for r in records]
+
+    def count_by_schema_filtered(
+        self, schema_name: str, filter_tree: dict[str, Any] | None = None
+    ) -> int:
+        schema = self._schema_svc.get(schema_name)
+        resolved_tree = self._resolved_tree_for_schema(schema_name, filter_tree)
+        return self._records.count(
+            dataset_id=None,
+            schema_id=schema.id,
+            parent_record_id=None,
+            field_filters=[],
+            search=None,
+            filter_tree=resolved_tree,
+        )
+
     def delete(self, record_id: str, force: bool = False) -> None:
         record = self.get(record_id)
         delete_set = self._collect_delete_set(record.id)

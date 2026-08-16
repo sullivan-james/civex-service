@@ -118,6 +118,7 @@ class ViewRepository(Protocol):
     def get_by_id(self, id: uuid.UUID) -> ViewDTO | None: ...
     def get_by_name(self, schema_id: uuid.UUID, name: str) -> ViewDTO | None: ...
     def list_by_schema(self, schema_id: uuid.UUID) -> list[ViewDTO]: ...
+    def list_all(self) -> list[ViewDTO]: ...
     def create(
         self,
         schema_id: uuid.UUID,
@@ -150,7 +151,7 @@ class RecordRepository(Protocol):
     def list_by_dataset(self, dataset_id: uuid.UUID) -> list[RecordDTO]: ...
     def list_filtered(
         self,
-        dataset_id: uuid.UUID,
+        dataset_id: uuid.UUID | None,
         schema_id: uuid.UUID | None,
         parent_record_id: uuid.UUID | None,
         field_filters: list[tuple[str, str]],
@@ -161,7 +162,7 @@ class RecordRepository(Protocol):
     ) -> list[RecordDTO]: ...
     def count(
         self,
-        dataset_id: uuid.UUID,
+        dataset_id: uuid.UUID | None,
         schema_id: uuid.UUID | None,
         parent_record_id: uuid.UUID | None,
         field_filters: list[tuple[str, str]],

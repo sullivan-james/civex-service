@@ -6,7 +6,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from functools import cmp_to_key
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from civex.domain.dtos import FieldDTO, FileRef, RecordDTO, SchemaDTO, ViewDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
@@ -22,12 +22,11 @@ from civex.repositories.protocols import (
     RecordRepository,
     ViewRepository,
 )
+from civex.services.record_service import RecordService
 from civex.services.schema_service import SchemaService
 
-if TYPE_CHECKING:
-    from civex.services.record_service import RecordService
-
 SORT_DIRECTIONS = frozenset({"asc", "desc"})
+PREVIEW_FETCH_CAP = 1000
 
 # GET /collections/{name}/export.csv uses the same ceiling -- a view spans
 # every dataset for its schema, so export has no natural pagination point.
@@ -89,17 +88,14 @@ class ViewService:
         view_repo: ViewRepository,
         schema_svc: SchemaService,
         record_repo: RecordRepository,
+        record_svc: RecordService,
         audit_repo: AuditRepository | None = None,
-        record_svc: RecordService | None = None,
     ) -> None:
         self._views = view_repo
         self._schemas = schema_svc
         self._records = record_repo
-        self._audit = audit_repo
-        # Only needed by export() -- a RecordService (not just RecordRepository)
-        # because export queries span every dataset for the view's schema and
-        # need name-keyed data, both of which live above the raw repo layer.
         self._record_svc = record_svc
+        self._audit = audit_repo
 
     def _validate_columns(
         self, columns: list[str] | None, schema: SchemaDTO
@@ -233,6 +229,11 @@ class ViewService:
         schema = self._schemas.get(schema_name)
         return self._views.list_by_schema(schema.id)
 
+    def list_across_schemas(self) -> list[ViewDTO]:
+        """Every saved view across every schema, for the top-level Views
+        index -- unlike `list_all`, not scoped to one schema."""
+        return self._views.list_all()
+
     def update(
         self,
         schema_name: str,
@@ -305,19 +306,16 @@ class ViewService:
             joins[col] = (ref_name, target_id)
         return joins
 
-    def resolve_rows(
-        self, schema_name: str, view_name: str, records: list[RecordDTO]
+    def _build_rows(
+        self,
+        columns: list[str],
+        records: list[RecordDTO],
+        fields_by_name: dict[str, FieldDTO],
     ) -> list[dict[str, Any]]:
-        """Flatten `records` (name-keyed record data for the view's base
-        schema, e.g. from RecordService.find) into rows matching `view.columns`,
-        joining one hop through the stored UUID of any dotted reference-field
-        column ("customer.email")."""
-        view = self.get(schema_name, view_name)
-        schema = self._schemas.get(schema_name)
-        fields_by_name = {
-            rf.field.name: rf.field for rf in self._schemas.collect_fields(schema)
-        }
-        joins = self._join_specs(view.columns, fields_by_name)
+        """Flatten `records` (name-keyed record data for the base schema)
+        into rows matching `columns`, joining one hop through the stored
+        UUID of any dotted reference-field column ("customer.email")."""
+        joins = self._join_specs(columns, fields_by_name)
 
         target_cache: dict[str, RecordDTO | None] = {}
 
@@ -334,7 +332,7 @@ class ViewService:
         rows = []
         for record in records:
             row: dict[str, Any] = {}
-            for col in view.columns:
+            for col in columns:
                 if col in joins:
                     ref_name, target_field_id = joins[col]
                     ref_value = record.data.get(ref_name)
@@ -344,6 +342,73 @@ class ViewService:
                     row[col] = record.data.get(col)
             rows.append(row)
         return rows
+
+    def resolve_rows(
+        self, schema_name: str, view_name: str, records: list[RecordDTO]
+    ) -> list[dict[str, Any]]:
+        """Flatten `records` (name-keyed record data for the view's base
+        schema, e.g. from RecordService.find) into rows matching `view.columns`,
+        joining one hop through the stored UUID of any dotted reference-field
+        column ("customer.email")."""
+        view = self.get(schema_name, view_name)
+        schema = self._schemas.get(schema_name)
+        fields_by_name = {
+            rf.field.name: rf.field for rf in self._schemas.collect_fields(schema)
+        }
+        return self._build_rows(view.columns, records, fields_by_name)
+
+    def _sort_rows(
+        self, rows: list[dict[str, Any]], sort: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Stable multi-key sort applied in Python: sort entries may
+        reference joined columns, which only exist after `_build_rows` has
+        already flattened them, so this can't be pushed down to SQL. Applied
+        least-significant-key first so Python's stable sort composes them
+        into the right overall order. Nulls sort last regardless of
+        direction."""
+        for entry in reversed(sort):
+            field_name = entry["field"]
+            reverse = entry.get("direction", "asc") == "desc"
+            present = [r for r in rows if r.get(field_name) is not None]
+            missing = [r for r in rows if r.get(field_name) is None]
+            present.sort(key=lambda r: r[field_name], reverse=reverse)
+            rows = present + missing
+        return rows
+
+    def preview(
+        self,
+        schema_name: str,
+        columns: list[str] | None = None,
+        filter_tree: dict[str, Any] | None = None,
+        sort: list[dict[str, Any]] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Rows + total count for the current (possibly unsaved) column/
+        filter/sort selection while building a view -- the same join/flatten
+        logic as `resolve_rows`, but against an arbitrary selection rather
+        than an already-saved view."""
+        schema = self._schemas.get(schema_name)
+        cols = self._validate_columns(columns, schema)
+        known = {rf.field.name for rf in self._schemas.collect_fields(schema)}
+        validated_tree = self._validate_filter_tree(filter_tree, known)
+        validated_sort = self._validate_sort(sort, known)
+
+        total = self._record_svc.count_by_schema_filtered(
+            schema_name, filter_tree=validated_tree
+        )
+        records = self._record_svc.find_by_schema_filtered(
+            schema_name,
+            filter_tree=validated_tree,
+            limit=PREVIEW_FETCH_CAP,
+            offset=0,
+        )
+        fields_by_name = {
+            rf.field.name: rf.field for rf in self._schemas.collect_fields(schema)
+        }
+        rows = self._build_rows(cols, records, fields_by_name)
+        rows = self._sort_rows(rows, validated_sort)
+        return rows[offset : offset + limit], total
 
     def _file_columns(self, schema: SchemaDTO, columns: list[str]) -> list[str]:
         """Base-schema (non-joined) columns whose field is file/file_list --
@@ -372,8 +437,6 @@ class ViewService:
         matching zip path (record id + collision-suffixed name, via
         RecordService.files_for_zip) and FileRef for every file to bundle
         alongside the CSV/JSON."""
-        if self._record_svc is None:
-            raise RuntimeError("ViewService.export() requires a record_svc")
         view = self.get(schema_name, view_name)
         schema = self._schemas.get(schema_name)
 

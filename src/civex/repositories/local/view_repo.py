@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from civex.db.models import View
+from civex.db.models import Schema, View
 from civex.domain.dtos import ViewDTO
 from civex.domain.exceptions import NotFoundError
 
@@ -28,6 +28,15 @@ class LocalViewRepository:
             for r in self._s.query(View)
             .filter_by(schema_id=schema_id)
             .order_by(View.created_at)
+            .all()
+        ]
+
+    def list_all(self) -> list[ViewDTO]:
+        return [
+            _to_dto(r)
+            for r in self._s.query(View)
+            .join(Schema, View.schema_id == Schema.id)
+            .order_by(Schema.name, View.name)
             .all()
         ]
 
