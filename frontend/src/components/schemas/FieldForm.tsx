@@ -82,10 +82,11 @@ export function FieldForm(props: FieldFormProps) {
   const updateField = useUpdateField(schemaName)
   const { data: allSchemas } = useSchemas()
 
+  const isReferenceType = type === 'reference' || type === 'reference_list'
   const canSubmit =
     !!fieldName.trim() &&
     !nameError(fieldName.trim()) &&
-    (mode === 'edit' || type !== 'reference' || !!refSchema)
+    (!isReferenceType || !!refSchema)
   const showDefault = mode === 'create' && !NON_DEFAULT_TYPES.has(type)
 
   function handleTypeChange(t: string) {
@@ -164,8 +165,8 @@ export function FieldForm(props: FieldFormProps) {
     <FormGrid
       className={
         mode === 'create'
-          ? 'border-t border-border bg-canvas-subtle px-4 py-3'
-          : 'bg-accent-subtle border-t border-border px-4 py-3'
+          ? 'bg-canvas-subtle px-4 py-3'
+          : 'bg-accent-subtle px-4 py-3'
       }
     >
       <NameLabelFields
@@ -211,7 +212,7 @@ export function FieldForm(props: FieldFormProps) {
         />
       </Field>
 
-      {mode === 'create' && type === 'reference' && (
+      {isReferenceType && (
         <Field
           label="Target schema"
           span={6}

@@ -1,4 +1,4 @@
-import type { AuditLogEntry } from '../api/schemas'
+import type { AuditLogEntry } from '../api/audit'
 import { summarise as summariseRestrictions } from './restrictions'
 
 export interface AuditSummary {

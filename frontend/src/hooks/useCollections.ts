@@ -15,6 +15,18 @@ export function useCollection(name: string) {
   })
 }
 
+export function useCollectionAudit(
+  name: string,
+  page: number,
+  pageSize: number,
+) {
+  return useQuery({
+    queryKey: ['collections', name, 'audit', page, pageSize],
+    queryFn: () => collectionsApi.getAudit(name, page * pageSize, pageSize),
+    enabled: !!name,
+  })
+}
+
 export function useCreateCollection() {
   const qc = useQueryClient()
   const toast = useToast()
