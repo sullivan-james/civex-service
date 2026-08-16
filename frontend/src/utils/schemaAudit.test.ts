@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { describeAuditEntry } from './schemaAudit'
-import type { AuditLogEntry } from '../api/schemas'
+import type { AuditLogEntry } from '../api/audit'
 
 function makeEntry(overrides: Partial<AuditLogEntry> = {}): AuditLogEntry {
   return {
