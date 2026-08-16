@@ -204,9 +204,9 @@ class ViewResponse(BaseModel):
     schema_name: str
     name: str
     columns: list[str] = Field(
-        description="Base schema field names to show, in order. Own or "
-        "inherited fields only -- joined/reference-field columns aren't "
-        "supported yet."
+        description="Base schema field names to show, in order (own or "
+        "inherited). May also include single-hop reference-field joins as "
+        "'ref_field.target_field' (e.g. 'customer.email')."
     )
     filter_tree: dict[str, Any] | None = Field(
         default=None,
@@ -239,7 +239,9 @@ class CreateViewRequest(BaseModel):
         )
     )
     columns: list[str] | None = Field(
-        default=None, description="Base schema field names to show, in order."
+        default=None,
+        description="Base schema field names to show, in order. May also "
+        "include single-hop reference-field joins as 'ref_field.target_field'.",
     )
     filter_tree: dict[str, Any] | None = Field(
         default=None,

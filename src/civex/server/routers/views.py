@@ -22,7 +22,8 @@ def list_views(schema_name: str, ctx: AppContext = Depends(get_ctx)):
 def create_view(
     schema_name: str, body: CreateViewRequest, ctx: AppContext = Depends(get_ctx)
 ):
-    """Create a saved column/filter/sort view against a schema's own fields."""
+    """Create a saved column/filter/sort view against a schema's own fields,
+    with columns optionally joining one hop through a reference field."""
     try:
         dto = ctx.view_svc.create(
             schema_name,

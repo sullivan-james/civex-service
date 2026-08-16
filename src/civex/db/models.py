@@ -148,7 +148,10 @@ class View(Base):
     reconstruct itself. filter_tree is the same AND/OR shape records
     queries use (civex.domain.filters); columns/sort reference field names
     the way Schema.display_fields does, not field ids, so renaming a field
-    on the schema is not reflected here automatically.
+    on the schema is not reflected here automatically. columns may also
+    contain single-hop reference joins ("customer.email") -- see
+    ViewService._validate_join_column / resolve_rows; filter_tree and sort
+    stay restricted to the base schema's own fields.
     """
 
     __tablename__ = "views"

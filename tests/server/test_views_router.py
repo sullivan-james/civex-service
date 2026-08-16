@@ -111,3 +111,42 @@ def test_delete_view_via_api(client: TestClient):
     assert response.status_code == 204
 
     assert client.get("/api/schemas/trial/views/view1").status_code == 404
+
+
+def test_create_view_with_single_hop_join_column_via_api(client: TestClient):
+    _make_schema(client, "customer", fields=[("email", "string")])
+    _make_schema(client, "invoice", fields=[("amount", "integer")])
+    client.post(
+        "/api/schemas/invoice/fields",
+        json={
+            "name": "customer",
+            "type": "reference",
+            "restrictions": {"schema": "customer"},
+        },
+    )
+
+    response = client.post(
+        "/api/schemas/invoice/views",
+        json={"name": "with_customer", "columns": ["amount", "customer.email"]},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["columns"] == ["amount", "customer.email"]
+
+
+def test_create_view_with_multi_hop_join_column_returns_422(client: TestClient):
+    _make_schema(client, "customer", fields=[("email", "string")])
+    _make_schema(client, "invoice")
+    client.post(
+        "/api/schemas/invoice/fields",
+        json={
+            "name": "customer",
+            "type": "reference",
+            "restrictions": {"schema": "customer"},
+        },
+    )
+
+    response = client.post(
+        "/api/schemas/invoice/views",
+        json={"name": "bad", "columns": ["customer.region.name"]},
+    )
+    assert response.status_code == 422
