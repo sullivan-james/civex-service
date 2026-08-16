@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { PaginatedAuditLog } from './audit'
 
 export interface Collection {
   id: string
@@ -12,6 +13,10 @@ export interface Collection {
 export const collectionsApi = {
   list: () => api.get<Collection[]>('/collections'),
   get: (name: string) => api.get<Collection>(`/collections/${name}`),
+  getAudit: (name: string, offset = 0, limit = 50) =>
+    api.get<PaginatedAuditLog>(
+      `/collections/${name}/audit?offset=${offset}&limit=${limit}`,
+    ),
   create: (body: { name: string; description?: string }) =>
     api.post<Collection>('/collections', body),
   update: (name: string, body: { rename?: string; description?: string }) =>

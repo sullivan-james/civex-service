@@ -33,6 +33,7 @@ import {
   Pagination,
 } from '../components/ui'
 import { RecordForm } from '../components/records/RecordForm'
+import { CollectionHistory } from '../components/collections/CollectionHistory'
 import { formatDate } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 import type { Schema } from '../api/schemas'
@@ -548,6 +549,8 @@ export default function CollectionDetailPage() {
           />
         </div>
       )}
+      <CollectionHistory collectionName={collection.name} />
+
       {/* Danger zone */}
       <div className="border border-danger-muted rounded-md">
         <div className="px-4 py-3 border-b border-danger-muted bg-danger-subtle rounded-t-md">

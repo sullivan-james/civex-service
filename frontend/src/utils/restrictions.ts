@@ -63,7 +63,8 @@ export function build(
   state: RestrictionState,
 ): Restrictions | undefined {
   const r: Restrictions = {}
-  if (type === 'reference' && state.refSchema) r.schema = state.refSchema
+  if ((type === 'reference' || type === 'reference_list') && state.refSchema)
+    r.schema = state.refSchema
   if (type === 'integer' || type === 'float') {
     if (state.min !== '')
       r.min = type === 'integer' ? parseInt(state.min) : parseFloat(state.min)
@@ -187,7 +188,10 @@ export function toInputProps(field: Field): InputProps {
     if (restrictions.max_size !== undefined)
       props.maxSize = Number(restrictions.max_size)
   }
-  if (field.type === 'reference' && typeof restrictions.schema === 'string') {
+  if (
+    (field.type === 'reference' || field.type === 'reference_list') &&
+    typeof restrictions.schema === 'string'
+  ) {
     props.targetSchema = restrictions.schema
   }
   return props

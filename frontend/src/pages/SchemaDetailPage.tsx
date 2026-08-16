@@ -16,14 +16,8 @@ import {
   Button,
   IconButton,
   Badge,
-  Table,
-  Thead,
-  Th,
-  Tbody,
-  Tr,
-  Td,
   DetailSkeleton,
-  TableSkeleton,
+  Skeleton,
   ErrorState,
   Field,
   Input,
@@ -245,7 +239,7 @@ export default function SchemaDetailPage() {
   }
 
   function handleRowKeyDown(
-    e: React.KeyboardEvent<HTMLTableRowElement>,
+    e: React.KeyboardEvent<HTMLDivElement>,
     index: number,
   ) {
     if (!(e.altKey || e.metaKey)) return
@@ -267,10 +261,11 @@ export default function SchemaDetailPage() {
         loading={
           <>
             <DetailSkeleton metadataRows={0} sections={0} />
-            <TableSkeleton
-              columns={['w-8', 'w-32', 'w-20', 'w-16', 'w-24']}
-              rows={6}
-            />
+            <div className="flex flex-col gap-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-16 w-full" />
+              ))}
+            </div>
           </>
         }
       />
@@ -369,102 +364,77 @@ export default function SchemaDetailPage() {
           {announcement}
         </div>
 
-        <Table>
-          <Thead>
-            <tr>
-              <Th className="w-8" />
-              <Th>Name</Th>
-              <Th>Type</Th>
-              <Th>Required</Th>
-              <Th className="w-24" />
-            </tr>
-          </Thead>
-          <Tbody>
-            {schema.fields.length === 0 && !addingField && (
-              <Tr>
-                <td
-                  colSpan={5}
-                  className="px-4 py-3 text-sm text-fg-muted italic"
-                >
-                  No fields yet.
-                </td>
-              </Tr>
-            )}
-            {schema.fields.map((field, index) =>
-              editingField === field.name ? (
-                <tr key={field.id} className="bg-canvas">
-                  <td colSpan={5} className="p-0">
-                    <FieldForm
-                      mode="edit"
-                      field={field}
-                      schemaName={schema.name}
-                      onDone={() => setEditingField(null)}
-                    />
-                  </td>
-                </tr>
-              ) : (
-                <tr
-                  key={field.id}
-                  tabIndex={0}
-                  onKeyDown={(e) => handleRowKeyDown(e, index)}
-                  onDragOver={(e: React.DragEvent) => handleDragOver(e, index)}
-                  onDrop={() => handleDrop(index)}
-                  className={`bg-canvas transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent ${
-                    dragOverIndex === index && dragSrcIndex !== index
-                      ? 'bg-accent-subtle outline outline-2 outline-accent'
-                      : dragSrcIndex === index
-                        ? 'opacity-50'
-                        : ''
-                  }`}
-                >
-                  {/* Drag handle + reorder buttons */}
-                  <Td className="w-8 text-border hover:text-fg-muted select-none">
-                    <div className="flex flex-col items-center gap-1">
-                      <IconButton
-                        icon={ChevronUp}
-                        aria-label={`Move ${displayLabel(field.name, field.label)} up`}
-                        variant="subtle"
-                        disabled={index === 0 || reorderFields.isPending}
-                        onClick={() => moveField(index, 'up')}
-                      />
-                      <span
-                        draggable
-                        onDragStart={() => handleDragStart(index)}
-                        onDragEnd={handleDragEnd}
-                        title="Drag to reorder"
-                        aria-hidden="true"
-                        className="cursor-grab active:cursor-grabbing"
-                      >
-                        <GripVertical size={12} />
-                      </span>
-                      <IconButton
-                        icon={ChevronDown}
-                        aria-label={`Move ${displayLabel(field.name, field.label)} down`}
-                        variant="subtle"
-                        disabled={
-                          index === schema.fields.length - 1 ||
-                          reorderFields.isPending
-                        }
-                        onClick={() => moveField(index, 'down')}
-                      />
-                    </div>
-                  </Td>
-                  <Td>
-                    <span className="flex flex-col gap-1">
-                      <span className="flex items-center gap-2">
-                        <span className="text-sm font-medium">
-                          {displayLabel(field.name, field.label)}
-                        </span>
-                        {schema.display_fields.includes(field.name) && (
-                          <span
-                            className="text-xs font-medium px-2 py-1 rounded-full bg-attention-subtle text-attention border border-attention-muted"
-                            title="Display field — included in the record's natural name"
-                          >
-                            display
-                            {schema.display_fields.length > 1 &&
-                              ` #${schema.display_fields.indexOf(field.name) + 1}`}
-                          </span>
-                        )}
+        <div className="flex flex-col gap-2">
+          {schema.fields.length === 0 && !addingField && (
+            <p className="text-sm text-fg-muted italic border border-dashed border-border rounded-md px-4 py-6 text-center">
+              No fields yet.
+            </p>
+          )}
+          {schema.fields.map((field, index) =>
+            editingField === field.name ? (
+              <div
+                key={field.id}
+                className="border border-accent-muted rounded-md overflow-hidden"
+              >
+                <FieldForm
+                  mode="edit"
+                  field={field}
+                  schemaName={schema.name}
+                  onDone={() => setEditingField(null)}
+                />
+              </div>
+            ) : (
+              <div
+                key={field.id}
+                tabIndex={0}
+                onKeyDown={(e) => handleRowKeyDown(e, index)}
+                onDragOver={(e: React.DragEvent) => handleDragOver(e, index)}
+                onDrop={() => handleDrop(index)}
+                className={`flex items-start gap-2 rounded-md border p-3 bg-canvas transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent ${
+                  dragOverIndex === index && dragSrcIndex !== index
+                    ? 'bg-accent-subtle outline outline-2 outline-accent border-accent'
+                    : dragSrcIndex === index
+                      ? 'opacity-50 border-border'
+                      : 'border-border'
+                }`}
+              >
+                {/* Drag handle + reorder buttons */}
+                <div className="flex flex-col items-center gap-1 shrink-0 pt-0.5 text-border hover:text-fg-muted select-none">
+                  <IconButton
+                    icon={ChevronUp}
+                    aria-label={`Move ${displayLabel(field.name, field.label)} up`}
+                    variant="subtle"
+                    disabled={index === 0 || reorderFields.isPending}
+                    onClick={() => moveField(index, 'up')}
+                  />
+                  <span
+                    draggable
+                    onDragStart={() => handleDragStart(index)}
+                    onDragEnd={handleDragEnd}
+                    title="Drag to reorder"
+                    aria-hidden="true"
+                    className="cursor-grab active:cursor-grabbing"
+                  >
+                    <GripVertical size={12} />
+                  </span>
+                  <IconButton
+                    icon={ChevronDown}
+                    aria-label={`Move ${displayLabel(field.name, field.label)} down`}
+                    variant="subtle"
+                    disabled={
+                      index === schema.fields.length - 1 ||
+                      reorderFields.isPending
+                    }
+                    onClick={() => moveField(index, 'down')}
+                  />
+                </div>
+
+                <div className="flex-1 min-w-0 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                  {/* Identity + type/restrictions */}
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium">
+                        {displayLabel(field.name, field.label)}
                       </span>
                       <span
                         className="font-mono text-xs text-fg-subtle"
@@ -472,145 +442,144 @@ export default function SchemaDetailPage() {
                       >
                         {field.name}
                       </span>
+                      {schema.display_fields.includes(field.name) && (
+                        <span
+                          className="text-xs font-medium px-2 py-1 rounded-full bg-attention-subtle text-attention border border-attention-muted"
+                          title="Display field — included in the record's natural name"
+                        >
+                          display
+                          {schema.display_fields.length > 1 &&
+                            ` #${schema.display_fields.indexOf(field.name) + 1}`}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <Badge variant="accent">{field.type}</Badge>
+                      {(field.type === 'reference' ||
+                        field.type === 'reference_list') &&
+                        !!field.restrictions?.schema && (
+                          <span className="inline-flex items-center gap-1 text-xs text-fg-muted">
+                            <ArrowRight size={12} />
+                            <Link
+                              to={`/schemas/${allSchemas?.find((s) => s.name === String(field.restrictions.schema))?.id ?? String(field.restrictions.schema)}`}
+                              className="text-accent hover:underline"
+                            >
+                              {String(field.restrictions.schema)}
+                            </Link>
+                          </span>
+                        )}
+                      <button
+                        onClick={() =>
+                          updateField.mutate({
+                            fieldName: field.name,
+                            required: !field.required,
+                          })
+                        }
+                        className={`text-xs font-medium px-2 py-1 rounded-full border cursor-pointer transition-colors ${
+                          field.required
+                            ? 'bg-success-subtle text-success border-success-muted hover:bg-success-subtle-hover'
+                            : 'bg-canvas-subtle text-fg-muted border-border hover:bg-canvas-inset'
+                        }`}
+                      >
+                        {field.required ? 'Required' : 'Optional'}
+                      </button>
+                      <RestrictionsSummary
+                        restrictions={field.restrictions}
+                        type={field.type}
+                      />
                       {field.default !== null &&
                         field.default !== undefined && (
                           <span className="text-xs text-attention">
                             default: {String(field.default)}
                           </span>
                         )}
-                    </span>
-                  </Td>
-                  <Td>
-                    <div className="flex flex-col gap-1">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="accent">{field.type}</Badge>
-                        {field.type === 'reference' &&
-                          !!field.restrictions?.schema && (
-                            <span className="inline-flex items-center gap-1 text-xs text-fg-muted">
-                              <ArrowRight size={12} />
-                              <Link
-                                to={`/schemas/${allSchemas?.find((s) => s.name === String(field.restrictions.schema))?.id ?? String(field.restrictions.schema)}`}
-                                className="text-accent hover:underline"
-                              >
-                                {String(field.restrictions.schema)}
-                              </Link>
-                            </span>
-                          )}
-                      </div>
-                      <RestrictionsSummary
-                        restrictions={field.restrictions}
-                        type={field.type}
-                      />
                     </div>
-                  </Td>
-                  <Td>
-                    <button
-                      onClick={() =>
-                        updateField.mutate({
-                          fieldName: field.name,
-                          required: !field.required,
-                        })
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <IconButton
+                      icon={Star}
+                      aria-label={
+                        schema.display_fields.includes(field.name)
+                          ? 'Remove from display fields'
+                          : 'Add to display fields'
                       }
-                      className={`text-xs font-medium px-2 py-1 rounded-full border cursor-pointer transition-colors ${
-                        field.required
-                          ? 'bg-success-subtle text-success border-success-muted hover:bg-success-subtle-hover'
-                          : 'bg-canvas-subtle text-fg-muted border-border hover:bg-canvas-inset'
-                      }`}
-                    >
-                      {field.required ? 'Required' : 'Optional'}
-                    </button>
-                  </Td>
-                  <Td>
-                    <span className="flex items-center gap-2">
-                      <IconButton
-                        icon={Star}
-                        aria-label={
-                          schema.display_fields.includes(field.name)
-                            ? 'Remove from display fields'
-                            : 'Add to display fields'
-                        }
-                        variant="subtle"
-                        className={
-                          schema.display_fields.includes(field.name)
-                            ? '!text-attention hover:!text-attention-emphasis'
-                            : ''
-                        }
-                        iconProps={{
-                          fill: schema.display_fields.includes(field.name)
-                            ? 'currentColor'
-                            : 'none',
-                        }}
-                        onClick={() => toggleDisplayField(field.name)}
-                      />
-                      {schema.display_fields.length > 1 &&
-                        schema.display_fields.includes(field.name) && (
-                          <span className="flex flex-col items-center gap-1">
-                            <IconButton
-                              icon={ChevronUp}
-                              aria-label={`Move ${displayLabel(field.name, field.label)} earlier in display order`}
-                              variant="subtle"
-                              className="!text-attention hover:!text-attention-emphasis"
-                              disabled={
-                                schema.display_fields.indexOf(field.name) ===
-                                  0 || updateSchema.isPending
-                              }
-                              onClick={() => moveDisplayField(field.name, 'up')}
-                            />
-                            <IconButton
-                              icon={ChevronDown}
-                              aria-label={`Move ${displayLabel(field.name, field.label)} later in display order`}
-                              variant="subtle"
-                              className="!text-attention hover:!text-attention-emphasis"
-                              disabled={
-                                schema.display_fields.indexOf(field.name) ===
-                                  schema.display_fields.length - 1 ||
-                                updateSchema.isPending
-                              }
-                              onClick={() =>
-                                moveDisplayField(field.name, 'down')
-                              }
-                            />
-                          </span>
-                        )}
-                      <IconButton
-                        icon={Pencil}
-                        aria-label="Edit field"
-                        variant="default"
-                        className="hover:!text-accent"
-                        onClick={() => {
-                          setConfirmDeleteField(null)
-                          setEditingField(field.name)
-                        }}
-                      />
-                      <IconButton
-                        icon={X}
-                        aria-label="Remove field"
-                        variant="danger"
-                        onClick={() => {
-                          setEditingField(null)
-                          setConfirmDeleteField(field.name)
-                        }}
-                      />
-                    </span>
-                  </Td>
-                </tr>
-              ),
-            )}
-          </Tbody>
-          {addingField && (
-            <tfoot>
-              <tr>
-                <td colSpan={5} className="p-0">
-                  <FieldForm
-                    mode="create"
-                    schemaName={schema.name}
-                    onDone={() => setAddingField(false)}
-                  />
-                </td>
-              </tr>
-            </tfoot>
+                      variant="subtle"
+                      className={
+                        schema.display_fields.includes(field.name)
+                          ? '!text-attention hover:!text-attention-emphasis'
+                          : ''
+                      }
+                      iconProps={{
+                        fill: schema.display_fields.includes(field.name)
+                          ? 'currentColor'
+                          : 'none',
+                      }}
+                      onClick={() => toggleDisplayField(field.name)}
+                    />
+                    {schema.display_fields.length > 1 &&
+                      schema.display_fields.includes(field.name) && (
+                        <span className="flex flex-col items-center gap-1">
+                          <IconButton
+                            icon={ChevronUp}
+                            aria-label={`Move ${displayLabel(field.name, field.label)} earlier in display order`}
+                            variant="subtle"
+                            className="!text-attention hover:!text-attention-emphasis"
+                            disabled={
+                              schema.display_fields.indexOf(field.name) === 0 ||
+                              updateSchema.isPending
+                            }
+                            onClick={() => moveDisplayField(field.name, 'up')}
+                          />
+                          <IconButton
+                            icon={ChevronDown}
+                            aria-label={`Move ${displayLabel(field.name, field.label)} later in display order`}
+                            variant="subtle"
+                            className="!text-attention hover:!text-attention-emphasis"
+                            disabled={
+                              schema.display_fields.indexOf(field.name) ===
+                                schema.display_fields.length - 1 ||
+                              updateSchema.isPending
+                            }
+                            onClick={() => moveDisplayField(field.name, 'down')}
+                          />
+                        </span>
+                      )}
+                    <IconButton
+                      icon={Pencil}
+                      aria-label="Edit field"
+                      variant="default"
+                      className="hover:!text-accent"
+                      onClick={() => {
+                        setConfirmDeleteField(null)
+                        setEditingField(field.name)
+                      }}
+                    />
+                    <IconButton
+                      icon={X}
+                      aria-label="Remove field"
+                      variant="danger"
+                      onClick={() => {
+                        setEditingField(null)
+                        setConfirmDeleteField(field.name)
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            ),
           )}
-        </Table>
+          {addingField && (
+            <div className="border border-border rounded-md overflow-hidden">
+              <FieldForm
+                mode="create"
+                schemaName={schema.name}
+                onDone={() => setAddingField(false)}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       <SchemaHistory schemaName={schema.name} />
