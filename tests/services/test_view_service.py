@@ -429,3 +429,118 @@ def test_resolve_rows_returns_none_for_dangling_reference(
     rows = ctx.view_svc.resolve_rows("invoice", "with_customer", [invoice])
 
     assert rows == [{"amount": 50, "customer.email": None}]
+
+
+# --- export: querying, filtering, sorting, and file bundling ---
+
+
+def _file_ref(sha256: str, filename: str, size: int = 10) -> dict:
+    return {"sha256": sha256, "filename": filename, "size": size}
+
+
+def test_export_joins_filters_and_sorts(ctx: AppContext, make_schema, make_collection):
+    _make_invoice_customer_schemas(ctx, make_schema)
+    make_collection("study")
+    ctx.commit()
+    customer = ctx.record_svc.add(
+        "study", "customer", {"email": "a@example.com", "region": "west"}
+    )
+    ctx.record_svc.add(
+        "study", "invoice", {"amount": 300, "customer": str(customer.id)}
+    )
+    ctx.record_svc.add(
+        "study", "invoice", {"amount": 100, "customer": str(customer.id)}
+    )
+    ctx.record_svc.add("study", "invoice", {"amount": 50})  # filtered out below
+    ctx.commit()
+    ctx.view_svc.create(
+        "invoice",
+        "big_orders",
+        columns=["amount", "customer.email"],
+        filter_tree={"field": "amount", "op": "gte", "value": 100},
+        sort=[{"field": "amount", "direction": "asc"}],
+    )
+    ctx.commit()
+
+    export = ctx.view_svc.export("invoice", "big_orders")
+
+    assert export.rows == [
+        {"amount": 100, "customer.email": "a@example.com"},
+        {"amount": 300, "customer.email": "a@example.com"},
+    ]
+    assert export.file_entries == []
+
+
+def test_export_spans_every_dataset_for_the_schema(
+    ctx: AppContext, make_schema, make_collection
+):
+    make_schema("trial", fields=[("subject", "string")])
+    make_collection("study1")
+    make_collection("study2")
+    ctx.commit()
+    ctx.record_svc.add("study1", "trial", {"subject": "S01"})
+    ctx.record_svc.add("study2", "trial", {"subject": "S02"})
+    ctx.commit()
+    ctx.view_svc.create("trial", "all", columns=["subject"])
+    ctx.commit()
+
+    export = ctx.view_svc.export("trial", "all")
+
+    assert {row["subject"] for row in export.rows} == {"S01", "S02"}
+
+
+def test_export_bundles_file_columns_and_uses_resolved_filename(
+    ctx: AppContext, make_schema, make_collection
+):
+    make_schema(
+        "invoice",
+        fields=[("invoice_number", "string"), ("scan", "file")],
+    )
+    ctx.schema_svc.update_field(
+        "invoice", "scan", restrictions={"filename_template": "{invoice_number}.{ext}"}
+    )
+    make_collection("study")
+    ctx.commit()
+    record = ctx.record_svc.add(
+        "study",
+        "invoice",
+        {"invoice_number": "INV-1", "scan": _file_ref("a" * 64, "upload.pdf")},
+    )
+    ctx.commit()
+    ctx.view_svc.create("invoice", "with_scan", columns=["invoice_number", "scan"])
+    ctx.commit()
+
+    export = ctx.view_svc.export("invoice", "with_scan")
+
+    assert export.rows == [{"invoice_number": "INV-1", "scan": "INV-1.pdf"}]
+    assert len(export.file_entries) == 1
+    path, ref = export.file_entries[0]
+    assert path == f"{record.id}/INV-1.pdf"
+    assert ref.sha256 == "a" * 64
+
+
+def test_export_ignores_joined_file_columns_for_zip_bundling(
+    ctx: AppContext, make_schema, make_collection
+):
+    make_schema("customer", fields=[("avatar", "file")])
+    make_schema("invoice", fields=[("amount", "integer")])
+    ctx.schema_svc.add_field(
+        "invoice", "customer", "reference", restrictions={"schema": "customer"}
+    )
+    make_collection("study")
+    ctx.commit()
+    customer = ctx.record_svc.add(
+        "study", "customer", {"avatar": _file_ref("b" * 64, "pic.png")}
+    )
+    ctx.record_svc.add(
+        "study", "invoice", {"amount": 10, "customer": str(customer.id)}
+    )
+    ctx.commit()
+    ctx.view_svc.create(
+        "invoice", "with_avatar", columns=["amount", "customer.avatar"]
+    )
+    ctx.commit()
+
+    export = ctx.view_svc.export("invoice", "with_avatar")
+
+    assert export.file_entries == []

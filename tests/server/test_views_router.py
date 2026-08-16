@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import io
+import zipfile
+
 from fastapi.testclient import TestClient
 
 
@@ -150,3 +153,130 @@ def test_create_view_with_multi_hop_join_column_returns_422(client: TestClient):
         json={"name": "bad", "columns": ["customer.region.name"]},
     )
     assert response.status_code == 422
+
+
+def _upload(client: TestClient, filename: str, content: bytes) -> dict:
+    resp = client.post(
+        "/api/files", files={"file": (filename, io.BytesIO(content), "text/plain")}
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def test_export_view_csv_flattens_joined_columns(client: TestClient):
+    _make_schema(client, "customer", fields=[("email", "string")])
+    _make_schema(client, "invoice", fields=[("amount", "integer")])
+    client.post(
+        "/api/schemas/invoice/fields",
+        json={
+            "name": "customer",
+            "type": "reference",
+            "restrictions": {"schema": "customer"},
+        },
+    )
+    client.post("/api/collections", json={"name": "study"})
+    customer = client.post(
+        "/api/collections/study/records",
+        json={"schema_name": "customer", "data": {"email": "a@example.com"}},
+    ).json()
+    client.post(
+        "/api/collections/study/records",
+        json={
+            "schema_name": "invoice",
+            "data": {"amount": 100, "customer": customer["id"]},
+        },
+    )
+    client.post(
+        "/api/schemas/invoice/views",
+        json={"name": "with_customer", "columns": ["amount", "customer.email"]},
+    )
+
+    resp = client.get("/api/schemas/invoice/views/with_customer/export")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert resp.text.splitlines() == [
+        "amount,customer.email",
+        "100,a@example.com",
+    ]
+
+
+def test_export_view_json_nests_joined_columns(client: TestClient):
+    _make_schema(client, "customer", fields=[("email", "string")])
+    _make_schema(client, "invoice", fields=[("amount", "integer")])
+    client.post(
+        "/api/schemas/invoice/fields",
+        json={
+            "name": "customer",
+            "type": "reference",
+            "restrictions": {"schema": "customer"},
+        },
+    )
+    client.post("/api/collections", json={"name": "study"})
+    customer = client.post(
+        "/api/collections/study/records",
+        json={"schema_name": "customer", "data": {"email": "a@example.com"}},
+    ).json()
+    client.post(
+        "/api/collections/study/records",
+        json={
+            "schema_name": "invoice",
+            "data": {"amount": 100, "customer": customer["id"]},
+        },
+    )
+    client.post(
+        "/api/schemas/invoice/views",
+        json={"name": "with_customer", "columns": ["amount", "customer.email"]},
+    )
+
+    resp = client.get(
+        "/api/schemas/invoice/views/with_customer/export", params={"format": "json"}
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/json")
+    assert resp.json() == [{"amount": 100, "customer": {"email": "a@example.com"}}]
+
+
+def test_export_view_bundles_file_columns_as_zip(client: TestClient):
+    _make_schema(client, "invoice", fields=[("scan", "file")])
+    client.post("/api/collections", json={"name": "study"})
+    scan = _upload(client, "scan.pdf", b"scan-bytes")
+    client.post(
+        "/api/collections/study/records",
+        json={"schema_name": "invoice", "data": {"scan": scan}},
+    )
+    client.post(
+        "/api/schemas/invoice/views",
+        json={"name": "with_scan", "columns": ["scan"]},
+    )
+
+    resp = client.get("/api/schemas/invoice/views/with_scan/export")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/zip"
+
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = set(zf.namelist())
+    assert "with_scan.csv" in names
+    file_entries = [n for n in names if n != "with_scan.csv"]
+    assert len(file_entries) == 1
+    assert file_entries[0].endswith("/scan.pdf")
+    assert zf.read(file_entries[0]) == b"scan-bytes"
+    assert zf.read("with_scan.csv").decode().splitlines() == [
+        "scan",
+        "scan.pdf",
+    ]
+
+
+def test_export_view_invalid_format_returns_422(client: TestClient):
+    _make_schema(client, "trial")
+    client.post("/api/schemas/trial/views", json={"name": "view1"})
+
+    resp = client.get(
+        "/api/schemas/trial/views/view1/export", params={"format": "xml"}
+    )
+    assert resp.status_code == 422
+
+
+def test_export_missing_view_returns_404(client: TestClient):
+    _make_schema(client, "trial")
+    resp = client.get("/api/schemas/trial/views/missing/export")
+    assert resp.status_code == 404
