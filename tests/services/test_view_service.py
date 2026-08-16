@@ -266,3 +266,166 @@ def test_purging_schema_deletes_its_views(ctx: AppContext, make_schema):
     ctx.schema_svc.create("trial")
     ctx.commit()
     assert ctx.view_svc.list_all("trial") == []
+
+
+# --- Single-hop reference-field joins ---
+
+
+def _make_invoice_customer_schemas(ctx: AppContext, make_schema):
+    make_schema("customer", fields=[("email", "string"), ("region", "string")])
+    make_schema("invoice", fields=[("amount", "integer")])
+    ctx.schema_svc.add_field(
+        "invoice", "customer", "reference", restrictions={"schema": "customer"}
+    )
+    ctx.commit()
+
+
+def test_create_view_accepts_single_hop_reference_join_column(
+    ctx: AppContext, make_schema
+):
+    _make_invoice_customer_schemas(ctx, make_schema)
+
+    view = ctx.view_svc.create(
+        "invoice", "with_customer", columns=["amount", "customer.email"]
+    )
+    ctx.commit()
+
+    assert view.columns == ["amount", "customer.email"]
+
+
+def test_create_view_rejects_join_through_reference_list_field(
+    ctx: AppContext, make_schema
+):
+    make_schema("customer", fields=[("email", "string")])
+    make_schema("invoice")
+    ctx.schema_svc.add_field(
+        "invoice",
+        "customers",
+        "reference_list",
+        restrictions={"schema": "customer"},
+    )
+    ctx.commit()
+
+    with pytest.raises(ValidationError):
+        ctx.view_svc.create("invoice", "bad", columns=["customers.email"])
+
+
+def test_create_view_rejects_multi_hop_join_column(ctx: AppContext, make_schema):
+    _make_invoice_customer_schemas(ctx, make_schema)
+    ctx.schema_svc.add_field(
+        "customer", "region_ref", "reference", restrictions={"schema": "customer"}
+    )
+    ctx.commit()
+
+    with pytest.raises(ValidationError):
+        ctx.view_svc.create(
+            "invoice", "bad", columns=["customer.region_ref.email"]
+        )
+
+
+def test_create_view_rejects_join_through_non_reference_field(
+    ctx: AppContext, make_schema
+):
+    make_schema("invoice", fields=[("amount", "integer")])
+    ctx.commit()
+
+    with pytest.raises(ValidationError):
+        ctx.view_svc.create("invoice", "bad", columns=["amount.email"])
+
+
+def test_create_view_rejects_join_through_reference_without_schema_restriction(
+    ctx: AppContext, make_schema
+):
+    make_schema("customer", fields=[("email", "string")])
+    make_schema("invoice")
+    ctx.schema_svc.add_field("invoice", "customer", "reference")
+    ctx.commit()
+
+    with pytest.raises(ValidationError):
+        ctx.view_svc.create("invoice", "bad", columns=["customer.email"])
+
+
+def test_create_view_rejects_unknown_join_target_field(ctx: AppContext, make_schema):
+    _make_invoice_customer_schemas(ctx, make_schema)
+
+    with pytest.raises(ValidationError):
+        ctx.view_svc.create("invoice", "bad", columns=["customer.nonexistent"])
+
+
+def test_update_view_accepts_join_column(ctx: AppContext, make_schema):
+    _make_invoice_customer_schemas(ctx, make_schema)
+    ctx.view_svc.create("invoice", "view1", columns=["amount"])
+    ctx.commit()
+
+    updated = ctx.view_svc.update(
+        "invoice", "view1", columns=["amount", "customer.email"]
+    )
+    ctx.commit()
+
+    assert updated.columns == ["amount", "customer.email"]
+
+
+# --- resolve_rows: joining at query time ---
+
+
+def test_resolve_rows_joins_reference_field(
+    ctx: AppContext, make_schema, make_collection
+):
+    _make_invoice_customer_schemas(ctx, make_schema)
+    make_collection("study")
+    ctx.commit()
+    customer = ctx.record_svc.add(
+        "study", "customer", {"email": "a@example.com", "region": "west"}
+    )
+    invoice = ctx.record_svc.add(
+        "study", "invoice", {"amount": 100, "customer": str(customer.id)}
+    )
+    ctx.commit()
+    ctx.view_svc.create(
+        "invoice", "with_customer", columns=["amount", "customer.email"]
+    )
+    ctx.commit()
+
+    rows = ctx.view_svc.resolve_rows("invoice", "with_customer", [invoice])
+
+    assert rows == [{"amount": 100, "customer.email": "a@example.com"}]
+
+
+def test_resolve_rows_returns_none_for_unset_reference(
+    ctx: AppContext, make_schema, make_collection
+):
+    _make_invoice_customer_schemas(ctx, make_schema)
+    make_collection("study")
+    ctx.commit()
+    invoice = ctx.record_svc.add("study", "invoice", {"amount": 50})
+    ctx.commit()
+    ctx.view_svc.create(
+        "invoice", "with_customer", columns=["amount", "customer.email"]
+    )
+    ctx.commit()
+
+    rows = ctx.view_svc.resolve_rows("invoice", "with_customer", [invoice])
+
+    assert rows == [{"amount": 50, "customer.email": None}]
+
+
+def test_resolve_rows_returns_none_for_dangling_reference(
+    ctx: AppContext, make_schema, make_collection
+):
+    import uuid
+
+    _make_invoice_customer_schemas(ctx, make_schema)
+    make_collection("study")
+    ctx.commit()
+    invoice = ctx.record_svc.add(
+        "study", "invoice", {"amount": 50, "customer": str(uuid.uuid4())}
+    )
+    ctx.commit()
+    ctx.view_svc.create(
+        "invoice", "with_customer", columns=["amount", "customer.email"]
+    )
+    ctx.commit()
+
+    rows = ctx.view_svc.resolve_rows("invoice", "with_customer", [invoice])
+
+    assert rows == [{"amount": 50, "customer.email": None}]

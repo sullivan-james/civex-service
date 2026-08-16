@@ -188,15 +188,16 @@ class DatasetDTO:
 class ViewDTO:
     """A saved column/filter/sort definition against a base schema's own
     fields -- what a table view in the UI reads back to reconstruct itself.
-    Reference-field joins in columns and actually running the view against
-    records are separate, later stories (see the filter tree shape in
-    civex.domain.filters, which this reuses unchanged)."""
+    (see the filter tree shape in civex.domain.filters, which this reuses
+    unchanged). filter_tree and sort are restricted to the base schema's own
+    fields; columns may additionally contain single-hop reference-field
+    joins (see ViewService)."""
 
     id: uuid.UUID
     schema_id: uuid.UUID
     schema_name: str  # denormalised for display, resolved by the repo
     name: str
-    columns: list[str]  # base schema field names, in display order
+    columns: list[str]  # base schema field names, or "ref_field.target_field" joins
     filter_tree: dict[str, Any] | None  # civex.domain.filters wire shape
     sort: list[dict[str, Any]]  # [{"field": <name>, "direction": "asc"|"desc"}, ...]
     created_at: datetime
