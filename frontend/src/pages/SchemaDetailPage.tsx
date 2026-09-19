@@ -38,7 +38,8 @@ import {
 } from '../components/ui/icons'
 import { FieldForm } from '../components/schemas/FieldForm'
 import { RestrictionsSummary } from '../components/schemas/RestrictionsSummary'
-import { SchemaHistory } from '../components/schemas/SchemaHistory'
+import { AuditTrail } from '../components/audit/AuditTrail'
+import { describeAuditEntry as describeSchemaAuditEntry } from '../utils/schemaAudit'
 
 // Above this many records, or with any child schema, deleting is treated as
 // high-impact: the confirm button stays disabled until the user types the
@@ -582,7 +583,14 @@ export default function SchemaDetailPage() {
         </div>
       </div>
 
-      <SchemaHistory schemaName={schema.name} />
+      <AuditTrail
+        queryKey={['schemas', schema.name, 'audit']}
+        fetchPage={(offset, limit) =>
+          schemasApi.getAudit(schema.name, offset, limit)
+        }
+        describeEntry={describeSchemaAuditEntry}
+        emptyMessage="Changes to this schema and its fields will appear here."
+      />
 
       {/* Danger zone */}
       <div className="border border-danger-muted rounded-md">

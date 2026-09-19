@@ -112,6 +112,8 @@ export const recordsApi = {
 
   purge: (id: string) => api.delete<void>(`/records/${id}/purge`),
 
-  audit: (id: string, limit = 50) =>
-    api.get<PaginatedAuditLog>(`/records/${id}/audit?limit=${limit}`),
+  audit: (id: string, offset = 0, limit = 50) =>
+    api.get<PaginatedAuditLog>(
+      `/records/${id}/audit?offset=${offset}&limit=${limit}`,
+    ),
 }
