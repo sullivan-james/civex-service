@@ -259,6 +259,59 @@ class FileRef:
 
 
 @dataclass
+class StoredObjectInfo:
+    """One object on disk in the content-addressed store, as seen by GC --
+    not what a FileRef claims to point at, but what's actually there."""
+
+    sha256: str
+    volume: str
+    size: int
+    mtime: float  # unix timestamp; objects are write-once, so this is effectively creation time
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sha256": self.sha256,
+            "volume": self.volume,
+            "size": self.size,
+            "mtime": self.mtime,
+        }
+
+
+@dataclass
+class GCReport:
+    """Result of a GCService.run() pass over the object store."""
+
+    dry_run: bool
+    grace_days: int
+    scanned: int  # total objects found in the store
+    referenced: int  # distinct sha256 reachable from a live root
+    protected_by_grace: int  # unreferenced but younger than the grace period
+    deleted: list[StoredObjectInfo]  # collected (or, if dry_run, collectible)
+    stale_scratch_removed: int = 0  # abandoned put_stream() .part files reclaimed
+
+    @property
+    def deleted_count(self) -> int:
+        return len(self.deleted)
+
+    @property
+    def deleted_bytes(self) -> int:
+        return sum(o.size for o in self.deleted)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "dry_run": self.dry_run,
+            "grace_days": self.grace_days,
+            "scanned": self.scanned,
+            "referenced": self.referenced,
+            "protected_by_grace": self.protected_by_grace,
+            "deleted_count": self.deleted_count,
+            "deleted_bytes": self.deleted_bytes,
+            "deleted": [o.to_dict() for o in self.deleted],
+            "stale_scratch_removed": self.stale_scratch_removed,
+        }
+
+
+@dataclass
 class RecordDTO:
     id: uuid.UUID
     dataset_id: uuid.UUID

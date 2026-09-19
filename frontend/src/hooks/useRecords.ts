@@ -227,14 +227,6 @@ export function useDeleteManyRecords(datasetName: string) {
   })
 }
 
-export function useRecordAudit(recordId: string | null | undefined) {
-  return useQuery({
-    queryKey: ['record-audit', recordId],
-    queryFn: () => recordsApi.audit(recordId!),
-    enabled: !!recordId,
-  })
-}
-
 export function useDeleteAllRecords(datasetName: string) {
   const qc = useQueryClient()
   const toast = useToast()

@@ -12,6 +12,25 @@ export interface VolumeStats {
   in_queue: boolean
 }
 
+export interface StoredObject {
+  sha256: string
+  volume: string
+  size: number
+  mtime: number
+}
+
+export interface GCReport {
+  dry_run: boolean
+  grace_days: number
+  scanned: number
+  referenced: number
+  protected_by_grace: number
+  deleted_count: number
+  deleted_bytes: number
+  deleted: StoredObject[]
+  stale_scratch_removed: number
+}
+
 export const storeApi = {
   listVolumes: () => api.get<VolumeStats[]>('/store/volumes'),
   addVolume: (body: {
@@ -29,4 +48,6 @@ export const storeApi = {
   ) => api.patch<VolumeStats>(`/store/volumes/${name}`, body),
   removeVolume: (name: string) => api.delete<void>(`/store/volumes/${name}`),
   setQueue: (queue: string[]) => api.put<string[]>('/store/queue', { queue }),
+  runGC: (body: { apply?: boolean; grace_days?: number }) =>
+    api.post<GCReport>('/store/gc', body),
 }

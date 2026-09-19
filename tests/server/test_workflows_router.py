@@ -159,6 +159,52 @@ def test_run_unknown_workflow_returns_404(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
+def test_run_with_a_files_input_actually_seeds_input_data(client: TestClient) -> None:
+    """A manual run posted as multipart/form-data with an uploaded file must
+    reach the executor as __input__.<name> -- `await request.form()` on a raw
+    Starlette `Request` hands back `starlette.datastructures.UploadFile`
+    instances, not `fastapi.UploadFile` (a subclass of it), so isinstance
+    checks against the wrong one silently drop every uploaded file."""
+    import io
+
+    content = """\
+name: import-files
+inputs:
+  files:
+    type: files
+steps:
+  - id: save
+    plugin: civex.save_field
+    config:
+      field: attachments
+    inputs:
+      value: __input__.files
+"""
+    client.put("/api/workflows/import-files", json={"content": content})
+    client.post("/api/schemas", json={"name": "doc", "description": None})
+    client.post(
+        "/api/schemas/doc/fields",
+        json={"name": "attachments", "type": "file_list", "required": False},
+    )
+    client.post("/api/collections", json={"name": "study", "description": None})
+    rec_resp = client.post(
+        "/api/collections/study/records",
+        json={"schema_name": "doc", "data": {}},
+    )
+    record_id = rec_resp.json()["id"]
+
+    resp = client.post(
+        "/api/workflows/import-files/run",
+        data={"record_id": record_id},
+        files=[("files", ("f.csv", io.BytesIO(b"a,b\n1,2\n"), "text/csv"))],
+    )
+    assert resp.status_code == 202
+
+    job = client.get(f"/api/jobs/{resp.json()['id']}").json()
+    assert job["status"] == "completed", job
+    assert job["step_executions"][0]["inputs"]["value"][0]["filename"] == "f.csv"
+
+
 def test_delete_blocked_by_pending_job_returns_409(client: TestClient) -> None:
     """Enqueues the job directly against the same on-disk project rather
     than via POST .../run -- TestClient executes FastAPI BackgroundTasks

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import AsyncIterable
 
 from civex.domain.dtos import FileRef
 from civex.repositories.protocols import FileObjectStore
@@ -22,6 +23,16 @@ class FileService:
     def store_bytes(self, data: bytes, filename: str) -> FileRef:
         """Store raw bytes (e.g. from an HTTP upload) in the object store."""
         return self._store.put(data, filename)
+
+    async def store_stream(
+        self,
+        chunks: AsyncIterable[bytes],
+        filename: str,
+        size_hint: int | None = None,
+    ) -> FileRef:
+        """Store a streamed upload without buffering the whole file in
+        memory first. See VolumeAwareFileObjectStore.put_stream."""
+        return await self._store.put_stream(chunks, filename, size_hint)
 
     def retrieve(self, sha256: str) -> bytes:
         """Return object bytes, fetching from the remote and caching locally if needed."""

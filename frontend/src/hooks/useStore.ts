@@ -48,3 +48,11 @@ export function useSetQueue() {
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   })
 }
+
+export function useRunGC() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: storeApi.runGC,
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  })
+}

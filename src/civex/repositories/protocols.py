@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, AsyncIterable, Protocol, runtime_checkable
 
 from civex.domain.dtos import (
     AiUsageEventDTO,
@@ -20,6 +20,7 @@ from civex.domain.dtos import (
     FileRef,
     RecordDTO,
     SchemaDTO,
+    StoredObjectInfo,
     ViewDTO,
     WorkflowJobDTO,
 )
@@ -321,6 +322,17 @@ class FileObjectStore(Protocol):
     """
 
     def put(self, data: bytes, original_filename: str) -> FileRef: ...
+    async def put_stream(
+        self,
+        chunks: AsyncIterable[bytes],
+        original_filename: str,
+        size_hint: int | None = None,
+    ) -> FileRef: ...
     def get(self, sha256: str) -> bytes: ...
     def exists(self, sha256: str) -> bool: ...
     def object_path(self, sha256: str) -> Path: ...
+    def list_objects(self) -> list[StoredObjectInfo]: ...
+    def delete(self, sha256: str, volume: str | None = None) -> bool: ...
+    def sweep_stale_scratch(
+        self, older_than_seconds: float, dry_run: bool = False
+    ) -> int: ...

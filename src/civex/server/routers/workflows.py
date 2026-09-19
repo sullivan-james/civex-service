@@ -8,8 +8,8 @@ from fastapi import (
     Depends,
     HTTPException,
     Request,
-    UploadFile,
 )
+from starlette.datastructures import UploadFile
 
 from civex.context import AppContext
 from civex.domain.exceptions import (

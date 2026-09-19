@@ -26,7 +26,9 @@ import {
 } from '../components/ui'
 import { RecordForm } from '../components/records/RecordForm'
 import { RecordsTable } from '../components/records/RecordsTable'
-import { CollectionHistory } from '../components/collections/CollectionHistory'
+import { AuditTrail } from '../components/audit/AuditTrail'
+import { collectionsApi } from '../api/collections'
+import { describeAuditEntry as describeCollectionAuditEntry } from '../utils/collectionAudit'
 import { errorMessage } from '../lib/errors'
 import type { Schema } from '../api/schemas'
 import { displayLabel } from '../utils/naming'
@@ -482,7 +484,14 @@ export default function CollectionDetailPage() {
           />
         </div>
       )}
-      <CollectionHistory collectionName={collection.name} />
+      <AuditTrail
+        queryKey={['collections', collection.name, 'audit']}
+        fetchPage={(offset, limit) =>
+          collectionsApi.getAudit(collection.name, offset, limit)
+        }
+        describeEntry={describeCollectionAuditEntry}
+        emptyMessage="Changes to this collection will appear here."
+      />
 
       {/* Danger zone */}
       <div className="border border-danger-muted rounded-md">

@@ -12,6 +12,8 @@ from civex.domain.exceptions import (
 from civex.server.deps import get_ctx
 from civex.server.models import (
     AddVolumeRequest,
+    GCReportResponse,
+    GCRequest,
     SetQueueRequest,
     UpdateVolumeRequest,
     VolumeStatsResponse,
@@ -76,3 +78,15 @@ def set_queue(body: SetQueueRequest, ctx: AppContext = Depends(get_ctx)):
     except (NotFoundError, ValidationError) as e:
         raise HTTPException(422, detail=str(e))
     return ctx.store_svc._config.store_config.volume_queue
+
+
+@router.post("/gc", response_model=GCReportResponse)
+def run_gc(body: GCRequest = GCRequest(), ctx: AppContext = Depends(get_ctx)):
+    """Reclaim object-store blobs no longer referenced by any live record or
+    workflow job. Defaults to a dry run (`apply=false`) that only reports
+    what's collectible; pass `apply=true` to actually delete. Objects
+    referenced only by audit history or job step logs are not protected --
+    both retain FileRef snapshots indefinitely, so an old audit diff may
+    reference a hash GC has since removed."""
+    report = ctx.gc_svc.run(dry_run=not body.apply, grace_days=body.grace_days)
+    return report.to_dict()

@@ -38,7 +38,8 @@ import type { Schema } from '../api/schemas'
 import type { CivexRecord } from '../api/records'
 import JobsTable from '../components/jobs/JobsTable'
 import RecordProvenance from '../components/jobs/RecordProvenance'
-import RecordHistory from '../components/records/RecordHistory'
+import { AuditTrail } from '../components/audit/AuditTrail'
+import { describeAuditEntry as describeRecordAuditEntry } from '../utils/recordAudit'
 import { FieldValue } from '../components/records/FieldValue'
 
 function ChildTable({
@@ -501,7 +502,14 @@ export default function RecordDetailPage() {
 
       <RecordProvenance recordId={record.id} />
 
-      <RecordHistory recordId={record.id} />
+      <AuditTrail
+        queryKey={['records', record.id, 'audit']}
+        fetchPage={(offset, limit) =>
+          recordsApi.audit(record.id, offset, limit)
+        }
+        describeEntry={describeRecordAuditEntry}
+        emptyMessage="Changes to this record will appear here."
+      />
 
       <div>
         <h2 className="text-base font-semibold text-fg mb-2">Runs</h2>
