@@ -12,6 +12,7 @@ import pytest
 
 from civex.config import StoreConfig, VolumeConfig
 from civex.context import AppContext
+from civex.domain.exceptions import VolumeUnavailableError
 from civex.repositories.local.file_store import VolumeAwareFileObjectStore
 
 
@@ -88,6 +89,51 @@ def test_storing_identical_bytes_twice_appends_manifest_once(tmp_path: Path) -> 
     lines = manifest_path.read_text().splitlines()
     assert len(lines) == 1
     assert json.loads(lines[0])["filename"] == "a.txt"
+
+
+def test_put_leaves_no_partial_object_when_write_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A write that fails partway (e.g. ENOSPC) must never leave a
+    truncated/corrupt blob at the final content-addressed path -- put()
+    writes to a scratch file and renames into place, same as put_stream()."""
+    vol = VolumeConfig(name="default", path="objects")
+    config = StoreConfig(volumes={"default": vol}, volume_queue=["default"])
+    store = VolumeAwareFileObjectStore(config, tmp_path)
+
+    def failing_write_bytes(self, data):
+        raise OSError("disk exploded mid-write")
+
+    monkeypatch.setattr(Path, "write_bytes", failing_write_bytes)
+
+    with pytest.raises(VolumeUnavailableError):
+        store.put(b"doomed content", "f.txt")
+
+    objects_dir = tmp_path / "objects"
+    leftover_files = [
+        p for p in objects_dir.rglob("*") if p.is_file() and p.name != "manifest.jsonl"
+    ]
+    assert leftover_files == [], (
+        f"no object or scratch file should remain: {leftover_files}"
+    )
+
+
+def test_put_succeeds_even_if_manifest_append_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The manifest is display metadata only -- a failure writing it must
+    not fail an upload whose bytes are already durably stored."""
+    vol = VolumeConfig(name="default", path="objects")
+    config = StoreConfig(volumes={"default": vol}, volume_queue=["default"])
+    store = VolumeAwareFileObjectStore(config, tmp_path)
+
+    def failing_append(*args, **kwargs):
+        raise OSError("disk full writing manifest")
+
+    monkeypatch.setattr(store, "_append_manifest", failing_append)
+
+    ref = store.put(b"stored despite manifest failure", "f.txt")
+    assert store.exists(ref.sha256)
 
 
 def test_manifest_is_per_volume(tmp_path: Path) -> None:

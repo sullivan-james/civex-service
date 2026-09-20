@@ -63,12 +63,14 @@ def update_volume(
 
 @router.delete("/volumes/{name}", status_code=204)
 def remove_volume(name: str, force: bool = False, ctx: AppContext = Depends(get_ctx)):
+    # ValidationError (e.g. volume still has objects, force=False) isn't
+    # caught here -- the registered CivexError handler maps it to 422,
+    # same as every other ValidationError, rather than a locally-chosen 409
+    # that would disagree with the global mapping for the same exception type.
     try:
         ctx.store_svc.remove_volume(name, force=force)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
-    except ValidationError as e:
-        raise HTTPException(409, detail=str(e))
 
 
 @router.put("/queue", response_model=list[str])

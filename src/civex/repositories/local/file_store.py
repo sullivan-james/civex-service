@@ -22,21 +22,35 @@ FileRef is a fast hint but resolution always falls back to scanning.
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import hashlib
 import json
+import logging
 import os
 import shutil
 import time
 import uuid
 from pathlib import Path
-from typing import AsyncIterable
+from typing import AsyncIterable, Iterator
 
 from civex.config import StoreConfig, VolumeConfig
 from civex.domain.dtos import FileRef, StoredObjectInfo
-from civex.domain.exceptions import AllVolumesFull, VolumeUnavailableError
+from civex.domain.exceptions import (
+    AllVolumesFull,
+    GCAlreadyRunningError,
+    VolumeUnavailableError,
+)
+
+log = logging.getLogger(__name__)
 
 _SCRATCH_DIRNAME = ".tmp"
+_GC_LOCK_FILENAME = ".gc.lock"
+# Long enough that no real GC pass should ever take this long; a lock file
+# older than this is assumed to be left behind by a process that crashed
+# mid-run rather than one still working, and is reclaimed rather than
+# deadlocking every future run.
+_GC_LOCK_STALE_SECONDS = 3600
 
 
 class VolumeAwareFileObjectStore:
@@ -67,25 +81,38 @@ class VolumeAwareFileObjectStore:
             if not can:
                 reasons.append(f"{vol_name}: {reason}")
                 continue
+
+            vc = self._cfg.volumes[vol_name]
+            scratch_dir = self._resolve_path(vc) / _SCRATCH_DIRNAME
+            scratch_dir.mkdir(parents=True, exist_ok=True)
+            tmp_path = scratch_dir / f"{uuid.uuid4().hex}.part"
             dest = self._object_path(sha256, vol_name)
-            dest.parent.mkdir(parents=True, exist_ok=True)
             try:
-                dest.write_bytes(data)
-                self._used_cache.pop(vol_name, None)
-                self._append_manifest(vol_name, sha256, original_filename, size)
-                return FileRef(
-                    sha256=sha256,
-                    filename=original_filename,
-                    size=size,
-                    volume=vol_name,
-                )
+                # Written to a scratch file and renamed into place, same as
+                # put_stream() -- a write that fails partway (e.g. ENOSPC)
+                # never leaves a truncated/corrupt blob sitting at the
+                # content-addressed path, since dest is only ever created by
+                # an atomic same-filesystem rename.
+                tmp_path.write_bytes(data)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(tmp_path, dest)
             except OSError as e:
+                tmp_path.unlink(missing_ok=True)
                 if e.errno == errno.ENOSPC:
                     reasons.append(f"{vol_name}: no space left on device")
                     continue
                 raise VolumeUnavailableError(
                     f"Cannot write to volume '{vol_name}': {e}"
                 ) from e
+
+            self._used_cache.pop(vol_name, None)
+            self._append_manifest_best_effort(vol_name, sha256, original_filename, size)
+            return FileRef(
+                sha256=sha256,
+                filename=original_filename,
+                size=size,
+                volume=vol_name,
+            )
 
         raise AllVolumesFull(
             f"No volume in queue has space for {size / 1_048_576:.1f} MB. "
@@ -164,10 +191,16 @@ class VolumeAwareFileObjectStore:
                 )
 
             dest = self._object_path(sha256, vol_name)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(tmp_path, dest)
+            try:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(tmp_path, dest)
+            except OSError as e:
+                tmp_path.unlink(missing_ok=True)
+                raise VolumeUnavailableError(
+                    f"Cannot finalize upload on volume '{vol_name}': {e}"
+                ) from e
             self._used_cache.pop(vol_name, None)
-            self._append_manifest(vol_name, sha256, original_filename, size)
+            self._append_manifest_best_effort(vol_name, sha256, original_filename, size)
             return FileRef(
                 sha256=sha256, filename=original_filename, size=size, volume=vol_name
             )
@@ -207,13 +240,30 @@ class VolumeAwareFileObjectStore:
             root = self._resolve_path(vc)
             if not root.exists():
                 continue
-            for f in root.rglob("*"):
-                if not f.is_file() or f.name == "manifest.jsonl":
+            try:
+                # Materialize eagerly: rglob() is a generator, so a
+                # permission error or a volume going unavailable partway
+                # through a directory walk would otherwise raise from
+                # *inside* the for-loop below and abort every other
+                # volume's scan along with it -- one bad volume should only
+                # cost that volume's objects, not the whole GC pass.
+                entries = list(root.rglob("*"))
+            except OSError as e:
+                log.warning("Skipping volume '%s' while listing objects: %s", name, e)
+                continue
+            for f in entries:
+                try:
+                    if not f.is_file() or f.name == "manifest.jsonl":
+                        continue
+                    if _SCRATCH_DIRNAME in f.relative_to(root).parts:
+                        continue  # in-progress put_stream() upload, not a real object
+                    stat = f.stat()
+                except OSError:
+                    # Removed (e.g. by a concurrent GC run or delete()) or a
+                    # broken symlink between the rglob listing and this
+                    # check -- skip it rather than aborting the whole scan.
                     continue
-                if _SCRATCH_DIRNAME in f.relative_to(root).parts:
-                    continue  # in-progress put_stream() upload, not a real object
                 sha256 = f.parent.name + f.name
-                stat = f.stat()
                 results.append(
                     StoredObjectInfo(
                         sha256=sha256,
@@ -267,10 +317,61 @@ class VolumeAwareFileObjectStore:
             path = self._find_object(sha256)
         if path is None:
             return False
-        path.unlink()
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            # Already gone -- e.g. a second GC run (or any other deleter)
+            # removed the same object between our existence check above and
+            # this unlink(). The end state either caller wanted is achieved
+            # either way, so this is success, not a failure to propagate.
+            pass
         if volume is not None:
             self._used_cache.pop(volume, None)
         return True
+
+    @contextlib.contextmanager
+    def gc_lock(self) -> Iterator[None]:
+        """Advisory lock so at most one garbage-collection pass runs at a
+        time. Without it, two overlapping runs race on delete()'s
+        exists-then-unlink check and can independently mark-and-sweep
+        against a store that's mutating out from under both of them.
+
+        A plain marker file whose existence is the lock, rather than
+        fcntl/msvcrt advisory locking, so this works the same on every
+        platform civex runs on. Raises GCAlreadyRunningError if another
+        (non-stale) run already holds it.
+        """
+        lock_path = self._root / "_civex" / _GC_LOCK_FILENAME
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _acquire() -> None:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+
+        try:
+            _acquire()
+        except FileExistsError:
+            try:
+                age = time.time() - lock_path.stat().st_mtime
+            except OSError:
+                age = _GC_LOCK_STALE_SECONDS  # already gone -- treat as stale
+            if age < _GC_LOCK_STALE_SECONDS:
+                raise GCAlreadyRunningError(
+                    "A garbage-collection pass is already running against "
+                    "this object store. Wait for it to finish and retry."
+                )
+            log.warning(
+                "Reclaiming GC lock file older than %ds -- assuming the "
+                "process that held it crashed.",
+                _GC_LOCK_STALE_SECONDS,
+            )
+            lock_path.unlink(missing_ok=True)
+            _acquire()
+
+        try:
+            yield
+        finally:
+            lock_path.unlink(missing_ok=True)
 
     # ------------------------------------------------------------------
     # Stats (for CLI / UI)
@@ -361,6 +462,25 @@ class VolumeAwareFileObjectStore:
         )
         with manifest_path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
+
+    def _append_manifest_best_effort(
+        self, volume: str, sha256: str, filename: str, size: int
+    ) -> None:
+        """Same as _append_manifest(), but never raises: the manifest is
+        display metadata only (see list_objects()'s docstring), so a failure
+        writing it must not fail an upload whose bytes are already durably
+        stored at their final, content-addressed path."""
+        try:
+            self._append_manifest(volume, sha256, filename, size)
+        except OSError:
+            log.warning(
+                "Failed to append manifest entry for %s on volume '%s' -- "
+                "the object is stored, but display metadata for it may be "
+                "missing.",
+                sha256,
+                volume,
+                exc_info=True,
+            )
 
     def _find_object(self, sha256: str) -> Path | None:
         for vc in self._cfg.volumes.values():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import glob as _glob
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,8 @@ from civex.cli.utils import cli_load_config, drain_jobs, get_ctx
 from civex.console import console
 from civex.domain.exceptions import NotFoundError
 from civex.workflows.definition import WorkflowDef, load_workflow
+
+log = logging.getLogger(__name__)
 
 app = typer.Typer(help="Manage and run data processing workflows")
 
@@ -27,7 +30,8 @@ def _find_workflow(name: str, workflows_dir: Path) -> WorkflowDef | None:
             candidate = load_workflow(path)
             if candidate.name == name or path.stem == name:
                 return candidate
-        except Exception:
+        except Exception as e:
+            log.warning("Skipping unparseable workflow file %s: %s", path, e)
             continue
     return None
 

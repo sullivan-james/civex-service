@@ -205,7 +205,7 @@ steps:
     assert job["step_executions"][0]["inputs"]["value"][0]["filename"] == "f.csv"
 
 
-def test_delete_blocked_by_pending_job_returns_409(client: TestClient) -> None:
+def test_delete_blocked_by_pending_job_returns_422(client: TestClient) -> None:
     """Enqueues the job directly against the same on-disk project rather
     than via POST .../run -- TestClient executes FastAPI BackgroundTasks
     synchronously before the request returns, so a /run call would drain
@@ -233,7 +233,10 @@ def test_delete_blocked_by_pending_job_returns_409(client: TestClient) -> None:
     ctx.close()
 
     del_resp = client.delete("/api/workflows/parse-audio-dates")
-    assert del_resp.status_code == 409
+    # ValidationError now maps to 422 everywhere (see server/errors.py
+    # _status_for) rather than this endpoint special-casing it to 409 while
+    # every other ValidationError in the API maps to 422.
+    assert del_resp.status_code == 422
 
     force_resp = client.delete("/api/workflows/parse-audio-dates?force=true")
     assert force_resp.status_code == 204

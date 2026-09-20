@@ -6,7 +6,12 @@ import typer
 
 from civex.cli.utils import get_ctx
 from civex.console import console
-from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
+from civex.domain.exceptions import (
+    AlreadyExistsError,
+    CivexError,
+    NotFoundError,
+    ValidationError,
+)
 
 app = typer.Typer(help="Manage file storage volumes", no_args_is_help=True)
 
@@ -25,8 +30,10 @@ def _fmt_bytes(b: int | None) -> str:
 def store_list() -> None:
     """List configured volumes and their current usage."""
     ctx = get_ctx()
-    stats = ctx.store_svc.volume_stats()
-    ctx.close()
+    try:
+        stats = ctx.store_svc.volume_stats()
+    finally:
+        ctx.close()
 
     if not stats:
         console.print("[dim]No volumes configured.[/dim]")
@@ -84,7 +91,7 @@ def store_add(
             "  Add it to the write queue with: [bold]civex store queue set[/bold]"
         )
     except AlreadyExistsError as e:
-        console.print(f"[red]{e}[/red]")
+        console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
     finally:
         ctx.close()
@@ -114,7 +121,7 @@ def store_update(
         ctx.store_svc.update_volume(name, path=path, allocated_gb=alloc)
         console.print(f"[green]Updated volume '{name}'.[/green]")
     except NotFoundError as e:
-        console.print(f"[red]{e}[/red]")
+        console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
     finally:
         ctx.close()
@@ -135,7 +142,7 @@ def store_remove(
         ctx.store_svc.remove_volume(name, force=force)
         console.print(f"[green]Removed volume '{name}'.[/green]")
     except (NotFoundError, ValidationError) as e:
-        console.print(f"[red]{e}[/red]")
+        console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
     finally:
         ctx.close()
@@ -151,7 +158,7 @@ def store_queue(
         ctx.store_svc.set_queue(names)
         console.print(f"[green]Write queue set to: {' → '.join(names)}[/green]")
     except (NotFoundError, ValidationError) as e:
-        console.print(f"[red]{e}[/red]")
+        console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
     finally:
         ctx.close()
@@ -187,6 +194,12 @@ def store_gc(
     ctx = get_ctx()
     try:
         report = ctx.gc_svc.run(dry_run=not apply, grace_days=grace_days)
+    except CivexError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    except OSError as e:
+        console.print(f"[error]Storage error while running GC: {e}[/error]")
+        raise typer.Exit(1)
     finally:
         ctx.close()
 
@@ -197,13 +210,22 @@ def store_gc(
             return f"{b / 1_048_576:.1f} MB"
         return f"{b} B"
 
+    if report.errors:
+        console.print(
+            "[warning]Some reference sources could not be read -- "
+            "nothing was deleted this run:[/warning]"
+        )
+        for err in report.errors:
+            console.print(f"  [warning]{err}[/warning]")
+
     console.print(f"Scanned {report.scanned} object(s) in the store.")
     console.print(f"  {report.referenced} referenced by a live record or job")
     console.print(
         f"  {report.protected_by_grace} unreferenced but within the "
         f"{report.grace_days}-day grace period"
     )
-    verb = "Deleted" if apply else "Collectible"
+    applied = apply and not report.errors
+    verb = "Deleted" if applied else "Collectible"
     console.print(
         f"  [bold]{verb} {report.deleted_count} object(s), {_fmt(report.deleted_bytes)}[/bold]"
     )
@@ -218,7 +240,7 @@ def store_gc(
             f"  {verb} {report.stale_scratch_removed} abandoned upload scratch file(s)"
         )
 
-    if not apply and (report.deleted_count or report.stale_scratch_removed):
+    if not applied and (report.deleted_count or report.stale_scratch_removed):
         console.print(
             "\n[dim]Dry run -- re-run with --apply to actually delete these.[/dim]"
         )

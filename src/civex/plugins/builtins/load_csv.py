@@ -7,6 +7,7 @@ from typing import Any
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, Field
 
+from civex.domain.exceptions import ValidationError
 from civex.plugins.base import Tier0Plugin, WorkflowContext
 
 log = logging.getLogger(__name__)
@@ -40,9 +41,18 @@ class Plugin(Tier0Plugin):
             )
 
         raw: bytes = inputs["bytes"]
-        df = pd.read_csv(
-            io.BytesIO(raw), sep=config.delimiter, encoding=config.encoding
-        )
+        try:
+            df = pd.read_csv(
+                io.BytesIO(raw), sep=config.delimiter, encoding=config.encoding
+            )
+        except UnicodeDecodeError as e:
+            raise ValidationError(
+                f"Could not decode CSV bytes as {config.encoding}: {e}"
+            ) from e
+        except pd.errors.EmptyDataError as e:
+            raise ValidationError("CSV file has no data to parse") from e
+        except pd.errors.ParserError as e:
+            raise ValidationError(f"Could not parse CSV: {e}") from e
         log.info(
             "Parsed CSV: %d rows × %d columns %s",
             len(df),

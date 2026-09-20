@@ -5,7 +5,10 @@ from __future__ import annotations
 import os
 import time
 
+import pytest
+
 from civex.context import AppContext
+from civex.domain.exceptions import GCAlreadyRunningError, ValidationError
 
 
 def _store(ctx: AppContext, content: bytes, name: str):
@@ -149,3 +152,54 @@ def test_stale_upload_scratch_file_is_swept_but_fresh_one_is_not(
 
     # never surfaced as a real object either
     assert ctx.file_svc._store.list_objects() == []
+
+
+def test_unreadable_reference_source_reports_error_and_deletes_nothing(
+    ctx: AppContext, make_schema, make_collection, monkeypatch
+) -> None:
+    """A source that fails to read (e.g. a corrupt row) must not crash the
+    whole GC pass, and must not let the run delete anything -- an
+    incomplete reference set could otherwise make a still-live object look
+    collectible."""
+    make_schema("doc")
+    make_collection("study")
+    ref = _store(ctx, b"orphan", "orphan.txt")
+
+    def _boom():
+        raise RuntimeError("corrupt row")
+
+    monkeypatch.setattr(ctx.gc_svc._jobs, "list_all", lambda **kw: _boom())
+
+    report = ctx.gc_svc.run(dry_run=False, grace_days=0)
+
+    assert report.errors and "workflow jobs" in report.errors[0]
+    assert report.deleted_count == 1  # still reported as collectible...
+    assert ctx.file_svc._store.exists(ref.sha256)  # ...but not actually deleted
+
+
+def test_overlapping_gc_runs_are_rejected(ctx: AppContext) -> None:
+    with ctx.file_svc._store.gc_lock():
+        with pytest.raises(GCAlreadyRunningError):
+            ctx.gc_svc.run(dry_run=True, grace_days=0)
+
+    # Lock released -- a subsequent run works normally.
+    ctx.gc_svc.run(dry_run=True, grace_days=0)
+
+
+def test_stale_gc_lock_is_reclaimed(ctx: AppContext) -> None:
+    from civex.repositories.local.file_store import _GC_LOCK_STALE_SECONDS
+
+    store = ctx.file_svc._store
+    lock_path = store._root / "_civex" / ".gc.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.touch()
+    old = time.time() - _GC_LOCK_STALE_SECONDS - 1
+    os.utime(lock_path, (old, old))
+
+    # Doesn't raise -- the stale lock is reclaimed rather than blocking forever.
+    ctx.gc_svc.run(dry_run=True, grace_days=0)
+
+
+def test_negative_grace_days_is_rejected(ctx: AppContext) -> None:
+    with pytest.raises(ValidationError):
+        ctx.gc_svc.run(dry_run=True, grace_days=-1)

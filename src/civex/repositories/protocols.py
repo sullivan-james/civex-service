@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, AsyncIterable, Protocol, runtime_checkable
+from typing import Any, AsyncIterable, ContextManager, Protocol, runtime_checkable
 
 from civex.domain.dtos import (
     AiUsageEventDTO,
@@ -336,3 +336,4 @@ class FileObjectStore(Protocol):
     def sweep_stale_scratch(
         self, older_than_seconds: float, dry_run: bool = False
     ) -> int: ...
+    def gc_lock(self) -> ContextManager[None]: ...

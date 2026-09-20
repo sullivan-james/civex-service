@@ -439,6 +439,7 @@ class GCRequest(BaseModel):
     )
     grace_days: int = Field(
         default=14,
+        ge=0,
         description="Skip unreferenced objects written more recently than this many days.",
     )
 

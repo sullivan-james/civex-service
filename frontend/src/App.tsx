@@ -29,15 +29,6 @@ export default function App() {
         <Route path="/collections" element={<CollectionsPage />} />
         <Route path="/collections/:id" element={<CollectionDetailPage />} />
         <Route path="/collections/:id/import" element={<ImportPage />} />
-        {/* Legacy redirects */}
-        <Route
-          path="/datasets"
-          element={<Navigate to="/collections" replace />}
-        />
-        <Route
-          path="/datasets/:id"
-          element={<Navigate to="/collections" replace />}
-        />
         <Route path="/views" element={<ViewsIndexPage />} />
         <Route path="/schemas" element={<SchemasPage />} />
         <Route path="/schemas/:id" element={<SchemaDetailPage />} />

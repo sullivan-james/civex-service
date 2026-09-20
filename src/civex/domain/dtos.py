@@ -288,6 +288,11 @@ class GCReport:
     protected_by_grace: int  # unreferenced but younger than the grace period
     deleted: list[StoredObjectInfo]  # collected (or, if dry_run, collectible)
     stale_scratch_removed: int = 0  # abandoned put_stream() .part files reclaimed
+    # Sources that failed to read while collecting references (e.g. a
+    # corrupt JSON row). Non-empty means the reference set may be
+    # incomplete, so run() refuses to delete anything this pass regardless
+    # of the dry_run flag it was called with -- see GCService.run().
+    errors: list[str] = field(default_factory=list)
 
     @property
     def deleted_count(self) -> int:
@@ -308,6 +313,7 @@ class GCReport:
             "deleted_bytes": self.deleted_bytes,
             "deleted": [o.to_dict() for o in self.deleted],
             "stale_scratch_removed": self.stale_scratch_removed,
+            "errors": self.errors,
         }
 
 

@@ -164,7 +164,7 @@ function NavItem({
       title={collapsed ? label : undefined}
       aria-label={collapsed ? label : undefined}
       className={({ isActive }) =>
-        `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+        `flex items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
           collapsed ? 'justify-center px-0' : ''
         } ${
           isActive
@@ -190,7 +190,7 @@ function NavGroupHeading({
 }) {
   return (
     <div
-      className={`px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wider first:pt-0 text-fg-subtle ${
+      className={`px-3 pb-1 pt-4 mt-2 text-xs font-semibold uppercase tracking-wider first:pt-0 text-fg-subtle ${
         secondary ? 'opacity-70' : ''
       }`}
     >
@@ -428,7 +428,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           }`}
         >
           <div
-            className={`flex pb-2 ${collapsed ? 'justify-center' : 'justify-end'}`}
+            className={`flex pb-5 ${collapsed ? 'justify-center' : 'justify-end'}`}
           >
             <IconButton
               icon={collapsed ? PanelLeftOpen : PanelLeftClose}

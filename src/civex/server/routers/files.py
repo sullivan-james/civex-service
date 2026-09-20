@@ -7,6 +7,7 @@ from civex.context import AppContext
 from civex.domain.exceptions import AllVolumesFull, VolumeUnavailableError
 from civex.server.deps import get_ctx
 from civex.server.models import FileRefResponse
+from civex.sync.transport import SyncError
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -14,7 +15,10 @@ router = APIRouter(prefix="/files", tags=["files"])
 @router.post("", response_model=FileRefResponse, status_code=201)
 async def upload_file(file: UploadFile, ctx: AppContext = Depends(get_ctx)):
     data = await file.read()
-    ref = ctx.file_svc.store_bytes(data, file.filename or "upload")
+    try:
+        ref = ctx.file_svc.store_bytes(data, file.filename or "upload")
+    except (AllVolumesFull, VolumeUnavailableError) as e:
+        raise HTTPException(507, detail=str(e))
     return FileRefResponse(
         sha256=ref.sha256, filename=ref.filename, size=ref.size, volume=ref.volume
     )
@@ -63,7 +67,7 @@ def download_file(sha256: str, filename: str = "", ctx: AppContext = Depends(get
     """
     try:
         data = ctx.file_svc.retrieve(sha256)
-    except Exception:
+    except (FileNotFoundError, SyncError):
         raise HTTPException(
             404, detail=f"Object {sha256} not found locally or on remote"
         )

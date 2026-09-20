@@ -19,6 +19,7 @@ from civex.server.models import (
     RecordResponse,
     UpdateRecordRequest,
 )
+from civex.sync.transport import SyncError
 
 router = APIRouter(tags=["records"])
 
@@ -186,7 +187,7 @@ def export_record_files_zip(
         for name, ref in entries:
             try:
                 data = ctx.file_svc.retrieve(ref.sha256)
-            except Exception:
+            except (FileNotFoundError, SyncError):
                 raise HTTPException(
                     404, detail=f"Object {ref.sha256} not found locally or on remote"
                 )

@@ -17,6 +17,7 @@ from civex.server.models import (
     ViewResponse,
 )
 from civex.services.view_service import rows_to_csv, rows_to_json
+from civex.sync.transport import SyncError
 
 router = APIRouter(prefix="/schemas/{schema_name}/views", tags=["views"])
 all_views_router = APIRouter(prefix="/views", tags=["views"])
@@ -176,7 +177,7 @@ def export_view(
         for name, ref in export.file_entries:
             try:
                 data = ctx.file_svc.retrieve(ref.sha256)
-            except Exception:
+            except (FileNotFoundError, SyncError):
                 raise HTTPException(
                     404, detail=f"Object {ref.sha256} not found locally or on remote"
                 )

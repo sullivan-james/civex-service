@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import (
@@ -13,8 +14,10 @@ from starlette.datastructures import UploadFile
 
 from civex.context import AppContext
 from civex.domain.exceptions import (
+    AllVolumesFull,
     NotFoundError,
     ValidationError,
+    VolumeUnavailableError,
     WorkflowValidationError,
 )
 from civex.server.background import run_pending_jobs
@@ -131,12 +134,13 @@ def save_workflow(
 
 @router.delete("/{stem}", status_code=204)
 def delete_workflow(stem: str, force: bool = False, ctx: AppContext = Depends(get_ctx)):
+    # ValidationError (e.g. workflow still has active jobs, force=False)
+    # isn't caught here -- see the matching comment on store.remove_volume:
+    # the registered CivexError handler already maps it to 422 consistently.
     try:
         ctx.workflow_svc.delete(stem, force=force)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
-    except ValidationError as e:
-        raise HTTPException(409, detail=str(e))
 
 
 @router.post("/{name}/run", response_model=WorkflowJobResponse, status_code=202)
@@ -169,16 +173,22 @@ async def run_workflow(
                 for upload in uploads:
                     if isinstance(upload, UploadFile):
                         data = await upload.read()
-                        ref = ctx.file_svc.store_bytes(
-                            data, upload.filename or "upload"
-                        )
+                        try:
+                            ref = ctx.file_svc.store_bytes(
+                                data, upload.filename or "upload"
+                            )
+                        except (AllVolumesFull, VolumeUnavailableError) as e:
+                            raise HTTPException(507, detail=str(e))
                         refs.append(ref.to_dict())
                 if refs:
                     resolved[input_name] = refs
         if resolved:
             input_data = {"__input__": resolved}
     else:
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError as e:
+            raise HTTPException(422, detail=f"Invalid JSON body: {e}")
         record_id = body.get("record_id", "")
 
     if not record_id:
