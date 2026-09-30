@@ -52,15 +52,23 @@ class LocalDatasetRepository:
             .all()
         ]
 
-    def create(self, name: str, description: str | None) -> DatasetDTO:
-        row = Dataset(name=name, description=description)
+    def create(
+        self, name: str, description: str | None, timezone: str | None = None
+    ) -> DatasetDTO:
+        row = Dataset(name=name, description=description, timezone=timezone or None)
         self._s.add(row)
         self._s.flush()
         return _to_dto(self._s, row)
 
     def update(
-        self, id: uuid.UUID, name: str | None, description: str | None
+        self,
+        id: uuid.UUID,
+        name: str | None,
+        description: str | None,
+        timezone: str | None = None,
     ) -> DatasetDTO:
+        """None leaves a field unchanged. For `timezone`, an empty string
+        clears it back to unset (None can't, since it means "no change")."""
         row = self._s.query(Dataset).filter_by(id=id).first()
         if row is None:
             raise NotFoundError(f"Dataset '{id}' not found")
@@ -68,6 +76,8 @@ class LocalDatasetRepository:
             row.name = name
         if description is not None:
             row.description = description
+        if timezone is not None:
+            row.timezone = timezone or None
         self._s.flush()
         return _to_dto(self._s, row)
 
@@ -136,4 +146,5 @@ def _to_dto(session: Session, row: Dataset) -> DatasetDTO:
         record_count=record_count or 0,
         created_at=row.created_at,
         deleted_at=row.deleted_at,
+        timezone=row.timezone,
     )
