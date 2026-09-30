@@ -80,6 +80,14 @@ class LocalRecordRepository:
         )
         return [_to_dto(r) for r in rows]
 
+    def list_by_ids(self, ids: list[uuid.UUID]) -> list[RecordDTO]:
+        """Batch lookup by id, deleted or not -- a stale reference to a
+        since-deleted target should still resolve a display label."""
+        if not ids:
+            return []
+        rows = self._s.query(Record).filter(Record.id.in_(ids)).all()
+        return [_to_dto(r) for r in rows]
+
     def list_filtered(
         self,
         dataset_id: uuid.UUID | None,

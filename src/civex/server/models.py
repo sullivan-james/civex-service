@@ -359,6 +359,15 @@ class RecordResponse(BaseModel):
         default=None,
         description="When this record was soft-deleted. Null means live.",
     )
+    reference_labels: dict[str, str | None] | None = Field(
+        default=None,
+        description=(
+            "For every reference/reference_list value on this record, the "
+            "target record's id mapped to its natural_name (null if the "
+            "target has none). Lets clients render a reference as a link "
+            "with a readable label without a lookup per value."
+        ),
+    )
 
     @classmethod
     def from_dto(cls, dto: RecordDTO) -> RecordResponse:
@@ -374,6 +383,7 @@ class RecordResponse(BaseModel):
             created_at=dto.created_at,
             updated_at=dto.updated_at,
             deleted_at=dto.deleted_at,
+            reference_labels=dto.reference_labels,
         )
 
 

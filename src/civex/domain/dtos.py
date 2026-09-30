@@ -332,6 +332,10 @@ class RecordDTO:
     )
     # Soft-delete marker; None means live. See RecordRepository.delete/restore.
     deleted_at: datetime | None = None
+    # id -> that target's natural_name, for every reference/reference_list
+    # value on this record. Response-only, like schema_name -- computed by
+    # RecordService._attach_reference_labels, never stored or round-tripped.
+    reference_labels: dict[str, str | None] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         # schema_name excluded — denormalized display field, not stored on the entity

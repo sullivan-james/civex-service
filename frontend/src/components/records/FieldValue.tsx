@@ -1,8 +1,32 @@
 import { Badge } from '../ui'
+import { ReferenceLink } from './ReferenceLink'
+import type { Field } from '../../api/schemas'
 
-export function FieldValue({ value }: { value: unknown }) {
+export function FieldValue({
+  value,
+  field,
+  referenceLabels,
+}: {
+  value: unknown
+  /** Reference/reference_list values render as links; every other type
+   * falls back to the existing shape-based rendering below. */
+  field?: Field
+  referenceLabels?: Record<string, string | null> | null
+}) {
   if (value === null || value === undefined)
     return <span className="text-fg-subtle">—</span>
+  if (field?.type === 'reference' && typeof value === 'string')
+    return <ReferenceLink id={value} labels={referenceLabels} />
+  if (field?.type === 'reference_list' && Array.isArray(value)) {
+    if (value.length === 0) return <span className="text-fg-subtle">—</span>
+    return (
+      <span className="flex flex-wrap gap-x-2 gap-y-1">
+        {(value as string[]).map((id) => (
+          <ReferenceLink key={id} id={id} labels={referenceLabels} />
+        ))}
+      </span>
+    )
+  }
   if (typeof value === 'boolean')
     return (
       <Badge variant={value ? 'success' : 'default'}>{String(value)}</Badge>

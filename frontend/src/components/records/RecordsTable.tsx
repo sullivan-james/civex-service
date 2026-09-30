@@ -3,11 +3,15 @@ import { Table, Thead, Th, Tbody, Tr, Td, Checkbox, Badge } from '../ui'
 import { ChevronUp, ChevronDown } from '../ui/icons'
 import { displayLabel } from '../../utils/naming'
 import { formatDate } from '../../lib/utils'
+import { ReferenceLink } from './ReferenceLink'
 import type { Schema } from '../../api/schemas'
 
 export interface RecordsTableColumn {
   name: string
   label: string
+  /** Field type, for reference/reference_list values to render as links
+   * instead of raw ids. Omit for projected/preview columns without one. */
+  type?: string
 }
 
 export interface RecordsTableRow {
@@ -16,6 +20,7 @@ export interface RecordsTableRow {
   natural_name?: string | null
   schema_name?: string
   created_at?: string
+  reference_labels?: Record<string, string | null> | null
 }
 
 export interface RecordsTableSort {
@@ -179,15 +184,34 @@ export function RecordsTable({
                 })()}
               </Td>
             )}
-            {columns.map((col) => (
-              <Td key={col.name} className="text-fg">
-                {r.data[col.name] !== undefined && r.data[col.name] !== null ? (
-                  formatCellValue(r.data[col.name])
-                ) : (
-                  <span className="text-fg-subtle">—</span>
-                )}
-              </Td>
-            ))}
+            {columns.map((col) => {
+              const value = r.data[col.name]
+              return (
+                <Td key={col.name} className="text-fg">
+                  {value === undefined || value === null ? (
+                    <span className="text-fg-subtle">—</span>
+                  ) : col.type === 'reference' && typeof value === 'string' ? (
+                    <ReferenceLink id={value} labels={r.reference_labels} />
+                  ) : col.type === 'reference_list' && Array.isArray(value) ? (
+                    value.length === 0 ? (
+                      <span className="text-fg-subtle">—</span>
+                    ) : (
+                      <span className="flex flex-wrap gap-x-2 gap-y-1">
+                        {(value as string[]).map((id) => (
+                          <ReferenceLink
+                            key={id}
+                            id={id}
+                            labels={r.reference_labels}
+                          />
+                        ))}
+                      </span>
+                    )
+                  ) : (
+                    formatCellValue(value)
+                  )}
+                </Td>
+              )
+            })}
             {showAddedColumn && (
               <Td className="text-fg-muted">
                 {r.created_at ? formatDate(r.created_at) : '—'}

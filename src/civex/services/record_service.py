@@ -345,6 +345,82 @@ class RecordService:
         named_data = _apply_filename_templates(named_data, fields)
         return dataclasses.replace(dto, data=named_data, natural_name=natural_name)
 
+    def _attach_reference_labels(self, records: list[RecordDTO]) -> list[RecordDTO]:
+        """Batch-resolve reference/reference_list values to their target's
+        natural_name, attached as RecordDTO.reference_labels -- one extra
+        query for the whole batch instead of one per reference value, so a
+        table of many records with reference columns doesn't fan out into
+        per-row lookups. Call after _with_names (needs name-keyed data)."""
+        if not records:
+            return records
+
+        # schema_id -> fields, cached so repeated schemas in the batch (the
+        # common case: a whole page of one schema) resolve once.
+        fields_by_schema: dict[uuid.UUID, list[ResolvedField]] = {}
+
+        def fields_for(schema_id: uuid.UUID) -> list[ResolvedField]:
+            if schema_id not in fields_by_schema:
+                schema = self._schema_svc._repo.get_by_id(
+                    schema_id, include_deleted=True
+                )
+                fields_by_schema[schema_id] = (
+                    self._schema_svc.collect_fields(schema) if schema else []
+                )
+            return fields_by_schema[schema_id]
+
+        def reference_ids(
+            data: dict[str, Any], fields: list[ResolvedField]
+        ) -> set[uuid.UUID]:
+            ids: set[uuid.UUID] = set()
+            for rf in fields:
+                if rf.field.dtype not in ("reference", "reference_list"):
+                    continue
+                value = data.get(rf.field.name)
+                raw_values = (
+                    value
+                    if rf.field.dtype == "reference_list" and isinstance(value, list)
+                    else [value]
+                    if rf.field.dtype == "reference" and isinstance(value, str)
+                    else []
+                )
+                for v in raw_values:
+                    if isinstance(v, str):
+                        try:
+                            ids.add(uuid.UUID(v))
+                        except ValueError:
+                            pass
+            return ids
+
+        per_record_ids = [
+            reference_ids(r.data, fields_for(r.schema_id)) for r in records
+        ]
+        all_ids: set[uuid.UUID] = set().union(*per_record_ids)
+        if not all_ids:
+            return records
+
+        targets = self._records.list_by_ids(list(all_ids))
+        label_by_id: dict[uuid.UUID, str | None] = {}
+        for t in targets:
+            t_schema = self._schema_svc._repo.get_by_id(
+                t.schema_id, include_deleted=True
+            )
+            if t_schema is None:
+                continue
+            id_map = self._schema_svc.id_to_name_map(t_schema)
+            named_data = {id_map.get(k, k): v for k, v in t.data.items()}
+            label_by_id[t.id] = _natural_name(
+                named_data, fields_for(t.schema_id), t_schema.display_fields
+            )
+
+        return [
+            dataclasses.replace(
+                r, reference_labels={str(i): label_by_id.get(i) for i in ids}
+            )
+            if ids
+            else r
+            for r, ids in zip(records, per_record_ids)
+        ]
+
     def _apply_defaults(
         self, data: dict[str, Any], schema_id: uuid.UUID
     ) -> dict[str, Any]:
@@ -540,13 +616,13 @@ class RecordService:
                         changed_fields=set_fields,
                         depth=_job_depth,
                     )
-        return named
+        return self._attach_reference_labels([named])[0]
 
     def get(self, record_id: str) -> RecordDTO:
         record = self._records.get_by_prefix(record_id)
         if not record:
             raise NotFoundError(f"Record '{record_id}' not found")
-        return self._with_names(record)
+        return self._attach_reference_labels([self._with_names(record)])[0]
 
     def files_for_zip(
         self,
@@ -653,7 +729,7 @@ class RecordService:
             self._job_svc.trigger_for_record(
                 named, "record_updated", changed_fields=changed, depth=_job_depth
             )
-        return named
+        return self._attach_reference_labels([named])[0]
 
     def find(
         self,
@@ -681,7 +757,7 @@ class RecordService:
             limit=limit,
             filter_tree=resolved_tree,
         )
-        return [self._with_names(r) for r in records]
+        return self._attach_reference_labels([self._with_names(r) for r in records])
 
     def count(
         self,
@@ -759,7 +835,7 @@ class RecordService:
     ) -> list[RecordDTO]:
         schema = self._schema_svc.get(schema_name)
         records = self._records.list_by_schema(schema.id, search=search, limit=limit)
-        return [self._with_names(r) for r in records]
+        return self._attach_reference_labels([self._with_names(r) for r in records])
 
     def _resolved_tree_for_schema(
         self, schema_name: str, filter_tree: dict[str, Any] | None
@@ -793,7 +869,7 @@ class RecordService:
             limit=limit,
             filter_tree=resolved_tree,
         )
-        return [self._with_names(r) for r in records]
+        return self._attach_reference_labels([self._with_names(r) for r in records])
 
     def count_by_schema_filtered(
         self, schema_name: str, filter_tree: dict[str, Any] | None = None
@@ -869,7 +945,9 @@ class RecordService:
             if not dataset:
                 raise NotFoundError(f"Dataset '{dataset_name}' not found")
             dataset_id = dataset.id
-        return [self._with_names(r) for r in self._records.list_deleted(dataset_id)]
+        return self._attach_reference_labels(
+            [self._with_names(r) for r in self._records.list_deleted(dataset_id)]
+        )
 
     def restore(self, record_id: str) -> RecordDTO:
         """Undo delete(): the record and every descendant cascade-deleted

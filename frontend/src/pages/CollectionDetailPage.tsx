@@ -23,6 +23,7 @@ import {
   Field,
   Input,
   Pagination,
+  ConfirmDialog,
 } from '../components/ui'
 import { RecordForm } from '../components/records/RecordForm'
 import { RecordsTable } from '../components/records/RecordsTable'
@@ -30,14 +31,21 @@ import { AuditTrail } from '../components/audit/AuditTrail'
 import { collectionsApi } from '../api/collections'
 import { describeAuditEntry as describeCollectionAuditEntry } from '../utils/collectionAudit'
 import { errorMessage } from '../lib/errors'
+import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
 import type { Schema } from '../api/schemas'
 import { displayLabel } from '../utils/naming'
 
 /** Header text comes from the label, the data lookup from the name. */
-function schemaColumns(schema: Schema): { name: string; label: string }[] {
+function schemaColumns(
+  schema: Schema,
+): { name: string; label: string; type: string }[] {
   return schema.fields
     .filter((f) => f.type !== 'file')
-    .map((f) => ({ name: f.name, label: displayLabel(f.name, f.label) }))
+    .map((f) => ({
+      name: f.name,
+      label: displayLabel(f.name, f.label),
+      type: f.type,
+    }))
 }
 
 export default function CollectionDetailPage() {
@@ -49,8 +57,9 @@ export default function CollectionDetailPage() {
   const [addingRecord, setAddingRecord] = useState(false)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
-  const [renaming, setRenaming] = useState(false)
-  const [renameValue, setRenameValue] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [nameValue, setNameValue] = useState('')
+  const [descriptionValue, setDescriptionValue] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
@@ -169,15 +178,19 @@ export default function CollectionDetailPage() {
     })
   }
 
-  function handleRename() {
-    const newName = renameValue.trim()
-    if (!newName || newName === collection!.name) {
-      setRenaming(false)
+  function handleSaveEdit() {
+    const newName = nameValue.trim()
+    const body: { rename?: string; description?: string } = {}
+    if (newName && newName !== collection!.name) body.rename = newName
+    if (descriptionValue !== (collection!.description ?? ''))
+      body.description = descriptionValue
+    if (!Object.keys(body).length) {
+      setEditing(false)
       return
     }
     updateCollection.mutate(
-      { name: collection!.name, body: { rename: newName } },
-      { onSuccess: () => setRenaming(false) },
+      { name: collection!.name, body },
+      { onSuccess: () => setEditing(false) },
     )
   }
 
@@ -210,7 +223,7 @@ export default function CollectionDetailPage() {
       title={collection.name}
       description={collection.description ?? undefined}
       action={
-        !renaming && (
+        !editing && (
           <div className="flex items-center gap-2">
             <Link to={`/collections/${id}/import`}>
               <Button size="sm" variant="primary">
@@ -228,27 +241,38 @@ export default function CollectionDetailPage() {
             <Button
               size="sm"
               onClick={() => {
-                setRenameValue(collection.name)
-                setRenaming(true)
+                setNameValue(collection.name)
+                setDescriptionValue(collection.description ?? '')
+                setEditing(true)
               }}
             >
-              Rename
+              Edit
             </Button>
           </div>
         )
       }
     >
-      {renaming && (
-        <div className="border border-border rounded-md p-4 bg-canvas-subtle flex items-center gap-3">
-          <Field label="Collection name" hideLabel className="flex-1">
+      {editing && (
+        <div className="border border-border rounded-md p-4 bg-canvas-subtle flex flex-col gap-3">
+          <Field label="Collection name">
             <Input
               autoFocus
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
+              value={nameValue}
+              onChange={(e) => setNameValue(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleRename()
-                if (e.key === 'Escape') setRenaming(false)
+                if (e.key === 'Enter') handleSaveEdit()
+                if (e.key === 'Escape') setEditing(false)
               }}
+            />
+          </Field>
+          <Field label="Description">
+            <Input
+              value={descriptionValue}
+              onChange={(e) => setDescriptionValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setEditing(false)
+              }}
+              placeholder="No description"
             />
           </Field>
           {updateCollection.error && (
@@ -256,17 +280,19 @@ export default function CollectionDetailPage() {
               {errorMessage(updateCollection.error)}
             </span>
           )}
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleRename}
-            disabled={updateCollection.isPending || !renameValue.trim()}
-          >
-            {updateCollection.isPending ? 'Saving…' : 'Save'}
-          </Button>
-          <Button size="sm" onClick={() => setRenaming(false)}>
-            Cancel
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleSaveEdit}
+              disabled={updateCollection.isPending || !nameValue.trim()}
+            >
+              {updateCollection.isPending ? 'Saving…' : 'Save'}
+            </Button>
+            <Button size="sm" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+          </div>
         </div>
       )}
 
@@ -317,33 +343,15 @@ export default function CollectionDetailPage() {
               </Button>
             </Link>
           )}
-          {selectedSchema &&
-            (confirmDeleteAll ? (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-fg-muted">
-                  Delete all {selectedSchema}?
-                </span>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  disabled={deleteAllRecords.isPending}
-                  onClick={handleDeleteAll}
-                >
-                  {deleteAllRecords.isPending ? 'Deleting…' : 'Confirm'}
-                </Button>
-                <Button size="sm" onClick={() => setConfirmDeleteAll(false)}>
-                  Cancel
-                </Button>
-              </div>
-            ) : (
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => setConfirmDeleteAll(true)}
-              >
-                Delete all {selectedSchema}
-              </Button>
-            ))}
+          {selectedSchema && (
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => setConfirmDeleteAll(true)}
+            >
+              Delete all {selectedSchema}
+            </Button>
+          )}
           {!addingRecord && (
             <Button
               variant="primary"
@@ -508,36 +516,71 @@ export default function CollectionDetailPage() {
               restore it any time before it's permanently purged.
             </p>
           </div>
-          {confirmDelete ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-fg-muted">Are you sure?</span>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() =>
-                  deleteCollection.mutate(collection.name, {
-                    onSuccess: () => navigate('/collections'),
-                  })
-                }
-                disabled={deleteCollection.isPending}
-              >
-                {deleteCollection.isPending ? 'Deleting…' : 'Confirm delete'}
-              </Button>
-              <Button size="sm" onClick={() => setConfirmDelete(false)}>
-                Cancel
-              </Button>
-            </div>
-          ) : (
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setConfirmDelete(true)}
-            >
-              Delete collection
-            </Button>
-          )}
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => setConfirmDelete(true)}
+          >
+            Delete collection
+          </Button>
         </div>
       </div>
+
+      {confirmDeleteAll && selectedSchema && (
+        <ConfirmDialog
+          title={`Delete all ${selectedSchema} records`}
+          body={`Delete all ${(counts?.[selectedSchema] ?? 0).toLocaleString()} "${selectedSchema}" record(s) in this collection? They'll move to Recently Deleted — restore any time before they're permanently purged.`}
+          confirmLabel={`Delete ${(counts?.[selectedSchema] ?? 0).toLocaleString()} record${(counts?.[selectedSchema] ?? 0) === 1 ? '' : 's'}`}
+          variant="danger"
+          typedConfirmationValue={
+            (counts?.[selectedSchema] ?? 0) > HIGH_IMPACT_RECORD_THRESHOLD
+              ? selectedSchema
+              : undefined
+          }
+          warning={
+            deleteAllRecords.error
+              ? errorMessage(deleteAllRecords.error)
+              : undefined
+          }
+          isPending={deleteAllRecords.isPending}
+          onConfirm={handleDeleteAll}
+          onClose={() => setConfirmDeleteAll(false)}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete collection"
+          body={
+            collection.record_count > 0
+              ? `Delete "${collection.name}"? This moves it and its ${collection.record_count.toLocaleString()} record(s) to Recently Deleted — restore any time before it's permanently purged.`
+              : `Delete "${collection.name}"? It has no records. It moves to Recently Deleted — restore any time before it's permanently purged.`
+          }
+          confirmLabel={
+            collection.record_count > 0
+              ? `Delete collection and ${collection.record_count.toLocaleString()} record${collection.record_count === 1 ? '' : 's'}`
+              : 'Delete collection'
+          }
+          variant="danger"
+          typedConfirmationValue={
+            collection.record_count > HIGH_IMPACT_RECORD_THRESHOLD
+              ? collection.name
+              : undefined
+          }
+          warning={
+            deleteCollection.error
+              ? errorMessage(deleteCollection.error)
+              : undefined
+          }
+          isPending={deleteCollection.isPending}
+          onConfirm={() =>
+            deleteCollection.mutate(collection.name, {
+              onSuccess: () => navigate('/collections'),
+            })
+          }
+          onClose={() => setConfirmDelete(false)}
+        />
+      )}
     </Page>
   )
 }

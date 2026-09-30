@@ -5,11 +5,13 @@ const BASE = '/api'
  * value so callers who know its shape can use it directly; `.message`
  * stays a human-readable fallback for callers that just display text. */
 export class ApiError extends Error {
+  status: number
   detail: unknown
 
   constructor(detail: unknown, status: number) {
     super(typeof detail === 'string' ? detail : `HTTP ${status}`)
     this.name = 'ApiError'
+    this.status = status
     this.detail = detail
   }
 }

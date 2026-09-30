@@ -21,6 +21,8 @@ import AiAttestationGate from './ai/AiAttestationGate'
 import AiPanel from './ai/AiPanel'
 import { useToast } from './ui/ToastProvider'
 import { IconButton } from './ui/IconButton'
+import { Spinner } from './ui/Spinner'
+import { Menu as Dropdown } from './ui/Menu'
 import {
   RefreshCw,
   Sparkles,
@@ -28,9 +30,11 @@ import {
   ExternalLink,
   ArrowDownToLine,
   ArrowUpToLine,
+  ArrowRightLeft,
   FolderOpen,
   FolderPlus,
   Folder,
+  ChevronDown,
   LayoutGrid,
   Table,
   Database,
@@ -71,6 +75,9 @@ function fileManagerLabel(): string {
 }
 
 const NAV_COLLAPSED_KEY = 'civex-nav-collapsed'
+
+const navButtonClass =
+  'inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors'
 
 // The breakpoint at which the persistent rail gives way to a drawer (not one
 // of Tailwind's default steps) is written out as the literal `min-[900px]:`
@@ -337,7 +344,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <button
           onClick={() => queryClient.refetchQueries({ type: 'active' })}
           title="Refresh all data"
-          className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
+          className={navButtonClass}
         >
           <RefreshCw size={12} />
           Refresh
@@ -356,63 +363,84 @@ export default function Layout({ children }: { children: ReactNode }) {
         </button>
 
         {isDesktop && (
-          <div className="flex items-center gap-1 ml-2">
-            <button
-              onClick={() => window.pywebview!.api.open_project()}
-              title="Open a different civex project"
-              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
-            >
-              <FolderOpen size={12} />
-              Open project
-            </button>
-            <button
-              onClick={() => window.pywebview!.api.create_project()}
-              title="Create a new civex project"
-              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
-            >
-              <FolderPlus size={12} />
-              New project
-            </button>
-            <button
-              onClick={async () => {
-                const r = await window.pywebview!.api.open_data_dir()
-                if (r?.error) toast.error(r.error)
-              }}
-              title={`${fileManagerLabel()} — open this project's database directory`}
-              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
-            >
-              <Folder size={12} />
-              {fileManagerLabel()}
-            </button>
-          </div>
+          <>
+            <div className="h-5 w-px bg-nav-border" aria-hidden="true" />
+            <Dropdown
+              align="left"
+              items={[
+                {
+                  label: 'Open project',
+                  icon: FolderOpen,
+                  onClick: () => window.pywebview!.api.open_project(),
+                },
+                {
+                  label: 'New project',
+                  icon: FolderPlus,
+                  onClick: () => window.pywebview!.api.create_project(),
+                },
+                {
+                  label: fileManagerLabel(),
+                  icon: Folder,
+                  onClick: async () => {
+                    const r = await window.pywebview!.api.open_data_dir()
+                    if (r?.error) toast.error(r.error)
+                  },
+                },
+              ]}
+              trigger={({ toggle }) => (
+                <button
+                  onClick={toggle}
+                  title="Project"
+                  className={navButtonClass}
+                >
+                  <Folder size={12} />
+                  Project
+                  <ChevronDown size={12} />
+                </button>
+              )}
+            />
+          </>
         )}
 
         <div className="flex-1" />
 
         {remote && (
-          <div className="flex items-center gap-2" aria-busy={syncing !== null}>
+          <div aria-busy={syncing !== null}>
             <span role="status" aria-live="polite" className="sr-only">
               {syncAnnouncement}
             </span>
-            <button
-              onClick={() => runSync('pull')}
-              disabled={syncing !== null}
-              title={`Pull from ${remote.url}`}
-              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {syncing === 'pull' ? <Spinner /> : <ArrowDownToLine size={12} />}
-              Pull
-            </button>
-
-            <button
-              onClick={() => runSync('push')}
-              disabled={syncing !== null}
-              title={`Push to ${remote.url}`}
-              className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {syncing === 'push' ? <Spinner /> : <ArrowUpToLine size={12} />}
-              Push
-            </button>
+            <Dropdown
+              items={[
+                {
+                  label: 'Pull',
+                  icon: ArrowDownToLine,
+                  disabled: syncing !== null,
+                  onClick: () => runSync('pull'),
+                },
+                {
+                  label: 'Push',
+                  icon: ArrowUpToLine,
+                  disabled: syncing !== null,
+                  onClick: () => runSync('push'),
+                },
+              ]}
+              trigger={({ toggle }) => (
+                <button
+                  onClick={toggle}
+                  disabled={syncing !== null}
+                  title={`Sync with ${remote.url}`}
+                  className={`${navButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  {syncing !== null ? (
+                    <Spinner size={12} />
+                  ) : (
+                    <ArrowRightLeft size={12} />
+                  )}
+                  Sync
+                  <ChevronDown size={12} />
+                </button>
+              )}
+            />
           </div>
         )}
       </header>
@@ -548,25 +576,5 @@ export default function Layout({ children }: { children: ReactNode }) {
         </a>
       </footer>
     </div>
-  )
-}
-
-function Spinner() {
-  return (
-    <svg
-      className="animate-spin"
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      aria-hidden
-    >
-      <path
-        d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"
-        strokeLinecap="round"
-      />
-    </svg>
   )
 }

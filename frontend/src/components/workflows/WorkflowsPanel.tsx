@@ -6,10 +6,20 @@ import type { Workflow } from '../../api/workflows'
 interface WorkflowsPanelProps {
   onRun: (workflow: Workflow) => void
   onView: (workflow: Workflow) => void
+  /** Only show workflows triggered by this schema's records (`record_schema`).
+   * Omit for the full, unfiltered list (e.g. the Workflows page). */
+  schemaName?: string
 }
 
-export function WorkflowsPanel({ onRun, onView }: WorkflowsPanelProps) {
-  const { data: workflows, isLoading, error } = useWorkflows()
+export function WorkflowsPanel({
+  onRun,
+  onView,
+  schemaName,
+}: WorkflowsPanelProps) {
+  const { data: allWorkflows, isLoading, error } = useWorkflows()
+  const workflows = schemaName
+    ? allWorkflows?.filter((wf) => wf.record_schema === schemaName)
+    : allWorkflows
   const deleteWf = useDeleteWorkflow()
 
   const [deleteTarget, setDeleteTarget] = useState<Workflow | null>(null)
@@ -81,8 +91,16 @@ export function WorkflowsPanel({ onRun, onView }: WorkflowsPanelProps) {
         getRowId={(wf) => wf.stem}
         isLoading={isLoading}
         error={error?.message}
-        emptyTitle="No workflows yet"
-        emptyMessage="Workflows automate data processing — they run when records are created or updated. Create a .yaml file in .civex/workflows/ to get started."
+        emptyTitle={
+          schemaName
+            ? 'No automations for this record type yet'
+            : 'No workflows yet'
+        }
+        emptyMessage={
+          schemaName
+            ? 'Automations run when a record of this type is created or updated — set one up from an import, or create a .yaml file in .civex/workflows/.'
+            : 'Workflows automate data processing — they run when records are created or updated. Create a .yaml file in .civex/workflows/ to get started.'
+        }
         actions={(wf) => (
           <div className="flex justify-end gap-2">
             <Button size="sm" onClick={() => onRun(wf)}>

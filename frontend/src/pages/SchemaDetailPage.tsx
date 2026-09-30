@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router'
 import { errorMessage } from '../lib/errors'
+import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
 import { schemasApi } from '../api/schemas'
 import {
   useSchema,
@@ -12,6 +13,7 @@ import {
   useSchemas,
   useReorderFields,
 } from '../hooks/useSchemas'
+import { usePlugins } from '../hooks/usePlugins'
 import {
   Button,
   IconButton,
@@ -25,6 +27,7 @@ import {
   Page,
   FormGrid,
   NameLabelFields,
+  Section,
 } from '../components/ui'
 import { displayLabel, nameError } from '../utils/naming'
 import {
@@ -35,16 +38,16 @@ import {
   ChevronDown,
   GripVertical,
   ArrowRight,
+  Upload,
 } from '../components/ui/icons'
 import { FieldForm } from '../components/schemas/FieldForm'
 import { RestrictionsSummary } from '../components/schemas/RestrictionsSummary'
 import { AuditTrail } from '../components/audit/AuditTrail'
 import { describeAuditEntry as describeSchemaAuditEntry } from '../utils/schemaAudit'
-
-// Above this many records, or with any child schema, deleting is treated as
-// high-impact: the confirm button stays disabled until the user types the
-// schema name, instead of a single click.
-const HIGH_IMPACT_RECORD_THRESHOLD = 25
+import { WorkflowsPanel } from '../components/workflows/WorkflowsPanel'
+import { WorkflowSummaryModal } from '../components/workflows/WorkflowSummaryModal'
+import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
+import type { Workflow } from '../api/workflows'
 
 function describeDeleteImpact(childCount: number, recordCount: number): string {
   const records = `${recordCount.toLocaleString()} record${recordCount === 1 ? '' : 's'}`
@@ -161,6 +164,9 @@ export default function SchemaDetailPage() {
   const [confirmDeleteField, setConfirmDeleteField] = useState<string | null>(
     null,
   )
+  const { data: pluginList } = usePlugins()
+  const [summaryTarget, setSummaryTarget] = useState<Workflow | null>(null)
+  const [runTarget, setRunTarget] = useState<Workflow | null>(null)
 
   function toggleDisplayField(fieldName: string) {
     if (!schema) return
@@ -323,6 +329,11 @@ export default function SchemaDetailPage() {
       action={
         !editing && (
           <div className="flex items-center gap-2">
+            <Link to={`/schemas/${schema.id}/import`}>
+              <Button size="sm" variant="primary">
+                <Upload size={14} /> Import data
+              </Button>
+            </Link>
             <Link to={`/schemas/${schema.id}/views`}>
               <Button size="sm">Views</Button>
             </Link>
@@ -338,29 +349,17 @@ export default function SchemaDetailPage() {
       )}
 
       {/* Fields */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-base font-semibold text-fg">
-            Fields
-            <span className="ml-2 text-sm font-normal text-fg-muted">
-              {schema.fields.length} own
-            </span>
-          </h2>
-          {!addingField && (
+      <Section
+        title="Fields"
+        count={schema.fields.length}
+        action={
+          !addingField && (
             <Button size="sm" onClick={() => setAddingField(true)}>
               + Add field
             </Button>
-          )}
-        </div>
-        <p className="text-xs text-fg-subtle mb-2">
-          Click <Star size={11} className="inline align-text-top" /> to mark a
-          field as a display field — its value is used to name records of this
-          type wherever they're listed.
-        </p>
-        <p className="text-xs text-fg-subtle mb-2">
-          Focus a field row and press Alt/Cmd + Arrow Up/Down to reorder it with
-          the keyboard.
-        </p>
+          )
+        }
+      >
         <div role="status" aria-live="polite" className="sr-only">
           {announcement}
         </div>
@@ -412,7 +411,7 @@ export default function SchemaDetailPage() {
                     draggable
                     onDragStart={() => handleDragStart(index)}
                     onDragEnd={handleDragEnd}
-                    title="Drag to reorder"
+                    title="Drag to reorder, or focus the row and press Alt/Cmd+Arrow"
                     aria-hidden="true"
                     className="cursor-grab active:cursor-grabbing"
                   >
@@ -504,7 +503,7 @@ export default function SchemaDetailPage() {
                       aria-label={
                         schema.display_fields.includes(field.name)
                           ? 'Remove from display fields'
-                          : 'Add to display fields'
+                          : "Add to display fields — used to name this type's records"
                       }
                       variant="subtle"
                       className={
@@ -581,7 +580,30 @@ export default function SchemaDetailPage() {
             </div>
           )}
         </div>
-      </div>
+      </Section>
+
+      <Section title="Automations">
+        <WorkflowsPanel
+          schemaName={schema.name}
+          onRun={(wf) => setRunTarget(wf)}
+          onView={(wf) => setSummaryTarget(wf)}
+        />
+      </Section>
+
+      {summaryTarget && (
+        <WorkflowSummaryModal
+          workflow={summaryTarget}
+          plugins={pluginList ?? []}
+          onClose={() => setSummaryTarget(null)}
+        />
+      )}
+
+      {runTarget && (
+        <WorkflowRunModal
+          workflow={runTarget}
+          onClose={() => setRunTarget(null)}
+        />
+      )}
 
       <AuditTrail
         queryKey={['schemas', schema.name, 'audit']}

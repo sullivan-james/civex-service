@@ -6,18 +6,22 @@ import CollectionDetailPage from './pages/CollectionDetailPage'
 import ImportPage from './pages/ImportPage'
 import SchemasPage from './pages/SchemasPage'
 import SchemaDetailPage from './pages/SchemaDetailPage'
+import SchemaImportPage from './pages/SchemaImportPage'
 import ViewsIndexPage from './pages/ViewsIndexPage'
 import ViewsPage from './pages/ViewsPage'
 import ViewBuilderPage from './pages/ViewBuilderPage'
 import RecordDetailPage from './pages/RecordDetailPage'
 import RecentlyDeletedPage from './pages/RecentlyDeletedPage'
 import WorkflowsPage from './pages/WorkflowsPage'
+import WorkflowEditorPage from './pages/WorkflowEditorPage'
 import JobsPage from './pages/JobsPage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import JobDetailPage from './pages/JobDetailPage'
 import TerminalPage from './pages/TerminalPage'
 import AiPage from './pages/AiPage'
 import PluginsPage from './pages/PluginsPage'
+import PluginEditorPage from './pages/PluginEditorPage'
+import ContainerPluginEditorPage from './pages/ContainerPluginEditorPage'
 import SettingsPage from './pages/SettingsPage'
 import LegalPage from './pages/LegalPage'
 
@@ -32,6 +36,7 @@ export default function App() {
         <Route path="/views" element={<ViewsIndexPage />} />
         <Route path="/schemas" element={<SchemasPage />} />
         <Route path="/schemas/:id" element={<SchemaDetailPage />} />
+        <Route path="/schemas/:id/import" element={<SchemaImportPage />} />
         <Route path="/schemas/:id/views" element={<ViewsPage />} />
         <Route path="/schemas/:id/views/new" element={<ViewBuilderPage />} />
         <Route
@@ -41,6 +46,8 @@ export default function App() {
         <Route path="/records/:id" element={<RecordDetailPage />} />
         <Route path="/trash" element={<RecentlyDeletedPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
+        <Route path="/workflows/new" element={<WorkflowEditorPage isNew />} />
+        <Route path="/workflows/:stem/edit" element={<WorkflowEditorPage />} />
         <Route path="/runs" element={<JobsPage />} />
         <Route path="/runs/:id" element={<JobDetailPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
@@ -50,6 +57,12 @@ export default function App() {
         <Route path="/terminal" element={<TerminalPage />} />
         <Route path="/ai" element={<AiPage />} />
         <Route path="/plugins" element={<PluginsPage />} />
+        <Route path="/plugins/new" element={<PluginEditorPage isNew />} />
+        <Route path="/plugins/:stem/edit" element={<PluginEditorPage />} />
+        <Route
+          path="/plugins/container/:name/edit"
+          element={<ContainerPluginEditorPage />}
+        />
         <Route path="/settings" element={<SettingsPage />} />
         {/* Legacy redirect — Storage moved into Settings */}
         <Route path="/storage" element={<Navigate to="/settings" replace />} />

@@ -1,12 +1,10 @@
-import { useState } from 'react'
+import { Link } from 'react-router'
 import { useContainerPlugins } from '../../hooks/useContainerPlugins'
 import { DataTable, type DataTableColumn, Button } from '../ui'
-import { ContainerPluginEditor } from './ContainerPluginEditor'
 import type { ContainerPluginInfo } from '../../api/containerPlugins'
 
 export function ContainerPluginsPanel() {
   const { data: containerPlugins } = useContainerPlugins()
-  const [editorTarget, setEditorTarget] = useState<string | null>(null)
 
   if (!containerPlugins || containerPlugins.length === 0) return null
 
@@ -45,25 +43,20 @@ export function ContainerPluginsPanel() {
         emptyTitle="No container plugins"
         actions={(p) => (
           <div className="flex justify-end">
-            <Button
-              size="sm"
-              variant="default"
-              onClick={() => setEditorTarget(p.name)}
+            <Link
+              to={`/plugins/container/${encodeURIComponent(p.name)}/edit`}
+              target="_blank"
+              rel="opener"
             >
-              Edit
-            </Button>
+              <Button size="sm" variant="default">
+                Edit
+              </Button>
+            </Link>
           </div>
         )}
         actionsLabel="Actions"
         actionsWidth="96px"
       />
-
-      {editorTarget && (
-        <ContainerPluginEditor
-          name={editorTarget}
-          onClose={() => setEditorTarget(null)}
-        />
-      )}
     </div>
   )
 }
