@@ -61,7 +61,22 @@ civex schema lint
 | `file_list` | Multiple file attachments | File path (repeat the prompt to add more) |
 | `reference` | Link to another record | Record ID or short prefix |
 
-Dates and datetimes are always stored as UTC. Naive datetimes (no timezone suffix) are assumed to be UTC.
+Datetimes are always stored as UTC instants. What changes with a timezone is how a value *without* a UTC offset (like `2024-03-15T09:30:00`, from a CSV cell, an instrument export or a filename) is read, and how stored values are shown.
+
+**Timezones.** A timestamp from an instrument is usually wall time where it was recorded, not UTC. Set a timezone on the collection so such values land on the right instant, and so every viewer sees the same wall time:
+
+```bash
+civex collection create my-study --timezone America/Chicago
+civex collection update my-study --timezone Asia/Kolkata
+civex collection update my-study --timezone ""   # back to unset
+```
+
+A `datetime` field can override the collection's zone with its own **Timezone** setting (in the web UI's field form, or as a `timezone` restriction through the API). For any value, the zone is the field's own, else the collection's, else unset.
+
+- **Unset** behaves as it always has: a value with no offset is read as UTC, and the web UI shows times in the viewer's own timezone.
+- A value **with an offset** (`2024-03-15T09:30:00-05:00`) is always converted exactly; the zone is ignored.
+- Wall times that don't exist (clocks skip forward) or are ambiguous (clocks go back) are **rejected** rather than guessed. Add an offset to resolve them.
+- Changing a collection's timezone does not change stored values, only how they are shown and how future offset-less input is read. Values already stored without an offset are still read as UTC.
 
 ## Adding fields
 
