@@ -12,7 +12,7 @@ civex host could observe (wire format, IO conversion, public API), patch for
 fixes that change neither. A change to the wire protocol itself also bumps
 `PROTOCOL_VERSION` (see `civex_plugin_sdk.protocol`).
 
-## Unreleased
+## v0.2.0 (2026-09-30)
 
 First release published to PyPI (planned tag `sdk-v0.2.0`), under the MIT
 license. Previously the SDK shipped only vendored inside the `civex` wheel.
