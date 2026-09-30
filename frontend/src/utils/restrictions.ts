@@ -1,5 +1,5 @@
 import type { Field } from '../api/schemas'
-import { utcToDatetimeLocal, datetimeLocalToUTC } from './dates'
+import { knownTimeZone, utcToZonedLocal, zonedLocalToUTC } from './dates'
 
 /**
  * Single source of truth for field restriction handling on the frontend.
@@ -24,6 +24,8 @@ export interface RestrictionState {
   minDate: string
   maxDate: string
   refSchema: string
+  /** datetime only: IANA zone overriding the collection's; '' = inherit. */
+  timezone: string
 }
 
 export const EMPTY_RESTRICTION_STATE: RestrictionState = {
@@ -36,6 +38,7 @@ export const EMPTY_RESTRICTION_STATE: RestrictionState = {
   minDate: '',
   maxDate: '',
   refSchema: '',
+  timezone: '',
 }
 
 export interface InputProps {
@@ -89,16 +92,48 @@ export function build(
     if (state.maxDate) r.max = state.maxDate
   }
   if (type === 'datetime') {
-    if (state.minDate) r.min = datetimeLocalToUTC(state.minDate)
-    if (state.maxDate) r.max = datetimeLocalToUTC(state.maxDate)
+    // Bounds are typed as wall time in the field's own zone (else the
+    // viewer's) and stored as UTC instants. boundsProblem() has already
+    // vetted them; an unresolvable one is dropped rather than stored naive,
+    // which the server would silently ignore when comparing.
+    const zone = state.timezone || null
+    if (state.timezone) r.timezone = state.timezone
+    const min = state.minDate ? zonedLocalToUTC(state.minDate, zone) : ''
+    const max = state.maxDate ? zonedLocalToUTC(state.maxDate, zone) : ''
+    if (min) r.min = min
+    if (max) r.max = max
   }
   return Object.keys(r).length ? r : undefined
+}
+
+/** Why the datetime bounds in `state` can't be saved, or null if they can. */
+export function boundsProblem(
+  type: FieldType,
+  state: RestrictionState,
+): string | null {
+  if (type !== 'datetime') return null
+  const zone = state.timezone || null
+  for (const [label, value] of [
+    ['Not before', state.minDate],
+    ['Not after', state.maxDate],
+  ] as const) {
+    if (value && zonedLocalToUTC(value, zone) === null) {
+      return `${label}: that time doesn't exist or is ambiguous in ${zone ?? 'your timezone'} (a clock change). Pick another time.`
+    }
+  }
+  return null
 }
 
 /** Parse a field's restrictions into form state, for editing. */
 export function parse(field: Field): RestrictionState {
   const restrictions = field.restrictions ?? {}
+  const timezone =
+    typeof restrictions.timezone === 'string' ? restrictions.timezone : ''
+  // Bounds are shown in the field's own zone (else the viewer's) -- the
+  // same zone build() reads them in, so they round-trip.
+  const zone = knownTimeZone(timezone)
   return {
+    timezone,
     min: restrictions.min !== undefined ? String(restrictions.min) : '',
     max: restrictions.max !== undefined ? String(restrictions.max) : '',
     choices: Array.isArray(restrictions.choices)
@@ -114,13 +149,13 @@ export function parse(field: Field): RestrictionState {
     minDate:
       restrictions.min !== undefined
         ? field.type === 'datetime'
-          ? utcToDatetimeLocal(String(restrictions.min))
+          ? utcToZonedLocal(String(restrictions.min), zone)
           : String(restrictions.min)
         : '',
     maxDate:
       restrictions.max !== undefined
         ? field.type === 'datetime'
-          ? utcToDatetimeLocal(String(restrictions.max))
+          ? utcToZonedLocal(String(restrictions.max), zone)
           : String(restrictions.max)
         : '',
     refSchema:
@@ -154,11 +189,18 @@ export function summarise(
     if (restrictions.min !== undefined) parts.push(`from ${restrictions.min}`)
     if (restrictions.max !== undefined) parts.push(`until ${restrictions.max}`)
   }
+  if (type === 'datetime' && typeof restrictions.timezone === 'string')
+    parts.push(`timezone ${restrictions.timezone}`)
   return parts.join(' · ')
 }
 
-/** Derive input props (choices, min/max, accept, etc.) for DynamicField. */
-export function toInputProps(field: Field): InputProps {
+/** Derive input props (choices, min/max, accept, etc.) for DynamicField.
+ * `timeZone` is the field's effective zone: datetime bounds (UTC instants)
+ * are expressed in it so the input's min/max match what the user types. */
+export function toInputProps(
+  field: Field,
+  timeZone: string | null = null,
+): InputProps {
   const restrictions = field.restrictions ?? {}
   const props: InputProps = {}
   if (field.type === 'string' || field.type === 'enum') {
@@ -178,9 +220,9 @@ export function toInputProps(field: Field): InputProps {
   }
   if (field.type === 'datetime') {
     if (restrictions.min !== undefined)
-      props.minDate = utcToDatetimeLocal(String(restrictions.min))
+      props.minDate = utcToZonedLocal(String(restrictions.min), timeZone)
     if (restrictions.max !== undefined)
-      props.maxDate = utcToDatetimeLocal(String(restrictions.max))
+      props.maxDate = utcToZonedLocal(String(restrictions.max), timeZone)
   }
   if (field.type === 'file' || field.type === 'file_list') {
     if (typeof restrictions.accept === 'string')

@@ -591,6 +591,12 @@ export default function ImportWizard({
           parentSchema={parentSchema}
           hasParentCandidates={hasParentCandidates}
           parsedCsv={parsedCsv}
+          collectionTimeZone={
+            datasetName
+              ? (collections?.find((c) => c.name === datasetName)?.timezone ??
+                null)
+              : undefined
+          }
           canMatch={canMatch}
           strategy={strategy}
           filenames={filenames}

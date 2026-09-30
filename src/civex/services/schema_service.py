@@ -13,6 +13,7 @@ from civex.domain.dtos import (
 )
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.domain.naming import is_slug, slugify, validate_name
+from civex.domain.timezones import validate_timezone
 from civex.repositories.protocols import (
     AuditRepository,
     RecordRepository,
@@ -46,7 +47,7 @@ VALID_RESTRICTION_KEYS: dict[str, frozenset[str]] = {
     "float": frozenset({"min", "max"}),
     "string": frozenset({"choices", "max_length"}),
     "date": frozenset({"min", "max"}),
-    "datetime": frozenset({"min", "max"}),
+    "datetime": frozenset({"min", "max", "timezone"}),
     "file": frozenset({"accept", "max_size", "filename_template"}),
     "file_list": frozenset({"accept", "max_size", "filename_template"}),
     "reference": frozenset({"schema"}),
@@ -68,6 +69,14 @@ def _validate_restriction_keys(dtype: str, restrictions: dict[str, Any] | None) 
         raise ValidationError(
             f"Unknown restriction key(s) {unknown} for type '{dtype}'. Valid keys: {valid}"
         )
+    tz = restrictions.get("timezone")
+    if tz is not None:
+        # Stored verbatim and later handed to ZoneInfo, so it has to be exact.
+        if not isinstance(tz, str) or validate_timezone(tz) != tz:
+            raise ValidationError(
+                f"Restriction 'timezone' must be an IANA zone name with no "
+                f"surrounding whitespace, got {tz!r}"
+            )
 
 
 # `{field_name}` placeholders in a `filename_template` restriction; `{ext}`

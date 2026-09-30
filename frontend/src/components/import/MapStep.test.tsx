@@ -77,3 +77,42 @@ describe('MapStep (csv)', () => {
     expect(props.onContinue).toHaveBeenCalled()
   })
 })
+
+describe('MapStep timezone hint', () => {
+  const datetimeField = {
+    ...fields[0],
+    id: 'f9',
+    name: 'taken_at',
+    type: 'datetime',
+  }
+  const mapped = {
+    ...initialMapState(),
+    columnMap: { wt: 'taken_at' },
+  }
+  const base = {
+    availableFields: [...fields, datetimeField],
+    state: mapped,
+  }
+
+  it('says which zone times are read in when the collection has one', () => {
+    renderCsvStep({ ...base, collectionTimeZone: 'America/Chicago' })
+    expect(screen.getByText(/read as America\/Chicago/)).toBeInTheDocument()
+  })
+
+  it('warns that an unset collection reads times as UTC', () => {
+    renderCsvStep({ ...base, collectionTimeZone: null })
+    expect(
+      screen.getByText(/no timezone, so times .* read as UTC/),
+    ).toBeInTheDocument()
+  })
+
+  it("defers to the chosen collection when it isn't picked yet", () => {
+    renderCsvStep({ ...base, collectionTimeZone: undefined })
+    expect(screen.getByText(/chosen collection's timezone/)).toBeInTheDocument()
+  })
+
+  it('stays quiet when no column maps to a datetime field', () => {
+    renderCsvStep({ collectionTimeZone: 'America/Chicago' })
+    expect(screen.queryByText(/UTC offset/)).toBeNull()
+  })
+})

@@ -2,6 +2,7 @@ export {
   Star,
   Pencil,
   X,
+  Plus,
   XCircle,
   ChevronUp,
   ChevronDown,

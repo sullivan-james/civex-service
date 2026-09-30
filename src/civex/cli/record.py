@@ -55,6 +55,7 @@ def record_add(
     if not fields:
         console.print("[warning]Schema has no own fields.[/warning]")
 
+    collection_timezone = dataset.timezone
     data: dict = {}
     for rf in fields:
         dtype_label = rf.field.dtype
@@ -70,7 +71,11 @@ def record_add(
                 break
             try:
                 data[rf.field.name] = ctx.record_svc.coerce_value(
-                    raw, rf.field.dtype, rf.field.name, rf.field.restrictions
+                    raw,
+                    rf.field.dtype,
+                    rf.field.name,
+                    rf.field.restrictions,
+                    timezone=collection_timezone,
                 )
                 break
             except CoercionError as e:
@@ -136,6 +141,11 @@ def record_update(
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
+    collection_timezone = (
+        ctx.dataset_svc.get_by_id(record.dataset_id).timezone
+        if record.dataset_id
+        else None
+    )
     data = dict(record.data)
     for rf in fields:
         current = data.get(rf.field.name, "")
@@ -153,7 +163,11 @@ def record_update(
                 break
             try:
                 data[rf.field.name] = ctx.record_svc.coerce_value(
-                    raw, rf.field.dtype, rf.field.name, rf.field.restrictions
+                    raw,
+                    rf.field.dtype,
+                    rf.field.name,
+                    rf.field.restrictions,
+                    timezone=collection_timezone,
                 )
                 break
             except CoercionError as e:

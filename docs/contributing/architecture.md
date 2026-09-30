@@ -41,7 +41,7 @@ Record `data` is stored as a single JSON dict per record — there is no entity-
 Field types: `integer | float | string | boolean | date | datetime | file | file_list | reference`.
 
 - `file` / `file_list` — the record stores a `FileRef` dict (`{sha256, filename, size}`), or a list of them; the bytes themselves live in the content-addressed object store described above.
-- `date` — stored as an ISO date string (`YYYY-MM-DD`). `datetime` — stored as a UTC ISO string; naive datetimes are assumed UTC on ingest.
+- `date` — stored as an ISO date string (`YYYY-MM-DD`). `datetime` — always stored as a UTC ISO string. Values with no UTC offset are read in the field's `timezone` restriction, else the collection's timezone, else UTC (`domain/timezones.py`, applied in `RecordService._normalise_datetimes`).
 - `reference` — stores the UUID of another record as a string; the target schema is enforced via a `schema` restriction on the field.
 
 Schema inheritance is resolved recursively by `SchemaService.collect_fields()` — a child schema's own fields come first, followed by each ancestor's fields (labelled with their source schema), so a subclassed schema's records carry both its own and its parents' fields.

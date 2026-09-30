@@ -315,6 +315,16 @@ class DatasetResponse(BaseModel):
         default=None,
         description="When this collection was soft-deleted. Null means live.",
     )
+    timezone: str | None = Field(
+        default=None,
+        description=(
+            "IANA timezone (e.g. 'America/Chicago') that datetime values in "
+            "this collection are read and shown in. Null means unset: "
+            "offset-less input is read as UTC and the UI uses the viewer's "
+            "own zone. A datetime field's own `timezone` restriction "
+            "overrides this."
+        ),
+    )
 
     @classmethod
     def from_dto(cls, dto: DatasetDTO) -> DatasetResponse:
@@ -324,17 +334,29 @@ class DatasetResponse(BaseModel):
             description=dto.description,
             record_count=dto.record_count,
             deleted_at=dto.deleted_at,
+            timezone=dto.timezone,
         )
 
 
 class CreateDatasetRequest(BaseModel):
     name: str
     description: str | None = None
+    timezone: str | None = Field(
+        default=None,
+        description="IANA timezone for datetime values in this collection. Omit or null to leave unset.",
+    )
 
 
 class UpdateDatasetRequest(BaseModel):
     rename: str | None = None
     description: str | None = None
+    timezone: str | None = Field(
+        default=None,
+        description=(
+            "IANA timezone for datetime values in this collection. Omit or "
+            "null to leave unchanged; an empty string clears it back to unset."
+        ),
+    )
 
 
 # Collection aliases (user-facing rename of Dataset → Collection)

@@ -72,6 +72,10 @@ tests/
   regression test showing why date/datetime bounds must compare parsed
   objects rather than raw ISO strings, plus the naive-datetime-assumed-UTC
   rule in `_parse_datetime`.
+- `tests/domain/test_timezones.py` and `tests/server/test_collection_timezone_api.py`
+  — timezone resolution (field > collection > UTC), DST gap/overlap rejection,
+  and that the API write path normalises datetimes. The DST cases are mirrored
+  by `frontend/src/utils/dates.test.ts` so the two implementations stay in step.
 - `tests/services/test_record_service_integration.py` — the `reference`
   dtype's `schema` restriction (enforced in `coerce_value`, not
   `_check_restrictions`) and the `record_created` + `record_updated`

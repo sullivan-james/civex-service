@@ -1,5 +1,7 @@
 import { Badge } from '../ui'
 import { ReferenceLink } from './ReferenceLink'
+import { useFieldTimeZone } from './timeZoneContext'
+import { formatDateTime } from '../../utils/dates'
 import type { Field } from '../../api/schemas'
 
 export function FieldValue({
@@ -13,8 +15,12 @@ export function FieldValue({
   field?: Field
   referenceLabels?: Record<string, string | null> | null
 }) {
+  const timeZone = useFieldTimeZone(field)
   if (value === null || value === undefined)
     return <span className="text-fg-subtle">—</span>
+  if (field?.type === 'datetime' && typeof value === 'string' && value)
+    // Shown as wall time in the field's zone; the stored UTC value is on hover.
+    return <span title={value}>{formatDateTime(value, timeZone)}</span>
   if (field?.type === 'reference' && typeof value === 'string')
     return <ReferenceLink id={value} labels={referenceLabels} />
   if (field?.type === 'reference_list' && Array.isArray(value)) {

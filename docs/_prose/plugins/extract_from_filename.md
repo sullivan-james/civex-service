@@ -21,7 +21,7 @@ All other characters in the format string are treated as **raw regex fragments**
 YYYYMMDD[-_]HHmmSS   →  matches  20240315-093000  and  20240315_093000
 ```
 
-Extracted datetimes are stored as UTC ISO 8601 strings.
+Extracted datetimes carry no UTC offset: a timestamp in a filename is wall time where the file was recorded. When the value is saved it is read in the datetime field's `timezone` restriction, else the collection's timezone, else UTC, and stored as a UTC ISO 8601 string. Set the collection's timezone (`civex collection update NAME --timezone America/Chicago`) so extracted times land on the right instant.
 
 **Examples**
 

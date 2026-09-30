@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { filesApi } from '../../api/files'
 import type { Field } from '../../api/schemas'
-import { utcToDatetimeLocal, datetimeLocalToUTC } from '../../utils/dates'
+import { utcToZonedLocal, datetimeInputToWire } from '../../utils/dates'
+import { useFieldTimeZone } from './timeZoneContext'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
 import { Input, Select, Checkbox } from '../ui'
 import { Paperclip, X } from '../ui/icons'
@@ -258,6 +259,7 @@ export function DynamicField({
   'aria-describedby': ariaDescribedby,
   'aria-invalid': ariaInvalid,
 }: Props) {
+  const timeZone = useFieldTimeZone(field)
   switch (field.type) {
     case 'string': {
       const { choices, maxLength } = toInputProps(field)
@@ -361,23 +363,32 @@ export function DynamicField({
     }
 
     case 'datetime': {
-      const { minDate: rMin, maxDate: rMax } = toInputProps(field)
+      const { minDate: rMin, maxDate: rMax } = toInputProps(field, timeZone)
       return (
-        <Input
-          id={id}
-          aria-describedby={ariaDescribedby}
-          aria-invalid={ariaInvalid}
-          required={field.required}
-          aria-required={field.required}
-          type="datetime-local"
-          value={value ? utcToDatetimeLocal(value as string) : ''}
-          min={rMin}
-          max={rMax}
-          onChange={(e) =>
-            onChange(e.target.value ? datetimeLocalToUTC(e.target.value) : '')
-          }
-          className="w-full"
-        />
+        <div>
+          <Input
+            id={id}
+            aria-describedby={ariaDescribedby}
+            aria-invalid={ariaInvalid}
+            required={field.required}
+            aria-required={field.required}
+            type="datetime-local"
+            value={value ? utcToZonedLocal(value as string, timeZone) : ''}
+            min={rMin}
+            max={rMax}
+            onChange={(e) =>
+              onChange(
+                e.target.value
+                  ? datetimeInputToWire(e.target.value, timeZone)
+                  : '',
+              )
+            }
+            className="w-full"
+          />
+          {timeZone && (
+            <p className="mt-1 text-xs text-fg-muted">Time in {timeZone}</p>
+          )}
+        </div>
       )
     }
 

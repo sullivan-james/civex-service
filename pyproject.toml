@@ -60,6 +60,7 @@ dependencies = [
     "anthropic>=0.40",
     "openai>=1.0",
     "sentry-sdk>=2.0",
+    "tzdata>=2024.1",
 ]
 
 [project.urls]

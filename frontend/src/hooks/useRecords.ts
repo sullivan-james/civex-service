@@ -126,7 +126,9 @@ export function useCreateRecord(datasetName: string) {
   })
 }
 
-export function useUpdateRecord() {
+/** `quiet` suppresses the success/failure toasts, for callers (inline cell
+ * editing) that show the outcome next to the thing edited instead. */
+export function useUpdateRecord({ quiet = false }: { quiet?: boolean } = {}) {
   const qc = useQueryClient()
   const toast = useToast()
   return useMutation({
@@ -137,21 +139,29 @@ export function useUpdateRecord() {
       await qc.cancelQueries({ queryKey: ['records'] })
       const previous = optimisticUpdateRecord(qc, id, (r) => ({
         ...r,
-        data: { ...r.data, ...data },
+        // The PATCH body is the record's full data (the API replaces, it
+        // doesn't merge), so mirror that -- merging would leave a cleared
+        // field showing its old value until the refetch.
+        data: data as Record<string, unknown>,
       }))
       return { previous }
     },
     onError: (err, _vars, context) => {
       rollbackRecordCache(qc, context?.previous)
+      if (quiet) return
       toast.error(
         `Couldn't save record changes — reverted. ${errorMessage(err)}`,
       )
     },
     onSuccess: (updated) => {
+      if (quiet) return
       toast.success(`Record "${updated.natural_name ?? updated.id}" updated`)
     },
     onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: ['record', vars.id] })
+      // Lists too: an edit can change the record's natural name and any
+      // server-resolved reference labels shown in a table row.
+      qc.invalidateQueries({ queryKey: ['records'] })
       qc.invalidateQueries({ queryKey: ['record-audit', vars.id] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
     },
