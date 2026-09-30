@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date as _date, datetime as _dt, timezone as _tz
+from datetime import date as _date, datetime as _dt
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
@@ -26,6 +26,10 @@ def _parse_by_format(raw: str, fmt: str, output_type: str) -> str:
     Known tokens (YYYY MM DD HH mm SS) become named capture groups.
     Everything else is treated as a raw regex fragment, so you can use character
     classes — e.g. 'YYYYMMDD[-_]HHmmSS' matches both dashes and underscores.
+
+    A datetime is returned *naive* (no UTC offset): a timestamp in a filename
+    is wall time where it was recorded, and the record service reads it in the
+    field's / collection's timezone when it is saved (UTC if neither is set).
     """
     parts = _TOKEN_RE.split(fmt)
     regex_parts = [_TOKEN_MAP[p] if p in _TOKEN_MAP else p for p in parts]
@@ -43,7 +47,7 @@ def _parse_by_format(raw: str, fmt: str, output_type: str) -> str:
     if output_type == "date":
         return _date(year, month, day).isoformat()
     else:
-        return _dt(year, month, day, hour, minute, second, tzinfo=_tz.utc).isoformat()
+        return _dt(year, month, day, hour, minute, second).isoformat()
 
 
 class Plugin(Tier0Plugin):
