@@ -15,12 +15,14 @@ from civex_plugin_sdk.errors import (
 )
 from civex_plugin_sdk.plugin import Plugin
 from civex_plugin_sdk.plugin_base import IO_TYPES, IOSpec, PluginBase
+from civex_plugin_sdk.protocol import PROTOCOL_VERSION
 from civex_plugin_sdk.serve import serve, serve_container
 
 __all__ = [
     "Ctx",
     "IOSpec",
     "IO_TYPES",
+    "PROTOCOL_VERSION",
     "Plugin",
     "PluginBase",
     "serve",

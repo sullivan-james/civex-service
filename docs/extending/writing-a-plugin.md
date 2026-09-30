@@ -29,17 +29,14 @@ Use it in a workflow:
     value: compute.echo
 ```
 
-!!! note "civex-plugin-sdk is not yet on PyPI"
-    `civex-plugin-sdk` isn't independently installable yet, so `uv run`
-    can't resolve the plain `civex-plugin-sdk` dependency this section asks
-    you to declare against a real package index. The host works around this
-    for you: it hands `uv run` a `civex-plugin-sdk` wheel bundled with
-    whatever `civex` install is running your plugin (or, in a dev checkout
-    of this repo, freshly built from source) — so your plugin file itself
-    needs no change, but it's pinned to that host's exact SDK version until
-    the SDK has its own PyPI release. See
-    [Release process](../contributing/release.md#the-plugin-sdk-is-not-published-by-releaseyml)
-    for the details and current status.
+!!! note "Which SDK version does my plugin get?"
+    `civex-plugin-sdk` is a normal PyPI package (MIT licensed), so the plain
+    `dependencies = ["civex-plugin-sdk"]` line resolves like any other. When
+    civex runs your plugin it pins the SDK to the version civex itself uses,
+    so the host and your plugin always speak the same wire protocol — you
+    don't need to pin it yourself. If a plugin was written against an SDK
+    that speaks a different protocol version, civex refuses it with a message
+    saying which side to upgrade.
 
 ## Plugin structure
 

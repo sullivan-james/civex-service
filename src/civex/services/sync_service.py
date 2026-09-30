@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -11,6 +12,8 @@ from civex.repositories.protocols import FileObjectStore
 from civex.sync.exporter import export_bundle
 from civex.sync.importer import apply_bundle
 from civex.sync.transport import SyncError, get_transport
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -84,8 +87,13 @@ class SyncService:
                 try:
                     transport.put_object(sha256, self._file_store.get(sha256))
                     pushed_objects += 1
-                except SyncError:
-                    pass
+                except SyncError as e:
+                    # One object failing to push (network blip, remote out
+                    # of space) shouldn't abort the whole push -- the DB
+                    # bundle itself still goes out below -- but a silent
+                    # skip here previously gave no way to tell why
+                    # `objects` in the result came back lower than expected.
+                    log.warning("Failed to push object %s: %s", sha256, e)
 
         transport.receive_pack(bundle)
 

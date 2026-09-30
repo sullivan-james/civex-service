@@ -1,32 +1,22 @@
 import { useState } from 'react'
+import { useParams } from 'react-router'
 import {
   useContainerPlugin,
   useSaveContainerPluginFile,
-} from '../../hooks/useContainerPlugins'
-import {
-  Button,
-  Field,
-  Modal,
-  ModalBody,
-  ModalFooter,
-  ModalHeader,
-  Textarea,
-} from '../ui'
-import type { BuildResult } from '../../api/containerPlugins'
-
-interface ContainerPluginEditorProps {
-  name: string
-  onClose: () => void
-}
+} from '../hooks/useContainerPlugins'
+import { useCloseOrBack } from '../hooks/useCloseOrBack'
+import { Button, Field, Page, Textarea } from '../components/ui'
+import type { BuildResult } from '../api/containerPlugins'
 
 /** Multi-file editor for a Tier 2 (container) plugin: a Dockerfile + source
  * tree. Saving a file triggers an immediate `docker build` and shows the
  * result inline — the container-tier equivalent of the Tier 1 .py editor's
- * save-triggers-describe round-trip. */
-export function ContainerPluginEditor({
-  name,
-  onClose,
-}: ContainerPluginEditorProps) {
+ * save-triggers-describe round-trip. Stays on the page after a save (unlike
+ * the workflow/plugin editors) since a multi-file plugin is typically saved
+ * file-by-file and the build result is worth seeing before moving on. */
+export default function ContainerPluginEditorPage() {
+  const { name = '' } = useParams<{ name: string }>()
+  const closeOrBack = useCloseOrBack('/plugins')
   const { data: detail, isLoading } = useContainerPlugin(name)
   const save = useSaveContainerPluginFile()
 
@@ -58,15 +48,30 @@ export function ContainerPluginEditor({
   const filePaths = contents ? Object.keys(contents).sort() : []
 
   return (
-    <Modal onClose={onClose} size="2xl" className="h-[90vh]">
-      <ModalHeader onClose={onClose}>Container plugin — {name}</ModalHeader>
-
+    <Page
+      breadcrumbs={[{ label: 'Plugins', to: '/plugins' }, { label: name }]}
+      title={`Container plugin — ${name}`}
+      action={
+        <div className="flex items-center gap-2">
+          <Button variant="default" onClick={() => closeOrBack()}>
+            Close
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleSave}
+            disabled={save.isPending || !selectedPath}
+          >
+            {save.isPending ? 'Saving & rebuilding…' : 'Save & rebuild'}
+          </Button>
+        </div>
+      }
+    >
       {isLoading || contents === null ? (
-        <ModalBody className="flex items-center justify-center text-sm text-fg-muted">
+        <div className="flex items-center justify-center text-sm text-fg-muted h-[65vh]">
           Loading…
-        </ModalBody>
+        </div>
       ) : (
-        <ModalBody padded={false} className="flex">
+        <div className="flex h-[65vh] border border-border rounded-md overflow-hidden">
           {/* File tree */}
           <div className="w-56 border-r border-border overflow-y-auto py-2">
             {filePaths.map((path) => (
@@ -118,21 +123,8 @@ export function ContainerPluginEditor({
               </div>
             )}
           </div>
-        </ModalBody>
+        </div>
       )}
-
-      <ModalFooter>
-        <Button variant="default" onClick={onClose}>
-          Close
-        </Button>
-        <Button
-          variant="primary"
-          onClick={handleSave}
-          disabled={save.isPending || !selectedPath}
-        >
-          {save.isPending ? 'Saving & rebuilding…' : 'Save & rebuild'}
-        </Button>
-      </ModalFooter>
-    </Modal>
+    </Page>
   )
 }

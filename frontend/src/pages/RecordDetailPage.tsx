@@ -26,6 +26,9 @@ import {
   ErrorState,
   FormError,
   Page,
+  ConfirmDialog,
+  Section,
+  CollapsibleSection,
 } from '../components/ui'
 import { X, Play } from '../components/ui/icons'
 import { DynamicField } from '../components/records/DynamicField'
@@ -34,7 +37,8 @@ import { formatDate } from '../lib/utils'
 import { displayLabel } from '../utils/naming'
 import { errorMessage } from '../lib/errors'
 import { fieldErrorInfo } from '../utils/validationErrors'
-import type { Schema } from '../api/schemas'
+import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
+import type { Schema, Field as SchemaField } from '../api/schemas'
 import type { CivexRecord } from '../api/records'
 import JobsTable from '../components/jobs/JobsTable'
 import RecordProvenance from '../components/jobs/RecordProvenance'
@@ -53,12 +57,9 @@ function ChildTable({
   records: CivexRecord[]
   onDelete: (id: string) => void
 }) {
-  const cols =
-    schema?.fields
-      .filter((f) => f.type !== 'file')
-      .map((f) => ({ name: f.name, label: displayLabel(f.name, f.label) })) ??
-    []
+  const cols = schema?.fields.filter((f) => f.type !== 'file') ?? []
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const confirmRecord = records.find((r) => r.id === confirmId) ?? null
 
   return (
     <div className="space-y-2">
@@ -82,7 +83,7 @@ function ChildTable({
             <Th className="w-24">ID</Th>
             {cols.map((c) => (
               <Th key={c.name} title={c.name}>
-                {c.label}
+                {displayLabel(c.name, c.label)}
               </Th>
             ))}
             <Th className="w-28">Added</Th>
@@ -104,43 +105,40 @@ function ChildTable({
               </Td>
               {cols.map((col) => (
                 <Td key={col.name}>
-                  <FieldValue value={r.data[col.name]} />
+                  <FieldValue
+                    value={r.data[col.name]}
+                    field={col}
+                    referenceLabels={r.reference_labels}
+                  />
                 </Td>
               ))}
               <Td className="text-fg-muted">{formatDate(r.created_at)}</Td>
               <Td>
-                {confirmId === r.id ? (
-                  <span className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        onDelete(r.id)
-                        setConfirmId(null)
-                      }}
-                      className="text-xs text-danger font-medium hover:underline"
-                    >
-                      Confirm
-                    </button>
-                    <button
-                      onClick={() => setConfirmId(null)}
-                      className="text-xs text-fg-muted hover:underline"
-                    >
-                      Cancel
-                    </button>
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => setConfirmId(r.id)}
-                    className="text-xs text-fg-muted hover:text-danger transition-colors"
-                    title="Delete record"
-                  >
-                    <X size={14} />
-                  </button>
-                )}
+                <button
+                  onClick={() => setConfirmId(r.id)}
+                  className="text-xs text-fg-muted hover:text-danger transition-colors"
+                  title="Delete record"
+                >
+                  <X size={14} />
+                </button>
               </Td>
             </Tr>
           ))}
         </Tbody>
       </Table>
+      {confirmRecord && (
+        <ConfirmDialog
+          title="Delete record"
+          body={`Delete ${confirmRecord.natural_name ?? `record ${confirmRecord.id.slice(0, 8)}`}? It'll move to Recently Deleted — restore any time before it's permanently purged.`}
+          confirmLabel="Delete record"
+          variant="danger"
+          onConfirm={() => {
+            onDelete(confirmRecord.id)
+            setConfirmId(null)
+          }}
+          onClose={() => setConfirmId(null)}
+        />
+      )}
     </div>
   )
 }
@@ -324,18 +322,18 @@ export default function RecordDetailPage() {
       )}
 
       {/* Own fields */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold text-fg">Fields</h2>
-          {!isEditing && (
+      <Section
+        title="Fields"
+        action={
+          !isEditing && (
             <Button size="sm" onClick={startEditing}>
               Edit
             </Button>
-          )}
-        </div>
-
+          )
+        }
+      >
         {isEditing ? (
-          <div className="border border-border rounded-md bg-canvas-subtle p-4 space-y-4">
+          <div className="space-y-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {(schema?.fields ?? []).map((field) => (
                 <Field
@@ -408,26 +406,27 @@ export default function RecordDetailPage() {
                   )}
                 </p>
                 <div className="text-sm text-fg">
-                  <FieldValue value={record.data[field.name]} />
+                  <FieldValue
+                    value={record.data[field.name]}
+                    field={field as SchemaField}
+                    referenceLabels={record.reference_labels}
+                  />
                 </div>
               </div>
             ))}
           </div>
         )}
-      </div>
+      </Section>
 
       {/* Children */}
       {(childSchemas.length > 0 ||
         Object.keys(childrenBySchema).length > 0) && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-fg">
-              Children
-              <span className="ml-2 text-sm font-normal text-fg-muted">
-                {children.length} total
-              </span>
-            </h2>
-            {childSchemas.length > 0 && !addingChild && (
+        <Section
+          title="Children"
+          count={children.length}
+          action={
+            childSchemas.length > 0 &&
+            !addingChild && (
               <Button
                 variant="primary"
                 size="sm"
@@ -435,37 +434,39 @@ export default function RecordDetailPage() {
               >
                 + Add record
               </Button>
+            )
+          }
+        >
+          <div className="space-y-4">
+            {addingChild && collection && schemas && (
+              <RecordForm
+                schemas={schemas}
+                datasetName={collection.name}
+                selectableSchemaIds={childSchemas.map((s) => s.id)}
+                lockedParentRecordId={record.id}
+                onSubmit={handleAddChild}
+                onCancel={() => setAddingChild(false)}
+                isPending={createRecord.isPending}
+                error={createRecord.error}
+              />
             )}
+
+            {Object.entries(childrenBySchema).map(([schemaName, recs]) => (
+              <ChildTable
+                key={schemaName}
+                schemaName={schemaName}
+                schema={schemas?.find((s) => s.name === schemaName)}
+                records={recs}
+                onDelete={(childId) =>
+                  deleteRecord.mutate({
+                    id: childId,
+                    undo: () => recordsApi.restore(childId),
+                  })
+                }
+              />
+            ))}
           </div>
-
-          {addingChild && collection && schemas && (
-            <RecordForm
-              schemas={schemas}
-              datasetName={collection.name}
-              selectableSchemaIds={childSchemas.map((s) => s.id)}
-              lockedParentRecordId={record.id}
-              onSubmit={handleAddChild}
-              onCancel={() => setAddingChild(false)}
-              isPending={createRecord.isPending}
-              error={createRecord.error}
-            />
-          )}
-
-          {Object.entries(childrenBySchema).map(([schemaName, recs]) => (
-            <ChildTable
-              key={schemaName}
-              schemaName={schemaName}
-              schema={schemas?.find((s) => s.name === schemaName)}
-              records={recs}
-              onDelete={(childId) =>
-                deleteRecord.mutate({
-                  id: childId,
-                  undo: () => recordsApi.restore(childId),
-                })
-              }
-            />
-          ))}
-        </div>
+        </Section>
       )}
 
       {applicableWorkflows.length > 0 && (
@@ -507,14 +508,13 @@ export default function RecordDetailPage() {
         fetchPage={(offset, limit) =>
           recordsApi.audit(record.id, offset, limit)
         }
-        describeEntry={describeRecordAuditEntry}
+        describeEntry={(entry) => describeRecordAuditEntry(entry, schema)}
         emptyMessage="Changes to this record will appear here."
       />
 
-      <div>
-        <h2 className="text-base font-semibold text-fg mb-2">Runs</h2>
+      <CollapsibleSection title="Runs">
         <JobsTable recordId={record.id} />
-      </div>
+      </CollapsibleSection>
 
       {/* Danger zone */}
       <div className="border border-danger-muted rounded-md">
@@ -529,47 +529,55 @@ export default function RecordDetailPage() {
               it any time before it's permanently purged.
             </p>
           </div>
-          {confirmDelete ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-fg-muted">Are you sure?</span>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() =>
-                  deleteRecord.mutate(
-                    {
-                      id: record.id,
-                      undo: () => recordsApi.restore(record.id),
-                    },
-                    {
-                      onSuccess: () =>
-                        navigate(
-                          collection
-                            ? `/collections/${record.dataset_id}`
-                            : '/collections',
-                        ),
-                    },
-                  )
-                }
-                disabled={deleteRecord.isPending}
-              >
-                {deleteRecord.isPending ? 'Deleting…' : 'Confirm delete'}
-              </Button>
-              <Button size="sm" onClick={() => setConfirmDelete(false)}>
-                Cancel
-              </Button>
-            </div>
-          ) : (
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setConfirmDelete(true)}
-            >
-              Delete record
-            </Button>
-          )}
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => setConfirmDelete(true)}
+          >
+            Delete record
+          </Button>
         </div>
       </div>
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete record"
+          body={
+            children.length > 0
+              ? `Delete ${record.natural_name ?? `record ${record.id.slice(0, 8)}`}? This also deletes its ${children.length.toLocaleString()} child record${children.length === 1 ? '' : 's'}. They'll move to Recently Deleted — restore any time before it's permanently purged.`
+              : `Delete ${record.natural_name ?? `record ${record.id.slice(0, 8)}`}? It'll move to Recently Deleted — restore any time before it's permanently purged.`
+          }
+          confirmLabel={
+            children.length > 0
+              ? `Delete record and ${children.length.toLocaleString()} child record${children.length === 1 ? '' : 's'}`
+              : 'Delete record'
+          }
+          variant="danger"
+          typedConfirmationValue={
+            children.length > HIGH_IMPACT_RECORD_THRESHOLD
+              ? (record.natural_name ?? record.id.slice(0, 8))
+              : undefined
+          }
+          warning={
+            deleteRecord.error ? errorMessage(deleteRecord.error) : undefined
+          }
+          isPending={deleteRecord.isPending}
+          onConfirm={() =>
+            deleteRecord.mutate(
+              { id: record.id, undo: () => recordsApi.restore(record.id) },
+              {
+                onSuccess: () =>
+                  navigate(
+                    collection
+                      ? `/collections/${record.dataset_id}`
+                      : '/collections',
+                  ),
+              },
+            )
+          }
+          onClose={() => setConfirmDelete(false)}
+        />
+      )}
     </Page>
   )
 }

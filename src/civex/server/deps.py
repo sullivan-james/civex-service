@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Generator
 
-from fastapi import HTTPException
 from sqlalchemy.exc import OperationalError
 
 from civex.config import Config, load_config
 from civex.context import AppContext, build_local_context
-from civex.domain.exceptions import ConfigError, DatabaseUnavailableError
+from civex.domain.exceptions import DatabaseUnavailableError
 
 
 def _recovery_failure_message(result) -> str:  # noqa: ANN001 — ContainerRecoveryResult
@@ -81,11 +80,10 @@ def _recover_after_query_failure(config: Config) -> None:
 
 
 def get_ctx() -> Generator[AppContext, None, None]:
-    try:
-        config = load_config()
-    except ConfigError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+    # ConfigError propagates to the registered CivexError handler (400),
+    # rather than being turned into a bare 500 here -- the same exception
+    # type must map to the same status regardless of where it's raised.
+    config = load_config()
     ctx = _build_context_with_recovery(config)
     try:
         yield ctx

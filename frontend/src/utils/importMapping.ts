@@ -1,4 +1,5 @@
 import type { Field } from '../api/schemas'
+import type { FieldType } from './fieldTypes'
 
 function normalizeKey(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '')
@@ -33,8 +34,14 @@ export function suggestFieldMapping(
   return result
 }
 
-export type InferredFieldType =
+// The subset of FieldType (`utils/fieldTypes.ts`) inferable from raw text
+// values alone -- no file/reference/enum/etc., which need more than a
+// sample of strings to justify. `Extract` against the canonical union so a
+// type renamed there is a compile error here instead of silent drift.
+export type InferredFieldType = Extract<
+  FieldType,
   'integer' | 'float' | 'boolean' | 'date' | 'datetime' | 'string'
+>
 
 /** Infer a schema field dtype from sample column values. Falls back to
  * `string` — the always-safe choice — whenever the sample is empty or mixed. */

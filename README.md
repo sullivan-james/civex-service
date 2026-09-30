@@ -13,10 +13,10 @@ flowchart LR
 ## Install
 
 ```bash
-pipx install "civex[server,workflows]"
+pipx install civex
 ```
 
-See [Install](docs/getting-started/install.md) for the full list of extras and upgrading.
+See [Install](docs/getting-started/install.md) for installing and updating (`civex update`).
 
 ## 60-second example
 

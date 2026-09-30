@@ -36,6 +36,30 @@ dependencies = [
     # validate a schema that came from an arbitrary out-of-process plugin --
     # not somewhere to hand-roll a subset of the spec.
     "jsonschema>=4.0",
+    # `civex update` compares the installed version against PyPI's.
+    "packaging>=23",
+    # The plugin SDK is its own published project (MIT, versioned by hand --
+    # see docs/contributing/sdk-release.md). This range must admit the SDK
+    # version in civex-plugin-sdk/pyproject.toml: scripts/check_sdk_sync.py
+    # enforces that in CI, and the civex release refuses to publish unless
+    # that version is already on PyPI. Widen the upper bound (minor bump)
+    # deliberately when a compatible SDK ships; narrow the lower bound only
+    # if civex starts needing a newer SDK.
+    "civex-plugin-sdk>=0.2.0,<0.3",
+    # Everything below used to be an optional extra. The whole set is small
+    # enough that a plain `pipx install civex` should just work, so they're
+    # base dependencies now (the extras further down remain as empty aliases
+    # so `pip install "civex[server]"` and existing pipx installs keep
+    # resolving).
+    "psycopg2-binary>=2.9",
+    "pandas>=2.0",
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+    "python-multipart>=0.0.9",
+    "jinja2>=3.1",
+    "anthropic>=0.40",
+    "openai>=1.0",
+    "sentry-sdk>=2.0",
 ]
 
 [project.scripts]
@@ -43,12 +67,16 @@ civex = "civex.main:app"
 civex-desktop = "civex.desktop.tray:main"
 
 [project.optional-dependencies]
-postgres  = ["psycopg2-binary>=2.9"]
-workflows = ["pandas>=2.0"]
-server    = ["fastapi>=0.111", "uvicorn>=0.30", "python-multipart>=0.0.9", "jinja2>=3.1"]
+# pywebview stays optional: it pulls platform-specific GUI packages (pyobjc on
+# macOS, pythonnet on Windows) that a server-only install shouldn't need.
 desktop   = ["pywebview>=5.0"]
-ai        = ["anthropic>=0.40", "openai>=1.0"]
-telemetry = ["sentry-sdk>=2.0"]
+# Empty aliases kept for back-compat: these dependencies are now installed by
+# default (see `dependencies` above).
+postgres  = []
+workflows = []
+server    = []
+ai        = []
+telemetry = []
 dev       = ["pytest>=8", "pytest-cov>=5", "pytest-xdist>=3", "httpx2>=0.28", "pre-commit>=3.7", "ruff>=0.15", "mypy>=2.0", "pip-audit>=2.7"]
 docs = [
   "mkdocs>=1.6",
@@ -69,24 +97,10 @@ members = ["civex-plugin-sdk"]
 civex-plugin-sdk = { workspace = true }
 
 [tool.setuptools.packages.find]
-# civex-plugin-sdk isn't published to PyPI yet, so it can't be a real
-# dependency of the published `civex` wheel (pip has nothing to resolve it
-# against). Vendor its source into this wheel instead, for now -- the uv
-# workspace member is still what local dev (`uv sync`/`uv run`) resolves
-# against; this only affects what `python -m build` bundles.
-where = ["src", "civex-plugin-sdk/src"]
-
-[tool.setuptools.package-dir]
-civex_plugin_sdk = "civex-plugin-sdk/src/civex_plugin_sdk"
+where = ["src"]
 
 [tool.setuptools.package-data]
-# _vendor/sdk/*.whl: a prebuilt civex-plugin-sdk wheel, built from
-# civex-plugin-sdk/ into src/civex/_vendor/sdk/ just before this package is
-# built (see docs/contributing/release.md). subprocess_runtime.py's
-# _bundled_sdk_wheel_dir() hands it to `uv run --find-links` when spawning a
-# subprocess-tier plugin, so plugin environments resolve civex-plugin-sdk
-# from this install instead of needing it on PyPI or a sibling dev checkout.
-civex = ["server/static/**", "db/migrations/script.py.mako", "_vendor/sdk/*.whl"]
+civex = ["server/static/**", "db/migrations/script.py.mako"]
 
 [tool.coverage.run]
 source = ["civex"]

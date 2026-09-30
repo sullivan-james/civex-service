@@ -4,6 +4,7 @@ import pytest
 
 from civex_plugin_sdk.protocol import (
     BINARY_INLINE_THRESHOLD,
+    PROTOCOL_VERSION,
     DescribeResult,
     RpcCall,
     decode_binary,
@@ -61,3 +62,16 @@ def test_encode_binary_inlines_when_no_scratch_dir_even_above_threshold():
 def test_decode_binary_rejects_unknown_encoding():
     with pytest.raises(ValueError):
         decode_binary({"encoding": "smoke_signal"})
+
+
+def test_describe_result_states_protocol_version():
+    frame = DescribeResult(id="example.echo", name="Echo")
+    assert frame.protocol_version == PROTOCOL_VERSION
+    assert frame.model_dump()["protocol_version"] == PROTOCOL_VERSION
+
+
+def test_describe_result_from_pre_versioning_sdk_reads_as_v1():
+    """An SDK older than the field omits it; that must parse, as version 1."""
+    frame = parse_frame({"type": "describe_result", "id": "old.plugin", "name": "Old"})
+    assert isinstance(frame, DescribeResult)
+    assert frame.protocol_version == 1

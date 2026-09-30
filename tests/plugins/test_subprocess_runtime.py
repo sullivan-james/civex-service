@@ -32,7 +32,26 @@ from civex.plugins import subprocess_runtime as rt
 def test_build_command_without_local_sdk_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A real install: no --find-links; the SDK comes from the index, pinned
+    to the version this host itself runs."""
     monkeypatch.setattr(rt, "_sdk_find_links_dir", lambda: None)
+    monkeypatch.setattr(rt, "_installed_sdk_version", lambda: "0.2.0")
+    argv = rt._build_command("uv", Path("/plugins/thing.py"))
+    assert argv == [
+        "uv",
+        "run",
+        "--no-project",
+        "--with",
+        "civex-plugin-sdk==0.2.0",
+        "/plugins/thing.py",
+    ]
+
+
+def test_build_command_omits_pin_when_sdk_version_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(rt, "_sdk_find_links_dir", lambda: None)
+    monkeypatch.setattr(rt, "_installed_sdk_version", lambda: None)
     argv = rt._build_command("uv", Path("/plugins/thing.py"))
     assert argv == ["uv", "run", "--no-project", "/plugins/thing.py"]
 
@@ -396,3 +415,32 @@ def test_dispatcher_against_real_workflow_context(
         "update_record", {"record_id": str(record.id), "data": {"name": "S02"}}
     )
     assert updated["data"] == {"name": "S02"}
+
+
+# -- wire protocol version handshake ----------------------------------------
+
+
+def _described(protocol_version: int):
+    from civex_plugin_sdk.protocol import DescribeResult
+
+    return DescribeResult(id="p.x", name="X", protocol_version=protocol_version)
+
+
+def test_protocol_version_match_passes() -> None:
+    from civex_plugin_sdk.protocol import PROTOCOL_VERSION
+
+    described = _described(PROTOCOL_VERSION)
+    assert rt.check_protocol_version(described) is described
+
+
+def test_newer_plugin_protocol_tells_user_to_update_civex() -> None:
+    from civex_plugin_sdk.protocol import PROTOCOL_VERSION
+
+    with pytest.raises(PluginExecutionError, match="civex update") as exc:
+        rt.check_protocol_version(_described(PROTOCOL_VERSION + 1))
+    assert exc.value.kind == "protocol_mismatch"
+
+
+def test_older_plugin_protocol_tells_author_to_upgrade_sdk() -> None:
+    with pytest.raises(PluginExecutionError, match="upgrade the plugin's"):
+        rt.check_protocol_version(_described(0))

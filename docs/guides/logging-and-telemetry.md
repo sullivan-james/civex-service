@@ -44,11 +44,7 @@ Expected errors (not found, validation, conflicts) return a clear message and th
 
 Nothing is sent off your machine unless you turn this on. It uses [Sentry](https://sentry.io) and reports only exception stack traces (no request bodies, `send_default_pii=False`, no performance tracing).
 
-1. Install the extra:
-
-   ```bash
-   pip install "civex[telemetry]"        # or: pipx inject civex sentry-sdk
-   ```
+1. Nothing to install — the Sentry SDK ships with civex.
 
 2. Provide a DSN — either in `_civex/config.toml`:
 
@@ -64,4 +60,4 @@ Nothing is sent off your machine unless you turn this on. It uses [Sentry](https
    export CIVEX_SENTRY_DSN="https://<key>@<org>.ingest.sentry.io/<project>"
    ```
 
-With no DSN (the default), telemetry is a no-op even if the extra is installed.
+With no DSN (the default), telemetry is a no-op even though the SDK is installed.

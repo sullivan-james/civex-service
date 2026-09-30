@@ -4,6 +4,8 @@ import contextlib
 import io
 import logging
 
+log = logging.getLogger(__name__)
+
 
 _NOISY_PREFIXES = (
     "sqlalchemy",
@@ -64,6 +66,8 @@ def run_pending_jobs() -> None:
                 break
             log_buf = io.StringIO()
             wf_ctx = None
+            step_executions = None
+            failure: Exception | None = None
             try:
                 with _capture_output() as log_buf:
                     # Discovery runs inside the log-capture block (rather
@@ -94,13 +98,6 @@ def run_pending_jobs() -> None:
                         initial_outputs=initial_outputs,
                         default_timeout_seconds=config.plugins.default_timeout_seconds,
                     )
-                ctx.job_svc.mark_completed(
-                    job.id,
-                    log=log_buf.getvalue() or None,
-                    step_executions=step_executions,
-                    affected_records=wf_ctx.affected_records,
-                )
-                ctx.commit()
             except Exception as e:
                 # executor.run() attaches the envelope (with the failing step
                 # id) to whatever it re-raises; anything raised before the
@@ -109,16 +106,43 @@ def run_pending_jobs() -> None:
                 # step_executions (CIVEX-117): None if nothing ran yet.
                 # wf_ctx is None for that same before-any-step case, since it
                 # isn't built until the record/dataset/workflow are resolved.
-                envelope = getattr(e, "envelope", None) or ErrorEnvelope.from_exception(
-                    e
-                )
-                ctx.job_svc.mark_failed(
-                    job.id,
-                    envelope,
-                    log=log_buf.getvalue() or None,
-                    step_executions=getattr(e, "step_executions", None),
-                    affected_records=wf_ctx.affected_records if wf_ctx else None,
-                )
+                failure = e
+
+            # Persisting the outcome is a separate try/except from running
+            # the workflow above: a DB error here (e.g. a dropped
+            # connection) must not get mislabeled as this job's own
+            # failure, and must not silently kill the drain loop -- a
+            # background task's exception is otherwise only ever visible as
+            # a raw traceback in the server log, with every job still
+            # pending after it left unprocessed until the next manual
+            # drain (CIVEX-296 stability review).
+            try:
+                if failure is None:
+                    ctx.job_svc.mark_completed(
+                        job.id,
+                        log=log_buf.getvalue() or None,
+                        step_executions=step_executions,
+                        affected_records=wf_ctx.affected_records if wf_ctx else [],
+                    )
+                else:
+                    envelope = getattr(
+                        failure, "envelope", None
+                    ) or ErrorEnvelope.from_exception(failure)
+                    ctx.job_svc.mark_failed(
+                        job.id,
+                        envelope,
+                        log=log_buf.getvalue() or None,
+                        step_executions=getattr(failure, "step_executions", None),
+                        affected_records=wf_ctx.affected_records if wf_ctx else None,
+                    )
                 ctx.commit()
+            except Exception:
+                log.exception(
+                    "Failed to persist the outcome of job %s -- stopping "
+                    "this drain pass. The job will be retried on the next "
+                    "drain.",
+                    job.id,
+                )
+                break
     finally:
         ctx.close()

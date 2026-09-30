@@ -35,6 +35,7 @@ from civex.cli.plumbing import (
 from civex.cli.resolve import resolve
 from civex.cli.status import status
 from civex.cli.sync import pull, push
+from civex.cli.update import update
 
 app = typer.Typer(
     name="civex",
@@ -75,6 +76,7 @@ app.command("clone", rich_help_panel=_START)(clone)
 app.command("demo", rich_help_panel=_START)(demo)
 app.add_typer(db.app, name="db", rich_help_panel=_START)
 app.command("license", rich_help_panel=_START)(license_cmd)
+app.command("update", rich_help_panel=_START)(update)
 
 app.add_typer(ai_cli.app, name="ai", rich_help_panel=_WORK)
 app.add_typer(schema.app, name="schema", rich_help_panel=_WORK)

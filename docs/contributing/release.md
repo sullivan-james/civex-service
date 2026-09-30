@@ -44,11 +44,13 @@ Triggered on push of any `v*` tag:
    copies `frontend/dist/` into `src/civex/server/static/` — the wheel
    ships the built frontend as package data
    (`[tool.setuptools.package-data]` includes `server/static/**`), so a
-   `pip install civex[server]` gets a working web UI with no separate
+   `pip install civex` gets a working web UI with no separate
    frontend build step.
-3. **Bundles a civex-plugin-sdk wheel** (`uv build --wheel -o
-   src/civex/_vendor/sdk civex-plugin-sdk`) — see "The plugin SDK is not
-   published by `release.yml`" below.
+3. **Verifies the plugin SDK is published** — `civex` depends on
+   `civex-plugin-sdk` as a normal dependency, so the in-repo SDK version
+   must already be on PyPI (`scripts/check_sdk_sync.py require-published`),
+   and civex's declared range must admit it. See
+   [Releasing civex-plugin-sdk](sdk-release.md).
 4. **Builds the wheel** (`python -m build --wheel`), with the version
    resolved from the pushed tag via `setuptools-scm` as above.
 5. **Creates a GitHub Release** attaching the wheel, with
@@ -58,47 +60,18 @@ Triggered on push of any `v*` tag:
    `skip-existing: true` so a re-run against an already-published version
    doesn't fail the job.
 
-## The plugin SDK is not published by `release.yml`
+## The plugin SDK is released separately
 
-`civex-plugin-sdk` (`civex-plugin-sdk/`) has its own version in its own
-`pyproject.toml` and is not built or published as its own PyPI project by
-this workflow — pushing a `v*` tag releases `civex` only, and
-`civex-plugin-sdk` is not on PyPI under its own name.
+`civex-plugin-sdk` is its own PyPI project with its own hand-set version,
+tag namespace (`sdk-v*`) and workflow (`release-sdk.yml`); pushing a `v*` tag
+releases `civex` only. `civex` depends on it with a compatible-range
+requirement, and `release.yml` refuses to publish unless the in-repo SDK
+version is already on PyPI (this is what prevents a repeat of the v1.0.5
+silent-fallback bug). The full model, guards and procedure are in
+[Releasing civex-plugin-sdk](sdk-release.md).
 
-Until v1.0.5, `civex`'s own `pyproject.toml` listed `civex-plugin-sdk` as a
-plain runtime dependency anyway. Since nothing on PyPI satisfies that name,
-pip couldn't resolve it, and every `pip install`/`pipx install civex` since
-v1.0.5 silently fell back to the last version that *did* resolve (v1.0.4)
-rather than erroring — see the v1.0.6 `CHANGELOG.md` entry. As of v1.0.6,
-`civex` instead bundles the SDK with itself, covering both places it's
-needed:
-
-- **`civex`'s own imports** (the host-side subprocess plugin runtime does
-  `from civex_plugin_sdk.io import ...`) — the SDK's source is vendored
-  directly into the `civex` wheel (`[tool.setuptools.packages.find]` /
-  `[tool.setuptools.package-dir]` in `pyproject.toml`), so it's just part
-  of the same install.
-- **Plugin authors' code**, which runs in a *separate*
-  `uv run --no-project` environment per plugin and needs `civex-plugin-sdk`
-  resolvable there too. `subprocess_runtime.py` points `--find-links` at a
-  directory holding a real `civex-plugin-sdk` wheel: a fresh one built from
-  a sibling dev checkout when running out of this repo
-  (`_find_sdk_source()`), otherwise the prebuilt wheel this install shipped
-  as package data at `civex/_vendor/sdk/`
-  (`_bundled_sdk_wheel_dir()`) — built by the release step above and never
-  committed to the repo (see "Local build").
-
-This is a stopgap, not the end state: it means every `civex` release
-carries its own frozen copy of whatever SDK version was current at build
-time, rather than plugin authors being able to depend on `civex-plugin-sdk`
-independently, version it separately, or find it searchable on PyPI.
-Publishing `civex-plugin-sdk` to PyPI as its own project (its own release
-workflow, its own version tags, a license suited to third-party plugin
-authors rather than civex's own PolyForm Shield license) is still separate,
-not-yet-done work — once it's published, `_bundled_sdk_wheel_dir()` and the
-package-data bundling step can both be deleted, since
-`uv run --no-project` will resolve `civex-plugin-sdk` from the real index
-with no override needed.
+Before v1.1.0 the SDK was vendored into the `civex` wheel and shipped as a
+prebuilt wheel in package data; both are gone.
 
 ## Local build
 
@@ -108,7 +81,6 @@ wheel contents):
 ```bash
 cd frontend && npm ci && npm run build && cd ..
 cp -r frontend/dist/. src/civex/server/static/
-uv build --wheel -o src/civex/_vendor/sdk civex-plugin-sdk
 pip install build
 python -m build --wheel
 ```

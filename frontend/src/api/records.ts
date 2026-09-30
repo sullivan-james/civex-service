@@ -11,6 +11,10 @@ export interface CivexRecord {
   updated_at: string
   /** When this record was soft-deleted. Null means live. */
   deleted_at: string | null
+  /** id -> that target's natural_name, for every reference/reference_list
+   * value on this record. Null target label means the target has no
+   * natural_name (not that it's missing). */
+  reference_labels: Record<string, string | null> | null
 }
 
 export interface PaginatedRecords {

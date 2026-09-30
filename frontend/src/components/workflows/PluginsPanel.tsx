@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { Link } from 'react-router'
 import {
   useDeletePlugin,
   usePlugins,
@@ -13,7 +14,6 @@ import {
   ConfirmDialog,
 } from '../ui'
 import { ChevronUp, ChevronDown } from '../ui/icons'
-import { PluginEditor } from '../plugins/PluginEditor'
 import type {
   PluginInfo,
   PluginIOSpec,
@@ -118,10 +118,6 @@ export function PluginsPanel() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [deleteWarning, setDeleteWarning] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [pluginEditor, setPluginEditor] = useState<{
-    filename: string
-    isNew: boolean
-  } | null>(null)
 
   async function handlePluginFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -249,13 +245,11 @@ export function PluginsPanel() {
           >
             {uploadPlugin.isPending ? 'Uploading…' : 'Upload plugin'}
           </Button>
-          <Button
-            size="sm"
-            variant="primary"
-            onClick={() => setPluginEditor({ filename: '', isNew: true })}
-          >
-            + New plugin
-          </Button>
+          <Link to="/plugins/new" target="_blank" rel="opener">
+            <Button size="sm" variant="primary">
+              + New plugin
+            </Button>
+          </Link>
         </div>
       </div>
       <input
@@ -276,15 +270,15 @@ export function PluginsPanel() {
           actions={(p) =>
             p.filename ? (
               <div className="flex justify-end gap-2">
-                <Button
-                  size="sm"
-                  variant="default"
-                  onClick={() =>
-                    setPluginEditor({ filename: p.filename!, isNew: false })
-                  }
+                <Link
+                  to={`/plugins/${encodeURIComponent(p.filename.replace(/\.py$/, ''))}/edit`}
+                  target="_blank"
+                  rel="opener"
                 >
-                  Edit
-                </Button>
+                  <Button size="sm" variant="default">
+                    Edit
+                  </Button>
+                </Link>
                 <Button
                   size="sm"
                   variant="danger"
@@ -331,15 +325,15 @@ export function PluginsPanel() {
             emptyTitle="No errors"
             actions={(e) => (
               <div className="flex justify-end gap-2">
-                <Button
-                  size="sm"
-                  variant="default"
-                  onClick={() =>
-                    setPluginEditor({ filename: e.filename, isNew: false })
-                  }
+                <Link
+                  to={`/plugins/${encodeURIComponent(e.filename.replace(/\.py$/, ''))}/edit`}
+                  target="_blank"
+                  rel="opener"
                 >
-                  Edit
-                </Button>
+                  <Button size="sm" variant="default">
+                    Edit
+                  </Button>
+                </Link>
                 <Button
                   size="sm"
                   variant="danger"
@@ -354,14 +348,6 @@ export function PluginsPanel() {
             actionsWidth="160px"
           />
         </div>
-      )}
-
-      {pluginEditor && (
-        <PluginEditor
-          filename={pluginEditor.filename}
-          isNew={pluginEditor.isNew}
-          onClose={() => setPluginEditor(null)}
-        />
       )}
 
       {deleteTarget && (

@@ -1,199 +1,57 @@
 import { useState } from 'react'
-import { Link } from 'react-router'
 import { useSchemas } from '../../hooks/useSchemas'
-import { useRecords } from '../../hooks/useRecords'
-import {
-  schemasApi,
-  type Schema,
-  type Field as SchemaField,
-} from '../../api/schemas'
+import { useCollections } from '../../hooks/useCollections'
+import { useRecords, useHasSchemaRecords } from '../../hooks/useRecords'
+import { schemasApi, type Schema } from '../../api/schemas'
 import { recordsApi, type CivexRecord } from '../../api/records'
-import { RecordSearchPicker } from '../records/RecordSearchPicker'
+import { collectionsApi } from '../../api/collections'
 import { filesApi } from '../../api/files'
 import { workflowsApi } from '../../api/workflows'
-import {
-  Badge,
-  Button,
-  Checkbox,
-  Field,
-  FormError,
-  Input,
-  NameLabelFields,
-  Select,
-} from '../ui'
-import { ArrowLeft, ArrowRight, Check, Upload, Database } from '../ui/icons'
+import { Stepper } from '../ui'
 import { parseCsv, type ParsedCsv } from '../../utils/csv'
-import {
-  inferColumnType,
-  suggestFieldMapping,
-  type InferredFieldType,
-} from '../../utils/importMapping'
+import { inferColumnType, suggestFieldMapping } from '../../utils/importMapping'
 import { normalizeNumericKey } from '../../utils/filenamePattern'
-import {
-  FilenamePatternPreview,
-  extractFromFilename,
-  type ExtractOutputType,
-} from './FilenamePatternPreview'
+import { extractFromFilename } from './FilenamePatternPreview'
 import {
   buildCsvImportWorkflowYaml,
   buildFilesImportWorkflowYaml,
 } from '../../utils/workflowYaml'
-import { displayLabel, nameError, slugify } from '../../utils/naming'
+import { displayLabel, slugify, nameError } from '../../utils/naming'
 import { errorMessage } from '../../lib/errors'
+import { SourceStep } from './SourceStep'
+import { MapStep } from './MapStep'
+import { ConfirmStep } from './ConfirmStep'
+import { DoneStep } from './DoneStep'
+import {
+  NEW_SCHEMA,
+  NEW_COLLECTION,
+  NEW_FIELD,
+  initialMapState,
+  initialConfirmState,
+  coerceCsvValue,
+  type Mode,
+  type WizardStep,
+  type Strategy,
+  type CsvRowPlan,
+  type FilePlan,
+  type ImportOutcome,
+} from './importWizardTypes'
 
-interface Props {
-  datasetName: string
+export interface ImportWizardProps {
+  /** Pre-chosen collection (e.g. entering from a collection page). Omit to
+   * ask for one mid-wizard — see `schemaId` for the symmetric case. */
+  datasetName?: string
+  /** Pre-chosen schema (e.g. entering from a schema page) — skips the
+   * "record type" picker entirely rather than just hiding it. */
+  schemaId?: string
 }
 
-type Mode = 'files' | 'csv'
-type WizardStep = 'source' | 'map' | 'confirm' | 'done'
-type Strategy = 'create' | 'match'
+const STEPS: WizardStep[] = ['source', 'map', 'confirm', 'done']
 
-interface NewFieldDraft {
-  name: string
-  label: string
-  type: string
-}
-
-const SCALAR_TYPES: InferredFieldType[] = [
-  'string',
-  'integer',
-  'float',
-  'boolean',
-  'date',
-  'datetime',
-]
-
-const NEW_SCHEMA = '__new__'
-const NEW_FIELD = '__new__'
-const SKIP_COLUMN = '__skip__'
-
-function Spinner() {
-  return (
-    <svg
-      className="animate-spin"
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      aria-hidden
-    >
-      <path
-        d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
-}
-
-/** Compact inline editor for a not-yet-created field — name/label/type. */
-function NewFieldEditor({
-  draft,
-  onChange,
-  typeOptions,
-}: {
-  draft: NewFieldDraft
-  onChange: (next: NewFieldDraft) => void
-  typeOptions: readonly string[]
-}) {
-  const error = draft.name ? nameError(draft.name) : 'A name is required'
-  return (
-    <div className="flex flex-wrap items-end gap-2 mt-1 pl-3 border-l-2 border-accent-muted">
-      <Field label="Label" hideLabel span={4}>
-        <Input
-          size="sm"
-          value={draft.label}
-          onChange={(e) =>
-            onChange({
-              ...draft,
-              label: e.target.value,
-              name: slugify(e.target.value),
-            })
-          }
-          placeholder="Field label"
-        />
-      </Field>
-      <Field label="Name" hideLabel span={4} error={error ?? undefined}>
-        <Input
-          size="sm"
-          className="font-mono"
-          value={draft.name}
-          onChange={(e) => onChange({ ...draft, name: e.target.value })}
-          placeholder="field_name"
-        />
-      </Field>
-      <Field label="Type" hideLabel span={4}>
-        <Select
-          size="sm"
-          value={draft.type}
-          onChange={(e) => onChange({ ...draft, type: e.target.value })}
-        >
-          {typeOptions.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </Select>
-      </Field>
-    </div>
-  )
-}
-
-interface CsvRowPlan {
-  index: number
-  data: Record<string, unknown>
-  skip: string | null
-}
-
-interface FilePlan {
-  file: File
-  data: Record<string, unknown>
-  matchedRecord: CivexRecord | null
-  skip: string | null
-}
-
-interface ImportOutcome {
-  created: CivexRecord[]
-  updated: CivexRecord[]
-  skipped: { label: string; reason: string }[]
-  automationStem?: string
-  automationError?: string
-}
-
-function coerceCsvValue(
-  raw: string,
-  dtype: string,
-): { value: unknown; error: string | null } {
-  const trimmed = raw.trim()
-  if (trimmed === '') return { value: undefined, error: null }
-  if (dtype === 'integer') {
-    const n = parseInt(trimmed, 10)
-    return isNaN(n)
-      ? { value: undefined, error: `"${raw}" is not an integer` }
-      : { value: n, error: null }
-  }
-  if (dtype === 'float') {
-    const n = parseFloat(trimmed)
-    return isNaN(n)
-      ? { value: undefined, error: `"${raw}" is not a number` }
-      : { value: n, error: null }
-  }
-  if (dtype === 'boolean') {
-    return {
-      value: ['true', 'yes', '1'].includes(trimmed.toLowerCase()),
-      error: null,
-    }
-  }
-  return { value: trimmed, error: null }
-}
-
-function recordLabel(r: CivexRecord): string {
-  return r.natural_name ?? r.id.slice(0, 8)
-}
-
-export default function ImportWizard({ datasetName }: Props) {
+export default function ImportWizard({
+  datasetName,
+  schemaId,
+}: ImportWizardProps) {
   const [step, setStep] = useState<WizardStep>('source')
   const [mode, setMode] = useState<Mode | null>(null)
 
@@ -201,6 +59,71 @@ export default function ImportWizard({ datasetName }: Props) {
   const [files, setFiles] = useState<File[]>([])
   const [csvReadError, setCsvReadError] = useState<string | null>(null)
   const [parsedCsv, setParsedCsv] = useState<ParsedCsv | null>(null)
+
+  // ── Schema ────────────────────────────────────────────────────────────
+  const { data: schemas } = useSchemas()
+  const [mapState, setMapState] = useState(initialMapState)
+  function patchMap(patch: Partial<typeof mapState>) {
+    setMapState((prev) => ({ ...prev, ...patch }))
+  }
+
+  const presetSchema = schemaId
+    ? (schemas?.find((s) => s.id === schemaId) ?? null)
+    : null
+  // schemaId was given but the schemas list hasn't loaded yet -- avoid a
+  // one-frame flash of the "pick a record type" UI before snapping to
+  // "already have one".
+  const schemaResolving = !!schemaId && !schemas
+
+  const isNewSchema = !presetSchema && mapState.schemaChoice === NEW_SCHEMA
+  const effectiveSchema: Schema | null =
+    presetSchema ??
+    (isNewSchema
+      ? null
+      : (schemas?.find((s) => s.id === mapState.schemaChoice) ?? null))
+  const targetSchemaName = isNewSchema
+    ? mapState.newSchema.name
+    : (effectiveSchema?.name ?? '')
+  const availableFields = effectiveSchema?.fields ?? []
+  const availableFileFields = availableFields.filter((f) => f.type === 'file')
+  const availableNonFileFields = availableFields.filter(
+    (f) => f.type !== 'file' && f.type !== 'file_list',
+  )
+
+  const parentSchema =
+    !isNewSchema && effectiveSchema?.parent_id
+      ? (schemas?.find((s) => s.id === effectiveSchema.parent_id) ?? null)
+      : null
+  const hasParentCandidates = useHasSchemaRecords(parentSchema?.name)
+  const needsParent = !!parentSchema
+
+  // ── Collection ───────────────────────────────────────────────────────
+  const { data: collections } = useCollections()
+  const showCollectionPicker = !datasetName
+
+  // ── CSV column mapping ───────────────────────────────────────────────
+  // Re-run whenever the CSV changes or the target schema's field set
+  // changes -- called explicitly at those two points rather than
+  // reactively, so a column the user has already remapped by hand doesn't
+  // get silently overwritten by an unrelated re-render.
+  function applyColumnSuggestions(csv: ParsedCsv, fields: Schema['fields']) {
+    const suggested = suggestFieldMapping(csv.columns, fields)
+    const nextMap: Record<string, string> = {}
+    const nextDrafts: typeof mapState.newColumnFields = {}
+    for (const col of csv.columns) {
+      if (suggested[col]) {
+        nextMap[col] = suggested[col]!
+      } else {
+        nextMap[col] = NEW_FIELD
+        nextDrafts[col] = {
+          label: displayLabel(slugify(col) || col, null),
+          name: slugify(col),
+          type: inferColumnType(csv.rows.map((r) => r[col] ?? '')),
+        }
+      }
+    }
+    patchMap({ columnMap: nextMap, newColumnFields: nextDrafts })
+  }
 
   async function handleCsvFileChange(file: File | null) {
     setCsvReadError(null)
@@ -216,75 +139,28 @@ export default function ImportWizard({ datasetName }: Props) {
     }
   }
 
-  // ── Schema ────────────────────────────────────────────────────────────
-  const { data: schemas } = useSchemas()
-  const [schemaChoice, setSchemaChoice] = useState<string>('')
-  const [newSchema, setNewSchema] = useState({ label: '', name: '' })
-  const isNewSchema = schemaChoice === NEW_SCHEMA
-  const effectiveSchema: Schema | null = isNewSchema
-    ? null
-    : (schemas?.find((s) => s.id === schemaChoice) ?? null)
-  const targetSchemaName = isNewSchema
-    ? newSchema.name
-    : (effectiveSchema?.name ?? '')
-  const availableFields = effectiveSchema?.fields ?? []
-  const availableFileFields = availableFields.filter((f) => f.type === 'file')
-  const availableNonFileFields = availableFields.filter(
-    (f) => f.type !== 'file' && f.type !== 'file_list',
-  )
-
-  const parentSchema =
-    !isNewSchema && effectiveSchema?.parent_id
-      ? (schemas?.find((s) => s.id === effectiveSchema.parent_id) ?? null)
-      : null
-  const [parentRecordId, setParentRecordId] = useState('')
-  // Only need to know whether *any* parent-schema records exist — the
-  // picker itself searches on demand rather than listing every candidate.
-  const { data: parentPage } = useRecords(
-    parentSchema ? datasetName : '',
-    parentSchema ? { schema: parentSchema.name, limit: 1 } : undefined,
-  )
-  const hasParentCandidates = (parentPage?.total ?? 0) > 0
-  const needsParent = !!parentSchema
-
-  // ── CSV column mapping ───────────────────────────────────────────────
-  const [columnMap, setColumnMap] = useState<Record<string, string>>({})
-  const [newColumnFields, setNewColumnFields] = useState<
-    Record<string, NewFieldDraft>
-  >({})
-
-  // Re-run whenever the CSV changes (see handleCsvFileChange) or the target
-  // schema's field set changes (see the schema <Select>'s onChange below) —
-  // called explicitly at those two points rather than reactively, so a
-  // column the user has already remapped by hand doesn't get silently
-  // overwritten by an unrelated re-render.
-  function applyColumnSuggestions(csv: ParsedCsv, fields: SchemaField[]) {
-    const suggested = suggestFieldMapping(csv.columns, fields)
-    const nextMap: Record<string, string> = {}
-    const nextDrafts: Record<string, NewFieldDraft> = {}
-    for (const col of csv.columns) {
-      if (suggested[col]) {
-        nextMap[col] = suggested[col]!
-      } else {
-        nextMap[col] = NEW_FIELD
-        nextDrafts[col] = {
-          label: displayLabel(slugify(col) || col, null),
-          name: slugify(col),
-          type: inferColumnType(csv.rows.map((r) => r[col] ?? '')),
-        }
-      }
+  function handleSchemaChoiceChange(id: string) {
+    const patch: Partial<typeof mapState> = {
+      schemaChoice: id,
+      parentRecordId: '',
     }
-    setColumnMap(nextMap)
-    setNewColumnFields(nextDrafts)
+    patchMap(patch)
+    if (parsedCsv) {
+      const fields =
+        id && id !== NEW_SCHEMA
+          ? (schemas?.find((s) => s.id === id)?.fields ?? [])
+          : []
+      applyColumnSuggestions(parsedCsv, fields)
+    }
   }
 
   function resolvedColumnTarget(
     col: string,
   ): { fieldName: string; dtype: string } | null {
-    const choice = columnMap[col]
-    if (!choice || choice === SKIP_COLUMN) return null
+    const choice = mapState.columnMap[col]
+    if (!choice || choice === '__skip__') return null
     if (choice === NEW_FIELD) {
-      const draft = newColumnFields[col]
+      const draft = mapState.newColumnFields[col]
       return draft && draft.name
         ? { fieldName: draft.name, dtype: draft.type }
         : null
@@ -294,45 +170,43 @@ export default function ImportWizard({ datasetName }: Props) {
   }
 
   // ── Files mapping ────────────────────────────────────────────────────
-  const [fileFieldChoice, setFileFieldChoice] = useState<string>('')
-  const [newFileField, setNewFileField] = useState<NewFieldDraft>({
-    name: 'file',
-    label: 'File',
-    type: 'file',
-  })
-  const [strategyChoice, setStrategyChoice] = useState<Strategy>('create')
-  const [keyFieldName, setKeyFieldName] = useState('')
-  const [pattern, setPattern] = useState('')
-  const [extraExtractEnabled, setExtraExtractEnabled] = useState(false)
-  const [extraFieldChoice, setExtraFieldChoice] = useState('')
-  const [newExtraField, setNewExtraField] = useState<NewFieldDraft>({
-    name: '',
-    label: '',
-    type: 'string',
-  })
   const extraOutputType = (
-    extraFieldChoice === NEW_FIELD
-      ? newExtraField.type
-      : (availableNonFileFields.find((f) => f.name === extraFieldChoice)
-          ?.type ?? 'string')
-  ) as ExtractOutputType
+    mapState.extraFieldChoice === NEW_FIELD
+      ? mapState.newExtraField.type
+      : (availableNonFileFields.find(
+          (f) => f.name === mapState.extraFieldChoice,
+        )?.type ?? 'string')
+  ) as 'string' | 'integer' | 'float' | 'date' | 'datetime'
 
   const canMatch = !isNewSchema && !!parentSchema
   // Match mode only makes sense once a parent-scoped existing schema is
-  // chosen — derived rather than synced back into state via an effect, so
+  // chosen -- derived rather than synced back into state via an effect, so
   // switching schemas can't leave a stale, no-longer-selectable strategy.
-  const strategy: Strategy = canMatch ? strategyChoice : 'create'
+  const strategy: Strategy = canMatch ? mapState.strategyChoice : 'create'
 
   const filenames = files.map((f) => f.name)
 
+  // ── Confirm / collection choice ─────────────────────────────────────
+  const [confirmState, setConfirmState] = useState(initialConfirmState)
+  function patchConfirm(patch: Partial<typeof confirmState>) {
+    setConfirmState((prev) => ({ ...prev, ...patch }))
+  }
+  const collectionIsNew = confirmState.collectionChoice === NEW_COLLECTION
+  // The collection to scope reads against right now -- the prop if given,
+  // else whatever's been chosen so far (empty until then; a brand-new
+  // collection has no existing records to match against anyway, so leaving
+  // this empty in that case is correct, not just a placeholder).
+  const scopedDatasetName =
+    datasetName ?? (collectionIsNew ? '' : confirmState.collectionChoice)
+
   const { data: existingChildPage } = useRecords(
-    strategy === 'match' && effectiveSchema && parentRecordId
-      ? datasetName
+    strategy === 'match' && effectiveSchema && mapState.parentRecordId
+      ? scopedDatasetName
       : '',
     strategy === 'match' && effectiveSchema
       ? {
           schema: effectiveSchema.name,
-          parent_record_id: parentRecordId || undefined,
+          parent_record_id: mapState.parentRecordId || undefined,
           limit: 1000,
         }
       : undefined,
@@ -340,10 +214,12 @@ export default function ImportWizard({ datasetName }: Props) {
   const existingChildren = existingChildPage?.items ?? []
 
   const fileFieldName =
-    fileFieldChoice === NEW_FIELD ? newFileField.name : fileFieldChoice
+    mapState.fileFieldChoice === NEW_FIELD
+      ? mapState.newFileField.name
+      : mapState.fileFieldChoice
 
   // ── Plans (dry run) ──────────────────────────────────────────────────
-  // Recomputed on every render rather than memoized — cheap relative to a
+  // Recomputed on every render rather than memoized -- cheap relative to a
   // form render, and it keeps the confirm-step counts and the actual run
   // reading from the exact same (always-current) logic.
   function computeCsvPlan(): CsvRowPlan[] {
@@ -382,7 +258,12 @@ export default function ImportWizard({ datasetName }: Props) {
       let matchedRecord: CivexRecord | null = null
 
       if (strategy === 'match') {
-        const extraction = extractFromFilename(file.name, pattern, 'string', '')
+        const extraction = extractFromFilename(
+          file.name,
+          mapState.pattern,
+          'string',
+          '',
+        )
         if (extraction.error || extraction.value === null) {
           skip = `${extraction.error ?? 'no match'}`
         } else {
@@ -392,14 +273,14 @@ export default function ImportWizard({ datasetName }: Props) {
             : normalized
           matchedRecord =
             existingChildren.find(
-              (r) => String(r.data[keyFieldName] ?? '') === normalized,
+              (r) => String(r.data[mapState.keyFieldName] ?? '') === normalized,
             ) ?? null
-          if (!matchedRecord) data[keyFieldName] = typedKey
+          if (!matchedRecord) data[mapState.keyFieldName] = typedKey
         }
-      } else if (extraExtractEnabled) {
+      } else if (mapState.extraExtractEnabled) {
         const extraction = extractFromFilename(
           file.name,
-          pattern,
+          mapState.pattern,
           extraOutputType,
           '',
         )
@@ -407,9 +288,9 @@ export default function ImportWizard({ datasetName }: Props) {
           skip = extraction.error
         } else if (extraction.value !== null) {
           const target =
-            extraFieldChoice === NEW_FIELD
-              ? newExtraField.name
-              : extraFieldChoice
+            mapState.extraFieldChoice === NEW_FIELD
+              ? mapState.newExtraField.name
+              : mapState.extraFieldChoice
           if (target) data[target] = extraction.value
         }
       }
@@ -431,15 +312,16 @@ export default function ImportWizard({ datasetName }: Props) {
   ).length
   const filesSkipCount = filesPlan.filter((p) => p.skip).length
 
-  // ── Automation ───────────────────────────────────────────────────────
-  const [saveAsAutomation, setSaveAsAutomation] = useState(false)
-  const [automationLabel, setAutomationLabel] = useState('')
-
   // ── Run ──────────────────────────────────────────────────────────────
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(0)
   const [runErrorBanner, setRunErrorBanner] = useState<string | null>(null)
   const [result, setResult] = useState<ImportOutcome | null>(null)
+  // The collection actually used for the run just completed -- captured
+  // separately from confirmState so "Done" can deep-link to it even though
+  // confirmState.collectionChoice may still hold the NEW_COLLECTION
+  // sentinel rather than the real name.
+  const [ranDatasetName, setRanDatasetName] = useState('')
 
   const total = mode === 'csv' ? csvPlan.length : filesPlan.length
 
@@ -449,22 +331,22 @@ export default function ImportWizard({ datasetName }: Props) {
       ? files.length > 0
       : !!parsedCsv && parsedCsv.columns.length > 0 && parsedCsv.rows.length > 0
 
-  const schemaValid = isNewSchema
-    ? !newSchema.name && !newSchema.label
-      ? false
-      : !nameError(newSchema.name)
-    : !!effectiveSchema
+  const schemaValid = presetSchema
+    ? true
+    : isNewSchema
+      ? !(!mapState.newSchema.name && !mapState.newSchema.label) &&
+        !nameError(mapState.newSchema.name)
+      : !!effectiveSchema
 
   const mapValid =
     schemaValid &&
-    (!needsParent || !!parentRecordId) &&
+    (!needsParent || !!mapState.parentRecordId) &&
     (mode === 'csv'
       ? parsedCsv!.columns.some((c) => resolvedColumnTarget(c) !== null)
       : !!fileFieldName &&
         !nameError(fileFieldName) &&
-        (strategy !== 'match' || (!!keyFieldName && !!pattern)))
-
-  const automationValid = !saveAsAutomation || !!automationLabel.trim()
+        (strategy !== 'match' ||
+          (!!mapState.keyFieldName && !!mapState.pattern)))
 
   // ── Execution ────────────────────────────────────────────────────────
   async function runImport() {
@@ -472,21 +354,31 @@ export default function ImportWizard({ datasetName }: Props) {
     setRunErrorBanner(null)
     setProgress(0)
     try {
+      let finalDatasetName = datasetName ?? confirmState.collectionChoice
+      if (!datasetName && collectionIsNew) {
+        const created = await collectionsApi.create({
+          name: confirmState.newCollection.name,
+          description: confirmState.newCollection.description || undefined,
+        })
+        finalDatasetName = created.name
+      }
+      setRanDatasetName(finalDatasetName)
+
       let schemaName = targetSchemaName
       let liveSchema = effectiveSchema
 
       if (isNewSchema) {
         liveSchema = await schemasApi.create({
-          name: newSchema.name,
-          label: newSchema.label || undefined,
+          name: mapState.newSchema.name,
+          label: mapState.newSchema.label || undefined,
         })
         schemaName = liveSchema.name
       }
 
       if (mode === 'csv' && parsedCsv) {
         for (const col of parsedCsv.columns) {
-          if (columnMap[col] === NEW_FIELD) {
-            const draft = newColumnFields[col]
+          if (mapState.columnMap[col] === NEW_FIELD) {
+            const draft = mapState.newColumnFields[col]
             await schemasApi.addField(schemaName, {
               name: draft.name,
               label: draft.label || undefined,
@@ -495,18 +387,21 @@ export default function ImportWizard({ datasetName }: Props) {
           }
         }
       } else if (mode === 'files') {
-        if (fileFieldChoice === NEW_FIELD) {
+        if (mapState.fileFieldChoice === NEW_FIELD) {
           await schemasApi.addField(schemaName, {
-            name: newFileField.name,
-            label: newFileField.label || undefined,
+            name: mapState.newFileField.name,
+            label: mapState.newFileField.label || undefined,
             type: 'file',
           })
         }
-        if (extraExtractEnabled && extraFieldChoice === NEW_FIELD) {
+        if (
+          mapState.extraExtractEnabled &&
+          mapState.extraFieldChoice === NEW_FIELD
+        ) {
           await schemasApi.addField(schemaName, {
-            name: newExtraField.name,
-            label: newExtraField.label || undefined,
-            type: newExtraField.type,
+            name: mapState.newExtraField.name,
+            label: mapState.newExtraField.label || undefined,
+            type: mapState.newExtraField.type,
           })
         }
       }
@@ -524,10 +419,10 @@ export default function ImportWizard({ datasetName }: Props) {
             })
           } else {
             try {
-              const rec = await recordsApi.create(datasetName, {
+              const rec = await recordsApi.create(finalDatasetName, {
                 schema_name: schemaName,
                 data: rowPlan.data,
-                parent_record_id: parentRecordId || undefined,
+                parent_record_id: mapState.parentRecordId || undefined,
               })
               created.push(rec)
             } catch (e) {
@@ -554,10 +449,10 @@ export default function ImportWizard({ datasetName }: Props) {
               })
               updated.push(rec)
             } else {
-              const rec = await recordsApi.create(datasetName, {
+              const rec = await recordsApi.create(finalDatasetName, {
                 schema_name: schemaName,
                 data: { ...filePlan.data, [fileFieldName]: ref },
-                parent_record_id: parentRecordId || undefined,
+                parent_record_id: mapState.parentRecordId || undefined,
               })
               created.push(rec)
             }
@@ -570,19 +465,20 @@ export default function ImportWizard({ datasetName }: Props) {
 
       let automationStem: string | undefined
       let automationError: string | undefined
-      if (saveAsAutomation) {
+      if (confirmState.saveAsAutomation) {
         try {
-          const stem = slugify(automationLabel)
+          const stem = slugify(confirmState.automationLabel)
           if (mode === 'files') {
             const yaml = buildFilesImportWorkflowYaml({
-              name: automationLabel,
+              name: confirmState.automationLabel,
               strategy,
               schemaName,
               fileField: fileFieldName,
-              datasetName,
-              parentRecordId: parentRecordId || undefined,
-              keyField: strategy === 'match' ? keyFieldName : undefined,
-              pattern: strategy === 'match' ? pattern : undefined,
+              datasetName: finalDatasetName,
+              parentRecordId: mapState.parentRecordId || undefined,
+              keyField:
+                strategy === 'match' ? mapState.keyFieldName : undefined,
+              pattern: strategy === 'match' ? mapState.pattern : undefined,
             })
             await workflowsApi.save(stem, yaml)
           } else {
@@ -594,7 +490,7 @@ export default function ImportWizard({ datasetName }: Props) {
               importSchema = await schemasApi.create({
                 name: importSchemaName,
                 label: `${displayLabel(schemaName, liveSchema?.label)} import`,
-                description: `Attach a new CSV here to re-run "${automationLabel}".`,
+                description: `Attach a new CSV here to re-run "${confirmState.automationLabel}".`,
               })
             }
             if (!importSchema.fields.some((f) => f.name === 'csv_file')) {
@@ -611,11 +507,11 @@ export default function ImportWizard({ datasetName }: Props) {
               if (target) fieldMapping[col] = target.fieldName
             }
             const yaml = buildCsvImportWorkflowYaml({
-              name: automationLabel,
+              name: confirmState.automationLabel,
               triggerSchemaName: importSchemaName,
               csvFieldName: 'csv_file',
               targetSchemaName: schemaName,
-              datasetName,
+              datasetName: finalDatasetName,
               fieldMapping,
             })
             await workflowsApi.save(stem, yaml)
@@ -635,686 +531,108 @@ export default function ImportWizard({ datasetName }: Props) {
     }
   }
 
+  function importMore() {
+    setStep('source')
+    setMode(null)
+    setFiles([])
+    setParsedCsv(null)
+    setMapState(initialMapState())
+    setConfirmState(initialConfirmState())
+    setResult(null)
+  }
+
+  const doneHref = schemaId
+    ? `/schemas/${schemaId}`
+    : `/collections/${encodeURIComponent(ranDatasetName || datasetName || '')}`
+
   // ── Render ───────────────────────────────────────────────────────────
+  if (schemaResolving) return null
+
   return (
     <div className="space-y-6 max-w-4xl">
-      <ol className="flex items-center gap-2 text-xs text-fg-muted">
-        {(['source', 'map', 'confirm', 'done'] as WizardStep[]).map((s, i) => (
-          <li key={s} className="flex items-center gap-2">
-            {i > 0 && <span aria-hidden="true">/</span>}
-            <span
-              className={
-                s === step
-                  ? 'text-fg font-semibold'
-                  : i <
-                      (
-                        ['source', 'map', 'confirm', 'done'] as WizardStep[]
-                      ).indexOf(step)
-                    ? 'text-accent'
-                    : ''
-              }
-            >
-              {
-                {
-                  source: 'Source',
-                  map: 'Map',
-                  confirm: 'Confirm',
-                  done: 'Done',
-                }[s]
-              }
-            </span>
-          </li>
-        ))}
-      </ol>
+      <Stepper
+        steps={[
+          { label: 'Source' },
+          { label: 'Map' },
+          { label: 'Confirm' },
+          { label: 'Done' },
+        ]}
+        activeIndex={STEPS.indexOf(step)}
+      />
 
       {step === 'source' && (
-        <div className="space-y-4">
-          <div className="flex gap-3">
-            <button
-              onClick={() => setMode('files')}
-              className={`flex-1 flex items-center gap-3 px-4 py-4 rounded-md border text-left transition-colors cursor-pointer ${
-                mode === 'files'
-                  ? 'border-accent bg-accent-subtle'
-                  : 'border-border hover:border-accent'
-              }`}
-            >
-              <Upload size={18} className="text-accent shrink-0" />
-              <span>
-                <span className="block text-sm font-medium text-fg">Files</span>
-                <span className="block text-xs text-fg-muted">
-                  A folder of scans, images, recordings…
-                </span>
-              </span>
-            </button>
-            <button
-              onClick={() => setMode('csv')}
-              className={`flex-1 flex items-center gap-3 px-4 py-4 rounded-md border text-left transition-colors cursor-pointer ${
-                mode === 'csv'
-                  ? 'border-accent bg-accent-subtle'
-                  : 'border-border hover:border-accent'
-              }`}
-            >
-              <Database size={18} className="text-accent shrink-0" />
-              <span>
-                <span className="block text-sm font-medium text-fg">
-                  Spreadsheet
-                </span>
-                <span className="block text-xs text-fg-muted">
-                  A CSV of rows to turn into records
-                </span>
-              </span>
-            </button>
-          </div>
-
-          {mode === 'files' && (
-            <div className="space-y-2">
-              <input
-                id="import-files-input"
-                type="file"
-                multiple
-                className="block w-full text-sm text-fg file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer"
-                onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
-              />
-              {files.length > 0 && (
-                <div className="border border-border rounded-md p-3 space-y-1">
-                  <p className="text-xs font-medium text-fg">
-                    {files.length} file{files.length === 1 ? '' : 's'} selected
-                  </p>
-                  <div className="max-h-40 overflow-y-auto text-xs font-mono text-fg-muted space-y-0.5">
-                    {files.slice(0, 30).map((f, i) => (
-                      <p key={i} className="truncate">
-                        {f.name}
-                      </p>
-                    ))}
-                    {files.length > 30 && <p>… and {files.length - 30} more</p>}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {mode === 'csv' && (
-            <div className="space-y-2">
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                className="block w-full text-sm text-fg file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer"
-                onChange={(e) =>
-                  handleCsvFileChange(e.target.files?.[0] ?? null)
-                }
-              />
-              {csvReadError && <FormError message={csvReadError} />}
-              {parsedCsv && parsedCsv.columns.length > 0 && (
-                <div className="border border-border rounded-md overflow-hidden">
-                  <div className="px-3 py-2 text-xs font-medium text-fg bg-canvas-subtle border-b border-border">
-                    {parsedCsv.columns.length} column
-                    {parsedCsv.columns.length === 1 ? '' : 's'} ·{' '}
-                    {parsedCsv.rows.length} row
-                    {parsedCsv.rows.length === 1 ? '' : 's'}
-                  </div>
-                  <div className="overflow-x-auto max-h-64">
-                    <table className="text-xs w-full">
-                      <thead>
-                        <tr>
-                          {parsedCsv.columns.map((c) => (
-                            <th
-                              key={c}
-                              className="text-left px-2 py-1.5 font-medium text-fg-muted whitespace-nowrap border-b border-border"
-                            >
-                              {c}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {parsedCsv.rows.slice(0, 5).map((row, i) => (
-                          <tr key={i} className="border-t border-border-muted">
-                            {parsedCsv!.columns.map((c) => (
-                              <td
-                                key={c}
-                                className="px-2 py-1.5 text-fg whitespace-nowrap"
-                              >
-                                {row[c]}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-              {parsedCsv && parsedCsv.rows.length === 0 && (
-                <FormError message="No data rows found in this file." />
-              )}
-            </div>
-          )}
-
-          <div className="flex justify-end">
-            <Button
-              variant="primary"
-              disabled={!mode || !sourceValid}
-              onClick={() => setStep('map')}
-            >
-              Continue <ArrowRight size={14} />
-            </Button>
-          </div>
-        </div>
+        <SourceStep
+          mode={mode}
+          onModeChange={setMode}
+          files={files}
+          onFilesChange={setFiles}
+          csvReadError={csvReadError}
+          parsedCsv={parsedCsv}
+          onCsvFileChange={handleCsvFileChange}
+          sourceValid={sourceValid}
+          onContinue={() => setStep('map')}
+        />
       )}
 
       {step === 'map' && mode && (
-        <div className="space-y-5">
-          <div className="space-y-2">
-            <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
-              Record type
-            </span>
-            <Select
-              value={schemaChoice}
-              onChange={(e) => {
-                const id = e.target.value
-                setSchemaChoice(id)
-                setParentRecordId('')
-                if (parsedCsv) {
-                  const fields =
-                    id && id !== NEW_SCHEMA
-                      ? (schemas?.find((s) => s.id === id)?.fields ?? [])
-                      : []
-                  applyColumnSuggestions(parsedCsv, fields)
-                }
-              }}
-              className="w-full max-w-sm"
-            >
-              <option value="">— Select a record type —</option>
-              <option value={NEW_SCHEMA}>+ Create a new record type</option>
-              {schemas?.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {displayLabel(s.name, s.label)}
-                  {s.parent_id ? ' (child record)' : ''}
-                </option>
-              ))}
-            </Select>
-            {isNewSchema && (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 pt-2">
-                <NameLabelFields
-                  kind="Schema"
-                  value={newSchema}
-                  onChange={setNewSchema}
-                  autoFocus
-                />
-              </div>
-            )}
-          </div>
-
-          {needsParent && parentSchema && (
-            <div className="space-y-1">
-              <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide flex items-center gap-2">
-                Parent record
-                <Badge variant="accent">
-                  {displayLabel(parentSchema.name, parentSchema.label)}
-                </Badge>
-              </span>
-              {!hasParentCandidates ? (
-                <p className="text-xs text-danger">
-                  No {displayLabel(parentSchema.name, parentSchema.label)}{' '}
-                  records in this collection yet — add one first.
-                </p>
-              ) : (
-                <RecordSearchPicker
-                  schemaName={parentSchema.name}
-                  value={parentRecordId || undefined}
-                  onChange={(id) => setParentRecordId(id ?? '')}
-                  placeholder="Search records…"
-                  className="w-full max-w-sm"
-                />
-              )}
-            </div>
-          )}
-
-          {mode === 'csv' && parsedCsv && (
-            <div className="space-y-1">
-              <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
-                Column mapping
-              </span>
-              <div className="border border-border rounded-md divide-y divide-border-muted">
-                {parsedCsv.columns.map((col) => (
-                  <div key={col} className="px-3 py-2">
-                    <div className="flex items-center gap-3">
-                      <span
-                        className="text-sm text-fg font-mono truncate flex-1"
-                        title={col}
-                      >
-                        {col}
-                      </span>
-                      <ArrowRight
-                        size={12}
-                        className="text-fg-subtle shrink-0"
-                      />
-                      <Select
-                        size="sm"
-                        value={columnMap[col] ?? SKIP_COLUMN}
-                        onChange={(e) =>
-                          setColumnMap((prev) => ({
-                            ...prev,
-                            [col]: e.target.value,
-                          }))
-                        }
-                        className="w-56 shrink-0"
-                      >
-                        <option value={SKIP_COLUMN}>
-                          — Skip this column —
-                        </option>
-                        <option value={NEW_FIELD}>+ Create new field</option>
-                        {availableFields
-                          .filter(
-                            (f) => f.type !== 'file' && f.type !== 'file_list',
-                          )
-                          .map((f) => (
-                            <option key={f.name} value={f.name}>
-                              {displayLabel(f.name, f.label)}
-                            </option>
-                          ))}
-                      </Select>
-                    </div>
-                    {columnMap[col] === NEW_FIELD && newColumnFields[col] && (
-                      <NewFieldEditor
-                        draft={newColumnFields[col]}
-                        onChange={(next) =>
-                          setNewColumnFields((prev) => ({
-                            ...prev,
-                            [col]: next,
-                          }))
-                        }
-                        typeOptions={SCALAR_TYPES}
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {mode === 'files' && (
-            <div className="space-y-5">
-              <div className="space-y-1">
-                <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
-                  Store each file in
-                </span>
-                <Select
-                  value={fileFieldChoice}
-                  onChange={(e) => setFileFieldChoice(e.target.value)}
-                  className="w-full max-w-sm"
-                >
-                  <option value="">— Select a field —</option>
-                  <option value={NEW_FIELD}>+ Create new field</option>
-                  {availableFileFields.map((f) => (
-                    <option key={f.name} value={f.name}>
-                      {displayLabel(f.name, f.label)}
-                    </option>
-                  ))}
-                </Select>
-                {fileFieldChoice === NEW_FIELD && (
-                  <NewFieldEditor
-                    draft={newFileField}
-                    onChange={setNewFileField}
-                    typeOptions={['file']}
-                  />
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
-                  Strategy
-                </span>
-                <div className="flex flex-col gap-2">
-                  <label className="flex items-start gap-2 text-sm text-fg cursor-pointer">
-                    <input
-                      type="radio"
-                      className="mt-1"
-                      checked={strategyChoice === 'create'}
-                      onChange={() => setStrategyChoice('create')}
-                    />
-                    <span>
-                      Create one record per file
-                      <span className="block text-xs text-fg-muted">
-                        Every file becomes a new {targetSchemaName || 'record'}.
-                      </span>
-                    </span>
-                  </label>
-                  <label
-                    className={`flex items-start gap-2 text-sm cursor-pointer ${canMatch ? 'text-fg' : 'text-fg-subtle cursor-not-allowed'}`}
-                  >
-                    <input
-                      type="radio"
-                      className="mt-1"
-                      disabled={!canMatch}
-                      checked={strategyChoice === 'match'}
-                      onChange={() => setStrategyChoice('match')}
-                    />
-                    <span>
-                      Match to existing records by a key in the filename
-                      <span className="block text-xs text-fg-muted">
-                        {canMatch
-                          ? 'Update the matching record, or create one if no key matches.'
-                          : 'Only available for a record type that is a child of another record.'}
-                      </span>
-                    </span>
-                  </label>
-                </div>
-              </div>
-
-              {strategy === 'match' && (
-                <div className="space-y-2 pl-3 border-l-2 border-accent-muted">
-                  <Field label="Match against field" span={6}>
-                    <Select
-                      size="sm"
-                      value={keyFieldName}
-                      onChange={(e) => setKeyFieldName(e.target.value)}
-                    >
-                      <option value="">— Select a field —</option>
-                      {availableNonFileFields.map((f) => (
-                        <option key={f.name} value={f.name}>
-                          {displayLabel(f.name, f.label)}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  <FilenamePatternPreview
-                    filenames={filenames}
-                    pattern={pattern}
-                    onPatternChange={setPattern}
-                    outputType="string"
-                    dateFormat=""
-                    onDateFormatChange={() => {}}
-                  />
-                </div>
-              )}
-
-              {strategy === 'create' && (
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-sm text-fg cursor-pointer">
-                    <Checkbox
-                      checked={extraExtractEnabled}
-                      onChange={(e) => setExtraExtractEnabled(e.target.checked)}
-                    />
-                    Also fill a field from the filename
-                  </label>
-                  {extraExtractEnabled && (
-                    <div className="space-y-2 pl-3 border-l-2 border-accent-muted">
-                      <Field label="Target field" span={6}>
-                        <Select
-                          size="sm"
-                          value={extraFieldChoice}
-                          onChange={(e) => setExtraFieldChoice(e.target.value)}
-                        >
-                          <option value="">— Select a field —</option>
-                          <option value={NEW_FIELD}>+ Create new field</option>
-                          {availableNonFileFields.map((f) => (
-                            <option key={f.name} value={f.name}>
-                              {displayLabel(f.name, f.label)}
-                            </option>
-                          ))}
-                        </Select>
-                      </Field>
-                      {extraFieldChoice === NEW_FIELD && (
-                        <NewFieldEditor
-                          draft={newExtraField}
-                          onChange={setNewExtraField}
-                          typeOptions={SCALAR_TYPES}
-                        />
-                      )}
-                      <FilenamePatternPreview
-                        filenames={filenames}
-                        pattern={pattern}
-                        onPatternChange={setPattern}
-                        outputType={extraOutputType}
-                        dateFormat=""
-                        onDateFormatChange={() => {}}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="flex justify-between">
-            <Button onClick={() => setStep('source')}>
-              <ArrowLeft size={14} /> Back
-            </Button>
-            <Button
-              variant="primary"
-              disabled={!mapValid}
-              onClick={() => setStep('confirm')}
-            >
-              Continue <ArrowRight size={14} />
-            </Button>
-          </div>
-        </div>
+        <MapStep
+          mode={mode}
+          state={mapState}
+          onChange={patchMap}
+          showSchemaPicker={!presetSchema}
+          schemas={schemas}
+          isNewSchema={isNewSchema}
+          onSchemaChoiceChange={handleSchemaChoiceChange}
+          availableFields={availableFields}
+          availableFileFields={availableFileFields}
+          availableNonFileFields={availableNonFileFields}
+          targetSchemaName={targetSchemaName}
+          needsParent={needsParent}
+          parentSchema={parentSchema}
+          hasParentCandidates={hasParentCandidates}
+          parsedCsv={parsedCsv}
+          canMatch={canMatch}
+          strategy={strategy}
+          filenames={filenames}
+          extraOutputType={extraOutputType}
+          mapValid={mapValid}
+          onBack={() => setStep('source')}
+          onContinue={() => setStep('confirm')}
+        />
       )}
 
       {step === 'confirm' && (
-        <div className="space-y-5">
-          <div className="border border-border rounded-md p-4 bg-canvas-subtle space-y-2">
-            <p className="text-sm text-fg">
-              {isNewSchema && (
-                <>
-                  Creates a new record type{' '}
-                  <Badge variant="accent">
-                    {newSchema.name || '(unnamed)'}
-                  </Badge>
-                  .{' '}
-                </>
-              )}
-              {mode === 'csv' ? (
-                <>
-                  <strong>{csvCreateCount}</strong> record
-                  {csvCreateCount === 1 ? '' : 's'} will be created in{' '}
-                  <Badge variant="accent">{targetSchemaName}</Badge>.
-                  {csvSkipCount > 0 && (
-                    <>
-                      {' '}
-                      {csvSkipCount} row{csvSkipCount === 1 ? '' : 's'} will be
-                      skipped.
-                    </>
-                  )}
-                </>
-              ) : (
-                <>
-                  <strong>{filesCreateCount}</strong> record
-                  {filesCreateCount === 1 ? '' : 's'} will be created
-                  {filesUpdateCount > 0 && (
-                    <>
-                      , <strong>{filesUpdateCount}</strong> existing record
-                      {filesUpdateCount === 1 ? '' : 's'} will be updated
-                    </>
-                  )}{' '}
-                  in <Badge variant="accent">{targetSchemaName}</Badge>.
-                  {filesSkipCount > 0 && (
-                    <>
-                      {' '}
-                      {filesSkipCount} file{filesSkipCount === 1 ? '' : 's'}{' '}
-                      will be skipped.
-                    </>
-                  )}
-                </>
-              )}
-            </p>
-
-            {(mode === 'csv' ? csvSkipCount : filesSkipCount) > 0 && (
-              <details className="text-xs text-fg-muted">
-                <summary className="cursor-pointer">View skipped items</summary>
-                <ul className="mt-1 space-y-0.5 max-h-40 overflow-y-auto">
-                  {(mode === 'csv'
-                    ? csvPlan
-                        .filter((p) => p.skip)
-                        .map((p) => `Row ${p.index + 1}: ${p.skip}`)
-                    : filesPlan
-                        .filter((p) => p.skip)
-                        .map((p) => `${p.file.name}: ${p.skip}`)
-                  ).map((line, i) => (
-                    <li key={i} className="font-mono">
-                      {line}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-sm text-fg cursor-pointer">
-              <Checkbox
-                checked={saveAsAutomation}
-                onChange={(e) => setSaveAsAutomation(e.target.checked)}
-              />
-              Save this as a reusable automation
-            </label>
-            {saveAsAutomation && (
-              <div className="pl-3 border-l-2 border-accent-muted space-y-2">
-                <Field
-                  label="Automation name"
-                  span={6}
-                  hint={
-                    mode === 'csv'
-                      ? `Creates a "${targetSchemaName || 'record'}_import" record type — attach a new CSV to it to repeat this import.`
-                      : 'Re-run it later from the Workflows page with a new folder of files.'
-                  }
-                >
-                  <Input
-                    size="sm"
-                    value={automationLabel}
-                    onChange={(e) => setAutomationLabel(e.target.value)}
-                    placeholder={`Import ${targetSchemaName || 'records'}`}
-                  />
-                </Field>
-              </div>
-            )}
-          </div>
-
-          {runErrorBanner && <FormError message={runErrorBanner} />}
-
-          <div className="flex justify-between items-center">
-            <Button onClick={() => setStep('map')} disabled={running}>
-              <ArrowLeft size={14} /> Back
-            </Button>
-            <Button
-              variant="primary"
-              disabled={!automationValid || running || total === 0}
-              onClick={runImport}
-            >
-              {running ? (
-                <>
-                  <Spinner /> Importing {progress}/{total}…
-                </>
-              ) : (
-                <>
-                  <Check size={14} /> Import {total} record
-                  {total === 1 ? '' : 's'}
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
+        <ConfirmStep
+          mode={mode!}
+          isNewSchema={isNewSchema}
+          newSchemaName={mapState.newSchema.name}
+          targetSchemaName={targetSchemaName}
+          csvCreateCount={csvCreateCount}
+          csvSkipCount={csvSkipCount}
+          filesCreateCount={filesCreateCount}
+          filesUpdateCount={filesUpdateCount}
+          filesSkipCount={filesSkipCount}
+          csvPlan={csvPlan}
+          filesPlan={filesPlan}
+          showCollectionPicker={showCollectionPicker}
+          collections={collections}
+          state={confirmState}
+          onChange={patchConfirm}
+          runErrorBanner={runErrorBanner}
+          running={running}
+          progress={progress}
+          total={total}
+          onBack={() => setStep('map')}
+          onRun={runImport}
+        />
       )}
 
       {step === 'done' && result && (
-        <div className="space-y-5">
-          <div className="border border-success-muted bg-success-subtle rounded-md p-4">
-            <p className="text-sm text-success font-medium">
-              {result.created.length} created
-              {result.updated.length > 0 &&
-                `, ${result.updated.length} updated`}
-              {result.skipped.length > 0 &&
-                `, ${result.skipped.length} skipped`}
-            </p>
-          </div>
-
-          {result.automationError && (
-            <FormError
-              message={`Import finished, but saving the automation failed: ${result.automationError}`}
-            />
-          )}
-          {result.automationStem && (
-            <p className="text-sm text-fg">
-              Saved as automation —{' '}
-              <Link
-                to={`/workflows/${encodeURIComponent(result.automationStem)}`}
-                className="text-accent hover:underline"
-              >
-                view "{result.automationStem}"
-              </Link>
-            </p>
-          )}
-
-          {(result.created.length > 0 || result.updated.length > 0) && (
-            <div className="border border-border rounded-md">
-              <div className="px-3 py-2 text-xs font-medium text-fg-muted bg-canvas-subtle border-b border-border">
-                Records
-              </div>
-              <div className="max-h-72 overflow-y-auto divide-y divide-border-muted">
-                {[...result.created, ...result.updated].map((r) => (
-                  <Link
-                    key={r.id}
-                    to={`/records/${r.id}`}
-                    className="flex items-center justify-between px-3 py-1.5 text-sm text-accent hover:bg-canvas-subtle hover:underline"
-                  >
-                    <span>{recordLabel(r)}</span>
-                    <Badge
-                      variant={
-                        result.created.includes(r) ? 'success' : 'default'
-                      }
-                    >
-                      {result.created.includes(r) ? 'created' : 'updated'}
-                    </Badge>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {result.skipped.length > 0 && (
-            <details className="text-xs text-fg-muted border border-border rounded-md p-3">
-              <summary className="cursor-pointer font-medium text-fg">
-                {result.skipped.length} skipped
-              </summary>
-              <ul className="mt-2 space-y-0.5 max-h-40 overflow-y-auto">
-                {result.skipped.map((s, i) => (
-                  <li key={i} className="font-mono">
-                    {s.label}: {s.reason}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-
-          <div className="flex gap-2">
-            <Link to={`/collections`}>
-              <Button variant="primary">Done</Button>
-            </Link>
-            <Button
-              onClick={() => {
-                setStep('source')
-                setMode(null)
-                setFiles([])
-                setParsedCsv(null)
-                setSchemaChoice('')
-                setColumnMap({})
-                setNewColumnFields({})
-                setFileFieldChoice('')
-                setStrategyChoice('create')
-                setKeyFieldName('')
-                setPattern('')
-                setExtraExtractEnabled(false)
-                setParentRecordId('')
-                setSaveAsAutomation(false)
-                setAutomationLabel('')
-                setResult(null)
-              }}
-            >
-              Import more
-            </Button>
-          </div>
-        </div>
+        <DoneStep
+          result={result}
+          doneHref={doneHref}
+          onImportMore={importMore}
+        />
       )}
     </div>
   )

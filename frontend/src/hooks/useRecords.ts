@@ -11,6 +11,7 @@ import {
   type PaginatedRecords,
   type ListParams,
 } from '../api/records'
+import { ApiError } from '../api/client'
 import { useToast } from '../components/ui/ToastProvider'
 import { errorMessage } from '../lib/errors'
 
@@ -66,6 +67,22 @@ export function useRecords(
   })
 }
 
+/** Whether *any* record of this schema exists, anywhere — not scoped to a
+ * collection (schemas aren't dataset-scoped; the same schema's records can
+ * live in different collections). Used for "is there a parent to pick from
+ * yet" checks that need an answer before a collection is necessarily known
+ * (e.g. the import wizard entered from a schema page). Mirrors
+ * `RecordSearchPicker`'s own global `searchBySchema` call, just without a
+ * search term and capped to 1 result. */
+export function useHasSchemaRecords(schemaName: string | null | undefined) {
+  const { data } = useQuery({
+    queryKey: ['records-exist', schemaName],
+    queryFn: () => recordsApi.searchBySchema(schemaName!, undefined, 1),
+    enabled: !!schemaName,
+  })
+  return (data?.length ?? 0) > 0
+}
+
 export function useRecordCounts(datasetName: string) {
   return useQuery({
     queryKey: ['record-counts', datasetName],
@@ -82,7 +99,13 @@ export function useRecord(
     queryKey: ['record', id],
     queryFn: () => recordsApi.get(id!),
     enabled: !!id,
-    refetchInterval: refetchInterval ?? false,
+    refetchInterval: (query) => {
+      const error = query.state.error
+      // Confirmed gone -- polling on a schedule won't make it reappear,
+      // so stop instead of re-requesting (and re-retrying) it forever.
+      if (error instanceof ApiError && error.status === 404) return false
+      return refetchInterval ?? false
+    },
   })
 }
 

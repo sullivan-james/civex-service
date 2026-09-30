@@ -32,36 +32,67 @@ def worker_run(
 
     console.print("[dim]Watching for jobs… (Ctrl-C to stop)[/dim]")
     while True:
-        job = ctx.job_svc.claim_pending()
+        # This loop is meant to run unattended for a long time, so a single
+        # transient failure anywhere in an iteration -- claiming a job,
+        # running it, or persisting its outcome -- must be logged and
+        # waited out rather than allowed to kill the whole daemon with a
+        # raw traceback (CIVEX-296 stability review). Contrast with the
+        # one-poll-per-call server equivalent, where a fresh call already
+        # gets a clean retry; here the retry has to be built into the loop
+        # itself.
+        try:
+            job = ctx.job_svc.claim_pending()
+        except Exception as e:
+            console.print(f"[error]✗ failed to claim the next job: {e}[/error]")
+            time.sleep(interval)
+            continue
         if job is None:
             time.sleep(interval)
             continue
         console.print(
             f"  [dim]→ workflow '{job.workflow_name}' (trigger: {job.trigger})[/dim]"
         )
+        failure: Exception | None = None
+        step_executions: list[dict] = []
+        affected_records: list[dict] = []
         try:
             step_executions, _, affected_records = run_job(job, ctx)
-            ctx.job_svc.mark_completed(
-                job.id,
-                step_executions=step_executions,
-                affected_records=affected_records,
-            )
-            ctx.commit()
-            console.print("    [success]✓ done[/success]")
         except Exception as e:
-            envelope = getattr(e, "envelope", None) or ErrorEnvelope.from_exception(e)
-            ctx.job_svc.mark_failed(
-                job.id,
-                envelope,
-                step_executions=getattr(e, "step_executions", None),
-                affected_records=getattr(e, "affected_records", None),
-            )
-            ctx.commit()
-            where = f" [{envelope.step}]" if envelope.step else ""
-            retry_hint = " [dim](retryable)[/dim]" if envelope.retryable else ""
+            failure = e
+
+        # Persisting the outcome is deliberately outside the try/except
+        # above: a DB error here must not be mistaken for this job's own
+        # failure, and must not crash the daemon.
+        try:
+            if failure is None:
+                ctx.job_svc.mark_completed(
+                    job.id,
+                    step_executions=step_executions,
+                    affected_records=affected_records,
+                )
+                ctx.commit()
+                console.print("    [success]✓ done[/success]")
+            else:
+                envelope = getattr(
+                    failure, "envelope", None
+                ) or ErrorEnvelope.from_exception(failure)
+                ctx.job_svc.mark_failed(
+                    job.id,
+                    envelope,
+                    step_executions=getattr(failure, "step_executions", None),
+                    affected_records=getattr(failure, "affected_records", None),
+                )
+                ctx.commit()
+                where = f" [{envelope.step}]" if envelope.step else ""
+                retry_hint = " [dim](retryable)[/dim]" if envelope.retryable else ""
+                console.print(
+                    f"    [error]✗{where} {envelope.kind}: {failure}[/error]{retry_hint}"
+                )
+        except Exception as e:
             console.print(
-                f"    [error]✗{where} {envelope.kind}: {e}[/error]{retry_hint}"
+                f"    [error]✗ failed to record this job's outcome: {e}[/error]"
             )
+            time.sleep(interval)
 
 
 @app.command("jobs")

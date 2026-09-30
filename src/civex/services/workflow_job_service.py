@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from civex.domain.dtos import ErrorEnvelope, RecordDTO, WorkflowJobDTO
 from civex.repositories.protocols import WorkflowJobRepository
 from civex.workflows.definition import WorkflowDef, load_workflow
 
+log = logging.getLogger(__name__)
 
 MAX_JOB_DEPTH = 10
 
@@ -24,8 +26,8 @@ class WorkflowJobService:
         for path in sorted(wf_dir.glob("*.yaml")) + sorted(wf_dir.glob("*.yml")):
             try:
                 result.append(load_workflow(path))
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("Skipping unparseable workflow file %s: %s", path, e)
         return result
 
     def find_workflow(self, name: str) -> WorkflowDef | None:
@@ -35,7 +37,8 @@ class WorkflowJobService:
         for path in sorted(wf_dir.glob("*.yaml")) + sorted(wf_dir.glob("*.yml")):
             try:
                 wf = load_workflow(path)
-            except Exception:
+            except Exception as e:
+                log.warning("Skipping unparseable workflow file %s: %s", path, e)
                 continue
             if (
                 wf.name == name

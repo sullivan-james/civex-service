@@ -2,7 +2,7 @@
 
 Parse a CSV file's bytes into a pandas DataFrame — the usual first step before `civex.rows_to_records` or `civex.upsert_records`.
 
-> Requires the `[workflows]` extra (`pip install 'civex[workflows]'`). The `import pandas` happens inside `invoke()`, not at module load, so this plugin still registers and appears in workflow validation without pandas installed — it only raises `ImportError` (pointing at the same install command) if a workflow actually runs the step.
+> Requires pandas, which ships with civex. It is imported inside `invoke()`, not at module load, so this plugin registers quickly and validates without loading pandas.
 
 <!-- civex:tables -->
 

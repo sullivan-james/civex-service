@@ -8,6 +8,7 @@ on:
       - "src/**"
       - "tests/**"
       - "civex-plugin-sdk/**"
+      - "scripts/**"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/ci.yml"
@@ -63,6 +64,28 @@ jobs:
 
       - name: Run tests
         run: uv run pytest tests/ -q -n auto --cov=civex --cov-report=term-missing
+
+      - name: Run SDK tests
+        run: uv run pytest civex-plugin-sdk/tests -q
+
+  sdk-sync:
+    # civex and civex-plugin-sdk release separately; these keep them in step.
+    # See docs/contributing/sdk-release.md.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v7
+
+      - name: SDK/civex consistency (range, changelog, version bump)
+        run: |
+          BASE=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="--base origin/${{ github.base_ref }}"
+          fi
+          uv run --no-project --with packaging python scripts/check_sdk_sync.py check $BASE
 
   audit:
     runs-on: ubuntu-latest

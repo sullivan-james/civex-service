@@ -19,12 +19,15 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from civex.domain.exceptions import (
+    AllVolumesFull,
     AlreadyExistsError,
     CivexError,
     ConfigError,
     DatabaseUnavailableError,
+    GCAlreadyRunningError,
     NotFoundError,
     ValidationError,
+    VolumeFullError,
 )
 from civex.observability import get_logger, request_id_var
 
@@ -108,13 +111,21 @@ class RequestContextMiddleware:
 def _status_for(exc: CivexError) -> int:
     if isinstance(exc, NotFoundError):
         return 404
-    if isinstance(exc, AlreadyExistsError):
+    if isinstance(exc, (AlreadyExistsError, GCAlreadyRunningError)):
         return 409
     if isinstance(exc, ValidationError):
         return 422
     if isinstance(exc, ConfigError):
         return 400
+    if isinstance(exc, (AllVolumesFull, VolumeFullError)):
+        return 507
     if isinstance(exc, DatabaseUnavailableError):
+        return 503
+    # Any other CivexError that declares itself retryable (VolumeUnavailableError,
+    # PluginTimeoutError, ...) is a transient/environmental failure rather than a
+    # client mistake -- 503 lets a caller distinguish "retry me" from "you did
+    # something wrong" (4xx) or "we have a bug" (an unclassified 500).
+    if exc.retryable:
         return 503
     return 500
 

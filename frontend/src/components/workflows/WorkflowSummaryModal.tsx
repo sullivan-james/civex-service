@@ -1,3 +1,4 @@
+import { Link } from 'react-router'
 import {
   Badge,
   Button,
@@ -15,7 +16,6 @@ interface WorkflowSummaryModalProps {
   workflow: Workflow
   plugins: PluginInfo[]
   onClose: () => void
-  onEditYaml: () => void
 }
 
 function TriggerSummary({
@@ -154,12 +154,12 @@ function StepCard({
 
 /** Readable view of a workflow — trigger, steps, their inputs and outputs —
  * so an automation can be understood without reading its YAML. "Edit as
- * YAML" is the explicit escape hatch into WorkflowEditorModal. */
+ * YAML" is the explicit escape hatch into the WorkflowEditorPage, opened in
+ * a new tab. */
 export function WorkflowSummaryModal({
   workflow,
   plugins,
   onClose,
-  onEditYaml,
 }: WorkflowSummaryModalProps) {
   const { data: detail, isLoading } = useWorkflow(workflow.stem)
   const pluginsById = new Map(plugins.map((p) => [p.id, p]))
@@ -227,10 +227,16 @@ export function WorkflowSummaryModal({
         <Button variant="default" onClick={onClose}>
           Close
         </Button>
-        <Button variant="default" onClick={onEditYaml}>
-          <FileCode size={14} />
-          Edit as YAML
-        </Button>
+        <Link
+          to={`/workflows/${workflow.stem}/edit`}
+          target="_blank"
+          rel="opener"
+        >
+          <Button variant="default">
+            <FileCode size={14} />
+            Edit as YAML
+          </Button>
+        </Link>
       </ModalFooter>
     </Modal>
   )

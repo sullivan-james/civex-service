@@ -6,7 +6,7 @@ from typing import Any
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field
 
-from civex.domain.exceptions import ValidationError
+from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.plugins.base import Tier0Plugin, WorkflowContext
 
 log = logging.getLogger(__name__)
@@ -115,7 +115,12 @@ class Plugin(Tier0Plugin):
                         context_record_id=parent_id,
                     )
                     created += 1
-            except ValidationError as e:
+            except (ValidationError, NotFoundError) as e:
+                # NotFoundError alongside ValidationError: the matched record
+                # can be deleted between find_records() above and this
+                # update() (e.g. another workflow step, or a concurrent
+                # delete) -- that race should skip the row like any other
+                # per-row failure, not abort the whole upsert.
                 log.warning("  ✗ skipped row %s: %s", data, e)
                 skipped += 1
 

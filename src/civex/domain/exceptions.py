@@ -69,6 +69,17 @@ class DatabaseUnavailableError(CivexError):
     retryable = True
 
 
+class GCAlreadyRunningError(CivexError):
+    """Raised when a garbage-collection pass is requested while another is
+    already in progress. Two concurrent sweeps over the same object store
+    would race on delete()'s exists-then-unlink check and could disagree
+    about what's collectible if a reference is written mid-sweep; safe to
+    just retry once the other run finishes."""
+
+    kind = "gc_already_running"
+    retryable = True
+
+
 class VolumeFullError(CivexError):
     kind = "volume_full"
 

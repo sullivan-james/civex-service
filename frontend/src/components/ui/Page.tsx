@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { IconButton } from './IconButton'
+import { Menu } from './Menu'
 import { MoreVertical } from './icons'
 
 export interface BreadcrumbItem {
@@ -49,61 +50,19 @@ export interface PageMenuAction {
 
 /** Overflow menu for a page's secondary actions. */
 function PageActionsMenu({ actions }: { actions: PageMenuAction[] }) {
-  const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function onPointerDown(e: MouseEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [open])
-
   return (
-    <div ref={rootRef} className="relative inline-flex">
-      <IconButton
-        icon={MoreVertical}
-        aria-label="More actions"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-haspopup="menu"
-      />
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-full mt-1 z-10 min-w-[10rem] bg-canvas border border-border rounded-md shadow-lg py-1"
-        >
-          {actions.map((a) => (
-            <button
-              key={a.label}
-              type="button"
-              role="menuitem"
-              disabled={a.disabled}
-              onClick={() => {
-                setOpen(false)
-                a.onClick()
-              }}
-              className={`w-full text-left px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed ${
-                a.variant === 'danger'
-                  ? 'text-danger hover:bg-danger-subtle'
-                  : 'text-fg hover:bg-canvas-subtle'
-              }`}
-            >
-              {a.label}
-            </button>
-          ))}
-        </div>
+    <Menu
+      items={actions}
+      trigger={({ open, toggle }) => (
+        <IconButton
+          icon={MoreVertical}
+          aria-label="More actions"
+          onClick={toggle}
+          aria-expanded={open}
+          aria-haspopup="menu"
+        />
       )}
-    </div>
+    />
   )
 }
 

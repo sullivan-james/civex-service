@@ -1,6 +1,6 @@
 import { Link } from 'react-router'
 import { useJobsAffectingRecord } from '../../hooks/useWorkflows'
-import { Badge } from '../ui'
+import { Badge, CollapsibleSection } from '../ui'
 
 // The reverse of JobsTable's recordId filter: not "runs this record
 // triggered" but "runs that created or changed this record" -- so a
@@ -11,10 +11,10 @@ export default function RecordProvenance({ recordId }: { recordId: string }) {
   if (!jobs || jobs.length === 0) return null
 
   return (
-    <div>
-      <h2 className="text-base font-semibold text-fg mb-2">
-        Runs that touched this record
-      </h2>
+    <CollapsibleSection
+      title="Runs that touched this record"
+      count={jobs.length}
+    >
       <ul className="space-y-1.5">
         {jobs.map((job) => {
           const touch = job.affected_records?.find(
@@ -42,6 +42,6 @@ export default function RecordProvenance({ recordId }: { recordId: string }) {
           )
         })}
       </ul>
-    </div>
+    </CollapsibleSection>
   )
 }

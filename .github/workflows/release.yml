@@ -50,12 +50,13 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Bundle civex-plugin-sdk wheel
-        # civex-plugin-sdk isn't published to PyPI -- ship a prebuilt wheel
-        # as civex package data so the subprocess plugin runtime can resolve
-        # it locally (see docs/contributing/release.md and
-        # subprocess_runtime.py's _bundled_sdk_wheel_dir()).
-        run: uv build --wheel -o src/civex/_vendor/sdk civex-plugin-sdk
+      - name: Verify the SDK civex depends on is published
+        # civex declares civex-plugin-sdk as a normal dependency, so the
+        # in-repo SDK version must already be on PyPI or `pip install civex`
+        # can't resolve it (the v1.0.5 failure). Push the sdk-v* tag first.
+        run: |
+          uv run --no-project --with packaging python scripts/check_sdk_sync.py check
+          uv run --no-project --with packaging python scripts/check_sdk_sync.py require-published
 
       - name: Build wheel
         run: |

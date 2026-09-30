@@ -20,6 +20,54 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## v1.1.0 — batteries included, `civex update` (2026-09-30)
+
+### Breaking
+- The `server`, `workflows`, `postgres`, `ai` and `telemetry` extras are now
+  installed by default: a plain `pipx install civex` gives you the HTTP API
+  and web UI, workflow execution and built-in plugins (pandas), the
+  PostgreSQL driver, AI-assisted commands and the telemetry SDK.
+  - The old extras remain as empty aliases, so `pip install "civex[server]"`
+    and existing pipx installs keep resolving — no action needed.
+  - Installs are larger (pandas/numpy alone add tens of MB), and
+    `psycopg2-binary` is now required everywhere; on platforms without a
+    prebuilt wheel it needs libpq to build.
+  - `desktop` (pywebview) deliberately stays optional:
+    `pipx install "civex[desktop]"`.
+- New base dependencies: `packaging` and `civex-plugin-sdk` (`>=0.2.0,<0.3`).
+  The SDK is now published to PyPI as its own MIT-licensed project instead of
+  being vendored into the `civex` wheel; the bundled `_vendor/sdk` wheel and
+  `civex_plugin_sdk` source copy are gone from the wheel. Publish the SDK
+  (`sdk-v0.2.0`) before tagging this release — `release.yml` checks.
+
+### Features
+- `civex update` upgrades an installed civex to the latest PyPI release. It
+  detects pipx, `uv tool` or pip and runs the matching upgrade, refuses on
+  editable dev installs, and verifies the installed version actually changed
+  afterwards — pip can exit 0 while leaving the old version in place when a
+  newer release's dependencies won't resolve (the v1.0.5 failure mode).
+  `civex update --check` only reports.
+- Records now include `reference_labels`: each reference/reference_list
+  value's target `natural_name`, resolved in one batched query. The UI
+  renders references as links with readable labels.
+- Workflow, plugin and container-plugin editors are now routed pages
+  (`/workflows/new`, `/plugins/:stem/edit`, …) instead of modals, and the
+  import wizard is split into per-step components with a
+  `/schemas/:id/import` entry point.
+
+- The host now checks a plugin's wire `protocol_version` at describe time
+  and refuses a mismatch with a message naming the side to upgrade, rather
+  than failing opaquely mid-run. Plugins from SDKs that predate the field are
+  read as version 1, so existing plugins keep working.
+- CI now runs the SDK's own tests and guards that keep civex and the SDK in
+  step (`scripts/check_sdk_sync.py`); the SDK has its own release workflow.
+  See `docs/contributing/sdk-release.md`.
+
+### Fixes
+- 4xx API errors are no longer retried by the UI, and a record that 404s
+  stops polling, so "not found" pages render immediately instead of after
+  ~7s of backoff.
+
 ## v1.0.6 — packaging fix (2026-08-16)
 
 ### Fixes

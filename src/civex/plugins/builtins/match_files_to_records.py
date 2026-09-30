@@ -7,7 +7,7 @@ from typing import Any
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field
 
-from civex.domain.exceptions import ValidationError
+from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.plugins.base import Tier0Plugin, WorkflowContext
 
 log = logging.getLogger(__name__)
@@ -81,6 +81,12 @@ class Plugin(Tier0Plugin):
             pat = re.compile(config.pattern)
         except re.error as e:
             raise ValueError(f"Invalid regex pattern '{config.pattern}': {e}")
+        if pat.groups < 1:
+            raise ValueError(
+                f"Pattern '{config.pattern}' has no capture group -- it must "
+                "have one, e.g. '(\\d+)', to extract the key value from a "
+                "filename."
+            )
 
         log.info(
             "Matching %d file(s) → %s.%s using pattern '%s'",
@@ -118,15 +124,31 @@ class Plugin(Tier0Plugin):
 
             if existing:
                 child = existing[0]
-                ctx.update_record(str(child.id), {**child.data, config.file_field: ref})
-                log.info(
-                    "  ✓ updated  '%s' → %s %s (key=%s)",
-                    filename,
-                    config.schema_name,
-                    str(child.id)[:8],
-                    key_value,
-                )
-                updated += 1
+                try:
+                    ctx.update_record(
+                        str(child.id), {**child.data, config.file_field: ref}
+                    )
+                    log.info(
+                        "  ✓ updated  '%s' → %s %s (key=%s)",
+                        filename,
+                        config.schema_name,
+                        str(child.id)[:8],
+                        key_value,
+                    )
+                    updated += 1
+                except (ValidationError, NotFoundError) as e:
+                    # Symmetric with the create branch below: a schema
+                    # restriction violation, or the matched record being
+                    # deleted concurrently, should report this one file as
+                    # unmatched rather than abort the whole job.
+                    log.warning(
+                        "  ✗ cannot update %s %s (key=%s): %s",
+                        config.schema_name,
+                        str(child.id)[:8],
+                        key_value,
+                        e,
+                    )
+                    unmatched.append(f"{filename} (could not update record: {e})")
             else:
                 try:
                     typed_key: Any = int(key_value)

@@ -1,48 +1,32 @@
-import { type ComponentType } from 'react'
 import { Link } from 'react-router'
 import { useJobsPaged } from '../hooks/useWorkflows'
-import { Badge, Page } from '../components/ui'
-import {
-  ArrowRight,
-  Database,
-  ListChecks,
-  Upload,
-} from '../components/ui/icons'
+import { Badge, EmptyState, Page, StepBadge } from '../components/ui'
+import { ArrowRight } from '../components/ui/icons'
 
-interface StartTileProps {
+interface OnboardingStep {
   to: string
-  icon: ComponentType<{
-    size?: number
-    className?: string
-    'aria-hidden'?: boolean | 'true'
-  }>
   title: string
   description: string
 }
 
-function StartTile({ to, icon: Icon, title, description }: StartTileProps) {
-  return (
-    <Link
-      to={to}
-      className="group flex flex-col gap-3 rounded-lg border border-border bg-canvas p-4 transition-colors hover:border-accent-subtle-border hover:bg-canvas-subtle"
-    >
-      <div className="flex items-center justify-between">
-        <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-accent-subtle text-accent">
-          <Icon size={18} aria-hidden="true" />
-        </span>
-        <ArrowRight
-          size={16}
-          className="text-fg-subtle transition-colors group-hover:text-accent"
-          aria-hidden="true"
-        />
-      </div>
-      <div>
-        <h2 className="text-sm font-semibold text-fg">{title}</h2>
-        <p className="mt-0.5 text-sm text-fg-muted">{description}</p>
-      </div>
-    </Link>
-  )
-}
+const ONBOARDING_STEPS: OnboardingStep[] = [
+  {
+    to: '/collections',
+    title: 'Import data',
+    description: 'Bring in files or a spreadsheet and turn them into records.',
+  },
+  {
+    to: '/schemas',
+    title: 'Create a record type',
+    description:
+      'Define the fields your records will have before you start adding data.',
+  },
+  {
+    to: '/runs',
+    title: 'Automate the rest',
+    description: 'See what automations have run and whether they succeeded.',
+  },
+]
 
 function jobBadgeVariant(status: string): 'success' | 'danger' | 'default' {
   if (status === 'completed') return 'success'
@@ -59,26 +43,37 @@ export default function HomePage() {
       title="Get started"
       description="Import data, define record types, and let automations handle the rest."
     >
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StartTile
-          to="/collections"
-          icon={Upload}
-          title="Import data"
-          description="Bring in files or a spreadsheet and turn them into records."
-        />
-        <StartTile
-          to="/schemas"
-          icon={Database}
-          title="Create a record type"
-          description="Define the fields your records will have before you start adding data."
-        />
-        <StartTile
-          to="/runs"
-          icon={ListChecks}
-          title="View recent activity"
-          description="See what automations have run and whether they succeeded."
-        />
-      </div>
+      <ol className="flex flex-col gap-3 sm:flex-row sm:gap-0">
+        {ONBOARDING_STEPS.map((s, i) => (
+          <li key={s.to} className="flex sm:flex-1">
+            <Link
+              to={s.to}
+              className="group flex flex-1 items-start gap-3 rounded-lg border border-border bg-canvas p-4 transition-colors hover:border-accent-subtle-border hover:bg-canvas-subtle"
+            >
+              <StepBadge index={i + 1} state="current" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-sm font-semibold text-fg">{s.title}</h2>
+                  <ArrowRight
+                    size={16}
+                    className="shrink-0 text-fg-subtle transition-colors group-hover:text-accent"
+                    aria-hidden="true"
+                  />
+                </div>
+                <p className="mt-0.5 text-sm text-fg-muted">{s.description}</p>
+              </div>
+            </Link>
+            {i < ONBOARDING_STEPS.length - 1 && (
+              <div
+                className="hidden shrink-0 items-center px-2 sm:flex"
+                aria-hidden="true"
+              >
+                <div className="h-px w-4 bg-border" />
+              </div>
+            )}
+          </li>
+        ))}
+      </ol>
 
       <div>
         <div className="mb-3 flex items-center justify-between">
@@ -88,10 +83,10 @@ export default function HomePage() {
           </Link>
         </div>
         {recentJobs.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border px-6 py-8 text-center text-sm text-fg-muted">
-            Nothing has run yet. Runs appear here once an automation is
-            triggered.
-          </div>
+          <EmptyState
+            title="Nothing has run yet"
+            message="Runs appear here once an automation is triggered."
+          />
         ) : (
           <ul className="divide-y divide-border-muted rounded-md border border-border">
             {recentJobs.map((job) => (

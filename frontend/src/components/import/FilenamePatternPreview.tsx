@@ -6,9 +6,14 @@ import {
   normalizeNumericKey,
   parseFilenameByTokenFormat,
 } from '../../utils/filenamePattern'
+import type { FieldType } from '../../utils/fieldTypes'
 
-export type ExtractOutputType =
+// The subset of FieldType a filename capture can produce -- see
+// InferredFieldType (utils/importMapping.ts) for the same reasoning.
+export type ExtractOutputType = Extract<
+  FieldType,
   'string' | 'integer' | 'float' | 'date' | 'datetime'
+>
 
 export interface FilenameExtraction {
   filename: string

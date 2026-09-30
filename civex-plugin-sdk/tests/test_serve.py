@@ -8,6 +8,7 @@ from civex_plugin_sdk.errors import CapabilityDeniedError
 from civex_plugin_sdk.io import FrameReader, FrameWriter
 from civex_plugin_sdk.plugin import Plugin
 from civex_plugin_sdk.plugin_base import IOSpec
+from civex_plugin_sdk.protocol import PROTOCOL_VERSION
 from civex_plugin_sdk.serve import serve_container_once, serve_loop
 
 
@@ -95,6 +96,7 @@ def test_describe_reports_the_plugins_whole_declared_contract():
                 },
             ],
             "config_schema": GreetPlugin.Config.model_json_schema(),
+            "protocol_version": PROTOCOL_VERSION,
         }
     ]
 

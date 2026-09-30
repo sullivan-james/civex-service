@@ -1,9 +1,10 @@
+import type { ReactNode } from 'react'
 import type { AuditLogEntry } from '../api/audit'
 import { summarise as summariseRestrictions } from './restrictions'
 
 export interface AuditSummary {
   title: string
-  detail: string | null
+  detail: ReactNode
 }
 
 function describeValue(v: unknown): string {

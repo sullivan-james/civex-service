@@ -17,22 +17,7 @@ import {
   spanClassName,
 } from '../ui'
 import { displayLabel, nameError } from '../../utils/naming'
-
-const FIELD_TYPES = [
-  'string',
-  'integer',
-  'float',
-  'boolean',
-  'date',
-  'datetime',
-  'file',
-  'file_list',
-  'reference',
-  'enum',
-  'url',
-  'reference_list',
-  'tags',
-]
+import { FIELD_TYPES } from '../../utils/fieldTypes'
 
 const NON_DEFAULT_TYPES = new Set([
   'file',

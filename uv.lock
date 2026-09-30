@@ -310,20 +310,27 @@ name = "civex"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
+    { name = "anthropic" },
+    { name = "civex-plugin-sdk" },
+    { name = "fastapi" },
+    { name = "jinja2" },
     { name = "jsonschema" },
+    { name = "openai" },
+    { name = "packaging" },
+    { name = "pandas" },
+    { name = "psycopg2-binary" },
     { name = "pydantic" },
+    { name = "python-multipart" },
     { name = "pyyaml" },
     { name = "rich" },
+    { name = "sentry-sdk" },
     { name = "sqlalchemy" },
     { name = "structlog" },
     { name = "typer" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
-ai = [
-    { name = "anthropic" },
-    { name = "openai" },
-]
 desktop = [
     { name = "pywebview" },
 ]
@@ -344,29 +351,15 @@ docs = [
     { name = "mkdocstrings", extra = ["python"] },
     { name = "neoteroi-mkdocs" },
 ]
-postgres = [
-    { name = "psycopg2-binary" },
-]
-server = [
-    { name = "fastapi" },
-    { name = "jinja2" },
-    { name = "python-multipart" },
-    { name = "uvicorn" },
-]
-telemetry = [
-    { name = "sentry-sdk" },
-]
-workflows = [
-    { name = "pandas" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
-    { name = "anthropic", marker = "extra == 'ai'", specifier = ">=0.40" },
-    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.111" },
+    { name = "anthropic", specifier = ">=0.40" },
+    { name = "civex-plugin-sdk", editable = "civex-plugin-sdk" },
+    { name = "fastapi", specifier = ">=0.111" },
     { name = "httpx2", marker = "extra == 'dev'", specifier = ">=0.28" },
-    { name = "jinja2", marker = "extra == 'server'", specifier = ">=3.1" },
+    { name = "jinja2", specifier = ">=3.1" },
     { name = "jsonschema", specifier = ">=4.0" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },
     { name = "mkdocs-gen-files", marker = "extra == 'docs'", specifier = ">=0.5" },
@@ -374,27 +367,28 @@ requires-dist = [
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.26" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "neoteroi-mkdocs", marker = "extra == 'docs'", specifier = ">=1.1" },
-    { name = "openai", marker = "extra == 'ai'", specifier = ">=1.0" },
-    { name = "pandas", marker = "extra == 'workflows'", specifier = ">=2.0" },
+    { name = "openai", specifier = ">=1.0" },
+    { name = "packaging", specifier = ">=23" },
+    { name = "pandas", specifier = ">=2.0" },
     { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.7" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7" },
-    { name = "psycopg2-binary", marker = "extra == 'postgres'", specifier = ">=2.9" },
+    { name = "psycopg2-binary", specifier = ">=2.9" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3" },
-    { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.9" },
+    { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "pywebview", marker = "extra == 'desktop'", specifier = ">=5.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15" },
-    { name = "sentry-sdk", marker = "extra == 'telemetry'", specifier = ">=2.0" },
+    { name = "sentry-sdk", specifier = ">=2.0" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "structlog", specifier = ">=24.1" },
     { name = "typer", specifier = ">=0.12" },
-    { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.30" },
+    { name = "uvicorn", specifier = ">=0.30" },
 ]
-provides-extras = ["postgres", "workflows", "server", "desktop", "ai", "telemetry", "dev", "docs"]
+provides-extras = ["desktop", "postgres", "workflows", "server", "ai", "telemetry", "dev", "docs"]
 
 [[package]]
 name = "civex-plugin-sdk"

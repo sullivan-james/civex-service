@@ -1,32 +1,27 @@
 import { useId, useState, useRef, useCallback } from 'react'
+import { useParams } from 'react-router'
 import CodeMirror, {
   type EditorView,
   type ViewUpdate,
 } from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
-import { useWorkflow, useSaveWorkflow } from '../../hooks/useWorkflows'
-import {
-  Button,
-  Modal,
-  ModalBody,
-  ModalFooter,
-  ModalHeader,
-  Input,
-} from '../ui'
-import { AutocompleteMenu } from './YamlAutocomplete'
+import { useWorkflow, useSaveWorkflow } from '../hooks/useWorkflows'
+import { usePlugins } from '../hooks/usePlugins'
+import { useCloseOrBack } from '../hooks/useCloseOrBack'
+import { Button, Page, Input } from '../components/ui'
+import { AutocompleteMenu } from '../components/workflows/YamlAutocomplete'
 import {
   getAutocompleteContext,
   getSuggestions,
   type Suggestion,
-} from '../../utils/workflowAutocomplete'
+} from '../utils/workflowAutocomplete'
 import {
   groupWorkflowValidationErrors,
   findStepLine,
   type WorkflowValidationIssue,
-} from '../../utils/workflowValidationErrors'
-import { ApiError } from '../../api/client'
-import type { PluginInfo } from '../../api/plugins'
-import { useTheme } from '../../hooks/useTheme'
+} from '../utils/workflowValidationErrors'
+import { ApiError } from '../api/client'
+import { useTheme } from '../hooks/useTheme'
 
 export const NEW_WORKFLOW_TEMPLATE = `name: my-workflow
 description: null
@@ -53,19 +48,15 @@ steps:
       bytes: load_bytes.bytes
 `
 
-interface WorkflowEditorModalProps {
-  stem: string
-  isNew: boolean
-  onClose: () => void
-  plugins: PluginInfo[]
+interface WorkflowEditorPageProps {
+  isNew?: boolean
 }
 
-export function WorkflowEditorModal({
-  stem: initialStem,
-  isNew,
-  onClose,
-  plugins,
-}: WorkflowEditorModalProps) {
+export default function WorkflowEditorPage({
+  isNew = false,
+}: WorkflowEditorPageProps) {
+  const { stem: routeStem } = useParams<{ stem: string }>()
+  const initialStem = isNew ? 'new-workflow' : (routeStem ?? '')
   const stemId = useId()
   const [stem, setStem] = useState(initialStem)
   const [content, setContent] = useState<string | null>(null)
@@ -73,6 +64,8 @@ export function WorkflowEditorModal({
     null,
   )
   const { resolved: theme } = useTheme()
+  const { data: plugins } = usePlugins()
+  const closeOrBack = useCloseOrBack('/workflows')
 
   const { data: detail, isLoading } = useWorkflow(isNew ? '' : initialStem)
   const save = useSaveWorkflow()
@@ -103,7 +96,7 @@ export function WorkflowEditorModal({
   const refreshSuggestions = useCallback(
     (text: string, cursor: number) => {
       const ctx = getAutocompleteContext(text, cursor)
-      const matches = ctx ? getSuggestions(ctx, plugins, text) : []
+      const matches = ctx ? getSuggestions(ctx, plugins ?? [], text) : []
       if (!ctx || matches.length === 0) {
         acContextRef.current = null
         setSuggestions([])
@@ -203,7 +196,7 @@ export function WorkflowEditorModal({
     setSaveError(null)
     try {
       await save.mutateAsync({ stem: stem.trim(), content })
-      onClose()
+      closeOrBack()
     } catch (err) {
       // Contract violations (CIVEX-109) arrive as structured per-step
       // issues; anything else (bad stem, unparseable YAML) is a plain
@@ -238,12 +231,28 @@ export function WorkflowEditorModal({
   }
 
   return (
-    <Modal onClose={onClose} size="xl" className="h-[90vh]">
-      <ModalHeader onClose={onClose}>
-        {isNew ? 'New workflow' : `Edit — ${initialStem}.yaml`}
-      </ModalHeader>
-
-      <ModalBody className="flex flex-col gap-3">
+    <Page
+      breadcrumbs={[
+        { label: 'Workflows', to: '/workflows' },
+        { label: isNew ? 'New workflow' : `${initialStem}.yaml` },
+      ]}
+      title={isNew ? 'New workflow' : `Edit — ${initialStem}.yaml`}
+      action={
+        <div className="flex items-center gap-2">
+          <Button variant="default" onClick={() => closeOrBack()}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleSave}
+            disabled={save.isPending || !stem.trim()}
+          >
+            {save.isPending ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-3">
         {isNew && (
           <div className="flex flex-col gap-1">
             <label
@@ -252,7 +261,7 @@ export function WorkflowEditorModal({
             >
               Filename stem
             </label>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 max-w-sm">
               <Input
                 id={stemId}
                 aria-describedby={`${stemId}-hint`}
@@ -288,8 +297,7 @@ export function WorkflowEditorModal({
             <div
               ref={editorWrapRef}
               onKeyDownCapture={handleEditorKeyDownCapture}
-              className="relative flex-1 min-h-0 overflow-auto border border-border rounded-md bg-canvas-subtle focus-within:border-accent focus-within:ring-1 focus-within:ring-accent"
-              style={{ minHeight: '200px' }}
+              className="relative flex-1 min-h-0 h-[65vh] overflow-auto border border-border rounded-md bg-canvas-subtle focus-within:border-accent focus-within:ring-1 focus-within:ring-accent"
             >
               <CodeMirror
                 value={content ?? ''}
@@ -345,20 +353,7 @@ export function WorkflowEditorModal({
             )}
           </div>
         )}
-      </ModalBody>
-
-      <ModalFooter>
-        <Button variant="default" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          variant="primary"
-          onClick={handleSave}
-          disabled={save.isPending || !stem.trim()}
-        >
-          {save.isPending ? 'Saving…' : 'Save'}
-        </Button>
-      </ModalFooter>
-    </Modal>
+      </div>
+    </Page>
   )
 }
