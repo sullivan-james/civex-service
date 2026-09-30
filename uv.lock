@@ -327,6 +327,7 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "structlog" },
     { name = "typer" },
+    { name = "tzdata" },
     { name = "uvicorn" },
 ]
 
@@ -386,6 +387,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "structlog", specifier = ">=24.1" },
     { name = "typer", specifier = ">=0.12" },
+    { name = "tzdata", specifier = ">=2024.1" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 provides-extras = ["desktop", "postgres", "workflows", "server", "ai", "telemetry", "dev", "docs"]
