@@ -8,7 +8,7 @@ export function recordLabel(r: CivexRecord): string {
 }
 
 /** Debounced schema-scoped record search, shared by the single- and multi-select pickers below. */
-function useRecordSearch(schemaName: string, search: string) {
+export function useRecordSearch(schemaName: string, search: string) {
   const [results, setResults] = useState<CivexRecord[]>([])
   const [loading, setLoading] = useState(false)
 

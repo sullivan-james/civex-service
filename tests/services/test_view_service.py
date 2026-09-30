@@ -97,12 +97,26 @@ def test_create_view_rejects_invalid_sort_direction(ctx: AppContext, make_schema
         )
 
 
-def test_create_view_rejects_non_slug_name(ctx: AppContext, make_schema):
+def test_view_names_are_free_text(ctx: AppContext, make_schema):
+    make_schema("trial")
+    ctx.commit()
+
+    view = ctx.view_svc.create("trial", "  Missing table (QC) – Étude 2  ")
+    ctx.commit()
+
+    assert view.name == "Missing table (QC) – Étude 2"
+    assert ctx.view_svc.get("trial", "Missing table (QC) – Étude 2").id == view.id
+    renamed = ctx.view_svc.update("trial", view.name, new_name="Needs  review ")
+    assert renamed.name == "Needs  review"
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "a/b", "a\\b", "..", "x" * 300])
+def test_view_names_still_have_to_fit_in_a_url(ctx: AppContext, make_schema, bad):
     make_schema("trial")
     ctx.commit()
 
     with pytest.raises(ValidationError):
-        ctx.view_svc.create("trial", "My View")
+        ctx.view_svc.create("trial", bad)
 
 
 def test_create_view_on_missing_schema_raises_not_found(ctx: AppContext):
@@ -382,10 +396,10 @@ def test_update_view_accepts_join_column(ctx: AppContext, make_schema):
     assert updated.columns == ["amount", "customer.email"]
 
 
-# --- resolve_rows: joining at query time ---
+# --- joining reference columns at query time ---
 
 
-def test_resolve_rows_joins_reference_field(
+def test_preview_rows_joins_reference_field(
     ctx: AppContext, make_schema, make_collection
 ):
     _make_invoice_customer_schemas(ctx, make_schema)
@@ -403,12 +417,14 @@ def test_resolve_rows_joins_reference_field(
     )
     ctx.commit()
 
-    rows = ctx.view_svc.resolve_rows("invoice", "with_customer", [invoice])
+    rows, _ = ctx.view_svc.preview(
+        "invoice", columns=ctx.view_svc.get("invoice", "with_customer").columns
+    )
 
     assert rows == [{"amount": 100, "customer.email": "a@example.com"}]
 
 
-def test_resolve_rows_returns_none_for_unset_reference(
+def test_preview_rows_returns_none_for_unset_reference(
     ctx: AppContext, make_schema, make_collection
 ):
     _make_invoice_customer_schemas(ctx, make_schema)
@@ -421,7 +437,9 @@ def test_resolve_rows_returns_none_for_unset_reference(
     )
     ctx.commit()
 
-    rows = ctx.view_svc.resolve_rows("invoice", "with_customer", [invoice])
+    rows, _ = ctx.view_svc.preview(
+        "invoice", columns=ctx.view_svc.get("invoice", "with_customer").columns
+    )
 
     assert rows == [{"amount": 50, "customer.email": None}]
 
@@ -528,7 +546,7 @@ def test_preview_rejects_unknown_filter_field(ctx: AppContext, make_schema):
         )
 
 
-def test_resolve_rows_returns_none_for_dangling_reference(
+def test_preview_rows_returns_none_for_dangling_reference(
     ctx: AppContext, make_schema, make_collection
 ):
     import uuid
@@ -545,7 +563,9 @@ def test_resolve_rows_returns_none_for_dangling_reference(
     )
     ctx.commit()
 
-    rows = ctx.view_svc.resolve_rows("invoice", "with_customer", [invoice])
+    rows, _ = ctx.view_svc.preview(
+        "invoice", columns=ctx.view_svc.get("invoice", "with_customer").columns
+    )
 
     assert rows == [{"amount": 50, "customer.email": None}]
 
@@ -663,3 +683,63 @@ def test_export_ignores_joined_file_columns_for_zip_bundling(
     export = ctx.view_svc.export("invoice", "with_avatar")
 
     assert export.file_entries == []
+
+
+# --- views over the record hierarchy ---
+
+
+def test_view_filter_may_test_a_descendants_field(
+    ctx: AppContext, make_schema, make_collection, make_record
+):
+    make_schema("encounter", fields=[("site", "string")])
+    make_schema("selection", fields=[("selection_table", "string")], parent="encounter")
+    make_collection("hb")
+    e1 = make_record("hb", "encounter", {"site": "A"})
+    e2 = make_record("hb", "encounter", {"site": "B"})
+    make_record("hb", "selection", {"selection_table": "t.txt"}, parent_record_id=str(e1.id))
+    make_record("hb", "selection", {}, parent_record_id=str(e2.id))
+
+    view = ctx.view_svc.create(
+        "encounter",
+        "missing_table",
+        columns=["site"],
+        filter_tree={"schema": "selection", "field": "selection_table", "op": "is_null"},
+    )
+    ctx.commit()
+
+    rows, total = ctx.view_svc.preview(
+        "encounter", columns=view.columns, filter_tree=view.filter_tree
+    )
+    assert (rows, total) == ([{"site": "B"}], 1)
+    exported = ctx.view_svc.export("encounter", "missing_table")
+    assert exported.rows == [{"site": "B"}]
+
+
+def test_view_columns_and_sort_may_use_inherited_fields(
+    ctx: AppContext, make_schema, make_collection, make_record
+):
+    make_schema("encounter", fields=[("site", "string")])
+    make_schema("recording", fields=[("rate", "integer")], parent="encounter")
+    make_collection("hb")
+    e1 = make_record("hb", "encounter", {"site": "B"})
+    e2 = make_record("hb", "encounter", {"site": "A"})
+    make_record("hb", "recording", {"rate": 1}, parent_record_id=str(e1.id))
+    make_record("hb", "recording", {"rate": 2}, parent_record_id=str(e2.id))
+
+    rows, _ = ctx.view_svc.preview(
+        "recording",
+        columns=["rate", "site"],
+        sort=[{"field": "site", "direction": "asc"}],
+    )
+    assert rows == [{"rate": 2, "site": "A"}, {"rate": 1, "site": "B"}]
+
+
+def test_view_rejects_a_condition_on_an_unrelated_schema(
+    ctx: AppContext, make_schema
+):
+    make_schema("a", fields=[("x", "string")])
+    make_schema("b", fields=[("y", "string")])
+    with pytest.raises(ValidationError, match="neither 'a' nor one of"):
+        ctx.view_svc.create(
+            "a", "v", filter_tree={"schema": "b", "field": "y", "op": "eq", "value": 1}
+        )

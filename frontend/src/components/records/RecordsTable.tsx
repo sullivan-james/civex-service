@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { Table, Thead, Th, Tbody, Tr, Td, Checkbox, Badge } from '../ui'
 import { ChevronUp, ChevronDown } from '../ui/icons'
@@ -12,6 +13,8 @@ export interface RecordsTableColumn {
   /** Field type, for reference/reference_list values to render as links
    * instead of raw ids. Omit for projected/preview columns without one. */
   type?: string
+  /** Set false for a column the server can't order by (e.g. a join). */
+  sortable?: boolean
 }
 
 export interface RecordsTableRow {
@@ -21,6 +24,7 @@ export interface RecordsTableRow {
   schema_name?: string
   created_at?: string
   reference_labels?: Record<string, string | null> | null
+  child_counts?: Record<string, number> | null
 }
 
 export interface RecordsTableSort {
@@ -47,6 +51,8 @@ export interface RecordsTableProps {
   selection?: RecordsTableSelection
   sort?: RecordsTableSort
   onSortChange?: (columnName: string) => void
+  /** An extra last column -- e.g. links down to a row's children. */
+  trailing?: { header: string; render: (row: RecordsTableRow) => ReactNode }
 }
 
 function formatCellValue(value: unknown): string {
@@ -71,6 +77,7 @@ export function RecordsTable({
   selection,
   sort,
   onSortChange,
+  trailing,
 }: RecordsTableProps) {
   return (
     <Table>
@@ -103,10 +110,12 @@ export function RecordsTable({
                 key={col.name}
                 title={col.name}
                 sortDirection={
-                  onSortChange ? (activeDirection ?? 'none') : undefined
+                  onSortChange && col.sortable !== false
+                    ? (activeDirection ?? 'none')
+                    : undefined
                 }
               >
-                {onSortChange ? (
+                {onSortChange && col.sortable !== false ? (
                   <button
                     type="button"
                     onClick={() => onSortChange(col.name)}
@@ -131,6 +140,7 @@ export function RecordsTable({
             )
           })}
           {showAddedColumn && <Th className="w-32">Added</Th>}
+          {trailing && <Th>{trailing.header}</Th>}
         </tr>
       </Thead>
       <Tbody>
@@ -216,6 +226,7 @@ export function RecordsTable({
                 {r.created_at ? formatDate(r.created_at) : '—'}
               </Td>
             )}
+            {trailing && <Td>{trailing.render(r)}</Td>}
           </Tr>
         ))}
       </Tbody>

@@ -172,7 +172,7 @@ Schemas can extend a parent schema. Records of a child schema are linked to a pa
 When you add a `selection` record, civex prompts for the parent `encounter` record ID. The parent's fields are also visible when viewing a child record. Inheritance can be arbitrarily deep — grandchild schemas are supported.
 
 !!! note
-    A child schema only stores its own fields. Parent fields live on the parent record. This keeps the data model clean and avoids duplication.
+    A child schema only stores its own fields. Parent fields live on the parent record. This keeps the data model clean and avoids duplication. Filters, sorts and view columns can still use a parent's fields on its children — civex reads them from the parent record — and can reach the other way too ("encounters that have a selection where…"). See [Browsing a collection](collections-and-records.md#browsing-a-collection).
 
 ## Deleting fields and schemas
 

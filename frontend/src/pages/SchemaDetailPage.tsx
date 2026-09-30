@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router'
 import { errorMessage } from '../lib/errors'
+import { schemaRecordsPath } from '../utils/explorerState'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
 import { schemasApi } from '../api/schemas'
 import {
@@ -216,8 +217,8 @@ export default function SchemaDetailPage() {
                 <Upload size={14} /> Import data
               </Button>
             </Link>
-            <Link to={`/schemas/${schema.id}/views`}>
-              <Button size="sm">Views</Button>
+            <Link to={schemaRecordsPath(schema.id)}>
+              <Button size="sm">Browse records</Button>
             </Link>
             <Button size="sm" onClick={() => setEditing(true)}>
               Edit

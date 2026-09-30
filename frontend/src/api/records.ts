@@ -1,4 +1,9 @@
 import { api } from './client'
+import {
+  recordQueryString,
+  type PageParams,
+  type RecordQueryParams,
+} from './query'
 
 export interface CivexRecord {
   id: string
@@ -15,6 +20,19 @@ export interface CivexRecord {
    * value on this record. Null target label means the target has no
    * natural_name (not that it's missing). */
   reference_labels: Record<string, string | null> | null
+  /** Only when requested: live child count per child schema name. */
+  child_counts?: Record<string, number> | null
+  /** Only when `columns` were requested: the columns this record's own
+   * `data` can't answer (inherited fields, `ref.field` joins). */
+  derived?: Record<string, unknown> | null
+  /** Only on a single-record fetch: the parent chain, root first. */
+  ancestors?: RecordRef[] | null
+}
+
+export interface RecordRef {
+  id: string
+  schema_name: string
+  natural_name: string | null
 }
 
 export interface PaginatedRecords {
@@ -44,34 +62,25 @@ export interface PaginatedAuditLog {
   limit: number
 }
 
-export interface ListParams {
-  schema?: string
-  parent_record_id?: string
-  search?: string
-  where?: string[]
-  limit?: number
-  offset?: number
-}
+export type ListParams = RecordQueryParams & PageParams
 
 export const recordsApi = {
-  list: (datasetName: string, params?: ListParams) => {
-    const qs = new URLSearchParams()
-    if (params?.schema) qs.set('schema', params.schema)
-    if (params?.parent_record_id)
-      qs.set('parent_record_id', params.parent_record_id)
-    if (params?.search) qs.set('search', params.search)
-    params?.where?.forEach((w) => qs.append('where', w))
-    if (params?.limit != null) qs.set('limit', String(params.limit))
-    if (params?.offset != null) qs.set('offset', String(params.offset))
-    const query = qs.toString() ? `?${qs}` : ''
-    return api.get<PaginatedRecords>(
-      `/collections/${encodeURIComponent(datasetName)}/records${query}`,
-    )
-  },
+  list: (datasetName: string, params?: ListParams) =>
+    api.get<PaginatedRecords>(
+      `/collections/${encodeURIComponent(datasetName)}/records${recordQueryString(params)}`,
+    ),
 
-  counts: (datasetName: string) =>
+  /** A schema's records across every collection -- what a saved view browses. */
+  listBySchema: (schemaName: string, params?: ListParams) =>
+    api.get<PaginatedRecords>(
+      `/schemas/${encodeURIComponent(schemaName)}/records${recordQueryString(params)}`,
+    ),
+
+  /** Matching records per schema name (`within` scopes it to one record's
+   * descendants). */
+  counts: (datasetName: string, params?: RecordQueryParams) =>
     api.get<Record<string, number>>(
-      `/collections/${encodeURIComponent(datasetName)}/record-counts`,
+      `/collections/${encodeURIComponent(datasetName)}/record-counts${recordQueryString(params)}`,
     ),
 
   get: (id: string) => api.get<CivexRecord>(`/records/${id}`),
@@ -93,12 +102,16 @@ export const recordsApi = {
   deleteMany: (ids: string[]) =>
     api.post<{ deleted: number }>('/records/bulk-delete', { ids }),
 
-  deleteAll: (datasetName: string, schema?: string) => {
-    const qs = schema ? `?schema=${encodeURIComponent(schema)}` : ''
-    return api.delete<{ deleted: number }>(
-      `/collections/${encodeURIComponent(datasetName)}/records${qs}`,
-    )
-  },
+  /** Deletes every record the query matches (no filters: the whole
+   * collection). The same query the list shows, so "all N matching" is
+   * exactly what is on screen. */
+  deleteMatching: (datasetName: string, params?: RecordQueryParams) =>
+    api.delete<{ deleted: number }>(
+      `/collections/${encodeURIComponent(datasetName)}/records${recordQueryString(params)}`,
+    ),
+
+  exportCsvUrl: (datasetName: string, params?: RecordQueryParams) =>
+    `/api/collections/${encodeURIComponent(datasetName)}/export.csv${recordQueryString(params)}`,
 
   searchBySchema: (schemaName: string, search?: string, limit = 20) => {
     const qs = new URLSearchParams({ schema: schemaName })

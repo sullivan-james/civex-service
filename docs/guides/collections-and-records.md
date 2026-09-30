@@ -65,9 +65,24 @@ For schemas with a parent, civex first prompts for the parent record.
     ```
 
 === "Web UI"
-    A collection's detail page lists its records, with a schema filter and a free-text search box (matches anywhere in the record's field values, not per-field like `--where`).
+    A collection's detail page is a record explorer — see [Browsing a collection](#browsing-a-collection) below.
 
 Every record has a UUID. You can refer to any record by its full UUID or by any unique prefix — civex errors if the prefix is ambiguous.
+
+## Browsing a collection
+
+The web UI's collection page (and the **Contains** section of a record's page) is one explorer, built around the schema hierarchy:
+
+- **Hierarchy rail** — the collection's schemas from the top down (for example Encounter → Recording → Selection), each with how many records are in scope. Pick one to list its records. It opens on the top level, not on a mixed list of everything.
+- **Drilling down** — a row shows how many children it has ("3 recordings →"). Click it to list them in the same table, scoped to that record. Drill again and you are looking at that record's grandchildren. The trail above the table takes you back up, and so does the rail. On a record's own page the same explorer lists *everything* under that record, at any depth.
+- **Search** — always available, and scoped to wherever you are.
+- **Filters** — click **+ Filter** to add conditions on this level's fields, on a *parent* record's fields, or on *any child* record's fields. "Recordings that have a selection whose `selection_table` is empty" is one condition; drill into a recording and the filter still applies, now to its selections. Conditions are AND/OR groups, like a view's.
+- **Saved filters** — the chips are the current schema's [views](views.md): click one to apply it. Save your own with **Save as view…**. They belong to the schema, so everyone sees them.
+- **Columns, sort and export** — choose columns (including inherited fields and one-hop reference joins), click a header to sort, and **Export** downloads exactly the rows listed.
+
+Everything you choose is in the page's URL, so a filtered list can be bookmarked or shared, and Back undoes a drill-down.
+
+The same selection is available to scripts: the records API takes `schema`, `within` (a record — list only its descendants), `filter`, `sort` and `search`, and a filter condition may name another `schema` (see the [HTTP API reference](../reference/http-api.md)).
 
 ## Updating records
 
@@ -93,7 +108,7 @@ Every record has a UUID. You can refer to any record by its full UUID or by any 
     ```
 
 === "Web UI"
-    Select one or more rows in a collection's record list and click **Delete**, or use **Delete all** (scoped to the current schema filter) on the collection's detail page.
+    Tick rows in the explorer and click **Delete**. Ticking a whole page offers **Select all N matching**, which deletes every record the current search and filters match — not just the ones on screen — and the confirmation shows the real count.
 
 Deleting a record moves it (and its children, if any) to **Recently Deleted** rather than removing it outright — see [Deleting & restoring data](deleting-and-restoring.md).
 

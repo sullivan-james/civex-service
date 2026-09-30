@@ -379,6 +379,32 @@ class SchemaService:
                 by_parent.setdefault(s.parent_id, []).append(s)
         return by_parent
 
+    def ancestors(self, schema: SchemaDTO) -> list[SchemaDTO]:
+        """Parent, grandparent, ... -- nearest first. A soft-deleted ancestor
+        still counts (see collect_fields): records keep pointing at it."""
+        chain: list[SchemaDTO] = []
+        current = schema
+        while current.parent_id:
+            parent = self._repo.get_by_id(current.parent_id, include_deleted=True)
+            if parent is None:
+                break
+            chain.append(parent)
+            current = parent
+        return chain
+
+    def descendants(self, schema: SchemaDTO) -> list[tuple[SchemaDTO, int]]:
+        """Every schema that (transitively) inherits from `schema`, with its
+        depth below it (children are 1), parents before their children."""
+        by_parent = self._children_by_parent()
+        found: list[tuple[SchemaDTO, int]] = []
+        frontier = [(schema.id, 0)]
+        while frontier:
+            parent_id, depth = frontier.pop(0)
+            for child in by_parent.get(parent_id, []):
+                found.append((child, depth + 1))
+                frontier.append((child.id, depth + 1))
+        return found
+
     def _descendant_count(
         self, schema_id: uuid.UUID, children_by_parent: dict[uuid.UUID, list[SchemaDTO]]
     ) -> int:

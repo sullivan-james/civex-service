@@ -1,10 +1,8 @@
 import { api } from './client'
 import type { FilterTreeWire } from '../utils/filterTree'
+import type { SortEntry } from './query'
 
-export interface ViewSortEntry {
-  field: string
-  direction: 'asc' | 'desc'
-}
+export type ViewSortEntry = SortEntry
 
 export interface View {
   id: string
@@ -44,8 +42,6 @@ export interface PreviewViewBody {
 }
 
 export const viewsApi = {
-  listAll: () => api.get<View[]>('/views'),
-
   list: (schemaName: string) =>
     api.get<View[]>(`/schemas/${encodeURIComponent(schemaName)}/views`),
 
@@ -67,6 +63,9 @@ export const viewsApi = {
     api.delete<void>(
       `/schemas/${encodeURIComponent(schemaName)}/views/${encodeURIComponent(viewName)}`,
     ),
+
+  exportUrl: (schemaName: string, viewName: string, format: 'csv' | 'json') =>
+    `/api/schemas/${encodeURIComponent(schemaName)}/views/${encodeURIComponent(viewName)}/export?format=${format}`,
 
   preview: (schemaName: string, body: PreviewViewBody) =>
     api.post<ViewPreview>(

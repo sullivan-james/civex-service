@@ -186,12 +186,11 @@ class DatasetDTO:
 
 @dataclass
 class ViewDTO:
-    """A saved column/filter/sort definition against a base schema's own
-    fields -- what a table view in the UI reads back to reconstruct itself.
-    (see the filter tree shape in civex.domain.filters, which this reuses
-    unchanged). filter_tree and sort are restricted to the base schema's own
-    fields; columns may additionally contain single-hop reference-field
-    joins (see ViewService)."""
+    """A saved column/filter/sort definition against a base schema -- a named
+    civex.domain.query.RecordQuery plus columns. filter_tree is the filter
+    tree shape of civex.domain.filters, unchanged: its conditions may test the
+    base schema's own fields, an ancestor's or a descendant's. columns may
+    additionally contain single-hop reference-field joins (see ViewService)."""
 
     id: uuid.UUID
     schema_id: uuid.UUID
@@ -336,6 +335,11 @@ class RecordDTO:
     # value on this record. Response-only, like schema_name -- computed by
     # RecordService._attach_reference_labels, never stored or round-tripped.
     reference_labels: dict[str, str | None] | None = None
+    # Response-only, like reference_labels: live child counts per child schema
+    # name, and the requested columns the record's own data can't answer
+    # (inherited fields, `ref.field` joins). See RecordService.query_records.
+    child_counts: dict[str, int] | None = None
+    derived: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         # schema_name excluded — denormalized display field, not stored on the entity

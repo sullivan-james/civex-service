@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useQuery,
   useMutation,
   useQueryClient,
@@ -11,6 +12,7 @@ import {
   type PaginatedRecords,
   type ListParams,
 } from '../api/records'
+import type { RecordQueryParams } from '../api/query'
 import { ApiError } from '../api/client'
 import { useToast } from '../components/ui/ToastProvider'
 import { errorMessage } from '../lib/errors'
@@ -83,10 +85,36 @@ export function useHasSchemaRecords(schemaName: string | null | undefined) {
   return (data?.length ?? 0) > 0
 }
 
-export function useRecordCounts(datasetName: string) {
+/** One page of records -- of a collection, or (no `datasetName`, a
+ * `schemaName`) of a schema across every collection. The same query either
+ * way, so the explorer doesn't care which it is browsing. */
+export function useRecordPage(
+  scope: { datasetName?: string; schemaName?: string },
+  params: ListParams,
+  options: { enabled?: boolean; refetchInterval?: number | false } = {},
+) {
   return useQuery({
-    queryKey: ['record-counts', datasetName],
-    queryFn: () => recordsApi.counts(datasetName),
+    queryKey: ['records', scope.datasetName ?? null, scope.schemaName, params],
+    queryFn: () =>
+      scope.datasetName
+        ? recordsApi.list(scope.datasetName, params)
+        : recordsApi.listBySchema(scope.schemaName!, params),
+    enabled:
+      (options.enabled ?? true) && !!(scope.datasetName || scope.schemaName),
+    refetchInterval: options.refetchInterval ?? false,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** Matching records per schema (optionally scoped to one record's
+ * descendants via `params.within`). */
+export function useRecordCounts(
+  datasetName: string,
+  params?: RecordQueryParams,
+) {
+  return useQuery({
+    queryKey: ['record-counts', datasetName, params ?? null],
+    queryFn: () => recordsApi.counts(datasetName, params),
     enabled: !!datasetName,
   })
 }
@@ -122,7 +150,6 @@ export function useCreateRecord(datasetName: string) {
       qc.invalidateQueries({ queryKey: ['jobs'] })
       toast.success(`Record "${created.natural_name ?? created.id}" created`)
     },
-    onError: (err) => toast.error(errorMessage(err)),
   })
 }
 
@@ -141,11 +168,10 @@ export function useUpdateRecord() {
       }))
       return { previous }
     },
-    onError: (err, _vars, context) => {
+    onError: (_err, _vars, context) => {
+      // No toast: the record page shows the failure under the field itself,
+      // where it stays until dismissed or the next edit.
       rollbackRecordCache(qc, context?.previous)
-      toast.error(
-        `Couldn't save record changes — reverted. ${errorMessage(err)}`,
-      )
     },
     onSuccess: (updated) => {
       toast.success(`Record "${updated.natural_name ?? updated.id}" updated`)
@@ -250,11 +276,13 @@ export function useDeleteManyRecords(datasetName: string) {
   })
 }
 
-export function useDeleteAllRecords(datasetName: string) {
+/** Deletes everything `params` matches -- "select all N matching". */
+export function useDeleteMatchingRecords(datasetName: string) {
   const qc = useQueryClient()
   const toast = useToast()
   return useMutation({
-    mutationFn: (schema?: string) => recordsApi.deleteAll(datasetName, schema),
+    mutationFn: (params: RecordQueryParams) =>
+      recordsApi.deleteMatching(datasetName, params),
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['records', datasetName] })
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })

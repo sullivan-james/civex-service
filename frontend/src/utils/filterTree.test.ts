@@ -7,6 +7,8 @@ import {
   toWireFilterTree,
   updateNodeById,
   wireToRootGroup,
+  pruneWireConditions,
+  wireConditions,
   type FilterConditionNode,
   type FilterGroupNode,
 } from './filterTree'
@@ -159,5 +161,51 @@ describe('tree edits', () => {
     expect(nestedGroup.children).toHaveLength(2)
     expect(nestedGroup.children[1]).toBe(newCondition)
     expect(updated.children[0]).toBe(root.children[0])
+  })
+})
+
+describe('schema-qualified conditions', () => {
+  it('round-trips the schema a condition names', () => {
+    const wire = {
+      schema: 'selection',
+      field: 'selection_table',
+      op: 'is_null' as const,
+      value: true,
+    }
+    expect(toWireFilterTree(wireToRootGroup(wire))).toEqual({ and: [wire] })
+  })
+
+  it('omits the schema key when there is none', () => {
+    const node = wireToRootGroup({ field: 'a', op: 'eq', value: 1 })
+    expect(JSON.stringify(toWireFilterTree(node))).not.toContain('schema')
+  })
+})
+
+describe('wireConditions / pruneWireConditions', () => {
+  const tree = {
+    and: [
+      { field: 'a', op: 'eq' as const, value: 1, schema: 'keep' },
+      {
+        or: [
+          { field: 'b', op: 'eq' as const, value: 2, schema: 'drop' },
+          { field: 'c', op: 'eq' as const, value: 3, schema: 'drop' },
+        ],
+      },
+    ],
+  }
+
+  it('lists every condition, depth-first', () => {
+    expect(wireConditions(tree).map((c) => c.field)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('drops rejected conditions and the groups they empty', () => {
+    expect(pruneWireConditions(tree, (c) => c.schema === 'keep')).toEqual({
+      and: [{ field: 'a', op: 'eq', value: 1, schema: 'keep' }],
+    })
+  })
+
+  it('is null when nothing is left', () => {
+    expect(pruneWireConditions(tree, () => false)).toBeNull()
+    expect(pruneWireConditions(null, () => true)).toBeNull()
   })
 })

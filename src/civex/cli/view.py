@@ -9,6 +9,7 @@ import typer
 
 from civex.cli.utils import get_ctx as _ctx
 from civex.console import console
+from civex.domain.naming import safe_filename
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.services.archive import write_zip
 from civex.services.view_service import write_csv, write_json
@@ -50,7 +51,7 @@ def view_export(
                 file_entries.extend(batch.file_entries)
                 yield batch.rows
 
-        data_filename = f"{view_name}.{format}"
+        data_filename = f"{safe_filename(view_name)}.{format}"
         # Write the data file straight to its final destination when there
         # are no files to bundle; otherwise to a scratch file that gets
         # zipped. Either way rows are paged, never all held in memory.
@@ -68,7 +69,7 @@ def view_export(
                 console.print(f"[success]Wrote {dest}[/success]")
                 return
 
-            dest = output or Path(f"{view_name}.zip")
+            dest = output or Path(f"{safe_filename(view_name)}.zip")
             try:
                 write_zip(
                     dest,

@@ -13,10 +13,6 @@ import {
 import { useToast } from '../components/ui/ToastProvider'
 import { errorMessage } from '../lib/errors'
 
-export function useAllViews() {
-  return useQuery({ queryKey: ['views'], queryFn: viewsApi.listAll })
-}
-
 export function useViews(schemaName: string) {
   return useQuery({
     queryKey: ['views', schemaName],

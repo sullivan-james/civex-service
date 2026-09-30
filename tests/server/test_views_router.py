@@ -331,3 +331,34 @@ def test_export_missing_view_returns_404(client: TestClient):
     _make_schema(client, "trial")
     resp = client.get("/api/schemas/trial/views/missing/export")
     assert resp.status_code == 404
+
+
+def test_view_with_a_friendly_name_round_trips_through_the_url(client: TestClient):
+    _make_schema(client, "trial", fields=[("subject", "string")])
+    name = "Needs review (QC) – 50%?"
+    created = client.post(
+        "/api/schemas/trial/views", json={"name": name, "columns": ["subject"]}
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["name"] == name
+
+    from urllib.parse import quote
+
+    path = f"/api/schemas/trial/views/{quote(name, safe='')}"
+    assert client.get(path).json()["name"] == name
+
+    export = client.get(f"{path}/export", params={"format": "csv"})
+    assert export.status_code == 200
+    # the name is display text; the download's file name is made safe
+    assert ".csv" in export.headers["content-disposition"]
+    assert "/" not in export.headers["content-disposition"].split("filename")[1]
+
+    renamed = client.patch(path, json={"rename": "Plain old name"})
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "Plain old name"
+
+
+def test_view_name_with_a_slash_is_rejected(client: TestClient):
+    _make_schema(client, "trial")
+    response = client.post("/api/schemas/trial/views", json={"name": "a/b"})
+    assert response.status_code == 422

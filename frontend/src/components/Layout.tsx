@@ -16,6 +16,7 @@ import {
 import { remoteApi } from '../api/remote'
 import { errorMessage } from '../lib/errors'
 import { useUISettings } from '../hooks/useUISettings'
+import { useFrequentCollections } from '../hooks/useFrequentCollections'
 import { useDialogA11y } from '../hooks/useDialogA11y'
 import AiAttestationGate from './ai/AiAttestationGate'
 import AiPanel from './ai/AiPanel'
@@ -36,7 +37,6 @@ import {
   Folder,
   ChevronDown,
   LayoutGrid,
-  Table,
   Database,
   Workflow,
   ListChecks,
@@ -116,7 +116,6 @@ const navGroups: NavGroupDef[] = [
     heading: 'Data',
     items: [
       { to: '/collections', label: 'Collections', icon: LayoutGrid },
-      { to: '/views', label: 'Views', icon: Table },
       { to: '/trash', label: 'Recently Deleted', icon: Trash2 },
     ],
   },
@@ -158,10 +157,13 @@ function NavItem({
   icon: Icon,
   collapsed,
   secondary,
+  indent,
   onNavigate,
 }: NavItemDef & {
   collapsed: boolean
   secondary?: boolean
+  /** A shortcut nested under its parent item. */
+  indent?: boolean
   onNavigate?: () => void
 }) {
   return (
@@ -172,7 +174,7 @@ function NavItem({
       aria-label={collapsed ? label : undefined}
       className={({ isActive }) =>
         `flex items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-          collapsed ? 'justify-center px-0' : ''
+          collapsed ? 'justify-center px-0' : indent ? 'pl-8' : ''
         } ${
           isActive
             ? 'bg-accent-subtle text-accent'
@@ -206,6 +208,32 @@ function NavGroupHeading({
   )
 }
 
+/** The collections opened most often, nested under "Collections". */
+function FrequentCollections({
+  collapsed,
+  onNavigate,
+}: {
+  collapsed: boolean
+  onNavigate?: () => void
+}) {
+  const frequent = useFrequentCollections(5)
+  return (
+    <>
+      {frequent.map((c) => (
+        <NavItem
+          key={c.id}
+          to={`/collections/${c.id}`}
+          label={c.name}
+          icon={Folder}
+          collapsed={collapsed}
+          indent
+          onNavigate={onNavigate}
+        />
+      ))}
+    </>
+  )
+}
+
 function NavGroups({
   collapsed,
   showAdvanced,
@@ -229,13 +257,20 @@ function NavGroups({
           )}
           <div className="flex flex-col gap-1">
             {group.items.map((item) => (
-              <NavItem
-                key={item.to}
-                {...item}
-                collapsed={collapsed}
-                secondary={group.secondary}
-                onNavigate={onNavigate}
-              />
+              <div key={item.to} className="flex flex-col gap-1">
+                <NavItem
+                  {...item}
+                  collapsed={collapsed}
+                  secondary={group.secondary}
+                  onNavigate={onNavigate}
+                />
+                {item.to === '/collections' && (
+                  <FrequentCollections
+                    collapsed={collapsed}
+                    onNavigate={onNavigate}
+                  />
+                )}
+              </div>
             ))}
           </div>
         </div>

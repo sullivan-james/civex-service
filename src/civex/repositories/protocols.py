@@ -32,7 +32,7 @@ from civex.domain.dtos import (
     ViewDTO,
     WorkflowJobDTO,
 )
-from civex.domain.filters import FilterNode, SortKey
+from civex.domain.query import ResolvedQuery
 
 # (day, dataset_name, schema_name, count) -- see LocalRecordRepository.growth_by_period
 RecordGrowthRow = tuple[date, str, str, int]
@@ -165,27 +165,13 @@ class RecordRepository(Protocol):
     def list_by_dataset(self, dataset_id: uuid.UUID) -> list[RecordDTO]: ...
     def list_by_ids(self, ids: list[uuid.UUID]) -> list[RecordDTO]: ...
     def list_filtered(
-        self,
-        dataset_id: uuid.UUID | None,
-        schema_id: uuid.UUID | None,
-        parent_record_id: uuid.UUID | None,
-        field_filters: list[tuple[str, str]],
-        search: str | None,
-        offset: int,
-        limit: int,
-        filter_tree: FilterNode | None = None,
-        sort: list[SortKey] | None = None,
+        self, query: ResolvedQuery, offset: int, limit: int
     ) -> list[RecordDTO]: ...
-    def count(
-        self,
-        dataset_id: uuid.UUID | None,
-        schema_id: uuid.UUID | None,
-        parent_record_id: uuid.UUID | None,
-        field_filters: list[tuple[str, str]],
-        search: str | None,
-        filter_tree: FilterNode | None = None,
-    ) -> int: ...
-    def count_by_schema(self, dataset_id: uuid.UUID) -> dict[str, int]: ...
+    def count(self, query: ResolvedQuery) -> int: ...
+    def count_by_schema(self, query: ResolvedQuery) -> dict[str, int]: ...
+    def count_children(
+        self, parent_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, dict[str, int]]: ...
     def growth_by_period(
         self,
         dataset_id: uuid.UUID | None,

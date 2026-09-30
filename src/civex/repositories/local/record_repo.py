@@ -5,14 +5,15 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, cast, func, literal, or_, String
+from sqlalchemy import and_, cast, func, literal, or_, select, String
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from civex.db.models import Dataset, Record, Schema, WorkflowJob
 from civex.domain.dtos import RecordDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode, SortKey
+from civex.domain.query import ResolvedQuery
 from civex.repositories.local._bucketing import day_bucket
 from civex.repositories.local._jobs import bulk_delete_jobs
 from civex.repositories.protocols import RecordGrowthRow
@@ -21,14 +22,76 @@ from civex.repositories.protocols import RecordGrowthRow
 def _order_by(sort: list[SortKey] | None) -> list[Any]:
     """ORDER BY terms for a view-style sort on JSON fields: nulls (absent or
     JSON null) always last regardless of direction, numeric types compared
-    as numbers, everything else (ISO dates/datetimes included) as text."""
+    as numbers, everything else (ISO dates/datetimes included) as text. A key
+    on an ancestor's field sorts by that ancestor record's value."""
     terms: list[Any] = []
     for key in sort or []:
-        col = Record.data[key.field_id]
-        value = col.as_float() if key.numeric else col.as_string()
+        if key.rel.direction == "up":
+            value = _up_value(key.rel.hops, key.field_id, key.numeric)
+        else:
+            col = Record.data[key.field_id]
+            value = col.as_float() if key.numeric else col.as_string()
         terms.append(value.is_(None))
         terms.append(value.desc() if key.descending else value.asc())
     return terms
+
+
+def _chain(columns: Any, hops: int, link: Any):
+    """`SELECT columns` over `hops` aliased Records joined in a chain
+    (`link(prev, next)` is the join condition), plus the aliases."""
+    aliases = [aliased(Record) for _ in range(hops)]
+    q = select(columns).select_from(aliases[0])
+    for prev, nxt in zip(aliases, aliases[1:]):
+        q = q.join(nxt, link(prev, nxt))
+    return q, aliases
+
+
+def _up(prev: Any, nxt: Any) -> Any:
+    return nxt.id == prev.parent_record_id
+
+
+def _down(prev: Any, nxt: Any) -> Any:
+    return nxt.parent_record_id == prev.id
+
+
+def _exists_up(hops: int, predicate):
+    """EXISTS an ancestor `hops` levels above the outer Record matching
+    `predicate(ancestor_alias)` (a1 is the outer record's parent, each next
+    alias the previous one's parent)."""
+    q, aliases = _chain(literal(1), hops, _up)
+    return (
+        q.where(aliases[0].id == Record.parent_record_id, predicate(aliases[-1]))
+        .correlate(Record)
+        .exists()
+    )
+
+
+def _up_value(hops: int, field_id: str, numeric: bool):
+    """The value of `field_id` on the ancestor `hops` levels above the outer
+    Record, as a correlated scalar -- NULL when there is none."""
+    aliases = [aliased(Record) for _ in range(hops)]
+    col = aliases[-1].data[field_id]
+    value = col.as_float() if numeric else col.as_string()
+    q = select(value).select_from(aliases[0])
+    for prev, nxt in zip(aliases, aliases[1:]):
+        q = q.join(nxt, _up(prev, nxt))
+    return (
+        q.where(aliases[0].id == Record.parent_record_id)
+        .correlate(Record)
+        .scalar_subquery()
+    )
+
+
+def _exists_down(hops: int, schema_id: uuid.UUID | None, predicate):
+    """EXISTS a live descendant `hops` levels below the outer Record, of
+    `schema_id`, matching `predicate(descendant_alias)`. Every hop follows
+    `parent_record_id` (indexed); the terminal schema pins the path."""
+    q, aliases = _chain(literal(1), hops, _down)
+    last = aliases[-1]
+    conds = [aliases[0].parent_record_id == Record.id, last.deleted_at.is_(None)]
+    if schema_id is not None:
+        conds.append(last.schema_id == schema_id)
+    return q.where(*conds, predicate(last)).correlate(Record).exists()
 
 
 def _coerce_json_value(v: str) -> Any:
@@ -110,58 +173,43 @@ class LocalRecordRepository:
         return [_to_dto(r) for r in rows]
 
     def list_filtered(
-        self,
-        dataset_id: uuid.UUID | None,
-        schema_id: uuid.UUID | None,
-        parent_record_id: uuid.UUID | None,
-        field_filters: list[tuple[str, str]],
-        search: str | None,
-        offset: int,
-        limit: int,
-        filter_tree: FilterNode | None = None,
-        sort: list[SortKey] | None = None,
+        self, query: ResolvedQuery, offset: int, limit: int
     ) -> list[RecordDTO]:
-        q = _base_query(
-            self._s,
-            dataset_id,
-            schema_id,
-            parent_record_id,
-            field_filters,
-            search,
-            self._pg,
-            filter_tree,
-        )
+        q = _base_query(self._s, query, self._pg)
         # created_at alone isn't a total order (bulk inserts share
         # timestamps), so ties are broken on id -- otherwise OFFSET pages can
         # repeat or skip rows.
         rows = (
-            q.order_by(*_order_by(sort), Record.created_at, Record.id)
+            q.order_by(*_order_by(query.sort), Record.created_at, Record.id)
             .offset(offset)
             .limit(limit)
             .all()
         )
         return [_to_dto(r) for r in rows]
 
-    def count(
-        self,
-        dataset_id: uuid.UUID | None,
-        schema_id: uuid.UUID | None,
-        parent_record_id: uuid.UUID | None,
-        field_filters: list[tuple[str, str]],
-        search: str | None,
-        filter_tree: FilterNode | None = None,
-    ) -> int:
-        q = _base_query(
-            self._s,
-            dataset_id,
-            schema_id,
-            parent_record_id,
-            field_filters,
-            search,
-            self._pg,
-            filter_tree,
+    def count(self, query: ResolvedQuery) -> int:
+        return _base_query(self._s, query, self._pg).count()
+
+    def count_children(
+        self, parent_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, dict[str, int]]:
+        """Live child counts per parent, broken out by child schema name --
+        one grouped query for a whole page of parents."""
+        if not parent_ids:
+            return {}
+        rows = (
+            self._s.query(Record.parent_record_id, Schema.name, func.count(Record.id))
+            .join(Schema, Record.schema_id == Schema.id)
+            .filter(
+                Record.parent_record_id.in_(parent_ids), Record.deleted_at.is_(None)
+            )
+            .group_by(Record.parent_record_id, Schema.name)
+            .all()
         )
-        return q.count()
+        counts: dict[uuid.UUID, dict[str, int]] = {}
+        for parent_id, schema_name, n in rows:
+            counts.setdefault(parent_id, {})[schema_name] = n
+        return counts
 
     def _by_schema_query(self, schema_id: uuid.UUID, search: str | None):
         q = self._s.query(Record).filter(
@@ -260,11 +308,11 @@ class LocalRecordRepository:
                 result.append(_to_dto(row))
         return result
 
-    def count_by_schema(self, dataset_id: uuid.UUID) -> dict[str, int]:
+    def count_by_schema(self, query: ResolvedQuery) -> dict[str, int]:
         rows = (
-            self._s.query(Schema.name, func.count(Record.id))
+            _base_query(self._s, query, self._pg)
+            .with_entities(Schema.name, func.count(Record.id))
             .join(Schema, Record.schema_id == Schema.id)
-            .filter(Record.dataset_id == dataset_id, Record.deleted_at.is_(None))
             .group_by(Schema.name)
             .all()
         )
@@ -357,24 +405,23 @@ class LocalRecordRepository:
         self._s.flush()
 
 
-def _base_query(
-    session: Session,
-    dataset_id: uuid.UUID | None,
-    schema_id: uuid.UUID | None,
-    parent_record_id: uuid.UUID | None,
-    field_filters: list[tuple[str, str]],
-    search: str | None = None,
-    is_postgres: bool = False,
-    filter_tree: FilterNode | None = None,
-):
+def _base_query(session: Session, query: ResolvedQuery, is_postgres: bool = False):
     q = session.query(Record).filter(Record.deleted_at.is_(None))
-    if dataset_id is not None:
-        q = q.filter(Record.dataset_id == dataset_id)
-    if schema_id is not None:
-        q = q.filter(Record.schema_id == schema_id)
-    if parent_record_id is not None:
-        q = q.filter(Record.parent_record_id == parent_record_id)
-    for key, value in field_filters:
+    if query.dataset_id is not None:
+        q = q.filter(Record.dataset_id == query.dataset_id)
+    if query.schema_id is not None:
+        q = q.filter(Record.schema_id == query.schema_id)
+    if query.parent_record_id is not None:
+        q = q.filter(Record.parent_record_id == query.parent_record_id)
+    if query.within is not None:
+        ancestor_id, hops = query.within
+        if hops == 1:
+            q = q.filter(Record.parent_record_id == ancestor_id)
+        else:
+            q = q.filter(
+                _exists_up(hops - 1, lambda a: a.parent_record_id == ancestor_id)
+            )
+    for key, value in query.field_filters:
         if is_postgres:
             # @> containment uses the GIN index on PostgreSQL.
             # _coerce_json_value converts "30" → 30 so numeric/bool fields match correctly.
@@ -387,15 +434,17 @@ def _base_query(
             # both strings and numbers to match the string filter value.
             # (Plain cast(data[key], String) would instead yield the JSON form '"S02"'.)
             q = q.filter(cast(Record.data[key].as_string(), String) == value)
-    if filter_tree is not None:
-        q = q.filter(_build_filter_condition(filter_tree))
-    if search:
+    if query.filter_tree is not None:
+        q = q.filter(_build_filter_condition(query.filter_tree))
+    if query.search:
         if is_postgres:
             q = q.filter(
-                Record.search_vector.op("@@")(func.plainto_tsquery("simple", search))
+                Record.search_vector.op("@@")(
+                    func.plainto_tsquery("simple", query.search)
+                )
             )
         else:
-            q = q.filter(cast(Record.data, String).ilike(f"%{search}%"))
+            q = q.filter(cast(Record.data, String).ilike(f"%{query.search}%"))
     return q
 
 
@@ -403,11 +452,18 @@ def _build_filter_condition(node: FilterNode):
     if isinstance(node, FilterGroup):
         clauses = [_build_filter_condition(c) for c in node.conditions]
         return and_(*clauses) if node.op == "and" else or_(*clauses)
-    return _build_leaf_condition(node)
+    rel = node.rel
+    if rel.direction == "up":
+        return _exists_up(rel.hops, lambda a: _build_leaf_condition(node, a))
+    if rel.direction == "down":
+        return _exists_down(
+            rel.hops, rel.schema_id, lambda d: _build_leaf_condition(node, d)
+        )
+    return _build_leaf_condition(node, Record)
 
 
-def _build_leaf_condition(node: FilterCondition):
-    col = Record.data[node.field]
+def _build_leaf_condition(node: FilterCondition, entity: Any):
+    col = entity.data[node.field]
     if node.op == "is_null":
         # `.as_string()` (->>` on PG, plain json_extract on SQLite) collapses
         # "key absent" and "key present with JSON null" to the same SQL NULL

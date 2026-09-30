@@ -1,5 +1,11 @@
 export {
   Star,
+  Plus,
+  Search,
+  Columns3,
+  Download,
+  Save,
+  ListFilter,
   Pencil,
   X,
   XCircle,
