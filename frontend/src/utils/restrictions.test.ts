@@ -4,6 +4,7 @@ import {
   parse,
   summarise,
   toInputProps,
+  boundsProblem,
   formatBytes,
   EMPTY_RESTRICTION_STATE,
 } from './restrictions'
@@ -235,5 +236,67 @@ describe('toInputProps', () => {
     expect(
       toInputProps(makeField({ type: 'boolean', restrictions: {} })),
     ).toEqual({})
+  })
+})
+
+describe('datetime timezone restriction', () => {
+  const CHI = 'America/Chicago'
+
+  it('stores the timezone and reads bounds in that zone', () => {
+    const r = build('datetime', {
+      ...EMPTY_RESTRICTION_STATE,
+      timezone: CHI,
+      minDate: '2024-03-01T15:30',
+    })
+    expect(r).toEqual({ timezone: CHI, min: '2024-03-01T21:30:00.000Z' })
+  })
+
+  it('round-trips through parse in the same zone', () => {
+    const r = build('datetime', {
+      ...EMPTY_RESTRICTION_STATE,
+      timezone: CHI,
+      minDate: '2024-07-01T15:30',
+      maxDate: '2024-12-01T08:00',
+    })
+    const state = parse(makeField({ type: 'datetime', restrictions: r }))
+    expect(state.timezone).toBe(CHI)
+    expect(state.minDate).toBe('2024-07-01T15:30')
+    expect(state.maxDate).toBe('2024-12-01T08:00')
+  })
+
+  it('omits timezone when inheriting', () => {
+    expect(
+      build('datetime', {
+        ...EMPTY_RESTRICTION_STATE,
+        minDate: '2024-03-01T15:30',
+      }),
+    ).not.toHaveProperty('timezone')
+  })
+
+  it('expresses input bounds in the effective zone', () => {
+    const field = makeField({
+      type: 'datetime',
+      restrictions: { min: '2024-03-01T21:30:00Z' },
+    })
+    expect(toInputProps(field, CHI).minDate).toBe('2024-03-01T15:30')
+    expect(toInputProps(field, 'UTC').minDate).toBe('2024-03-01T21:30')
+  })
+
+  it('flags a bound in a DST gap instead of storing a guess', () => {
+    const state = {
+      ...EMPTY_RESTRICTION_STATE,
+      timezone: CHI,
+      minDate: '2024-03-10T02:30',
+    }
+    expect(boundsProblem('datetime', state)).toMatch(/Not before/)
+    expect(build('datetime', state)).toEqual({ timezone: CHI })
+    expect(
+      boundsProblem('datetime', { ...state, minDate: '2024-03-10T03:30' }),
+    ).toBeNull()
+    expect(boundsProblem('string', state)).toBeNull()
+  })
+
+  it('shows the zone in the summary', () => {
+    expect(summarise({ timezone: CHI }, 'datetime')).toBe(`timezone ${CHI}`)
   })
 })

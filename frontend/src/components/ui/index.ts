@@ -38,6 +38,7 @@ export { FormError } from './FormError'
 export { Input, type InputProps } from './Input'
 export { Textarea, type TextareaProps } from './Textarea'
 export { Select, type SelectProps } from './Select'
+export { TimeZoneSelect } from './TimeZoneSelect'
 export { Checkbox, type CheckboxProps } from './Checkbox'
 export { Field, type FieldProps } from './Field'
 export {

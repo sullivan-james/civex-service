@@ -9,6 +9,7 @@ import {
   Field,
   Input,
   Select,
+  TimeZoneSelect,
   Checkbox,
   FormGrid,
   FormSection,
@@ -62,6 +63,8 @@ export function FieldForm(props: FieldFormProps) {
   // date/datetime — stored as UTC ISO; display in datetime-local format
   const [minDate, setMinDate] = useState(initialRestrictions.minDate)
   const [maxDate, setMaxDate] = useState(initialRestrictions.maxDate)
+  // datetime only: overrides the collection's timezone for this field
+  const [timezone, setTimezone] = useState(initialRestrictions.timezone)
 
   const addField = useAddField(schemaName)
   const updateField = useUpdateField(schemaName)
@@ -86,21 +89,26 @@ export function FieldForm(props: FieldFormProps) {
     setMaxSize('')
     setMinDate('')
     setMaxDate('')
+    setTimezone('')
   }
 
+  const restrictionState: restrictions.RestrictionState = {
+    min: minVal,
+    max: maxVal,
+    choices,
+    maxLength,
+    accept,
+    maxSize,
+    minDate,
+    maxDate,
+    refSchema,
+    timezone,
+  }
+  const boundsError = restrictions.boundsProblem(type, restrictionState)
+
   function handleSubmit() {
-    if (!canSubmit) return
-    const builtRestrictions = restrictions.build(type, {
-      min: minVal,
-      max: maxVal,
-      choices,
-      maxLength,
-      accept,
-      maxSize,
-      minDate,
-      maxDate,
-      refSchema,
-    })
+    if (!canSubmit || boundsError) return
+    const builtRestrictions = restrictions.build(type, restrictionState)
 
     if (mode === 'create') {
       const body: Parameters<typeof addField.mutate>[0] = {
@@ -315,6 +323,20 @@ export function FieldForm(props: FieldFormProps) {
       )}
       {(type === 'date' || type === 'datetime') && (
         <FormSection title="Restrictions">
+          {type === 'datetime' && (
+            <Field
+              label="Timezone"
+              span={12}
+              hint="Values without a UTC offset are read in this zone, and shown in it. Leave unset to use the collection's timezone."
+            >
+              <TimeZoneSelect
+                size="sm"
+                value={timezone}
+                onChange={setTimezone}
+                unsetLabel="Inherit from the collection"
+              />
+            </Field>
+          )}
           <Field label="Not before" span={6}>
             <Input
               size="sm"
@@ -334,9 +356,9 @@ export function FieldForm(props: FieldFormProps) {
         </FormSection>
       )}
 
-      {mutation.error && (
+      {(boundsError || mutation.error) && (
         <p role="alert" className={`${spanClassName(12)} text-xs text-danger`}>
-          {errorMessage(mutation.error)}
+          {boundsError ?? errorMessage(mutation.error)}
         </p>
       )}
 
@@ -345,7 +367,7 @@ export function FieldForm(props: FieldFormProps) {
           variant="primary"
           size="sm"
           onClick={handleSubmit}
-          disabled={mutation.isPending || !canSubmit}
+          disabled={mutation.isPending || !canSubmit || !!boundsError}
         >
           {mode === 'create'
             ? mutation.isPending

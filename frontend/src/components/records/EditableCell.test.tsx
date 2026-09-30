@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { EditableCell } from './EditableCell'
+import { CollectionTimeZone } from './CollectionTimeZone'
 import type { Field } from '../../api/schemas'
 
 function field(type: string, extra: Partial<Field> = {}): Field {
@@ -153,5 +154,37 @@ describe('EditableCell popover editing', () => {
     renderCell(field('file'), null)
     await userEvent.click(cell())
     expect(screen.getByRole('dialog').closest('table')).toBeNull()
+  })
+})
+
+describe('EditableCell datetimes', () => {
+  it("edits in the collection's zone and commits a UTC instant", async () => {
+    const onCommit = vi.fn()
+    render(
+      <CollectionTimeZone timeZone="America/Chicago">
+        <table>
+          <tbody>
+            <tr>
+              <EditableCell
+                field={field('datetime', { name: 'taken_at' })}
+                value="2024-03-01T21:30:00+00:00"
+                onCommit={onCommit}
+                rowLabel="r1"
+              />
+            </tr>
+          </tbody>
+        </table>
+      </CollectionTimeZone>,
+    )
+    // Shown as Chicago wall time, not the raw UTC string.
+    expect(screen.getByText(/3:30 PM CST/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('cell'))
+    const input = document.querySelector(
+      'input[type="datetime-local"]',
+    ) as HTMLInputElement
+    expect(input).toHaveValue('2024-03-01T15:30')
+    fireEvent.change(input, { target: { value: '2024-03-01T16:45' } })
+    await userEvent.keyboard('{Enter}')
+    expect(onCommit).toHaveBeenCalledWith('2024-03-01T22:45:00.000Z')
   })
 })
