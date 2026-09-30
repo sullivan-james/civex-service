@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react'
+import { type ComponentPropsWithRef, type ReactNode } from 'react'
 
 export function Table({
   children,
@@ -95,9 +95,11 @@ export function Tr({
 export function Td({
   children,
   className = '',
-}: {
-  children?: ReactNode
-  className?: string
-}) {
-  return <td className={`px-4 py-3 text-fg ${className}`}>{children}</td>
+  ...rest
+}: ComponentPropsWithRef<'td'>) {
+  return (
+    <td className={`px-4 py-3 text-fg ${className}`} {...rest}>
+      {children}
+    </td>
+  )
 }
