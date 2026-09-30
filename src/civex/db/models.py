@@ -152,15 +152,15 @@ class Field(Base):
 
 class View(Base):
     """
-    A saved column/filter/sort definition against a base schema's own
-    fields -- the definition a table view in the UI reads back to
-    reconstruct itself. filter_tree is the same AND/OR shape records
-    queries use (civex.domain.filters); columns/sort reference field names
-    the way Schema.display_fields does, not field ids, so renaming a field
-    on the schema is not reflected here automatically. columns may also
-    contain single-hop reference joins ("customer.email") -- see
-    ViewService._validate_join_column / resolve_rows; filter_tree and sort
-    stay restricted to the base schema's own fields.
+    A saved column/filter/sort definition against a base schema -- the
+    definition a table view in the UI reads back to reconstruct itself, and
+    what a schema's "saved filters" are. filter_tree is the same AND/OR shape
+    records queries use (civex.domain.filters), whose conditions may test the
+    base schema's own fields, an ancestor's or a descendant's; columns/sort
+    reference field names the way Schema.display_fields does, not field ids,
+    so renaming a field on the schema is not reflected here automatically.
+    columns may also contain single-hop reference joins ("customer.email") --
+    see RecordService.validate_columns / _attach_derived.
     """
 
     __tablename__ = "views"

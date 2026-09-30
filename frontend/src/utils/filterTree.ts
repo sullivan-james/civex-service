@@ -2,7 +2,9 @@
  * AND/OR filter tree for the view builder — the frontend half of
  * `civex.domain.filters`. The wire shape (what the API sends/receives) is a
  * plain nested object: `{"field": ..., "op": ..., "value": ...}` for a leaf,
- * `{"and": [...]}`/`{"or": [...]}` for a group. `FilterTreeNode` below adds a
+ * `{"and": [...]}`/`{"or": [...]}` for a group. A leaf may name the `schema`
+ * whose field it tests -- an ancestor's or descendant's as well as the
+ * queried schema's own (see civex/domain/filters.py). `FilterTreeNode` adds a
  * stable `id` and an explicit `kind` discriminant so the builder UI can key
  * and edit individual nodes; `toWireFilterTree`/`fromWireFilterTree` convert
  * between the two.
@@ -34,6 +36,9 @@ export interface FilterConditionWire {
   field: string
   op: FilterOp
   value?: unknown
+  /** Schema owning `field`; omitted means the queried schema (or the
+   * ancestor owning an inherited name). */
+  schema?: string
 }
 
 export interface FilterGroupWire {
@@ -51,6 +56,7 @@ export interface FilterConditionNode {
   field: string
   op: FilterOp
   value: unknown
+  schema?: string
 }
 
 export interface FilterGroupNode {
@@ -95,6 +101,7 @@ export function fromWireFilterTree(wire: FilterTreeWire): FilterTreeNode {
     field: wire.field,
     op: wire.op,
     value: wire.op === 'is_null' ? true : (wire.value ?? ''),
+    ...(wire.schema ? { schema: wire.schema } : {}),
   }
 }
 
@@ -114,9 +121,10 @@ export function wireToRootGroup(wire: FilterTreeWire | null): FilterGroupNode {
 export function toWireFilterTree(node: FilterTreeNode): FilterTreeWire | null {
   if (node.kind === 'condition') {
     if (!node.field) return null
+    const schema = node.schema ? { schema: node.schema } : {}
     if (node.op === 'is_null')
-      return { field: node.field, op: node.op, value: true }
-    return { field: node.field, op: node.op, value: node.value }
+      return { ...schema, field: node.field, op: node.op, value: true }
+    return { ...schema, field: node.field, op: node.op, value: node.value }
   }
   const children = node.children
     .map(toWireFilterTree)
@@ -172,4 +180,29 @@ export function addChildById(
     }
   }
   return walk(root)
+}
+
+/** Every condition in a wire tree, depth-first. */
+export function wireConditions(wire: FilterTreeWire): FilterConditionWire[] {
+  if (isGroupWire(wire)) {
+    return (wire.and ?? wire.or ?? []).flatMap(wireConditions)
+  }
+  return [wire]
+}
+
+/** The tree without the conditions `keep` rejects; groups left empty go too.
+ * Null when nothing remains. */
+export function pruneWireConditions(
+  wire: FilterTreeWire | null,
+  keep: (condition: FilterConditionWire) => boolean,
+): FilterTreeWire | null {
+  if (!wire) return null
+  if (isGroupWire(wire)) {
+    const op = 'and' in wire ? 'and' : 'or'
+    const children = (wire.and ?? wire.or ?? [])
+      .map((c) => pruneWireConditions(c, keep))
+      .filter((c): c is FilterTreeWire => c !== null)
+    return children.length === 0 ? null : { [op]: children }
+  }
+  return keep(wire) ? wire : null
 }

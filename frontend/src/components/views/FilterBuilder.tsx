@@ -11,7 +11,11 @@ import {
   type FilterConditionNode,
   type FilterOp,
 } from '../../utils/filterTree'
-import type { ResolvedField } from '../../utils/viewFields'
+import {
+  fieldKey,
+  type FilterableField,
+  type FieldRelation,
+} from '../../utils/hierarchy'
 import { displayLabel } from '../../utils/naming'
 import {
   effectiveTimeZone,
@@ -21,15 +25,36 @@ import {
 
 interface FilterBuilderProps {
   root: FilterGroupNode
-  fields: ResolvedField[]
+  fields: FilterableField[]
   onChange: (root: FilterGroupNode) => void
+}
+
+const RELATION_HINT: Record<FieldRelation, string> = {
+  self: 'this level',
+  ancestor: 'parent record',
+  descendant: 'any child record',
+}
+
+/** The field a condition names. A condition without a schema (saved before
+ * conditions could name one) means the listed schema's, or an ancestor's. */
+function fieldOf(
+  fields: FilterableField[],
+  node: FilterConditionNode,
+): FilterableField | undefined {
+  return fields.find(
+    (f) =>
+      f.name === node.field &&
+      (node.schema
+        ? f.sourceSchemaName === node.schema
+        : f.relation !== 'descendant'),
+  )
 }
 
 /** Airtable/Notion-style groupable AND/OR filter builder. Operates on the
  * `FilterTreeNode` shape from utils/filterTree, converted to/from the API's
- * wire format by the caller. Filter fields are restricted to the base
- * schema's own (+ inherited) fields -- joined columns aren't filterable,
- * matching ViewService._validate_filter_tree. */
+ * wire format by the caller. A condition may test a field of the listed
+ * schema, of an ancestor (its parent record) or of a descendant (matches
+ * when any child record does) -- joined columns aren't filterable. */
 export function FilterBuilder({ root, fields, onChange }: FilterBuilderProps) {
   return (
     <GroupEditor
@@ -48,7 +73,7 @@ function FilterValueInput({
   value,
   onChange,
 }: {
-  field: ResolvedField | undefined
+  field: FilterableField | undefined
   op: FilterOp
   value: unknown
   onChange: (value: unknown) => void
@@ -165,10 +190,10 @@ function ConditionEditor({
 }: {
   root: FilterGroupNode
   node: FilterConditionNode
-  fields: ResolvedField[]
+  fields: FilterableField[]
   onChange: (root: FilterGroupNode) => void
 }) {
-  const field = fields.find((f) => f.name === node.field)
+  const field = fieldOf(fields, node)
 
   function update(patch: Partial<FilterConditionNode>) {
     onChange(
@@ -183,15 +208,29 @@ function ConditionEditor({
     <div className="flex items-center gap-2 flex-wrap">
       <Select
         aria-label="Field"
-        value={node.field}
-        onChange={(e) => update({ field: e.target.value, value: '' })}
-        className="w-40"
+        value={field ? fieldKey(field) : ''}
+        onChange={(e) => {
+          const picked = fields.find((f) => fieldKey(f) === e.target.value)
+          update({
+            field: picked?.name ?? '',
+            schema: picked?.sourceSchemaName,
+            value: '',
+          })
+        }}
+        className="w-56"
       >
         <option value="">Select field…</option>
-        {fields.map((f) => (
-          <option key={f.name} value={f.name}>
-            {displayLabel(f.name, f.label)}
-          </option>
+        {groupFields(fields).map(({ schemaName, relation, items }) => (
+          <optgroup
+            key={schemaName}
+            label={`${schemaName} (${RELATION_HINT[relation]})`}
+          >
+            {items.map((f) => (
+              <option key={fieldKey(f)} value={fieldKey(f)}>
+                {displayLabel(f.name, f.label)}
+              </option>
+            ))}
+          </optgroup>
         ))}
       </Select>
       <Select
@@ -225,6 +264,27 @@ function ConditionEditor({
   )
 }
 
+/** Fields grouped by owning schema, in the order given (own, ancestors,
+ * descendants). */
+function groupFields(fields: FilterableField[]) {
+  const groups: {
+    schemaName: string
+    relation: FieldRelation
+    items: FilterableField[]
+  }[] = []
+  for (const f of fields) {
+    const last = groups[groups.length - 1]
+    if (last && last.schemaName === f.sourceSchemaName) last.items.push(f)
+    else
+      groups.push({
+        schemaName: f.sourceSchemaName,
+        relation: f.relation,
+        items: [f],
+      })
+  }
+  return groups
+}
+
 function GroupEditor({
   root,
   node,
@@ -234,7 +294,7 @@ function GroupEditor({
 }: {
   root: FilterGroupNode
   node: FilterGroupNode
-  fields: ResolvedField[]
+  fields: FilterableField[]
   onChange: (root: FilterGroupNode) => void
   isRoot?: boolean
 }) {

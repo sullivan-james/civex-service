@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
+from civex.domain.query import RecordQuery
 from civex.server.deps import get_ctx
+from civex.server.query_params import record_query
 from civex.server.models import (
     AuditLogResponse,
     CreateDatasetRequest,
@@ -58,8 +60,14 @@ def get_dataset(name_or_id: str, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.get("/{name_or_id}/record-counts")
-def record_counts(name_or_id: str, ctx: AppContext = Depends(get_ctx)):
-    """Record counts grouped by schema name — single SQL GROUP BY, no record loading."""
+def record_counts(
+    name_or_id: str,
+    query: RecordQuery = Depends(record_query),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Record counts grouped by schema name — single SQL GROUP BY, no record
+    loading. Takes the list endpoint's filters (except 'schema', which is the
+    grouping), so e.g. 'within' counts what sits under one record."""
     dataset = None
     try:
         uid = uuid.UUID(name_or_id)
@@ -71,7 +79,15 @@ def record_counts(name_or_id: str, ctx: AppContext = Depends(get_ctx)):
             dataset = ctx.dataset_svc.get(name_or_id)
         except NotFoundError as e:
             raise HTTPException(404, detail=str(e))
-    return ctx.record_svc.schema_counts(dataset.name)
+    query.dataset = dataset.name
+    query.schema = None
+    query.sort = None
+    try:
+        return ctx.record_svc.schema_counts(query)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
 
 
 @router.get("/{name_or_id}/audit", response_model=PaginatedAuditLogResponse)

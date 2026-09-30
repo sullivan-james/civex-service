@@ -1,22 +1,24 @@
 from __future__ import annotations
 
 import csv
-import json
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 
 from civex.context import AppContext
 from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.domain.query import RecordQuery
 from civex.server.background import run_pending_jobs
 from civex.server.deps import get_ctx
 from civex.server.downloads import new_temp_path, serve, temp_paths
 from civex.server.models import (
     CreateRecordRequest,
     PaginatedRecordResponse,
+    RecordRef,
     RecordResponse,
     UpdateRecordRequest,
 )
+from civex.server.query_params import record_query
 from civex.services.archive import write_zip
 from civex.sync.transport import SyncError
 
@@ -39,68 +41,23 @@ def search_records_global(
     return [RecordResponse.from_dto(r) for r in items]
 
 
-@router.get(
-    "/collections/{dataset_name}/records", response_model=PaginatedRecordResponse
-)
-def list_records(
-    dataset_name: str,
-    schema: Optional[str] = Query(default=None),
-    parent_record_id: Optional[str] = Query(default=None),
-    search: Optional[str] = Query(
-        default=None, description="Full-text search across all field values"
-    ),
-    where: list[str] = Query(
-        default=[],
-        description="Simple equality filter, repeatable: 'field=value'. "
-        "AND-combined with each other and with 'filter'. Kept for backwards "
-        "compatibility -- prefer 'filter' for anything beyond plain equality.",
-    ),
-    filter_: Optional[str] = Query(
-        default=None,
-        alias="filter",
-        description="JSON-encoded filter tree, AND/OR groups of field "
-        "conditions against the base schema's own fields (joined/reference "
-        "fields aren't supported here). "
-        'Leaf: {"field": "<name>", "op": "eq"|"ne"|"gt"|"gte"|'
-        '"lt"|"lte"|"contains"|"in"|"is_null", "value": ...}. '
-        'Group: {"and": [<node>, ...]} or {"or": [<node>, ...]}, nestable. '
-        "'value' must be a list for 'in' and is optional (default true) for "
-        "'is_null'. Example: "
-        '{"and": [{"field": "status", "op": "eq", "value": "active"}, '
-        '{"field": "age", "op": "gte", "value": 18}]}',
-    ),
-    limit: int = Query(default=50, le=1000),
-    offset: int = Query(default=0, ge=0),
-    ctx: AppContext = Depends(get_ctx),
-):
-    """List records in a collection, paginated and optionally filtered.
-
-    'where' and 'filter' can be combined -- the equality checks from 'where'
-    are AND-combined with the 'filter' tree, if both are given.
-    """
+def _page(
+    ctx: AppContext,
+    query: RecordQuery,
+    columns: list[str],
+    child_counts: bool,
+    limit: int,
+    offset: int,
+) -> PaginatedRecordResponse:
     try:
-        filter_tree = json.loads(filter_) if filter_ else None
-    except json.JSONDecodeError as e:
-        raise HTTPException(422, detail=f"Invalid 'filter' JSON: {e}")
-    try:
-        items = ctx.record_svc.find(
-            dataset_name,
-            schema_name=schema,
-            parent_record_id=parent_record_id or None,
-            filters=where,
-            filter_tree=filter_tree,
-            search=search or None,
+        items = ctx.record_svc.query_records(
+            query,
             limit=limit,
             offset=offset,
+            columns=columns or None,
+            child_counts=child_counts,
         )
-        total = ctx.record_svc.count(
-            dataset_name,
-            schema_name=schema,
-            parent_record_id=parent_record_id or None,
-            filters=where,
-            filter_tree=filter_tree,
-            search=search or None,
-        )
+        total = ctx.record_svc.count_records(query)
     except (NotFoundError, ValueError, ValidationError) as e:
         raise HTTPException(404 if isinstance(e, NotFoundError) else 422, detail=str(e))
     return PaginatedRecordResponse(
@@ -109,6 +66,56 @@ def list_records(
         offset=offset,
         limit=limit,
     )
+
+
+_COLUMNS = Query(
+    default=[],
+    description="Repeatable column names whose values aren't in a record's "
+    "own 'data' -- inherited fields and 'ref_field.target_field' joins -- "
+    "returned under each record's 'derived'.",
+)
+_CHILD_COUNTS = Query(
+    default=False,
+    description="Attach each record's live child count per child schema.",
+)
+
+
+@router.get(
+    "/collections/{dataset_name}/records", response_model=PaginatedRecordResponse
+)
+def list_records(
+    dataset_name: str,
+    query: RecordQuery = Depends(record_query),
+    columns: list[str] = _COLUMNS,
+    child_counts: bool = _CHILD_COUNTS,
+    limit: int = Query(default=50, le=1000),
+    offset: int = Query(default=0, ge=0),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """List records in a collection, paginated, filtered and sorted.
+
+    'where' and 'filter' can be combined -- the equality checks from 'where'
+    are AND-combined with the 'filter' tree, if both are given.
+    """
+    query.dataset = dataset_name
+    return _page(ctx, query, columns, child_counts, limit, offset)
+
+
+@router.get("/schemas/{schema_name}/records", response_model=PaginatedRecordResponse)
+def list_schema_records(
+    schema_name: str,
+    query: RecordQuery = Depends(record_query),
+    columns: list[str] = _COLUMNS,
+    child_counts: bool = _CHILD_COUNTS,
+    limit: int = Query(default=50, le=1000),
+    offset: int = Query(default=0, ge=0),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """List a schema's records across every collection -- the same query as
+    a collection's list, just not scoped to one collection (what a saved view
+    browses)."""
+    query.schema = schema_name
+    return _page(ctx, query, columns, child_counts, limit, offset)
 
 
 @router.post(
@@ -161,9 +168,16 @@ def list_deleted_records(
 @router.get("/records/{record_id}", response_model=RecordResponse)
 def get_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
     try:
-        return RecordResponse.from_dto(ctx.record_svc.get(record_id))
+        record = ctx.record_svc.get(record_id)
+        ancestors = ctx.record_svc.ancestors(record)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+    response = RecordResponse.from_dto(record)
+    response.ancestors = [
+        RecordRef(id=str(a.id), schema_name=a.schema_name, natural_name=a.natural_name)
+        for a in ancestors
+    ]
+    return response
 
 
 @router.get("/records/{record_id}/files.zip")
@@ -268,16 +282,21 @@ def bulk_delete_records(
 @router.delete("/collections/{dataset_name}/records")
 def delete_all_records(
     dataset_name: str,
-    schema: Optional[str] = Query(default=None),
+    query: RecordQuery = Depends(record_query),
     force: bool = Query(default=False),
     ctx: AppContext = Depends(get_ctx),
 ):
+    """Delete every record the query matches -- with no filters, all of the
+    collection's records (of 'schema', if given). The same filters as the
+    list endpoint, so "delete all N matching" deletes exactly what a list
+    with those filters shows."""
+    query.dataset = dataset_name
     try:
-        deleted = ctx.record_svc.delete_all(
-            dataset_name, schema_name=schema or None, force=force
-        )
+        deleted = ctx.record_svc.delete_matching(query, force=force)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
     ctx.commit()
     return {"deleted": deleted}
 
@@ -285,20 +304,15 @@ def delete_all_records(
 @router.get("/collections/{collection_name}/export.csv")
 def export_records_csv(
     collection_name: str,
-    schema: Optional[str] = Query(default=None),
-    search: Optional[str] = Query(
-        default=None, description="Full-text search across all field values"
-    ),
-    where: list[str] = Query(default=[]),
+    query: RecordQuery = Depends(record_query),
     ctx: AppContext = Depends(get_ctx),
 ):
     """Export records in a collection as a CSV file, honoring the same
-    schema/where/search filters as the record list endpoint."""
+    filters as the record list endpoint."""
+    query.dataset = collection_name
 
     def pages():
-        return ctx.record_svc.iter_find(
-            collection_name, schema_name=schema, filters=where, search=search or None
-        )
+        return ctx.record_svc.stream_records(query)
 
     try:
         # First pass: only the set of column names is kept (in encounter
@@ -313,7 +327,7 @@ def export_records_csv(
                         field_names.append(k)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
-    except ValueError as e:
+    except (ValueError, ValidationError) as e:
         raise HTTPException(422, detail=str(e))
 
     columns = ["id", "schema", "created_at", "updated_at"] + field_names

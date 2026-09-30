@@ -85,6 +85,45 @@ def validate_name(name: str, kind: str = "name") -> str:
     return name
 
 
+#: Path separators and control characters: a free-text name travels in URL
+#: paths and file names, so these can't be part of one.
+_UNUSABLE_IN_FREE_NAME = re.compile(r"[/\\\x00-\x1f\x7f]")
+
+
+def validate_free_name(name: str, kind: str = "name") -> str:
+    """For things people name in their own words -- a saved view -- rather
+    than machine keys: any text goes (spaces, capitals, punctuation,
+    accents), so long as it is non-empty, not absurdly long, and can sit in
+    a URL path segment. Returns the trimmed name.
+
+    Schemas and fields keep the slug rule (:func:`validate_name`) because
+    workflows and CSV headers reference them as text; nothing references a
+    view by name except its own URL and `civex view export`.
+    """
+    cleaned = name.strip()
+    if not cleaned:
+        raise ValidationError(f"A {kind} cannot be empty")
+    if len(cleaned) > MAX_NAME_LENGTH:
+        raise ValidationError(
+            f"{kind.capitalize()} '{cleaned[:32]}...' is too long "
+            f"({len(cleaned)} > {MAX_NAME_LENGTH} characters)"
+        )
+    if _UNUSABLE_IN_FREE_NAME.search(cleaned) or set(cleaned) == {"."}:
+        raise ValidationError(
+            f"Invalid {kind} '{cleaned}': it can't contain '/' or '\\', "
+            "control characters, or be only dots"
+        )
+    return cleaned
+
+
+_UNSAFE_IN_FILENAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
+
+
+def safe_filename(stem: str) -> str:
+    """`stem` made safe to use as a download's file name."""
+    return _UNSAFE_IN_FILENAME.sub("_", stem).strip(" .") or "export"
+
+
 def display_label(name: str, label: str | None) -> str:
     """What a human should see: the explicit label, else a readable name."""
     if label:

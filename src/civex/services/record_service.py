@@ -7,9 +7,19 @@ from datetime import date as _date, datetime as _dt
 from pathlib import Path
 from typing import Any, Iterator
 
-from civex.domain.dtos import FileRef, RecordDTO, ResolvedField
+from civex.domain.dtos import FieldDTO, FileRef, RecordDTO, ResolvedField, SchemaDTO
 from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
-from civex.domain.filters import FilterNode, SortKey, map_fields, parse_filter_tree
+from civex.domain.filters import (
+    SELF,
+    FilterCondition,
+    FilterNode,
+    Relation,
+    SortKey,
+    leaves,
+    map_leaves,
+    parse_filter_tree,
+)
+from civex.domain.query import RecordQuery, ResolvedQuery
 from civex.domain.timezones import parse_datetime
 from civex.repositories.protocols import (
     AuditRepository,
@@ -23,6 +33,18 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from civex.services.workflow_job_service import WorkflowJobService
+
+
+# Records per page when a bulk operation walks a whole result set.
+EXPORT_PAGE = 500
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _parse_date(v: str) -> str:
@@ -792,6 +814,248 @@ class RecordService:
             )
         return self._attach_reference_labels([named])[0]
 
+    # ------------------------------------------------------------------
+    # Queries -- every read path (collection list, a record's descendants,
+    # saved views, exports, counts, the AI tools) goes through RecordQuery
+    # ------------------------------------------------------------------
+
+    def resolve(self, query: RecordQuery) -> ResolvedQuery:
+        """Names -> ids: the dataset, schema, `within`/parent records, the
+        filter tree (each leaf located on the queried schema, an ancestor or
+        a descendant) and the sort keys. Raises on anything that doesn't
+        resolve, so a bad query fails loudly instead of matching nothing."""
+        dataset_id = None
+        if query.dataset:
+            dataset = self._datasets.get_by_name(query.dataset)
+            if not dataset:
+                raise NotFoundError(f"Dataset '{query.dataset}' not found")
+            dataset_id = dataset.id
+        schema = self._schema_svc.get(query.schema) if query.schema else None
+
+        parent_uuid = None
+        if query.parent_record_id:
+            parent = self._records.get_by_prefix(query.parent_record_id)
+            if not parent:
+                raise NotFoundError(
+                    f"Parent record '{query.parent_record_id}' not found"
+                )
+            parent_uuid = parent.id
+
+        within = None
+        if query.within:
+            if schema is None:
+                raise ValidationError("'within' needs a schema to list")
+            ancestor = self._records.get_by_prefix(query.within)
+            if not ancestor:
+                raise NotFoundError(f"Record '{query.within}' not found")
+            chain = self._schema_svc.ancestors(schema)
+            hops = next(
+                (i for i, a in enumerate(chain, start=1) if a.id == ancestor.schema_id),
+                None,
+            )
+            if hops is None:
+                raise ValidationError(
+                    f"'{schema.name}' records can't descend from a "
+                    f"'{ancestor.schema_name}' record"
+                )
+            within = (ancestor.id, hops)
+
+        name_map = self._schema_svc.name_to_id_map(schema) if schema else {}
+        field_filters: list[tuple[str, str]] = []
+        for condition in query.where:
+            if "=" not in condition:
+                raise ValueError(f"Invalid filter '{condition}'. Use field=value.")
+            key, _, value = condition.partition("=")
+            field_filters.append((name_map.get(key, key), value))
+
+        return ResolvedQuery(
+            dataset_id=dataset_id,
+            schema_id=schema.id if schema else None,
+            parent_record_id=parent_uuid,
+            within=within,
+            field_filters=field_filters,
+            search=query.search or None,
+            filter_tree=self._resolve_filter(schema, query.filter_tree),
+            sort=self._resolve_sort(schema, query.sort),
+        )
+
+    def _relations(self, schema: SchemaDTO) -> dict[str, tuple[SchemaDTO, Relation]]:
+        """Every schema a condition on `schema` may name, with where its
+        records sit relative to `schema`'s: itself, then ancestors (nearest
+        first), then descendants."""
+        related: dict[str, tuple[SchemaDTO, Relation]] = {schema.name: (schema, SELF)}
+        for hops, ancestor in enumerate(self._schema_svc.ancestors(schema), start=1):
+            related[ancestor.name] = (ancestor, Relation("up", hops))
+        for descendant, depth in self._schema_svc.descendants(schema):
+            related[descendant.name] = (
+                descendant,
+                Relation("down", depth, descendant.id),
+            )
+        return related
+
+    def _locate(
+        self,
+        schema: SchemaDTO,
+        related: dict[str, tuple[SchemaDTO, Relation]],
+        field_name: str,
+        schema_name: str | None,
+        what: str,
+    ) -> tuple[FieldDTO, Relation]:
+        """The field a condition/sort names, and its relation to `schema`.
+        Unqualified names resolve on `schema` itself, else on the nearest
+        ancestor that owns them (an inherited field lives on the parent
+        record, not the child's own data)."""
+        if schema_name is None:
+            for owner, rel in related.values():
+                if rel.direction == "down":
+                    break
+                for f in owner.fields:
+                    if f.name == field_name:
+                        return f, rel
+            raise ValidationError(
+                f"Unknown {what} field '{field_name}' for schema '{schema.name}'"
+            )
+        entry = related.get(schema_name)
+        if entry is None:
+            raise ValidationError(
+                f"Schema '{schema_name}' is neither '{schema.name}' nor one of "
+                "its ancestors or descendants"
+            )
+        owner, rel = entry
+        for f in owner.fields:
+            if f.name == field_name:
+                return f, rel
+        raise ValidationError(
+            f"Unknown {what} field '{field_name}' on schema '{schema_name}'"
+        )
+
+    def _resolve_filter(
+        self, schema: SchemaDTO | None, tree: dict[str, Any] | None
+    ) -> FilterNode | None:
+        if tree is None:
+            return None
+        node = parse_filter_tree(tree)
+        if schema is None:
+            # No schema to resolve names against (a mixed-schema list):
+            # conditions pass through by stored key, as they always have.
+            if any(leaf.schema for leaf in leaves(node)):
+                raise ValidationError(
+                    "A filter condition naming a schema needs a schema to query"
+                )
+            return node
+        related = self._relations(schema)
+
+        def resolve_leaf(leaf: FilterCondition) -> FilterCondition:
+            f, rel = self._locate(schema, related, leaf.field, leaf.schema, "filter")
+            return dataclasses.replace(leaf, field=str(f.id), rel=rel)
+
+        return map_leaves(node, resolve_leaf)
+
+    def _resolve_sort(
+        self, schema: SchemaDTO | None, sort: list[dict[str, Any]] | None
+    ) -> list[SortKey] | None:
+        if not sort:
+            return None
+        if schema is None:
+            raise ValidationError("Sorting needs a schema to list")
+        related = self._relations(schema)
+        keys = []
+        for entry in sort:
+            if not isinstance(entry, dict) or "field" not in entry:
+                raise ValidationError(
+                    "Each sort entry must be an object with a 'field' key"
+                )
+            direction = entry.get("direction", "asc")
+            if direction not in ("asc", "desc"):
+                raise ValidationError(
+                    f"Invalid sort direction '{direction}': must be 'asc' or 'desc'"
+                )
+            f, rel = self._locate(
+                schema, related, entry["field"], entry.get("schema"), "sort"
+            )
+            if rel.direction == "down":
+                raise ValidationError(
+                    f"Can't sort by '{entry['field']}': a record can have many "
+                    "descendants of that schema"
+                )
+            keys.append(
+                SortKey(
+                    field_id=str(f.id),
+                    numeric=f.dtype in ("integer", "float"),
+                    descending=direction == "desc",
+                    rel=rel,
+                )
+            )
+        return keys
+
+    def query_records(
+        self,
+        query: RecordQuery,
+        limit: int = 50,
+        offset: int = 0,
+        columns: list[str] | None = None,
+        child_counts: bool = False,
+    ) -> list[RecordDTO]:
+        """One page of `query`. `columns` asks for values that aren't in a
+        record's own data (an inherited field, a `ref.field` join), attached
+        as `derived`; `child_counts` attaches per-child-schema counts."""
+        records = self._records.list_filtered(self.resolve(query), offset, limit)
+        named = self._attach_reference_labels([self._with_names(r) for r in records])
+        if columns and query.schema:
+            named = self._attach_derived(query.schema, named, columns)
+        if child_counts:
+            counts = self._records.count_children([r.id for r in named])
+            named = [
+                dataclasses.replace(r, child_counts=counts.get(r.id, {})) for r in named
+            ]
+        return named
+
+    def count_records(self, query: RecordQuery) -> int:
+        return self._records.count(self.resolve(query))
+
+    def stream_records(
+        self,
+        query: RecordQuery,
+        page_size: int = 500,
+        columns: list[str] | None = None,
+    ) -> Iterator[list[RecordDTO]]:
+        """Every matching record, one page at a time -- for exports, which
+        must not hold the whole result set in memory."""
+        offset = 0
+        while True:
+            page = self.query_records(
+                query, limit=page_size, offset=offset, columns=columns
+            )
+            if not page:
+                return
+            yield page
+            if len(page) < page_size:
+                return
+            offset += page_size
+
+    def schema_counts(self, query: RecordQuery) -> dict[str, int]:
+        """Matching records per schema name -- one GROUP BY, no rows loaded.
+        With `within` and no schema, counts each descendant schema of that
+        record's own (one grouped count per schema, not per record)."""
+        if query.within and not query.schema:
+            ancestor = self._records.get_by_prefix(query.within)
+            if not ancestor:
+                raise NotFoundError(f"Record '{query.within}' not found")
+            counts: dict[str, int] = {}
+            for descendant, _ in self._schema_svc.descendants(
+                self._schema_svc.get(ancestor.schema_name)
+            ):
+                n = self.count_records(
+                    dataclasses.replace(query, schema=descendant.name)
+                )
+                if n:
+                    counts[descendant.name] = n
+            return counts
+        return self._records.count_by_schema(self.resolve(query))
+
+    # Keyword-argument conveniences over the methods above, for callers that
+    # think in "a collection, maybe one schema" (CLI, plugins, AI tools).
+
     def find(
         self,
         dataset_name: str,
@@ -803,22 +1067,18 @@ class RecordService:
         limit: int = 50,
         offset: int = 0,
     ) -> list[RecordDTO]:
-        dataset, schema_id, parent_uuid, field_filters, resolved_tree = (
-            self._resolve_query_params(
-                dataset_name, schema_name, parent_record_id, filters or [], filter_tree
-            )
-        )
-        records = self._records.list_filtered(
-            dataset_id=dataset.id,
-            schema_id=schema_id,
-            parent_record_id=parent_uuid,
-            field_filters=field_filters,
-            search=search or None,
-            offset=offset,
+        return self.query_records(
+            RecordQuery(
+                dataset=dataset_name,
+                schema=schema_name,
+                parent_record_id=parent_record_id,
+                where=filters or [],
+                filter_tree=filter_tree,
+                search=search,
+            ),
             limit=limit,
-            filter_tree=resolved_tree,
+            offset=offset,
         )
-        return self._attach_reference_labels([self._with_names(r) for r in records])
 
     def count(
         self,
@@ -829,64 +1089,38 @@ class RecordService:
         filter_tree: dict[str, Any] | None = None,
         search: str | None = None,
     ) -> int:
-        dataset, schema_id, parent_uuid, field_filters, resolved_tree = (
-            self._resolve_query_params(
-                dataset_name, schema_name, parent_record_id, filters or [], filter_tree
+        return self.count_records(
+            RecordQuery(
+                dataset=dataset_name,
+                schema=schema_name,
+                parent_record_id=parent_record_id,
+                where=filters or [],
+                filter_tree=filter_tree,
+                search=search,
             )
         )
-        return self._records.count(
-            dataset_id=dataset.id,
-            schema_id=schema_id,
-            parent_record_id=parent_uuid,
-            field_filters=field_filters,
-            search=search or None,
-            filter_tree=resolved_tree,
-        )
 
-    def schema_counts(self, dataset_name: str) -> dict[str, int]:
-        dataset = self._datasets.get_by_name(dataset_name)
-        if not dataset:
-            raise NotFoundError(f"Dataset '{dataset_name}' not found")
-        return self._records.count_by_schema(dataset.id)
-
-    def _resolve_query_params(
+    def iter_find(
         self,
         dataset_name: str,
-        schema_name: str | None,
-        parent_record_id: str | None,
-        filters: list[str],
+        schema_name: str | None = None,
+        parent_record_id: str | None = None,
+        filters: list[str] | None = None,
         filter_tree: dict[str, Any] | None = None,
-    ):
-        dataset = self._datasets.get_by_name(dataset_name)
-        if not dataset:
-            raise NotFoundError(f"Dataset '{dataset_name}' not found")
-
-        schema_id = None
-        name_map: dict[str, str] = {}
-        if schema_name:
-            schema = self._schema_svc.get(schema_name)
-            schema_id = schema.id
-            name_map = self._schema_svc.name_to_id_map(schema)
-
-        parent_uuid = None
-        if parent_record_id:
-            parent = self._records.get_by_prefix(parent_record_id)
-            if not parent:
-                raise NotFoundError(f"Parent record '{parent_record_id}' not found")
-            parent_uuid = parent.id
-
-        field_filters: list[tuple[str, str]] = []
-        for condition in filters:
-            if "=" not in condition:
-                raise ValueError(f"Invalid filter '{condition}'. Use field=value.")
-            key, _, value = condition.partition("=")
-            field_filters.append((name_map.get(key, key), value))
-
-        resolved_tree: FilterNode | None = None
-        if filter_tree is not None:
-            resolved_tree = map_fields(parse_filter_tree(filter_tree), name_map)
-
-        return dataset, schema_id, parent_uuid, field_filters, resolved_tree
+        search: str | None = None,
+        page_size: int = 500,
+    ) -> Iterator[list[RecordDTO]]:
+        return self.stream_records(
+            RecordQuery(
+                dataset=dataset_name,
+                schema=schema_name,
+                parent_record_id=parent_record_id,
+                where=filters or [],
+                filter_tree=filter_tree,
+                search=search,
+            ),
+            page_size=page_size,
+        )
 
     def count_by_schema_search(
         self, schema_name: str, search: str | None = None
@@ -905,131 +1139,197 @@ class RecordService:
         records = self._records.list_by_schema(schema.id, search=search, limit=limit)
         return self._attach_reference_labels([self._with_names(r) for r in records])
 
-    def _resolved_tree_for_schema(
-        self, schema_name: str, filter_tree: dict[str, Any] | None
-    ) -> FilterNode | None:
-        if filter_tree is None:
-            return None
-        schema = self._schema_svc.get(schema_name)
-        name_map = self._schema_svc.name_to_id_map(schema)
-        return map_fields(parse_filter_tree(filter_tree), name_map)
+    # ------------------------------------------------------------------
+    # Columns that aren't in a record's own data
+    # ------------------------------------------------------------------
 
-    def find_by_schema_filtered(
-        self,
-        schema_name: str,
-        filter_tree: dict[str, Any] | None = None,
-        limit: int = 50,
-        offset: int = 0,
-        sort: list[dict[str, Any]] | None = None,
-    ) -> list[RecordDTO]:
-        """Records of `schema_name` across every collection, matching
-        `filter_tree` (base schema's own fields only) -- unlike `find`, this
-        isn't scoped to one collection, which is what a schema-level view
-        needs to preview against. `sort` is a view-style list of
-        {"field": name, "direction": "asc"|"desc"}, applied in SQL so
-        limit/offset page through the sorted result."""
-        schema = self._schema_svc.get(schema_name)
-        resolved_tree = self._resolved_tree_for_schema(schema_name, filter_tree)
-        sort_keys = self._sort_keys(schema, sort)
-        records = self._records.list_filtered(
-            dataset_id=None,
-            schema_id=schema.id,
-            parent_record_id=None,
-            field_filters=[],
-            search=None,
-            offset=offset,
-            limit=limit,
-            filter_tree=resolved_tree,
-            sort=sort_keys,
-        )
-        return self._attach_reference_labels([self._with_names(r) for r in records])
-
-    def _sort_keys(
-        self, schema: Any, sort: list[dict[str, Any]] | None
-    ) -> list[SortKey] | None:
-        if not sort:
-            return None
-        by_name = {
+    def validate_columns(self, schema: SchemaDTO, columns: list[str]) -> None:
+        """Every column must be a field of `schema` (own or inherited) or a
+        single-hop `ref_field.target_field` join through a reference field."""
+        fields_by_name = {
             rf.field.name: rf.field for rf in self._schema_svc.collect_fields(schema)
         }
-        keys = []
-        for entry in sort:
-            f = by_name.get(entry["field"])
-            if f is None:
-                raise ValidationError(f"Unknown sort field '{entry['field']}'")
-            keys.append(
-                SortKey(
-                    field_id=str(f.id),
-                    numeric=f.dtype in ("integer", "float"),
-                    descending=entry.get("direction", "asc") == "desc",
-                )
+        unknown = []
+        for col in columns:
+            if "." in col:
+                self._validate_join_column(col, fields_by_name)
+            elif col not in fields_by_name:
+                unknown.append(col)
+        if unknown:
+            raise ValidationError(
+                f"Unknown column field(s) {sorted(unknown)} for this schema"
             )
-        return keys
 
-    def iter_find_by_schema_filtered(
-        self,
-        schema_name: str,
-        filter_tree: dict[str, Any] | None = None,
-        sort: list[dict[str, Any]] | None = None,
-        page_size: int = 500,
-    ) -> Iterator[list[RecordDTO]]:
-        """Every matching record, one page at a time -- for exports, which
-        must not hold the whole result set in memory."""
-        offset = 0
-        while True:
-            page = self.find_by_schema_filtered(
-                schema_name, filter_tree, limit=page_size, offset=offset, sort=sort
+    def _validate_join_column(
+        self, col: str, fields_by_name: dict[str, FieldDTO]
+    ) -> None:
+        parts = col.split(".")
+        if len(parts) != 2:
+            raise ValidationError(
+                f"Column '{col}' is not a valid reference-field join -- only "
+                "one hop is supported (e.g. 'customer.email')"
             )
-            if not page:
-                return
-            yield page
-            if len(page) < page_size:
-                return
-            offset += page_size
-
-    def iter_find(
-        self,
-        dataset_name: str,
-        schema_name: str | None = None,
-        parent_record_id: str | None = None,
-        filters: list[str] | None = None,
-        filter_tree: dict[str, Any] | None = None,
-        search: str | None = None,
-        page_size: int = 500,
-    ) -> Iterator[list[RecordDTO]]:
-        """`find()` over the whole result set, one page at a time."""
-        offset = 0
-        while True:
-            page = self.find(
-                dataset_name,
-                schema_name,
-                parent_record_id,
-                filters,
-                filter_tree,
-                search,
-                limit=page_size,
-                offset=offset,
+        ref_name, target_name = parts
+        ref_field = fields_by_name.get(ref_name)
+        if ref_field is None:
+            raise ValidationError(
+                f"Unknown column field(s) ['{ref_name}'] for this schema"
             )
-            if not page:
-                return
-            yield page
-            if len(page) < page_size:
-                return
-            offset += page_size
+        if ref_field.dtype != "reference":
+            raise ValidationError(
+                f"Column '{col}' joins through '{ref_name}', a '{ref_field.dtype}' "
+                "field -- only single 'reference' fields support joins"
+            )
+        target_schema_name = ref_field.restrictions.get("schema")
+        if not target_schema_name:
+            raise ValidationError(
+                f"Column '{col}' joins through '{ref_name}', which has no target "
+                "schema restriction set"
+            )
+        try:
+            target_schema = self._schema_svc.get(target_schema_name)
+        except NotFoundError:
+            raise ValidationError(
+                f"Column '{col}' targets schema '{target_schema_name}', which "
+                "does not exist"
+            ) from None
+        target_known = {
+            rf.field.name for rf in self._schema_svc.collect_fields(target_schema)
+        }
+        if target_name not in target_known:
+            raise ValidationError(
+                f"Unknown column field(s) ['{col}'] for schema '{target_schema_name}'"
+            )
 
-    def count_by_schema_filtered(
-        self, schema_name: str, filter_tree: dict[str, Any] | None = None
-    ) -> int:
+    def _attach_derived(
+        self, schema_name: str, records: list[RecordDTO], columns: list[str]
+    ) -> list[RecordDTO]:
+        """Fill `derived` with the requested columns a record's own data
+        can't answer: fields inherited from an ancestor record, and
+        `ref_field.target_field` joins. Ancestors and join targets are each
+        batch-loaded once per level, not once per row. A column that no
+        longer resolves (a field or target schema renamed after a view was
+        saved) is left out rather than raised -- this runs at read time,
+        long after create/update validation."""
         schema = self._schema_svc.get(schema_name)
-        resolved_tree = self._resolved_tree_for_schema(schema_name, filter_tree)
-        return self._records.count(
-            dataset_id=None,
-            schema_id=schema.id,
-            parent_record_id=None,
-            field_filters=[],
-            search=None,
-            filter_tree=resolved_tree,
-        )
+        related = self._relations(schema)
+        own = {f.name for f in schema.fields}
+
+        def plain(name: str) -> tuple[str, int] | None:
+            """(field id, hops up) for a non-dotted column, None if unknown."""
+            try:
+                f, rel = self._locate(schema, related, name, None, "column")
+            except ValidationError:
+                return None
+            return str(f.id), rel.hops
+
+        plans: dict[str, Any] = {}
+        for col in columns:
+            if "." in col:
+                ref_name, _, target_name = col.partition(".")
+                ref = plain(ref_name)
+                ref_field = next(
+                    (
+                        rf.field
+                        for rf in self._schema_svc.collect_fields(schema)
+                        if rf.field.name == ref_name
+                    ),
+                    None,
+                )
+                target_schema_name = (
+                    ref_field.restrictions.get("schema")
+                    if ref_field and ref_field.dtype == "reference"
+                    else None
+                )
+                if ref is None or not target_schema_name:
+                    continue
+                try:
+                    target_schema = self._schema_svc.get(target_schema_name)
+                except NotFoundError:
+                    continue
+                target_id = self._schema_svc.name_to_id_map(target_schema).get(
+                    target_name
+                )
+                if target_id is not None:
+                    plans[col] = ("join", ref, target_id)
+            elif col not in own and (located := plain(col)) is not None:
+                plans[col] = ("inherited", located)
+        if not plans:
+            return records
+
+        chains = self._ancestor_chains(records, max(p[1][1] for p in plans.values()))
+        id_to_name = self._schema_svc.id_to_name_map(schema)
+
+        def value(record: RecordDTO, located: tuple[str, int]) -> Any:
+            field_id, hops = located
+            if hops == 0:
+                return record.data.get(id_to_name[field_id])
+            ancestor = chains[record.id][hops - 1]
+            return ancestor.data.get(field_id) if ancestor else None
+
+        ref_values: dict[str, list[Any]] = {}
+        for col, plan in plans.items():
+            if plan[0] == "join":
+                ref_values[col] = [value(r, plan[1]) for r in records]
+        target_ids = {
+            uuid.UUID(v)
+            for values in ref_values.values()
+            for v in values
+            if isinstance(v, str) and _is_uuid(v)
+        }
+        targets = {t.id: t for t in self._records.list_by_ids(list(target_ids))}
+
+        out = []
+        for i, record in enumerate(records):
+            derived: dict[str, Any] = {}
+            for col, plan in plans.items():
+                if plan[0] == "inherited":
+                    derived[col] = value(record, plan[1])
+                else:
+                    ref_value = ref_values[col][i]
+                    target = (
+                        targets.get(uuid.UUID(ref_value))
+                        if isinstance(ref_value, str) and _is_uuid(ref_value)
+                        else None
+                    )
+                    derived[col] = target.data.get(plan[2]) if target else None
+            out.append(dataclasses.replace(record, derived=derived))
+        return out
+
+    def _ancestor_chains(
+        self, records: list[RecordDTO], levels: int
+    ) -> dict[uuid.UUID, list[RecordDTO | None]]:
+        """Per record, its parent, grandparent, ... (`levels` deep; None once
+        the chain ends) -- one batched lookup per level for the whole page."""
+        chains: dict[uuid.UUID, list[RecordDTO | None]] = {r.id: [] for r in records}
+        current = {r.id: r.parent_record_id for r in records}
+        for _ in range(levels):
+            wanted = {p for p in current.values() if p}
+            found = (
+                {a.id: a for a in self._records.list_by_ids(list(wanted))}
+                if wanted
+                else {}
+            )
+            following: dict[uuid.UUID, uuid.UUID | None] = {}
+            for rid, pid in current.items():
+                ancestor = found.get(pid) if pid else None
+                chains[rid].append(ancestor)
+                following[rid] = ancestor.parent_record_id if ancestor else None
+            current = following
+        return chains
+
+    def ancestors(self, record: RecordDTO) -> list[RecordDTO]:
+        """The record's parent chain, root first -- the breadcrumb trail."""
+        chain: list[RecordDTO] = []
+        current = record
+        while current.parent_record_id:
+            parent = self._records.get_by_id(current.parent_record_id)
+            if parent is None:
+                break
+            chain.append(self._with_names(parent))
+            current = parent
+        chain.reverse()
+        return chain
 
     def delete(self, record_id: str, force: bool = False) -> None:
         record = self.get(record_id)
@@ -1044,43 +1344,40 @@ class RecordService:
                 records.append(self.get(rid))
             except NotFoundError:
                 continue
+        return self._delete_records([r.id for r in records], force)
 
-        delete_set: set[uuid.UUID] = set()
-        for r in records:
-            delete_set |= self._collect_delete_set(r.id)
-        self._handle_referrers(delete_set, force)
-
-        deleted = 0
-        for r in records:
-            if not self._records.get_by_id(r.id):
-                continue  # already gone via a parent cascade earlier in this batch
-            self._delete_recursive(r.id)
-            deleted += 1
-        return deleted
+    def delete_matching(self, query: RecordQuery, force: bool = False) -> int:
+        """Delete every record `query` matches -- what "select all N
+        matching" means, as opposed to deleting the ids on one page."""
+        resolved = self.resolve(query)
+        ids: list[uuid.UUID] = []
+        offset = 0
+        while True:
+            page = self._records.list_filtered(resolved, offset, EXPORT_PAGE)
+            ids.extend(r.id for r in page)
+            if len(page) < EXPORT_PAGE:
+                break
+            offset += EXPORT_PAGE
+        return self._delete_records(ids, force)
 
     def delete_all(
         self, dataset_name: str, schema_name: str | None = None, force: bool = False
     ) -> int:
-        dataset = self._datasets.get_by_name(dataset_name)
-        if not dataset:
-            raise NotFoundError(f"Dataset '{dataset_name}' not found")
-        schema_id = None
-        if schema_name:
-            schema = self._schema_svc.get(schema_name)
-            schema_id = schema.id
-        records = self._records.list_by_dataset(dataset.id)
-        targets = [r for r in records if not schema_id or r.schema_id == schema_id]
+        return self.delete_matching(
+            RecordQuery(dataset=dataset_name, schema=schema_name), force
+        )
 
+    def _delete_records(self, ids: list[uuid.UUID], force: bool) -> int:
         delete_set: set[uuid.UUID] = set()
-        for r in targets:
-            delete_set |= self._collect_delete_set(r.id)
+        for rid in ids:
+            delete_set |= self._collect_delete_set(rid)
         self._handle_referrers(delete_set, force)
 
         deleted = 0
-        for r in targets:
-            if not self._records.get_by_id(r.id):
-                continue  # already gone via a parent cascade
-            self._delete_recursive(r.id)
+        for rid in ids:
+            if not self._records.get_by_id(rid):
+                continue  # already gone via a parent cascade earlier in this batch
+            self._delete_recursive(rid)
             deleted += 1
         return deleted
 

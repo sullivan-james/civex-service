@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Spinner } from './Spinner'
 
 export function LoadingState() {
@@ -25,7 +26,7 @@ export function EmptyState({
   message,
 }: {
   title: string
-  message?: string
+  message?: ReactNode
 }) {
   return (
     <div

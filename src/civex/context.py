@@ -186,7 +186,7 @@ def build_local_context(
     )
     container_plugin_svc = ContainerPluginService(config.civex_dir)
     policy_svc = PolicyService(config.civex_dir)
-    view_svc = ViewService(view_repo, schema_svc, record_repo, record_svc, audit_repo)
+    view_svc = ViewService(view_repo, schema_svc, record_svc, audit_repo)
 
     ctx = AppContext(
         schema_svc=schema_svc,

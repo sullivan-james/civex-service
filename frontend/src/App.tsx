@@ -11,10 +11,10 @@ const ImportPage = lazy(() => import('./pages/ImportPage'))
 const SchemasPage = lazy(() => import('./pages/SchemasPage'))
 const SchemaDetailPage = lazy(() => import('./pages/SchemaDetailPage'))
 const SchemaImportPage = lazy(() => import('./pages/SchemaImportPage'))
-const ViewsIndexPage = lazy(() => import('./pages/ViewsIndexPage'))
-const ViewsPage = lazy(() => import('./pages/ViewsPage'))
-const ViewBuilderPage = lazy(() => import('./pages/ViewBuilderPage'))
+const SchemaRecordsPage = lazy(() => import('./pages/SchemaRecordsPage'))
+const ViewRedirect = lazy(() => import('./pages/ViewRedirect'))
 const RecordDetailPage = lazy(() => import('./pages/RecordDetailPage'))
+const NewRecordPage = lazy(() => import('./pages/NewRecordPage'))
 const RecentlyDeletedPage = lazy(() => import('./pages/RecentlyDeletedPage'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 const WorkflowEditorPage = lazy(() => import('./pages/WorkflowEditorPage'))
@@ -40,19 +40,24 @@ export default function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/collections" element={<CollectionsPage />} />
             <Route path="/collections/:id" element={<CollectionDetailPage />} />
+            <Route path="/collections/:id/new" element={<NewRecordPage />} />
             <Route path="/collections/:id/import" element={<ImportPage />} />
-            <Route path="/views" element={<ViewsIndexPage />} />
+            <Route
+              path="/views"
+              element={<Navigate replace to="/collections" />}
+            />
             <Route path="/schemas" element={<SchemasPage />} />
             <Route path="/schemas/:id" element={<SchemaDetailPage />} />
             <Route path="/schemas/:id/import" element={<SchemaImportPage />} />
-            <Route path="/schemas/:id/views" element={<ViewsPage />} />
+            <Route path="/schemas/:id/views" element={<ViewRedirect />} />
             <Route
-              path="/schemas/:id/views/new"
-              element={<ViewBuilderPage />}
+              path="/schemas/:id/records"
+              element={<SchemaRecordsPage />}
             />
+            <Route path="/schemas/:id/views/new" element={<ViewRedirect />} />
             <Route
               path="/schemas/:id/views/:viewName"
-              element={<ViewBuilderPage />}
+              element={<ViewRedirect />}
             />
             <Route path="/records/:id" element={<RecordDetailPage />} />
             <Route path="/trash" element={<RecentlyDeletedPage />} />

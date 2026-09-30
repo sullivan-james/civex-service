@@ -210,8 +210,9 @@ class ViewResponse(BaseModel):
     )
     filter_tree: dict[str, Any] | None = Field(
         default=None,
-        description="AND/OR filter tree over the base schema's own fields, "
-        "same shape as the records 'filter' query parameter.",
+        description="AND/OR filter tree, same shape as the records 'filter' "
+        "query parameter (conditions may name an ancestor or descendant "
+        "schema).",
     )
     sort: list[dict[str, Any]] = Field(
         description="Ordered list of {field, direction} entries; direction "
@@ -234,8 +235,9 @@ class ViewResponse(BaseModel):
 class CreateViewRequest(BaseModel):
     name: str = Field(
         description=(
-            "Machine key: lowercase letters, digits and underscores, not "
-            "starting with a digit."
+            "What the view is called, in your own words -- spaces, capitals "
+            "and punctuation are fine. Only '/', '\\' and control "
+            "characters are refused. Unique per schema."
         )
     )
     columns: list[str] | None = Field(
@@ -245,8 +247,9 @@ class CreateViewRequest(BaseModel):
     )
     filter_tree: dict[str, Any] | None = Field(
         default=None,
-        description="AND/OR filter tree over the base schema's own fields, "
-        "same shape as the records 'filter' query parameter.",
+        description="AND/OR filter tree, same shape as the records 'filter' "
+        "query parameter (conditions may name an ancestor or descendant "
+        "schema).",
     )
     sort: list[dict[str, Any]] | None = Field(
         default=None,
@@ -256,7 +259,9 @@ class CreateViewRequest(BaseModel):
 
 
 class UpdateViewRequest(BaseModel):
-    rename: str | None = None
+    rename: str | None = Field(
+        default=None, description="New name; same rules as when creating."
+    )
     columns: list[str] | None = Field(
         default=None,
         description="Replace the column list; omit the key to leave it unchanged.",
@@ -281,13 +286,12 @@ class PreviewViewRequest(BaseModel):
     )
     filter_tree: dict[str, Any] | None = Field(
         default=None,
-        description="Same shape as a view's 'filter_tree', over the base "
-        "schema's own fields.",
+        description="Same shape as a view's 'filter_tree'.",
     )
     sort: list[dict[str, Any]] | None = Field(
         default=None,
-        description="Same shape as a view's 'sort'. Applied to the "
-        "flattened preview rows, so it can order by a joined column too.",
+        description="Same shape as a view's 'sort': the schema's own or an "
+        "inherited field, each ascending or descending.",
     )
     limit: int = Field(default=50, le=1000, ge=1)
     offset: int = Field(default=0, ge=0)
@@ -368,6 +372,12 @@ UpdateCollectionRequest = UpdateDatasetRequest
 # --- Records ---
 
 
+class RecordRef(BaseModel):
+    id: str
+    schema_name: str
+    natural_name: str | None
+
+
 class RecordResponse(BaseModel):
     id: str
     dataset_id: str
@@ -390,6 +400,23 @@ class RecordResponse(BaseModel):
             "with a readable label without a lookup per value."
         ),
     )
+    child_counts: dict[str, int] | None = Field(
+        default=None,
+        description="Only when requested ('child_counts=true'): how many live "
+        "child records this record has, per child schema name.",
+    )
+    derived: dict[str, Any] | None = Field(
+        default=None,
+        description="Only when 'columns' were requested: the requested "
+        "columns this record's own 'data' can't answer -- fields inherited "
+        "from an ancestor record, and 'ref_field.target_field' joins -- keyed "
+        "by column.",
+    )
+    ancestors: list[RecordRef] | None = Field(
+        default=None,
+        description="Only on a single-record fetch: the parent chain, root "
+        "first, for breadcrumbs.",
+    )
 
     @classmethod
     def from_dto(cls, dto: RecordDTO) -> RecordResponse:
@@ -406,6 +433,8 @@ class RecordResponse(BaseModel):
             updated_at=dto.updated_at,
             deleted_at=dto.deleted_at,
             reference_labels=dto.reference_labels,
+            child_counts=dto.child_counts,
+            derived=dto.derived,
         )
 
 

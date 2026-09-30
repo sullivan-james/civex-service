@@ -14,6 +14,7 @@ from civex.server.models import (
     ViewResponse,
 )
 from civex.services.archive import write_zip
+from civex.domain.naming import safe_filename
 from civex.services.view_service import write_csv, write_json
 from civex.sync.transport import SyncError
 
@@ -156,9 +157,12 @@ def export_view(
         raise HTTPException(422, detail=str(e))
 
     if format == "csv":
-        data_filename, media_type = f"{view_name}.csv", "text/csv"
+        data_filename, media_type = f"{safe_filename(view_name)}.csv", "text/csv"
     else:
-        data_filename, media_type = f"{view_name}.json", "application/json"
+        data_filename, media_type = (
+            f"{safe_filename(view_name)}.json",
+            "application/json",
+        )
 
     file_entries: list = []
 
@@ -195,4 +199,6 @@ def export_view(
             raise HTTPException(404, detail=f"Export file not found: {e}")
         tmp.remove(zip_path)
         tmp.remove(data_path)
-        return serve(zip_path, "application/zip", f"{view_name}.zip", data_path)
+        return serve(
+            zip_path, "application/zip", f"{safe_filename(view_name)}.zip", data_path
+        )

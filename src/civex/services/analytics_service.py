@@ -4,6 +4,7 @@ import uuid
 from dataclasses import dataclass
 
 from civex.domain.dtos import AnalyticsFilters
+from civex.domain.query import ResolvedQuery
 from civex.repositories.local._bucketing import rebucket
 from civex.repositories.protocols import (
     AuditRepository,
@@ -131,7 +132,9 @@ class AnalyticsService:
         )
         results: list[RecordCount] = []
         for ds in datasets:
-            for schema_name, count in self._records.count_by_schema(ds.id).items():
+            for schema_name, count in self._records.count_by_schema(
+                ResolvedQuery(dataset_id=ds.id)
+            ).items():
                 if filters.schema and schema_name != filters.schema:
                     continue
                 results.append(

@@ -58,3 +58,20 @@ export function nameError(name: string): string | null {
     return 'Use lowercase letters, digits and underscores only, not starting with a digit'
   return null
 }
+
+/**
+ * Validation message for a view name, or null if it's fine. Views are named
+ * in the user's own words -- spaces, capitals and punctuation included --
+ * so unlike `nameError` this isn't a slug rule; it only refuses what can't
+ * sit in a URL path (mirrors `validate_free_name` in civex/domain/naming.py).
+ */
+export function viewNameError(name: string): string | null {
+  const cleaned = name.trim()
+  if (!cleaned) return 'A name is required'
+  if (cleaned.length > MAX_NAME_LENGTH)
+    return `Name is too long (max ${MAX_NAME_LENGTH} characters)`
+  // eslint-disable-next-line no-control-regex
+  if (/[/\\\x00-\x1f\x7f]/.test(cleaned) || /^\.+$/.test(cleaned))
+    return "A name can't contain / or \\, or be only dots"
+  return null
+}
