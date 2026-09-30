@@ -30,15 +30,30 @@ export function Th({
   children,
   className = '',
   title,
+  sortDirection,
 }: {
   children?: ReactNode
   className?: string
+  /** Set on a sortable column: the current direction, or `'none'`. Lives on
+   * the header cell (not the inner button) — that's where assistive tech
+   * reads `aria-sort`. Omit for non-sortable columns. */
+  sortDirection?: 'asc' | 'desc' | 'none'
   /** Tooltip — used to surface a column's machine name behind its label. */
   title?: string
 }) {
   return (
     <th
+      scope="col"
       title={title}
+      aria-sort={
+        sortDirection === undefined
+          ? undefined
+          : sortDirection === 'asc'
+            ? 'ascending'
+            : sortDirection === 'desc'
+              ? 'descending'
+              : 'none'
+      }
       className={`px-4 py-3 text-left text-xs font-semibold text-fg-muted uppercase tracking-wider ${className}`}
     >
       {children}
@@ -60,6 +75,16 @@ export function Tr({
   return (
     <tr
       onClick={onClick}
+      // Keyboard parity for the click handler; only when the row itself has
+      // focus so Enter on a nested link/button doesn't fire it twice.
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.target === e.currentTarget && e.key === 'Enter') onClick()
+            }
+          : undefined
+      }
       className={`bg-canvas ${onClick ? 'hover:bg-canvas-subtle cursor-pointer' : ''}`}
     >
       {children}

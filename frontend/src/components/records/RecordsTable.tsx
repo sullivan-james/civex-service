@@ -99,18 +99,17 @@ export function RecordsTable({
             const activeDirection =
               sort && sort.key === col.name ? sort.direction : undefined
             return (
-              <Th key={col.name} title={col.name}>
+              <Th
+                key={col.name}
+                title={col.name}
+                sortDirection={
+                  onSortChange ? (activeDirection ?? 'none') : undefined
+                }
+              >
                 {onSortChange ? (
                   <button
                     type="button"
                     onClick={() => onSortChange(col.name)}
-                    aria-sort={
-                      activeDirection === 'asc'
-                        ? 'ascending'
-                        : activeDirection === 'desc'
-                          ? 'descending'
-                          : 'none'
-                    }
                     className="group inline-flex items-center gap-1 cursor-pointer hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent rounded-sm"
                   >
                     {col.label}
