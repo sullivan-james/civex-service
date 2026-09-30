@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 _README = """\
-This directory is managed by civex (https://github.com/sullivan-james/civex).
+This directory is managed by civex (https://civexdata.github.io/civex-docs/).
 Do not edit its contents manually — use the civex CLI or UI instead.
 
   config.toml   project configuration

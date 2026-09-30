@@ -49,10 +49,11 @@ Triggered on push of any `v*` tag:
 3. **Verifies the plugin SDK is published** — `civex` depends on
    `civex-plugin-sdk` as a normal dependency, so the in-repo SDK version
    must already be on PyPI (`scripts/check_sdk_sync.py require-published`),
-   and civex's declared range must admit it. See
+   and civex's declared range must admit it, and the SDK's source must be unchanged since its tag. See
    [Releasing civex-plugin-sdk](sdk-release.md).
 4. **Builds the wheel** (`python -m build --wheel`), with the version
-   resolved from the pushed tag via `setuptools-scm` as above.
+   resolved from the pushed tag via `setuptools-scm` as above (only `v*` tags
+   count; `sdk-v*` tags version the SDK and are ignored here).
 5. **Creates a GitHub Release** attaching the wheel, with
    `generate_release_notes: true` for the auto-generated commit list
    alongside the hand-written `CHANGELOG.md` entry.
@@ -62,7 +63,7 @@ Triggered on push of any `v*` tag:
 
 ## The plugin SDK is released separately
 
-`civex-plugin-sdk` is its own PyPI project with its own hand-set version,
+`civex-plugin-sdk` is its own PyPI project with its own tag-derived version,
 tag namespace (`sdk-v*`) and workflow (`release-sdk.yml`); pushing a `v*` tag
 releases `civex` only. `civex` depends on it with a compatible-range
 requirement, and `release.yml` refuses to publish unless the in-repo SDK

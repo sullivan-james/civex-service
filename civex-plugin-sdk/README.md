@@ -1,6 +1,6 @@
 # civex-plugin-sdk
 
-SDK for authoring out-of-process [civex](https://github.com/CivexData/civex-service) workflow plugins — subprocess-tier (`uv run --script`) and container-tier plugins that run as an isolated OS process/container and talk to the host over an RPC wire protocol, rather than importing into civex's own process.
+SDK for authoring out-of-process [civex](https://civexdata.github.io/civex-docs/) workflow plugins — subprocess-tier (`uv run --script`) and container-tier plugins that run as an isolated OS process/container and talk to the host over an RPC wire protocol, rather than importing into civex's own process.
 
 Subclass `Plugin`, declare its metadata, implement `invoke()`, and call `serve()`:
 
@@ -48,10 +48,10 @@ In a plugin script the PEP 723 header is all you need — `uv run` resolves it. 
 
 ## Versioning
 
-The SDK's version is hand-set in `pyproject.toml` and bumped on every change under `src/` (CI enforces this) — it does not use setuptools-scm like the parent `civex` package does. `requires-python` is `>=3.10`, looser than civex's own `>=3.12`, since plugins run in their own subprocess/container environment independent of the host's interpreter.
+The SDK's version comes from `sdk-vX.Y.Z` git tags (setuptools-scm) — there is no version written in `pyproject.toml`. civex's own `vX.Y.Z` tags are a separate namespace. A build between tags is `X.Y.Z.postN`; only a tagged commit produces a plain release version. `requires-python` is `>=3.10`, looser than civex's own `>=3.12`, since plugins run in their own subprocess/container environment independent of the host's interpreter.
 
-The wire protocol has its own number, `civex_plugin_sdk.PROTOCOL_VERSION`, which changes only for breaking wire changes; civex refuses a plugin whose protocol it doesn't speak. See [CHANGELOG.md](CHANGELOG.md) and the maintainer guide `docs/contributing/sdk-release.md` in the civex repo.
+The wire protocol has its own number, `civex_plugin_sdk.PROTOCOL_VERSION`, which changes only for breaking wire changes; civex refuses a plugin whose protocol it doesn't speak. Release notes are in `CHANGELOG.md` in the source distribution.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). (The `civex` application itself is under a different license.)
+MIT — the full text ships in the package as `LICENSE`. (The `civex` application itself is under a different license.)

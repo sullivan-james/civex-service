@@ -38,11 +38,11 @@ dependencies = [
     "jsonschema>=4.0",
     # `civex update` compares the installed version against PyPI's.
     "packaging>=23",
-    # The plugin SDK is its own published project (MIT, versioned by hand --
-    # see docs/contributing/sdk-release.md). This range must admit the SDK
-    # version in civex-plugin-sdk/pyproject.toml: scripts/check_sdk_sync.py
-    # enforces that in CI, and the civex release refuses to publish unless
-    # that version is already on PyPI. Widen the upper bound (minor bump)
+    # The plugin SDK is its own published project (MIT, versioned from `sdk-v*` git tags --
+    # see docs/contributing/sdk-release.md). This range must admit the newest
+    # `sdk-v*` tag: scripts/check_sdk_sync.py enforces that in CI, and the
+    # civex release refuses to publish unless that SDK version is already on
+    # PyPI and the SDK's source hasn't changed since it. Widen the upper bound (minor bump)
     # deliberately when a compatible SDK ships; narrow the lower bound only
     # if civex starts needing a newer SDK.
     "civex-plugin-sdk>=0.2.0,<0.3",
@@ -61,6 +61,9 @@ dependencies = [
     "openai>=1.0",
     "sentry-sdk>=2.0",
 ]
+
+[project.urls]
+Documentation = "https://civexdata.github.io/civex-docs/"
 
 [project.scripts]
 civex = "civex.main:app"
@@ -87,6 +90,11 @@ docs = [
 ]
 
 [tool.setuptools_scm]
+# Only `v*` tags version civex. `sdk-v*` tags belong to civex-plugin-sdk (its
+# own pyproject.toml); setuptools-scm's default tag pattern would otherwise
+# accept them, because it tolerates a word prefix.
+tag_regex = "^v(?P<version>\\d+(?:\\.\\d+)*(?:[.-]?(?:a|b|rc|post|dev)\\d+)*)$"
+git_describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--match", "v[0-9]*"]
 version_scheme = "post-release"
 local_scheme = "no-local-version"
 

@@ -1,16 +1,13 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "civex-plugin-sdk"
-# 0.2.0: `table`/`bytes` IOSpec values now cross the wire as the typed
-# columnar/binary envelope (civex_plugin_sdk.io_convert), and the `[table]`
-# extra provides the pandas that a `table`-typed plugin is handed. The bump
-# is load-bearing, not cosmetic: `uv run` caches a per-script environment, so
-# an already-resolved plugin would otherwise keep an older SDK with the old
-# behaviour and never see the new conversion at all.
-version = "0.2.0"
+# No version here: it comes from the newest `sdk-v*` git tag (see
+# [tool.setuptools_scm] below and docs/contributing/sdk-release.md), so it can
+# never disagree with what was tagged and published.
+dynamic = ["version"]
 description = "SDK for authoring out-of-process Civex workflow plugins (subprocess/container tiers)"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -37,6 +34,19 @@ dev = ["pytest>=8"]
 # A plugin that does declare one asks for it by name in its own PEP 723
 # header: dependencies = ["civex-plugin-sdk[table]"].
 table = ["pandas>=2.0"]
+
+[project.urls]
+Documentation = "https://civexdata.github.io/civex-docs/extending/sdk-reference.html"
+
+[tool.setuptools_scm]
+# The SDK lives in a subdirectory of the civex repo, so the git root is one up.
+root = ".."
+# Only `sdk-v*` tags version the SDK; civex's own `v*` tags are a separate
+# namespace (and civex's config, in the root pyproject.toml, ignores these).
+tag_regex = "^sdk-v(?P<version>\\d+(?:\\.\\d+)*(?:[.-]?(?:a|b|rc|post|dev)\\d+)*)$"
+git_describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--match", "sdk-v[0-9]*"]
+version_scheme = "post-release"
+local_scheme = "no-local-version"
 
 [tool.setuptools.packages.find]
 where = ["src"]

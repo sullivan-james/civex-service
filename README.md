@@ -16,7 +16,7 @@ flowchart LR
 pipx install civex
 ```
 
-See [Install](docs/getting-started/install.md) for installing and updating (`civex update`).
+See [Install](https://civexdata.github.io/civex-docs/getting-started/install.html) for installing and updating (`civex update`).
 
 ## 60-second example
 
@@ -29,16 +29,16 @@ civex record add --to study-2024 --schema trial
 civex serve                          # open http://localhost:8000
 ```
 
-Take the [five-minute tour](docs/getting-started/tour.md) for the full walkthrough, including workflows.
+Take the [five-minute tour](https://civexdata.github.io/civex-docs/getting-started/tour.html) for the full walkthrough, including workflows.
 
 ## Documentation
 
-Full docs live in [`docs/`](docs/index.md) — run `make docs` to browse them locally with live reload.
+Full docs live in [`docs/`](https://civexdata.github.io/civex-docs/) — run `make docs` to browse them locally with live reload.
 
-- **Getting started** — [install](docs/getting-started/install.md), [your first project](docs/getting-started/first-project.md), [five-minute tour](docs/getting-started/tour.md)
-- **Guides** — [schemas & fields](docs/guides/schemas-and-fields.md), [collections & records](docs/guides/collections-and-records.md), [files](docs/guides/files.md), [workflows](docs/guides/workflows.md), [automation](docs/guides/automation.md), [server & web UI](docs/guides/server-and-web-ui.md), [remote sync](docs/guides/remote-sync.md), [PostgreSQL](docs/guides/postgresql.md), [logging & telemetry](docs/guides/logging-and-telemetry.md)
-- **Reference** — [plugins](docs/_prose/plugins/), [writing a plugin](docs/extending/writing-a-plugin.md), [container plugins](docs/extending/container-plugins.md), [wire protocol](docs/extending/wire-protocol.md), [plugin SDK](docs/extending/sdk-reference.md)
-- **Contributing** — [dev setup](docs/contributing/dev-setup.md), [architecture](docs/contributing/architecture.md), [testing](docs/contributing/testing.md), [release process](docs/contributing/release.md), [publishing the docs site](docs/contributing/publishing-docs.md); see [CONTRIBUTING.md](CONTRIBUTING.md) for the short version
+- **Getting started** — [install](https://civexdata.github.io/civex-docs/getting-started/install.html), [your first project](https://civexdata.github.io/civex-docs/getting-started/first-project.html), [five-minute tour](https://civexdata.github.io/civex-docs/getting-started/tour.html)
+- **Guides** — [schemas & fields](https://civexdata.github.io/civex-docs/guides/schemas-and-fields.html), [collections & records](https://civexdata.github.io/civex-docs/guides/collections-and-records.html), [files](https://civexdata.github.io/civex-docs/guides/files.html), [workflows](https://civexdata.github.io/civex-docs/guides/workflows.html), [automation](https://civexdata.github.io/civex-docs/guides/automation.html), [server & web UI](https://civexdata.github.io/civex-docs/guides/server-and-web-ui.html), [remote sync](https://civexdata.github.io/civex-docs/guides/remote-sync.html), [PostgreSQL](https://civexdata.github.io/civex-docs/guides/postgresql.html), [logging & telemetry](https://civexdata.github.io/civex-docs/guides/logging-and-telemetry.html)
+- **Reference** — built-in plugins (see the docs site's Reference section), [writing a plugin](https://civexdata.github.io/civex-docs/extending/writing-a-plugin.html), [container plugins](https://civexdata.github.io/civex-docs/extending/container-plugins.html), [wire protocol](https://civexdata.github.io/civex-docs/extending/wire-protocol.html), [plugin SDK](https://civexdata.github.io/civex-docs/extending/sdk-reference.html)
+- **Contributing** — maintainer docs (dev setup, architecture, testing, release process) live in `docs/contributing/` in the repository, alongside `CONTRIBUTING.md`
 
 ## Development
 
@@ -47,7 +47,7 @@ make install   # uv sync — sets up the venv and dependencies
 make check     # everything CI runs: format, lint, typecheck, test, docs build
 ```
 
-See [dev setup](docs/contributing/dev-setup.md) for the full local development workflow.
+See `docs/contributing/dev-setup.md` in the repository for the full local development workflow.
 
 ## License
 

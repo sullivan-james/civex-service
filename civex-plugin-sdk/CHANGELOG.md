@@ -1,21 +1,21 @@
 # Changelog — civex-plugin-sdk
 
-One section per published release: `## vX.Y.Z (YYYY-MM-DD)`. The version in
-`pyproject.toml` is the source of truth and is bumped **by hand** whenever
-anything under `src/` changes (CI enforces this — see
-`docs/contributing/sdk-release.md` in the civex repo). An entry for the
-current version must exist before its `sdk-vX.Y.Z` tag is pushed; the release
-workflow refuses to publish without one.
+One section per published release, newest first, under a running
+`## Unreleased` heading for work not yet tagged. The version is **not** written
+anywhere in the repo: it comes from the `sdk-vX.Y.Z` git tag. To release,
+rename `## Unreleased` to `## vX.Y.Z (YYYY-MM-DD)` (CI requires a dated entry
+for the tag) and push the tag — see `docs/contributing/sdk-release.md` in the
+civex repo. Any change under `src/` must also touch this file (CI enforces it).
 
-Bump the minor version for anything a plugin author or the civex host could
-observe (wire format, IO conversion, public API); the patch version for fixes
-that change neither. A change to the wire protocol itself also bumps
+Choose the version when you tag: minor for anything a plugin author or the
+civex host could observe (wire format, IO conversion, public API), patch for
+fixes that change neither. A change to the wire protocol itself also bumps
 `PROTOCOL_VERSION` (see `civex_plugin_sdk.protocol`).
 
-## v0.0.1
+## Unreleased
 
-First release published to PyPI under the MIT license. Previously the SDK
-shipped only vendored inside the `civex` wheel.
+First release published to PyPI (planned tag `sdk-v0.2.0`), under the MIT
+license. Previously the SDK shipped only vendored inside the `civex` wheel.
 
 - `table`/`bytes` IOSpec values cross the wire as a typed columnar/binary
   envelope (`civex_plugin_sdk.io_convert`); the `[table]` extra provides the

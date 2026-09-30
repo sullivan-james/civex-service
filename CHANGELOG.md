@@ -38,7 +38,13 @@ from the next tag forward.
   The SDK is now published to PyPI as its own MIT-licensed project instead of
   being vendored into the `civex` wheel; the bundled `_vendor/sdk` wheel and
   `civex_plugin_sdk` source copy are gone from the wheel. Publish the SDK
-  (`sdk-v0.2.0`) before tagging this release — `release.yml` checks.
+  (tag `sdk-v0.2.0`) before tagging this release — `release.yml` checks.
+  - Upgrading from civex 1.0.6 or earlier: those releases shipped the SDK
+    inside the civex wheel, and pip deletes the new SDK's files when it
+    uninstalls the old civex. civex detects this on its first run after the
+    upgrade and restores the SDK automatically (one stderr line, needs
+    network access to PyPI or pip's cache). If that fails it prints the exact
+    manual command: `pip install --force-reinstall --no-deps civex-plugin-sdk`.
 
 ### Features
 - `civex update` upgrades an installed civex to the latest PyPI release. It
@@ -60,7 +66,9 @@ from the next tag forward.
   than failing opaquely mid-run. Plugins from SDKs that predate the field are
   read as version 1, so existing plugins keep working.
 - CI now runs the SDK's own tests and guards that keep civex and the SDK in
-  step (`scripts/check_sdk_sync.py`); the SDK has its own release workflow.
+  step (`scripts/check_sdk_sync.py`); the SDK has its own release workflow
+  and its version comes from `sdk-v*` git tags, not from `pyproject.toml`.
+  CI jobs that install the project now fetch full git history (tags).
   See `docs/contributing/sdk-release.md`.
 
 ### Fixes
