@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import { Input } from '../ui'
 import { X } from '../ui/icons'
@@ -11,25 +11,27 @@ export function recordLabel(r: CivexRecord): string {
 function useRecordSearch(schemaName: string, search: string) {
   const [results, setResults] = useState<CivexRecord[]>([])
   const [loading, setLoading] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!schemaName) return
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(async () => {
+    // `stale` drops the response of a superseded search so a slow earlier
+    // request can't overwrite the results of a newer one.
+    let stale = false
+    const timer = setTimeout(async () => {
       setLoading(true)
       try {
         const records = await recordsApi.searchBySchema(
           schemaName,
           search || undefined,
         )
-        setResults(records)
+        if (!stale) setResults(records)
       } finally {
-        setLoading(false)
+        if (!stale) setLoading(false)
       }
     }, 250)
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
+      stale = true
+      clearTimeout(timer)
     }
   }, [schemaName, search])
 

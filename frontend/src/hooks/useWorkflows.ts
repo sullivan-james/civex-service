@@ -129,7 +129,12 @@ export function useActiveJobCount() {
       ])
       return { running: r.total, pending: p.total }
     },
-    refetchInterval: 3000,
+    // This runs in the app shell on every page, so back off when idle;
+    // the jobs mutations invalidate ['jobs'] and refresh it immediately.
+    refetchInterval: (query) => {
+      const counts = query.state.data
+      return counts && counts.running + counts.pending > 0 ? 3000 : 15_000
+    },
   })
 }
 
