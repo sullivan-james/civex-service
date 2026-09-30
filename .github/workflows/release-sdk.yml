@@ -31,9 +31,9 @@ jobs:
           enable-cache: true
 
       - name: Verify tag, version, changelog and PyPI state
-        # Tag == pyproject version, that version not already on PyPI, its
-        # CHANGELOG heading dated (not "unreleased"), and civex's declared
-        # SDK range admits it.
+        # The tag *is* the version (setuptools-scm). Checks: it's a valid
+        # sdk-vX.Y.Z, newer than everything on PyPI, civex's declared range
+        # admits it, and CHANGELOG.md has a dated entry for it.
         run: |
           uv run --no-project --with packaging python scripts/check_sdk_sync.py check
           uv run --no-project --with packaging python scripts/check_sdk_sync.py release-sdk "${GITHUB_REF_NAME}"
@@ -65,4 +65,7 @@ jobs:
         # No skip-existing: re-publishing a version is an error, not a no-op.
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          # This repository is private. Sigstore attestations are logged in a
+          # public transparency log and would name it, so opt out explicitly.
+          attestations: false
           packages-dir: dist/

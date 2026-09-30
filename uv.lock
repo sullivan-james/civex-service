@@ -392,7 +392,6 @@ provides-extras = ["desktop", "postgres", "workflows", "server", "ai", "telemetr
 
 [[package]]
 name = "civex-plugin-sdk"
-version = "0.2.0"
 source = { editable = "civex-plugin-sdk" }
 dependencies = [
     { name = "pydantic" },

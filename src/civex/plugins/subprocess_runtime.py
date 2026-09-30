@@ -162,7 +162,7 @@ def _build_command(uv_bin: str, plugin_path: Path) -> list[str]:
     # SDK keeps using it after the SDK changes, and silently disagrees
     # with the host about the wire format (a `table` input arriving as a
     # raw envelope dict instead of a DataFrame, say). Naming the version
-    # makes it part of the cache key, so an SDK bump re-resolves.
+    # makes it part of the cache key, so a new SDK release re-resolves.
     version = _sdk_pin_version(find_links)
     if version is not None:
         argv += ["--with", f"civex-plugin-sdk=={version}"]

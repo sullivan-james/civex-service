@@ -26,6 +26,9 @@ from civex.domain.exceptions import (
 )
 from civex.plugins import subprocess_runtime as rt
 
+# Arbitrary: the tests only care that whatever version is installed is pinned.
+_SDK_VERSION = "9.8.7"
+
 # -- command construction ------------------------------------------------
 
 
@@ -35,14 +38,14 @@ def test_build_command_without_local_sdk_source(
     """A real install: no --find-links; the SDK comes from the index, pinned
     to the version this host itself runs."""
     monkeypatch.setattr(rt, "_sdk_find_links_dir", lambda: None)
-    monkeypatch.setattr(rt, "_installed_sdk_version", lambda: "0.2.0")
+    monkeypatch.setattr(rt, "_installed_sdk_version", lambda: _SDK_VERSION)
     argv = rt._build_command("uv", Path("/plugins/thing.py"))
     assert argv == [
         "uv",
         "run",
         "--no-project",
         "--with",
-        "civex-plugin-sdk==0.2.0",
+        f"civex-plugin-sdk=={_SDK_VERSION}",
         "/plugins/thing.py",
     ]
 
