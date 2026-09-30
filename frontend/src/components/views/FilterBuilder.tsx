@@ -17,7 +17,11 @@ import {
   type FieldRelation,
 } from '../../utils/hierarchy'
 import { displayLabel } from '../../utils/naming'
-import { utcToDatetimeLocal, datetimeLocalToUTC } from '../../utils/dates'
+import {
+  effectiveTimeZone,
+  utcToZonedLocal,
+  zonedLocalToUTC,
+} from '../../utils/dates'
 
 interface FilterBuilderProps {
   root: FilterGroupNode
@@ -136,12 +140,20 @@ function FilterValueInput({
     )
   }
   if (field?.type === 'datetime') {
+    // A view belongs to a schema, not a collection, so only the field's own
+    // timezone override is known here; otherwise it's the viewer's zone.
+    const timeZone = effectiveTimeZone(field, null)
     return (
       <Input
         aria-label="Value"
         type="datetime-local"
-        value={utcToDatetimeLocal(String(value ?? ''))}
-        onChange={(e) => onChange(datetimeLocalToUTC(e.target.value))}
+        value={utcToZonedLocal(String(value ?? ''), timeZone)}
+        onChange={(e) => {
+          // A wall time in a DST gap/overlap resolves to no single instant;
+          // keep the previous filter value rather than store a guess.
+          const utc = zonedLocalToUTC(e.target.value, timeZone)
+          if (utc !== null) onChange(utc)
+        }}
         className="w-56"
       />
     )

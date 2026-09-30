@@ -14,3 +14,11 @@ if (typeof HTMLDialogElement !== 'undefined') {
     this.dispatchEvent(new Event('close'))
   }
 }
+
+// jsdom has no layout engine; components that observe size (Popover) only
+// need the API to exist.
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}

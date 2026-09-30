@@ -18,11 +18,12 @@ import {
   ErrorState,
   Input,
   Pagination,
-  Popover,
+  TriggerPopover,
   TableSkeleton,
   Field,
 } from '../ui'
 import { Columns3, Download, Plus } from '../ui/icons'
+import { toTableRows } from '../records/tableRows'
 import {
   RecordsTable,
   type RecordsTableRow,
@@ -30,6 +31,7 @@ import {
 } from '../records/RecordsTable'
 import { ColumnPicker, columnLabel } from '../views/ColumnPicker'
 import { FilterControls } from './FilterControls'
+import { DrillLinks } from './DrillLinks'
 import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
 import { SelectionBar } from './SelectionBar'
@@ -113,10 +115,7 @@ export function RecordsExplorer({
 
   const items = x.page.data?.items ?? []
   const total = x.page.data?.total ?? 0
-  const rows: RecordsTableRow[] = items.map((r) => ({
-    ...r,
-    data: { ...r.derived, ...r.data },
-  }))
+  const rows = toTableRows(items)
   const columns = x.columnNames.map((name) => ({
     name,
     label: columnLabel(name, x.baseFields, x.joinable),
@@ -240,7 +239,7 @@ export function RecordsExplorer({
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {toolbarActions}
-            <Popover
+            <TriggerPopover
               label="Choose columns"
               align="right"
               panelClassName="w-[36rem] max-w-[90vw]"
@@ -265,7 +264,7 @@ export function RecordsExplorer({
                   Reset to default columns
                 </button>
               )}
-            </Popover>
+            </TriggerPopover>
             {exportHref ? (
               <a href={exportHref} download>
                 <Button
@@ -522,37 +521,5 @@ export function RecordsExplorer({
         />
       )}
     </div>
-  )
-}
-
-/** One button per child schema a row has records of -- "3 recordings →" --
- * that lists them in the same explorer, scoped to that row. */
-function DrillLinks({
-  counts,
-  byName,
-  onDrill,
-}: {
-  counts: CivexRecord['child_counts']
-  byName: Map<string, { name: string; label: string | null }>
-  onDrill: (childSchema: string) => void
-}) {
-  const entries = Object.entries(counts ?? {})
-  if (entries.length === 0) return <span className="text-fg-subtle">—</span>
-  return (
-    <span className="flex flex-wrap gap-1">
-      {entries.map(([name, n]) => {
-        const s = byName.get(name)
-        return (
-          <button
-            key={name}
-            type="button"
-            onClick={() => onDrill(name)}
-            className="rounded-md border border-accent-muted bg-accent-subtle px-2 py-1 text-xs font-medium text-accent cursor-pointer hover:bg-accent-subtle-border"
-          >
-            {pluralise(n, displayLabel(name, s?.label).toLowerCase())} →
-          </button>
-        )
-      })}
-    </span>
   )
 }

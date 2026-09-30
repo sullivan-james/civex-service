@@ -105,12 +105,17 @@ def _upsert_datasets(session: Session, rows: list[dict]) -> None:
                     id=dto.id,
                     name=dto.name,
                     description=dto.description,
+                    timezone=dto.timezone,
                     created_at=dto.created_at,
                 )
             )
         else:
             existing.name = dto.name
             existing.description = dto.description
+            # A bundle from a peer that predates timezones has no key at all;
+            # don't let that read as "cleared" and wipe a locally set zone.
+            if "timezone" in d:
+                existing.timezone = dto.timezone
 
 
 def _upsert_records(session: Session, rows: list[dict]) -> None:

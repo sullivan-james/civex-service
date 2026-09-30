@@ -24,14 +24,25 @@ def dataset_create(
     description: Optional[str] = typer.Option(
         None, "--description", "-d", help="Collection description"
     ),
+    timezone: Optional[str] = typer.Option(
+        None,
+        "--timezone",
+        "--tz",
+        help=(
+            "IANA timezone such as America/Chicago. Datetime values without a "
+            "UTC offset are read in this zone, and the web UI shows them in it."
+        ),
+    ),
 ) -> None:
     """Create a new collection."""
     ctx = _ctx()
     try:
-        dataset = ctx.dataset_svc.create(name, description=description)
+        dataset = ctx.dataset_svc.create(
+            name, description=description, timezone=timezone
+        )
         ctx.commit()
         console.print(f"[success]Created collection '{dataset.name}'.[/success]")
-    except AlreadyExistsError as e:
+    except (AlreadyExistsError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
@@ -67,6 +78,7 @@ def dataset_show(name: str = typer.Argument(..., help="Collection name")) -> Non
     console.print(f"  Records  {d.record_count}")
     if d.description:
         console.print(f"  {d.description}")
+    console.print(f"  Timezone  {d.timezone or 'not set (UTC for input)'}")
 
     if d.record_count > 0:
         records = ctx.record_svc.find(name, schema_name=None, filters=[], limit=100_000)
@@ -86,23 +98,34 @@ def dataset_update(
     description: Optional[str] = typer.Option(
         None, "--description", "-d", help="New description for the collection"
     ),
+    timezone: Optional[str] = typer.Option(
+        None,
+        "--timezone",
+        "--tz",
+        help=(
+            "New IANA timezone for datetime values, such as America/Chicago. "
+            "Pass an empty string to clear it. Stored values are not changed."
+        ),
+    ),
 ) -> None:
-    """Update a collection's name or description."""
-    if rename is None and description is None:
+    """Update a collection's name, description or timezone."""
+    if rename is None and description is None and timezone is None:
         console.print(
-            "[error]Provide at least one of --rename or --description.[/error]"
+            "[error]Provide at least one of --rename, --description or --timezone.[/error]"
         )
         raise typer.Exit(1)
     ctx = _ctx()
     try:
-        dataset = ctx.dataset_svc.update(name, new_name=rename, description=description)
+        dataset = ctx.dataset_svc.update(
+            name, new_name=rename, description=description, timezone=timezone
+        )
         ctx.commit()
         if rename and rename != name:
             console.print(
                 f"[warning]Workflow configs that reference '{name}' by name will need updating.[/warning]"
             )
         console.print(f"[success]Updated collection '{dataset.name}'.[/success]")
-    except (NotFoundError, AlreadyExistsError) as e:
+    except (NotFoundError, AlreadyExistsError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 

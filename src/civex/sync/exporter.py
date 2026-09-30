@@ -64,6 +64,7 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
             description=r.description,
             record_count=0,
             created_at=r.created_at or now,
+            timezone=r.timezone,
         ).to_dict()
         for r in session.query(Dataset)
         .filter(Dataset.deleted_at.is_(None))

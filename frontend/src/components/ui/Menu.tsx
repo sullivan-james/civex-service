@@ -1,11 +1,5 @@
-import {
-  useCallback,
-  useRef,
-  useState,
-  type ComponentType,
-  type ReactNode,
-} from 'react'
 import { useDismiss } from '../../hooks/useDismiss'
+import { useRef, useState, type ComponentType, type ReactNode } from 'react'
 
 export interface MenuItem {
   label: string
@@ -34,8 +28,7 @@ export function Menu({
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
-  const close = useCallback(() => setOpen(false), [])
-  useDismiss(rootRef, open, close)
+  useDismiss(open, [rootRef], () => setOpen(false))
 
   return (
     <div ref={rootRef} className="relative inline-flex">

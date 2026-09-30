@@ -16,8 +16,10 @@ import {
   Field,
   Input,
   Page,
+  TimeZoneSelect,
   TableSkeleton,
 } from '../components/ui'
+import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { recordCollectionVisit } from '../hooks/useFrequentCollections'
 import { RecordsExplorer } from '../components/explorer/RecordsExplorer'
 import { WithHierarchy } from '../components/explorer/HierarchySidebar'
@@ -34,6 +36,7 @@ export default function CollectionDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [editing, setEditing] = useState(false)
+  const [timezoneValue, setTimezoneValue] = useState('')
   const [nameValue, setNameValue] = useState('')
   const [descriptionValue, setDescriptionValue] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -78,15 +81,20 @@ export default function CollectionDetailPage() {
   function startEditing() {
     setNameValue(collection!.name)
     setDescriptionValue(collection!.description ?? '')
+    setTimezoneValue(collection!.timezone ?? '')
     setEditing(true)
   }
 
   function handleSaveEdit() {
     const newName = nameValue.trim()
-    const body: { rename?: string; description?: string } = {}
+    const body: { rename?: string; description?: string; timezone?: string } =
+      {}
     if (newName && newName !== collection!.name) body.rename = newName
     if (descriptionValue !== (collection!.description ?? ''))
       body.description = descriptionValue
+    // '' clears the zone; omitting leaves it untouched.
+    if (timezoneValue !== (collection!.timezone ?? ''))
+      body.timezone = timezoneValue
     if (!Object.keys(body).length) {
       setEditing(false)
       return
@@ -100,141 +108,153 @@ export default function CollectionDetailPage() {
   const recordCount = collection.record_count
 
   return (
-    <WithHierarchy dataset={collection.name} collectionId={id}>
-      <Page
-        breadcrumbs={[...breadcrumbs, { label: collection.name }]}
-        title={
-          <span className="inline-flex flex-wrap items-center gap-3">
-            {collection.name}
-            <Badge variant="accent">
-              {recordCount.toLocaleString()}{' '}
-              {recordCount === 1 ? 'record' : 'records'}
-            </Badge>
-          </span>
-        }
-        description={collection.description ?? undefined}
-        action={
-          <Link to={`/collections/${id}/import`}>
-            <Button size="sm" variant="primary">
-              <Upload size={14} /> Guided import
-            </Button>
-          </Link>
-        }
-        secondaryActions={[
-          { label: 'Edit details', onClick: startEditing },
-          {
-            label: 'Delete collection',
-            variant: 'danger',
-            onClick: () => setConfirmDelete(true),
-          },
-        ]}
-      >
-        {editing && (
-          <div className="border border-border rounded-md p-4 bg-canvas-subtle flex flex-col gap-3">
-            <Field label="Collection name">
-              <Input
-                autoFocus
-                value={nameValue}
-                onChange={(e) => setNameValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSaveEdit()
-                  if (e.key === 'Escape') setEditing(false)
-                }}
-              />
-            </Field>
-            <Field label="Description">
-              <Input
-                value={descriptionValue}
-                onChange={(e) => setDescriptionValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') setEditing(false)
-                }}
-                placeholder="No description"
-              />
-            </Field>
-            {updateCollection.error && (
-              <span role="alert" className="text-xs text-danger">
-                {errorMessage(updateCollection.error)}
-              </span>
-            )}
-            <div className="flex gap-2">
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={handleSaveEdit}
-                disabled={updateCollection.isPending || !nameValue.trim()}
-              >
-                {updateCollection.isPending ? 'Saving…' : 'Save'}
-              </Button>
-              <Button size="sm" onClick={() => setEditing(false)}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        )}
-
-        <RecordsExplorer
-          dataset={collection.name}
-          scopeLabel={collection.name}
-          emptyHint={
-            <>
-              Add your first record with the button above, or use{' '}
-              <Link
-                to={`/collections/${id}/import`}
-                className="text-accent hover:underline"
-              >
-                guided import
-              </Link>{' '}
-              to bring in a folder of files or a spreadsheet.
-            </>
+    <CollectionTimeZone timeZone={collection.timezone}>
+      <WithHierarchy dataset={collection.name} collectionId={id}>
+        <Page
+          breadcrumbs={[...breadcrumbs, { label: collection.name }]}
+          title={
+            <span className="inline-flex flex-wrap items-center gap-3">
+              {collection.name}
+              <Badge variant="accent">
+                {recordCount.toLocaleString()}{' '}
+                {recordCount === 1 ? 'record' : 'records'}
+              </Badge>
+            </span>
           }
-        />
+          description={collection.description ?? undefined}
+          action={
+            <Link to={`/collections/${id}/import`}>
+              <Button size="sm" variant="primary">
+                <Upload size={14} /> Guided import
+              </Button>
+            </Link>
+          }
+          secondaryActions={[
+            { label: 'Edit details', onClick: startEditing },
+            {
+              label: 'Delete collection',
+              variant: 'danger',
+              onClick: () => setConfirmDelete(true),
+            },
+          ]}
+        >
+          {editing && (
+            <div className="border border-border rounded-md p-4 bg-canvas-subtle flex flex-col gap-3">
+              <Field label="Collection name">
+                <Input
+                  autoFocus
+                  value={nameValue}
+                  onChange={(e) => setNameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveEdit()
+                    if (e.key === 'Escape') setEditing(false)
+                  }}
+                />
+              </Field>
+              <Field label="Description">
+                <Input
+                  value={descriptionValue}
+                  onChange={(e) => setDescriptionValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setEditing(false)
+                  }}
+                  placeholder="No description"
+                />
+              </Field>
+              <Field
+                label="Timezone"
+                hint="Datetimes without a UTC offset are read in this zone, and everyone sees them in it. Existing values are not changed, only how they are shown."
+              >
+                <TimeZoneSelect
+                  value={timezoneValue}
+                  onChange={setTimezoneValue}
+                  unsetLabel="Not set — each viewer's own timezone"
+                />
+              </Field>
+              {updateCollection.error && (
+                <span role="alert" className="text-xs text-danger">
+                  {errorMessage(updateCollection.error)}
+                </span>
+              )}
+              <div className="flex gap-2">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handleSaveEdit}
+                  disabled={updateCollection.isPending || !nameValue.trim()}
+                >
+                  {updateCollection.isPending ? 'Saving…' : 'Save'}
+                </Button>
+                <Button size="sm" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
 
-        <CollapsibleSection title="Activity">
-          <AuditTrail
-            queryKey={['collections', collection.name, 'audit']}
-            fetchPage={(offset, limit) =>
-              collectionsApi.getAudit(collection.name, offset, limit)
+          <RecordsExplorer
+            dataset={collection.name}
+            scopeLabel={collection.name}
+            emptyHint={
+              <>
+                Add your first record with the button above, or use{' '}
+                <Link
+                  to={`/collections/${id}/import`}
+                  className="text-accent hover:underline"
+                >
+                  guided import
+                </Link>{' '}
+                to bring in a folder of files or a spreadsheet.
+              </>
             }
-            describeEntry={describeCollectionAuditEntry}
-            emptyMessage="Changes to this collection will appear here."
           />
-        </CollapsibleSection>
 
-        {confirmDelete && (
-          <ConfirmDialog
-            title="Delete collection"
-            body={
-              recordCount > 0
-                ? `Delete "${collection.name}"? This moves it and its ${recordCount.toLocaleString()} record(s) to Recently Deleted — restore any time before it's permanently purged.`
-                : `Delete "${collection.name}"? It has no records. It moves to Recently Deleted — restore any time before it's permanently purged.`
-            }
-            confirmLabel={
-              recordCount > 0
-                ? `Delete collection and ${recordCount.toLocaleString()} record${recordCount === 1 ? '' : 's'}`
-                : 'Delete collection'
-            }
-            variant="danger"
-            typedConfirmationValue={
-              recordCount > HIGH_IMPACT_RECORD_THRESHOLD
-                ? collection.name
-                : undefined
-            }
-            warning={
-              deleteCollection.error
-                ? errorMessage(deleteCollection.error)
-                : undefined
-            }
-            isPending={deleteCollection.isPending}
-            onConfirm={() =>
-              deleteCollection.mutate(collection.name, {
-                onSuccess: () => navigate('/collections'),
-              })
-            }
-            onClose={() => setConfirmDelete(false)}
-          />
-        )}
-      </Page>
-    </WithHierarchy>
+          <CollapsibleSection title="Activity">
+            <AuditTrail
+              queryKey={['collections', collection.name, 'audit']}
+              fetchPage={(offset, limit) =>
+                collectionsApi.getAudit(collection.name, offset, limit)
+              }
+              describeEntry={describeCollectionAuditEntry}
+              emptyMessage="Changes to this collection will appear here."
+            />
+          </CollapsibleSection>
+
+          {confirmDelete && (
+            <ConfirmDialog
+              title="Delete collection"
+              body={
+                recordCount > 0
+                  ? `Delete "${collection.name}"? This moves it and its ${recordCount.toLocaleString()} record(s) to Recently Deleted — restore any time before it's permanently purged.`
+                  : `Delete "${collection.name}"? It has no records. It moves to Recently Deleted — restore any time before it's permanently purged.`
+              }
+              confirmLabel={
+                recordCount > 0
+                  ? `Delete collection and ${recordCount.toLocaleString()} record${recordCount === 1 ? '' : 's'}`
+                  : 'Delete collection'
+              }
+              variant="danger"
+              typedConfirmationValue={
+                recordCount > HIGH_IMPACT_RECORD_THRESHOLD
+                  ? collection.name
+                  : undefined
+              }
+              warning={
+                deleteCollection.error
+                  ? errorMessage(deleteCollection.error)
+                  : undefined
+              }
+              isPending={deleteCollection.isPending}
+              onConfirm={() =>
+                deleteCollection.mutate(collection.name, {
+                  onSuccess: () => navigate('/collections'),
+                })
+              }
+              onClose={() => setConfirmDelete(false)}
+            />
+          )}
+        </Page>
+      </WithHierarchy>
+    </CollectionTimeZone>
   )
 }

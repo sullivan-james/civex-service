@@ -48,7 +48,7 @@ Opening [http://localhost:8000](http://localhost:8000) (or wherever you configur
 **Records** — Each record has a detail page showing its field values, attached files, everything under it (children, grandchildren, … in the same explorer), workflow jobs that have run against it, and a form to edit field values.
 
 - File fields show a file picker for upload and a download link for existing attachments.
-- `datetime` fields display in your local timezone; values are stored as UTC.
+- `datetime` fields display and edit in the collection's timezone (or the field's own override), with the zone shown next to the value and the UTC value on hover. If neither is set they use your own timezone. Values are stored as UTC.
 - `reference` fields show a searchable dropdown of records from the target schema.
 - String fields with a `choices` restriction render as a dropdown.
 - A **"⊙ from filename"** button appears on text/number/date/datetime fields whenever a file field on the same record has a file attached — lets you extract a value from the filename using a regex, without writing a workflow.

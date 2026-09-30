@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import re
 import uuid
-from datetime import date as _date, datetime as _dt, timezone as _tz
+from datetime import date as _date, datetime as _dt
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -20,6 +20,7 @@ from civex.domain.filters import (
     parse_filter_tree,
 )
 from civex.domain.query import RecordQuery, ResolvedQuery
+from civex.domain.timezones import parse_datetime
 from civex.repositories.protocols import (
     AuditRepository,
     DatasetRepository,
@@ -50,15 +51,10 @@ def _parse_date(v: str) -> str:
     return _date.fromisoformat(v.strip()).isoformat()
 
 
-def _parse_datetime(v: str) -> str:
-    s = v.strip()
-    # datetime-local inputs omit seconds; fromisoformat needs them on Python <3.11
-    if len(s) == 16 and s[10] == "T":
-        s += ":00"
-    dt = _dt.fromisoformat(s)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=_tz.utc)
-    return dt.astimezone(_tz.utc).isoformat()
+def _parse_datetime(v: str, tz: str | None = None) -> str:
+    """Normalise to a UTC ISO string; offset-less input is read in *tz*
+    (UTC when None). See civex.domain.timezones."""
+    return parse_datetime(v, tz)
 
 
 _COERCE: dict[str, Any] = {
@@ -464,7 +460,19 @@ class RecordService:
         dtype: str,
         field_name: str,
         restrictions: dict[str, Any] | None = None,
+        timezone: str | None = None,
     ) -> Any:
+        """`timezone` is the collection's zone, used to read an offset-less
+        datetime; the field's own `timezone` restriction takes precedence."""
+        if dtype == "datetime":
+            try:
+                parsed = _parse_datetime(
+                    raw, (restrictions or {}).get("timezone") or timezone
+                )
+            except ValueError:
+                raise CoercionError(field_name, dtype, raw)
+            _check_restrictions(parsed, dtype, restrictions or {}, field_name)
+            return parsed
         if dtype == "file":
             path = Path(raw)
             if not path.exists():
@@ -530,6 +538,47 @@ class RecordService:
         _check_restrictions(value, dtype, restrictions or {}, field_name)
         return value
 
+    def _normalise_datetimes(
+        self,
+        data: dict[str, Any],
+        schema_id: uuid.UUID,
+        dataset_timezone: str | None,
+        unchanged: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Store every datetime value as a UTC ISO string.
+
+        Offset-less values are read in the field's `timezone` restriction,
+        else the collection's zone, else as UTC. `unchanged` (the record's
+        current values) lets an update skip fields the caller merely echoed
+        back: the UI re-sends the whole record on every edit, and a legacy
+        offset-less value must not be re-read in a zone set after it was
+        stored -- that would silently shift it.
+        """
+        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
+        if schema is None:
+            return data
+        fields_by_name = {
+            rf.field.name: rf.field for rf in self._schema_svc.collect_fields(schema)
+        }
+        out = dict(data)
+        for name, value in data.items():
+            field = fields_by_name.get(name)
+            if field is None or field.dtype != "datetime":
+                continue
+            if not isinstance(value, str) or (
+                unchanged is not None and unchanged.get(name) == value
+            ):
+                continue
+            tz = field.restrictions.get("timezone") or dataset_timezone
+            try:
+                out[name] = _parse_datetime(value, tz)
+            except ValueError:
+                raise ValidationError(
+                    f"Field '{name}': '{value}' is not a valid datetime "
+                    "(use e.g. 2024-03-01T15:30 or 2024-03-01T15:30:00-06:00)"
+                ) from None
+        return out
+
     def _validate_data(self, data: dict[str, Any], schema_id: uuid.UUID) -> None:
         """Validate all field values in data against their restrictions."""
         schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
@@ -583,6 +632,7 @@ class RecordService:
 
         # Apply field defaults before validation
         data = self._apply_defaults(data, schema.id)
+        data = self._normalise_datetimes(data, schema.id, dataset.timezone)
 
         resolved_parent_id = None
         if schema.parent_id:
@@ -730,8 +780,19 @@ class RecordService:
             raise NotFoundError(f"Record '{record_id}' not found")
         # Apply field defaults before validation
         data = self._apply_defaults(data, raw.schema_id)
-        self._validate_data(data, raw.schema_id)
         old_data = self._ids_to_names(raw.data, raw.schema_id)
+        dataset = (
+            self._datasets.get_by_id(raw.dataset_id, include_deleted=True)
+            if raw.dataset_id
+            else None
+        )
+        data = self._normalise_datetimes(
+            data,
+            raw.schema_id,
+            dataset.timezone if dataset else None,
+            unchanged=old_data,
+        )
+        self._validate_data(data, raw.schema_id)
         id_data = self._names_to_ids(data, raw.schema_id)
         dto = self._records.update(id=raw.id, data=id_data)
         named = self._with_names(dto)

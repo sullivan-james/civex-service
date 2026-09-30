@@ -91,7 +91,7 @@ src/civex/
 Record `data` is stored as a JSON/JSONB dict (no EAV), keyed by **field UUID** — `RecordService._names_to_ids()`/`_ids_to_names()` translate at the service boundary, so everything above that layer sees name-keyed data and renaming a field costs nothing in storage. Field types: `integer | float | string | boolean | date | datetime | file | file_list | reference`.
 
 - `file` / `file_list`: record stores `FileRef` dict(s) `{sha256, filename, size}`; bytes live in `_civex/objects/<sha256[:2]>/<sha256[2:]>` (git object store layout).
-- `date`: stored as ISO date string (`YYYY-MM-DD`). `datetime`: stored as UTC ISO string. Naive datetimes are assumed UTC on ingest (`_parse_datetime` in `record_service.py`).
+- `date`: stored as ISO date string (`YYYY-MM-DD`). `datetime`: always stored as a UTC ISO string. `RecordService.add`/`update` normalise every datetime via `_normalise_datetimes()` (and the CLI via `coerce_value`), reading a value with no UTC offset as wall time in the field's `timezone` restriction, else the collection's `timezone` (`datasets.timezone`), else UTC. DST gaps/overlaps and malformed values are rejected; `update` skips values merely echoed back, so a legacy offset-less value isn't shifted when a zone is set later. The logic lives in `domain/timezones.py`; `frontend/src/utils/dates.ts` mirrors its DST rules for display and entry.
 - `reference`: stores the UUID of another record as a string. The target schema is enforced via a `schema` restriction.
 - `file_list`: stores a list of `FileRef` dicts.
 
@@ -117,6 +117,7 @@ Each field carries a `restrictions: dict[str, Any]` validated at write time by `
 | `integer`, `float` | `min`, `max` |
 | `string` | `choices` (list), `max_length` |
 | `date`, `datetime` | `min`, `max` (ISO strings; compared as parsed objects, not strings) |
+| `datetime` | also `timezone` (IANA name; overrides the collection's `timezone` when reading and showing this field) |
 | `file`, `file_list` | `accept` (comma-separated MIME/ext), `max_size` (bytes), `filename_template` (see below) |
 | `reference` | `schema` (target schema name) |
 
@@ -160,7 +161,7 @@ frontend/src/
   hooks/        # TanStack Query hooks (useSchemas, useRecords, useWorkflows, …)
   pages/        # One file per route (SchemaDetailPage, RecordDetailPage, JobsPage, …)
   components/   # Shared UI (records/DynamicField.tsx, jobs/JobsTable.tsx, …)
-  utils/dates.ts  # utcToDatetimeLocal / datetimeLocalToUTC helpers
+  utils/dates.ts  # timezone-aware datetime helpers (utcToZonedLocal / zonedLocalToUTC / formatDateTime / effectiveTimeZone)
 ```
 
 `DynamicField` is the single component that renders an editable input for any field type, including restriction-aware behaviour (choices→select, min/max, accept/max_size on files). `JobsTable` owns its own pagination state and accepts `recordId?` + `statusFilter?` props — do not duplicate pagination in parent pages.

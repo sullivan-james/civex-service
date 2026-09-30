@@ -193,6 +193,11 @@ class Dataset(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(String(1000))
+    # IANA zone (e.g. "America/Chicago") that datetime values in this dataset
+    # are read and shown in. NULL means unset: naive input is read as UTC and
+    # the UI falls back to the viewer's own zone. A datetime field's own
+    # `timezone` restriction overrides it. See domain/timezones.py.
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
     # See Schema.deleted_at -- same soft-delete marker, same reason. Deleting
     # a dataset cascades to soft-delete its records (DatasetRepository).

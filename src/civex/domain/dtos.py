@@ -161,6 +161,8 @@ class DatasetDTO:
     created_at: datetime
     # Soft-delete marker; None means live. See DatasetRepository.delete/restore.
     deleted_at: datetime | None = None
+    # IANA zone datetime values are read and shown in; None = unset.
+    timezone: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         # record_count excluded — it's a computed value, not stored on the entity
@@ -168,6 +170,7 @@ class DatasetDTO:
             "id": str(self.id),
             "name": self.name,
             "description": self.description,
+            "timezone": self.timezone,
             "created_at": self.created_at.isoformat(),
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
@@ -181,6 +184,8 @@ class DatasetDTO:
             record_count=0,
             created_at=datetime.fromisoformat(d["created_at"]),
             deleted_at=_parse_dt(d.get("deleted_at")),
+            # Absent in bundles/audit rows written before timezones existed.
+            timezone=d.get("timezone"),
         )
 
 

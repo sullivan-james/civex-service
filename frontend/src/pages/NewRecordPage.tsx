@@ -12,6 +12,7 @@ import {
   Page,
   Section,
 } from '../components/ui'
+import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { RecordPageFrame } from '../components/records/RecordPageFrame'
 import { fieldSaveErrors } from '../components/records/saveErrors'
 import { recordTrail } from '../utils/recordTrail'
@@ -134,79 +135,81 @@ export default function NewRecordPage() {
   }
 
   return (
-    <RecordPageFrame
-      collection={collection.name}
-      collectionId={id!}
-      path={parentPath}
-      current={`New ${label.toLowerCase()}`}
-      title={
-        <span className="inline-flex items-center gap-2">
-          New {label.toLowerCase()}
-          <Badge variant="accent">{schema.name}</Badge>
-        </span>
-      }
-      description="Fill in what you have — click a value to edit it. Nothing is saved until you add the record."
-    >
-      <Section title="Fields">
-        <RecordFieldGrid
-          fields={fields}
-          data={values}
-          onSave={(name, value) =>
-            setValues((prev) => {
-              const next = { ...prev }
-              if (value === undefined) delete next[name]
-              else next[name] = value
-              return next
-            })
-          }
-          errors={errors}
-          onDismissError={() => createRecord.reset()}
-          extra={(field) => {
-            if (
-              field.name === PARENT ||
-              !EXTRACTABLE_TYPES.has(field.type) ||
-              fileSources.length === 0
-            )
-              return null
-            const open = extracting === field.name
-            return (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setExtracting(open ? null : field.name)}
-                  className="mt-1 inline-flex items-center gap-1 text-xs text-fg-muted hover:text-accent cursor-pointer"
-                >
-                  <ScanText size={11} /> fill from filename
-                </button>
-                {open && (
-                  <FilenameExtractor
-                    sources={fileSources}
-                    fieldType={field.type}
-                    onApply={(v) =>
-                      setValues((prev) => ({ ...prev, [field.name]: v }))
-                    }
-                    onClose={() => setExtracting(null)}
-                  />
-                )}
-              </>
-            )
-          }}
-        />
-      </Section>
-      <div className="flex gap-2">
-        <Button
-          variant="primary"
-          onClick={submit}
-          disabled={
-            createRecord.isPending || (!!parentField && !values[PARENT])
-          }
-        >
-          {createRecord.isPending ? 'Adding…' : `Add ${label.toLowerCase()}`}
-        </Button>
-        <Link to={listHref}>
-          <Button>Cancel</Button>
-        </Link>
-      </div>
-    </RecordPageFrame>
+    <CollectionTimeZone timeZone={collection.timezone}>
+      <RecordPageFrame
+        collection={collection.name}
+        collectionId={id!}
+        path={parentPath}
+        current={`New ${label.toLowerCase()}`}
+        title={
+          <span className="inline-flex items-center gap-2">
+            New {label.toLowerCase()}
+            <Badge variant="accent">{schema.name}</Badge>
+          </span>
+        }
+        description="Fill in what you have — click a value to edit it. Nothing is saved until you add the record."
+      >
+        <Section title="Fields">
+          <RecordFieldGrid
+            fields={fields}
+            data={values}
+            onSave={(name, value) =>
+              setValues((prev) => {
+                const next = { ...prev }
+                if (value === undefined) delete next[name]
+                else next[name] = value
+                return next
+              })
+            }
+            errors={errors}
+            onDismissError={() => createRecord.reset()}
+            extra={(field) => {
+              if (
+                field.name === PARENT ||
+                !EXTRACTABLE_TYPES.has(field.type) ||
+                fileSources.length === 0
+              )
+                return null
+              const open = extracting === field.name
+              return (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setExtracting(open ? null : field.name)}
+                    className="mt-1 inline-flex items-center gap-1 text-xs text-fg-muted hover:text-accent cursor-pointer"
+                  >
+                    <ScanText size={11} /> fill from filename
+                  </button>
+                  {open && (
+                    <FilenameExtractor
+                      sources={fileSources}
+                      fieldType={field.type}
+                      onApply={(v) =>
+                        setValues((prev) => ({ ...prev, [field.name]: v }))
+                      }
+                      onClose={() => setExtracting(null)}
+                    />
+                  )}
+                </>
+              )
+            }}
+          />
+        </Section>
+        <div className="flex gap-2">
+          <Button
+            variant="primary"
+            onClick={submit}
+            disabled={
+              createRecord.isPending || (!!parentField && !values[PARENT])
+            }
+          >
+            {createRecord.isPending ? 'Adding…' : `Add ${label.toLowerCase()}`}
+          </Button>
+          <Link to={listHref}>
+            <Button>Cancel</Button>
+          </Link>
+        </div>
+      </RecordPageFrame>
+    </CollectionTimeZone>
   )
 }

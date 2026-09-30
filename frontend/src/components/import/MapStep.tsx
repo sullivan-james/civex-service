@@ -32,6 +32,7 @@ export function MapStep({
   parentSchema,
   hasParentCandidates,
   parsedCsv,
+  collectionTimeZone,
   canMatch,
   strategy,
   filenames,
@@ -55,6 +56,9 @@ export function MapStep({
   parentSchema: Schema | null
   hasParentCandidates: boolean
   parsedCsv: ParsedCsv | null
+  /** Timezone of the collection being imported into: a zone name, null when
+   * the collection has none, undefined when it isn't chosen yet. */
+  collectionTimeZone?: string | null
   canMatch: boolean
   strategy: Strategy
   filenames: string[]
@@ -63,6 +67,15 @@ export function MapStep({
   onBack: () => void
   onContinue: () => void
 }) {
+  // Is any CSV column headed for a datetime field? (existing, or new)
+  const hasDatetimeColumn =
+    mode === 'csv' &&
+    Object.entries(state.columnMap).some(([col, target]) =>
+      target === NEW_FIELD
+        ? state.newColumnFields[col]?.type === 'datetime'
+        : availableFields.find((f) => f.name === target)?.type === 'datetime',
+    )
+
   return (
     <div className="space-y-5">
       {showSchemaPicker && (
@@ -106,6 +119,16 @@ export function MapStep({
           <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
             Column mapping
           </span>
+          {hasDatetimeColumn && (
+            <p className="text-xs text-fg-muted">
+              {collectionTimeZone
+                ? `Times without a UTC offset are read as ${collectionTimeZone}.`
+                : collectionTimeZone === null
+                  ? 'This collection has no timezone, so times without a UTC offset are read as UTC. Set one on the collection to change that.'
+                  : "Times without a UTC offset are read in the chosen collection's timezone (UTC if it has none)."}{' '}
+              A field can override this in its settings.
+            </p>
+          )}
           <div className="border border-border rounded-md divide-y divide-border-muted">
             {parsedCsv.columns.map((col) => (
               <div key={col} className="px-3 py-2">

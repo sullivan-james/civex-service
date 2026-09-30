@@ -228,6 +228,53 @@ def test_extract_from_filename_converts_to_date_via_token_format(
     assert result.outputs["value"] == "2024-01-02"
 
 
+def test_extract_from_filename_datetime_is_naive_wall_time(
+    ctx, make_collection, make_schema, make_record
+):
+    dataset = make_collection("study")
+    make_schema("doc", fields=[("attachment", "file")])
+    ref = ctx.file_svc.store_bytes(b"x", "rec_20210218_075000.wav")
+    record = make_record("study", "doc", {"attachment": ref.to_dict()})
+    wf_ctx = _wf_ctx(ctx, record, dataset)
+
+    registration = get_plugin("civex.extract_from_filename")
+    config = registration.config_model(
+        field="attachment",
+        pattern=r"rec_(\d{8}_\d{6})",
+        output_type="datetime",
+        date_format="YYYYMMDD_HHmmSS",
+    )
+    result = registration.invoke({}, config, wf_ctx, 60.0)
+
+    # No offset: the record service decides which zone this is wall time in.
+    assert result.outputs["value"] == "2021-02-18T07:50:00"
+
+
+def test_extracted_datetime_is_read_in_the_collection_timezone_when_saved(
+    ctx, make_collection, make_schema, make_record
+):
+    dataset = make_collection("study")
+    ctx.dataset_svc.update("study", timezone="America/Chicago")
+    make_schema("doc", fields=[("attachment", "file"), ("recorded_at", "datetime")])
+    ref = ctx.file_svc.store_bytes(b"x", "rec_20210218_075000.wav")
+    record = make_record("study", "doc", {"attachment": ref.to_dict()})
+    wf_ctx = _wf_ctx(ctx, record, dataset)
+
+    registration = get_plugin("civex.extract_from_filename")
+    config = registration.config_model(
+        field="attachment",
+        pattern=r"rec_(\d{8}_\d{6})",
+        output_type="datetime",
+        date_format="YYYYMMDD_HHmmSS",
+    )
+    value = registration.invoke({}, config, wf_ctx, 60.0).outputs["value"]
+    updated = ctx.record_svc.update(
+        str(record.id), {**record.data, "recorded_at": value}
+    )
+
+    assert updated.data["recorded_at"] == "2021-02-18T13:50:00+00:00"  # CST, UTC-6
+
+
 def test_load_csv_parses_bytes_into_dataframe(
     ctx, make_collection, make_schema, make_record
 ):

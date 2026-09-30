@@ -7,6 +7,8 @@ import {
   Button,
   CreateResourceModal,
   ErrorState,
+  Field,
+  TimeZoneSelect,
   TableSkeleton,
   Modal,
   ModalBody,
@@ -27,6 +29,7 @@ import { dumpApi, type RestoreResult } from '../api/dump'
 
 function CreateCollectionModal({ onClose }: { onClose: () => void }) {
   const create = useCreateCollection()
+  const [timezone, setTimezone] = useState('')
 
   return (
     <CreateResourceModal
@@ -36,10 +39,24 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       isPending={create.isPending}
       error={create.error}
+      extraFields={
+        <Field
+          label="Timezone"
+          hint="Datetimes without a UTC offset are read in this zone, and everyone sees them in it. Leave unset to use each viewer's own timezone."
+        >
+          <TimeZoneSelect
+            value={timezone}
+            onChange={setTimezone}
+            unsetLabel="Not set — each viewer's own timezone"
+            className="w-full"
+          />
+        </Field>
+      }
       onSubmit={async ({ name, description }) => {
         await create.mutateAsync({
           name,
           description: description || undefined,
+          timezone: timezone || undefined,
         })
       }}
     />

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, IconButton, Popover } from '../ui'
+import { Button, IconButton, TriggerPopover } from '../ui'
 import { Plus, X } from '../ui/icons'
 import { FilterBuilder } from '../views/FilterBuilder'
 import {
@@ -79,7 +79,7 @@ export function FilterControls({
           </span>
         )
       })}
-      <Popover
+      <TriggerPopover
         label="Edit filters"
         trigger={({ toggle, open }) => (
           <Button
@@ -93,7 +93,7 @@ export function FilterControls({
         )}
       >
         <FilterEditor wire={wire} fields={fields} onChange={onChange} />
-      </Popover>
+      </TriggerPopover>
     </div>
   )
 }

@@ -22,7 +22,8 @@ import {
   CollapsibleSection,
 } from '../components/ui'
 import { Play } from '../components/ui/icons'
-import { RecordsExplorer } from '../components/explorer/RecordsExplorer'
+import { ContainsPreview } from '../components/records/ContainsPreview'
+import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { RecordPageFrame } from '../components/records/RecordPageFrame'
 import { fieldSaveErrors } from '../components/records/saveErrors'
 import { recordTrail } from '../utils/recordTrail'
@@ -48,7 +49,8 @@ export default function RecordDetailPage() {
   const { data: workflows } = useWorkflows()
   const { data: recordJobs } = useJobs(undefined, id)
   const [savingField, setSavingField] = useState<string | null>(null)
-  const updateRecord = useUpdateRecord()
+  // quiet: the field itself shows the outcome (new value, or the error under it)
+  const updateRecord = useUpdateRecord({ quiet: true })
   const deleteRecord = useDeleteRecord(collection?.name ?? '')
 
   // Everything below this record (children, grandchildren, …) -- the
@@ -113,180 +115,181 @@ export default function RecordDetailPage() {
   }
 
   return (
-    <RecordPageFrame
-      collection={collection?.name}
-      collectionId={record.dataset_id}
-      recordId={record.id}
-      path={record.ancestors ?? []}
-      current={record.natural_name ?? record.id.slice(0, 8)}
-      currentSchema={record.schema_name}
-      title={
-        <span className="inline-flex items-center gap-2">
-          {record.natural_name ?? (
-            <span className="font-mono">{record.id.slice(0, 8)}</span>
-          )}
-          {schema ? (
-            <Link to={`/schemas/${schema.id}`}>
+    <CollectionTimeZone timeZone={collection?.timezone}>
+      <RecordPageFrame
+        collection={collection?.name}
+        collectionId={record.dataset_id}
+        recordId={record.id}
+        path={record.ancestors ?? []}
+        current={record.natural_name ?? record.id.slice(0, 8)}
+        currentSchema={record.schema_name}
+        title={
+          <span className="inline-flex items-center gap-2">
+            {record.natural_name ?? (
+              <span className="font-mono">{record.id.slice(0, 8)}</span>
+            )}
+            {schema ? (
+              <Link to={`/schemas/${schema.id}`}>
+                <Badge variant="accent">{record.schema_name}</Badge>
+              </Link>
+            ) : (
               <Badge variant="accent">{record.schema_name}</Badge>
-            </Link>
-          ) : (
-            <Badge variant="accent">{record.schema_name}</Badge>
-          )}
-        </span>
-      }
-      description={
-        <>
-          Added {formatDate(record.created_at)}
-          {record.created_at !== record.updated_at &&
-            ` · Updated ${formatDate(record.updated_at)}`}
-        </>
-      }
-    >
-      {/* Own fields */}
-      <Section title="Fields">
-        <RecordFieldGrid
-          fields={
-            schema?.fields ??
-            Object.keys(record.data).map(
-              (name) =>
-                ({
-                  name,
-                  label: null,
-                  type: 'string',
-                  required: false,
-                  id: name,
-                }) as SchemaField,
-            )
-          }
-          data={record.data}
-          referenceLabels={record.reference_labels}
-          onSave={saveField}
-          errors={saveErrors}
-          onDismissError={() => updateRecord.reset()}
-        />
-      </Section>
-
-      {(hasChildSchemas || descendantTotal > 0) && collection && (
-        <Section title="Contains" count={descendantTotal}>
-          <RecordsExplorer
-            dataset={collection.name}
-            root={{ id: record.id }}
-            scopeLabel={record.natural_name ?? record.id.slice(0, 8)}
-            pollMs={hasActiveJobs ? 2000 : 5000}
-            emptyHint="Nothing has been added under this record yet."
+            )}
+          </span>
+        }
+        description={
+          <>
+            Added {formatDate(record.created_at)}
+            {record.created_at !== record.updated_at &&
+              ` · Updated ${formatDate(record.updated_at)}`}
+          </>
+        }
+      >
+        {/* Own fields */}
+        <Section title="Fields">
+          <RecordFieldGrid
+            fields={
+              schema?.fields ??
+              Object.keys(record.data).map(
+                (name) =>
+                  ({
+                    name,
+                    label: null,
+                    type: 'string',
+                    required: false,
+                    id: name,
+                  }) as SchemaField,
+              )
+            }
+            data={record.data}
+            referenceLabels={record.reference_labels}
+            onSave={saveField}
+            errors={saveErrors}
+            onDismissError={() => updateRecord.reset()}
           />
         </Section>
-      )}
 
-      {applicableWorkflows.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-base font-semibold text-fg">Workflows</h2>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {applicableWorkflows.map((wf) => (
-              <button
-                key={wf.name}
-                onClick={() => setRunWorkflow(wf.name)}
-                className="flex items-center gap-2 px-3 py-2 text-sm border border-border rounded-md hover:bg-canvas-subtle hover:border-accent transition-colors text-fg"
-              >
-                <Play size={12} />
-                <span className="font-mono text-xs">{wf.name}</span>
-                {wf.inputs &&
-                  Object.values(wf.inputs).some((i) => i.type === 'files') && (
-                    <span className="text-xs text-fg-muted">· files</span>
-                  )}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+        {(hasChildSchemas || descendantTotal > 0) && collection && (
+          <Section title="Contains" count={descendantTotal}>
+            <ContainsPreview
+              record={record}
+              collection={collection.name}
+              collectionId={record.dataset_id}
+              pollMs={hasActiveJobs ? 2000 : 5000}
+            />
+          </Section>
+        )}
 
-      {runWorkflowDef && (
-        <WorkflowRunModal
-          workflow={runWorkflowDef}
-          recordId={record.id}
-          onClose={() => setRunWorkflow(null)}
-        />
-      )}
-
-      <RecordProvenance recordId={record.id} />
-
-      <AuditTrail
-        queryKey={['records', record.id, 'audit']}
-        fetchPage={(offset, limit) =>
-          recordsApi.audit(record.id, offset, limit)
-        }
-        describeEntry={(entry) => describeRecordAuditEntry(entry, schema)}
-        emptyMessage="Changes to this record will appear here."
-      />
-
-      <CollapsibleSection title="Runs">
-        <JobsTable recordId={record.id} />
-      </CollapsibleSection>
-
-      {/* Danger zone */}
-      <div className="border border-danger-muted rounded-md">
-        <div className="px-4 py-3 border-b border-danger-muted bg-danger-subtle rounded-t-md">
-          <h2 className="text-sm font-semibold text-danger">Danger zone</h2>
-        </div>
-        <div className="px-4 py-3 flex items-center justify-between">
+        {applicableWorkflows.length > 0 && (
           <div>
-            <p className="text-sm font-medium text-fg">Delete this record</p>
-            <p className="text-xs text-fg-muted">
-              Moves this record (and everything under it) to Recently Deleted —
-              restore it any time before it's permanently purged.
-            </p>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-base font-semibold text-fg">Workflows</h2>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {applicableWorkflows.map((wf) => (
+                <button
+                  key={wf.name}
+                  onClick={() => setRunWorkflow(wf.name)}
+                  className="flex items-center gap-2 px-3 py-2 text-sm border border-border rounded-md hover:bg-canvas-subtle hover:border-accent transition-colors text-fg"
+                >
+                  <Play size={12} />
+                  <span className="font-mono text-xs">{wf.name}</span>
+                  {wf.inputs &&
+                    Object.values(wf.inputs).some(
+                      (i) => i.type === 'files',
+                    ) && <span className="text-xs text-fg-muted">· files</span>}
+                </button>
+              ))}
+            </div>
           </div>
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => setConfirmDelete(true)}
-          >
-            Delete record
-          </Button>
-        </div>
-      </div>
+        )}
 
-      {confirmDelete && (
-        <ConfirmDialog
-          title="Delete record"
-          body={
-            descendantTotal > 0
-              ? `Delete ${record.natural_name ?? `record ${record.id.slice(0, 8)}`}? This also deletes its ${descendantTotal.toLocaleString()} child record${descendantTotal === 1 ? '' : 's'}. They'll move to Recently Deleted — restore any time before it's permanently purged.`
-              : `Delete ${record.natural_name ?? `record ${record.id.slice(0, 8)}`}? It'll move to Recently Deleted — restore any time before it's permanently purged.`
+        {runWorkflowDef && (
+          <WorkflowRunModal
+            workflow={runWorkflowDef}
+            recordId={record.id}
+            onClose={() => setRunWorkflow(null)}
+          />
+        )}
+
+        <RecordProvenance recordId={record.id} />
+
+        <AuditTrail
+          queryKey={['records', record.id, 'audit']}
+          fetchPage={(offset, limit) =>
+            recordsApi.audit(record.id, offset, limit)
           }
-          confirmLabel={
-            descendantTotal > 0
-              ? `Delete record and ${descendantTotal.toLocaleString()} child record${descendantTotal === 1 ? '' : 's'}`
-              : 'Delete record'
-          }
-          variant="danger"
-          typedConfirmationValue={
-            descendantTotal > HIGH_IMPACT_RECORD_THRESHOLD
-              ? (record.natural_name ?? record.id.slice(0, 8))
-              : undefined
-          }
-          warning={
-            deleteRecord.error ? errorMessage(deleteRecord.error) : undefined
-          }
-          isPending={deleteRecord.isPending}
-          onConfirm={() =>
-            deleteRecord.mutate(
-              { id: record.id, undo: () => recordsApi.restore(record.id) },
-              {
-                onSuccess: () =>
-                  navigate(
-                    collection
-                      ? `/collections/${record.dataset_id}`
-                      : '/collections',
-                  ),
-              },
-            )
-          }
-          onClose={() => setConfirmDelete(false)}
+          describeEntry={(entry) => describeRecordAuditEntry(entry, schema)}
+          emptyMessage="Changes to this record will appear here."
         />
-      )}
-    </RecordPageFrame>
+
+        <CollapsibleSection title="Runs">
+          <JobsTable recordId={record.id} />
+        </CollapsibleSection>
+
+        {/* Danger zone */}
+        <div className="border border-danger-muted rounded-md">
+          <div className="px-4 py-3 border-b border-danger-muted bg-danger-subtle rounded-t-md">
+            <h2 className="text-sm font-semibold text-danger">Danger zone</h2>
+          </div>
+          <div className="px-4 py-3 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-fg">Delete this record</p>
+              <p className="text-xs text-fg-muted">
+                Moves this record (and everything under it) to Recently Deleted
+                — restore it any time before it's permanently purged.
+              </p>
+            </div>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => setConfirmDelete(true)}
+            >
+              Delete record
+            </Button>
+          </div>
+        </div>
+
+        {confirmDelete && (
+          <ConfirmDialog
+            title="Delete record"
+            body={
+              descendantTotal > 0
+                ? `Delete ${record.natural_name ?? `record ${record.id.slice(0, 8)}`}? This also deletes its ${descendantTotal.toLocaleString()} child record${descendantTotal === 1 ? '' : 's'}. They'll move to Recently Deleted — restore any time before it's permanently purged.`
+                : `Delete ${record.natural_name ?? `record ${record.id.slice(0, 8)}`}? It'll move to Recently Deleted — restore any time before it's permanently purged.`
+            }
+            confirmLabel={
+              descendantTotal > 0
+                ? `Delete record and ${descendantTotal.toLocaleString()} child record${descendantTotal === 1 ? '' : 's'}`
+                : 'Delete record'
+            }
+            variant="danger"
+            typedConfirmationValue={
+              descendantTotal > HIGH_IMPACT_RECORD_THRESHOLD
+                ? (record.natural_name ?? record.id.slice(0, 8))
+                : undefined
+            }
+            warning={
+              deleteRecord.error ? errorMessage(deleteRecord.error) : undefined
+            }
+            isPending={deleteRecord.isPending}
+            onConfirm={() =>
+              deleteRecord.mutate(
+                { id: record.id, undo: () => recordsApi.restore(record.id) },
+                {
+                  onSuccess: () =>
+                    navigate(
+                      collection
+                        ? `/collections/${record.dataset_id}`
+                        : '/collections',
+                    ),
+                },
+              )
+            }
+            onClose={() => setConfirmDelete(false)}
+          />
+        )}
+      </RecordPageFrame>
+    </CollectionTimeZone>
   )
 }
