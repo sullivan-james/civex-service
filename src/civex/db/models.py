@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -25,10 +27,17 @@ from sqlalchemy import (
     Integer,
     JSON,
     String,
+    Table,
     Text,
     TypeDecorator,
     UniqueConstraint,
+    delete,
+    event,
+    inspect,
+    insert,
     nulls_last,
+    select,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -226,6 +235,28 @@ class Record(Base):
         Index("ix_records_dataset_created", "dataset_id", "created_at"),
         Index("ix_records_dataset_parent", "dataset_id", "parent_record_id"),
         Index("ix_records_deleted_at", "deleted_at"),
+        # list_children / recursive delete-restore-purge look children up by
+        # parent alone (no dataset_id), which the composite index above can't
+        # serve because it leads with dataset_id.
+        Index("ix_records_parent", "parent_record_id"),
+        # Nearly every read filters deleted_at IS NULL, so the live-row
+        # listing index is partial: it excludes trash and stays small.
+        Index(
+            "ix_records_live_dataset_created",
+            "dataset_id",
+            "created_at",
+            "id",
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "ix_records_live_schema_created",
+            "schema_id",
+            "created_at",
+            "id",
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
         # GIN index enables containment (@>) queries on JSONB data fields.
         # On SQLite this degrades to a plain B-tree on the JSON text column (harmless).
         Index("ix_records_data_gin", "data", postgresql_using="gin"),
@@ -280,6 +311,19 @@ class AuditLog(Base):
     """One row per entity write — create, update, or delete — from any source."""
 
     __tablename__ = "audit_log"
+    __table_args__ = (
+        Index("ix_audit_log_entity", "entity_id", "timestamp"),
+        Index("ix_audit_log_commit", "commit_id"),
+        Index("ix_audit_log_timestamp", "timestamp"),
+        # Staged (uncommitted) entries: a tiny, hot subset of a table that
+        # otherwise grows forever.
+        Index(
+            "ix_audit_log_staged",
+            "timestamp",
+            postgresql_where=text("commit_id IS NULL"),
+            sqlite_where=text("commit_id IS NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     commit_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -309,6 +353,13 @@ class WorkflowJob(Base):
     """
 
     __tablename__ = "workflow_jobs"
+    __table_args__ = (
+        # claim_pending(): oldest job in a given status.
+        Index("ix_workflow_jobs_status_created", "status", "created_at"),
+        Index("ix_workflow_jobs_record_created", "record_id", "created_at"),
+        Index("ix_workflow_jobs_created", "created_at"),
+        Index("ix_workflow_jobs_workflow_status", "workflow_name", "status"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -372,7 +423,10 @@ class StepExecution(Base):
     """
 
     __tablename__ = "step_executions"
-    __table_args__ = (UniqueConstraint("job_id", "position"),)
+    __table_args__ = (
+        UniqueConstraint("job_id", "position"),
+        Index("ix_step_executions_plugin_status", "plugin", "status"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     job_id: Mapped[uuid.UUID] = mapped_column(
@@ -409,3 +463,135 @@ class AiUsageEvent(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+
+
+class JobAffectedSchema(Base):
+    """Which schemas a workflow run wrote to. Real foreign keys on both
+    sides (unlike the `affected_records` JSON on WorkflowJob), so "jobs that
+    touched schema X" is an indexed join rather than a JSON scan, and a
+    purged job or schema takes its link rows with it."""
+
+    __tablename__ = "job_affected_schemas"
+    __table_args__ = (Index("ix_job_affected_schemas_schema", "schema_id"),)
+
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workflow_jobs.id", ondelete="CASCADE"), primary_key=True
+    )
+    schema_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("schemas.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class StoredObject(Base):
+    """Inventory of blobs in the object store: one row per sha256, written
+    when the blob lands on disk and removed when it is deleted. Exists so
+    per-volume usage is `SUM(size)` over an indexed column instead of a walk
+    of the whole volume, and so GC never has to hold the store listing in
+    memory. Disk is the source of truth -- GC reconciles this table against
+    it, so drift (a rolled-back request, a crash) self-heals."""
+
+    __tablename__ = "stored_objects"
+    __table_args__ = (Index("ix_stored_objects_volume", "volume"),)
+
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    volume: Mapped[str] = mapped_column(String(255), nullable=False)
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+
+
+class FileReference(Base):
+    """A live reference from a record (or a workflow job's input) to a blob.
+    Maintained by ORM events in `civex.db.file_refs` whenever a record's
+    `data` or a job's `input_data` is written, and removed by ON DELETE
+    CASCADE when the owner is purged. GC collects blobs with no row here.
+    `sha256` is deliberately not a FK to `stored_objects`: a record may
+    reference a blob that hasn't been fetched from the remote yet."""
+
+    __tablename__ = "file_references"
+    __table_args__ = (
+        CheckConstraint(
+            "(record_id IS NOT NULL AND job_id IS NULL) "
+            "OR (record_id IS NULL AND job_id IS NOT NULL)",
+            name="ck_file_references_one_owner",
+        ),
+        UniqueConstraint("record_id", "sha256", name="uq_file_refs_record_sha"),
+        UniqueConstraint("job_id", "sha256", name="uq_file_refs_job_sha"),
+        Index("ix_file_references_sha256", "sha256"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    record_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("records.id", ondelete="CASCADE"), nullable=True
+    )
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workflow_jobs.id", ondelete="CASCADE"), nullable=True
+    )
+
+
+# ---------------------------------------------------------------------------
+# file_references maintenance
+#
+# Hooked on the ORM mapper rather than called from repositories so *every*
+# writer is covered -- RecordRepository, the sync importer, restore paths --
+# and none can forget. Uses the flush's own connection, so the reference rows
+# commit or roll back atomically with the record/job write that caused them.
+# ---------------------------------------------------------------------------
+
+
+def _sync_file_refs(
+    connection: Any, owner: str, owner_id: uuid.UUID, data: Any
+) -> None:
+    from civex.domain.file_refs import collect_sha256_refs
+
+    table = cast(Table, FileReference.__table__)
+    owner_col = table.c[owner]
+    wanted = collect_sha256_refs(data)
+    have = {
+        row[0]
+        for row in connection.execute(
+            select(table.c.sha256).where(owner_col == owner_id)
+        )
+    }
+    stale = have - wanted
+    if stale:
+        connection.execute(
+            delete(table).where(owner_col == owner_id, table.c.sha256.in_(stale))
+        )
+    fresh = wanted - have
+    if fresh:
+        other = "job_id" if owner == "record_id" else "record_id"
+        connection.execute(
+            insert(table),
+            [
+                {"id": _uuid(), "sha256": sha, owner: owner_id, other: None}
+                for sha in sorted(fresh)
+            ],
+        )
+
+
+def _data_changed(target: Any, attr: str) -> bool:
+    return inspect(target).attrs[attr].history.has_changes()
+
+
+@event.listens_for(Record, "after_insert")
+def _record_inserted(mapper: Any, connection: Any, target: Record) -> None:
+    _sync_file_refs(connection, "record_id", target.id, target.data)
+
+
+@event.listens_for(Record, "after_update")
+def _record_updated(mapper: Any, connection: Any, target: Record) -> None:
+    if _data_changed(target, "data"):
+        _sync_file_refs(connection, "record_id", target.id, target.data)
+
+
+@event.listens_for(WorkflowJob, "after_insert")
+def _job_inserted(mapper: Any, connection: Any, target: WorkflowJob) -> None:
+    if target.input_data:
+        _sync_file_refs(connection, "job_id", target.id, target.input_data)
+
+
+@event.listens_for(WorkflowJob, "after_update")
+def _job_updated(mapper: Any, connection: Any, target: WorkflowJob) -> None:
+    if _data_changed(target, "input_data"):
+        _sync_file_refs(connection, "job_id", target.id, target.input_data)

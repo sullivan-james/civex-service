@@ -157,7 +157,7 @@ def test_stale_upload_scratch_file_is_swept_but_fresh_one_is_not(
 def test_unreadable_reference_source_reports_error_and_deletes_nothing(
     ctx: AppContext, make_schema, make_collection, monkeypatch
 ) -> None:
-    """A source that fails to read (e.g. a corrupt row) must not crash the
+    """A reference lookup that fails must not crash the
     whole GC pass, and must not let the run delete anything -- an
     incomplete reference set could otherwise make a still-live object look
     collectible."""
@@ -168,13 +168,14 @@ def test_unreadable_reference_source_reports_error_and_deletes_nothing(
     def _boom():
         raise RuntimeError("corrupt row")
 
-    monkeypatch.setattr(ctx.gc_svc._jobs, "list_all", lambda **kw: _boom())
+    monkeypatch.setattr(
+        ctx.gc_svc._refs, "referenced_subset", lambda shas: _boom()
+    )
 
     report = ctx.gc_svc.run(dry_run=False, grace_days=0)
 
-    assert report.errors and "workflow jobs" in report.errors[0]
-    assert report.deleted_count == 1  # still reported as collectible...
-    assert ctx.file_svc._store.exists(ref.sha256)  # ...but not actually deleted
+    assert report.errors and "file references" in report.errors[0]
+    assert ctx.file_svc._store.exists(ref.sha256)  # nothing deleted on error
 
 
 def test_overlapping_gc_runs_are_rejected(ctx: AppContext) -> None:
@@ -203,3 +204,92 @@ def test_stale_gc_lock_is_reclaimed(ctx: AppContext) -> None:
 def test_negative_grace_days_is_rejected(ctx: AppContext) -> None:
     with pytest.raises(ValidationError):
         ctx.gc_svc.run(dry_run=True, grace_days=-1)
+
+
+def test_reference_table_tracks_record_writes_and_purge(
+    ctx: AppContext, make_schema, make_collection, make_record
+) -> None:
+    """file_references is maintained by ORM events on every record write,
+    and emptied by ON DELETE CASCADE when the record is purged."""
+    from civex.domain.file_refs import collect_sha256_refs  # noqa: F401
+    from civex.repositories.local.file_ref_repo import LocalFileReferenceRepository
+
+    refs = LocalFileReferenceRepository(ctx._session)
+    make_schema("doc", fields=[("attachments", "file_list")])
+    make_collection("study")
+    a = _store(ctx, b"a", "a.txt")
+    b = _store(ctx, b"b", "b.txt")
+    rec = make_record("study", "doc", {"attachments": [a.to_dict()]})
+    ctx.commit()
+    assert refs.referenced_subset([a.sha256, b.sha256]) == {a.sha256}
+
+    ctx.record_svc.update(str(rec.id), {"attachments": [b.to_dict()]})
+    ctx.commit()
+    assert refs.referenced_subset([a.sha256, b.sha256]) == {b.sha256}
+
+    ctx.record_svc.delete(str(rec.id))
+    ctx.commit()
+    # soft-deleted records still protect their files (they're restorable)
+    assert refs.referenced_subset([b.sha256]) == {b.sha256}
+
+    ctx.record_svc.purge(str(rec.id))
+    ctx.commit()
+    assert refs.referenced_subset([a.sha256, b.sha256]) == set()
+
+
+def test_rebuild_references_recovers_from_a_wiped_table(
+    ctx: AppContext, make_schema, make_collection, make_record
+) -> None:
+    from sqlalchemy import delete
+
+    from civex.db.models import FileReference
+
+    make_schema("doc", fields=[("attachments", "file_list")])
+    make_collection("study")
+    ref = _store(ctx, b"kept", "kept.txt")
+    make_record("study", "doc", {"attachments": [ref.to_dict()]})
+    ctx.commit()
+
+    ctx._session.execute(delete(FileReference))
+    assert ctx.gc_svc.rebuild_references() == 1
+    report = ctx.gc_svc.run(dry_run=False, grace_days=0)
+    assert report.deleted_count == 0
+    assert ctx.file_svc._store.exists(ref.sha256)
+
+
+def test_gc_processes_more_objects_than_one_batch(
+    ctx: AppContext, monkeypatch
+) -> None:
+    import civex.services.gc_service as gc
+
+    monkeypatch.setattr(gc, "_BATCH", 3)
+    refs = [_store(ctx, f"blob-{i}".encode(), f"{i}.txt") for i in range(10)]
+    report = ctx.gc_svc.run(dry_run=False, grace_days=0)
+    assert report.scanned == 10
+    assert report.deleted_count == 10
+    assert not any(ctx.file_svc._store.exists(r.sha256) for r in refs)
+
+
+def test_volume_usage_comes_from_inventory_and_heals_on_gc(ctx: AppContext) -> None:
+    store = ctx.file_svc._store
+    a = store.put(b"x" * 100, "a")
+    store.put(b"y" * 50, "b")
+    assert store._civex_used("default") == 150
+
+    # Drift: a blob vanishes behind the store's back.
+    store._object_path(a.sha256, "default").unlink()
+    assert store._civex_used("default") == 150  # stale until reconciled
+    ctx.gc_svc.run(dry_run=False, grace_days=0)
+    assert store._civex_used("default") == 0  # both unreferenced -> deleted
+
+
+def test_dedupe_hit_refreshes_mtime_so_grace_protects_it(ctx: AppContext) -> None:
+    store = ctx.file_svc._store
+    ref = store.put(b"again", "a.txt")
+    path = store.object_path(ref.sha256)
+    old = time.time() - 40 * 86400
+    os.utime(path, (old, old))
+    store.put(b"again", "a.txt")  # user re-uploads the same bytes
+    assert path.stat().st_mtime > old + 86400
+    report = ctx.gc_svc.run(dry_run=False, grace_days=14)
+    assert report.deleted_count == 0

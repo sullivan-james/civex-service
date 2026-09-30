@@ -151,8 +151,10 @@ class WorkflowJobService:
         affected_record_id: str | None = None,
         offset: int = 0,
         limit: int | None = None,
+        affected_schema: str | None = None,
     ) -> list[WorkflowJobDTO]:
         return self._repo.list_all(
+            affected_schema=affected_schema,
             status=status,
             record_id=record_id,
             affected_record_id=affected_record_id,
@@ -165,9 +167,13 @@ class WorkflowJobService:
         status: str | None = None,
         record_id: str | None = None,
         affected_record_id: str | None = None,
+        affected_schema: str | None = None,
     ) -> int:
         return self._repo.count(
-            status=status, record_id=record_id, affected_record_id=affected_record_id
+            status=status,
+            record_id=record_id,
+            affected_record_id=affected_record_id,
+            affected_schema=affected_schema,
         )
 
     def get_job(self, job_id: uuid.UUID) -> WorkflowJobDTO | None:

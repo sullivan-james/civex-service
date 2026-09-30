@@ -452,6 +452,10 @@ class GCRequest(BaseModel):
         ge=0,
         description="Skip unreferenced objects written more recently than this many days.",
     )
+    rebuild_refs: bool = Field(
+        default=False,
+        description="Recompute the file-reference table from every record and job before collecting. Normally unnecessary; use if the table may have drifted.",
+    )
 
 
 class StoredObjectResponse(BaseModel):

@@ -2,15 +2,9 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
-
 from civex.domain.dtos import GCReport, StoredObjectInfo
 from civex.domain.exceptions import ValidationError
-from civex.repositories.protocols import (
-    FileObjectStore,
-    RecordRepository,
-    WorkflowJobRepository,
-)
+from civex.repositories.protocols import FileObjectStore, FileReferenceRepository
 
 log = logging.getLogger(__name__)
 
@@ -21,23 +15,9 @@ _DAY_SECONDS = 86400
 # protect against -- just enough headroom that a slow-but-live upload isn't
 # mistaken for an abandoned one.
 _STALE_SCRATCH_SECONDS = _DAY_SECONDS
-
-
-def _collect_sha256_refs(value: Any, out: set[str]) -> None:
-    """Recursively find every `{"sha256": ...}` dict nested anywhere in
-    `value` -- covers `file` fields (a single FileRef dict), `file_list`
-    fields (a list of them), and workflow `input_data` (FileRef dicts
-    nested under arbitrary input names), all without needing schema
-    field-type lookups to know where to look."""
-    if isinstance(value, dict):
-        sha = value.get("sha256")
-        if isinstance(sha, str):
-            out.add(sha)
-        for v in value.values():
-            _collect_sha256_refs(v, out)
-    elif isinstance(value, list):
-        for v in value:
-            _collect_sha256_refs(v, out)
+# Objects checked against the reference table per query -- bounds GC's memory
+# at O(batch) however large the store or the record/job history is.
+_BATCH = 2000
 
 
 class GCService:
@@ -58,53 +38,15 @@ class GCService:
     GC at all.
     """
 
-    def __init__(
-        self,
-        store: FileObjectStore,
-        record_repo: RecordRepository,
-        job_repo: WorkflowJobRepository,
-    ) -> None:
+    def __init__(self, store: FileObjectStore, refs: FileReferenceRepository) -> None:
         self._store = store
-        self._records = record_repo
-        self._jobs = job_repo
+        self._refs = refs
 
-    def _referenced_hashes(self) -> tuple[set[str], list[str]]:
-        """Returns (referenced hashes, source-read errors).
-
-        Each root source is read independently and isolated: a single
-        corrupt row (e.g. malformed JSON in a record's `data` or a job's
-        `input_data`) fails that source's read, but must not abort the
-        whole pass -- run() below reads `errors` and refuses to delete
-        anything this run if it's non-empty, since a source that couldn't
-        be read means the reference set may be missing something still
-        live.
-        """
-        refs: set[str] = set()
-        errors: list[str] = []
-
-        try:
-            for record in self._records.list_all():
-                _collect_sha256_refs(record.data, refs)
-        except Exception as e:
-            log.error("GC: failed to read live records: %s", e, exc_info=True)
-            errors.append(f"live records: {e}")
-
-        try:
-            for record in self._records.list_deleted():
-                _collect_sha256_refs(record.data, refs)
-        except Exception as e:
-            log.error("GC: failed to read deleted records: %s", e, exc_info=True)
-            errors.append(f"deleted records: {e}")
-
-        try:
-            for job in self._jobs.list_all(limit=None):
-                if job.input_data:
-                    _collect_sha256_refs(job.input_data, refs)
-        except Exception as e:
-            log.error("GC: failed to read workflow jobs: %s", e, exc_info=True)
-            errors.append(f"workflow jobs: {e}")
-
-        return refs, errors
+    def rebuild_references(self) -> int:
+        """Recompute the reference table from every record and job input.
+        Not needed in normal operation (it's maintained on every write);
+        run it if the table may have drifted, before a GC pass."""
+        return self._refs.rebuild()
 
     def run(self, dry_run: bool = True, grace_days: int = 14) -> GCReport:
         if grace_days < 0:
@@ -116,40 +58,59 @@ class GCService:
             raise ValidationError("grace_days must be >= 0")
 
         with self._store.gc_lock():
-            referenced, errors = self._referenced_hashes()
             cutoff = time.time() - grace_days * _DAY_SECONDS
-
+            errors: list[str] = []
             collectible: list[StoredObjectInfo] = []
-            protected_by_grace = 0
-            scanned = 0
+            counts = {"scanned": 0, "protected": 0}
 
-            for obj in self._store.list_objects():
-                scanned += 1
-                if obj.sha256 in referenced:
-                    continue
-                if obj.mtime > cutoff:
-                    protected_by_grace += 1
-                    continue
-                collectible.append(obj)
+            def process(batch: list[StoredObjectInfo]) -> None:
+                # A reference lookup that fails means this batch might hold
+                # something still live: skip it, and stop deleting for the
+                # rest of the run (same contract as the old per-source read
+                # errors -- an incomplete picture must never delete).
+                try:
+                    live = self._refs.referenced_subset(o.sha256 for o in batch)
+                except Exception as e:
+                    log.error(
+                        "GC: failed to read file references: %s", e, exc_info=True
+                    )
+                    errors.append(f"file references: {e}")
+                    return
+                for obj in batch:
+                    if obj.sha256 in live:
+                        continue
+                    if obj.mtime > cutoff:
+                        counts["protected"] += 1
+                        continue
+                    collectible.append(obj)
+                    if not dry_run and not errors:
+                        self._store.delete(obj.sha256, volume=obj.volume)
 
-            # A source we couldn't read might have referenced one of these
-            # objects -- treat this run as dry regardless of what was asked,
-            # rather than risk deleting something still live.
-            effective_dry_run = dry_run or bool(errors)
-            if not effective_dry_run:
-                for obj in collectible:
-                    self._store.delete(obj.sha256, volume=obj.volume)
+            batch: list[StoredObjectInfo] = []
+            for obj in self._store.iter_objects():
+                counts["scanned"] += 1
+                batch.append(obj)
+                if len(batch) >= _BATCH:
+                    process(batch)
+                    batch = []
+            if batch:
+                process(batch)
+
+            # Repair inventory drift as part of the same pass, so volume
+            # usage accounting can't silently diverge from disk.
+            if not dry_run and not errors:
+                self._store.reconcile_inventory()
 
             stale_scratch_removed = self._store.sweep_stale_scratch(
-                _STALE_SCRATCH_SECONDS, dry_run=effective_dry_run
+                _STALE_SCRATCH_SECONDS, dry_run=dry_run or bool(errors)
             )
 
             return GCReport(
                 dry_run=dry_run,
                 grace_days=grace_days,
-                scanned=scanned,
-                referenced=len(referenced),
-                protected_by_grace=protected_by_grace,
+                scanned=counts["scanned"],
+                referenced=self._refs.count_referenced(),
+                protected_by_grace=counts["protected"],
                 deleted=collectible,
                 stale_scratch_removed=stale_scratch_removed,
                 errors=errors,

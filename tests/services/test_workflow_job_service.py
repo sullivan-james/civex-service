@@ -96,3 +96,34 @@ def test_list_and_count_jobs_filter_by_affected_record_id(
     assert ctx.job_svc.count_jobs(affected_record_id=touched_id) == 1
 
     assert ctx.job_svc.count_jobs(affected_record_id="does-not-exist") == 0
+
+
+def test_jobs_are_filterable_by_affected_schema(
+    ctx: AppContext, make_schema, make_collection, make_record
+) -> None:
+    """mark_completed/mark_failed mirror the schema names in affected_records
+    into job_affected_schemas (real FKs, indexed), so "jobs that wrote to
+    schema X" is a join instead of a JSON scan."""
+    make_schema("doc")
+    make_schema("other")
+    make_collection("study")
+    record = make_record("study", "doc")
+
+    touched = ctx.job_svc.enqueue_manual("wf", record)
+    untouched = ctx.job_svc.enqueue_manual("wf", record)
+    failed = ctx.job_svc.enqueue_manual("wf", record)
+    ctx.commit()
+    entry = {"record_id": "x", "schema_name": "other", "natural_name": "n", "action": "created"}
+    ctx.job_svc.mark_completed(touched.id, affected_records=[entry])
+    ctx.job_svc.mark_completed(untouched.id, affected_records=[])
+    ctx.job_svc.mark_failed(
+        failed.id,
+        ErrorEnvelope(kind="plugin_error", message="boom"),
+        affected_records=[entry],
+    )
+    ctx.commit()
+
+    found = ctx.job_svc.list_jobs(affected_schema="other")
+    assert {j.id for j in found} == {touched.id, failed.id}  # partial work counts
+    assert ctx.job_svc.count_jobs(affected_schema="other") == 2
+    assert ctx.job_svc.count_jobs(affected_schema="doc") == 0

@@ -5,17 +5,11 @@ import io
 import json
 import uuid
 from dataclasses import dataclass
-from functools import cmp_to_key
-from typing import Any
+from typing import Any, Iterator
 
 from civex.domain.dtos import FieldDTO, FileRef, RecordDTO, SchemaDTO, ViewDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
-from civex.domain.filters import (
-    FilterGroup,
-    FilterNode,
-    evaluate_filter_tree,
-    parse_filter_tree,
-)
+from civex.domain.filters import FilterGroup, FilterNode, parse_filter_tree
 from civex.domain.naming import validate_name
 from civex.repositories.protocols import (
     AuditRepository,
@@ -26,46 +20,35 @@ from civex.services.record_service import RecordService
 from civex.services.schema_service import SchemaService
 
 SORT_DIRECTIONS = frozenset({"asc", "desc"})
-PREVIEW_FETCH_CAP = 1000
 
-# GET /collections/{name}/export.csv uses the same ceiling -- a view spans
-# every dataset for its schema, so export has no natural pagination point.
-EXPORT_RECORD_LIMIT = 100_000
+# Records per page when an export walks a view's full result set.
+EXPORT_PAGE_SIZE = 500
 
 
-def _compare_values(a: Any, b: Any) -> int:
-    if a is None and b is None:
-        return 0
-    if a is None:
-        return 1
-    if b is None:
-        return -1
-    if a < b:
-        return -1
-    if a > b:
-        return 1
-    return 0
+@dataclass
+class ExportBatch:
+    """One page of an export: flattened rows plus the files to bundle."""
+
+    rows: list[dict[str, Any]]
+    # (zip entry path, blob) for every file/file_list value in a file-bearing
+    # column of these rows -- empty when the view has no such columns.
+    file_entries: list[tuple[str, FileRef]]
 
 
-def _sort_records(
-    records: list[RecordDTO], sort_spec: list[dict[str, Any]]
-) -> list[RecordDTO]:
-    def cmp(r1: RecordDTO, r2: RecordDTO) -> int:
-        for entry in sort_spec:
-            c = _compare_values(
-                r1.data.get(entry["field"]), r2.data.get(entry["field"])
-            )
-            if entry.get("direction") == "desc":
-                c = -c
-            if c != 0:
-                return c
-        return 0
+@dataclass
+class ViewExportStream:
+    """A view export that yields its rows page by page, so neither the rows
+    nor the record DTOs behind them are ever all in memory at once."""
 
-    return sorted(records, key=cmp_to_key(cmp))
+    view: ViewDTO
+    batches: Iterator[ExportBatch]
 
 
 @dataclass
 class ViewExport:
+    """Fully materialised export -- convenient for small views and tests;
+    large exports should consume `ViewExportStream` instead."""
+
     view: ViewDTO
     rows: list[dict[str, Any]]
     # (zip entry path, blob) for every file/file_list value in a file-bearing
@@ -357,24 +340,6 @@ class ViewService:
         }
         return self._build_rows(view.columns, records, fields_by_name)
 
-    def _sort_rows(
-        self, rows: list[dict[str, Any]], sort: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
-        """Stable multi-key sort applied in Python: sort entries may
-        reference joined columns, which only exist after `_build_rows` has
-        already flattened them, so this can't be pushed down to SQL. Applied
-        least-significant-key first so Python's stable sort composes them
-        into the right overall order. Nulls sort last regardless of
-        direction."""
-        for entry in reversed(sort):
-            field_name = entry["field"]
-            reverse = entry.get("direction", "asc") == "desc"
-            present = [r for r in rows if r.get(field_name) is not None]
-            missing = [r for r in rows if r.get(field_name) is None]
-            present.sort(key=lambda r: r[field_name], reverse=reverse)
-            rows = present + missing
-        return rows
-
     def preview(
         self,
         schema_name: str,
@@ -397,18 +362,19 @@ class ViewService:
         total = self._record_svc.count_by_schema_filtered(
             schema_name, filter_tree=validated_tree
         )
+        # Filter, sort and page all happen in SQL, so this only ever
+        # materialises the `limit` rows actually shown.
         records = self._record_svc.find_by_schema_filtered(
             schema_name,
             filter_tree=validated_tree,
-            limit=PREVIEW_FETCH_CAP,
-            offset=0,
+            limit=limit,
+            offset=offset,
+            sort=validated_sort,
         )
         fields_by_name = {
             rf.field.name: rf.field for rf in self._schemas.collect_fields(schema)
         }
-        rows = self._build_rows(cols, records, fields_by_name)
-        rows = self._sort_rows(rows, validated_sort)
-        return rows[offset : offset + limit], total
+        return self._build_rows(cols, records, fields_by_name), total
 
     def _file_columns(self, schema: SchemaDTO, columns: list[str]) -> list[str]:
         """Base-schema (non-joined) columns whose field is file/file_list --
@@ -427,43 +393,54 @@ class ViewService:
             and f.dtype in ("file", "file_list")
         ]
 
-    def export(self, schema_name: str, view_name: str) -> ViewExport:
+    def export_stream(self, schema_name: str, view_name: str) -> ViewExportStream:
         """Every record for the view's schema (across all datasets -- a view
         isn't dataset-scoped), filtered/sorted per the view's own definition
-        and flattened into `columns` via resolve_rows. When any column is a
-        file/file_list field, its row value is swapped for the same
-        `resolved_filename` the record API stamps on file values (falling
-        back to the original filename), and `file_entries` carries the
-        matching zip path (record id + collision-suffixed name, via
-        RecordService.files_for_zip) and FileRef for every file to bundle
-        alongside the CSV/JSON."""
+        in SQL and flattened into `columns` via `_build_rows`, yielded in
+        pages of EXPORT_PAGE_SIZE. When any column is a file/file_list field,
+        its row value is swapped for the same `resolved_filename` the record
+        API stamps on file values (falling back to the original filename),
+        and each batch's `file_entries` carries the matching zip path
+        (record id + collision-suffixed name, via RecordService.files_for_zip)
+        and FileRef for every file to bundle alongside the CSV/JSON."""
         view = self.get(schema_name, view_name)
         schema = self._schemas.get(schema_name)
-
-        records = self._record_svc.find_by_schema(
-            schema_name, limit=EXPORT_RECORD_LIMIT
-        )
-        if view.filter_tree is not None:
-            node = parse_filter_tree(view.filter_tree)
-            records = [r for r in records if evaluate_filter_tree(node, r.data)]
-        if view.sort:
-            records = _sort_records(records, view.sort)
-
-        rows = self.resolve_rows(schema_name, view_name, records)
-
-        file_entries: list[tuple[str, FileRef]] = []
+        fields_by_name = {
+            rf.field.name: rf.field for rf in self._schemas.collect_fields(schema)
+        }
         file_columns = self._file_columns(schema, view.columns)
-        if file_columns:
-            for record, row in zip(records, rows):
-                entries = self._record_svc.files_for_zip(
-                    str(record.id), field_names=file_columns
-                )
-                for name, ref in entries:
-                    file_entries.append((f"{record.id}/{name}", ref))
-                for col in file_columns:
-                    row[col] = _display_filename(row.get(col))
 
-        return ViewExport(view=view, rows=rows, file_entries=file_entries)
+        def batches() -> Iterator[ExportBatch]:
+            for records in self._record_svc.iter_find_by_schema_filtered(
+                schema_name,
+                filter_tree=view.filter_tree,
+                sort=view.sort or None,
+                page_size=EXPORT_PAGE_SIZE,
+            ):
+                rows = self._build_rows(view.columns, records, fields_by_name)
+                file_entries: list[tuple[str, FileRef]] = []
+                if file_columns:
+                    for record, row in zip(records, rows):
+                        entries = self._record_svc.files_for_zip(
+                            str(record.id), field_names=file_columns
+                        )
+                        for name, ref in entries:
+                            file_entries.append((f"{record.id}/{name}", ref))
+                        for col in file_columns:
+                            row[col] = _display_filename(row.get(col))
+                yield ExportBatch(rows=rows, file_entries=file_entries)
+
+        return ViewExportStream(view=view, batches=batches())
+
+    def export(self, schema_name: str, view_name: str) -> ViewExport:
+        """`export_stream()` collected into memory."""
+        stream = self.export_stream(schema_name, view_name)
+        rows: list[dict[str, Any]] = []
+        file_entries: list[tuple[str, FileRef]] = []
+        for batch in stream.batches:
+            rows.extend(batch.rows)
+            file_entries.extend(batch.file_entries)
+        return ViewExport(view=stream.view, rows=rows, file_entries=file_entries)
 
 
 def _display_filename(value: Any) -> Any:
@@ -511,3 +488,33 @@ def rows_to_csv(columns: list[str], rows: list[dict[str, Any]]) -> str:
 
 def rows_to_json(rows: list[dict[str, Any]]) -> str:
     return json.dumps([_nest_row(r) for r in rows], indent=2, default=str)
+
+
+def write_csv(
+    out: Any, columns: list[str], batches: Iterator[list[dict[str, Any]]]
+) -> None:
+    """Stream rows to a text file object as CSV, batch by batch."""
+    writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for rows in batches:
+        for row in rows:
+            writer.writerow(
+                {
+                    k: v if not isinstance(v, (list, dict)) else json.dumps(v)
+                    for k, v in row.items()
+                }
+            )
+
+
+def write_json(out: Any, batches: Iterator[list[dict[str, Any]]]) -> None:
+    """Stream rows to a text file object as a JSON array, batch by batch --
+    byte-identical to `rows_to_json` (2-space indent), without building the
+    whole array in memory."""
+    first = True
+    for rows in batches:
+        for row in rows:
+            body = json.dumps(_nest_row(row), indent=2, default=str)
+            out.write("[\n" if first else ",\n")
+            out.write("  " + body.replace("\n", "\n  "))
+            first = False
+    out.write("[]" if first else "\n]")

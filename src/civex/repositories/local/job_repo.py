@@ -3,10 +3,16 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from civex.db.models import Record, StepExecution, WorkflowJob
+from civex.db.models import (
+    JobAffectedSchema,
+    Record,
+    Schema,
+    StepExecution,
+    WorkflowJob,
+)
 from civex.domain.dtos import WorkflowJobDTO
 from civex.repositories.local._bucketing import day_bucket, rebucket
 from civex.repositories.protocols import JobStatusRow, PluginFailureRow
@@ -73,6 +79,7 @@ class LocalWorkflowJobRepository:
             row.log = log
             row.affected_records = affected_records or None
             _replace_step_executions(self._s, job_id, step_executions)
+            _replace_affected_schemas(self._s, job_id, affected_records)
             self._s.flush()
 
     def mark_failed(
@@ -98,6 +105,7 @@ class LocalWorkflowJobRepository:
             # step_executions, so the audit trail doesn't hide real writes.
             row.affected_records = affected_records or None
             _replace_step_executions(self._s, job_id, step_executions)
+            _replace_affected_schemas(self._s, job_id, affected_records)
             self._s.flush()
 
     def list_all(
@@ -107,6 +115,7 @@ class LocalWorkflowJobRepository:
         affected_record_id: str | None = None,
         offset: int = 0,
         limit: int | None = None,
+        affected_schema: str | None = None,
     ) -> list[WorkflowJobDTO]:
         q = self._s.query(WorkflowJob).options(
             selectinload(WorkflowJob.steps), _WITH_SCHEMA
@@ -118,7 +127,9 @@ class LocalWorkflowJobRepository:
                 q = q.filter_by(record_id=uuid.UUID(record_id))
             except ValueError:
                 return []
-        q = q.order_by(WorkflowJob.created_at.desc())
+        if affected_schema:
+            q = q.filter(_touches_schema(affected_schema))
+        q = q.order_by(WorkflowJob.created_at.desc(), WorkflowJob.id.desc())
         if affected_record_id:
             # affected_records is a small per-job JSON list -- no index to
             # filter on, so this scans and checks in Python rather than
@@ -137,8 +148,11 @@ class LocalWorkflowJobRepository:
         status: str | None = None,
         record_id: str | None = None,
         affected_record_id: str | None = None,
+        affected_schema: str | None = None,
     ) -> int:
         q = self._s.query(WorkflowJob)
+        if affected_schema:
+            q = q.filter(_touches_schema(affected_schema))
         if status:
             q = q.filter_by(status=status)
         if record_id:
@@ -280,6 +294,36 @@ class LocalWorkflowJobRepository:
         if end is not None:
             q = q.filter(WorkflowJob.created_at < end)
         return [d for (d,) in q.all()]
+
+
+def _touches_schema(schema_name: str):
+    """Indexed membership test against job_affected_schemas."""
+    return WorkflowJob.id.in_(
+        select(JobAffectedSchema.job_id)
+        .join(Schema, Schema.id == JobAffectedSchema.schema_id)
+        .where(Schema.name == schema_name)
+    )
+
+
+def _replace_affected_schemas(
+    session: Session, job_id: uuid.UUID, affected_records: list[dict] | None
+) -> None:
+    """Rewrites this job's schema links from the schema names recorded in
+    its affected_records entries."""
+    session.query(JobAffectedSchema).filter_by(job_id=job_id).delete(
+        synchronize_session=False
+    )
+    names = {
+        e["schema_name"]
+        for e in affected_records or []
+        if isinstance(e, dict) and e.get("schema_name")
+    }
+    if not names:
+        return
+    ids = [
+        sid for (sid,) in session.query(Schema.id).filter(Schema.name.in_(names)).all()
+    ]
+    session.add_all(JobAffectedSchema(job_id=job_id, schema_id=sid) for sid in ids)
 
 
 def _touches(row: WorkflowJob, record_id: str) -> bool:

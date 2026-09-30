@@ -12,9 +12,23 @@ from sqlalchemy.orm import Session
 from civex.db.models import Dataset, Record, Schema, WorkflowJob
 from civex.domain.dtos import RecordDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
-from civex.domain.filters import FilterCondition, FilterGroup, FilterNode
+from civex.domain.filters import FilterCondition, FilterGroup, FilterNode, SortKey
 from civex.repositories.local._bucketing import day_bucket
+from civex.repositories.local._jobs import bulk_delete_jobs
 from civex.repositories.protocols import RecordGrowthRow
+
+
+def _order_by(sort: list[SortKey] | None) -> list[Any]:
+    """ORDER BY terms for a view-style sort on JSON fields: nulls (absent or
+    JSON null) always last regardless of direction, numeric types compared
+    as numbers, everything else (ISO dates/datetimes included) as text."""
+    terms: list[Any] = []
+    for key in sort or []:
+        col = Record.data[key.field_id]
+        value = col.as_float() if key.numeric else col.as_string()
+        terms.append(value.is_(None))
+        terms.append(value.desc() if key.descending else value.asc())
+    return terms
 
 
 def _coerce_json_value(v: str) -> Any:
@@ -63,12 +77,19 @@ class LocalRecordRepository:
         )
         return [_to_dto(r) for r in rows]
 
-    def list_deleted(self, dataset_id: uuid.UUID | None = None) -> list[RecordDTO]:
+    def list_deleted(
+        self,
+        dataset_id: uuid.UUID | None = None,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> list[RecordDTO]:
         q = self._s.query(Record).filter(Record.deleted_at.is_not(None))
         if dataset_id is not None:
             q = q.filter(Record.dataset_id == dataset_id)
-        rows = q.order_by(Record.deleted_at.desc()).all()
-        return [_to_dto(r) for r in rows]
+        q = q.order_by(Record.deleted_at.desc(), Record.id.desc()).offset(offset)
+        if limit is not None:
+            q = q.limit(limit)
+        return [_to_dto(r) for r in q.all()]
 
     def list_by_dataset(self, dataset_id: uuid.UUID) -> list[RecordDTO]:
         rows = (
@@ -98,6 +119,7 @@ class LocalRecordRepository:
         offset: int,
         limit: int,
         filter_tree: FilterNode | None = None,
+        sort: list[SortKey] | None = None,
     ) -> list[RecordDTO]:
         q = _base_query(
             self._s,
@@ -109,7 +131,15 @@ class LocalRecordRepository:
             self._pg,
             filter_tree,
         )
-        rows = q.order_by(Record.created_at).offset(offset).limit(limit).all()
+        # created_at alone isn't a total order (bulk inserts share
+        # timestamps), so ties are broken on id -- otherwise OFFSET pages can
+        # repeat or skip rows.
+        rows = (
+            q.order_by(*_order_by(sort), Record.created_at, Record.id)
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
         return [_to_dto(r) for r in rows]
 
     def count(
@@ -133,9 +163,7 @@ class LocalRecordRepository:
         )
         return q.count()
 
-    def list_by_schema(
-        self, schema_id: uuid.UUID, search: str | None = None, limit: int = 20
-    ) -> list[RecordDTO]:
+    def _by_schema_query(self, schema_id: uuid.UUID, search: str | None):
         q = self._s.query(Record).filter(
             Record.schema_id == schema_id, Record.deleted_at.is_(None)
         )
@@ -146,8 +174,24 @@ class LocalRecordRepository:
                     cast(Record.id, String).ilike(f"{search}%"),
                 )
             )
-        rows = q.order_by(Record.created_at.desc()).limit(limit).all()
+        return q
+
+    def list_by_schema(
+        self, schema_id: uuid.UUID, search: str | None = None, limit: int = 20
+    ) -> list[RecordDTO]:
+        rows = (
+            self._by_schema_query(schema_id, search)
+            .order_by(Record.created_at.desc(), Record.id.desc())
+            .limit(limit)
+            .all()
+        )
         return [_to_dto(r) for r in rows]
+
+    def count_schema_matches(
+        self, schema_id: uuid.UUID, search: str | None = None
+    ) -> int:
+        """Same predicate as list_by_schema, so a count and a page agree."""
+        return self._by_schema_query(schema_id, search).count()
 
     def list_ids_by_schema_ids(self, schema_ids: list[uuid.UUID]) -> list[uuid.UUID]:
         if not schema_ids:
@@ -308,9 +352,7 @@ class LocalRecordRepository:
         row = self._s.query(Record).filter_by(id=id).first()
         if row is None:
             return
-        self._s.query(WorkflowJob).filter_by(record_id=id).delete(
-            synchronize_session=False
-        )
+        bulk_delete_jobs(self._s, WorkflowJob.record_id == id)
         self._s.delete(row)
         self._s.flush()
 

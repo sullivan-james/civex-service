@@ -90,5 +90,7 @@ def run_gc(body: GCRequest = GCRequest(), ctx: AppContext = Depends(get_ctx)):
     referenced only by audit history or job step logs are not protected --
     both retain FileRef snapshots indefinitely, so an old audit diff may
     reference a hash GC has since removed."""
+    if body.rebuild_refs:
+        ctx.gc_svc.rebuild_references()
     report = ctx.gc_svc.run(dry_run=not body.apply, grace_days=body.grace_days)
     return report.to_dict()

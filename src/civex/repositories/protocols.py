@@ -11,7 +11,15 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, AsyncIterable, ContextManager, Protocol, runtime_checkable
+from typing import (
+    Any,
+    AsyncIterable,
+    ContextManager,
+    Iterable,
+    Iterator,
+    Protocol,
+    runtime_checkable,
+)
 
 from civex.domain.dtos import (
     AiUsageEventDTO,
@@ -24,7 +32,7 @@ from civex.domain.dtos import (
     ViewDTO,
     WorkflowJobDTO,
 )
-from civex.domain.filters import FilterNode
+from civex.domain.filters import FilterNode, SortKey
 
 # (day, dataset_name, schema_name, count) -- see LocalRecordRepository.growth_by_period
 RecordGrowthRow = tuple[date, str, str, int]
@@ -148,7 +156,12 @@ class RecordRepository(Protocol):
         self, prefix: str, include_deleted: bool = False
     ) -> RecordDTO | None: ...
     def list_all(self) -> list[RecordDTO]: ...
-    def list_deleted(self, dataset_id: uuid.UUID | None = None) -> list[RecordDTO]: ...
+    def list_deleted(
+        self,
+        dataset_id: uuid.UUID | None = None,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> list[RecordDTO]: ...
     def list_by_dataset(self, dataset_id: uuid.UUID) -> list[RecordDTO]: ...
     def list_by_ids(self, ids: list[uuid.UUID]) -> list[RecordDTO]: ...
     def list_filtered(
@@ -161,6 +174,7 @@ class RecordRepository(Protocol):
         offset: int,
         limit: int,
         filter_tree: FilterNode | None = None,
+        sort: list[SortKey] | None = None,
     ) -> list[RecordDTO]: ...
     def count(
         self,
@@ -182,6 +196,9 @@ class RecordRepository(Protocol):
     def list_by_schema(
         self, schema_id: uuid.UUID, search: str | None = None, limit: int = 20
     ) -> list[RecordDTO]: ...
+    def count_schema_matches(
+        self, schema_id: uuid.UUID, search: str | None = None
+    ) -> int: ...
     def list_ids_by_schema_ids(
         self, schema_ids: list[uuid.UUID]
     ) -> list[uuid.UUID]: ...
@@ -240,12 +257,14 @@ class WorkflowJobRepository(Protocol):
         affected_record_id: str | None = None,
         offset: int = 0,
         limit: int | None = None,
+        affected_schema: str | None = None,
     ) -> list[WorkflowJobDTO]: ...
     def count(
         self,
         status: str | None = None,
         record_id: str | None = None,
         affected_record_id: str | None = None,
+        affected_schema: str | None = None,
     ) -> int: ...
     def get_by_id(self, job_id: uuid.UUID) -> WorkflowJobDTO | None: ...
     def count_active_for_workflow(self, workflow_name: str) -> int: ...
@@ -333,8 +352,19 @@ class FileObjectStore(Protocol):
     def exists(self, sha256: str) -> bool: ...
     def object_path(self, sha256: str) -> Path: ...
     def list_objects(self) -> list[StoredObjectInfo]: ...
+    def iter_objects(self) -> Iterator[StoredObjectInfo]: ...
+    def put_path(self, path: Path, original_filename: str | None = None) -> FileRef: ...
+    def reconcile_inventory(self) -> dict[str, int]: ...
     def delete(self, sha256: str, volume: str | None = None) -> bool: ...
     def sweep_stale_scratch(
         self, older_than_seconds: float, dry_run: bool = False
     ) -> int: ...
     def gc_lock(self) -> ContextManager[None]: ...
+
+
+class FileReferenceRepository(Protocol):
+    """Which blobs are referenced by live records / workflow job inputs."""
+
+    def referenced_subset(self, shas: Iterable[str]) -> set[str]: ...
+    def count_referenced(self) -> int: ...
+    def rebuild(self) -> int: ...

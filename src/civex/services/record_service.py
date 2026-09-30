@@ -5,11 +5,11 @@ import re
 import uuid
 from datetime import date as _date, datetime as _dt, timezone as _tz
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from civex.domain.dtos import FileRef, RecordDTO, ResolvedField
 from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
-from civex.domain.filters import FilterNode, map_fields, parse_filter_tree
+from civex.domain.filters import FilterNode, SortKey, map_fields, parse_filter_tree
 from civex.repositories.protocols import (
     AuditRepository,
     DatasetRepository,
@@ -447,7 +447,7 @@ class RecordService:
             path = Path(raw)
             if not path.exists():
                 raise CoercionError(field_name, dtype, raw)
-            file_ref = self._files.put(path.read_bytes(), path.name)
+            file_ref = self._files.put_path(path)
             value = file_ref.to_dict()
             _check_restrictions(value, dtype, restrictions or {}, field_name)
             return value
@@ -456,7 +456,7 @@ class RecordService:
             path = Path(raw)
             if not path.exists():
                 raise CoercionError(field_name, dtype, raw)
-            file_ref = self._files.put(path.read_bytes(), path.name)
+            file_ref = self._files.put_path(path)
             file_list_value = [file_ref.to_dict()]
             _check_restrictions(file_list_value, dtype, restrictions or {}, field_name)
             return file_list_value
@@ -827,6 +827,13 @@ class RecordService:
 
         return dataset, schema_id, parent_uuid, field_filters, resolved_tree
 
+    def count_by_schema_search(
+        self, schema_name: str, search: str | None = None
+    ) -> int:
+        """Total matching `find_by_schema` -- same predicate, in SQL."""
+        schema = self._schema_svc.get(schema_name)
+        return self._records.count_schema_matches(schema.id, search=search)
+
     def find_by_schema(
         self,
         schema_name: str,
@@ -852,13 +859,17 @@ class RecordService:
         filter_tree: dict[str, Any] | None = None,
         limit: int = 50,
         offset: int = 0,
+        sort: list[dict[str, Any]] | None = None,
     ) -> list[RecordDTO]:
         """Records of `schema_name` across every collection, matching
         `filter_tree` (base schema's own fields only) -- unlike `find`, this
         isn't scoped to one collection, which is what a schema-level view
-        needs to preview against."""
+        needs to preview against. `sort` is a view-style list of
+        {"field": name, "direction": "asc"|"desc"}, applied in SQL so
+        limit/offset page through the sorted result."""
         schema = self._schema_svc.get(schema_name)
         resolved_tree = self._resolved_tree_for_schema(schema_name, filter_tree)
+        sort_keys = self._sort_keys(schema, sort)
         records = self._records.list_filtered(
             dataset_id=None,
             schema_id=schema.id,
@@ -868,8 +879,82 @@ class RecordService:
             offset=offset,
             limit=limit,
             filter_tree=resolved_tree,
+            sort=sort_keys,
         )
         return self._attach_reference_labels([self._with_names(r) for r in records])
+
+    def _sort_keys(
+        self, schema: Any, sort: list[dict[str, Any]] | None
+    ) -> list[SortKey] | None:
+        if not sort:
+            return None
+        by_name = {
+            rf.field.name: rf.field for rf in self._schema_svc.collect_fields(schema)
+        }
+        keys = []
+        for entry in sort:
+            f = by_name.get(entry["field"])
+            if f is None:
+                raise ValidationError(f"Unknown sort field '{entry['field']}'")
+            keys.append(
+                SortKey(
+                    field_id=str(f.id),
+                    numeric=f.dtype in ("integer", "float"),
+                    descending=entry.get("direction", "asc") == "desc",
+                )
+            )
+        return keys
+
+    def iter_find_by_schema_filtered(
+        self,
+        schema_name: str,
+        filter_tree: dict[str, Any] | None = None,
+        sort: list[dict[str, Any]] | None = None,
+        page_size: int = 500,
+    ) -> Iterator[list[RecordDTO]]:
+        """Every matching record, one page at a time -- for exports, which
+        must not hold the whole result set in memory."""
+        offset = 0
+        while True:
+            page = self.find_by_schema_filtered(
+                schema_name, filter_tree, limit=page_size, offset=offset, sort=sort
+            )
+            if not page:
+                return
+            yield page
+            if len(page) < page_size:
+                return
+            offset += page_size
+
+    def iter_find(
+        self,
+        dataset_name: str,
+        schema_name: str | None = None,
+        parent_record_id: str | None = None,
+        filters: list[str] | None = None,
+        filter_tree: dict[str, Any] | None = None,
+        search: str | None = None,
+        page_size: int = 500,
+    ) -> Iterator[list[RecordDTO]]:
+        """`find()` over the whole result set, one page at a time."""
+        offset = 0
+        while True:
+            page = self.find(
+                dataset_name,
+                schema_name,
+                parent_record_id,
+                filters,
+                filter_tree,
+                search,
+                limit=page_size,
+                offset=offset,
+            )
+            if not page:
+                return
+            yield page
+            if len(page) < page_size:
+                return
+            offset += page_size
 
     def count_by_schema_filtered(
         self, schema_name: str, filter_tree: dict[str, Any] | None = None
@@ -938,7 +1023,12 @@ class RecordService:
             deleted += 1
         return deleted
 
-    def list_deleted(self, dataset_name: str | None = None) -> list[RecordDTO]:
+    def list_deleted(
+        self,
+        dataset_name: str | None = None,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> list[RecordDTO]:
         dataset_id = None
         if dataset_name:
             dataset = self._datasets.get_by_name(dataset_name)
@@ -946,7 +1036,12 @@ class RecordService:
                 raise NotFoundError(f"Dataset '{dataset_name}' not found")
             dataset_id = dataset.id
         return self._attach_reference_labels(
-            [self._with_names(r) for r in self._records.list_deleted(dataset_id)]
+            [
+                self._with_names(r)
+                for r in self._records.list_deleted(
+                    dataset_id, offset=offset, limit=limit
+                )
+            ]
         )
 
     def restore(self, record_id: str) -> RecordDTO:

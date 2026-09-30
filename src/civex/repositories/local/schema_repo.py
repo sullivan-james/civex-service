@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import nulls_last
 from sqlalchemy.orm import Session
 
+from civex.repositories.local._jobs import bulk_delete_jobs
 from civex.db.models import Field, Record, Schema, View, WorkflowJob
 from civex.domain.dtos import FieldDTO, SchemaDTO
 from civex.domain.exceptions import NotFoundError
@@ -155,9 +156,7 @@ class LocalSchemaRepository:
             self._s.query(Record).filter(
                 Record.parent_record_id.in_(record_ids)
             ).update({"parent_record_id": None}, synchronize_session=False)
-            self._s.query(WorkflowJob).filter(
-                WorkflowJob.record_id.in_(record_ids)
-            ).delete(synchronize_session=False)
+            bulk_delete_jobs(self._s, WorkflowJob.record_id.in_(record_ids))
             self._s.query(Record).filter_by(schema_id=id).delete(
                 synchronize_session=False
             )

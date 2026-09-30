@@ -116,6 +116,7 @@ def build_local_context(
     from civex.db.migrate import ensure_schema_current
     from civex.repositories.local.audit_repo import LocalAuditRepository
     from civex.repositories.local.dataset_repo import LocalDatasetRepository
+    from civex.repositories.local.file_ref_repo import LocalFileReferenceRepository
     from civex.repositories.local.file_store import VolumeAwareFileObjectStore
     from civex.repositories.local.job_repo import LocalWorkflowJobRepository
     from civex.repositories.local.record_repo import LocalRecordRepository
@@ -150,7 +151,7 @@ def build_local_context(
     view_repo = LocalViewRepository(session)
     if file_store is None:
         file_store = VolumeAwareFileObjectStore(
-            config.store_config, config.project_root
+            config.store_config, config.project_root, session=session
         )
 
     remote_transport = None
@@ -169,7 +170,7 @@ def build_local_context(
     )
     file_svc = FileService(file_store, remote_transport=remote_transport)
     store_svc = StoreService(config, file_store)
-    gc_svc = GCService(file_store, record_repo, job_repo)
+    gc_svc = GCService(file_store, LocalFileReferenceRepository(session))
     ai_svc = AiService(schema_svc, dataset_svc, record_svc, job_svc)
     ai_usage_svc = AiUsageService(engine)
     analytics_svc = AnalyticsService(
