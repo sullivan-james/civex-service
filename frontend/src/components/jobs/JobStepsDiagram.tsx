@@ -107,7 +107,7 @@ export default function JobStepsDiagram({
                     key={`${depId}->${node.step.step_id}`}
                     d={`M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`}
                     fill="none"
-                    stroke="#8c959f"
+                    className="stroke-fg-subtle"
                     strokeWidth={1.5}
                   />,
                 ]

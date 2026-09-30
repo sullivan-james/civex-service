@@ -35,7 +35,7 @@ export default function HistoryPane({
           No saved sessions yet
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto divide-y divide-[#eaeef2]">
+        <div className="flex-1 overflow-y-auto divide-y divide-border-muted">
           {sessions.map((s) => (
             <button
               key={s.id}
