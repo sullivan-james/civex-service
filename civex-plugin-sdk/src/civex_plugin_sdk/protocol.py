@@ -22,6 +22,15 @@ from pydantic import BaseModel, Field
 
 from civex_plugin_sdk.plugin_base import IOSpec
 
+# Version of the wire protocol itself -- deliberately separate from the
+# package version. Bump it only for a change a peer built against the old one
+# can't cope with (a renamed/removed frame or field, changed semantics); an
+# additive field with a default doesn't need it, and neither does a bug fix.
+# The host reads `DescribeResult.protocol_version` and refuses a plugin whose
+# version it doesn't speak, naming the side to upgrade. Older SDKs predate the
+# field and omit it; that is read as 1.
+PROTOCOL_VERSION = 1
+
 RpcMethod = Literal["get_file", "update_record", "create_record", "commit", "call_tool"]
 
 CAPABILITIES: tuple[RpcMethod, ...] = (
@@ -77,6 +86,10 @@ class DescribeResult(BaseModel):
     inputs: list[IOSpec] | None = None
     outputs: list[IOSpec] | None = None
     config_schema: dict[str, Any] = Field(default_factory=dict)
+    # See PROTOCOL_VERSION. Defaults to it so a plugin's own `describe` answer
+    # states the protocol its SDK speaks; a frame from a pre-versioning SDK
+    # has no such key and parses as 1 -- the protocol it actually spoke.
+    protocol_version: int = PROTOCOL_VERSION
 
 
 class RunRequest(BaseModel):

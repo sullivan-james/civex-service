@@ -1,0 +1,144 @@
+"""civex update -- upgrade this civex install to the latest release.
+
+Deliberately doesn't require a civex project: it updates the software, not
+project data. Project databases migrate themselves the next time they're
+opened (see ``ensure_schema_current``), so there's nothing to run afterwards.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from importlib.metadata import PackageNotFoundError, distribution
+from pathlib import Path
+
+import typer
+
+from civex import __version__
+from civex.console import console
+
+_PYPI_URL = "https://pypi.org/pypi/civex/json"
+
+
+def latest_version(timeout: float = 10.0) -> str:
+    """Latest stable civex version published on PyPI."""
+    with urllib.request.urlopen(_PYPI_URL, timeout=timeout) as resp:  # noqa: S310
+        return json.load(resp)["info"]["version"]
+
+
+def detect_installer() -> str:
+    """How this civex was installed: ``pipx`` | ``uv`` | ``editable`` | ``pip``."""
+    try:
+        direct_url = distribution("civex").read_text("direct_url.json")
+        if direct_url and json.loads(direct_url).get("dir_info", {}).get("editable"):
+            return "editable"
+    except (PackageNotFoundError, ValueError):
+        pass
+    parts = Path(sys.prefix).parts
+    if "pipx" in parts and "venvs" in parts:
+        return "pipx"
+    if "uv" in parts and "tools" in parts:
+        return "uv"
+    return "pip"
+
+
+def installed_version() -> str | None:
+    """civex's version as installed *now*, read in a fresh interpreter.
+
+    ``civex.__version__`` was fixed when this process started, so it can't
+    show the effect of the upgrade we just ran.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from importlib.metadata import version; print(version('civex'))",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() or None if result.returncode == 0 else None
+
+
+def upgrade_command(installer: str) -> list[str]:
+    """The command that upgrades civex for *installer*.
+
+    Falls back to pip inside this environment when the installer's own CLI
+    isn't on PATH (pip is always present in a pipx venv; uv tool venvs may
+    not have it, so that case is reported by the caller instead).
+    """
+    if installer == "pipx" and shutil.which("pipx"):
+        return ["pipx", "upgrade", "civex"]
+    if installer == "uv" and shutil.which("uv"):
+        return ["uv", "tool", "upgrade", "civex"]
+    return [sys.executable, "-m", "pip", "install", "--upgrade", "civex"]
+
+
+def update(
+    check: bool = typer.Option(
+        False, "--check", help="Only report whether a newer version exists."
+    ),
+) -> None:
+    """Update civex to the latest release.
+
+    Detects whether civex was installed with pipx, uv tool or pip and runs the
+    matching upgrade. Restart any running `civex serve` afterwards.
+    """
+    installer = detect_installer()
+    if installer == "editable":
+        console.print(
+            "[warning]This is a development (editable) install -- update it "
+            "with git and `uv sync` instead.[/warning]"
+        )
+        raise typer.Exit(1)
+
+    # Imported here, not at module top: a stale environment missing this
+    # dependency must not break every other civex command.
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        latest = latest_version()
+        newer = Version(latest) > Version(__version__)
+    except (urllib.error.URLError, TimeoutError, KeyError, ValueError) as e:
+        console.print(f"[error]Couldn't check PyPI for updates: {e}[/error]")
+        raise typer.Exit(1)
+    except InvalidVersion:
+        # Local build with a non-PEP-440 version: can't compare, so let the
+        # installer decide.
+        latest, newer = "unknown", True
+
+    if not newer:
+        console.print(f"[success]civex {__version__} is up to date.[/success]")
+        return
+    if check:
+        console.print(f"civex {latest} is available (you have {__version__}).")
+        console.print("Run [cyan]civex update[/cyan] to install it.")
+        raise typer.Exit(1)
+
+    cmd = upgrade_command(installer)
+    console.print(
+        f"Updating civex {__version__} -> {latest}: [dim]{' '.join(cmd)}[/dim]"
+    )
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        console.print("[error]Update failed -- see the output above.[/error]")
+        raise typer.Exit(result.returncode)
+    # pip can exit 0 yet leave the old version in place (it backtracks to an
+    # older release when a newer one's dependencies won't resolve -- what
+    # happened with v1.0.5), so confirm rather than trust the exit code.
+    now = installed_version()
+    if now == __version__:
+        console.print(
+            f"[error]The upgrade ran but civex is still {__version__}.[/error] "
+            f"A dependency of {latest} may not install on this machine; try "
+            "`pip install --upgrade civex` directly to see the reason."
+        )
+        raise typer.Exit(1)
+    console.print(
+        f"[success]Updated to {now or latest}.[/success] "
+        "Restart `civex serve` if it's running."
+    )

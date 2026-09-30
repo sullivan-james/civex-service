@@ -2,7 +2,7 @@
 
 Create one new record per table row. Every row produces a new record; use `civex.upsert_records` instead if you want existing records to be matched and updated rather than duplicated.
 
-> Requires the `[workflows]` extra — see `civex.load_csv` for how the pandas dependency is resolved.
+> Uses pandas, which ships with civex — see `civex.load_csv`.
 
 <!-- civex:tables -->
 

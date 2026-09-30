@@ -37,14 +37,21 @@ if __name__ == "__main__":
 
 Drop the file in `_civex/plugins/` in a civex project and it's discovered automatically. See [Writing a plugin](https://civexdata.github.io/civex-docs/extending/writing-a-plugin.html) for the full authoring guide (the `Ctx` API, isolation/timeouts, constraints), [Container plugins](https://civexdata.github.io/civex-docs/extending/container-plugins.html) for the Tier 2 path, and the [SDK reference](https://civexdata.github.io/civex-docs/extending/sdk-reference.html) for the complete public API.
 
-## This package is not on PyPI
+## Installing
 
-`pip install civex-plugin-sdk` does not work. The package is not published — the [release workflow](https://github.com/CivexData/civex-service/blob/main/.github/workflows/release.yml) builds and publishes only the civex application wheel, never this one.
+```bash
+pip install civex-plugin-sdk          # or: uv add civex-plugin-sdk
+pip install "civex-plugin-sdk[table]" # adds pandas for `table`-typed inputs/outputs
+```
 
-The `dependencies = ["civex-plugin-sdk"]` line in the example above resolves anyway, but only inside a civex host that has this SDK's source checked out next to it (this repo's own workspace layout). When the host runs a plugin, it `uv build`s a wheel from its local `civex-plugin-sdk/` directory into a scratch directory and passes that as `--find-links`, so `uv run`'s resolver finds a package by that name without ever reaching an index. Outside such a checkout there is no local source to build, no `--find-links` override, and the dependency simply fails to resolve.
-
-In short: plugin authors write `dependencies = ["civex-plugin-sdk"]` and it works *because they're running against a civex host that vendors this SDK's source*, not because the name is installable from PyPI. There is currently no supported way to `pip install` or `uv add` this package outside of that setup.
+In a plugin script the PEP 723 header is all you need — `uv run` resolves it. When civex runs the plugin it pins the SDK to the version civex itself uses, so you don't pin it yourself.
 
 ## Versioning
 
-The SDK's version is hand-set in `pyproject.toml` (currently `0.2.0`) — it does not use setuptools-scm like the parent `civex` package does. `requires-python` is `>=3.10`, looser than civex's own `>=3.12`, since plugins run in their own subprocess/container environment independent of the host's interpreter.
+The SDK's version is hand-set in `pyproject.toml` and bumped on every change under `src/` (CI enforces this) — it does not use setuptools-scm like the parent `civex` package does. `requires-python` is `>=3.10`, looser than civex's own `>=3.12`, since plugins run in their own subprocess/container environment independent of the host's interpreter.
+
+The wire protocol has its own number, `civex_plugin_sdk.PROTOCOL_VERSION`, which changes only for breaking wire changes; civex refuses a plugin whose protocol it doesn't speak. See [CHANGELOG.md](CHANGELOG.md) and the maintainer guide `docs/contributing/sdk-release.md` in the civex repo.
+
+## License
+
+MIT — see [LICENSE](LICENSE). (The `civex` application itself is under a different license.)

@@ -1,0 +1,68 @@
+name: Release SDK
+
+# Publishes civex-plugin-sdk to PyPI. Independent of release.yml: pushing an
+# `sdk-v*` tag releases the SDK only; pushing a `v*` tag releases civex only.
+# See docs/contributing/sdk-release.md.
+#
+# One-time PyPI setup (trusted publishing, no API token): on
+# https://pypi.org/manage/account/publishing/ add a pending publisher for
+# project `civex-plugin-sdk`, owner/repo of this repository, workflow
+# `release-sdk.yml`, no environment.
+
+on:
+  push:
+    tags:
+      - "sdk-v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Verify tag, version, changelog and PyPI state
+        # Tag == pyproject version, that version not already on PyPI, its
+        # CHANGELOG heading dated (not "unreleased"), and civex's declared
+        # SDK range admits it.
+        run: |
+          uv run --no-project --with packaging python scripts/check_sdk_sync.py check
+          uv run --no-project --with packaging python scripts/check_sdk_sync.py release-sdk "${GITHUB_REF_NAME}"
+
+      - name: Test the SDK
+        run: |
+          uv sync --extra dev
+          uv run pytest civex-plugin-sdk/tests -q
+
+      - name: Build sdist and wheel
+        run: uv build --package civex-plugin-sdk -o dist
+
+      - name: Check distribution metadata
+        run: uvx twine check dist/*
+
+      - name: Smoke-test the built wheel in a clean environment
+        run: |
+          uv venv /tmp/sdk-smoke
+          uv pip install --python /tmp/sdk-smoke/bin/python dist/*.whl
+          /tmp/sdk-smoke/bin/python -c "import civex_plugin_sdk as s; print('protocol', s.PROTOCOL_VERSION)"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+      - name: Publish to PyPI
+        # No skip-existing: re-publishing a version is an error, not a no-op.
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

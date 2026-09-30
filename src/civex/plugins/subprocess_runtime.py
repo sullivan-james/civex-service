@@ -28,11 +28,13 @@ import sys
 import tempfile
 import threading
 from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version as _dist_version
 from pathlib import Path
 from typing import Any, Callable, TextIO, cast
 
 from civex_plugin_sdk.io import FrameReader, FrameWriter
 from civex_plugin_sdk.protocol import (
+    PROTOCOL_VERSION,
     DescribeRequest,
     DescribeResult,
     ErrorFrame,
@@ -98,52 +100,27 @@ def _find_sdk_source() -> Path | None:
     return None
 
 
-def _bundled_sdk_wheel_dir() -> Path | None:
-    """The prebuilt civex_plugin_sdk-*.whl shipped as package data at
-    civex/_vendor/sdk/ (see [tool.setuptools.package-data] in
-    pyproject.toml) -- present in a real `pip install civex` (no dev
-    checkout, no sibling source directory to build from), absent in an
-    editable/dev install run straight out of src/."""
-    vendor_dir = Path(__file__).resolve().parent.parent / "_vendor" / "sdk"
-    if next(vendor_dir.glob("civex_plugin_sdk-*.whl"), None) is not None:
-        return vendor_dir
-    return None
-
-
 @lru_cache(maxsize=1)
 def _sdk_find_links_dir() -> Path | None:
-    """civex-plugin-sdk isn't published to PyPI yet, so `uv run --no-project`
-    can't resolve a script's plain `dependencies = ["civex-plugin-sdk"]` PEP
-    723 header on its own -- `--with-editable`/`--with` only *add* a
-    requirement, they don't substitute a source for one the script's own
-    metadata already declares by name. The fix: point `--find-links` at a
-    directory containing a real `civex-plugin-sdk` wheel, so uv's resolver
-    finds it locally under the exact name the script asks for.
+    """Only in a dev checkout: a directory holding a wheel freshly built from
+    the sibling `civex-plugin-sdk/` source, so a plugin resolves the SDK being
+    worked on (possibly unpublished) rather than whatever is on PyPI.
 
-    Prefers building fresh from a sibling dev checkout (`_find_sdk_source()`)
-    when one is present, since that reflects whatever's currently being
-    worked on; otherwise falls back to the wheel this install bundled at
-    build time (`_bundled_sdk_wheel_dir()`). Returns None only if neither is
-    available (unexpected outside a stripped-down build) -- resolution then
-    proceeds against a real index with no override at all."""
+    In a real install this is None: `civex-plugin-sdk` is a published
+    dependency of `civex`, so `uv run --no-project` resolves it from the index
+    like any other package, and `_build_command` pins it to the version this
+    install runs (see `_sdk_pin_version`)."""
     sdk_source = _find_sdk_source()
-    if sdk_source is not None:
-        wheel_dir = Path(tempfile.mkdtemp(prefix="civex-plugin-sdk-wheel-"))
-        subprocess.run(
-            [
-                find_uv_binary(),
-                "build",
-                "--wheel",
-                "-o",
-                str(wheel_dir),
-                str(sdk_source),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        return wheel_dir
-    return _bundled_sdk_wheel_dir()
+    if sdk_source is None:
+        return None
+    wheel_dir = Path(tempfile.mkdtemp(prefix="civex-plugin-sdk-wheel-"))
+    subprocess.run(
+        [find_uv_binary(), "build", "--wheel", "-o", str(wheel_dir), str(sdk_source)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return wheel_dir
 
 
 def _local_sdk_version(wheel_dir: Path) -> str | None:
@@ -156,23 +133,39 @@ def _local_sdk_version(wheel_dir: Path) -> str | None:
     return None
 
 
+def _installed_sdk_version() -> str | None:
+    """Version of the civex-plugin-sdk this host itself imports."""
+    try:
+        return _dist_version("civex-plugin-sdk")
+    except PackageNotFoundError:
+        return None
+
+
+def _sdk_pin_version(find_links: Path | None) -> str | None:
+    """The SDK version a plugin's environment must use: the freshly built
+    dev wheel's, or -- in a real install -- the one this host imports."""
+    if find_links is not None:
+        return _local_sdk_version(find_links)
+    return _installed_sdk_version()
+
+
 def _build_command(uv_bin: str, plugin_path: Path) -> list[str]:
     argv = [uv_bin, "run", "--no-project"]
     find_links = _sdk_find_links_dir()
     if find_links is not None:
         argv += ["--find-links", str(find_links)]
-        # Pin the SDK the *host* speaks. `uv run` caches a per-script
-        # environment keyed on the requirements it was given, and a plugin's
-        # own header asks for `civex-plugin-sdk` unpinned -- which whatever
-        # version that cached environment already holds satisfies forever.
-        # So without this pin, a plugin that resolved once against an older
-        # SDK keeps using it after the SDK changes, and silently disagrees
-        # with the host about the wire format (a `table` input arriving as a
-        # raw envelope dict instead of a DataFrame, say). Naming the version
-        # makes it part of the cache key, so an SDK bump re-resolves.
-        version = _local_sdk_version(find_links)
-        if version is not None:
-            argv += ["--with", f"civex-plugin-sdk=={version}"]
+    # Pin the SDK the *host* speaks. `uv run` caches a per-script
+    # environment keyed on the requirements it was given, and a plugin's
+    # own header asks for `civex-plugin-sdk` unpinned -- which whatever
+    # version that cached environment already holds satisfies forever.
+    # So without this pin, a plugin that resolved once against an older
+    # SDK keeps using it after the SDK changes, and silently disagrees
+    # with the host about the wire format (a `table` input arriving as a
+    # raw envelope dict instead of a DataFrame, say). Naming the version
+    # makes it part of the cache key, so an SDK bump re-resolves.
+    version = _sdk_pin_version(find_links)
+    if version is not None:
+        argv += ["--with", f"civex-plugin-sdk=={version}"]
     argv.append(str(plugin_path))
     return argv
 
@@ -431,11 +424,30 @@ def _drive_describe(proc: subprocess.Popen) -> DescribeResult:
         ) from None
     frame = parse_frame(raw)
     if isinstance(frame, DescribeResult):
-        return frame
+        return check_protocol_version(frame)
     if isinstance(frame, ErrorFrame):
         raise _error_from_frame(frame)
     raise PluginExecutionError(
         f"unexpected frame in response to describe: {raw!r}", kind="protocol_error"
+    )
+
+
+def check_protocol_version(described: DescribeResult) -> DescribeResult:
+    """Refuse a plugin whose SDK speaks a wire protocol this host doesn't,
+    naming the side that needs upgrading -- instead of letting the two
+    disagree mid-run with an opaque parse error. Shared by the subprocess and
+    container tiers, which both learn a plugin's version from `describe`."""
+    theirs = described.protocol_version
+    if theirs == PROTOCOL_VERSION:
+        return described
+    if theirs > PROTOCOL_VERSION:
+        fix = "update civex (`civex update`)"
+    else:
+        fix = "upgrade the plugin's civex-plugin-sdk (or rebuild its image)"
+    raise PluginExecutionError(
+        f"plugin '{described.id}' speaks civex-plugin-sdk wire protocol v{theirs}, "
+        f"but this civex speaks v{PROTOCOL_VERSION}: {fix}",
+        kind="protocol_mismatch",
     )
 
 

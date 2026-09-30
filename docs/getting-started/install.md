@@ -10,27 +10,7 @@ civex is published on PyPI as [`civex`](https://pypi.org/project/civex/) and req
     ```
 
     ```bash
-    pipx install "civex[server]"
-    ```
-
-    The `server` extra pulls in the HTTP API and web UI. Extras can be combined:
-
-    | Extra | Adds |
-    |---|---|
-    | `server` | HTTP API and web UI (`civex serve`) |
-    | `workflows` | Workflow execution and the built-in plugins |
-    | `postgres` | PostgreSQL driver |
-    | `ai` | AI-assisted commands |
-    | `telemetry` | Logging and metrics exporters |
-
-    ```bash
-    pipx install "civex[server,workflows,postgres]"
-    ```
-
-    To upgrade:
-
-    ```bash
-    pipx upgrade civex
+    pipx install civex
     ```
 
 === "pip"
@@ -39,8 +19,20 @@ civex is published on PyPI as [`civex`](https://pypi.org/project/civex/) and req
 
     ```bash
     python -m venv venv && source venv/bin/activate
-    pip install "civex[server]"
+    pip install civex
     ```
+
+Everything is included: the HTTP API and web UI, workflow execution, the
+PostgreSQL driver, AI-assisted commands and telemetry. There's nothing to
+choose. (`civex[server]` and the other old extra names still install fine —
+they're now no-ops — so existing scripts and installs keep working.)
+
+The one optional extra is the desktop tray app, which pulls in
+platform-specific GUI packages:
+
+```bash
+pipx install "civex[desktop]"
+```
 
 Verify the install:
 
@@ -48,6 +40,19 @@ Verify the install:
 civex --version
 civex --help
 ```
+
+## Updating
+
+```bash
+civex update           # install the latest release
+civex update --check   # only report whether one is available
+```
+
+`civex update` detects whether civex was installed with pipx, `uv tool` or pip
+and runs the matching upgrade. Restart `civex serve` afterwards if it's
+running. Project databases migrate themselves the next time they're opened.
+`civex update` confirms the installed version actually changed, and says so if
+it didn't.
 
 ## Next step
 
