@@ -8,6 +8,7 @@ import { DynamicField } from './DynamicField'
 import { RecordSearchPicker } from './RecordSearchPicker'
 import { datetimeLocalToUTC } from '../../utils/dates'
 import { displayLabel } from '../../utils/naming'
+import { buildRecordData } from '../../utils/recordValues'
 import { errorMessage } from '../../lib/errors'
 import { fieldErrorInfo } from '../../utils/validationErrors'
 import {
@@ -343,23 +344,11 @@ export function RecordForm({
     setExtractingField(null)
   }
 
-  function coerce(value: unknown, type: string): unknown {
-    if (value === '' || value === undefined || value === null) return undefined
-    if (type === 'integer') return parseInt(value as string, 10)
-    if (type === 'float') return parseFloat(value as string)
-    return value
-  }
-
   function handleSubmit() {
     if (!schema) return
-    const data: Record<string, unknown> = {}
-    for (const field of schema.fields) {
-      const coerced = coerce(values[field.name], field.type)
-      if (coerced !== undefined) data[field.name] = coerced
-    }
     onSubmit(
       schema.name,
-      data,
+      buildRecordData(schema.fields, values),
       lockedParentRecordId || parentRecordId || undefined,
     )
   }

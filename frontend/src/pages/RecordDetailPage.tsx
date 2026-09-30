@@ -16,12 +16,6 @@ import {
   Badge,
   Button,
   Field,
-  Table,
-  Thead,
-  Th,
-  Tbody,
-  Tr,
-  Td,
   DetailSkeleton,
   ErrorState,
   FormError,
@@ -30,7 +24,7 @@ import {
   Section,
   CollapsibleSection,
 } from '../components/ui'
-import { X, Play } from '../components/ui/icons'
+import { Play } from '../components/ui/icons'
 import { DynamicField } from '../components/records/DynamicField'
 import { RecordForm } from '../components/records/RecordForm'
 import { formatDate } from '../lib/utils'
@@ -38,110 +32,15 @@ import { displayLabel } from '../utils/naming'
 import { errorMessage } from '../lib/errors'
 import { fieldErrorInfo } from '../utils/validationErrors'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
-import type { Schema, Field as SchemaField } from '../api/schemas'
+import type { Field as SchemaField } from '../api/schemas'
 import type { CivexRecord } from '../api/records'
 import JobsTable from '../components/jobs/JobsTable'
 import RecordProvenance from '../components/jobs/RecordProvenance'
 import { AuditTrail } from '../components/audit/AuditTrail'
 import { describeAuditEntry as describeRecordAuditEntry } from '../utils/recordAudit'
+import { EditableRecordsTable } from '../components/records/EditableRecordsTable'
+import { buildRecordData } from '../utils/recordValues'
 import { FieldValue } from '../components/records/FieldValue'
-
-function ChildTable({
-  schemaName,
-  schema,
-  records,
-  onDelete,
-}: {
-  schemaName: string
-  schema: Schema | undefined
-  records: CivexRecord[]
-  onDelete: (id: string) => void
-}) {
-  const cols = schema?.fields.filter((f) => f.type !== 'file') ?? []
-  const [confirmId, setConfirmId] = useState<string | null>(null)
-  const confirmRecord = records.find((r) => r.id === confirmId) ?? null
-
-  return (
-    <div className="space-y-2">
-      <h3 className="text-sm font-semibold text-fg flex items-center gap-2">
-        {schema ? (
-          <Link to={`/schemas/${schema.id}`}>
-            <Badge variant="accent">
-              {displayLabel(schemaName, schema.label)}
-            </Badge>
-          </Link>
-        ) : (
-          <Badge variant="accent">{schemaName}</Badge>
-        )}
-        <span className="font-normal text-fg-muted">
-          {records.length} record{records.length !== 1 ? 's' : ''}
-        </span>
-      </h3>
-      <Table>
-        <Thead>
-          <tr>
-            <Th className="w-24">ID</Th>
-            {cols.map((c) => (
-              <Th key={c.name} title={c.name}>
-                {displayLabel(c.name, c.label)}
-              </Th>
-            ))}
-            <Th className="w-28">Added</Th>
-            <Th className="w-20" />
-          </tr>
-        </Thead>
-        <Tbody>
-          {records.map((r) => (
-            <Tr key={r.id}>
-              <Td>
-                <Link
-                  to={`/records/${r.id}`}
-                  className="text-sm text-accent hover:underline"
-                >
-                  {r.natural_name ?? (
-                    <span className="font-mono">{r.id.slice(0, 8)}</span>
-                  )}
-                </Link>
-              </Td>
-              {cols.map((col) => (
-                <Td key={col.name}>
-                  <FieldValue
-                    value={r.data[col.name]}
-                    field={col}
-                    referenceLabels={r.reference_labels}
-                  />
-                </Td>
-              ))}
-              <Td className="text-fg-muted">{formatDate(r.created_at)}</Td>
-              <Td>
-                <button
-                  onClick={() => setConfirmId(r.id)}
-                  className="text-xs text-fg-muted hover:text-danger transition-colors"
-                  title="Delete record"
-                >
-                  <X size={14} />
-                </button>
-              </Td>
-            </Tr>
-          ))}
-        </Tbody>
-      </Table>
-      {confirmRecord && (
-        <ConfirmDialog
-          title="Delete record"
-          body={`Delete ${confirmRecord.natural_name ?? `record ${confirmRecord.id.slice(0, 8)}`}? It'll move to Recently Deleted — restore any time before it's permanently purged.`}
-          confirmLabel="Delete record"
-          variant="danger"
-          onConfirm={() => {
-            onDelete(confirmRecord.id)
-            setConfirmId(null)
-          }}
-          onClose={() => setConfirmId(null)}
-        />
-      )}
-    </div>
-  )
-}
 
 export default function RecordDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -220,16 +119,7 @@ export default function RecordDetailPage() {
   }
 
   function saveEditing() {
-    const coerced: Record<string, unknown> = {}
-    for (const field of schema?.fields ?? []) {
-      const v = editValues[field.name]
-      if (v === '' || v === undefined || v === null) continue
-      if (field.type === 'integer')
-        coerced[field.name] = parseInt(v as string, 10)
-      else if (field.type === 'float')
-        coerced[field.name] = parseFloat(v as string)
-      else coerced[field.name] = v
-    }
+    const coerced = buildRecordData(schema?.fields ?? [], editValues)
     updateRecord.mutate(
       { id: record!.id, data: coerced },
       { onSuccess: () => setIsEditing(false) },
@@ -247,6 +137,8 @@ export default function RecordDetailPage() {
     )
   }
 
+  // Every child schema gets a table (even with no records yet, so rows can
+  // be created from it), plus any schema that has children but isn't listed.
   // Group children by schema name for display
   const childrenBySchema = children.reduce<Record<string, CivexRecord[]>>(
     (acc, r) => {
@@ -255,6 +147,12 @@ export default function RecordDetailPage() {
     },
     {},
   )
+  const childSchemaNames = [
+    ...new Set([
+      ...childSchemas.map((s) => s.name),
+      ...Object.keys(childrenBySchema),
+    ]),
+  ]
 
   return (
     <Page
@@ -451,20 +349,26 @@ export default function RecordDetailPage() {
               />
             )}
 
-            {Object.entries(childrenBySchema).map(([schemaName, recs]) => (
-              <ChildTable
-                key={schemaName}
-                schemaName={schemaName}
-                schema={schemas?.find((s) => s.name === schemaName)}
-                records={recs}
-                onDelete={(childId) =>
-                  deleteRecord.mutate({
-                    id: childId,
-                    undo: () => recordsApi.restore(childId),
-                  })
-                }
-              />
-            ))}
+            {collection &&
+              childSchemaNames.map((name) => {
+                const childSchema = schemas?.find((s) => s.name === name)
+                if (!childSchema) return null
+                return (
+                  <EditableRecordsTable
+                    key={name}
+                    schema={childSchema}
+                    records={childrenBySchema[name] ?? []}
+                    collectionName={collection.name}
+                    parentRecordId={record.id}
+                    onDelete={(childId) =>
+                      deleteRecord.mutate({
+                        id: childId,
+                        undo: () => recordsApi.restore(childId),
+                      })
+                    }
+                  />
+                )
+              })}
           </div>
         </Section>
       )}
