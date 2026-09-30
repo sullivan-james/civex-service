@@ -12,7 +12,7 @@ observe (wire format, IO conversion, public API); the patch version for fixes
 that change neither. A change to the wire protocol itself also bumps
 `PROTOCOL_VERSION` (see `civex_plugin_sdk.protocol`).
 
-## v0.2.0 (unreleased)
+## v0.0.1
 
 First release published to PyPI under the MIT license. Previously the SDK
 shipped only vendored inside the `civex` wheel.
