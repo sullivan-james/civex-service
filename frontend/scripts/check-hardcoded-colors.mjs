@@ -12,7 +12,7 @@ const frontendRoot = join(fileURLToPath(import.meta.url), '..', '..')
 const srcDir = join(frontendRoot, 'src')
 
 const PATTERN =
-  /(text|bg|border|ring|outline|fill|stroke)-\[#([0-9a-fA-F]{3,8})\]/g
+  /((text|bg|border|ring|outline|fill|stroke|divide|from|via|to|shadow|decoration|accent|caret)-\[(#[0-9a-fA-F]{3,8}|rgba?\([^\])]*\))\]|\b(fill|stroke|color|stopColor|floodColor)="#[0-9a-fA-F]{3,8}")/g
 
 function collectTsxFiles(dir) {
   const files = []

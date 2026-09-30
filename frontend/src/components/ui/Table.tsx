@@ -47,7 +47,7 @@ export function Th({
 }
 
 export function Tbody({ children }: { children: ReactNode }) {
-  return <tbody className="divide-y divide-[#d0d7de]">{children}</tbody>
+  return <tbody className="divide-y divide-border">{children}</tbody>
 }
 
 export function Tr({

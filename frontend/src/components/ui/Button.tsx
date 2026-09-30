@@ -10,7 +10,7 @@ const base =
 
 const variants: Record<Variant, string> = {
   primary:
-    'bg-success-emphasis hover:bg-success border-[rgba(31,35,40,0.15)] text-fg-on-emphasis',
+    'bg-success-emphasis hover:bg-success border-success-emphasis text-fg-on-emphasis',
   default: 'bg-canvas-subtle hover:bg-canvas-inset border-border text-fg',
   danger: 'bg-canvas-subtle hover:bg-danger-subtle border-border text-danger',
 }
