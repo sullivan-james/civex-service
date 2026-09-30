@@ -4,13 +4,13 @@ from datetime import datetime, timezone
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from fastapi.responses import Response
 from pydantic import BaseModel
 
 from civex import __version__
 from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.server.deps import get_ctx
+from civex.server.downloads import new_temp_path, serve, temp_paths
 
 router = APIRouter(tags=["dump"])
 
@@ -60,21 +60,6 @@ def export_dump(
         for d in ctx.dataset_svc.list_all()
     ]
 
-    records_out = []
-    if not no_data:
-        for dataset in ctx.dataset_svc.list_all():
-            for record in ctx.record_svc.find(
-                dataset.name, schema_name=None, filters=[], limit=100_000
-            ):
-                rec: dict = {
-                    "dataset": dataset.name,
-                    "schema": record.schema_name,
-                    "data": record.data,
-                }
-                if record.parent_record_id:
-                    rec["parent_record_id"] = str(record.parent_record_id)
-                records_out.append(rec)
-
     from civex.config import load_config
 
     try:
@@ -103,24 +88,55 @@ def export_dump(
     except Exception:
         plugins_out = []
 
-    dump_doc = {
-        "civex_version": __version__,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
-        "schemas": schemas_out,
-        "datasets": datasets_out,
-        "records": records_out,
-        "workflows": workflows_out,
-        "plugins": plugins_out,
-    }
+    def _yaml(doc) -> str:
+        return yaml.dump(
+            doc, default_flow_style=False, allow_unicode=True, sort_keys=False
+        )
 
-    content = yaml.dump(
-        dump_doc, default_flow_style=False, allow_unicode=True, sort_keys=False
-    )
-    return Response(
-        content=content,
-        media_type="application/yaml",
-        headers={"Content-Disposition": 'attachment; filename="civex-dump.yaml"'},
-    )
+    # Built section by section into a temp file, with records paged out of
+    # the DB, so dump size is bounded by disk rather than memory. The
+    # concatenated sections are the same YAML mapping (same key order) a
+    # single yaml.dump of the whole document would produce.
+    with temp_paths() as tmp:
+        path = new_temp_path(".yaml")
+        tmp.append(path)
+        with path.open("w", encoding="utf-8") as out:
+            out.write(
+                _yaml(
+                    {
+                        "civex_version": __version__,
+                        "exported_at": datetime.now(timezone.utc).isoformat(),
+                        "schemas": schemas_out,
+                        "datasets": datasets_out,
+                    }
+                )
+            )
+
+            wrote_records = False
+            if not no_data:
+                for dataset in ctx.dataset_svc.list_all():
+                    for page in ctx.record_svc.iter_find(dataset.name):
+                        chunk = []
+                        for record in page:
+                            rec: dict = {
+                                "dataset": dataset.name,
+                                "schema": record.schema_name,
+                                "data": record.data,
+                            }
+                            if record.parent_record_id:
+                                rec["parent_record_id"] = str(record.parent_record_id)
+                            chunk.append(rec)
+                        if not wrote_records:
+                            out.write("records:\n")
+                            wrote_records = True
+                        out.write(_yaml(chunk))
+            if not wrote_records:
+                out.write("records: []\n")
+
+            out.write(_yaml({"workflows": workflows_out, "plugins": plugins_out}))
+
+        tmp.remove(path)
+        return serve(path, "application/yaml", "civex-dump.yaml")
 
 
 @router.post("/restore", response_model=RestoreResult)

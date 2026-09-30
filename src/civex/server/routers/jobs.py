@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from civex.context import AppContext
 from civex.domain.exceptions import NotFoundError
@@ -18,11 +18,15 @@ def count_jobs(
     status: str | None = None,
     record_id: str | None = None,
     affected_record_id: str | None = None,
+    affected_schema: str | None = None,
     ctx: AppContext = Depends(get_ctx),
 ):
     return {
         "total": ctx.job_svc.count_jobs(
-            status=status, record_id=record_id, affected_record_id=affected_record_id
+            status=status,
+            record_id=record_id,
+            affected_record_id=affected_record_id,
+            affected_schema=affected_schema,
         )
     }
 
@@ -32,17 +36,21 @@ def list_jobs(
     status: str | None = None,
     record_id: str | None = None,
     affected_record_id: str | None = None,
-    offset: int = 0,
-    limit: int | None = None,
+    affected_schema: str | None = None,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=500),
     ctx: AppContext = Depends(get_ctx),
 ):
     """`record_id` filters to runs *triggered by* that record; `affected_record_id`
     filters to runs that created or updated that record -- the two directions of
-    the run/record audit trail (a record can be both for different runs)."""
+    the run/record audit trail (a record can be both for different runs).
+    `affected_schema` filters to runs that wrote to that schema (indexed).
+    Results are paginated: `limit` defaults to 50 and is capped at 500."""
     jobs = ctx.job_svc.list_jobs(
         status=status,
         record_id=record_id,
         affected_record_id=affected_record_id,
+        affected_schema=affected_schema,
         offset=offset,
         limit=limit,
     )

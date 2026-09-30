@@ -181,6 +181,14 @@ def store_gc(
     show: int = typer.Option(
         20, "--show", help="Max collectible objects to list individually"
     ),
+    rebuild_refs: bool = typer.Option(
+        False,
+        "--rebuild-refs",
+        help="Recompute the file-reference table from every record and job "
+        "before collecting. Normally unnecessary (it is kept current on every "
+        "write); use it if the table may have drifted, e.g. after editing the "
+        "database directly.",
+    ),
 ) -> None:
     """Reclaim object-store blobs no longer referenced by any record or workflow job.
 
@@ -193,6 +201,10 @@ def store_gc(
     """
     ctx = get_ctx()
     try:
+        if rebuild_refs:
+            count = ctx.gc_svc.rebuild_references()
+            ctx.commit()
+            console.print(f"Rebuilt file-reference table ({count} references).")
         report = ctx.gc_svc.run(dry_run=not apply, grace_days=grace_days)
     except CivexError as e:
         console.print(f"[error]{e}[/error]")

@@ -29,10 +29,12 @@ import json
 import logging
 import os
 import shutil
+import re
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterable, Iterator
+from typing import TYPE_CHECKING, AsyncIterable, Iterator, cast
 
 from civex.config import StoreConfig, VolumeConfig
 from civex.domain.dtos import FileRef, StoredObjectInfo
@@ -42,7 +44,15 @@ from civex.domain.exceptions import (
     VolumeUnavailableError,
 )
 
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
 log = logging.getLogger(__name__)
+
+_HEX2_RE = re.compile(r"^[0-9a-f]{2}$")
+_HEX62_RE = re.compile(r"^[0-9a-f]{62}$")
+_COPY_CHUNK = 1024 * 1024
+_RECONCILE_BATCH = 5000
 
 _SCRATCH_DIRNAME = ".tmp"
 _GC_LOCK_FILENAME = ".gc.lock"
@@ -54,10 +64,22 @@ _GC_LOCK_STALE_SECONDS = 3600
 
 
 class VolumeAwareFileObjectStore:
-    def __init__(self, store_config: StoreConfig, project_root: Path) -> None:
+    def __init__(
+        self,
+        store_config: StoreConfig,
+        project_root: Path,
+        session: Session | None = None,
+    ) -> None:
+        """With a `session`, per-volume usage is read from the
+        `stored_objects` inventory table (see db.models.StoredObject) rather
+        than by walking the volume, and survives across requests. Without
+        one (standalone use, tests), usage falls back to a cached directory
+        walk."""
         self._cfg = store_config
         self._root = project_root
+        self._session = session
         self._used_cache: dict[str, int] = {}
+        self._bootstrapped: set[str] = set()
 
     # ------------------------------------------------------------------
     # Protocol implementation
@@ -68,11 +90,11 @@ class VolumeAwareFileObjectStore:
         size = len(data)
 
         # If already stored in any volume, return immediately (idempotent).
-        existing = self._find_object(sha256)
-        if existing is not None:
-            vol_name = self._volume_of(sha256) or self._cfg.volume_queue[0]
+        located = self._locate(sha256)
+        if located is not None:
+            self._touch(located[1])
             return FileRef(
-                sha256=sha256, filename=original_filename, size=size, volume=vol_name
+                sha256=sha256, filename=original_filename, size=size, volume=located[0]
             )
 
         reasons: list[str] = []
@@ -105,7 +127,7 @@ class VolumeAwareFileObjectStore:
                     f"Cannot write to volume '{vol_name}': {e}"
                 ) from e
 
-            self._used_cache.pop(vol_name, None)
+            self._register(vol_name, sha256, size)
             self._append_manifest_best_effort(vol_name, sha256, original_filename, size)
             return FileRef(
                 sha256=sha256,
@@ -142,74 +164,130 @@ class VolumeAwareFileObjectStore:
         partway through fails the upload outright instead of retrying on
         the next volume in queue.
         """
+        vol_name, tmp_path = self._open_scratch(size_hint)
+        hasher = hashlib.sha256()
+        size = 0
+        try:
+            with tmp_path.open("wb") as f:
+                async for chunk in chunks:
+                    if not chunk:
+                        continue
+                    hasher.update(chunk)
+                    f.write(chunk)
+                    size += len(chunk)
+        except BaseException as e:
+            tmp_path.unlink(missing_ok=True)
+            if isinstance(e, OSError):
+                raise self._write_error(vol_name, e, size, streamed=True) from e
+            raise
+        return self._finalize(
+            vol_name, tmp_path, hasher.hexdigest(), size, original_filename
+        )
+
+    def put_path(self, path: Path, original_filename: str | None = None) -> FileRef:
+        """Store a file from disk by copying it in fixed-size chunks, so a
+        multi-GB file never has to fit in memory (put(path.read_bytes())
+        would). Unlike put_stream, the source is replayable, so a volume that
+        runs out of space partway through falls through to the next one."""
+        name = original_filename or path.name
+        size = path.stat().st_size
+        reasons: list[str] = []
+        for vol_name in self._cfg.volume_queue:
+            can, reason = self._can_write(vol_name, size)
+            if not can:
+                reasons.append(f"{vol_name}: {reason}")
+                continue
+            tmp_path = self._scratch_path(vol_name)
+            hasher = hashlib.sha256()
+            written = 0
+            try:
+                with path.open("rb") as src, tmp_path.open("wb") as dst:
+                    while chunk := src.read(_COPY_CHUNK):
+                        hasher.update(chunk)
+                        dst.write(chunk)
+                        written += len(chunk)
+            except OSError as e:
+                tmp_path.unlink(missing_ok=True)
+                if e.errno == errno.ENOSPC:
+                    reasons.append(f"{vol_name}: no space left on device")
+                    continue
+                raise self._write_error(vol_name, e, written, streamed=False) from e
+            return self._finalize(vol_name, tmp_path, hasher.hexdigest(), written, name)
+        raise AllVolumesFull(
+            f"No volume in queue has space for {size / 1_048_576:.1f} MB. "
+            + "; ".join(reasons)
+        )
+
+    # -- shared write plumbing -------------------------------------------
+
+    def _scratch_path(self, vol_name: str) -> Path:
+        scratch_dir = self._resolve_path(self._cfg.volumes[vol_name]) / _SCRATCH_DIRNAME
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+        return scratch_dir / f"{uuid.uuid4().hex}.part"
+
+    def _open_scratch(self, size_hint: int | None) -> tuple[str, Path]:
+        """First queued volume passing the allocation/headroom gates, plus a
+        fresh scratch path on it."""
         reasons: list[str] = []
         for vol_name in self._cfg.volume_queue:
             can, reason = self._can_write(vol_name, size_hint or 0)
             if not can:
                 reasons.append(f"{vol_name}: {reason}")
                 continue
-
-            vc = self._cfg.volumes[vol_name]
-            scratch_dir = self._resolve_path(vc) / _SCRATCH_DIRNAME
-            scratch_dir.mkdir(parents=True, exist_ok=True)
-            tmp_path = scratch_dir / f"{uuid.uuid4().hex}.part"
-
-            hasher = hashlib.sha256()
-            size = 0
-            try:
-                with tmp_path.open("wb") as f:
-                    async for chunk in chunks:
-                        if not chunk:
-                            continue
-                        hasher.update(chunk)
-                        f.write(chunk)
-                        size += len(chunk)
-            except OSError as e:
-                tmp_path.unlink(missing_ok=True)
-                if e.errno == errno.ENOSPC:
-                    raise VolumeUnavailableError(
-                        f"Volume '{vol_name}' ran out of space mid-upload "
-                        f"({size / 1_048_576:.1f} MB written); the upload "
-                        "can't resume on another volume once bytes have "
-                        "been streamed -- retry the upload from the start."
-                    ) from e
-                raise VolumeUnavailableError(
-                    f"Cannot write to volume '{vol_name}': {e}"
-                ) from e
-
-            sha256 = hasher.hexdigest()
-
-            existing = self._find_object(sha256)
-            if existing is not None:
-                tmp_path.unlink(missing_ok=True)
-                vol_of_existing = self._volume_of(sha256) or vol_name
-                return FileRef(
-                    sha256=sha256,
-                    filename=original_filename,
-                    size=size,
-                    volume=vol_of_existing,
-                )
-
-            dest = self._object_path(sha256, vol_name)
-            try:
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(tmp_path, dest)
-            except OSError as e:
-                tmp_path.unlink(missing_ok=True)
-                raise VolumeUnavailableError(
-                    f"Cannot finalize upload on volume '{vol_name}': {e}"
-                ) from e
-            self._used_cache.pop(vol_name, None)
-            self._append_manifest_best_effort(vol_name, sha256, original_filename, size)
-            return FileRef(
-                sha256=sha256, filename=original_filename, size=size, volume=vol_name
-            )
-
+            return vol_name, self._scratch_path(vol_name)
         raise AllVolumesFull(
             "No volume in queue has space"
             + (f" for {size_hint / 1_048_576:.1f} MB" if size_hint else "")
             + ". "
             + "; ".join(reasons)
+        )
+
+    @staticmethod
+    def _write_error(
+        vol_name: str, e: OSError, written: int, *, streamed: bool
+    ) -> VolumeUnavailableError:
+        if e.errno == errno.ENOSPC and streamed:
+            return VolumeUnavailableError(
+                f"Volume '{vol_name}' ran out of space mid-upload "
+                f"({written / 1_048_576:.1f} MB written); the upload "
+                "can't resume on another volume once bytes have "
+                "been streamed -- retry the upload from the start."
+            )
+        return VolumeUnavailableError(f"Cannot write to volume '{vol_name}': {e}")
+
+    def _finalize(
+        self,
+        vol_name: str,
+        tmp_path: Path,
+        sha256: str,
+        size: int,
+        original_filename: str,
+    ) -> FileRef:
+        """Rename a fully-written scratch file into its content-addressed
+        path, or discard it if the same content is already stored."""
+        located = self._locate(sha256)
+        if located is not None:
+            tmp_path.unlink(missing_ok=True)
+            self._touch(located[1])
+            return FileRef(
+                sha256=sha256,
+                filename=original_filename,
+                size=size,
+                volume=located[0],
+            )
+        dest = self._object_path(sha256, vol_name)
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(tmp_path, dest)
+        except OSError as e:
+            tmp_path.unlink(missing_ok=True)
+            raise VolumeUnavailableError(
+                f"Cannot finalize upload on volume '{vol_name}': {e}"
+            ) from e
+        self._register(vol_name, sha256, size)
+        self._append_manifest_best_effort(vol_name, sha256, original_filename, size)
+        return FileRef(
+            sha256=sha256, filename=original_filename, size=size, volume=vol_name
         )
 
     def get(self, sha256: str) -> bytes:
@@ -227,52 +305,63 @@ class VolumeAwareFileObjectStore:
             raise FileNotFoundError(f"Object {sha256} not found in any volume")
         return path
 
-    def list_objects(self) -> list[StoredObjectInfo]:
+    def iter_objects(self) -> Iterator[StoredObjectInfo]:
         """Every object actually on disk, across every configured volume --
-        including volumes no longer in the write queue. Walks the volume
-        directories rather than trusting manifest.jsonl: the manifest is
-        append-only and best-effort (a crash between write and append would
-        leave it short), so it's fine for display metadata but not as the
+        including volumes no longer in the write queue -- yielded one at a
+        time so callers (GC) never hold the whole listing in memory. Walks
+        the volume directories rather than trusting manifest.jsonl or the
+        inventory table: the manifest is append-only and best-effort, and
+        the inventory is a cache of this very walk, so neither is the
         authoritative existence check GC sweeps against.
         """
-        results = []
-        for name, vc in self._cfg.volumes.items():
-            root = self._resolve_path(vc)
-            if not root.exists():
+        for name in self._cfg.volumes:
+            yield from self._walk_volume(name)
+
+    def list_objects(self) -> list[StoredObjectInfo]:
+        """Materialised `iter_objects()`, for callers that want a list."""
+        return list(self.iter_objects())
+
+    def _walk_volume(self, name: str) -> Iterator[StoredObjectInfo]:
+        """Lazily scan `<root>/<2 hex>/<62 hex>` entries of one volume. Only
+        the two-level object layout is visited -- scratch files, the
+        manifest and anything foreign are skipped without being stat'd. One
+        bad directory or unavailable volume costs only its own objects."""
+        root = self._resolve_path(self._cfg.volumes[name])
+        try:
+            top = list(os.scandir(root))
+        except FileNotFoundError:
+            return
+        except OSError as e:
+            log.warning("Skipping volume '%s' while listing objects: %s", name, e)
+            return
+        for shard in top:
+            if not _HEX2_RE.match(shard.name):
                 continue
             try:
-                # Materialize eagerly: rglob() is a generator, so a
-                # permission error or a volume going unavailable partway
-                # through a directory walk would otherwise raise from
-                # *inside* the for-loop below and abort every other
-                # volume's scan along with it -- one bad volume should only
-                # cost that volume's objects, not the whole GC pass.
-                entries = list(root.rglob("*"))
-            except OSError as e:
-                log.warning("Skipping volume '%s' while listing objects: %s", name, e)
-                continue
-            for f in entries:
-                try:
-                    if not f.is_file() or f.name == "manifest.jsonl":
-                        continue
-                    if _SCRATCH_DIRNAME in f.relative_to(root).parts:
-                        continue  # in-progress put_stream() upload, not a real object
-                    stat = f.stat()
-                except OSError:
-                    # Removed (e.g. by a concurrent GC run or delete()) or a
-                    # broken symlink between the rglob listing and this
-                    # check -- skip it rather than aborting the whole scan.
+                if not shard.is_dir(follow_symlinks=False):
                     continue
-                sha256 = f.parent.name + f.name
-                results.append(
-                    StoredObjectInfo(
-                        sha256=sha256,
-                        volume=name,
-                        size=stat.st_size,
-                        mtime=stat.st_mtime,
-                    )
+                with os.scandir(shard.path) as it:
+                    for entry in it:
+                        if not _HEX62_RE.match(entry.name):
+                            continue
+                        try:
+                            if not entry.is_file(follow_symlinks=False):
+                                continue
+                            stat = entry.stat(follow_symlinks=False)
+                        except OSError:
+                            # Removed by a concurrent GC/delete between the
+                            # listing and the stat -- skip, don't abort.
+                            continue
+                        yield StoredObjectInfo(
+                            sha256=shard.name + entry.name,
+                            volume=name,
+                            size=stat.st_size,
+                            mtime=stat.st_mtime,
+                        )
+            except OSError as e:
+                log.warning(
+                    "Skipping shard '%s' of volume '%s': %s", shard.name, name, e
                 )
-        return results
 
     def sweep_stale_scratch(
         self, older_than_seconds: float, dry_run: bool = False
@@ -313,8 +402,9 @@ class VolumeAwareFileObjectStore:
                 if candidate.exists():
                     path = candidate
         if path is None:
-            volume = self._volume_of(sha256)
-            path = self._find_object(sha256)
+            located = self._locate(sha256)
+            if located is not None:
+                volume, path = located
         if path is None:
             return False
         try:
@@ -327,6 +417,7 @@ class VolumeAwareFileObjectStore:
             pass
         if volume is not None:
             self._used_cache.pop(volume, None)
+        self._unregister(sha256)
         return True
 
     @contextlib.contextmanager
@@ -482,33 +573,178 @@ class VolumeAwareFileObjectStore:
                 exc_info=True,
             )
 
-    def _find_object(self, sha256: str) -> Path | None:
-        for vc in self._cfg.volumes.values():
-            p = self._resolve_path(vc) / sha256[:2] / sha256[2:]
-            if p.exists():
-                return p
-        return None
-
-    def _volume_of(self, sha256: str) -> str | None:
+    def _locate(self, sha256: str) -> tuple[str, Path] | None:
+        """(volume name, path) of the first volume holding this object --
+        one pass over the volumes, rather than separate find/volume-of scans
+        (each of which is a stat per volume, i.e. a network round trip on
+        NFS-style mounts)."""
         for name, vc in self._cfg.volumes.items():
             p = self._resolve_path(vc) / sha256[:2] / sha256[2:]
             if p.exists():
-                return name
+                return name, p
         return None
 
+    def _find_object(self, sha256: str) -> Path | None:
+        located = self._locate(sha256)
+        return located[1] if located else None
+
+    def _volume_of(self, sha256: str) -> str | None:
+        located = self._locate(sha256)
+        return located[0] if located else None
+
+    @staticmethod
+    def _touch(path: Path) -> None:
+        """Bump an object's mtime when a new upload dedupes onto it. GC's
+        grace period is judged by mtime, so without this an old, otherwise
+        unreferenced blob that a user just re-uploaded (but whose record
+        isn't committed yet) could be collected out from under them."""
+        try:
+            os.utime(path)
+        except OSError:
+            pass
+
+    # -- usage accounting -------------------------------------------------
+
+    def _register(self, volume: str, sha256: str, size: int) -> None:
+        """Record a newly stored blob in the inventory (idempotent)."""
+        self._used_cache.pop(volume, None)
+        if self._session is None:
+            return
+        self._upsert_inventory([(sha256, volume, size)])
+
+    def _unregister(self, sha256: str) -> None:
+        if self._session is None:
+            return
+        from sqlalchemy import delete
+
+        from civex.db.models import StoredObject
+
+        self._session.execute(delete(StoredObject).where(StoredObject.sha256 == sha256))
+
+    def _upsert_inventory(self, rows: list[tuple[str, str, int]]) -> None:
+        assert self._session is not None
+        from civex.db.models import StoredObject
+
+        from sqlalchemy import Table
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        insert = (
+            pg_insert
+            if self._session.get_bind().dialect.name == "postgresql"
+            else sqlite_insert
+        )
+        table = cast(Table, StoredObject.__table__)
+        now = datetime.now(timezone.utc)
+        stmt = insert(table).values(
+            [
+                {"sha256": sha, "volume": vol, "size": size, "created_at": now}
+                for sha, vol, size in rows
+            ]
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["sha256"],
+            set_={"volume": stmt.excluded.volume, "size": stmt.excluded.size},
+        )
+        self._session.execute(stmt)
+
+    def reconcile_inventory(self) -> dict[str, int]:
+        """Bring the `stored_objects` table back in line with disk: add rows
+        for blobs present but unrecorded, drop rows whose blob is gone.
+        Disk is authoritative. Streams in fixed-size batches, so memory is
+        O(batch), not O(store). Returns {"added_or_updated", "removed"}.
+        GC runs this, so any drift (a rolled-back upload, a crash between
+        the rename and the commit, a file deleted by hand) is repaired by
+        the next pass instead of accumulating."""
+        if self._session is None:
+            return {"added_or_updated": 0, "removed": 0}
+        totals = {"added_or_updated": 0, "removed": 0}
+        for name in self._cfg.volumes:
+            r = self._reconcile_volume(name)
+            totals["added_or_updated"] += r[0]
+            totals["removed"] += r[1]
+        return totals
+
+    def _reconcile_volume(self, name: str) -> tuple[int, int]:
+        assert self._session is not None
+        from sqlalchemy import delete, select
+
+        from civex.db.models import StoredObject
+
+        upserted = 0
+        batch: list[tuple[str, str, int]] = []
+        for obj in self._walk_volume(name):
+            batch.append((obj.sha256, name, obj.size))
+            if len(batch) >= _RECONCILE_BATCH:
+                self._upsert_inventory(batch)
+                upserted += len(batch)
+                batch = []
+        if batch:
+            self._upsert_inventory(batch)
+            upserted += len(batch)
+
+        removed = 0
+        root = self._resolve_path(self._cfg.volumes[name])
+        last = ""
+        while True:
+            shas = [
+                sha
+                for (sha,) in self._session.execute(
+                    select(StoredObject.sha256)
+                    .where(StoredObject.volume == name, StoredObject.sha256 > last)
+                    .order_by(StoredObject.sha256)
+                    .limit(_RECONCILE_BATCH)
+                )
+            ]
+            if not shas:
+                break
+            last = shas[-1]
+            gone = [s for s in shas if not (root / s[:2] / s[2:]).exists()]
+            if gone:
+                self._session.execute(
+                    delete(StoredObject).where(StoredObject.sha256.in_(gone))
+                )
+                removed += len(gone)
+        self._used_cache.pop(name, None)
+        return upserted, removed
+
     def _civex_used(self, volume: str) -> int:
-        if volume in self._used_cache:
-            return self._used_cache[volume]
         vc = self._cfg.volumes.get(volume)
         if vc is None:
             return 0
-        root = self._resolve_path(vc)
-        if not root.exists():
-            self._used_cache[volume] = 0
-            return 0
-        total = sum(f.stat().st_size for f in root.rglob("*") if f.is_file())
+        if self._session is not None:
+            return self._inventory_used(volume)
+        if volume in self._used_cache:
+            return self._used_cache[volume]
+        total = sum(o.size for o in self._walk_volume(volume))
         self._used_cache[volume] = total
         return total
+
+    def _inventory_used(self, volume: str) -> int:
+        """SUM(size) over the volume's inventory rows. A volume with no rows
+        at all is scanned once to bootstrap the table -- covering an install
+        upgraded from before the inventory existed, where the migration
+        can't know the volume paths."""
+        assert self._session is not None
+        from sqlalchemy import func, select
+
+        from civex.db.models import StoredObject
+
+        if volume not in self._bootstrapped:
+            has_rows = self._session.execute(
+                select(StoredObject.sha256)
+                .where(StoredObject.volume == volume)
+                .limit(1)
+            ).first()
+            if has_rows is None:
+                self._reconcile_volume(volume)
+            self._bootstrapped.add(volume)
+        total = self._session.execute(
+            select(func.coalesce(func.sum(StoredObject.size), 0)).where(
+                StoredObject.volume == volume
+            )
+        ).scalar_one()
+        return int(total)
 
     def _can_write(self, volume: str, incoming_size: int) -> tuple[bool, str]:
         vc = self._cfg.volumes.get(volume)

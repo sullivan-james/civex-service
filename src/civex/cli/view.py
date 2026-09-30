@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import io
-import zipfile
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -10,7 +10,8 @@ import typer
 from civex.cli.utils import get_ctx as _ctx
 from civex.console import console
 from civex.domain.exceptions import NotFoundError, ValidationError
-from civex.services.view_service import rows_to_csv, rows_to_json
+from civex.services.archive import write_zip
+from civex.services.view_service import write_csv, write_json
 
 app = typer.Typer(help="Export saved views")
 
@@ -41,38 +42,50 @@ def view_export(
 
     ctx = _ctx()
     try:
-        export = ctx.view_svc.export(schema_name, view_name)
+        stream = ctx.view_svc.export_stream(schema_name, view_name)
+        file_entries: list = []
 
-        if format == "csv":
-            body = rows_to_csv(export.view.columns, export.rows).encode("utf-8")
-            data_filename = f"{view_name}.csv"
-        else:
-            body = rows_to_json(export.rows).encode("utf-8")
-            data_filename = f"{view_name}.json"
+        def row_batches():
+            for batch in stream.batches:
+                file_entries.extend(batch.file_entries)
+                yield batch.rows
 
-        if not export.file_entries:
-            dest = output or Path(data_filename)
-            dest.write_bytes(body)
+        data_filename = f"{view_name}.{format}"
+        # Write the data file straight to its final destination when there
+        # are no files to bundle; otherwise to a scratch file that gets
+        # zipped. Either way rows are paged, never all held in memory.
+        data_path = Path(tempfile.mkstemp(prefix="civex-view-", suffix=f".{format}")[1])
+        try:
+            with data_path.open("w", encoding="utf-8", newline="") as out:
+                if format == "csv":
+                    write_csv(out, stream.view.columns, row_batches())
+                else:
+                    write_json(out, row_batches())
+
+            if not file_entries:
+                dest = output or Path(data_filename)
+                shutil.move(str(data_path), dest)
+                console.print(f"[success]Wrote {dest}[/success]")
+                return
+
+            dest = output or Path(f"{view_name}.zip")
+            try:
+                write_zip(
+                    dest,
+                    ctx.file_svc,
+                    file_entries,
+                    data_member=(data_filename, data_path),
+                )
+            except Exception:
+                dest.unlink(missing_ok=True)
+                console.print(
+                    "[error]A file in this export was not found locally or "
+                    "on remote[/error]"
+                )
+                raise typer.Exit(1)
             console.print(f"[success]Wrote {dest}[/success]")
-            return
-
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(data_filename, body)
-            for name, ref in export.file_entries:
-                try:
-                    data = ctx.file_svc.retrieve(ref.sha256)
-                except Exception:
-                    console.print(
-                        f"[error]Object {ref.sha256} not found locally or "
-                        "on remote[/error]"
-                    )
-                    raise typer.Exit(1)
-                zf.writestr(name, data)
-
-        dest = output or Path(f"{view_name}.zip")
-        dest.write_bytes(buf.getvalue())
-        console.print(f"[success]Wrote {dest}[/success]")
+        finally:
+            data_path.unlink(missing_ok=True)
     except (NotFoundError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)

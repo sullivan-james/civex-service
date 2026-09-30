@@ -81,15 +81,13 @@ class QueryRecordsTool(AiTool):
         limit = min(int(tool_input.get("limit", 5)), 20)
         count_only = bool(tool_input.get("count_only", False))
 
-        all_records = ctx.record_svc.find_by_schema(schema, search=search, limit=1000)
-        total = len(all_records)
-        suffix = "" if total < 1000 else "+"
+        total = ctx.record_svc.count_by_schema_search(schema, search=search)
 
         if count_only:
-            return {"total": f"{total}{suffix}"}
+            return {"total": str(total)}
 
-        records_out = [record_summary(r) for r in all_records[:limit]]
-        return {"total": f"{total}{suffix}", "records": records_out}
+        records = ctx.record_svc.find_by_schema(schema, search=search, limit=limit)
+        return {"total": str(total), "records": [record_summary(r) for r in records]}
 
 
 class ListRecordsTool(AiTool):

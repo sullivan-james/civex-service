@@ -285,3 +285,34 @@ def test_list_deleted_can_be_scoped_to_a_dataset(
         zoo_record.id,
         aquarium_record.id,
     }
+
+
+def test_purging_a_record_whose_jobs_have_step_executions(
+    ctx, make_schema, make_collection, make_record
+) -> None:
+    """Regression: bulk-deleting jobs skipped the ORM's step_executions
+    cascade and violated the FK."""
+    from civex.domain.dtos import ErrorEnvelope
+
+    make_schema("doc")
+    make_collection("study")
+    rec = make_record("study", "doc")
+    job = ctx.job_svc.enqueue_manual("wf", rec)
+    ctx.commit()
+    ctx.job_svc.mark_failed(
+        job.id,
+        ErrorEnvelope(kind="plugin_error", message="boom"),
+        step_executions=[
+            {
+                "step_id": "s", "plugin": "p", "status": "failed",
+                "duration_seconds": 1.0, "error": "e", "error_details": None,
+                "inputs": {}, "outputs": {}, "depends_on": [],
+            }
+        ],
+    )
+    ctx.commit()
+    ctx.record_svc.delete(str(rec.id))
+    ctx.commit()
+    ctx.record_svc.purge(str(rec.id))
+    ctx.commit()
+    assert ctx.job_svc.get_job(job.id) is None

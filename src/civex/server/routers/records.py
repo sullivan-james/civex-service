@@ -1,24 +1,23 @@
 from __future__ import annotations
 
 import csv
-import io
 import json
-import zipfile
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
-from fastapi.responses import Response, StreamingResponse
 
 from civex.context import AppContext
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.server.background import run_pending_jobs
 from civex.server.deps import get_ctx
+from civex.server.downloads import new_temp_path, serve, temp_paths
 from civex.server.models import (
     CreateRecordRequest,
     PaginatedRecordResponse,
     RecordResponse,
     UpdateRecordRequest,
 )
+from civex.services.archive import write_zip
 from civex.sync.transport import SyncError
 
 router = APIRouter(tags=["records"])
@@ -144,11 +143,16 @@ def list_deleted_records(
     dataset: Optional[str] = Query(
         default=None, description="Limit to records from this collection"
     ),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=200, ge=1, le=1000),
     ctx: AppContext = Depends(get_ctx),
 ):
-    """Records currently in Recently Deleted, most recently deleted first."""
+    """Records currently in Recently Deleted, most recently deleted first.
+    Paginated: `limit` defaults to 200 and is capped at 1000."""
     try:
-        items = ctx.record_svc.list_deleted(dataset_name=dataset or None)
+        items = ctx.record_svc.list_deleted(
+            dataset_name=dataset or None, offset=offset, limit=limit
+        )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     return [RecordResponse.from_dto(r) for r in items]
@@ -182,23 +186,18 @@ def export_record_files_zip(
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name, ref in entries:
-            try:
-                data = ctx.file_svc.retrieve(ref.sha256)
-            except (FileNotFoundError, SyncError):
-                raise HTTPException(
-                    404, detail=f"Object {ref.sha256} not found locally or on remote"
-                )
-            zf.writestr(name, data)
-
     zip_name = f"{record_id}-{field}.zip" if field else f"{record_id}-files.zip"
-    return Response(
-        content=buf.getvalue(),
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
-    )
+    with temp_paths() as tmp:
+        zip_path = new_temp_path(".zip")
+        tmp.append(zip_path)
+        try:
+            write_zip(zip_path, ctx.file_svc, entries)
+        except (FileNotFoundError, SyncError) as e:
+            raise HTTPException(
+                404, detail=f"Object not found locally or on remote: {e}"
+            )
+        tmp.remove(zip_path)
+        return serve(zip_path, "application/zip", zip_name)
 
 
 @router.patch("/records/{record_id}", response_model=RecordResponse)
@@ -295,53 +294,48 @@ def export_records_csv(
 ):
     """Export records in a collection as a CSV file, honoring the same
     schema/where/search filters as the record list endpoint."""
-    try:
-        records = ctx.record_svc.find(
-            collection_name,
-            schema_name=schema,
-            filters=where,
-            search=search or None,
-            limit=100_000,
+
+    def pages():
+        return ctx.record_svc.iter_find(
+            collection_name, schema_name=schema, filters=where, search=search or None
         )
+
+    try:
+        # First pass: only the set of column names is kept (in encounter
+        # order), never the records themselves.
+        field_names: list[str] = []
+        seen: set[str] = set()
+        for page in pages():
+            for r in page:
+                for k in r.data:
+                    if k not in seen:
+                        seen.add(k)
+                        field_names.append(k)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except ValueError as e:
         raise HTTPException(422, detail=str(e))
 
-    # Gather unique field names in encounter order across all records
-    field_names: list[str] = []
-    seen: set[str] = set()
-    for r in records:
-        for k in r.data:
-            if k not in seen:
-                seen.add(k)
-                field_names.append(k)
-
     columns = ["id", "schema", "created_at", "updated_at"] + field_names
 
-    def generate():
-        buf = io.StringIO()
-        writer = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
-        writer.writeheader()
-        yield buf.getvalue()
-        for r in records:
-            buf = io.StringIO()
-            writer = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
-            row: dict = {
-                "id": str(r.id),
-                "schema": r.schema_name,
-                "created_at": r.created_at.isoformat(),
-                "updated_at": r.updated_at.isoformat(),
-            }
-            for k, v in r.data.items():
-                row[k] = v if not isinstance(v, (list, dict)) else str(v)
-            writer.writerow(row)
-            yield buf.getvalue()
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/csv",
-        headers={
-            "Content-Disposition": f'attachment; filename="{collection_name}.csv"'
-        },
-    )
+    # Second pass: rows go page by page into a temp file that is then served
+    # from disk, so the export's size is bounded by disk, not memory.
+    with temp_paths() as tmp:
+        path = new_temp_path(".csv")
+        tmp.append(path)
+        with path.open("w", encoding="utf-8", newline="") as out:
+            writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")
+            writer.writeheader()
+            for page in pages():
+                for r in page:
+                    row: dict = {
+                        "id": str(r.id),
+                        "schema": r.schema_name,
+                        "created_at": r.created_at.isoformat(),
+                        "updated_at": r.updated_at.isoformat(),
+                    }
+                    for k, v in r.data.items():
+                        row[k] = v if not isinstance(v, (list, dict)) else str(v)
+                    writer.writerow(row)
+        tmp.remove(path)
+        return serve(path, "text/csv", f"{collection_name}.csv")

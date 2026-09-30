@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import FileResponse
 
 from civex.context import AppContext
 from civex.domain.exceptions import AllVolumesFull, VolumeUnavailableError
@@ -12,11 +14,23 @@ from civex.sync.transport import SyncError
 router = APIRouter(prefix="/files", tags=["files"])
 
 
+_UPLOAD_CHUNK = 1024 * 1024
+
+
+async def _read_chunks(file: UploadFile) -> AsyncIterator[bytes]:
+    while chunk := await file.read(_UPLOAD_CHUNK):
+        yield chunk
+
+
 @router.post("", response_model=FileRefResponse, status_code=201)
 async def upload_file(file: UploadFile, ctx: AppContext = Depends(get_ctx)):
-    data = await file.read()
+    """Upload a multipart file. Starlette has already spooled the body to a
+    temp file by the time this runs; it is hashed and copied into the object
+    store 1 MiB at a time, so memory use is independent of file size."""
     try:
-        ref = ctx.file_svc.store_bytes(data, file.filename or "upload")
+        ref = await ctx.file_svc.store_stream(
+            _read_chunks(file), file.filename or "upload", file.size
+        )
     except (AllVolumesFull, VolumeUnavailableError) as e:
         raise HTTPException(507, detail=str(e))
     return FileRefResponse(
@@ -66,14 +80,14 @@ def download_file(sha256: str, filename: str = "", ctx: AppContext = Depends(get
     download link does this implicitly via the `download` attribute.
     """
     try:
-        data = ctx.file_svc.retrieve(sha256)
+        path = ctx.file_svc.local_path(sha256)
     except (FileNotFoundError, SyncError):
         raise HTTPException(
             404, detail=f"Object {sha256} not found locally or on remote"
         )
-    headers = {}
-    if filename:
-        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-    return Response(
-        content=data, media_type="application/octet-stream", headers=headers
+    # Streamed from disk in chunks (with Range/ETag support) rather than read
+    # into memory. `filename` sets Content-Disposition: attachment, properly
+    # quoted/encoded; without it no disposition header is sent.
+    return FileResponse(
+        path, media_type="application/octet-stream", filename=filename or None
     )

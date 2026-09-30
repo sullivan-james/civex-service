@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import io
-import zipfile
-
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
 
 from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.server.deps import get_ctx
+from civex.server.downloads import new_temp_path, serve, temp_paths
 from civex.server.models import (
     CreateViewRequest,
     PreviewViewRequest,
@@ -16,7 +13,8 @@ from civex.server.models import (
     UpdateViewRequest,
     ViewResponse,
 )
-from civex.services.view_service import rows_to_csv, rows_to_json
+from civex.services.archive import write_zip
+from civex.services.view_service import write_csv, write_json
 from civex.sync.transport import SyncError
 
 router = APIRouter(prefix="/schemas/{schema_name}/views", tags=["views"])
@@ -151,40 +149,50 @@ def export_view(
     the CSV/JSON, reusing the same resolved-filename + collision-suffix
     logic as the per-record files.zip export."""
     try:
-        export = ctx.view_svc.export(schema_name, view_name)
+        stream = ctx.view_svc.export_stream(schema_name, view_name)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
 
     if format == "csv":
-        body = rows_to_csv(export.view.columns, export.rows).encode("utf-8")
         data_filename, media_type = f"{view_name}.csv", "text/csv"
     else:
-        body = rows_to_json(export.rows).encode("utf-8")
         data_filename, media_type = f"{view_name}.json", "application/json"
 
-    if not export.file_entries:
-        return Response(
-            content=body,
-            media_type=media_type,
-            headers={"Content-Disposition": f'attachment; filename="{data_filename}"'},
-        )
+    file_entries: list = []
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(data_filename, body)
-        for name, ref in export.file_entries:
-            try:
-                data = ctx.file_svc.retrieve(ref.sha256)
-            except (FileNotFoundError, SyncError):
-                raise HTTPException(
-                    404, detail=f"Object {ref.sha256} not found locally or on remote"
-                )
-            zf.writestr(name, data)
+    def row_batches():
+        for batch in stream.batches:
+            file_entries.extend(batch.file_entries)
+            yield batch.rows
 
-    return Response(
-        content=buf.getvalue(),
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{view_name}.zip"'},
-    )
+    # Rows are paged out of the DB straight into a temp file, then the file is
+    # served (or zipped) from disk: memory stays O(page), not O(export).
+    with temp_paths() as tmp:
+        data_path = new_temp_path(".export")
+        tmp.append(data_path)
+        with data_path.open("w", encoding="utf-8", newline="") as out:
+            if format == "csv":
+                write_csv(out, stream.view.columns, row_batches())
+            else:
+                write_json(out, row_batches())
+
+        if not file_entries:
+            tmp.remove(data_path)
+            return serve(data_path, media_type, data_filename)
+
+        zip_path = new_temp_path(".zip")
+        tmp.append(zip_path)
+        try:
+            write_zip(
+                zip_path,
+                ctx.file_svc,
+                file_entries,
+                data_member=(data_filename, data_path),
+            )
+        except (FileNotFoundError, SyncError) as e:
+            raise HTTPException(404, detail=f"Export file not found: {e}")
+        tmp.remove(zip_path)
+        tmp.remove(data_path)
+        return serve(zip_path, "application/zip", f"{view_name}.zip", data_path)

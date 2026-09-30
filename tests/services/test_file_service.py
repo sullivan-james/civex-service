@@ -148,3 +148,21 @@ def test_manifest_is_per_volume(tmp_path: Path) -> None:
 
     assert (tmp_path / "first" / "manifest.jsonl").exists()
     assert not (tmp_path / "second" / "manifest.jsonl").exists()
+
+
+def test_put_path_copies_in_chunks_and_dedupes(tmp_path, monkeypatch) -> None:
+    import civex.repositories.local.file_store as fs
+
+    monkeypatch.setattr(fs, "_COPY_CHUNK", 7)  # force many chunks
+    vol = VolumeConfig(name="default", path="vol")
+    config = StoreConfig(volumes={"default": vol}, volume_queue=["default"])
+    store = VolumeAwareFileObjectStore(config, tmp_path)
+    src = tmp_path / "big.bin"
+    payload = bytes(range(256)) * 10
+    src.write_bytes(payload)
+
+    ref = store.put_path(src)
+    assert ref.size == len(payload)
+    assert store.get(ref.sha256) == payload
+    assert store.put_path(src).sha256 == ref.sha256
+    assert not list((tmp_path / "vol" / ".tmp").glob("*.part"))

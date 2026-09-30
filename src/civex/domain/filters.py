@@ -130,3 +130,13 @@ def map_fields(node: FilterNode, name_to_id: dict[str, str]) -> FilterNode:
     return FilterCondition(
         field=name_to_id.get(node.field, node.field), op=node.op, value=node.value
     )
+
+
+@dataclass(frozen=True)
+class SortKey:
+    """One ORDER BY term over a record field, already resolved to the
+    stored (field-UUID) key. `numeric` picks numeric over text comparison."""
+
+    field_id: str
+    numeric: bool = False
+    descending: bool = False
