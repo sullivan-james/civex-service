@@ -20,6 +20,77 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## v1.1.1 — collection timezones, scalable file store & queries (2026-09-30)
+
+### Breaking
+- Two schema migrations run automatically on first connect; both are
+  additive, but the first backfills from existing data, so expect a pause on
+  large installs:
+  - `e5b81c3d7a04` adds `stored_objects` (file inventory),
+    `file_references` (record/job → blob links, kept in sync by ORM events),
+    `job_affected_schemas`, and indexes for the job queue, audit log, step
+    analytics and record trees. Existing records and jobs are backfilled.
+  - `7c2e9d4a1b58` adds a nullable `datasets.timezone`. No backfill: `NULL`
+    means "unset", which is how every existing collection already behaves.
+- Datetime values written through the API are now normalised to UTC. Before,
+  only the CLI did this and the API stored the raw string. Offset-less values
+  are read in field zone > collection zone > UTC; malformed values and times
+  that a DST change skips or repeats are rejected with an error.
+  `extract_from_filename` now returns offset-less datetimes (a filename
+  timestamp is local wall time, not UTC), so they are localised by that same
+  rule.
+
+### Features
+- **Collection and field timezones.** Collections take an optional IANA
+  timezone (API, `--timezone` on the CLI, a picker in the UI; an empty value
+  clears it). A datetime field can override it with a `timezone` restriction.
+  The UI shows datetimes as wall time with a zone abbreviation (UTC on
+  hover), edits them in the effective zone, sends UTC, and applies min/max
+  bounds and view filters in that zone. The CSV import wizard says which zone
+  offset-less times will be read in. Sync bundles carry the zone, and an older
+  peer's bundle cannot clear a local one.
+- **Editable child-record table.** The read-only child table on record pages
+  is now editable in place (click, Enter or F2 to edit; Enter or blur saves,
+  Esc cancels), with a draft row for creating child records. File and
+  reference fields edit in a popover.
+- `civex store gc --rebuild-refs` recomputes `file_references` from scratch
+  if it is ever in doubt (raw SQL edits, an import that bypassed the ORM).
+- Jobs can be filtered by `affected_schema`.
+
+### Performance
+- **File store.** Usage is read from the `stored_objects` inventory instead of
+  walking the store on every request, and GC reconciles the inventory against
+  disk so drift self-heals. Uploads (multipart is now chunked) and downloads
+  (with Range support) stream instead of buffering whole files. GC checks
+  bounded batches against `file_references` rather than loading every record
+  and job. Dedupe hits now refresh an object's mtime, so the GC grace period
+  applies to them.
+- **Queries and exports.** View preview/export, collection CSV, dump and zip
+  exports now sort, filter and page in SQL and write to temp files. Trash and
+  job lists are paginated, and the AI count tool uses a SQL count.
+- **Web UI.** Routes are lazy-loaded and heavy vendors split out (entry
+  bundle 1.85 MB → 290 kB; CodeMirror, xterm and recharts load on demand).
+  Idle job-count polling backs off, and stale record-picker responses are
+  dropped.
+
+### Fixes
+- Purging a job that had step executions no longer fails (the bulk delete
+  skipped the `step_executions` cascade).
+- Accessibility: `aria-sort` now sits on column headers, and clickable table
+  rows are keyboard-activatable.
+
+### Security
+- Bumped the transitive dependencies `urllib3` 2.7.0 → 2.8.0
+  (CVE-2026-97687/97688/97689) and `virtualenv` 21.6.1 → 21.14.1
+  (PYSEC-2026-4011..4014), plus `python-discovery`. Only `uv.lock` changes.
+
+### Internal
+- Route error boundary; colour-token migration finished with a wider
+  hardcoded-colour lint; React Testing Library component tests for
+  `DynamicField`, `RecordForm` and `MapStep`; `SchemaFieldsSection`
+  extracted from `SchemaDetailPage`; `jsdom` pinned to `^27` so frontend tests
+  run on Node 20; `tzdata` added for platforms without a system tz database.
+
 ## v1.1.0 — batteries included, `civex update` (2026-09-30)
 
 ### Breaking
