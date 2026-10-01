@@ -437,7 +437,10 @@ class RecordService:
                 return None
             if dataset_id not in dataset_names:
                 ds = self._datasets.get_by_id(
-                    dataset_id, include_deleted=True, with_count=False
+                    dataset_id,
+                    include_deleted=True,
+                    with_count=False,
+                    with_schemas=False,
                 )
                 dataset_names[dataset_id] = ds.name if ds else None
             return dataset_names[dataset_id]
@@ -693,6 +696,7 @@ class RecordService:
         editing a record never fails over a reference it already held."""
         if shape is None:
             return
+        wanted: list[tuple[str, Any]] = []
         for rf in shape.fields:
             field = rf.field
             if field.dtype not in ("reference", "reference_list"):
@@ -702,35 +706,50 @@ class RecordService:
                 unchanged is not None and unchanged.get(field.name) == value
             ):
                 continue
-            items = value if isinstance(value, list) else [value]
-            for item in items:
-                self._check_reference_target(field.name, item, dataset)
+            for item in value if isinstance(value, list) else [value]:
+                wanted.append((field.name, item))
+        self._check_reference_targets(wanted, dataset)
 
-    def _check_reference_target(
-        self, field_name: str, raw: Any, dataset: DatasetDTO
+    def _check_reference_targets(
+        self, wanted: list[tuple[str, Any]], dataset: DatasetDTO
     ) -> None:
-        try:
-            target_id = uuid.UUID(str(raw))
-        except ValueError:
-            raise ValidationError(
-                f"Field '{field_name}': '{raw}' is not a record id"
-            ) from None
-        found = self._records.list_by_ids([target_id])
-        target = found[0] if found else None
-        if target is None or target.deleted_at is not None:
-            raise ValidationError(f"Field '{field_name}': record {raw} not found")
-        if target.dataset_id == dataset.id:
+        """Check every (field name, record id) in `wanted` against `dataset`:
+        the target must be a live record here or in a global collection. All
+        the targets are fetched together, and each collection looked up once,
+        however many references a record holds."""
+        if not wanted:
             return
-        owner = self._datasets.get_by_id(
-            target.dataset_id, include_deleted=True, with_count=False
-        )
-        if owner is None or not can_reference(dataset.id, owner.id, owner.scope):
-            where = f"collection '{owner.name}'" if owner else "another collection"
-            raise ValidationError(
-                f"Field '{field_name}': record {str(target_id)[:8]} is in "
-                f"{where}, which is local. A record can only reference "
-                f"records in its own collection or in a global collection."
-            )
+        ids: list[uuid.UUID] = []
+        for field_name, raw in wanted:
+            try:
+                ids.append(uuid.UUID(str(raw)))
+            except ValueError:
+                raise ValidationError(
+                    f"Field '{field_name}': '{raw}' is not a record id"
+                ) from None
+        targets = {t.id: t for t in self._records.list_by_ids(ids)}
+        owners: dict[uuid.UUID, DatasetDTO | None] = {}
+        for (field_name, raw), target_id in zip(wanted, ids):
+            target = targets.get(target_id)
+            if target is None or target.deleted_at is not None:
+                raise ValidationError(f"Field '{field_name}': record {raw} not found")
+            if target.dataset_id == dataset.id:
+                continue
+            if target.dataset_id not in owners:
+                owners[target.dataset_id] = self._datasets.get_by_id(
+                    target.dataset_id,
+                    include_deleted=True,
+                    with_count=False,
+                    with_schemas=False,
+                )
+            owner = owners[target.dataset_id]
+            if owner is None or not can_reference(dataset.id, owner.id, owner.scope):
+                where = f"collection '{owner.name}'" if owner else "another collection"
+                raise ValidationError(
+                    f"Field '{field_name}': record {str(target_id)[:8]} is in "
+                    f"{where}, which is local. A record can only reference "
+                    f"records in its own collection or in a global collection."
+                )
 
     def referrer_counts(self, record_id: str) -> list[ReferrerGroupDTO]:
         """What points at this record: live records holding a reference to it,
@@ -746,7 +765,10 @@ class RecordService:
         ):
             if dataset_id not in datasets:
                 datasets[dataset_id] = self._datasets.get_by_id(
-                    dataset_id, include_deleted=True, with_count=False
+                    dataset_id,
+                    include_deleted=True,
+                    with_count=False,
+                    with_schemas=False,
                 )
             ds = datasets[dataset_id]
             field_name, dtype = field_map[str(field_id)]
@@ -824,7 +846,11 @@ class RecordService:
         data: dict[str, Any],
         parent_record_id: str | None = None,
         _job_depth: int = 0,
+        with_labels: bool = True,
     ) -> RecordDTO:
+        """Create a record. `with_labels=False` skips resolving its reference
+        values' display names and collection for the returned DTO (a few
+        queries) -- for loops, like a restore, that discard the result."""
         dataset = self._datasets.get_by_name(dataset_name, with_count=False)
         if not dataset:
             raise NotFoundError(f"Dataset '{dataset_name}' not found")
@@ -894,7 +920,9 @@ class RecordService:
                         changed_fields=set_fields,
                         depth=_job_depth,
                     )
-        return self._attach_reference_labels([named], shapes)[0]
+        return (
+            self._attach_reference_labels([named], shapes)[0] if with_labels else named
+        )
 
     def get(self, record_id: str) -> RecordDTO:
         record = self._records.get_by_prefix(record_id)
@@ -991,7 +1019,10 @@ class RecordService:
         old_data = self._ids_to_names(raw.data, shape)
         dataset = (
             self._datasets.get_by_id(
-                raw.dataset_id, include_deleted=True, with_count=False
+                raw.dataset_id,
+                include_deleted=True,
+                with_count=False,
+                with_schemas=False,
             )
             if raw.dataset_id
             else None
@@ -1038,7 +1069,9 @@ class RecordService:
         resolve, so a bad query fails loudly instead of matching nothing."""
         dataset_id = None
         if query.dataset:
-            dataset = self._datasets.get_by_name(query.dataset, with_count=False)
+            dataset = self._datasets.get_by_name(
+                query.dataset, with_count=False, with_schemas=False
+            )
             if not dataset:
                 raise NotFoundError(f"Dataset '{query.dataset}' not found")
             dataset_id = dataset.id
@@ -1373,7 +1406,9 @@ class RecordService:
         schema = self._schema_svc.get(schema_name)
         dataset_ids = None
         if reachable_from:
-            source = self._datasets.get_by_name(reachable_from, with_count=False)
+            source = self._datasets.get_by_name(
+                reachable_from, with_count=False, with_schemas=False
+            )
             if not source:
                 raise NotFoundError(f"Dataset '{reachable_from}' not found")
             dataset_ids = [source.id] + [
@@ -1401,7 +1436,9 @@ class RecordService:
             return []
         dataset_id = None
         if collection:
-            dataset = self._datasets.get_by_name(collection, with_count=False)
+            dataset = self._datasets.get_by_name(
+                collection, with_count=False, with_schemas=False
+            )
             if not dataset:
                 raise NotFoundError(f"Dataset '{collection}' not found")
             dataset_id = dataset.id
@@ -1665,7 +1702,9 @@ class RecordService:
     ) -> list[RecordDTO]:
         dataset_id = None
         if dataset_name:
-            dataset = self._datasets.get_by_name(dataset_name, with_count=False)
+            dataset = self._datasets.get_by_name(
+                dataset_name, with_count=False, with_schemas=False
+            )
             if not dataset:
                 raise NotFoundError(f"Dataset '{dataset_name}' not found")
             dataset_id = dataset.id

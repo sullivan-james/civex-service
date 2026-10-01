@@ -17,22 +17,30 @@ class LocalDatasetRepository:
         self._s = session
 
     def get_by_name(
-        self, name: str, include_deleted: bool = False, with_count: bool = True
+        self,
+        name: str,
+        include_deleted: bool = False,
+        with_count: bool = True,
+        with_schemas: bool = True,
     ) -> DatasetDTO | None:
         q = self._s.query(Dataset).filter_by(name=name)
         if not include_deleted:
             q = q.filter(Dataset.deleted_at.is_(None))
         row = q.first()
-        return _to_dto(self._s, row, with_count) if row else None
+        return _to_dto(self._s, row, with_count, with_schemas) if row else None
 
     def get_by_id(
-        self, id: uuid.UUID, include_deleted: bool = False, with_count: bool = True
+        self,
+        id: uuid.UUID,
+        include_deleted: bool = False,
+        with_count: bool = True,
+        with_schemas: bool = True,
     ) -> DatasetDTO | None:
         q = self._s.query(Dataset).filter_by(id=id)
         if not include_deleted:
             q = q.filter(Dataset.deleted_at.is_(None))
         row = q.first()
-        return _to_dto(self._s, row, with_count) if row else None
+        return _to_dto(self._s, row, with_count, with_schemas) if row else None
 
     def list_all(self, with_count: bool = True) -> list[DatasetDTO]:
         return _to_dtos(
@@ -177,18 +185,27 @@ class LocalDatasetRepository:
         self._s.flush()
 
 
-def _to_dto(session: Session, row: Dataset, with_count: bool = True) -> DatasetDTO:
-    return _to_dtos(session, [row], with_count)[0]
+def _to_dto(
+    session: Session,
+    row: Dataset,
+    with_count: bool = True,
+    with_schemas: bool = True,
+) -> DatasetDTO:
+    return _to_dtos(session, [row], with_count, with_schemas)[0]
 
 
 def _to_dtos(
-    session: Session, rows: list[Dataset], with_count: bool = True
+    session: Session,
+    rows: list[Dataset],
+    with_count: bool = True,
+    with_schemas: bool = True,
 ) -> list[DatasetDTO]:
     """DTOs for `rows`, their schema lists from one query for the lot.
 
     The live-record count scans a collection's records, so a caller that only
     needs the collections themselves (every record write looks one up) skips
-    it, leaving `record_count` at 0."""
+    it, leaving `record_count` at 0; one that doesn't read `schemas` skips
+    that lookup too."""
     if not rows:
         return []
     ids = [r.id for r in rows]
@@ -207,11 +224,15 @@ def _to_dtos(
             )
     schema_names: dict[uuid.UUID, list[str]] = {}
     for dataset_id, name in (
-        session.query(DatasetSchema.dataset_id, Schema.name)
-        .join(Schema, DatasetSchema.schema_id == Schema.id)
-        .filter(DatasetSchema.dataset_id.in_(ids))
-        .order_by(Schema.name)
-        .all()
+        ()
+        if not with_schemas
+        else (
+            session.query(DatasetSchema.dataset_id, Schema.name)
+            .join(Schema, DatasetSchema.schema_id == Schema.id)
+            .filter(DatasetSchema.dataset_id.in_(ids))
+            .order_by(Schema.name)
+            .all()
+        )
     ):
         schema_names.setdefault(dataset_id, []).append(name)
     return [

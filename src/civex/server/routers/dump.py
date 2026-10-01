@@ -123,6 +123,7 @@ async def import_dump(
                 r["schema"],
                 r.get("data") or {},
                 parent_record_id=r.get("parent_record_id"),
+                with_labels=False,
             )
             records_restored += 1
             if records_restored % RESTORE_BATCH == 0:

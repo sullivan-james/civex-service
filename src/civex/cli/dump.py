@@ -144,6 +144,7 @@ def restore(
                 r["schema"],
                 data,
                 parent_record_id=r.get("parent_record_id"),
+                with_labels=False,
             )
             pending += 1
             if pending >= RESTORE_BATCH:

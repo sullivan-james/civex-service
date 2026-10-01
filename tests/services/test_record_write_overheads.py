@@ -118,3 +118,23 @@ def test_streaming_a_large_listing_never_pages_by_offset(
     assert sorted(streamed) == sorted(made)  # nothing skipped or repeated
     assert [len(p) for p in pages] == [10, 10, 5]
     assert offsets == [0, 0, 0]  # continued from the last record, not skipped to
+
+
+def test_add_can_skip_resolving_reference_labels(
+    ctx: AppContext, make_schema, make_collection, make_record
+):
+    make_schema("patient", fields=[("name", "string")])
+    make_schema("visit", fields=[("patient_ref", "reference")])
+    make_collection("study")
+    patient = make_record("study", "patient", {"name": "Ada"})
+    data = {"patient_ref": str(patient.id)}
+
+    full = ctx.record_svc.add("study", "visit", data)
+    bare = ctx.record_svc.add("study", "visit", data, with_labels=False)
+
+    assert full.reference_labels == {str(patient.id): "Ada"}
+    assert bare.reference_labels is None
+    assert bare.data == full.data  # same record, just no display lookups
+    with statements(ctx) as seen:
+        ctx.record_svc.add("study", "visit", data, with_labels=False)
+    assert len(seen) < 12
