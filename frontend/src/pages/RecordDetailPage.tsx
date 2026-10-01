@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link, useParams, useNavigate } from 'react-router'
+import { useEffect, useState } from 'react'
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router'
 import {
   useRecord,
   useRecordCounts,
@@ -20,6 +20,7 @@ import {
   ConfirmDialog,
   Section,
   CollapsibleSection,
+  PinButton,
 } from '../components/ui'
 import { Play } from '../components/ui/icons'
 import { ContainsPreview } from '../components/records/ContainsPreview'
@@ -27,6 +28,8 @@ import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { RecordPageFrame } from '../components/records/RecordPageFrame'
 import { fieldSaveErrors } from '../components/records/saveErrors'
 import { recordTrail } from '../utils/recordTrail'
+import { recordTarget } from '../utils/navTargets'
+import { recordRecent } from '../hooks/usePins'
 import { formatDate } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
@@ -36,10 +39,13 @@ import RecordProvenance from '../components/jobs/RecordProvenance'
 import { AuditTrail } from '../components/audit/AuditTrail'
 import { describeAuditEntry as describeRecordAuditEntry } from '../utils/recordAudit'
 import { RecordFieldGrid } from '../components/records/RecordFieldGrid'
+import { TriageBar } from '../components/records/TriageBar'
+import { TRIAGE_PARAM } from '../utils/triage'
 
 export default function RecordDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [runWorkflow, setRunWorkflow] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -65,6 +71,14 @@ export default function RecordDetailPage() {
   const hasActiveJobs = (recordJobs ?? []).some(
     (j) => j.status === 'pending' || j.status === 'running',
   )
+
+  // Opened records feed Home's "pick up where you left off".
+  const recordKey = record?.id
+  const recordLabel = record?.natural_name
+  useEffect(() => {
+    if (recordKey && record) recordRecent(recordTarget(record))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordKey, recordLabel])
 
   const breadcrumbs = recordTrail(undefined)
 
@@ -140,6 +154,9 @@ export default function RecordDetailPage() {
             )}
           </span>
         }
+        action={
+          <PinButton target={recordTarget(record)} noun="record" size="md" />
+        }
         description={
           <>
             Added {formatDate(record.created_at)}
@@ -148,6 +165,12 @@ export default function RecordDetailPage() {
           </>
         }
       >
+        <TriageBar
+          sessionId={searchParams.get(TRIAGE_PARAM)}
+          record={record}
+          fields={schema?.fields ?? []}
+        />
+
         {/* Own fields */}
         <Section title="Fields">
           <RecordFieldGrid

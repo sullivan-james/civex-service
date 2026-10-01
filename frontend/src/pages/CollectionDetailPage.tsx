@@ -16,11 +16,14 @@ import {
   Field,
   Input,
   Page,
+  PinButton,
   TimeZoneSelect,
   TableSkeleton,
 } from '../components/ui'
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { recordCollectionVisit } from '../hooks/useFrequentCollections'
+import { recordRecent } from '../hooks/usePins'
+import { collectionTarget } from '../utils/navTargets'
 import { RecordsExplorer } from '../components/explorer/RecordsExplorer'
 import { WithHierarchy } from '../components/explorer/HierarchySidebar'
 import { AuditTrail } from '../components/audit/AuditTrail'
@@ -49,6 +52,11 @@ export default function CollectionDetailPage() {
   useEffect(() => {
     if (collectionName) recordCollectionVisit(collectionName)
   }, [collectionName])
+  const collectionId = collection?.id
+  useEffect(() => {
+    if (collectionId && collectionName)
+      recordRecent(collectionTarget({ id: collectionId, name: collectionName }))
+  }, [collectionId, collectionName])
   const updateCollection = useUpdateCollection()
   const deleteCollection = useDeleteCollection()
 
@@ -139,11 +147,18 @@ export default function CollectionDetailPage() {
           }
           description={collection.description ?? undefined}
           action={
-            <Link to={`/collections/${id}/import`}>
-              <Button size="sm" variant="primary">
-                <Upload size={14} /> Guided import
-              </Button>
-            </Link>
+            <>
+              <PinButton
+                target={collectionTarget(collection)}
+                noun="collection"
+                size="md"
+              />
+              <Link to={`/collections/${id}/import`}>
+                <Button size="sm" variant="primary">
+                  <Upload size={14} /> Guided import
+                </Button>
+              </Link>
+            </>
           }
           secondaryActions={[
             { label: 'Edit details', onClick: startEditing },

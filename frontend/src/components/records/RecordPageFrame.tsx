@@ -16,6 +16,7 @@ export function RecordPageFrame({
   currentSchema,
   title,
   description,
+  action,
   children,
 }: {
   /** Collection name, once loaded. */
@@ -35,6 +36,7 @@ export function RecordPageFrame({
   currentSchema?: string
   title: ReactNode
   description?: ReactNode
+  action?: ReactNode
   children: ReactNode
 }) {
   const { data: schemas } = useSchemas()
@@ -62,6 +64,7 @@ export function RecordPageFrame({
         ]}
         title={title}
         description={description}
+        action={action}
       >
         {children}
       </Page>

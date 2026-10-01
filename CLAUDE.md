@@ -174,6 +174,8 @@ frontend/src/
   utils/dates.ts  # timezone-aware datetime helpers (utcToZonedLocal / zonedLocalToUTC / formatDateTime / effectiveTimeZone)
 ```
 
+Pins, recents and the Ctrl+K palette are per-browser (localStorage, `utils/pins.ts` + `hooks/usePins.ts`; there are no user accounts). A pin's `NavTarget` is built in `utils/navTargets.ts`; a pinned saved filter's live count is `hooks/useViewCount.ts` (keyed under `records`, so any record edit refreshes it). Triage ("Work through these") freezes a record-id list in `sessionStorage` (`utils/triage.ts`) and carries only a token in `/records/:id?triage=`; `TriageBar` renders only when the token's list contains the record. "Reviewed" is a boolean field chosen per schema in the browser -- no backend state.
+
 `DynamicField` is the single component that renders an editable input for any field type, including restriction-aware behaviour (choices→select, min/max, accept/max_size on files). `JobsTable` owns its own pagination state and accepts `recordId?` + `statusFilter?` props — do not duplicate pagination in parent pages.
 
 ## Key files for common tasks

@@ -57,6 +57,20 @@ Opening [http://localhost:8000](http://localhost:8000) (or wherever you configur
 
 **Workflows** — View and edit workflow YAML files directly in the browser. Run a workflow manually by selecting it from a record's detail page.
 
+### Pins, Home and jump-to
+
+Click the star on a saved filter, a collection, a record or a drilled-down place in the explorer to **pin** it. Pins appear in a **Pinned** section at the top of the left-hand navigation; a pinned saved filter shows how many records it matches right now. Pins and the list of things you opened lately are kept in your browser (they don't follow you to another machine or browser profile, and clearing site data removes them).
+
+**Home** shows your pinned saved filters with their live counts (plus a card for failed runs) under *Needs your attention*, and what you opened lately under *Pick up where you left off*, each with a star to pin it.
+
+Press **Ctrl+K** (**⌘K** on a Mac), or click **Jump to** in the top bar, to search collections, schemas, saved filters, records and places by name. With nothing typed it lists your pins and recents. The star on a result pins it.
+
+### Working through a list
+
+On a collection or schema's records, **Work through these** opens the first matching record and steps through the rest one at a time. A bar on each record shows where you are (*3 of 14*), with **Previous**, **Next**, **Skip** and **Mark reviewed & next**. The list is frozen when you start, so a record that drops out of the filter once it is marked doesn't shift the rest. A record opened any other way — from search, a link, or a new tab — has no list and no bar.
+
+*Mark reviewed* sets a yes/no (`boolean`) field on the record to true: the one named `reviewed` if the schema has one, otherwise its first yes/no field, or whichever you pick in the bar (remembered in your browser). A schema with no yes/no field can still be stepped through, just not marked. Pair it with a saved filter such as "reviewed is no" to have the work list shrink as you go.
+
 ## HTTP API
 
 Everything the web UI does, it does through `/api/` — schemas, collections (`/api/collections`), records, files, workflows, and jobs. Responses are JSON. For the complete, current list of endpoints, use the interactive documentation (Swagger UI) at [`/docs`](http://localhost:8000/docs) while the server is running, rather than a table here that would drift from the code.

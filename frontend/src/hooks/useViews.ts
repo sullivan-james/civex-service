@@ -21,6 +21,15 @@ export function useViews(schemaName: string) {
   })
 }
 
+/** Every saved view across every schema (the palette's filter search). */
+export function useAllViews(enabled = true) {
+  return useQuery({
+    queryKey: ['all-views'],
+    queryFn: viewsApi.listAll,
+    enabled,
+  })
+}
+
 export function useView(schemaName: string, viewName: string) {
   return useQuery({
     queryKey: ['views', schemaName, viewName],

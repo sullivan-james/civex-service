@@ -1,6 +1,7 @@
 import {
   type ComponentType,
   type ReactNode,
+  useEffect,
   useId,
   useRef,
   useState,
@@ -18,6 +19,8 @@ import { errorMessage } from '../lib/errors'
 import { useUISettings } from '../hooks/useUISettings'
 import { useFrequentCollections } from '../hooks/useFrequentCollections'
 import { useDialogA11y } from '../hooks/useDialogA11y'
+import { PinnedNav } from './PinnedNav'
+import { CommandPalette } from './CommandPalette'
 import AiAttestationGate from './ai/AiAttestationGate'
 import AiPanel from './ai/AiPanel'
 import { useToast } from './ui/ToastProvider'
@@ -48,6 +51,7 @@ import {
   Menu,
   X,
   Trash2,
+  Search,
 } from './ui/icons'
 
 declare global {
@@ -248,6 +252,7 @@ function NavGroups({
   )
   return (
     <div className="flex flex-col">
+      <PinnedNav collapsed={collapsed} onNavigate={onNavigate} />
       {groups.map((group) => (
         <div key={group.heading}>
           {!collapsed && (
@@ -286,6 +291,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [aiOpen, setAiOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const drawerWrapperRef = useRef<HTMLDivElement>(null)
   const drawerRef = useRef<HTMLDivElement>(null)
   const drawerTitleId = useId()
@@ -313,6 +319,23 @@ export default function Layout({ children }: { children: ReactNode }) {
     rootRef: drawerWrapperRef,
     dialogRef: drawerRef,
   })
+
+  // Ctrl/Cmd+K opens the jump-to palette from anywhere (and closes it again).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === 'k'
+      ) {
+        e.preventDefault()
+        setPaletteOpen((o) => !o)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   function closeDrawer() {
     setDrawerOpen(false)
@@ -375,6 +398,19 @@ export default function Layout({ children }: { children: ReactNode }) {
         >
           civex
         </NavLink>
+
+        <button
+          onClick={() => setPaletteOpen(true)}
+          title="Jump to… (Ctrl+K)"
+          aria-keyshortcuts="Control+K Meta+K"
+          className={navButtonClass}
+        >
+          <Search size={12} />
+          Jump to
+          <kbd className="ml-1 hidden rounded border border-nav-border px-1 text-[10px] sm:inline">
+            Ctrl K
+          </kbd>
+        </button>
 
         <button
           onClick={() => queryClient.refetchQueries({ type: 'active' })}
@@ -594,6 +630,8 @@ export default function Layout({ children }: { children: ReactNode }) {
       </div>
 
       {/* Footer */}
+      {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
+
       <footer className="shrink-0 border-t border-border bg-canvas px-6 py-3 flex items-center justify-center gap-4">
         <NavLink
           to="/legal"

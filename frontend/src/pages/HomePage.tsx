@@ -2,6 +2,7 @@ import { Link } from 'react-router'
 import { useJobsPaged } from '../hooks/useWorkflows'
 import { Badge, EmptyState, Page, StepBadge } from '../components/ui'
 import { ArrowRight } from '../components/ui/icons'
+import { HomeShortcuts } from '../components/home/HomeShortcuts'
 
 interface OnboardingStep {
   to: string
@@ -43,6 +44,8 @@ export default function HomePage() {
       title="Get started"
       description="Import data, define record types, and let automations handle the rest."
     >
+      <HomeShortcuts />
+
       <ol className="flex flex-col gap-3 sm:flex-row sm:gap-0">
         {ONBOARDING_STEPS.map((s, i) => (
           <li key={s.to} className="flex sm:flex-1">
