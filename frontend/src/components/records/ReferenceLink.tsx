@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import { useRecord } from '../../hooks/useRecords'
+import { CollectionMarker } from './CollectionMarker'
 
 export function referenceLabel(
   id: string,
@@ -8,11 +9,23 @@ export function referenceLabel(
   return labels?.[id] ?? id.slice(0, 8)
 }
 
-function LinkedId({ id, label }: { id: string; label: string | undefined }) {
+function LinkedId({
+  id,
+  label,
+  collection,
+}: {
+  id: string
+  label: string | undefined
+  /** Set when the target lives in a different (global) collection. */
+  collection?: string
+}) {
   return (
-    <Link to={`/records/${id}`} className="text-accent hover:underline">
-      {label ?? <span className="font-mono">{id.slice(0, 8)}</span>}
-    </Link>
+    <>
+      <Link to={`/records/${id}`} className="text-accent hover:underline">
+        {label ?? <span className="font-mono">{id.slice(0, 8)}</span>}
+      </Link>
+      {collection && <CollectionMarker name={collection} />}
+    </>
   )
 }
 
@@ -26,11 +39,20 @@ function LinkedId({ id, label }: { id: string; label: string | undefined }) {
 export function ReferenceLink({
   id,
   labels,
+  collections,
 }: {
   id: string
   labels?: Record<string, string | null> | null
+  /** id -> collection name, for targets outside the record's own collection. */
+  collections?: Record<string, string> | null
 }) {
-  return <LinkedId id={id} label={labels?.[id] ?? undefined} />
+  return (
+    <LinkedId
+      id={id}
+      label={labels?.[id] ?? undefined}
+      collection={collections?.[id]}
+    />
+  )
 }
 
 /** Self-fetching variant for contexts with no pre-resolved label -- only

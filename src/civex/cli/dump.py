@@ -79,7 +79,12 @@ def dump(
     if not no_data:
         for dataset in ctx.dataset_svc.list_all():
             datasets_out.append(
-                {"name": dataset.name, "description": dataset.description}
+                {
+                    "name": dataset.name,
+                    "description": dataset.description,
+                    "scope": dataset.scope,
+                    "schemas": dataset.schemas,
+                }
             )
             for record in ctx.record_svc.find(
                 dataset.name, schema_name=None, filters=[], limit=100_000
@@ -217,7 +222,12 @@ def restore(
     # --- datasets ---
     for d in doc.get("datasets", []):
         try:
-            ctx.dataset_svc.create(d["name"], description=d.get("description"))
+            ctx.dataset_svc.create(
+                d["name"],
+                description=d.get("description"),
+                scope=d.get("scope") or "local",
+                schemas=d.get("schemas") or [],
+            )
             ctx.commit()
         except AlreadyExistsError as e:
             console.print(f"  [warning]Dataset '{d['name']}': {e} — skipped.[/warning]")

@@ -33,16 +33,39 @@ def dataset_create(
             "UTC offset are read in this zone, and the web UI shows them in it."
         ),
     ),
+    scope: str = typer.Option(
+        "local",
+        "--scope",
+        help=(
+            "'local' (default): records here can only be referenced from this "
+            "collection. 'global': records here can be referenced from every "
+            "collection, for shared reference data such as species or sites."
+        ),
+    ),
+    schemas: list[str] = typer.Option(
+        [],
+        "--schema",
+        "-s",
+        help=(
+            "A schema the collection is for; repeat for several. Records here "
+            "can only be of these schemas. A child schema needs its parent "
+            "listed too."
+        ),
+    ),
 ) -> None:
     """Create a new collection."""
     ctx = _ctx()
     try:
         dataset = ctx.dataset_svc.create(
-            name, description=description, timezone=timezone
+            name,
+            description=description,
+            timezone=timezone,
+            scope=scope,
+            schemas=schemas,
         )
         ctx.commit()
         console.print(f"[success]Created collection '{dataset.name}'.[/success]")
-    except (AlreadyExistsError, ValidationError) as e:
+    except (AlreadyExistsError, NotFoundError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
@@ -58,9 +81,9 @@ def dataset_list() -> None:
         )
         return
 
-    table = Table("Name", "Records", "Description")
+    table = Table("Name", "Scope", "Records", "Description")
     for d in datasets:
-        table.add_row(d.name, str(d.record_count), d.description or "")
+        table.add_row(d.name, d.scope, str(d.record_count), d.description or "")
     console.print(table)
 
 
@@ -79,6 +102,8 @@ def dataset_show(name: str = typer.Argument(..., help="Collection name")) -> Non
     if d.description:
         console.print(f"  {d.description}")
     console.print(f"  Timezone  {d.timezone or 'not set (UTC for input)'}")
+    console.print(f"  Scope     {d.scope}")
+    console.print(f"  Schemas   {', '.join(d.schemas) or 'none'}")
 
     if d.record_count > 0:
         records = ctx.record_svc.find(name, schema_name=None, filters=[], limit=100_000)
@@ -107,17 +132,46 @@ def dataset_update(
             "Pass an empty string to clear it. Stored values are not changed."
         ),
     ),
+    scope: Optional[str] = typer.Option(
+        None,
+        "--scope",
+        help=(
+            "'local' or 'global'. A global collection that other collections "
+            "reference can't be made local."
+        ),
+    ),
+    schemas: list[str] = typer.Option(
+        [],
+        "--schema",
+        "-s",
+        help=(
+            "Replace the collection's schema list; repeat for several. A "
+            "schema that still has records here can't be removed."
+        ),
+    ),
 ) -> None:
-    """Update a collection's name, description or timezone."""
-    if rename is None and description is None and timezone is None:
+    """Update a collection's name, description, timezone, scope or schemas."""
+    if (
+        rename is None
+        and description is None
+        and timezone is None
+        and scope is None
+        and not schemas
+    ):
         console.print(
-            "[error]Provide at least one of --rename, --description or --timezone.[/error]"
+            "[error]Provide at least one of --rename, --description, --timezone, "
+            "--scope or --schema.[/error]"
         )
         raise typer.Exit(1)
     ctx = _ctx()
     try:
         dataset = ctx.dataset_svc.update(
-            name, new_name=rename, description=description, timezone=timezone
+            name,
+            new_name=rename,
+            description=description,
+            timezone=timezone,
+            scope=scope,
+            schemas=schemas or None,
         )
         ctx.commit()
         if rename and rename != name:
@@ -126,6 +180,27 @@ def dataset_update(
             )
         console.print(f"[success]Updated collection '{dataset.name}'.[/success]")
     except (NotFoundError, AlreadyExistsError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+
+
+@app.command("add-schema")
+def dataset_add_schema(
+    name: str = typer.Argument(..., help="Collection name"),
+    schemas: list[str] = typer.Argument(..., help="Schema name(s) to enable"),
+) -> None:
+    """Enable schemas on a collection, along with any parent schemas they need.
+
+    A collection only holds records of the schemas it is enabled for.
+    """
+    ctx = _ctx()
+    try:
+        dataset = ctx.dataset_svc.add_schemas(name, schemas)
+        ctx.commit()
+        console.print(
+            f"[success]'{dataset.name}' now has: {', '.join(dataset.schemas)}.[/success]"
+        )
+    except (NotFoundError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
@@ -147,7 +222,7 @@ def dataset_delete(
         ctx.dataset_svc.delete(name)
         ctx.commit()
         console.print(f"[success]Deleted '{name}'.[/success]")
-    except NotFoundError as e:
+    except (NotFoundError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 

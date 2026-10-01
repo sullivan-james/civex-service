@@ -225,14 +225,16 @@ class LocalRecordRepository:
         return q
 
     def list_by_schema(
-        self, schema_id: uuid.UUID, search: str | None = None, limit: int = 20
+        self,
+        schema_id: uuid.UUID,
+        search: str | None = None,
+        limit: int = 20,
+        dataset_ids: list[uuid.UUID] | None = None,
     ) -> list[RecordDTO]:
-        rows = (
-            self._by_schema_query(schema_id, search)
-            .order_by(Record.created_at.desc(), Record.id.desc())
-            .limit(limit)
-            .all()
-        )
+        q = self._by_schema_query(schema_id, search)
+        if dataset_ids is not None:
+            q = q.filter(Record.dataset_id.in_(dataset_ids))
+        rows = q.order_by(Record.created_at.desc(), Record.id.desc()).limit(limit).all()
         return [_to_dto(r) for r in rows]
 
     def count_schema_matches(

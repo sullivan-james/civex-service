@@ -24,7 +24,8 @@ import { recordCollectionVisit } from '../hooks/useFrequentCollections'
 import { RecordsExplorer } from '../components/explorer/RecordsExplorer'
 import { WithHierarchy } from '../components/explorer/HierarchySidebar'
 import { AuditTrail } from '../components/audit/AuditTrail'
-import { collectionsApi } from '../api/collections'
+import { collectionsApi, type CollectionScope } from '../api/collections'
+import { CollectionScopeFields } from '../components/collections/CollectionScopeFields'
 import { describeAuditEntry as describeCollectionAuditEntry } from '../utils/collectionAudit'
 import { errorMessage } from '../lib/errors'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
@@ -39,6 +40,8 @@ export default function CollectionDetailPage() {
   const [timezoneValue, setTimezoneValue] = useState('')
   const [nameValue, setNameValue] = useState('')
   const [descriptionValue, setDescriptionValue] = useState('')
+  const [scopeValue, setScopeValue] = useState<CollectionScope>('local')
+  const [schemasValue, setSchemasValue] = useState<string[]>([])
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   const { data: collection, isLoading, error } = useCollection(id!)
@@ -82,19 +85,29 @@ export default function CollectionDetailPage() {
     setNameValue(collection!.name)
     setDescriptionValue(collection!.description ?? '')
     setTimezoneValue(collection!.timezone ?? '')
+    setScopeValue(collection!.scope)
+    setSchemasValue(collection!.schemas)
     setEditing(true)
   }
 
   function handleSaveEdit() {
     const newName = nameValue.trim()
-    const body: { rename?: string; description?: string; timezone?: string } =
-      {}
+    const body: {
+      rename?: string
+      description?: string
+      timezone?: string
+      scope?: CollectionScope
+      schemas?: string[]
+    } = {}
     if (newName && newName !== collection!.name) body.rename = newName
     if (descriptionValue !== (collection!.description ?? ''))
       body.description = descriptionValue
     // '' clears the zone; omitting leaves it untouched.
     if (timezoneValue !== (collection!.timezone ?? ''))
       body.timezone = timezoneValue
+    if (scopeValue !== collection!.scope) body.scope = scopeValue
+    if (schemasValue.join('\n') !== collection!.schemas.join('\n'))
+      body.schemas = schemasValue
     if (!Object.keys(body).length) {
       setEditing(false)
       return
@@ -108,7 +121,10 @@ export default function CollectionDetailPage() {
   const recordCount = collection.record_count
 
   return (
-    <CollectionTimeZone timeZone={collection.timezone}>
+    <CollectionTimeZone
+      timeZone={collection.timezone}
+      collection={collection.name}
+    >
       <WithHierarchy dataset={collection.name} collectionId={id}>
         <Page
           breadcrumbs={[...breadcrumbs, { label: collection.name }]}
@@ -171,6 +187,12 @@ export default function CollectionDetailPage() {
                   unsetLabel="Not set — each viewer's own timezone"
                 />
               </Field>
+              <CollectionScopeFields
+                scope={scopeValue}
+                onScopeChange={setScopeValue}
+                schemas={schemasValue}
+                onSchemasChange={setSchemasValue}
+              />
               {updateCollection.error && (
                 <span role="alert" className="text-xs text-danger">
                   {errorMessage(updateCollection.error)}

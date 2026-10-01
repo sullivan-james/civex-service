@@ -329,6 +329,21 @@ class DatasetResponse(BaseModel):
             "overrides this."
         ),
     )
+    scope: str = Field(
+        default="local",
+        description=(
+            "Who may reference this collection's records: 'local' (only "
+            "records in this collection) or 'global' (records in any "
+            "collection)."
+        ),
+    )
+    schemas: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Names of the schemas this collection is for. Records in it can "
+            "only be of these schemas."
+        ),
+    )
 
     @classmethod
     def from_dto(cls, dto: DatasetDTO) -> DatasetResponse:
@@ -339,6 +354,8 @@ class DatasetResponse(BaseModel):
             record_count=dto.record_count,
             deleted_at=dto.deleted_at,
             timezone=dto.timezone,
+            scope=dto.scope,
+            schemas=list(dto.schemas),
         )
 
 
@@ -348,6 +365,17 @@ class CreateDatasetRequest(BaseModel):
     timezone: str | None = Field(
         default=None,
         description="IANA timezone for datetime values in this collection. Omit or null to leave unset.",
+    )
+    scope: str = Field(
+        default="local",
+        description="'local' (default) or 'global' -- see the collection's `scope`.",
+    )
+    schemas: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Names of the schemas the collection is for. A child schema's "
+            "parent schema must be listed too."
+        ),
     )
 
 
@@ -359,6 +387,21 @@ class UpdateDatasetRequest(BaseModel):
         description=(
             "IANA timezone for datetime values in this collection. Omit or "
             "null to leave unchanged; an empty string clears it back to unset."
+        ),
+    )
+    scope: str | None = Field(
+        default=None,
+        description=(
+            "'local' or 'global'. Omit or null to leave unchanged. A global "
+            "collection that other collections reference can't become local."
+        ),
+    )
+    schemas: list[str] | None = Field(
+        default=None,
+        description=(
+            "Replace the collection's schema list. Omit or null to leave "
+            "unchanged. A schema with records in the collection can't be "
+            "removed."
         ),
     )
 
@@ -400,6 +443,19 @@ class RecordResponse(BaseModel):
             "with a readable label without a lookup per value."
         ),
     )
+    collection: str | None = Field(
+        default=None,
+        description="Name of the collection this record lives in.",
+    )
+    reference_collections: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "For reference/reference_list targets that live in a different "
+            "collection (a global one), the target's id mapped to that "
+            "collection's name. Targets in the record's own collection are "
+            "left out."
+        ),
+    )
     child_counts: dict[str, int] | None = Field(
         default=None,
         description="Only when requested ('child_counts=true'): how many live "
@@ -433,6 +489,8 @@ class RecordResponse(BaseModel):
             updated_at=dto.updated_at,
             deleted_at=dto.deleted_at,
             reference_labels=dto.reference_labels,
+            collection=dto.dataset_name,
+            reference_collections=dto.reference_collections,
             child_counts=dto.child_counts,
             derived=dto.derived,
         )

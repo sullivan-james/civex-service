@@ -36,6 +36,7 @@ import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
 import { SelectionBar } from './SelectionBar'
 import { useExplorer, type ExplorerScope } from './useExplorer'
+import { useCollection } from '../../hooks/useCollections'
 import { viewPatch } from '../../utils/explorerState'
 import { ancestorSchemas } from '../../utils/hierarchy'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../../lib/deleteImpact'
@@ -66,6 +67,7 @@ export function RecordsExplorer({
   const x = useExplorer(scope)
   const { state, patch, listed, listedName } = x
   const dataset = scope.dataset
+  const { data: collection } = useCollection(dataset ?? '')
 
   // --- search box: local text, pushed to the URL after a pause
   const [searchInput, setSearchInput] = useState(state.q)
@@ -212,13 +214,44 @@ export function RecordsExplorer({
     else deleteMany.mutate([...selected], done)
   }
 
-  if (!listed && !x.page.isLoading && x.levels.length === 0)
+  if (!listed && !x.page.isLoading && x.levels.length === 0) {
+    // Levels come from record counts, so an empty collection has none and the
+    // list's own "Add" button never renders -- offer the collection's own
+    // top-level schemas here instead, or there is no way to create the first
+    // record (a child schema needs a parent record, so it can't start one).
+    const enabled = new Set(collection?.schemas ?? [])
+    const starters = dataset
+      ? (x.schemas ?? []).filter((s) => !s.parent_id && enabled.has(s.name))
+      : []
+    const noSchemas = !!collection && collection.schemas.length === 0
     return (
-      <EmptyState
-        title="No records yet"
-        message={emptyHint ?? 'Add a record to get started.'}
-      />
+      <div className="space-y-3">
+        <EmptyState
+          title="No records yet"
+          message={
+            noSchemas
+              ? 'This collection has no schemas yet. Edit the collection and choose the schemas it is for.'
+              : (emptyHint ?? 'Add a record to get started.')
+          }
+        />
+        {starters.length > 0 && (
+          <div className="flex flex-wrap justify-center gap-2">
+            {starters.map((s) => (
+              <Link
+                key={s.id}
+                to={`/collections/${dataset}/new?${new URLSearchParams({ schema: s.name })}`}
+              >
+                <Button variant="primary" size="sm">
+                  <Plus size={14} /> Add{' '}
+                  {displayLabel(s.name, s.label).toLowerCase()}
+                </Button>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
     )
+  }
 
   return (
     <div>

@@ -451,7 +451,7 @@ def test_preview_joins_and_filters_across_collections(
     ctx: AppContext, make_schema, make_collection
 ):
     _make_invoice_customer_schemas(ctx, make_schema)
-    make_collection("study_a")
+    make_collection("study_a", scope="global")
     make_collection("study_b")
     ctx.commit()
     customer = ctx.record_svc.add(
@@ -554,8 +554,14 @@ def test_preview_rows_returns_none_for_dangling_reference(
     _make_invoice_customer_schemas(ctx, make_schema)
     make_collection("study")
     ctx.commit()
-    invoice = ctx.record_svc.add(
-        "study", "invoice", {"amount": 50, "customer": str(uuid.uuid4())}
+    invoice = ctx.record_svc.add("study", "invoice", {"amount": 50})
+    # Writes reject a reference to a missing record, so dangle it underneath
+    # the service, the way a since-purged target would leave it.
+    ctx.record_svc._records.update(
+        id=invoice.id,
+        data=ctx.record_svc._names_to_ids(
+            {"amount": 50, "customer": str(uuid.uuid4())}, invoice.schema_id
+        ),
     )
     ctx.commit()
     ctx.view_svc.create(

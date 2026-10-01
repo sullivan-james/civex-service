@@ -23,6 +23,29 @@ runner = CliRunner()
 
 
 @pytest.fixture()
+def strict_schema_lists() -> None:
+    """Request this to run a test with the real "a collection only holds
+    records of its enabled schemas" check (see the autouse fixture below)."""
+
+
+@pytest.fixture(autouse=True)
+def _schema_lists_not_enforced(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Most tests are about something else and create collections without
+    enabling schemas on them, so the schema-list check is off unless a test
+    asks for `strict_schema_lists`. The rule has its own tests
+    (tests/services/test_collection_scope.py)."""
+    if "strict_schema_lists" in request.fixturenames:
+        return
+    from civex.services.record_service import RecordService
+
+    monkeypatch.setattr(
+        RecordService, "_check_schema_allowed", lambda self, dataset, schema: None
+    )
+
+
+@pytest.fixture()
 def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Initialise a civex project in a temp dir and cd into it."""
     monkeypatch.chdir(tmp_path)

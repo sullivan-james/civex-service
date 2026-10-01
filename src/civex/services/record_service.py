@@ -7,7 +7,14 @@ from datetime import date as _date, datetime as _dt
 from pathlib import Path
 from typing import Any, Iterator
 
-from civex.domain.dtos import FieldDTO, FileRef, RecordDTO, ResolvedField, SchemaDTO
+from civex.domain.dtos import (
+    DatasetDTO,
+    FieldDTO,
+    FileRef,
+    RecordDTO,
+    ResolvedField,
+    SchemaDTO,
+)
 from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
 from civex.domain.filters import (
     SELF,
@@ -20,6 +27,7 @@ from civex.domain.filters import (
     parse_filter_tree,
 )
 from civex.domain.query import RecordQuery, ResolvedQuery
+from civex.domain.scopes import GLOBAL, can_reference
 from civex.domain.timezones import parse_datetime
 from civex.repositories.protocols import (
     AuditRepository,
@@ -368,9 +376,29 @@ class RecordService:
         natural_name, attached as RecordDTO.reference_labels -- one extra
         query for the whole batch instead of one per reference value, so a
         table of many records with reference columns doesn't fan out into
-        per-row lookups. Call after _with_names (needs name-keyed data)."""
+        per-row lookups. Call after _with_names (needs name-keyed data).
+
+        Also stamps each record's collection name (`dataset_name`) and, for
+        reference targets in a different collection, `reference_collections`
+        -- the same batch, so showing where a record comes from costs no
+        extra per-row lookups."""
         if not records:
             return records
+
+        dataset_names: dict[uuid.UUID, str | None] = {}
+
+        def dataset_name(dataset_id: uuid.UUID | None) -> str | None:
+            if dataset_id is None:
+                return None
+            if dataset_id not in dataset_names:
+                ds = self._datasets.get_by_id(dataset_id, include_deleted=True)
+                dataset_names[dataset_id] = ds.name if ds else None
+            return dataset_names[dataset_id]
+
+        records = [
+            dataclasses.replace(r, dataset_name=dataset_name(r.dataset_id))
+            for r in records
+        ]
 
         # schema_id -> fields, cached so repeated schemas in the batch (the
         # common case: a whole page of one schema) resolve once.
@@ -417,6 +445,7 @@ class RecordService:
             return records
 
         targets = self._records.list_by_ids(list(all_ids))
+        target_dataset = {t.id: t.dataset_id for t in targets}
         label_by_id: dict[uuid.UUID, str | None] = {}
         for t in targets:
             t_schema = self._schema_svc._repo.get_by_id(
@@ -430,9 +459,22 @@ class RecordService:
                 named_data, fields_for(t.schema_id), t_schema.display_fields
             )
 
+        def foreign_collections(
+            r: RecordDTO, ids: set[uuid.UUID]
+        ) -> dict[str, str] | None:
+            out = {
+                str(i): name
+                for i in ids
+                if target_dataset.get(i) not in (None, r.dataset_id)
+                and (name := dataset_name(target_dataset[i]))
+            }
+            return out or None
+
         return [
             dataclasses.replace(
-                r, reference_labels={str(i): label_by_id.get(i) for i in ids}
+                r,
+                reference_labels={str(i): label_by_id.get(i) for i in ids},
+                reference_collections=foreign_collections(r, ids),
             )
             if ids
             else r
@@ -579,6 +621,80 @@ class RecordService:
                 ) from None
         return out
 
+    def _check_schema_allowed(self, dataset: DatasetDTO, schema: SchemaDTO) -> None:
+        """A collection only holds records of the schemas it is for."""
+        if schema.name not in dataset.schemas:
+            raise ValidationError(
+                f"Schema '{schema.name}' is not enabled for collection "
+                f"'{dataset.name}' -- add it to the collection's schemas first"
+            )
+
+    def _check_references(
+        self,
+        data: dict[str, Any],
+        schema_id: uuid.UUID,
+        dataset: DatasetDTO,
+        unchanged: dict[str, Any] | None = None,
+    ) -> None:
+        """Every reference/reference_list value must point at a live record in
+        this collection or in a global one (see civex.domain.scopes). Values
+        equal to the record's stored ones (`unchanged`) are not re-checked, so
+        editing a record never fails over a reference it already held."""
+        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
+        if schema is None:
+            return
+        for rf in self._schema_svc.collect_fields(schema):
+            field = rf.field
+            if field.dtype not in ("reference", "reference_list"):
+                continue
+            value = data.get(field.name)
+            if value is None or (
+                unchanged is not None and unchanged.get(field.name) == value
+            ):
+                continue
+            items = value if isinstance(value, list) else [value]
+            for item in items:
+                self._check_reference_target(field.name, item, dataset)
+
+    def _check_reference_target(
+        self, field_name: str, raw: Any, dataset: DatasetDTO
+    ) -> None:
+        try:
+            target_id = uuid.UUID(str(raw))
+        except ValueError:
+            raise ValidationError(
+                f"Field '{field_name}': '{raw}' is not a record id"
+            ) from None
+        found = self._records.list_by_ids([target_id])
+        target = found[0] if found else None
+        if target is None or target.deleted_at is not None:
+            raise ValidationError(f"Field '{field_name}': record {raw} not found")
+        if target.dataset_id == dataset.id:
+            return
+        owner = self._datasets.get_by_id(target.dataset_id, include_deleted=True)
+        if owner is None or not can_reference(dataset.id, owner.id, owner.scope):
+            where = f"collection '{owner.name}'" if owner else "another collection"
+            raise ValidationError(
+                f"Field '{field_name}': record {str(target_id)[:8]} is in "
+                f"{where}, which is local. A record can only reference "
+                f"records in its own collection or in a global collection."
+            )
+
+    def collection_referrers(
+        self, dataset_id: uuid.UUID
+    ) -> list[tuple[RecordDTO, dict[str, str]]]:
+        """Records in *other* collections that reference a record in this one,
+        with the referencing fields -- what stops a global collection from
+        being made local or deleted."""
+        own = {r.id for r in self._records.list_by_dataset(dataset_id)}
+        found: dict[uuid.UUID, tuple[RecordDTO, dict[str, str]]] = {}
+        ids = list(own)
+        for start in range(0, len(ids), 500):
+            chunk = set(ids[start : start + 500])
+            for rec, fields in self._find_referrers(chunk, exclude_ids=own):
+                found.setdefault(rec.id, (rec, fields))
+        return list(found.values())
+
     def _validate_data(self, data: dict[str, Any], schema_id: uuid.UUID) -> None:
         """Validate all field values in data against their restrictions."""
         schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
@@ -629,6 +745,7 @@ class RecordService:
             raise NotFoundError(f"Dataset '{dataset_name}' not found")
 
         schema = self._schema_svc.get(schema_name)
+        self._check_schema_allowed(dataset, schema)
 
         # Apply field defaults before validation
         data = self._apply_defaults(data, schema.id)
@@ -665,6 +782,7 @@ class RecordService:
             self.validate(data, self._schema_svc.collect_fields(schema))
 
         self._validate_data(data, schema.id)
+        self._check_references(data, schema.id, dataset)
         id_data = self._names_to_ids(data, schema.id)
         dto = self._records.create(
             dataset_id=dataset.id,
@@ -793,6 +911,8 @@ class RecordService:
             unchanged=old_data,
         )
         self._validate_data(data, raw.schema_id)
+        if dataset:
+            self._check_references(data, raw.schema_id, dataset, unchanged=old_data)
         id_data = self._names_to_ids(data, raw.schema_id)
         dto = self._records.update(id=raw.id, data=id_data)
         named = self._with_names(dto)
@@ -1134,9 +1254,27 @@ class RecordService:
         schema_name: str,
         search: str | None = None,
         limit: int = 20,
+        reachable_from: str | None = None,
     ) -> list[RecordDTO]:
+        """`reachable_from` (a collection name) limits the search to records a
+        record in that collection may reference: its own collection's plus
+        those of global collections (civex.domain.scopes). What a reference
+        picker searches, so it never offers another local collection's
+        records."""
         schema = self._schema_svc.get(schema_name)
-        records = self._records.list_by_schema(schema.id, search=search, limit=limit)
+        dataset_ids = None
+        if reachable_from:
+            source = self._datasets.get_by_name(reachable_from)
+            if not source:
+                raise NotFoundError(f"Dataset '{reachable_from}' not found")
+            dataset_ids = [source.id] + [
+                d.id
+                for d in self._datasets.list_all()
+                if d.scope == GLOBAL and d.id != source.id
+            ]
+        records = self._records.list_by_schema(
+            schema.id, search=search, limit=limit, dataset_ids=dataset_ids
+        )
         return self._attach_reference_labels([self._with_names(r) for r in records])
 
     # ------------------------------------------------------------------

@@ -174,11 +174,13 @@ function EditableValue({
   field,
   value,
   referenceLabels,
+  referenceCollections,
   onSave,
 }: {
   field: Field
   value: unknown
   referenceLabels?: Record<string, string | null> | null
+  referenceCollections?: Record<string, string> | null
   onSave: (value: unknown | undefined) => void
 }) {
   const [editing, setEditing] = useState(false)
@@ -220,6 +222,7 @@ function EditableValue({
         field={field}
         value={value}
         labels={referenceLabels}
+        collections={referenceCollections}
         onSave={onSave}
       />
     )
@@ -288,6 +291,7 @@ function EditableValue({
         value={value}
         field={field}
         referenceLabels={referenceLabels}
+        referenceCollections={referenceCollections}
       />
     </div>
   )
@@ -345,6 +349,7 @@ export function RecordFieldGrid({
   fields,
   data,
   referenceLabels,
+  referenceCollections,
   onSave,
   errors,
   onDismissError,
@@ -353,6 +358,7 @@ export function RecordFieldGrid({
   fields: Field[]
   data: Record<string, unknown>
   referenceLabels?: Record<string, string | null> | null
+  referenceCollections?: Record<string, string> | null
   /** `undefined` clears the field. */
   onSave: (name: string, value: unknown | undefined) => void
   /** Why the last save of a field failed, shown right under that field. */
@@ -394,6 +400,7 @@ export function RecordFieldGrid({
                 field={field}
                 value={data[field.name]}
                 referenceLabels={referenceLabels}
+                referenceCollections={referenceCollections}
                 onSave={(v) => onSave(field.name, v)}
               />
               {extra?.(field)}

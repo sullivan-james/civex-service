@@ -14,7 +14,15 @@ from datetime import timezone
 
 from sqlalchemy.orm import Session
 
-from civex.db.models import AuditLog, Commit, Dataset, Field, Record, Schema
+from civex.db.models import (
+    AuditLog,
+    Commit,
+    Dataset,
+    DatasetSchema,
+    Field,
+    Record,
+    Schema,
+)
 from civex.domain.dtos import (
     AuditLogDTO,
     CommitDTO,
@@ -106,9 +114,12 @@ def _upsert_datasets(session: Session, rows: list[dict]) -> None:
                     name=dto.name,
                     description=dto.description,
                     timezone=dto.timezone,
+                    scope=dto.scope,
                     created_at=dto.created_at,
                 )
             )
+            session.flush()
+            existing = session.get(Dataset, dto.id)
         else:
             existing.name = dto.name
             existing.description = dto.description
@@ -116,6 +127,20 @@ def _upsert_datasets(session: Session, rows: list[dict]) -> None:
             # don't let that read as "cleared" and wipe a locally set zone.
             if "timezone" in d:
                 existing.timezone = dto.timezone
+            if "scope" in d:
+                existing.scope = dto.scope
+        # Same for the schema list: only a peer that sends one replaces ours.
+        if "schemas" in d and existing is not None:
+            schema_ids = [
+                sid
+                for (sid,) in session.query(Schema.id).filter(
+                    Schema.name.in_(dto.schemas)
+                )
+            ]
+            existing.schema_links = [
+                DatasetSchema(dataset_id=existing.id, schema_id=sid)
+                for sid in schema_ids
+            ]
 
 
 def _upsert_records(session: Session, rows: list[dict]) -> None:

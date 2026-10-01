@@ -35,10 +35,16 @@ def list_deleted_datasets(ctx: AppContext = Depends(get_ctx)):
 def create_dataset(body: CreateDatasetRequest, ctx: AppContext = Depends(get_ctx)):
     try:
         dto = ctx.dataset_svc.create(
-            body.name, description=body.description, timezone=body.timezone
+            body.name,
+            description=body.description,
+            timezone=body.timezone,
+            scope=body.scope,
+            schemas=body.schemas,
         )
     except AlreadyExistsError as e:
         raise HTTPException(409, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
     return DatasetResponse.from_dto(dto)
@@ -144,6 +150,8 @@ def update_dataset(
             new_name=body.rename,
             description=body.description,
             timezone=body.timezone,
+            scope=body.scope,
+            schemas=body.schemas,
         )
         ctx.commit()
     except AlreadyExistsError as e:

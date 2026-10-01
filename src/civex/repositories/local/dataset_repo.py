@@ -7,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from civex.repositories.local._jobs import bulk_delete_jobs
-from civex.db.models import Dataset, Record, WorkflowJob
+from civex.db.models import Dataset, DatasetSchema, Record, Schema, WorkflowJob
 from civex.domain.dtos import DatasetDTO
 from civex.domain.exceptions import NotFoundError
 
@@ -53,9 +53,18 @@ class LocalDatasetRepository:
         ]
 
     def create(
-        self, name: str, description: str | None, timezone: str | None = None
+        self,
+        name: str,
+        description: str | None,
+        timezone: str | None = None,
+        scope: str = "local",
     ) -> DatasetDTO:
-        row = Dataset(name=name, description=description, timezone=timezone or None)
+        row = Dataset(
+            name=name,
+            description=description,
+            timezone=timezone or None,
+            scope=scope,
+        )
         self._s.add(row)
         self._s.flush()
         return _to_dto(self._s, row)
@@ -66,6 +75,7 @@ class LocalDatasetRepository:
         name: str | None,
         description: str | None,
         timezone: str | None = None,
+        scope: str | None = None,
     ) -> DatasetDTO:
         """None leaves a field unchanged. For `timezone`, an empty string
         clears it back to unset (None can't, since it means "no change")."""
@@ -78,8 +88,41 @@ class LocalDatasetRepository:
             row.description = description
         if timezone is not None:
             row.timezone = timezone or None
+        if scope is not None:
+            row.scope = scope
         self._s.flush()
         return _to_dto(self._s, row)
+
+    def set_schemas(self, id: uuid.UUID, schema_names: list[str]) -> DatasetDTO:
+        row = self._s.query(Dataset).filter_by(id=id).first()
+        if row is None:
+            raise NotFoundError(f"Dataset '{id}' not found")
+        wanted = set(schema_names)
+        schemas = (
+            self._s.query(Schema)
+            .filter(Schema.name.in_(wanted), Schema.deleted_at.is_(None))
+            .all()
+            if wanted
+            else []
+        )
+        missing = wanted - {s.name for s in schemas}
+        if missing:
+            raise NotFoundError(f"Schema '{sorted(missing)[0]}' not found")
+        row.schema_links = [
+            DatasetSchema(dataset_id=id, schema_id=s.id) for s in schemas
+        ]
+        self._s.flush()
+        return _to_dto(self._s, row)
+
+    def schemas_in_use(self, id: uuid.UUID) -> set[str]:
+        rows = (
+            self._s.query(Schema.name)
+            .join(Record, Record.schema_id == Schema.id)
+            .filter(Record.dataset_id == id, Record.deleted_at.is_(None))
+            .distinct()
+            .all()
+        )
+        return {name for (name,) in rows}
 
     def delete(self, id: uuid.UUID) -> None:
         """Soft-delete: mark the dataset deleted and cascade to every record
@@ -139,6 +182,14 @@ def _to_dto(session: Session, row: Dataset) -> DatasetDTO:
         .filter(Record.dataset_id == row.id, Record.deleted_at.is_(None))
         .scalar()
     )
+    schema_names = [
+        name
+        for (name,) in session.query(Schema.name)
+        .join(DatasetSchema, DatasetSchema.schema_id == Schema.id)
+        .filter(DatasetSchema.dataset_id == row.id)
+        .order_by(Schema.name)
+        .all()
+    ]
     return DatasetDTO(
         id=row.id,
         name=row.name,
@@ -147,4 +198,6 @@ def _to_dto(session: Session, row: Dataset) -> DatasetDTO:
         created_at=row.created_at,
         deleted_at=row.deleted_at,
         timezone=row.timezone,
+        scope=row.scope,
+        schemas=schema_names,
     )

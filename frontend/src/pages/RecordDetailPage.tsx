@@ -115,7 +115,10 @@ export default function RecordDetailPage() {
   }
 
   return (
-    <CollectionTimeZone timeZone={collection?.timezone}>
+    <CollectionTimeZone
+      timeZone={collection?.timezone}
+      collection={collection?.name}
+    >
       <RecordPageFrame
         collection={collection?.name}
         collectionId={record.dataset_id}
@@ -163,6 +166,7 @@ export default function RecordDetailPage() {
             }
             data={record.data}
             referenceLabels={record.reference_labels}
+            referenceCollections={record.reference_collections}
             onSave={saveField}
             errors={saveErrors}
             onDismissError={() => updateRecord.reset()}

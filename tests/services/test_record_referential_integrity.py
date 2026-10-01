@@ -48,7 +48,7 @@ def test_delete_blocked_across_datasets(
     dataset can still be the thing blocking the delete."""
     make_schema("patient")
     make_schema("visit", fields=[("patient_ref", "reference")])
-    make_collection("study_a")
+    make_collection("study_a", scope="global")
     make_collection("study_b")
 
     patient = make_record("study_a", "patient", {})

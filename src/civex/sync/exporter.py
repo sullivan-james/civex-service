@@ -17,7 +17,15 @@ from typing import Any, cast
 
 from sqlalchemy.orm import Session
 
-from civex.db.models import AuditLog, Commit, Dataset, Field, Record, Schema
+from civex.db.models import (
+    AuditLog,
+    Commit,
+    Dataset,
+    DatasetSchema,
+    Field,
+    Record,
+    Schema,
+)
 from civex.domain.dtos import (
     AuditLogDTO,
     CommitDTO,
@@ -65,6 +73,13 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
             record_count=0,
             created_at=r.created_at or now,
             timezone=r.timezone,
+            scope=r.scope,
+            schemas=sorted(
+                name
+                for (name,) in session.query(Schema.name)
+                .join(DatasetSchema, DatasetSchema.schema_id == Schema.id)
+                .filter(DatasetSchema.dataset_id == r.id)
+            ),
         ).to_dict()
         for r in session.query(Dataset)
         .filter(Dataset.deleted_at.is_(None))
