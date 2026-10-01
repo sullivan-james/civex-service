@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import nulls_last
+from sqlalchemy import nulls_last, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from civex.repositories.local._jobs import bulk_delete_jobs
@@ -155,17 +155,15 @@ class LocalSchemaRepository:
         if row is None:
             return
         self._s.query(View).filter_by(schema_id=id).delete(synchronize_session=False)
-        record_ids = [
-            r.id for r in self._s.query(Record.id).filter_by(schema_id=id).all()
-        ]
-        if record_ids:
-            self._s.query(Record).filter(
-                Record.parent_record_id.in_(record_ids)
-            ).update({"parent_record_id": None}, synchronize_session=False)
-            bulk_delete_jobs(self._s, WorkflowJob.record_id.in_(record_ids))
-            self._s.query(Record).filter_by(schema_id=id).delete(
-                synchronize_session=False
-            )
+        # The schema's records as a subquery, not a list of ids pulled into
+        # Python -- a large schema would otherwise be a huge IN (...) (and past
+        # SQLite's bound-variable limit, an error).
+        typed = select(Record.id).where(Record.schema_id == id)
+        self._s.query(Record).filter(Record.parent_record_id.in_(typed)).update(
+            {"parent_record_id": None}, synchronize_session=False
+        )
+        bulk_delete_jobs(self._s, WorkflowJob.record_id.in_(typed))
+        self._s.query(Record).filter_by(schema_id=id).delete(synchronize_session=False)
         self._s.delete(row)  # cascades to Field rows via ORM relationship
         self._s.flush()
 

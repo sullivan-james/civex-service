@@ -55,7 +55,7 @@ class CreateRecordTool(AiTool):
     def run(self, tool_input: dict, ctx: AiToolContext) -> Any:
         collection, schema = tool_input["collection"], tool_input["schema"]
         data = tool_input.get("data") or {}
-        collection_names = {d.name for d in ctx.dataset_svc.list_all()}
+        collection_names = {d.name for d in ctx.dataset_svc.list_all(with_count=False)}
         schema_names = {s.name for s in ctx.schema_svc.list_all()}
         if collection not in collection_names:
             return tool_error(f"Collection '{collection}' does not exist.")
@@ -562,7 +562,7 @@ class CreateCollectionTool(AiTool):
 
     def run(self, tool_input: dict, ctx: AiToolContext) -> Any:
         name = tool_input["name"]
-        collection_names = {d.name for d in ctx.dataset_svc.list_all()}
+        collection_names = {d.name for d in ctx.dataset_svc.list_all(with_count=False)}
         if name in collection_names:
             return tool_error(
                 f"Collection '{name}' already exists — do not retry create_collection for it. "
@@ -620,7 +620,7 @@ class UpdateCollectionTool(AiTool):
 
     def run(self, tool_input: dict, ctx: AiToolContext) -> Any:
         name = tool_input["name"]
-        collection_names = {d.name for d in ctx.dataset_svc.list_all()}
+        collection_names = {d.name for d in ctx.dataset_svc.list_all(with_count=False)}
         if name not in collection_names:
             return tool_error(f"Collection '{name}' does not exist.")
         body = {
@@ -672,7 +672,7 @@ class DeleteCollectionTool(AiTool):
 
     def run(self, tool_input: dict, ctx: AiToolContext) -> Any:
         name = tool_input["name"]
-        collection_names = {d.name for d in ctx.dataset_svc.list_all()}
+        collection_names = {d.name for d in ctx.dataset_svc.list_all(with_count=False)}
         if name not in collection_names:
             return tool_error(f"Collection '{name}' does not exist.")
         err = validate_via(ctx, ctx.dataset_svc.delete, name)

@@ -488,7 +488,7 @@ def schema_update_field(
 
         # Warn if making required but existing records are missing this field.
         if required:
-            all_datasets = ctx.dataset_svc.list_all()
+            all_datasets = ctx.dataset_svc.list_all(with_count=False)
             affected = []
             for d in all_datasets:
                 missing = [

@@ -85,3 +85,36 @@ def test_workflow_files_are_parsed_once_until_they_change(
     path.write_text(path.read_text() + "\n# edited\n")
     svc._load_workflows()
     assert len(calls) == 2
+
+
+def test_streaming_a_large_listing_never_pages_by_offset(
+    ctx: AppContext, make_schema, make_collection
+):
+    from civex.domain.query import RecordQuery
+
+    make_schema("patient", fields=[("name", "string")])
+    make_collection("study")
+    made = [
+        ctx.record_svc.add("study", "patient", {"name": f"p{i}"}).id for i in range(25)
+    ]
+    ctx.commit()
+
+    repo = ctx.record_svc._records
+    real = repo.list_filtered
+    offsets: list[int] = []
+
+    def spy(query, offset, limit, after=None):
+        offsets.append(offset)
+        return real(query, offset, limit, after=after)
+
+    repo.list_filtered = spy  # type: ignore[method-assign]
+    pages = list(
+        ctx.record_svc.stream_records(
+            RecordQuery(dataset="study", schema="patient"), page_size=10
+        )
+    )
+
+    streamed = [r.id for page in pages for r in page]
+    assert sorted(streamed) == sorted(made)  # nothing skipped or repeated
+    assert [len(p) for p in pages] == [10, 10, 5]
+    assert offsets == [0, 0, 0]  # continued from the last record, not skipped to

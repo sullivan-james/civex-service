@@ -120,3 +120,23 @@ def test_listing_records_costs_the_same_queries_for_a_page_of_any_size(
     ctx.commit()
 
     assert queries_for_page(40) == queries_for_page(3)
+
+
+def test_listing_collections_looks_up_schema_lists_once_and_counts_only_on_request(
+    ctx: AppContext, make_schema, make_collection, make_record
+):
+    make_schema("patient")
+    for name in ("a", "b", "c", "d"):
+        make_collection(name)
+        make_record(name, "patient", {})
+        make_record(name, "patient", {})
+
+    with count_statements(ctx) as seen:
+        listed = ctx.dataset_svc.list_all()
+    assert {d.name: d.record_count for d in listed} == {n: 2 for n in "abcd"}
+    assert len([s for s in seen if "dataset_schemas" in s]) == 1
+
+    with count_statements(ctx) as seen:
+        bare = ctx.dataset_svc.list_all(with_count=False)
+    assert {d.record_count for d in bare} == {0}
+    assert not any("count(" in s.lower() for s in seen)

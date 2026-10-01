@@ -188,19 +188,32 @@ class LocalRecordRepository:
         ]
 
     def list_filtered(
-        self, query: ResolvedQuery, offset: int, limit: int
+        self,
+        query: ResolvedQuery,
+        offset: int,
+        limit: int,
+        after: tuple[datetime, uuid.UUID] | None = None,
     ) -> list[RecordDTO]:
+        """One page. `after` (the last record of the previous page's
+        created_at and id) continues an unsorted listing from there -- keyset
+        paging, which costs the same at page 1000 as at page 1, where OFFSET
+        walks every row it skips. Only meaningful without a custom sort."""
         q = _base_query(self._s, query, self._pg)
+        if after is not None:
+            when, last_id = after
+            q = q.filter(
+                or_(
+                    Record.created_at > when,
+                    and_(Record.created_at == when, Record.id > last_id),
+                )
+            )
         # created_at alone isn't a total order (bulk inserts share
         # timestamps), so ties are broken on id -- otherwise OFFSET pages can
         # repeat or skip rows.
-        rows = (
-            q.order_by(*_order_by(query.sort), Record.created_at, Record.id)
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
-        return [_to_dto(r) for r in rows]
+        q = q.order_by(*_order_by(query.sort), Record.created_at, Record.id)
+        if offset:
+            q = q.offset(offset)
+        return [_to_dto(r) for r in q.limit(limit).all()]
 
     def count(self, query: ResolvedQuery) -> int:
         return _base_query(self._s, query, self._pg).count()
@@ -309,11 +322,16 @@ class LocalRecordRepository:
         """Same predicate as list_by_schema, so a count and a page agree."""
         return self._by_schema_query(schema_id, search).count()
 
-    def list_ids_by_schema_ids(self, schema_ids: list[uuid.UUID]) -> list[uuid.UUID]:
+    def count_by_schema_ids(self, schema_ids: list[uuid.UUID]) -> int:
+        """Records (deleted or not) typed by any of `schema_ids`."""
         if not schema_ids:
-            return []
-        rows = self._s.query(Record.id).filter(Record.schema_id.in_(schema_ids)).all()
-        return [r[0] for r in rows]
+            return 0
+        return (
+            self._s.query(func.count(Record.id))
+            .filter(Record.schema_id.in_(schema_ids))
+            .scalar()
+            or 0
+        )
 
     def list_children(
         self, parent_id: uuid.UUID, include_deleted: bool = False
@@ -332,19 +350,29 @@ class LocalRecordRepository:
         if not target_ids or not field_ids:
             return []
         rr = RecordReference
-        return [
+        # Two steps, not a JOIN to records: written as a join the planner
+        # (SQLite, measured) drives from "every live record" and probes
+        # record_references per row -- a scan of the whole table per call --
+        # instead of starting from the indexed target.
+        found = [
             (row[0], row[1], row[2])
             for chunk in _chunks(list(target_ids))
             for row in self._s.execute(
-                select(rr.record_id, rr.field_id, rr.target_id)
-                .join(Record, Record.id == rr.record_id)
-                .where(
-                    rr.target_id.in_(chunk),
-                    rr.field_id.in_(field_ids),
-                    Record.deleted_at.is_(None),
+                select(rr.record_id, rr.field_id, rr.target_id).where(
+                    rr.target_id.in_(chunk), rr.field_id.in_(field_ids)
                 )
             )
         ]
+        live: set[uuid.UUID] = set()
+        for chunk in _chunks(list({row[0] for row in found})):
+            live.update(
+                self._s.scalars(
+                    select(Record.id).where(
+                        Record.id.in_(chunk), Record.deleted_at.is_(None)
+                    )
+                )
+            )
+        return [row for row in found if row[0] in live]
 
     def referrer_groups(
         self, target_id: uuid.UUID, field_ids: list[uuid.UUID]

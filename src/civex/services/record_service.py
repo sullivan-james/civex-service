@@ -1207,11 +1207,15 @@ class RecordService:
         offset: int = 0,
         columns: list[str] | None = None,
         child_counts: bool = False,
+        after: tuple[_dt, uuid.UUID] | None = None,
     ) -> list[RecordDTO]:
         """One page of `query`. `columns` asks for values that aren't in a
         record's own data (an inherited field, a `ref.field` join), attached
-        as `derived`; `child_counts` attaches per-child-schema counts."""
-        records = self._records.list_filtered(self.resolve(query), offset, limit)
+        as `derived`; `child_counts` attaches per-child-schema counts. `after`
+        continues an unsorted listing past a record (see `stream_records`)."""
+        records = self._records.list_filtered(
+            self.resolve(query), offset, limit, after=after
+        )
         named = self._attach_reference_labels(self._with_names_many(records))
         if columns and query.schema:
             named = self._attach_derived(query.schema, named, columns)
@@ -1232,18 +1236,31 @@ class RecordService:
         columns: list[str] | None = None,
     ) -> Iterator[list[RecordDTO]]:
         """Every matching record, one page at a time -- for exports, which
-        must not hold the whole result set in memory."""
+        must not hold the whole result set in memory.
+
+        An unsorted walk continues from the last record's (created_at, id)
+        rather than an ever-growing OFFSET, which would re-read every row it
+        skips and make a large export quadratic. A custom sort has no such
+        cursor, so it still pages by offset."""
         offset = 0
+        after: tuple[_dt, uuid.UUID] | None = None
         while True:
             page = self.query_records(
-                query, limit=page_size, offset=offset, columns=columns
+                query,
+                limit=page_size,
+                offset=0 if after else offset,
+                columns=columns,
+                after=after,
             )
             if not page:
                 return
             yield page
             if len(page) < page_size:
                 return
-            offset += page_size
+            if query.sort:
+                offset += page_size
+            else:
+                after = (page[-1].created_at, page[-1].id)
 
     def schema_counts(self, query: RecordQuery) -> dict[str, int]:
         """Matching records per schema name -- one GROUP BY, no rows loaded.
@@ -1361,7 +1378,7 @@ class RecordService:
                 raise NotFoundError(f"Dataset '{reachable_from}' not found")
             dataset_ids = [source.id] + [
                 d.id
-                for d in self._datasets.list_all()
+                for d in self._datasets.list_all(with_count=False)
                 if d.scope == GLOBAL and d.id != source.id
             ]
         records = self._records.list_by_schema(
@@ -1624,15 +1641,21 @@ class RecordService:
         if not levels:
             return 0
         every = [rid for level in levels for rid in level]
-        beneath = {rid for level in levels[1:] for rid in level}
-        self._handle_referrers(set(every), force)
+        doomed = set(every)
+        self._handle_referrers(doomed, force)
+        records = self._records.list_by_ids(every)
         if self._audit:
-            for record in self._records.list_by_ids(every):
+            for record in records:
                 self._audit.log_change(
                     "delete", "record", record.id, record.to_dict(), None
                 )
         self._records.delete_many(every)
-        return sum(1 for rid in levels[0] if rid not in beneath)
+        requested = set(ids)
+        return sum(
+            1
+            for record in records
+            if record.id in requested and record.parent_record_id not in doomed
+        )
 
     def list_deleted(
         self,

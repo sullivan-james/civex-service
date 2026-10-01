@@ -519,7 +519,7 @@ class SchemaService:
         only -- see _descendant_count."""
         schema = self.get(name)
         record_count = (
-            len(self._records.list_ids_by_schema_ids([schema.id]))
+            self._records.count_by_schema_ids([schema.id])
             if self._records is not None
             else 0
         )

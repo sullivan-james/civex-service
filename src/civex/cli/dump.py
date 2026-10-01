@@ -1,35 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
 import yaml
 
-from civex import __version__
 from civex.cli.utils import cli_load_config, get_ctx
 from civex.console import console
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
-
-
-def _sort_schemas(schemas: list[dict]) -> list[dict]:
-    """Topological sort — parents before children."""
-    by_name = {s["name"]: s for s in schemas}
-    result: list[dict] = []
-    visited: set[str] = set()
-
-    def visit(name: str) -> None:
-        if name in visited:
-            return
-        visited.add(name)
-        parent = by_name[name].get("parent")
-        if parent and parent in by_name:
-            visit(parent)
-        result.append(by_name[name])
-
-    for s in schemas:
-        visit(s["name"])
-    return result
+from civex.services.dump_service import RESTORE_BATCH, write_dump
 
 
 def dump(
@@ -46,110 +25,26 @@ def dump(
     """Export all schemas, datasets, records, and workflows to a YAML file."""
     config = cli_load_config()
     ctx = get_ctx()
-
-    # --- schemas ---
-    schemas_out = []
-    for schema in ctx.schema_svc.list_all():
-        parent_name = None
-        if schema.parent_id:
-            parent_dto = ctx.schema_svc._repo.get_by_id(schema.parent_id)
-            parent_name = parent_dto.name if parent_dto else None
-        schemas_out.append(
-            {
-                "name": schema.name,
-                "label": schema.label,
-                "description": schema.description,
-                "parent": parent_name,
-                "fields": [
-                    {
-                        "name": f.name,
-                        "label": f.label,
-                        "type": f.dtype,
-                        "required": f.required,
-                    }
-                    for f in schema.fields
-                ],
-            }
+    with output.open("w", encoding="utf-8") as out:
+        counts = write_dump(
+            out,
+            ctx.schema_svc,
+            ctx.dataset_svc,
+            ctx.record_svc,
+            config.civex_dir,
+            include_data=not no_data,
+            include_workflows=not no_workflows,
         )
-    schemas_out = _sort_schemas(schemas_out)
 
-    # --- datasets + records ---
-    datasets_out = []
-    records_out = []
-    if not no_data:
-        for dataset in ctx.dataset_svc.list_all():
-            datasets_out.append(
-                {
-                    "name": dataset.name,
-                    "description": dataset.description,
-                    "scope": dataset.scope,
-                    "schemas": dataset.schemas,
-                }
-            )
-            for record in ctx.record_svc.find(
-                dataset.name, schema_name=None, filters=[], limit=100_000
-            ):
-                rec: dict = {
-                    "dataset": dataset.name,
-                    "schema": record.schema_name,
-                    "data": record.data,
-                }
-                if record.parent_record_id:
-                    rec["parent_record_id"] = str(record.parent_record_id)
-                records_out.append(rec)
-
-    # --- workflows ---
-    workflows_out = []
-    if not no_workflows:
-        workflows_dir = config.civex_dir / "workflows"
-        if workflows_dir.exists():
-            for path in sorted(workflows_dir.glob("*.yaml")) + sorted(
-                workflows_dir.glob("*.yml")
-            ):
-                workflows_out.append(
-                    {"filename": path.name, "content": path.read_text()}
-                )
-
-    # --- plugins ---
-    plugins_out = []
-    if not no_workflows:
-        plugins_dir = config.civex_dir / "plugins"
-        if plugins_dir.exists():
-            for path in sorted(plugins_dir.glob("*.py")):
-                plugins_out.append({"filename": path.name, "content": path.read_text()})
-
-    dump_doc = {
-        "civex_version": __version__,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
-        "schemas": schemas_out,
-        "datasets": datasets_out,
-        "records": records_out,
-        "workflows": workflows_out,
-        "plugins": plugins_out,
-    }
-
-    output.write_text(
-        yaml.dump(
-            dump_doc, default_flow_style=False, allow_unicode=True, sort_keys=False
-        )
-    )
-
-    total_records = len(records_out)
-    file_refs = sum(
-        1
-        for r in records_out
-        for v in r["data"].values()
-        if isinstance(v, dict) and "sha256" in v
-    )
     console.print(f"[success]Exported to {output}[/success]")
-    console.print(f"  Schemas    {len(schemas_out)}")
-    console.print(f"  Datasets   {len(datasets_out)}")
-    console.print(f"  Records    {total_records}")
-    console.print(f"  Workflows  {len(workflows_out)}")
-    console.print(f"  Plugins    {len(plugins_out)}")
-    if file_refs:
+    console.print(f"  Schemas    {counts.schemas}")
+    console.print(f"  Datasets   {counts.datasets}")
+    console.print(f"  Records    {counts.records}")
+    console.print(f"  Workflows  {counts.workflows}")
+    console.print(f"  Plugins    {counts.plugins}")
+    if counts.file_refs:
         console.print(
-            f"  [warning]File references: {file_refs} — copy _civex/objects/ to restore file content.[/warning]"
+            f"  [warning]File references: {counts.file_refs} — copy _civex/objects/ to restore file content.[/warning]"
         )
 
 
@@ -237,6 +132,7 @@ def restore(
     # --- records ---
     file_field_count = 0
     failed = 0
+    pending = 0
     for r in doc.get("records", []):
         data = r["data"] or {}
         file_field_count += sum(
@@ -249,10 +145,14 @@ def restore(
                 data,
                 parent_record_id=r.get("parent_record_id"),
             )
-            ctx.commit()
+            pending += 1
+            if pending >= RESTORE_BATCH:
+                ctx.commit()
+                pending = 0
         except (NotFoundError, ValidationError) as e:
             console.print(f"  [warning]Record skipped: {e}[/warning]")
             failed += 1
+    ctx.commit()
 
     restored = n_records - failed
     console.print(f"  Records restored: {restored}/{n_records}.")

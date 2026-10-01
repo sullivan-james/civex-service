@@ -98,8 +98,10 @@ class DatasetService:
             raise NotFoundError(f"Dataset '{dataset_id}' not found")
         return dto
 
-    def list_all(self) -> list[DatasetDTO]:
-        return self._datasets.list_all()
+    def list_all(self, with_count: bool = True) -> list[DatasetDTO]:
+        """Every live collection. `with_count=False` skips the record counts
+        (left at 0) for callers that only need names, ids or scopes."""
+        return self._datasets.list_all(with_count=with_count)
 
     def update(
         self,

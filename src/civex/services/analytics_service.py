@@ -128,7 +128,7 @@ class AnalyticsService:
         datasets = (
             [self._datasets.get(filters.dataset)]
             if filters.dataset
-            else self._datasets.list_all()
+            else self._datasets.list_all(with_count=False)
         )
         results: list[RecordCount] = []
         for ds in datasets:

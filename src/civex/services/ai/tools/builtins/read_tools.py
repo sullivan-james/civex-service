@@ -128,7 +128,9 @@ class ListRecordsTool(AiTool):
 
     def run(self, tool_input: dict, ctx: AiToolContext) -> Any:
         collection = tool_input["collection"]
-        if collection not in {d.name for d in ctx.dataset_svc.list_all()}:
+        if collection not in {
+            d.name for d in ctx.dataset_svc.list_all(with_count=False)
+        }:
             return tool_error(f"Collection '{collection}' does not exist.")
         schema = tool_input.get("schema") or None
         search = tool_input.get("search") or None
