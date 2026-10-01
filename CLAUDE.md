@@ -88,10 +88,12 @@ src/civex/
 
 ### Data model
 
-Record `data` is stored as a JSON/JSONB dict (no EAV), keyed by **field UUID** — `RecordService._names_to_ids()`/`_ids_to_names()` translate at the service boundary, so everything above that layer sees name-keyed data and renaming a field costs nothing in storage. Field types: `integer | float | string | boolean | date | datetime | file | file_list | reference`.
+Record `data` is stored as a JSON/JSONB dict (no EAV), keyed by **field UUID** — `RecordService._names_to_ids()`/`_ids_to_names()` translate at the service boundary, so everything above that layer sees name-keyed data and renaming a field costs nothing in storage. Field types: `integer | float | string | boolean | date | datetime | geo | file | file_list | reference | reference_list | enum | url | tags` (`VALID_DTYPES` in `schema_service.py` is the authority).
 
 - `file` / `file_list`: record stores `FileRef` dict(s) `{sha256, filename, size}`; bytes live in `_civex/objects/<sha256[:2]>/<sha256[2:]>` (git object store layout).
-- `date`: stored as ISO date string (`YYYY-MM-DD`). `datetime`: always stored as a UTC ISO string. `RecordService.add`/`update` normalise every datetime via `_normalise_datetimes()` (and the CLI via `coerce_value`), reading a value with no UTC offset as wall time in the field's `timezone` restriction, else the collection's `timezone` (`datasets.timezone`), else UTC. DST gaps/overlaps and malformed values are rejected; `update` skips values merely echoed back, so a legacy offset-less value isn't shifted when a zone is set later. The logic lives in `domain/timezones.py`; `frontend/src/utils/dates.ts` mirrors its DST rules for display and entry.
+- `date`: stored as an ISO string at the precision it was written (`2019`, `2019-06` or `2019-06-14`; a `precision` restriction names the least precise form a field accepts, default `day`). Logic in `domain/partial_dates.py`, mirrored by `frontend/src/utils/partialDates.ts`. Min/max compare whole periods. `datetime`: always stored as a UTC ISO string. `RecordService.add`/`update` normalise every datetime via `_normalise_datetimes()` (and the CLI via `coerce_value`), reading a value with no UTC offset as wall time in the field's `timezone` restriction, else the collection's `timezone` (`datasets.timezone`), else UTC. DST gaps/overlaps and malformed values are rejected; `update` skips values merely echoed back, so a legacy offset-less value isn't shifted when a zone is set later. The logic lives in `domain/timezones.py`; `frontend/src/utils/dates.ts` mirrors its DST rules for display and entry.
+- `geo`: stores a GeoJSON geometry dict (WGS84, `[lon, lat]`). Validated by `domain/geo.py` on every write, with or without restrictions; `bbox` with west > east crosses the antimeridian. CSV cells and the CLI read `"lat, lon"`, `POINT(lon lat)` or GeoJSON (`geo.parse_text`); exports write a plain point as `"lat, lon"` (`geo.to_text`). Mirrored by `frontend/src/utils/geo.ts` and `geoCoords.ts`. `parse_coordinates` also reads hemisphere letters and degrees/minutes/seconds (`56°07'12"N 3°24'36"W`); both implementations are tested against the same table of examples. A Point may carry `uncertainty_m` (a foreign member, validated) and a third coordinate (elevation, negative for depth). On the record form `GeoInput` gives guidance and an **Edit on map…** modal (`components/geo/GeoEditor.tsx`): OpenLayers in plain lat/lon with bundled coastlines (`world-atlas`) and a graticule, in a lazy chunk (`GeoMap.tsx`) so the main bundle doesn't carry it; an optional XYZ tile URL comes from `[map]` in `config.toml` (`GET/PATCH /settings/map`, `hooks/useMapSettings.ts`). The editor edits a draft (`utils/geoDraft.ts`) and changes nothing until Apply; file import (`utils/geoImport.ts`) reads GeoJSON, GPX, KML and WKT via OpenLayers' readers.
+- `float` with a `unit` restriction: a field has exactly one unit and every stored value is in it. The service never converts; `domain/units.py` (mirrored by `frontend/src/utils/units.ts`) converts only at entry edges: `RecordService.coerce_value` (CLI) reads `"1024 ft"`, the record form's `UnitInput` does the same, and the CSV import asks each column's unit (`MapState.columnUnits`). Changing a field's unit is a relabel, never a conversion (the CLI asks for confirmation). Units outside the table are plain labels.
 - `reference`: stores the UUID of another record as a string. The target schema is enforced via a `schema` restriction.
 - `file_list`: stores a list of `FileRef` dicts.
 
@@ -120,13 +122,18 @@ Validation is write-time only: rows predating the rule keep working, and `civex 
 
 ### Field restrictions
 
+Which restriction keys exist for a type, and how the UI should present them, is declared once in `domain/field_descriptors.py` (`FIELD_TYPES`, `FIELD_KINDS`). `schema_service.VALID_RESTRICTION_KEYS` is derived from it and `GET /schemas/field-types` serves it, so the field editor (`components/schemas/FieldForm.tsx`, rendering `RestrictionControls.tsx` through `controlRegistry.ts`) and the record form's guidance build from data. Adding a restriction means: a descriptor entry, its check in `_check_restrictions()`, and — only if no existing `control` fits — a new control in `RestrictionControls.tsx` registered in `controlRegistry.ts`. Descriptors only describe; validation stays in `_check_restrictions()` (stored values) and `SchemaService` (restriction values, `_check_control_value` + `_validate_restriction_values`). Rules (validation) are kept apart from views (how a value is displayed, e.g. a spectrogram for audio): a field's views are meant to become another section of the field inspector (`InspectorSection` in `SchemaFieldsSection.tsx`) with their own settings, not more keys in `restrictions`.
+
 Each field carries a `restrictions: dict[str, Any]` validated at write time by `_check_restrictions()` in `record_service.py` — the single source of truth. Restriction keys by type:
 
 | Type | Keys |
 |---|---|
 | `integer`, `float` | `min`, `max` |
+| `float` | also `unit` (symbol; canonicalised, e.g. `degC` → `°C`) |
 | `string` | `choices` (list), `max_length` |
-| `date`, `datetime` | `min`, `max` (ISO strings; compared as parsed objects, not strings) |
+| `date`, `datetime` | `min`, `max` (ISO strings; compared as parsed objects, not strings; `date` bounds may be partial) |
+| `date` | also `precision` (`year` / `month` / `day`) |
+| `geo` | `geometry_types` (list), `bbox` (`[west, south, east, north]`) |
 | `datetime` | also `timezone` (IANA name; overrides the collection's `timezone` when reading and showing this field) |
 | `file`, `file_list` | `accept` (comma-separated MIME/ext), `max_size` (bytes), `filename_template` (see below) |
 | `reference` | `schema` (target schema name) |
@@ -175,6 +182,8 @@ frontend/src/
 ```
 
 Pins, recents and the Ctrl+K palette are per-browser (localStorage, `utils/pins.ts` + `hooks/usePins.ts`; there are no user accounts). A pin's `NavTarget` is built in `utils/navTargets.ts`; a pinned saved filter's live count is `hooks/useViewCount.ts` (keyed under `records`, so any record edit refreshes it).
+
+On the record page, `RecordFieldGrid`'s `FileControl` stages an upload: the file sits in `PendingFiles` (with `accept`/`max_size` checks from `utils/fileChecks.ts`) until someone approves it, and only approval saves the record (and so fires workflow triggers). Pending state is page-local; unreferenced objects are left to `gc_service`.
 
 `DynamicField` is the single component that renders an editable input for any field type, including restriction-aware behaviour (choices→select, min/max, accept/max_size on files). `JobsTable` owns its own pagination state and accepts `recordId?` + `statusFilter?` props — do not duplicate pagination in parent pages.
 

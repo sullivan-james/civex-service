@@ -2,6 +2,8 @@ import { Badge } from '../ui'
 import { ReferenceLink } from './ReferenceLink'
 import { useFieldTimeZone } from './timeZoneContext'
 import { formatDateTime } from '../../utils/dates'
+import { formatLocation, isGeometry } from '../../utils/geo'
+import { describeGeometry } from '../../utils/geoDraft'
 import type { Field } from '../../api/schemas'
 
 export function FieldValue({
@@ -19,10 +21,35 @@ export function FieldValue({
 }) {
   const timeZone = useFieldTimeZone(field)
   if (value === null || value === undefined)
-    return <span className="text-fg-subtle">—</span>
+    return field?.type === 'geo' ? (
+      <span className="text-fg-subtle">
+        Not set. Click to enter latitude, longitude.
+      </span>
+    ) : (
+      <span className="text-fg-subtle">—</span>
+    )
   if (field?.type === 'datetime' && typeof value === 'string' && value)
     // Shown as wall time in the field's zone; the stored UTC value is on hover.
     return <span title={value}>{formatDateTime(value, timeZone)}</span>
+  if (field?.type === 'geo' && isGeometry(value))
+    // Full GeoJSON on hover; plain points read as "latitude, longitude".
+    return (
+      <span title={JSON.stringify(value)}>
+        {value.type === 'Point'
+          ? formatLocation(value)
+          : describeGeometry(value)}
+      </span>
+    )
+  if (
+    field?.type === 'float' &&
+    typeof field.restrictions?.unit === 'string' &&
+    typeof value === 'number'
+  )
+    return (
+      <span>
+        {value} <span className="text-fg-muted">{field.restrictions.unit}</span>
+      </span>
+    )
   if (field?.type === 'reference' && typeof value === 'string')
     return (
       <ReferenceLink

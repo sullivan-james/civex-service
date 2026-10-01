@@ -1,373 +1,279 @@
-import { useState } from 'react'
-import * as restrictions from '../../utils/restrictions'
-import type { Field as SchemaField } from '../../api/schemas'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { Field as SchemaField, FieldKind, Schema } from '../../api/schemas'
 import { errorMessage } from '../../lib/errors'
-import { useAddField, useUpdateField, useSchemas } from '../../hooks/useSchemas'
+import { useAddField, useUpdateField } from '../../hooks/useSchemas'
+import { useFieldTypes } from '../../hooks/useFieldTypes'
 import {
   Button,
-  Badge,
   Field,
-  Input,
-  Select,
-  TimeZoneSelect,
-  Checkbox,
   FormGrid,
-  FormSection,
-  FormFooter,
+  Input,
   NameLabelFields,
-  spanClassName,
+  Checkbox,
+  Skeleton,
 } from '../ui'
-import { displayLabel, nameError } from '../../utils/naming'
-import { FIELD_TYPES } from '../../utils/fieldTypes'
+import { nameError } from '../../utils/naming'
+import { CONTROLS } from './controlRegistry'
+import type { ControlContext, Rules } from './RestrictionControls'
 
-const NON_DEFAULT_TYPES = new Set([
-  'file',
-  'file_list',
-  'reference',
-  'reference_list',
-])
+type FieldFormProps = {
+  schemaName: string
+  schemas: Schema[] | undefined
+  /** Names of the schema's fields, offered when building a file name. */
+  fieldNames: string[]
+  /** Called after a save (with the new field's name when created), or when
+   * the person backs out. */
+  onDone: (savedName?: string) => void
+  /** Told whenever the form differs from what was loaded, so the page can
+   * ask before throwing edits away. */
+  onDirtyChange?: (dirty: boolean) => void
+} & (
+  | { mode: 'create'; kind: FieldKind; onChangeKind?: () => void }
+  | { mode: 'edit'; field: SchemaField }
+)
 
-type FieldFormProps =
-  | { mode: 'create'; schemaName: string; onDone: () => void }
-  | {
-      mode: 'edit'
-      schemaName: string
-      field: SchemaField
-      onDone: () => void
-    }
+/** Keep only the rules that say something. */
+function tidy(rules: Rules): Rules | undefined {
+  const out: Rules = {}
+  for (const [k, v] of Object.entries(rules)) {
+    if (v === undefined || v === null || v === '') continue
+    if (Array.isArray(v) && v.length === 0) continue
+    out[k] = v
+  }
+  return Object.keys(out).length ? out : undefined
+}
 
+/** One field's identity and rules. What can be set comes from the server's
+ * field-type descriptors, so a new rule shows up here without a UI change;
+ * `CONTROLS` maps each descriptor's `control` to its editor. */
 export function FieldForm(props: FieldFormProps) {
-  const { mode, schemaName, onDone } = props
-  const editingField = props.mode === 'edit' ? props.field : undefined
+  const { mode, schemaName, onDone, onDirtyChange } = props
+  const editing = props.mode === 'edit' ? props.field : undefined
+  const type = props.mode === 'edit' ? props.field.type : props.kind.type
+  const focus = props.mode === 'create' ? props.kind.focus : null
 
-  const [fieldName, setFieldName] = useState(editingField?.name ?? '')
-  const [fieldLabel, setFieldLabel] = useState(editingField?.label ?? '')
-  const [type, setType] = useState(editingField?.type ?? 'string')
-  const [required, setRequired] = useState(editingField?.required ?? false)
+  const descriptors = useFieldTypes()
+  const descriptor = descriptors?.types.find((t) => t.type === type)
+
+  const [name, setName] = useState(editing?.name ?? '')
+  const [label, setLabel] = useState(editing?.label ?? '')
+  const [required, setRequired] = useState(editing?.required ?? false)
   const [defaultVal, setDefaultVal] = useState('')
-
-  const initialRestrictions = editingField
-    ? restrictions.parse(editingField)
-    : restrictions.EMPTY_RESTRICTION_STATE
-  // reference
-  const [refSchema, setRefSchema] = useState(initialRestrictions.refSchema)
-  // integer/float
-  const [minVal, setMinVal] = useState(initialRestrictions.min)
-  const [maxVal, setMaxVal] = useState(initialRestrictions.max)
-  // string/enum
-  const [choices, setChoices] = useState(initialRestrictions.choices)
-  const [maxLength, setMaxLength] = useState(initialRestrictions.maxLength)
-  // file/file_list
-  const [accept, setAccept] = useState(initialRestrictions.accept)
-  const [maxSize, setMaxSize] = useState(initialRestrictions.maxSize)
-  // date/datetime — stored as UTC ISO; display in datetime-local format
-  const [minDate, setMinDate] = useState(initialRestrictions.minDate)
-  const [maxDate, setMaxDate] = useState(initialRestrictions.maxDate)
-  // datetime only: overrides the collection's timezone for this field
-  const [timezone, setTimezone] = useState(initialRestrictions.timezone)
+  const [rules, setRules] = useState<Rules>({
+    ...(editing?.restrictions ?? {}),
+  })
+  const [problems, setProblems] = useState<Record<string, string | null>>({})
 
   const addField = useAddField(schemaName)
   const updateField = useUpdateField(schemaName)
-  const { data: allSchemas } = useSchemas()
+  const mutation = mode === 'create' ? addField : updateField
 
-  const isReferenceType = type === 'reference' || type === 'reference_list'
+  const setRule = useCallback((key: string, value: unknown) => {
+    setRules((prev) => {
+      const next = { ...prev }
+      if (value === undefined) delete next[key]
+      else next[key] = value
+      return next
+    })
+  }, [])
+  const setProblem = useCallback((key: string, message: string | null) => {
+    setProblems((prev) =>
+      prev[key] === message ? prev : { ...prev, [key]: message },
+    )
+  }, [])
+
+  const dirty = useMemo(
+    () =>
+      mode === 'create'
+        ? name !== '' ||
+          label !== '' ||
+          required ||
+          defaultVal !== '' ||
+          !!tidy(rules)
+        : name !== editing!.name ||
+          label !== (editing!.label ?? '') ||
+          required !== editing!.required ||
+          JSON.stringify(tidy(rules) ?? {}) !==
+            JSON.stringify(tidy(editing!.restrictions ?? {}) ?? {}),
+    [mode, name, label, required, defaultVal, rules, editing],
+  )
+  useEffect(() => {
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
+
+  const problemList = Object.values(problems).filter((p): p is string => !!p)
   const canSubmit =
-    !!fieldName.trim() &&
-    !nameError(fieldName.trim()) &&
-    (!isReferenceType || !!refSchema)
-  const showDefault = mode === 'create' && !NON_DEFAULT_TYPES.has(type)
+    !!name.trim() && !nameError(name.trim()) && problemList.length === 0
 
-  function handleTypeChange(t: string) {
-    setType(t)
-    setDefaultVal('')
-    setRefSchema('')
-    setMinVal('')
-    setMaxVal('')
-    setChoices('')
-    setMaxLength('')
-    setAccept('')
-    setMaxSize('')
-    setMinDate('')
-    setMaxDate('')
-    setTimezone('')
+  const ctx: ControlContext = {
+    schemaName,
+    fieldNames: props.fieldNames,
+    schemas: props.schemas ?? [],
+    existing: editing,
   }
 
-  const restrictionState: restrictions.RestrictionState = {
-    min: minVal,
-    max: maxVal,
-    choices,
-    maxLength,
-    accept,
-    maxSize,
-    minDate,
-    maxDate,
-    refSchema,
-    timezone,
-  }
-  const boundsError = restrictions.boundsProblem(type, restrictionState)
-
-  function handleSubmit() {
-    if (!canSubmit || boundsError) return
-    const builtRestrictions = restrictions.build(type, restrictionState)
-
-    if (mode === 'create') {
+  function submit() {
+    if (!canSubmit) return
+    const built = tidy(rules)
+    if (props.mode === 'create') {
       const body: Parameters<typeof addField.mutate>[0] = {
-        name: fieldName.trim(),
+        name: name.trim(),
         type,
         required,
-        restrictions: builtRestrictions,
+        restrictions: built,
       }
-      if (fieldLabel.trim()) {
-        body.label = fieldLabel.trim()
-      }
-      if (showDefault && defaultVal !== '') {
+      if (label.trim()) body.label = label.trim()
+      if (descriptor?.supports_default !== false && defaultVal !== '')
         body.default = defaultVal
-      }
-      addField.mutate(body, {
-        onSuccess: () => {
-          setFieldName('')
-          setFieldLabel('')
-          handleTypeChange('string')
-          setRequired(false)
-          onDone()
-        },
-      })
+      addField.mutate(body, { onSuccess: (f) => onDone(f.name) })
     } else {
-      const trimmed = fieldName.trim()
-      const trimmedLabel = fieldLabel.trim()
+      const trimmedName = name.trim()
+      const trimmedLabel = label.trim()
       updateField.mutate(
         {
-          fieldName: editingField!.name,
-          rename: trimmed !== editingField!.name ? trimmed : undefined,
+          fieldName: props.field.name,
+          rename: trimmedName !== props.field.name ? trimmedName : undefined,
           // '' clears the label; undefined leaves it untouched.
           label:
-            trimmedLabel !== (editingField!.label ?? '')
+            trimmedLabel !== (props.field.label ?? '')
               ? trimmedLabel
               : undefined,
           required,
-          restrictions: builtRestrictions ?? {},
+          restrictions: built ?? {},
         },
-        { onSuccess: onDone },
+        { onSuccess: () => onDone() },
       )
     }
   }
 
-  const mutation = mode === 'create' ? addField : updateField
+  // The rule the chosen kind leads with comes first.
+  const ordered = descriptor
+    ? [...descriptor.restrictions].sort(
+        (a, b) => Number(b.key === focus) - Number(a.key === focus),
+      )
+    : []
 
   return (
-    <FormGrid
-      className={
-        mode === 'create'
-          ? 'bg-canvas-subtle px-4 py-3'
-          : 'bg-accent-subtle px-4 py-3'
-      }
-    >
-      <NameLabelFields
-        kind="Field"
-        value={{ label: fieldLabel, name: fieldName }}
-        onChange={(next) => {
-          setFieldLabel(next.label)
-          setFieldName(next.name)
-        }}
-        // An existing name is what workflows reference — never re-derive it.
-        deriveName={mode === 'create'}
-        onEnter={handleSubmit}
-        autoFocus
-      />
-      {mode === 'create' ? (
-        <Field
-          label="Type"
-          span={4}
-          hint="How values are stored and validated — pick reference to link to another record type."
-        >
-          <Select
-            size="sm"
-            value={type}
-            onChange={(e) => handleTypeChange(e.target.value)}
-          >
-            {FIELD_TYPES.map((t) => (
-              <option key={t}>{t}</option>
-            ))}
-          </Select>
-        </Field>
-      ) : (
-        <div className={`flex flex-col gap-1 ${spanClassName(4)}`}>
-          <span className="text-xs font-medium text-fg-muted">Type</span>
-          <div className="h-8 flex items-center">
-            <Badge variant="accent">{type}</Badge>
-          </div>
-        </div>
-      )}
-      <Field label="Required" layout="inline" span={4}>
-        <Checkbox
-          checked={required}
-          onChange={(e) => setRequired(e.target.checked)}
-        />
-      </Field>
-
-      {isReferenceType && (
-        <Field
-          label="Target schema"
-          span={6}
-          required
-          hint="Records in this field can only point to records of this type."
-        >
-          <Select
-            size="sm"
-            value={refSchema}
-            onChange={(e) => setRefSchema(e.target.value)}
-          >
-            <option value="">— target schema —</option>
-            {allSchemas
-              ?.filter((s) => s.name !== schemaName)
-              .map((s) => (
-                <option key={s.id} value={s.name}>
-                  {displayLabel(s.name, s.label)}
-                </option>
-              ))}
-          </Select>
-        </Field>
-      )}
-
-      {showDefault && (
-        <Field label="Default value" span={4}>
-          <Input
-            size="sm"
-            value={defaultVal}
-            onChange={(e) => setDefaultVal(e.target.value)}
-            placeholder="none"
+    <div className="space-y-6">
+      <section aria-label="Identity" className="space-y-3">
+        <FormGrid>
+          <NameLabelFields
+            kind="Field"
+            value={{ label, name }}
+            onChange={(next) => {
+              setLabel(next.label)
+              setName(next.name)
+            }}
+            // An existing name is what workflows reference: never re-derive it.
+            deriveName={mode === 'create'}
+            onEnter={submit}
+            autoFocus
           />
-        </Field>
-      )}
-
-      {(type === 'integer' || type === 'float') && (
-        <FormSection title="Restrictions">
-          <Field label="Min" span={6}>
-            <Input
-              size="sm"
-              type="number"
-              step={type === 'integer' ? '1' : 'any'}
-              value={minVal}
-              onChange={(e) => setMinVal(e.target.value)}
-              placeholder="none"
+          <Field label="Required" layout="inline" span={4}>
+            <Checkbox
+              checked={required}
+              onChange={(e) => setRequired(e.target.checked)}
             />
           </Field>
-          <Field label="Max" span={6}>
-            <Input
-              size="sm"
-              type="number"
-              step={type === 'integer' ? '1' : 'any'}
-              value={maxVal}
-              onChange={(e) => setMaxVal(e.target.value)}
-              placeholder="none"
-            />
-          </Field>
-        </FormSection>
-      )}
-      {(type === 'string' || type === 'enum') && (
-        <FormSection title="Restrictions">
-          <Field
-            label="Choices (comma-separated)"
-            span={type === 'string' ? 6 : 12}
-          >
-            <Input
-              size="sm"
-              value={choices}
-              onChange={(e) => setChoices(e.target.value)}
-              placeholder={
-                mode === 'create' ? 'e.g. left,right,bilateral' : 'none'
-              }
-            />
-          </Field>
-          {type === 'string' && (
-            <Field label="Max length" span={6}>
+          {mode === 'create' && descriptor?.supports_default !== false && (
+            <Field label="Default value" span={4}>
               <Input
                 size="sm"
-                type="number"
-                step="1"
-                min="1"
-                value={maxLength}
-                onChange={(e) => setMaxLength(e.target.value)}
+                value={defaultVal}
+                onChange={(e) => setDefaultVal(e.target.value)}
                 placeholder="none"
               />
             </Field>
           )}
-        </FormSection>
-      )}
-      {(type === 'file' || type === 'file_list') && (
-        <FormSection title="Restrictions">
-          <Field
-            label="Accept"
-            span={6}
-            hint="Comma-separated file extensions or MIME types to allow."
-          >
-            <Input
-              size="sm"
-              value={accept}
-              onChange={(e) => setAccept(e.target.value)}
-              placeholder=".csv,.txt"
-            />
-          </Field>
-          <Field label="Max size (bytes)" span={6}>
-            <Input
-              size="sm"
-              type="number"
-              step="1"
-              min="1"
-              value={maxSize}
-              onChange={(e) => setMaxSize(e.target.value)}
-              placeholder="none"
-            />
-          </Field>
-        </FormSection>
-      )}
-      {(type === 'date' || type === 'datetime') && (
-        <FormSection title="Restrictions">
-          {type === 'datetime' && (
-            <Field
-              label="Timezone"
-              span={12}
-              hint="Values without a UTC offset are read in this zone, and shown in it. Leave unset to use the collection's timezone."
+        </FormGrid>
+        {mode === 'edit' && (
+          <p className="text-xs text-fg-subtle">
+            The name is what workflows and CSV headers use. Changing it means
+            updating any workflow that mentions it.
+          </p>
+        )}
+      </section>
+
+      <section aria-label="What it stores" className="space-y-1">
+        <h3 className="text-sm font-semibold text-fg">
+          {descriptor?.label ?? type}
+          {props.mode === 'create' && props.onChangeKind && (
+            <button
+              type="button"
+              onClick={props.onChangeKind}
+              className="ml-3 text-xs font-normal text-accent hover:underline cursor-pointer"
             >
-              <TimeZoneSelect
-                size="sm"
-                value={timezone}
-                onChange={setTimezone}
-                unsetLabel="Inherit from the collection"
-              />
-            </Field>
+              Change kind
+            </button>
           )}
-          <Field label="Not before" span={6}>
-            <Input
-              size="sm"
-              type={type === 'date' ? 'date' : 'datetime-local'}
-              value={minDate}
-              onChange={(e) => setMinDate(e.target.value)}
+        </h3>
+        {descriptor ? (
+          <p className="text-sm text-fg-muted">
+            {descriptor.description}{' '}
+            <span className="text-fg-subtle">
+              Stored as: {descriptor.stored_as}.
+            </span>
+          </p>
+        ) : (
+          <Skeleton className="h-4 w-64" />
+        )}
+        {mode === 'edit' && (
+          <p className="text-xs text-fg-subtle">
+            The type can't change once a field exists.
+          </p>
+        )}
+      </section>
+
+      <section aria-label="Rules" className="space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold text-fg">Rules</h3>
+          <p className="text-xs text-fg-subtle">
+            What this field accepts. Checked when a record is saved; records
+            saved earlier are left as they are.
+          </p>
+        </div>
+        {!descriptor && <Skeleton className="h-16 w-full" />}
+        {descriptor && ordered.length === 0 && (
+          <p className="text-sm text-fg-muted">
+            This type has no rules to set.
+          </p>
+        )}
+        {ordered.map((desc) => {
+          const Control = CONTROLS[desc.control]
+          return Control ? (
+            <Control
+              key={desc.key}
+              desc={desc}
+              rules={rules}
+              set={setRule}
+              problem={setProblem}
+              ctx={ctx}
             />
-          </Field>
-          <Field label="Not after" span={6}>
-            <Input
-              size="sm"
-              type={type === 'date' ? 'date' : 'datetime-local'}
-              value={maxDate}
-              onChange={(e) => setMaxDate(e.target.value)}
-            />
-          </Field>
-        </FormSection>
+          ) : (
+            <p key={desc.key} className="text-xs text-fg-subtle">
+              {desc.label} can't be edited here yet.
+            </p>
+          )
+        })}
+      </section>
+
+      {(problemList.length > 0 || mutation.error) && (
+        <ul role="alert" className="space-y-0.5 text-xs text-danger">
+          {problemList.map((p) => (
+            <li key={p}>{p}</li>
+          ))}
+          {mutation.error && <li>{errorMessage(mutation.error)}</li>}
+        </ul>
       )}
 
-      {(boundsError || mutation.error) && (
-        <p role="alert" className={`${spanClassName(12)} text-xs text-danger`}>
-          {boundsError ?? errorMessage(mutation.error)}
-        </p>
-      )}
-
-      <FormFooter>
+      <div className="flex items-center gap-2">
         <Button
           variant="primary"
           size="sm"
-          onClick={handleSubmit}
-          disabled={mutation.isPending || !canSubmit || !!boundsError}
+          onClick={submit}
+          disabled={
+            mutation.isPending || !canSubmit || (mode === 'edit' && !dirty)
+          }
         >
           {mode === 'create'
             ? mutation.isPending
@@ -375,12 +281,12 @@ export function FieldForm(props: FieldFormProps) {
               : 'Add field'
             : mutation.isPending
               ? 'Saving…'
-              : 'Save'}
+              : 'Save changes'}
         </Button>
-        <Button size="sm" onClick={onDone}>
-          Cancel
+        <Button size="sm" onClick={() => onDone()}>
+          {mode === 'edit' && dirty ? 'Discard changes' : 'Cancel'}
         </Button>
-      </FormFooter>
-    </FormGrid>
+      </div>
+    </div>
   )
 }

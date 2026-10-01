@@ -3,6 +3,7 @@ import DatabaseSection from '../components/settings/DatabaseSection'
 import StorageSection from '../components/settings/StorageSection'
 import ThemeSection from '../components/settings/ThemeSection'
 import RetentionSection from '../components/settings/RetentionSection'
+import MapSection from '../components/settings/MapSection'
 import AdvancedSection from '../components/settings/AdvancedSection'
 
 export default function SettingsPage() {
@@ -15,6 +16,8 @@ export default function SettingsPage() {
       <StorageSection />
       <hr className="border-border" />
       <RetentionSection />
+      <hr className="border-border" />
+      <MapSection />
       <hr className="border-border" />
       <AdvancedSection />
     </Page>

@@ -36,7 +36,7 @@ Each volume also has a `manifest.jsonl` at its root — one JSON line per object
     ```
 
 === "Web UI"
-    On a record's detail page, file fields show a file picker. Multiple files can be attached to a `file_list` field. Uploaded files are stored immediately; they are associated with the record when you save the form.
+    On a new record's form, file fields show a file picker, and the files are attached when you save the form. On an existing record's detail page, a picked file is uploaded and then **waits for approval** beside the field: it shows its name, size and whether it passes the field's `accept` and `max_size` rules, and nothing on the record changes until you click **Approve** (or **Discard**). Workflows that watch the field run on approval, not on upload. Pending files live in the page, so leaving it discards them; the uploaded bytes stay in the object store until garbage collection removes them. Multiple files can be attached to a `file_list` field, and a batch is approved together.
 
 ## Downloading files
 

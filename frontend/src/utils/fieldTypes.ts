@@ -22,6 +22,7 @@ export const FIELD_TYPES = [
   'enum',
   'url',
   'tags',
+  'geo',
 ] as const
 
 export type FieldType = (typeof FIELD_TYPES)[number]

@@ -53,13 +53,24 @@ civex schema lint
 |---|---|---|
 | `string` | Text | Any text |
 | `integer` | Whole number | `42` |
-| `float` | Decimal number | `3.14` |
+| `float` | Decimal number, optionally in a fixed unit | `3.14`, or `1024 ft` when the field has a unit |
 | `boolean` | True/false | `true`, `yes`, `1` / `false`, `no`, `0` |
-| `date` | Calendar date | ISO date: `2024-03-15` |
+| `date` | Calendar date, or a year or month when the field allows it | ISO date: `2024-03-15` (`2024`, `2024-03` if allowed) |
+| `geo` | A point, line or area (GeoJSON) | `56.12, -3.41` (latitude, longitude), `POINT(-3.41 56.12)` or GeoJSON |
 | `datetime` | Point in time (UTC) | ISO datetime: `2024-03-15T09:30:00` |
 | `file` | One file attachment | Absolute or relative file path |
 | `file_list` | Multiple file attachments | File path (repeat the prompt to add more) |
 | `reference` | Link to another record | Record ID or short prefix |
+
+**Locations.** A `geo` field holds a GeoJSON geometry in WGS84 (longitude first). Restrict the shapes it accepts with `--geometry-types Point,Polygon` and the area it may fall in with `--bbox WEST,SOUTH,EAST,NORTH`; a west edge greater than the east edge crosses the 180th meridian. In CSV files and exports a point is written as `latitude, longitude`; other shapes are written as GeoJSON.
+
+Locations can be typed in the ways people write them: `56.12, -3.41`, `56.12N 3.41W`, `N56.12 W3.41`, `56°07'12"N 3°24'36"W` or `N 56° 07.2' W 3° 24.6'` (the CLI, CSV import and the web form all read these), as well as `POINT(-3.41 56.12)` and GeoJSON. A point can also carry an `uncertainty_m` (how well the position is known, in metres) and a third coordinate for elevation, negative below sea level for a depth.
+
+**The map editor.** On a record, a location field has an **Edit on map…** button. It opens a map for placing a point, or drawing a line or area; latitude and longitude boxes in decimal degrees, degrees and decimal minutes, or degrees, minutes and seconds (with N/S and E/W boxes, so no one has to remember that west is negative); a table of the points of a line or area with its length or area; **Use my current position** (with the device's accuracy); and **Import from a file** for GeoJSON, GPX, KML and WKT. Nothing changes on the record until you press **Apply**. A field's allowed shapes and area are shown on the map and enforced before you apply. The map draws built-in coastlines and a grid, so it works offline and needs no account. For street-level detail, set a tile server under **Settings → Map** (or `[map]` in `_civex/config.toml`, with `tile_url` and `attribution`); you are responsible for that provider's terms of use, and the public OpenStreetMap servers don't allow heavy use.
+
+**Partial dates.** A `date` field's `precision` names the least precise value it accepts: `year` accepts `2019`, `2019-06` and `2019-06-14`, `month` accepts the last two, and `day` (the default) accepts only full dates. Values are stored as written, never padded to a day. A minimum or maximum applies to the whole period, so `2020` fails a minimum of `2020-03`.
+
+**Units.** A `float` field can have a `unit` such as `m` or `degC`. A field has exactly one unit and every stored value is in it. Conversion happens only where data enters: typing `1024 ft` into a metres field (in the form or the CLI) stores `312.1152`, and the CSV import step asks which unit each mapped column is written in. Nothing already stored is ever converted. Changing a field's unit later only relabels it, for correcting a wrong label; to work in a different unit going forward, add a new field. Units outside the built-in table (for example `umol/kg`) work as plain labels with no conversion.
 
 Datetimes are always stored as UTC instants. What changes with a timezone is how a value *without* a UTC offset (like `2024-03-15T09:30:00`, from a CSV cell, an instrument export or a filename) is read, and how stored values are shown.
 
@@ -124,7 +135,7 @@ Restrictions constrain what values are accepted when records are saved. They are
     ```
 
 === "Web UI"
-    On a schema's detail page, click **Add field**. Enter a **label** (the name auto-fills as a slug), pick a type from the dropdown, and toggle **Required**. The form reveals the restrictions that apply to the chosen type — min/max for `integer`/`float`, choices/max length for `string`, accept/max size for `file`/`file_list`, and a target-schema picker for `reference`.
+    On a schema's detail page the fields are listed on the left; select one to see and change its rules on the right. Click **Add field** and choose what kind of data it is (a quantity, a location, a file, and so on); then enter a **label** (the name auto-fills as a slug) and toggle **Required**. The rules offered depend on the kind: min/max and a unit for numbers, precision for dates, shapes and an allowed area for locations, allowed values for text, file types and size for files, and a target schema for links. Unsaved changes are flagged, and you're asked before leaving them.
 
 **Restriction flags** (on `add-field` and `update-field`):
 
@@ -138,6 +149,10 @@ Restrictions constrain what values are accepted when records are saved. They are
 | `--max-length N` | `string` | Maximum character length |
 | `--accept .ext,.ext` | `file`, `file_list` | Comma-separated allowed extensions |
 | `--max-size BYTES` | `file`, `file_list` | Maximum file size in bytes |
+| `--unit SYMBOL` | `float` | Unit every value is stored in, e.g. `m` |
+| `--precision year\|month\|day` | `date` | Least precise value accepted |
+| `--geometry-types A,B` | `geo` | Shapes accepted, e.g. `Point,Polygon` |
+| `--bbox W,S,E,N` | `geo` | Allowed area in degrees |
 | `--references SCHEMA` | `reference` | Target schema name |
 | `--clear-restrictions` | all | Remove all restrictions (on `update-field`) |
 
@@ -164,7 +179,7 @@ Rename a field or change its restrictions without losing data.
     ```
 
 === "Web UI"
-    Click the pencil icon on any field row to edit it inline — the same label, name, type, required, and restriction inputs as **Add field**. Editing a field never re-derives its name from the label; renaming is always deliberate.
+    Select a field in the list to edit it — the same label, name, required, and rule inputs as **Add field**; the type can't change once a field exists. Editing a field never re-derives its name from the label; renaming is always deliberate.
 
 ## Schema inheritance
 

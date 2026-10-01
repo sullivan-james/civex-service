@@ -9,6 +9,7 @@ import {
   type ExtractOutputType,
 } from './FilenamePatternPreview'
 import { NEW_FIELD, SKIP_COLUMN, type MapState } from './importWizardTypes'
+import { UNIT_GROUPS, dimensionOf } from '../../utils/units'
 import type { ParsedCsv } from '../../utils/csv'
 import type { Schema, Field as SchemaField } from '../../api/schemas'
 import type { Mode, Strategy } from './importWizardTypes'
@@ -166,6 +167,45 @@ export function MapStep({
                       ))}
                   </Select>
                 </div>
+                {(() => {
+                  const target = availableFields.find(
+                    (f) => f.name === state.columnMap[col],
+                  )
+                  const fieldUnit =
+                    target?.type === 'float' &&
+                    typeof target.restrictions?.unit === 'string'
+                      ? target.restrictions.unit
+                      : null
+                  const dimension = fieldUnit ? dimensionOf(fieldUnit) : null
+                  if (!fieldUnit || !dimension) return null
+                  return (
+                    <label className="mt-2 flex items-center gap-2 text-xs text-fg-muted">
+                      Values in this column are in
+                      <Select
+                        size="sm"
+                        value={state.columnUnits[col] ?? fieldUnit}
+                        onChange={(e) =>
+                          onChange({
+                            columnUnits: {
+                              ...state.columnUnits,
+                              [col]: e.target.value,
+                            },
+                          })
+                        }
+                        className="w-28"
+                      >
+                        {UNIT_GROUPS[dimension].map((u) => (
+                          <option key={u} value={u}>
+                            {u}
+                          </option>
+                        ))}
+                      </Select>
+                      {(state.columnUnits[col] ?? fieldUnit) !== fieldUnit && (
+                        <span>converted to {fieldUnit} on import</span>
+                      )}
+                    </label>
+                  )
+                })()}
                 {state.columnMap[col] === NEW_FIELD &&
                   state.newColumnFields[col] && (
                     <NewFieldEditor

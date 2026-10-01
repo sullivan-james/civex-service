@@ -1,4 +1,5 @@
 import type { Field } from '../api/schemas'
+import { parseLocation } from './geo'
 
 /** True for the values the record form treats as "not set" -- omitted from
  * payloads rather than sent as empty strings/nulls. An empty list counts as
@@ -17,7 +18,13 @@ export function isEmptyValue(value: unknown): boolean {
 export function coerceFieldValue(value: unknown, type: string): unknown {
   if (isEmptyValue(value)) return undefined
   if (type === 'integer') return parseInt(value as string, 10)
-  if (type === 'float') return parseFloat(value as string)
+  if (type === 'float') {
+    // Number(), not parseFloat: "1024 ft" must not quietly become 1024.
+    const n = Number(value)
+    return Number.isNaN(n) ? value : n
+  }
+  if (type === 'geo' && typeof value === 'string')
+    return parseLocation(value) ?? value
   return value
 }
 
