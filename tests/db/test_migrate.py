@@ -96,3 +96,31 @@ def test_repeated_call_on_same_engine_object_is_cached_noop(tmp_path: Path) -> N
     ensure_schema_current(engine)
     ensure_schema_current(engine)  # in-process cache hit -- must not re-run and error
     assert _alembic_revision(engine) == _script_head()
+
+
+def test_concurrent_first_use_migrates_cleanly(tmp_path: Path):
+    """The server builds a context per request in a threadpool, so a burst of
+    requests on a cold start all call ensure_schema_current at once. Alembic's
+    context proxies are process-global; without the lock this raised
+    KeyError('script') / AttributeError in some threads."""
+    import threading
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'race.db'}")
+    errors: list[BaseException] = []
+    barrier = threading.Barrier(8)
+
+    def worker() -> None:
+        barrier.wait()
+        try:
+            ensure_schema_current(engine)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    assert _alembic_revision(engine) == _script_head()

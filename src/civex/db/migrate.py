@@ -25,6 +25,7 @@ states a given project is in.
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from alembic import command
@@ -38,6 +39,7 @@ _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 _LEGACY_MARKER_TABLE = "schemas"
 
 _migrated_engines: set[Engine] = set()
+_migrate_lock = threading.Lock()
 
 
 def _alembic_config() -> Config:
@@ -54,10 +56,17 @@ def ensure_schema_current(engine: Engine) -> None:
     if engine in _migrated_engines:
         return
 
-    with engine.connect() as connection:
-        _migrate_connection(connection)
-
-    _migrated_engines.add(engine)
+    # Alembic's `context`/`op` proxies are module globals, so two threads
+    # migrating at once corrupt each other (KeyError: 'script'). The server
+    # builds a context per request in a threadpool, and the UI fires a burst
+    # of requests on load -- all of which see an un-migrated engine until the
+    # first one finishes. Serialise, and re-check once the lock is held.
+    with _migrate_lock:
+        if engine in _migrated_engines:
+            return
+        with engine.connect() as connection:
+            _migrate_connection(connection)
+        _migrated_engines.add(engine)
 
 
 def _migrate_connection(connection: Connection) -> None:

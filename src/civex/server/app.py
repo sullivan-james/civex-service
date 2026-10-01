@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -254,6 +256,33 @@ for installing the CLI and standing up your first project.
 """
 
 
+def _migrate_on_startup() -> None:
+    """Bring the project database to the current schema before serving.
+
+    Best-effort: with no project, or a database that is down, the server must
+    still start (the `db` router is deliberately reachable in that state), so
+    failures are logged and left for the per-request path to report.
+    """
+    import structlog
+
+    try:
+        from civex.config import load_config
+        from civex.context import _get_engine
+        from civex.db.migrate import ensure_schema_current
+
+        ensure_schema_current(_get_engine(load_config().db.url))
+    except Exception as exc:
+        structlog.get_logger("civex.server").warning(
+            "startup_migration_skipped", error=str(exc)
+        )
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    _migrate_on_startup()
+    yield
+
+
 def create_app() -> FastAPI:
     _init_observability()
     from civex import __version__
@@ -263,6 +292,7 @@ def create_app() -> FastAPI:
         description=_DESCRIPTION,
         version=__version__,
         openapi_tags=_OPENAPI_TAGS,
+        lifespan=_lifespan,
         contact={
             "name": "James Sullivan",
             "email": "sullivanj041@gmail.com",
