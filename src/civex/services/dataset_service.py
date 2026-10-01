@@ -51,17 +51,16 @@ class DatasetService:
         can't be made local or deleted: the references would dangle."""
         if dataset.scope != GLOBAL or self._record_svc is None:
             return
-        referrers = self._record_svc.collection_referrers(dataset.id)
-        if not referrers:
+        total, referrers = self._record_svc.collection_referrers(dataset.id)
+        if not total:
             return
         shown = [f"{rec.schema_name} record {str(rec.id)[:8]}" for rec, _ in referrers]
         msg = (
             f"Cannot {action} '{dataset.name}': "
-            f"{len(referrers)} record(s) in other collections reference it: "
-            + "; ".join(shown[:5])
+            f"{total} record(s) in other collections reference it: " + "; ".join(shown)
         )
-        if len(shown) > 5:
-            msg += f" and {len(shown) - 5} more"
+        if total > len(shown):
+            msg += f" and {total - len(shown)} more"
         raise ValidationError(msg)
 
     def create(

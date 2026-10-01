@@ -5,11 +5,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, cast, func, literal, or_, select, String
+from sqlalchemy import and_, cast, delete, func, literal, or_, select, String, update
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlalchemy.orm import Session, aliased
 
-from civex.db.models import Dataset, Record, Schema, WorkflowJob
+from civex.db.models import Dataset, Record, RecordReference, Schema, WorkflowJob
 from civex.domain.dtos import RecordDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode, SortKey
@@ -102,6 +102,15 @@ def _coerce_json_value(v: str) -> Any:
         return v
 
 
+# Ids per IN (...) -- well under SQLite's bound-variable limit.
+_CHUNK = 500
+
+
+def _chunks(ids: list[uuid.UUID]):
+    for start in range(0, len(ids), _CHUNK):
+        yield ids[start : start + _CHUNK]
+
+
 class LocalRecordRepository:
     def __init__(self, session: Session, is_postgres: bool = False) -> None:
         self._s = session
@@ -123,9 +132,12 @@ class LocalRecordRepository:
             uid = uuid.UUID(prefix)
             q = self._s.query(Record).filter(Record.id == uid)
         except ValueError:
-            q = self._s.query(Record).filter(
-                cast(Record.id, String).like(f"{prefix.lower()}%")
-            )
+            span = _prefix_span(prefix)
+            if span is None:
+                return None
+            # A range over the id itself, so the primary-key index serves it;
+            # casting the id to text for LIKE would scan every record.
+            q = self._s.query(Record).filter(Record.id.between(*span))
         if not include_deleted:
             q = q.filter(Record.deleted_at.is_(None))
         row = q.first()
@@ -169,8 +181,11 @@ class LocalRecordRepository:
         since-deleted target should still resolve a display label."""
         if not ids:
             return []
-        rows = self._s.query(Record).filter(Record.id.in_(ids)).all()
-        return [_to_dto(r) for r in rows]
+        return [
+            _to_dto(r)
+            for chunk in _chunks(ids)
+            for r in self._s.query(Record).filter(Record.id.in_(chunk)).all()
+        ]
 
     def list_filtered(
         self, query: ResolvedQuery, offset: int, limit: int
@@ -189,6 +204,14 @@ class LocalRecordRepository:
 
     def count(self, query: ResolvedQuery) -> int:
         return _base_query(self._s, query, self._pg).count()
+
+    def list_ids(self, query: ResolvedQuery) -> list[uuid.UUID]:
+        """Ids of every record the query matches -- no rows hydrated, for
+        callers (bulk delete) that only need to know which."""
+        return [
+            rid
+            for (rid,) in _base_query(self._s, query, self._pg).with_entities(Record.id)
+        ]
 
     def count_children(
         self, parent_ids: list[uuid.UUID]
@@ -300,67 +323,115 @@ class LocalRecordRepository:
             q = q.filter(Record.deleted_at.is_(None))
         return [_to_dto(r) for r in q.all()]
 
-    def list_referencing(
-        self,
-        target_ids: list[uuid.UUID],
-        reference_field_ids: list[uuid.UUID],
-        reference_list_field_ids: list[uuid.UUID],
-    ) -> list[RecordDTO]:
-        """Records holding a `reference`/`reference_list` value that points at
-        any of target_ids, keyed by field id (data is stored id-keyed, not
-        name-keyed -- see RecordService._names_to_ids)."""
-        if not target_ids or not (reference_field_ids or reference_list_field_ids):
+    def referrers_of(
+        self, target_ids: list[uuid.UUID], field_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]:
+        """(referrer id, field id, target id) for every live record holding a
+        value in one of `field_ids` that points at any of `target_ids` -- an
+        index lookup in record_references, not a search of record data."""
+        if not target_ids or not field_ids:
             return []
-        target_strs = [str(t) for t in target_ids]
-
-        if self._pg:
-            # @> containment: for a nested array value, {"k": ["a","b"]} @> {"k": ["a"]}
-            # is true iff "a" appears in the array -- exactly the reference_list case.
-            clauses = [
-                Record.data.op("@>")(cast(literal(json.dumps({str(fid): t})), PG_JSONB))
-                for fid in reference_field_ids
-                for t in target_strs
-            ] + [
-                Record.data.op("@>")(
-                    cast(literal(json.dumps({str(fid): [t]})), PG_JSONB)
+        rr = RecordReference
+        return [
+            (row[0], row[1], row[2])
+            for chunk in _chunks(list(target_ids))
+            for row in self._s.execute(
+                select(rr.record_id, rr.field_id, rr.target_id)
+                .join(Record, Record.id == rr.record_id)
+                .where(
+                    rr.target_id.in_(chunk),
+                    rr.field_id.in_(field_ids),
+                    Record.deleted_at.is_(None),
                 )
-                for fid in reference_list_field_ids
-                for t in target_strs
-            ]
-            rows = (
-                self._s.query(Record)
-                .filter(Record.deleted_at.is_(None))
-                .filter(or_(*clauses))
-                .all()
             )
-            return [_to_dto(r) for r in rows]
+        ]
 
-        # SQLite has no JSONB containment operator. Let the database discard
-        # every record whose JSON text doesn't even mention a target id (a
-        # superset test -- ids are hyphenated hex, so nothing to escape), then
-        # check the survivors exactly in Python.
-        target_set = set(target_strs)
-        ref_ids = {str(fid) for fid in reference_field_ids}
-        ref_list_ids = {str(fid) for fid in reference_list_field_ids}
-        result = []
-        candidates = (
-            self._s.query(Record)
-            .filter(Record.deleted_at.is_(None))
-            .filter(
-                or_(*[cast(Record.data, String).like(f"%{t}%") for t in target_strs])
+    def referrer_groups(
+        self, target_id: uuid.UUID, field_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, str, uuid.UUID, int]]:
+        """Who points at `target_id`, counted per (collection, schema name,
+        field): live referrers only."""
+        if not field_ids:
+            return []
+        rr = RecordReference
+        rows = self._s.execute(
+            select(Record.dataset_id, Schema.name, rr.field_id, func.count())
+            .select_from(rr)
+            .join(Record, Record.id == rr.record_id)
+            .join(Schema, Schema.id == Record.schema_id)
+            .where(
+                rr.target_id == target_id,
+                rr.field_id.in_(field_ids),
+                Record.deleted_at.is_(None),
+            )
+            .group_by(Record.dataset_id, Schema.name, rr.field_id)
+        )
+        return [(r[0], r[1], r[2], r[3]) for r in rows]
+
+    def referrers_into_dataset(
+        self, dataset_id: uuid.UUID, field_ids: list[uuid.UUID], limit: int
+    ) -> tuple[int, list[tuple[uuid.UUID, uuid.UUID]]]:
+        """Live records in *other* collections that point at a live record in
+        `dataset_id`: how many there are, and (record id, field id) pairs for
+        the first `limit` of them."""
+        if not field_ids:
+            return 0, []
+        rr = RecordReference
+        target, referrer = aliased(Record), aliased(Record)
+        where = (
+            target.dataset_id == dataset_id,
+            target.deleted_at.is_(None),
+            referrer.dataset_id != dataset_id,
+            referrer.deleted_at.is_(None),
+            rr.field_id.in_(field_ids),
+        )
+
+        def joined(*cols):
+            return (
+                select(*cols)
+                .select_from(rr)
+                .join(referrer, referrer.id == rr.record_id)
+                .join(target, target.id == rr.target_id)
+                .where(*where)
+            )
+
+        total = self._s.scalar(joined(func.count(func.distinct(rr.record_id)))) or 0
+        page = list(
+            self._s.scalars(
+                joined(rr.record_id).distinct().order_by(rr.record_id).limit(limit)
             )
         )
-        for row in candidates.all():
-            data = row.data or {}
-            hit = any(data.get(fid) in target_set for fid in ref_ids)
-            if not hit:
-                hit = any(
-                    isinstance(data.get(fid), list) and target_set & set(data[fid])
-                    for fid in ref_list_ids
-                )
-            if hit:
-                result.append(_to_dto(row))
-        return result
+        if not page:
+            return total, []
+        pairs = self._s.execute(
+            joined(rr.record_id, rr.field_id).where(rr.record_id.in_(page))
+        )
+        return total, [(r[0], r[1]) for r in pairs]
+
+    def dangling_references(
+        self, field_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, str, uuid.UUID, uuid.UUID]]:
+        """(record id, its schema name, field id, target id) for every live
+        record whose value in one of `field_ids` names no live record."""
+        if not field_ids:
+            return []
+        rr = RecordReference
+        target = aliased(Record)
+        rows = self._s.execute(
+            select(rr.record_id, Schema.name, rr.field_id, rr.target_id)
+            .select_from(rr)
+            .join(Record, Record.id == rr.record_id)
+            .join(Schema, Schema.id == Record.schema_id)
+            .outerjoin(
+                target, and_(target.id == rr.target_id, target.deleted_at.is_(None))
+            )
+            .where(
+                Record.deleted_at.is_(None),
+                rr.field_id.in_(field_ids),
+                target.id.is_(None),
+            )
+        )
+        return [(r[0], r[1], r[2], r[3]) for r in rows]
 
     def count_by_schema(self, query: ResolvedQuery) -> dict[str, int]:
         rows = (
@@ -432,6 +503,85 @@ class LocalRecordRepository:
         row.data = data
         self._s.flush()
         return _to_dto(row)
+
+    def subtree_levels(
+        self, root_ids: list[uuid.UUID], deleted: bool | None = None
+    ) -> list[list[uuid.UUID]]:
+        """The records under `root_ids`, a level at a time: level 0 is the
+        roots that exist (and match `deleted`), level 1 their children, and so
+        on -- one query per level however many records are in it.
+
+        `deleted`: False follows live records only, True deleted ones only,
+        None either. A record appearing at a deeper level than 0 is also a
+        descendant of another root."""
+
+        def matching(*extra):
+            q = select(Record.id).where(*extra)
+            if deleted is True:
+                q = q.where(Record.deleted_at.is_not(None))
+            elif deleted is False:
+                q = q.where(Record.deleted_at.is_(None))
+            return q
+
+        levels: list[list[uuid.UUID]] = []
+        frontier = [
+            rid
+            for chunk in _chunks(list(dict.fromkeys(root_ids)))
+            for rid in self._s.scalars(matching(Record.id.in_(chunk)))
+        ]
+        seen: set[uuid.UUID] = set()
+        while frontier:
+            levels.append(frontier)
+            seen.update(frontier)
+            frontier = [
+                rid
+                for chunk in _chunks(frontier)
+                for rid in self._s.scalars(matching(Record.parent_record_id.in_(chunk)))
+                if rid not in seen
+            ]
+        return levels
+
+    def delete_many(self, ids: list[uuid.UUID]) -> None:
+        """Soft-delete every live record in `ids`."""
+        now = datetime.now(timezone.utc)
+        for chunk in _chunks(ids):
+            self._s.execute(
+                update(Record)
+                .where(Record.id.in_(chunk), Record.deleted_at.is_(None))
+                .values(deleted_at=now)
+                .execution_options(synchronize_session=False)
+            )
+        self._s.expire_all()
+
+    def restore_many(self, ids: list[uuid.UUID]) -> None:
+        for chunk in _chunks(ids):
+            self._s.execute(
+                update(Record)
+                .where(Record.id.in_(chunk))
+                .values(deleted_at=None)
+                .execution_options(synchronize_session=False)
+            )
+        self._s.expire_all()
+
+    def purge_many(self, ids: list[uuid.UUID]) -> None:
+        """Permanently remove records and their workflow jobs. Parent links
+        among `ids` are cleared first, so the order they go in can't trip the
+        self-referencing foreign key."""
+        for chunk in _chunks(ids):
+            self._s.execute(
+                update(Record)
+                .where(Record.id.in_(chunk))
+                .values(parent_record_id=None)
+                .execution_options(synchronize_session=False)
+            )
+        for chunk in _chunks(ids):
+            bulk_delete_jobs(self._s, WorkflowJob.record_id.in_(chunk))
+            self._s.execute(
+                delete(Record)
+                .where(Record.id.in_(chunk))
+                .execution_options(synchronize_session=False)
+            )
+        self._s.expire_all()
 
     def delete(self, id: uuid.UUID) -> None:
         row = self._s.query(Record).filter_by(id=id).first()
@@ -557,6 +707,20 @@ def _typed_comparison(col, op: str, value: Any):
     if op == "lte":
         return typed_col <= typed_value
     raise ValidationError(f"Unsupported filter operator '{op}'")
+
+
+def _prefix_span(prefix: str) -> tuple[uuid.UUID, uuid.UUID] | None:
+    """The lowest and highest ids that start with `prefix` (hex, dashes
+    optional), or None when nothing can: not hex, or longer than an id."""
+    digits = prefix.lower().replace("-", "")
+    if (
+        not digits
+        or len(digits) > 32
+        or any(c not in "0123456789abcdef" for c in digits)
+    ):
+        return None
+    pad = 32 - len(digits)
+    return uuid.UUID(digits + "0" * pad), uuid.UUID(digits + "f" * pad)
 
 
 def _to_dto(row: Record) -> RecordDTO:

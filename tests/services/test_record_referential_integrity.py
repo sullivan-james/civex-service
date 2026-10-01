@@ -276,3 +276,61 @@ def test_referrer_counts_skips_fields_restricted_to_another_schema(
 
     groups = ctx.record_svc.referrer_counts(str(patient.id))
     assert [(g.field_name, g.count) for g in groups] == [("patient_ref", 1)]
+
+
+def _reference_rows(ctx: AppContext):
+    from sqlalchemy import text
+
+    return {
+        tuple(r)
+        for r in ctx._session.execute(
+            text("SELECT record_id, target_id FROM record_references")
+        )
+    }
+
+
+def test_reference_index_follows_every_way_a_reference_can_change(
+    ctx: AppContext, make_schema, make_collection, make_record
+):
+    make_schema("patient")
+    make_schema("visit", fields=[("patient_ref", "reference")])
+    make_schema("cohort", fields=[("members", "reference_list")])
+    make_collection("study")
+    a = make_record("study", "patient", {})
+    b = make_record("study", "patient", {})
+    visit = make_record("study", "visit", {"patient_ref": str(a.id)})
+    cohort = make_record("study", "cohort", {"members": [str(a.id), str(b.id)]})
+    hex_ = lambda r: r.id.hex  # noqa: E731
+
+    assert _reference_rows(ctx) == {
+        (hex_(visit), hex_(a)),
+        (hex_(cohort), hex_(a)),
+        (hex_(cohort), hex_(b)),
+    }
+
+    ctx.record_svc.update(str(visit.id), {"patient_ref": str(b.id)})
+    ctx.record_svc.update(str(cohort.id), {"members": [str(b.id)]})
+    assert _reference_rows(ctx) == {
+        (hex_(visit), hex_(b)),
+        (hex_(cohort), hex_(b)),
+    }
+
+    ctx.record_svc.update(str(visit.id), {})  # field cleared
+    assert _reference_rows(ctx) == {(hex_(cohort), hex_(b))}
+
+
+def test_bulk_delete_blocked_then_allowed_with_a_large_batch(
+    ctx: AppContext, make_schema, make_collection, make_record
+):
+    """More targets than fit one IN (...) chunk still find their referrer."""
+    make_schema("patient")
+    make_schema("visit", fields=[("patient_ref", "reference")])
+    make_collection("study")
+    patients = [make_record("study", "patient", {}) for _ in range(620)]
+    make_record("study", "visit", {"patient_ref": str(patients[-1].id)})
+
+    with pytest.raises(ValidationError, match="visit"):
+        ctx.record_svc.delete_many([str(p.id) for p in patients])
+
+    assert ctx.record_svc.delete_all("study", schema_name="visit") == 1
+    assert ctx.record_svc.delete_many([str(p.id) for p in patients]) == 620

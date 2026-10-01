@@ -538,6 +538,28 @@ class StoredObject(Base):
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
 
+class RecordReference(Base):
+    """A reference from one record's field to another record -- the reverse of
+    what a `reference`/`reference_list` value says, so "what points at X" is an
+    indexed lookup instead of a search of every record's JSON. Maintained by
+    ORM events whenever a record's `data` is written (see below), and removed
+    by ON DELETE CASCADE when the referrer is purged.
+
+    `target_id` is deliberately not a FK: a reference may dangle (that is what
+    `civex doctor` reports), and a target must stay purgeable. Rows come from
+    any UUID-shaped value under a UUID key, so a text field holding a UUID adds
+    one too; readers restrict `field_id` to real reference fields."""
+
+    __tablename__ = "record_references"
+    __table_args__ = (Index("ix_record_references_target", "target_id"),)
+
+    record_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("records.id", ondelete="CASCADE"), primary_key=True
+    )
+    field_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    target_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+
+
 class FileReference(Base):
     """A live reference from a record (or a workflow job's input) to a blob.
     Maintained by ORM events in `civex.db.file_refs` whenever a record's
@@ -579,19 +601,37 @@ class FileReference(Base):
 
 
 def _sync_file_refs(
-    connection: Any, owner: str, owner_id: uuid.UUID, data: Any
+    connection: Any,
+    owner: str,
+    owner_id: uuid.UUID,
+    data: Any,
+    *,
+    is_new: bool = False,
 ) -> None:
+    """Make the owner's file_references rows match the files its data cites.
+
+    `is_new`: the owner was just inserted, so it has no rows yet -- nothing to
+    read back, and (the common case) nothing to write when it cites no file."""
     from civex.domain.file_refs import collect_sha256_refs
 
     table = cast(Table, FileReference.__table__)
     owner_col = table.c[owner]
     wanted = collect_sha256_refs(data)
-    have = {
-        row[0]
-        for row in connection.execute(
-            select(table.c.sha256).where(owner_col == owner_id)
-        )
-    }
+    if is_new and not wanted:
+        return
+    if not wanted:
+        connection.execute(delete(table).where(owner_col == owner_id))
+        return
+    have = (
+        set()
+        if is_new
+        else {
+            row[0]
+            for row in connection.execute(
+                select(table.c.sha256).where(owner_col == owner_id)
+            )
+        }
+    )
     stale = have - wanted
     if stale:
         connection.execute(
@@ -609,25 +649,72 @@ def _sync_file_refs(
         )
 
 
+def _sync_record_refs(
+    connection: Any, record_id: uuid.UUID, data: Any, *, is_new: bool = False
+) -> None:
+    """Make the record's record_references rows match its data's references.
+    `is_new`: just inserted, so there is nothing to read back or remove."""
+    from civex.domain.references import collect_record_refs
+
+    table = cast(Table, RecordReference.__table__)
+    wanted = collect_record_refs(data)
+    if is_new and not wanted:
+        return
+    if not wanted:
+        connection.execute(delete(table).where(table.c.record_id == record_id))
+        return
+    have: set[tuple[uuid.UUID, uuid.UUID]] = (
+        set()
+        if is_new
+        else {
+            (row[0], row[1])
+            for row in connection.execute(
+                select(table.c.field_id, table.c.target_id).where(
+                    table.c.record_id == record_id
+                )
+            )
+        }
+    )
+    for field_id, target_id in have - wanted:
+        connection.execute(
+            delete(table).where(
+                table.c.record_id == record_id,
+                table.c.field_id == field_id,
+                table.c.target_id == target_id,
+            )
+        )
+    fresh = wanted - have
+    if fresh:
+        connection.execute(
+            insert(table),
+            [
+                {"record_id": record_id, "field_id": f, "target_id": t}
+                for f, t in sorted(fresh)
+            ],
+        )
+
+
 def _data_changed(target: Any, attr: str) -> bool:
     return inspect(target).attrs[attr].history.has_changes()
 
 
 @event.listens_for(Record, "after_insert")
 def _record_inserted(mapper: Any, connection: Any, target: Record) -> None:
-    _sync_file_refs(connection, "record_id", target.id, target.data)
+    _sync_file_refs(connection, "record_id", target.id, target.data, is_new=True)
+    _sync_record_refs(connection, target.id, target.data, is_new=True)
 
 
 @event.listens_for(Record, "after_update")
 def _record_updated(mapper: Any, connection: Any, target: Record) -> None:
     if _data_changed(target, "data"):
         _sync_file_refs(connection, "record_id", target.id, target.data)
+        _sync_record_refs(connection, target.id, target.data)
 
 
 @event.listens_for(WorkflowJob, "after_insert")
 def _job_inserted(mapper: Any, connection: Any, target: WorkflowJob) -> None:
     if target.input_data:
-        _sync_file_refs(connection, "job_id", target.id, target.input_data)
+        _sync_file_refs(connection, "job_id", target.id, target.input_data, is_new=True)
 
 
 @event.listens_for(WorkflowJob, "after_update")
