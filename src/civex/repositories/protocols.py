@@ -106,10 +106,14 @@ class SchemaRepository(Protocol):
 @runtime_checkable
 class DatasetRepository(Protocol):
     def get_by_name(
-        self, name: str, include_deleted: bool = False
-    ) -> DatasetDTO | None: ...
+        self, name: str, include_deleted: bool = False, with_count: bool = True
+    ) -> DatasetDTO | None:
+        """`with_count=False` skips the live-record count (an O(records) scan)
+        and leaves `record_count` at 0, for callers that don't read it."""
+        ...
+
     def get_by_id(
-        self, id: uuid.UUID, include_deleted: bool = False
+        self, id: uuid.UUID, include_deleted: bool = False, with_count: bool = True
     ) -> DatasetDTO | None: ...
     def list_all(self) -> list[DatasetDTO]: ...
     def list_deleted(self) -> list[DatasetDTO]: ...

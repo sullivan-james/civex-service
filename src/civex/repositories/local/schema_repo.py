@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import nulls_last
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from civex.repositories.local._jobs import bulk_delete_jobs
 from civex.db.models import Field, Record, Schema, View, WorkflowJob
@@ -22,7 +22,11 @@ class LocalSchemaRepository:
     # ------------------------------------------------------------------
 
     def get_by_name(self, name: str, include_deleted: bool = False) -> SchemaDTO | None:
-        q = self._s.query(Schema).filter_by(name=name)
+        q = (
+            self._s.query(Schema)
+            .options(joinedload(Schema.fields))
+            .filter_by(name=name)
+        )
         if not include_deleted:
             q = q.filter(Schema.deleted_at.is_(None))
         row = q.first()
@@ -31,7 +35,7 @@ class LocalSchemaRepository:
     def get_by_id(
         self, id: uuid.UUID, include_deleted: bool = False
     ) -> SchemaDTO | None:
-        q = self._s.query(Schema).filter_by(id=id)
+        q = self._s.query(Schema).options(joinedload(Schema.fields)).filter_by(id=id)
         if not include_deleted:
             q = q.filter(Schema.deleted_at.is_(None))
         row = q.first()
@@ -41,6 +45,7 @@ class LocalSchemaRepository:
         return [
             _schema_to_dto(r)
             for r in self._s.query(Schema)
+            .options(selectinload(Schema.fields))
             .filter(Schema.deleted_at.is_(None))
             .order_by(Schema.created_at)
             .all()
@@ -50,6 +55,7 @@ class LocalSchemaRepository:
         return [
             _schema_to_dto(r)
             for r in self._s.query(Schema)
+            .options(selectinload(Schema.fields))
             .filter(Schema.deleted_at.is_not(None))
             .order_by(Schema.deleted_at.desc())
             .all()

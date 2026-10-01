@@ -8,6 +8,7 @@ from civex.domain.dtos import (
     FieldDTO,
     NameIssue,
     ResolvedField,
+    ResolvedSchema,
     SchemaDeleteImpactDTO,
     SchemaDTO,
 )
@@ -165,6 +166,29 @@ def _suggest(name: str) -> str | None:
         return slugify(name)
     except ValidationError:
         return None
+
+
+class SchemaResolver:
+    """Resolves schemas by id, each at most once for the life of the object.
+
+    Made per operation and dropped with it (it never outlives the request or
+    command that created it), so it can't go stale: a list of 50 records of
+    one schema resolves that schema once instead of 50 times."""
+
+    def __init__(self, svc: SchemaService) -> None:
+        self._svc = svc
+        self._done: dict[uuid.UUID, ResolvedSchema | None] = {}
+
+    def prime(self, shape: ResolvedSchema) -> None:
+        """Seed a schema the caller has already resolved."""
+        self._done[shape.schema.id] = shape
+
+    def __call__(self, schema_id: uuid.UUID) -> ResolvedSchema | None:
+        if schema_id not in self._done:
+            # include_deleted: records keep pointing at a trashed schema.
+            schema = self._svc._repo.get_by_id(schema_id, include_deleted=True)
+            self._done[schema_id] = self._svc.resolve(schema) if schema else None
+        return self._done[schema_id]
 
 
 class SchemaService:
@@ -556,6 +580,23 @@ class SchemaService:
         if self._audit:
             self._audit.log_change("purge", "schema", schema.id, schema.to_dict(), None)
         self._repo.purge(schema.id)
+
+    def resolve(self, schema: SchemaDTO) -> ResolvedSchema:
+        """`schema` with inherited fields flattened and indexed -- one parent
+        walk, however many lookups the caller then makes against it."""
+        fields = self.collect_fields(schema)
+        return ResolvedSchema(
+            schema=schema,
+            fields=fields,
+            by_name={rf.field.name: rf.field for rf in fields},
+            name_to_id={rf.field.name: str(rf.field.id) for rf in fields},
+            id_to_name={str(rf.field.id): rf.field.name for rf in fields},
+        )
+
+    def resolver(self) -> SchemaResolver:
+        """A resolver by schema id for one operation: a page of records, a
+        batch import. See `SchemaResolver`."""
+        return SchemaResolver(self)
 
     def name_to_id_map(self, schema: SchemaDTO) -> dict[str, str]:
         """field name → str(field.id), including inherited fields."""

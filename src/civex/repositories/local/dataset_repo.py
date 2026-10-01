@@ -17,22 +17,22 @@ class LocalDatasetRepository:
         self._s = session
 
     def get_by_name(
-        self, name: str, include_deleted: bool = False
+        self, name: str, include_deleted: bool = False, with_count: bool = True
     ) -> DatasetDTO | None:
         q = self._s.query(Dataset).filter_by(name=name)
         if not include_deleted:
             q = q.filter(Dataset.deleted_at.is_(None))
         row = q.first()
-        return _to_dto(self._s, row) if row else None
+        return _to_dto(self._s, row, with_count) if row else None
 
     def get_by_id(
-        self, id: uuid.UUID, include_deleted: bool = False
+        self, id: uuid.UUID, include_deleted: bool = False, with_count: bool = True
     ) -> DatasetDTO | None:
         q = self._s.query(Dataset).filter_by(id=id)
         if not include_deleted:
             q = q.filter(Dataset.deleted_at.is_(None))
         row = q.first()
-        return _to_dto(self._s, row) if row else None
+        return _to_dto(self._s, row, with_count) if row else None
 
     def list_all(self) -> list[DatasetDTO]:
         return [
@@ -176,11 +176,16 @@ class LocalDatasetRepository:
         self._s.flush()
 
 
-def _to_dto(session: Session, row: Dataset) -> DatasetDTO:
+def _to_dto(session: Session, row: Dataset, with_count: bool = True) -> DatasetDTO:
+    # The count scans the collection's records, so a caller that only needs the
+    # collection itself (every record write looks one up) skips it -- left at
+    # 0 -- rather than pay O(records so far) per record.
     record_count = (
         session.query(func.count(Record.id))
         .filter(Record.dataset_id == row.id, Record.deleted_at.is_(None))
         .scalar()
+        if with_count
+        else 0
     )
     schema_names = [
         name

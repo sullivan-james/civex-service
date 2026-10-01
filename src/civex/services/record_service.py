@@ -14,6 +14,7 @@ from civex.domain.dtos import (
     RecordDTO,
     ReferrerGroupDTO,
     ResolvedField,
+    ResolvedSchema,
     SchemaDTO,
 )
 from civex.domain import geo as geo_domain
@@ -38,7 +39,7 @@ from civex.repositories.protocols import (
     FileObjectStore,
     RecordRepository,
 )
-from civex.services.schema_service import SchemaService
+from civex.services.schema_service import SchemaResolver, SchemaService
 
 from typing import TYPE_CHECKING
 
@@ -380,35 +381,42 @@ class RecordService:
     # ------------------------------------------------------------------
 
     def _names_to_ids(
-        self, data: dict[str, Any], schema_id: uuid.UUID
+        self, data: dict[str, Any], shape: ResolvedSchema | None
     ) -> dict[str, Any]:
-        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
-        if schema is None:
+        if shape is None:
             return data
-        name_map = self._schema_svc.name_to_id_map(schema)
-        return {name_map.get(k, k): v for k, v in data.items()}
+        return {shape.name_to_id.get(k, k): v for k, v in data.items()}
 
     def _ids_to_names(
-        self, data: dict[str, Any], schema_id: uuid.UUID
+        self, data: dict[str, Any], shape: ResolvedSchema | None
     ) -> dict[str, Any]:
-        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
-        if schema is None:
+        if shape is None:
             return data
-        id_map = self._schema_svc.id_to_name_map(schema)
-        return {id_map.get(k, k): v for k, v in data.items()}
+        return {shape.id_to_name.get(k, k): v for k, v in data.items()}
 
-    def _with_names(self, dto: RecordDTO) -> RecordDTO:
-        schema = self._schema_svc._repo.get_by_id(dto.schema_id, include_deleted=True)
-        if schema is None:
+    def _with_names(
+        self, dto: RecordDTO, shapes: SchemaResolver | None = None
+    ) -> RecordDTO:
+        """`dto` with name-keyed data and its natural name. Pass the
+        operation's `shapes` when naming several records, so each schema is
+        resolved once, not once per record."""
+        shape = (shapes or self._schema_svc.resolver())(dto.schema_id)
+        if shape is None:
             return dataclasses.replace(dto)
-        id_map = self._schema_svc.id_to_name_map(schema)
-        named_data = {id_map.get(k, k): v for k, v in dto.data.items()}
-        fields = self._schema_svc.collect_fields(schema)
-        natural_name = _natural_name(named_data, fields, schema.display_fields)
-        named_data = _apply_filename_templates(named_data, fields)
+        named_data = {shape.id_to_name.get(k, k): v for k, v in dto.data.items()}
+        natural_name = _natural_name(
+            named_data, shape.fields, shape.schema.display_fields
+        )
+        named_data = _apply_filename_templates(named_data, shape.fields)
         return dataclasses.replace(dto, data=named_data, natural_name=natural_name)
 
-    def _attach_reference_labels(self, records: list[RecordDTO]) -> list[RecordDTO]:
+    def _with_names_many(self, dtos: list[RecordDTO]) -> list[RecordDTO]:
+        shapes = self._schema_svc.resolver()
+        return [self._with_names(r, shapes) for r in dtos]
+
+    def _attach_reference_labels(
+        self, records: list[RecordDTO], shapes: SchemaResolver | None = None
+    ) -> list[RecordDTO]:
         """Batch-resolve reference/reference_list values to their target's
         natural_name, attached as RecordDTO.reference_labels -- one extra
         query for the whole batch instead of one per reference value, so a
@@ -428,7 +436,9 @@ class RecordService:
             if dataset_id is None:
                 return None
             if dataset_id not in dataset_names:
-                ds = self._datasets.get_by_id(dataset_id, include_deleted=True)
+                ds = self._datasets.get_by_id(
+                    dataset_id, include_deleted=True, with_count=False
+                )
                 dataset_names[dataset_id] = ds.name if ds else None
             return dataset_names[dataset_id]
 
@@ -437,19 +447,11 @@ class RecordService:
             for r in records
         ]
 
-        # schema_id -> fields, cached so repeated schemas in the batch (the
-        # common case: a whole page of one schema) resolve once.
-        fields_by_schema: dict[uuid.UUID, list[ResolvedField]] = {}
+        shapes = shapes or self._schema_svc.resolver()
 
         def fields_for(schema_id: uuid.UUID) -> list[ResolvedField]:
-            if schema_id not in fields_by_schema:
-                schema = self._schema_svc._repo.get_by_id(
-                    schema_id, include_deleted=True
-                )
-                fields_by_schema[schema_id] = (
-                    self._schema_svc.collect_fields(schema) if schema else []
-                )
-            return fields_by_schema[schema_id]
+            shape = shapes(schema_id)
+            return shape.fields if shape else []
 
         def reference_ids(
             data: dict[str, Any], fields: list[ResolvedField]
@@ -485,15 +487,12 @@ class RecordService:
         target_dataset = {t.id: t.dataset_id for t in targets}
         label_by_id: dict[uuid.UUID, str | None] = {}
         for t in targets:
-            t_schema = self._schema_svc._repo.get_by_id(
-                t.schema_id, include_deleted=True
-            )
-            if t_schema is None:
+            t_shape = shapes(t.schema_id)
+            if t_shape is None:
                 continue
-            id_map = self._schema_svc.id_to_name_map(t_schema)
-            named_data = {id_map.get(k, k): v for k, v in t.data.items()}
+            named_data = {t_shape.id_to_name.get(k, k): v for k, v in t.data.items()}
             label_by_id[t.id] = _natural_name(
-                named_data, fields_for(t.schema_id), t_schema.display_fields
+                named_data, t_shape.fields, t_shape.schema.display_fields
             )
 
         def foreign_collections(
@@ -519,15 +518,13 @@ class RecordService:
         ]
 
     def _apply_defaults(
-        self, data: dict[str, Any], schema_id: uuid.UUID
+        self, data: dict[str, Any], shape: ResolvedSchema | None
     ) -> dict[str, Any]:
         """For any field with a default_value that is absent from data, insert the default."""
-        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
-        if schema is None:
+        if shape is None:
             return data
-        all_fields = self._schema_svc.collect_fields(schema)
         result = dict(data)
-        for rf in all_fields:
+        for rf in shape.fields:
             f = rf.field
             if f.default_value is not None and f.name not in result:
                 result[f.name] = f.default_value
@@ -641,7 +638,7 @@ class RecordService:
     def _normalise_datetimes(
         self,
         data: dict[str, Any],
-        schema_id: uuid.UUID,
+        shape: ResolvedSchema | None,
         dataset_timezone: str | None,
         unchanged: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -654,15 +651,11 @@ class RecordService:
         offset-less value must not be re-read in a zone set after it was
         stored -- that would silently shift it.
         """
-        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
-        if schema is None:
+        if shape is None:
             return data
-        fields_by_name = {
-            rf.field.name: rf.field for rf in self._schema_svc.collect_fields(schema)
-        }
         out = dict(data)
         for name, value in data.items():
-            field = fields_by_name.get(name)
+            field = shape.by_name.get(name)
             if field is None or field.dtype != "datetime":
                 continue
             if not isinstance(value, str) or (
@@ -690,7 +683,7 @@ class RecordService:
     def _check_references(
         self,
         data: dict[str, Any],
-        schema_id: uuid.UUID,
+        shape: ResolvedSchema | None,
         dataset: DatasetDTO,
         unchanged: dict[str, Any] | None = None,
     ) -> None:
@@ -698,10 +691,9 @@ class RecordService:
         this collection or in a global one (see civex.domain.scopes). Values
         equal to the record's stored ones (`unchanged`) are not re-checked, so
         editing a record never fails over a reference it already held."""
-        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
-        if schema is None:
+        if shape is None:
             return
-        for rf in self._schema_svc.collect_fields(schema):
+        for rf in shape.fields:
             field = rf.field
             if field.dtype not in ("reference", "reference_list"):
                 continue
@@ -729,7 +721,9 @@ class RecordService:
             raise ValidationError(f"Field '{field_name}': record {raw} not found")
         if target.dataset_id == dataset.id:
             return
-        owner = self._datasets.get_by_id(target.dataset_id, include_deleted=True)
+        owner = self._datasets.get_by_id(
+            target.dataset_id, include_deleted=True, with_count=False
+        )
         if owner is None or not can_reference(dataset.id, owner.id, owner.scope):
             where = f"collection '{owner.name}'" if owner else "another collection"
             raise ValidationError(
@@ -758,7 +752,7 @@ class RecordService:
         for (dataset_id, schema_name, fname), (dtype, count) in groups.items():
             if dataset_id not in datasets:
                 datasets[dataset_id] = self._datasets.get_by_id(
-                    dataset_id, include_deleted=True
+                    dataset_id, include_deleted=True, with_count=False
                 )
             ds = datasets[dataset_id]
             result.append(
@@ -789,16 +783,14 @@ class RecordService:
                 found.setdefault(rec.id, (rec, fields))
         return list(found.values())
 
-    def _validate_data(self, data: dict[str, Any], schema_id: uuid.UUID) -> None:
+    def _validate_data(
+        self, data: dict[str, Any], shape: ResolvedSchema | None
+    ) -> None:
         """Validate all field values in data against their restrictions."""
-        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
-        if schema is None:
+        if shape is None:
             return
-        fields_by_name = {
-            rf.field.name: rf.field for rf in self._schema_svc.collect_fields(schema)
-        }
         for name, value in data.items():
-            field = fields_by_name.get(name)
+            field = shape.by_name.get(name)
             if field is None or value is None:
                 continue
             _check_restrictions(value, field.dtype, field.restrictions, name)
@@ -834,7 +826,7 @@ class RecordService:
         parent_record_id: str | None = None,
         _job_depth: int = 0,
     ) -> RecordDTO:
-        dataset = self._datasets.get_by_name(dataset_name)
+        dataset = self._datasets.get_by_name(dataset_name, with_count=False)
         if not dataset:
             raise NotFoundError(f"Dataset '{dataset_name}' not found")
 
@@ -842,8 +834,9 @@ class RecordService:
         self._check_schema_allowed(dataset, schema)
 
         # Apply field defaults before validation
-        data = self._apply_defaults(data, schema.id)
-        data = self._normalise_datetimes(data, schema.id, dataset.timezone)
+        shape = self._schema_svc.resolve(schema)
+        data = self._apply_defaults(data, shape)
+        data = self._normalise_datetimes(data, shape, dataset.timezone)
 
         resolved_parent_id = None
         if schema.parent_id:
@@ -858,10 +851,10 @@ class RecordService:
                 raise ValidationError(
                     f"Parent record must belong to dataset '{dataset_name}'"
                 )
-            expected_parent = self._schema_svc._repo.get_by_id(
-                schema.parent_id, include_deleted=True
-            )
             if parent_record.schema_id != schema.parent_id:
+                expected_parent = self._schema_svc._repo.get_by_id(
+                    schema.parent_id, include_deleted=True
+                )
                 raise ValidationError(
                     f"Parent record uses schema '{parent_record.schema_name}', "
                     f"expected '{expected_parent.name if expected_parent else schema.parent_id}'"
@@ -873,18 +866,20 @@ class RecordService:
             ]
             self.validate(data, own_fields)
         else:
-            self.validate(data, self._schema_svc.collect_fields(schema))
+            self.validate(data, shape.fields)
 
-        self._validate_data(data, schema.id)
-        self._check_references(data, schema.id, dataset)
-        id_data = self._names_to_ids(data, schema.id)
+        self._validate_data(data, shape)
+        self._check_references(data, shape, dataset)
+        id_data = self._names_to_ids(data, shape)
         dto = self._records.create(
             dataset_id=dataset.id,
             schema_id=schema.id,
             data=id_data,
             parent_record_id=resolved_parent_id,
         )
-        named = self._with_names(dto)
+        shapes = self._schema_svc.resolver()
+        shapes.prime(shape)
+        named = self._with_names(dto, shapes)
         if self._audit:
             self._audit.log_change("create", "record", dto.id, None, named.to_dict())
         if self._job_svc:
@@ -900,7 +895,7 @@ class RecordService:
                         changed_fields=set_fields,
                         depth=_job_depth,
                     )
-        return self._attach_reference_labels([named])[0]
+        return self._attach_reference_labels([named], shapes)[0]
 
     def get(self, record_id: str) -> RecordDTO:
         record = self._records.get_by_prefix(record_id)
@@ -991,25 +986,29 @@ class RecordService:
         if not raw:
             raise NotFoundError(f"Record '{record_id}' not found")
         # Apply field defaults before validation
-        data = self._apply_defaults(data, raw.schema_id)
-        old_data = self._ids_to_names(raw.data, raw.schema_id)
+        shapes = self._schema_svc.resolver()
+        shape = shapes(raw.schema_id)
+        data = self._apply_defaults(data, shape)
+        old_data = self._ids_to_names(raw.data, shape)
         dataset = (
-            self._datasets.get_by_id(raw.dataset_id, include_deleted=True)
+            self._datasets.get_by_id(
+                raw.dataset_id, include_deleted=True, with_count=False
+            )
             if raw.dataset_id
             else None
         )
         data = self._normalise_datetimes(
             data,
-            raw.schema_id,
+            shape,
             dataset.timezone if dataset else None,
             unchanged=old_data,
         )
-        self._validate_data(data, raw.schema_id)
+        self._validate_data(data, shape)
         if dataset:
-            self._check_references(data, raw.schema_id, dataset, unchanged=old_data)
-        id_data = self._names_to_ids(data, raw.schema_id)
+            self._check_references(data, shape, dataset, unchanged=old_data)
+        id_data = self._names_to_ids(data, shape)
         dto = self._records.update(id=raw.id, data=id_data)
-        named = self._with_names(dto)
+        named = self._with_names(dto, shapes)
         if self._audit:
             old_named = dataclasses.replace(
                 raw, data=old_data, schema_name=named.schema_name
@@ -1026,7 +1025,7 @@ class RecordService:
             self._job_svc.trigger_for_record(
                 named, "record_updated", changed_fields=changed, depth=_job_depth
             )
-        return self._attach_reference_labels([named])[0]
+        return self._attach_reference_labels([named], shapes)[0]
 
     # ------------------------------------------------------------------
     # Queries -- every read path (collection list, a record's descendants,
@@ -1040,7 +1039,7 @@ class RecordService:
         resolve, so a bad query fails loudly instead of matching nothing."""
         dataset_id = None
         if query.dataset:
-            dataset = self._datasets.get_by_name(query.dataset)
+            dataset = self._datasets.get_by_name(query.dataset, with_count=False)
             if not dataset:
                 raise NotFoundError(f"Dataset '{query.dataset}' not found")
             dataset_id = dataset.id
@@ -1214,7 +1213,7 @@ class RecordService:
         record's own data (an inherited field, a `ref.field` join), attached
         as `derived`; `child_counts` attaches per-child-schema counts."""
         records = self._records.list_filtered(self.resolve(query), offset, limit)
-        named = self._attach_reference_labels([self._with_names(r) for r in records])
+        named = self._attach_reference_labels(self._with_names_many(records))
         if columns and query.schema:
             named = self._attach_derived(query.schema, named, columns)
         if child_counts:
@@ -1358,7 +1357,7 @@ class RecordService:
         schema = self._schema_svc.get(schema_name)
         dataset_ids = None
         if reachable_from:
-            source = self._datasets.get_by_name(reachable_from)
+            source = self._datasets.get_by_name(reachable_from, with_count=False)
             if not source:
                 raise NotFoundError(f"Dataset '{reachable_from}' not found")
             dataset_ids = [source.id] + [
@@ -1369,7 +1368,7 @@ class RecordService:
         records = self._records.list_by_schema(
             schema.id, search=search, limit=limit, dataset_ids=dataset_ids
         )
-        return self._attach_reference_labels([self._with_names(r) for r in records])
+        return self._attach_reference_labels(self._with_names_many(records))
 
     def search(
         self,
@@ -1386,12 +1385,12 @@ class RecordService:
             return []
         dataset_id = None
         if collection:
-            dataset = self._datasets.get_by_name(collection)
+            dataset = self._datasets.get_by_name(collection, with_count=False)
             if not dataset:
                 raise NotFoundError(f"Dataset '{collection}' not found")
             dataset_id = dataset.id
         records = self._records.search_all(query, limit=limit, dataset_id=dataset_id)
-        return self._attach_reference_labels([self._with_names(r) for r in records])
+        return self._attach_reference_labels(self._with_names_many(records))
 
     # ------------------------------------------------------------------
     # Columns that aren't in a record's own data
@@ -1643,17 +1642,14 @@ class RecordService:
     ) -> list[RecordDTO]:
         dataset_id = None
         if dataset_name:
-            dataset = self._datasets.get_by_name(dataset_name)
+            dataset = self._datasets.get_by_name(dataset_name, with_count=False)
             if not dataset:
                 raise NotFoundError(f"Dataset '{dataset_name}' not found")
             dataset_id = dataset.id
         return self._attach_reference_labels(
-            [
-                self._with_names(r)
-                for r in self._records.list_deleted(
-                    dataset_id, offset=offset, limit=limit
-                )
-            ]
+            self._with_names_many(
+                self._records.list_deleted(dataset_id, offset=offset, limit=limit)
+            )
         )
 
     def restore(self, record_id: str) -> RecordDTO:

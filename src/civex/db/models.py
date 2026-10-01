@@ -324,7 +324,9 @@ class Record(Base):
     )
 
     dataset: Mapped[Dataset] = relationship("Dataset", back_populates="records")
-    schema: Mapped[Schema] = relationship("Schema")
+    # Every record read names its schema (RecordDTO.schema_name); joined, that
+    # arrives with the record's own row instead of a lazy load per record.
+    schema: Mapped[Schema] = relationship("Schema", lazy="joined")
 
 
 class Commit(Base):

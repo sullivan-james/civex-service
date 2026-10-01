@@ -560,7 +560,8 @@ def test_preview_rows_returns_none_for_dangling_reference(
     ctx.record_svc._records.update(
         id=invoice.id,
         data=ctx.record_svc._names_to_ids(
-            {"amount": 50, "customer": str(uuid.uuid4())}, invoice.schema_id
+            {"amount": 50, "customer": str(uuid.uuid4())},
+            ctx.schema_svc.resolver()(invoice.schema_id),
         ),
     )
     ctx.commit()
