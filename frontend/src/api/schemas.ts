@@ -26,6 +26,42 @@ export interface Schema {
   deleted_at: string | null
 }
 
+/** One rule a field of some type can carry; see `domain/field_descriptors.py`. */
+export interface RestrictionDescriptor {
+  key: string
+  label: string
+  /** Which editor to show (number, bytes, choices, accept, bbox, ...). */
+  control: string
+  help: string
+}
+
+export interface FieldTypeDescriptor {
+  type: string
+  label: string
+  description: string
+  stored_as: string
+  /** One line shown beside the input on the record page. */
+  entry_hint: string
+  example: string
+  restrictions: RestrictionDescriptor[]
+  supports_default: boolean
+}
+
+/** An entry in the "what kind of data is this?" picker. */
+export interface FieldKind {
+  key: string
+  label: string
+  type: string
+  description: string
+  /** Restriction the editor leads with for this kind. */
+  focus: string | null
+}
+
+export interface FieldTypes {
+  types: FieldTypeDescriptor[]
+  kinds: FieldKind[]
+}
+
 export interface SchemaDeleteImpact {
   child_schema_count: number
   record_count: number
@@ -42,6 +78,7 @@ export interface NameIssue {
 export const schemasApi = {
   list: () => api.get<Schema[]>('/schemas'),
   lint: () => api.get<NameIssue[]>('/schemas/lint'),
+  fieldTypes: () => api.get<FieldTypes>('/schemas/field-types'),
   get: (name: string) => api.get<Schema>(`/schemas/${name}`),
   getDeleteImpact: (name: string) =>
     api.get<SchemaDeleteImpact>(`/schemas/${name}/delete-impact`),

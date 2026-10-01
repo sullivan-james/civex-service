@@ -231,3 +231,64 @@ def test_aware_datetime_converted_to_utc() -> None:
 def test_datetime_local_input_missing_seconds_is_accepted() -> None:
     # <input type="datetime-local"> values omit seconds.
     assert _parse_datetime("2024-01-01T12:00") == "2024-01-01T12:00:00+00:00"
+
+
+# ---------------------------------------------------------------------------
+# date: precision (partial dates) and period-aware min / max
+# ---------------------------------------------------------------------------
+
+def test_date_defaults_to_full_dates_only() -> None:
+    _check_restrictions("2019-06-14", "date", {}, "f")
+    with pytest.raises(ValidationError, match="precision"):
+        _check_restrictions("2019", "date", {}, "f")
+    with pytest.raises(ValidationError, match="precision"):
+        _check_restrictions("2019-06", "date", {"min": "2000-01-01"}, "f")
+
+
+@pytest.mark.parametrize("value", ["2019", "2019-06", "2019-06-14"])
+def test_year_precision_accepts_every_form(value: str) -> None:
+    _check_restrictions(value, "date", {"precision": "year"}, "f")
+
+
+def test_month_precision_rejects_a_bare_year() -> None:
+    _check_restrictions("2019-06", "date", {"precision": "month"}, "f")
+    with pytest.raises(ValidationError, match="at least month"):
+        _check_restrictions("2019", "date", {"precision": "month"}, "f")
+
+
+def test_partial_date_bounds_use_the_whole_period() -> None:
+    r = {"precision": "year", "min": "2020-03", "max": "2020-09"}
+    _check_restrictions("2020-05", "date", r, "f")
+    with pytest.raises(ValidationError, match="before minimum"):
+        _check_restrictions("2020", "date", r, "f")
+    with pytest.raises(ValidationError, match="after maximum"):
+        _check_restrictions("2020-10", "date", r, "f")
+
+
+# ---------------------------------------------------------------------------
+# geo: always structurally validated, plus geometry_types / bbox
+# ---------------------------------------------------------------------------
+
+_POINT = {"type": "Point", "coordinates": [-3.41, 56.12]}
+
+
+def test_geo_shape_is_checked_even_without_restrictions() -> None:
+    _check_restrictions(_POINT, "geo", {}, "f")
+    with pytest.raises(ValidationError, match="Field 'f'"):
+        _check_restrictions({"type": "Point", "coordinates": [500, 0]}, "geo", {}, "f")
+
+
+def test_geo_restrictions() -> None:
+    _check_restrictions(_POINT, "geo", {"geometry_types": ["Point"], "bbox": [-12, 48, 4, 62]}, "f")
+    with pytest.raises(ValidationError, match="outside the allowed area"):
+        _check_restrictions(_POINT, "geo", {"bbox": [10, 0, 20, 10]}, "f")
+
+
+# ---------------------------------------------------------------------------
+# float: unit is a label here, so it never changes validation
+# ---------------------------------------------------------------------------
+
+def test_float_unit_does_not_affect_bounds_checking() -> None:
+    _check_restrictions(312.4, "float", {"unit": "m", "min": 0, "max": 2000}, "f")
+    with pytest.raises(ValidationError, match="exceeds maximum"):
+        _check_restrictions(3000.0, "float", {"unit": "m", "max": 2000}, "f")

@@ -1,5 +1,7 @@
 import type { CivexRecord } from '../../api/records'
 import type { FieldType } from '../../utils/fieldTypes'
+import { parseLocation } from '../../utils/geo'
+import { convert, parseQuantity, tidy } from '../../utils/units'
 
 export type Mode = 'files' | 'csv'
 export type WizardStep = 'source' | 'map' | 'confirm' | 'done'
@@ -20,6 +22,9 @@ export interface MapState {
   newSchema: { label: string; name: string }
   parentRecordId: string
   columnMap: Record<string, string>
+  /** CSV column -> unit its values are written in, when that differs from
+   * the unit of the numeric field it maps to. Absent = the field's unit. */
+  columnUnits: Record<string, string>
   newColumnFields: Record<string, NewFieldDraft>
   fileFieldChoice: string
   newFileField: NewFieldDraft
@@ -37,6 +42,7 @@ export function initialMapState(): MapState {
     newSchema: { label: '', name: '' },
     parentRecordId: '',
     columnMap: {},
+    columnUnits: {},
     newColumnFields: {},
     fileFieldChoice: '',
     newFileField: { name: 'file', label: 'File', type: 'file' },
@@ -84,6 +90,7 @@ export const RESTRICTION_FREE_TYPES: readonly FieldType[] = [
   'datetime',
   'url',
   'tags',
+  'geo',
 ]
 
 export const NEW_SCHEMA = '__new__'
@@ -115,9 +122,31 @@ export interface ImportOutcome {
 export function coerceCsvValue(
   raw: string,
   dtype: string,
+  /** The numeric field's unit, and the unit this column is written in. */
+  units?: { fieldUnit?: string; columnUnit?: string },
 ): { value: unknown; error: string | null } {
   const trimmed = raw.trim()
   if (trimmed === '') return { value: undefined, error: null }
+  if (dtype === 'geo') {
+    const g = parseLocation(trimmed)
+    return g
+      ? { value: g, error: null }
+      : {
+          value: undefined,
+          error: `"${raw}" is not a location (use "latitude, longitude")`,
+        }
+  }
+  if (dtype === 'float' && units?.fieldUnit) {
+    // Stored values are always in the field's unit: convert on the way in so
+    // a column of feet can never land in a metres field as-is.
+    const q = parseQuantity(trimmed)
+    if (!q) return { value: undefined, error: `"${raw}" is not a number` }
+    const from = q.unit ?? units.columnUnit ?? units.fieldUnit
+    const r = convert(q.value, from, units.fieldUnit)
+    return 'error' in r
+      ? { value: undefined, error: r.error }
+      : { value: parseFloat(tidy(r.value)), error: null }
+  }
   if (dtype === 'integer') {
     const n = parseInt(trimmed, 10)
     return isNaN(n)

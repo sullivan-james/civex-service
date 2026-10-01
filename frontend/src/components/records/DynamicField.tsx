@@ -4,7 +4,31 @@ import type { Field } from '../../api/schemas'
 import { utcToZonedLocal, datetimeInputToWire } from '../../utils/dates'
 import { useFieldTimeZone } from './timeZoneContext'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
-import { Input, Select, Checkbox } from '../ui'
+import { Button, Input, Select, Checkbox } from '../ui'
+import { displayLabel } from '../../utils/naming'
+import {
+  exampleWithUnit,
+  parseQuantity,
+  tidy,
+  toFieldUnit,
+} from '../../utils/units'
+import {
+  describeBbox,
+  editableText,
+  isGeometry,
+  locationProblem,
+  parseLocation,
+  spokenPoint,
+} from '../../utils/geo'
+import { LocatorMap } from '../ui/LocatorMap'
+import { GeoEditorModal } from '../geo/GeoEditorModal'
+import { useMapSettings } from '../../hooks/useMapSettings'
+import {
+  isValidPartialDate,
+  placeholderFor,
+  precisionHelp,
+  type Precision,
+} from '../../utils/partialDates'
 import { Paperclip, X } from '../ui/icons'
 import {
   RecordSearchPicker,
@@ -251,6 +275,278 @@ function FileListField({
   )
 }
 
+interface InputBase {
+  id?: string
+  required: boolean
+  'aria-describedby'?: string
+  'aria-invalid'?: boolean
+}
+
+/** A float stored in a unit. Typing "1024 ft" into a metres field stores the
+ * converted number; a bare number is taken as already in the field's unit. */
+function UnitInput({
+  id,
+  required,
+  value,
+  onChange,
+  unit,
+  min,
+  max,
+  'aria-describedby': ariaDescribedby,
+  'aria-invalid': ariaInvalid,
+}: InputBase & {
+  value: unknown
+  onChange: (value: unknown) => void
+  unit: string
+  min?: number
+  max?: number
+}) {
+  // What the person typed, kept while it differs from the stored number.
+  const [draft, setDraft] = useState<string | null>(null)
+  const shown =
+    draft ?? (value === undefined || value === null ? '' : String(value))
+  const parsed = shown.trim() === '' ? null : toFieldUnit(shown, unit)
+  const typedUnit = parseQuantity(shown)?.unit ?? null
+  const error = parsed && 'error' in parsed ? parsed.error : null
+  const note =
+    parsed && 'value' in parsed && typedUnit && typedUnit !== unit
+      ? `= ${tidy(parsed.value)} ${unit}`
+      : null
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <Input
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid || !!error}
+          required={required}
+          aria-required={required}
+          type="text"
+          inputMode="decimal"
+          value={shown}
+          onChange={(e) => {
+            const text = e.target.value
+            setDraft(text)
+            const r = text.trim() === '' ? null : toFieldUnit(text, unit)
+            if (r === null) onChange('')
+            else if ('value' in r) onChange(tidy(r.value))
+            else onChange(text) // unreadable: kept so the form can say why
+          }}
+          onBlur={() => setDraft(null)}
+          placeholder={required ? 'Required' : 'Optional'}
+          className="w-full"
+          data-min={min}
+          data-max={max}
+        />
+        <span className="text-sm text-fg-muted">{unit}</span>
+      </div>
+      <p
+        role={error ? 'alert' : undefined}
+        className={`mt-1 text-xs ${error ? 'text-danger' : 'text-fg-muted'}`}
+      >
+        {error ??
+          note ??
+          `Stored in ${unit}. You can also type a value with its unit, such as ${exampleWithUnit(unit)}, and it is converted.`}
+      </p>
+    </div>
+  )
+}
+
+/** A location typed as "latitude, longitude" (or WKT, or GeoJSON). The form
+ * value is the GeoJSON object once the text reads as one. Everything a person
+ * needs to get it right is shown here: what to type, what it was understood
+ * as, whether it breaks the field's rules, and where it falls on a map. */
+function GeoInput({
+  id,
+  required,
+  value,
+  onChange,
+  rules,
+  title,
+  'aria-describedby': ariaDescribedby,
+  'aria-invalid': ariaInvalid,
+}: InputBase & {
+  value: unknown
+  onChange: (value: unknown) => void
+  rules: { geometry_types?: unknown; bbox?: unknown }
+  title: string
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const [mapOpen, setMapOpen] = useState(false)
+  const mapSettings = useMapSettings()
+  const stored = isGeometry(value)
+    ? editableText(value)
+    : typeof value === 'string'
+      ? value
+      : ''
+  const shown = draft ?? stored
+  const typed = shown.trim() !== ''
+  const parsed = typed ? parseLocation(shown) : null
+  const unreadable = typed && parsed === null
+  const problem = parsed ? locationProblem(parsed, rules) : null
+  const box =
+    Array.isArray(rules.bbox) && rules.bbox.length === 4
+      ? (rules.bbox as number[])
+      : null
+  const shapes = Array.isArray(rules.geometry_types)
+    ? (rules.geometry_types as string[])
+    : []
+  const helpId = `${id ?? 'geo'}-help`
+  return (
+    <div className="space-y-2">
+      <div className="flex items-start gap-2">
+        <Input
+          id={id}
+          aria-describedby={[ariaDescribedby, helpId].filter(Boolean).join(' ')}
+          aria-invalid={ariaInvalid || unreadable || !!problem}
+          required={required}
+          aria-required={required}
+          type="text"
+          value={shown}
+          onChange={(e) => {
+            const text = e.target.value
+            setDraft(text)
+            if (text.trim() === '') return onChange('')
+            onChange(parseLocation(text) ?? text)
+          }}
+          onBlur={() => setDraft(null)}
+          placeholder="latitude, longitude  e.g. 56.12, -3.41"
+          className="w-full font-mono"
+        />
+        <Button size="sm" onClick={() => setMapOpen(true)} className="shrink-0">
+          Edit on map…
+        </Button>
+      </div>
+      {mapOpen && (
+        <GeoEditorModal
+          title={`Location: ${title}`}
+          value={isGeometry(value) ? value : parsed}
+          rules={rules}
+          map={
+            mapSettings
+              ? {
+                  tileUrl: mapSettings.tile_url,
+                  attribution: mapSettings.attribution,
+                }
+              : undefined
+          }
+          onClose={() => setMapOpen(false)}
+          onApply={(g) => {
+            setDraft(null)
+            onChange(g ?? '')
+            setMapOpen(false)
+          }}
+        />
+      )}
+      <div id={helpId} className="space-y-1 text-xs text-fg-muted">
+        {!typed && (
+          <p>
+            Latitude then longitude, in degrees. South and west are negative:{' '}
+            <span className="font-mono">56.12, -3.41</span> is 56.12° N, 3.41°
+            W.
+          </p>
+        )}
+        {parsed && !problem && spokenPoint(parsed) && (
+          <p className="text-success">Reads as {spokenPoint(parsed)}.</p>
+        )}
+        {unreadable && (
+          <p role="alert" className="text-danger">
+            Couldn't read that as a location. Use{' '}
+            <span className="font-mono">latitude, longitude</span>, for example{' '}
+            <span className="font-mono">56.12, -3.41</span>.
+          </p>
+        )}
+        {problem && (
+          <p role="alert" className="text-danger">
+            {problem}
+          </p>
+        )}
+        {(shapes.length > 0 || box) && (
+          <p>
+            Allowed:{' '}
+            {[
+              shapes.length ? shapes.join(' or ') : null,
+              box ? `within ${describeBbox(box)}` : null,
+            ]
+              .filter(Boolean)
+              .join(', ')}
+            .
+          </p>
+        )}
+        <details>
+          <summary className="cursor-pointer select-none hover:text-fg">
+            Other ways to enter a location
+          </summary>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            <li>
+              Copy the coordinates from a map app (right-click a point) and
+              paste them here.
+            </li>
+            <li>
+              Well-known text, longitude first:{' '}
+              <span className="font-mono">POINT(-3.41 56.12)</span>
+            </li>
+            <li>
+              GeoJSON, for lines and areas:{' '}
+              <span className="font-mono">
+                {'{"type":"Point","coordinates":[-3.41,56.12]}'}
+              </span>
+            </li>
+            <li>
+              A depth or height can be added as a third number in GeoJSON.
+            </li>
+          </ul>
+        </details>
+      </div>
+      {(box || parsed) && (
+        <LocatorMap bbox={box} location={parsed} className="max-w-sm" />
+      )}
+    </div>
+  )
+}
+
+/** A date that may be a year or a month, when the schema allows it. */
+function PartialDateInput({
+  id,
+  required,
+  value,
+  onChange,
+  precision,
+  'aria-describedby': ariaDescribedby,
+  'aria-invalid': ariaInvalid,
+}: InputBase & {
+  value: unknown
+  onChange: (value: unknown) => void
+  precision: Precision
+}) {
+  const text = (value as string) ?? ''
+  const bad = text.trim() !== '' && !isValidPartialDate(text)
+  return (
+    <div>
+      <Input
+        id={id}
+        aria-describedby={ariaDescribedby}
+        aria-invalid={ariaInvalid || bad}
+        required={required}
+        aria-required={required}
+        type="text"
+        value={text}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholderFor(precision)}
+        className="w-full"
+      />
+      <p
+        role={bad ? 'alert' : undefined}
+        className={`mt-1 text-xs ${bad ? 'text-danger' : 'text-fg-muted'}`}
+      >
+        {bad
+          ? `Not a valid date. Use ${placeholderFor(precision)}.`
+          : `${precisionHelp(precision)} Stored exactly as you write it.`}
+      </p>
+    </div>
+  )
+}
+
 export function DynamicField({
   field,
   value,
@@ -323,7 +619,21 @@ export function DynamicField({
     }
 
     case 'float': {
-      const { min: rMin, max: rMax } = toInputProps(field)
+      const { min: rMin, max: rMax, unit } = toInputProps(field)
+      if (unit)
+        return (
+          <UnitInput
+            id={id}
+            aria-describedby={ariaDescribedby}
+            aria-invalid={ariaInvalid}
+            required={field.required}
+            value={value}
+            onChange={onChange}
+            unit={unit}
+            min={rMin}
+            max={rMax}
+          />
+        )
       return (
         <Input
           id={id}
@@ -343,8 +653,35 @@ export function DynamicField({
       )
     }
 
+    case 'geo':
+      return (
+        <GeoInput
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
+          required={field.required}
+          value={value}
+          onChange={onChange}
+          rules={field.restrictions ?? {}}
+          title={displayLabel(field.name, field.label)}
+        />
+      )
+
     case 'date': {
-      const { minDate, maxDate } = toInputProps(field)
+      const { minDate, maxDate, precision } = toInputProps(field)
+      // The browser's date picker can only produce full dates.
+      if (precision && precision !== 'day')
+        return (
+          <PartialDateInput
+            id={id}
+            aria-describedby={ariaDescribedby}
+            aria-invalid={ariaInvalid}
+            required={field.required}
+            value={value}
+            onChange={onChange}
+            precision={precision}
+          />
+        )
       return (
         <Input
           id={id}

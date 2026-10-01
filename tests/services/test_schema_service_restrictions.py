@@ -137,3 +137,65 @@ def test_update_field_accepts_filename_template_referencing_known_field(
         restrictions={"filename_template": "{invoice_number}.{ext}"},
     )
     assert field.restrictions == {"filename_template": "{invoice_number}.{ext}"}
+
+
+# --- unit / precision / geo ------------------------------------------------
+
+def test_float_unit_is_accepted_and_canonicalised(ctx: AppContext, make_schema):
+    make_schema("dive")
+    field = ctx.schema_svc.add_field(
+        "dive", "depth", "float", restrictions={"unit": "degC", "min": 0}
+    )
+    assert field.restrictions == {"unit": "°C", "min": 0}
+
+
+def test_unit_is_only_valid_on_float(ctx: AppContext, make_schema):
+    make_schema("dive")
+    with pytest.raises(ValidationError, match="unit"):
+        ctx.schema_svc.add_field("dive", "count", "integer", restrictions={"unit": "m"})
+
+
+def test_unit_must_be_a_short_symbol(ctx: AppContext, make_schema):
+    make_schema("dive")
+    with pytest.raises(ValidationError, match="unit"):
+        ctx.schema_svc.add_field(
+            "dive", "depth", "float", restrictions={"unit": "metres below surface"}
+        )
+
+
+def test_date_precision_and_partial_bounds(ctx: AppContext, make_schema):
+    make_schema("deployment")
+    field = ctx.schema_svc.add_field(
+        "deployment", "deployed", "date", restrictions={"precision": "month", "min": "2020-01"}
+    )
+    assert field.restrictions["precision"] == "month"
+    with pytest.raises(ValidationError, match="precision"):
+        ctx.schema_svc.add_field(
+            "deployment", "retrieved", "date", restrictions={"precision": "week"}
+        )
+    with pytest.raises(ValidationError, match="'max'"):
+        ctx.schema_svc.add_field(
+            "deployment", "lost", "date", restrictions={"max": "next spring"}
+        )
+
+
+def test_geo_field_and_its_restrictions(ctx: AppContext, make_schema):
+    make_schema("deployment")
+    field = ctx.schema_svc.add_field(
+        "deployment",
+        "release_point",
+        "geo",
+        restrictions={"geometry_types": ["Point"], "bbox": [-12, 48, 4, 62]},
+    )
+    assert field.dtype == "geo"
+    assert field.restrictions["bbox"] == [-12.0, 48.0, 4.0, 62.0]
+
+
+def test_geo_rejects_bad_geometry_types_and_bbox(ctx: AppContext, make_schema):
+    make_schema("deployment")
+    with pytest.raises(ValidationError, match="geometry_types"):
+        ctx.schema_svc.add_field(
+            "deployment", "p", "geo", restrictions={"geometry_types": ["Circle"]}
+        )
+    with pytest.raises(ValidationError, match="bbox"):
+        ctx.schema_svc.add_field("deployment", "q", "geo", restrictions={"bbox": [1, 2, 3]})

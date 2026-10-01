@@ -3,9 +3,14 @@ import { filesApi } from '../../api/files'
 import type { Field } from '../../api/schemas'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
 import { displayLabel } from '../../utils/naming'
+import { isGeometry, parseLocation, type Geometry } from '../../utils/geo'
+import { LocatorMap } from '../ui/LocatorMap'
+import { tidy, toFieldUnit } from '../../utils/units'
 import { Button, Checkbox, FormError } from '../ui'
 import { Paperclip, X } from '../ui/icons'
 import { DynamicField, type FileRef } from './DynamicField'
+import { PendingFiles, type StagedFile } from './PendingFiles'
+import { acceptProblem, sizeProblem } from '../../utils/fileChecks'
 import { ReferenceChips } from './ReferenceChips'
 import type { FieldSaveError } from './saveErrors'
 import { FieldValue } from './FieldValue'
@@ -27,6 +32,7 @@ const COMMIT_ON_ENTER = new Set([
   'datetime',
   'url',
   'tags',
+  'geo',
 ])
 
 function sameValue(a: unknown, b: unknown) {
@@ -42,14 +48,25 @@ function toSaved(field: Field, draft: unknown): unknown | undefined | null {
     return Number.isNaN(n) ? null : n
   }
   if (field.type === 'float') {
+    const unit = field.restrictions?.unit
+    if (typeof unit === 'string' && unit) {
+      // "1024 ft" into a metres field: convert, never drop the unit.
+      const r = toFieldUnit(String(draft), unit)
+      return 'error' in r ? null : parseFloat(tidy(r.value))
+    }
     const n = parseFloat(draft as string)
     return Number.isNaN(n) ? null : n
   }
+  if (field.type === 'geo' && typeof draft === 'string')
+    return parseLocation(draft)
   return draft
 }
 
-/** Attach / replace / remove for file and file_list fields. Uploads start as
- * soon as a file is picked and the record is saved when they finish. */
+/** Attach / replace / remove for file and file_list fields. An upload starts
+ * as soon as a file is picked, but the file only waits beside the field
+ * until someone approves it: the record changes (and any workflow that
+ * watches the field runs) on approval, never on upload. Pending files live
+ * in the page, so leaving it discards them. */
 function FileControl({
   field,
   value,
@@ -68,6 +85,7 @@ function FileControl({
   const inputRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [staged, setStaged] = useState<StagedFile[]>([])
   const { accept, maxSize } = toInputProps(field)
 
   async function pick(e: React.ChangeEvent<HTMLInputElement>) {
@@ -81,21 +99,34 @@ function FileControl({
     }
     setError(null)
     try {
-      const uploaded: FileRef[] = []
+      const uploaded: StagedFile[] = []
       for (let i = 0; i < files.length; i++) {
         setBusy(
           files.length > 1
             ? `Uploading ${i + 1} of ${files.length}…`
             : 'Uploading…',
         )
-        uploaded.push(await filesApi.uploadStreaming(files[i], () => {}))
+        const ref = await filesApi.uploadStreaming(files[i], () => {})
+        uploaded.push({
+          ref,
+          problem:
+            acceptProblem(files[i].name, files[i].type, accept) ??
+            sizeProblem(files[i].size, maxSize),
+        })
       }
-      onSave(multiple ? [...refs, ...uploaded] : uploaded[0])
+      // A single-file field holds one pending file: a new pick replaces it.
+      setStaged((prev) => (multiple ? [...prev, ...uploaded] : uploaded))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
       setBusy(null)
     }
+  }
+
+  function approve() {
+    const approved = staged.map((s) => s.ref)
+    setStaged([])
+    onSave(multiple ? [...refs, ...approved] : approved[0])
   }
 
   const remove = (sha256: string) => {
@@ -132,8 +163,17 @@ function FileControl({
           </button>
         </div>
       ))}
+      <PendingFiles
+        staged={staged}
+        replacing={!multiple && refs.length ? refs[0].filename : undefined}
+        onDiscard={(sha) =>
+          setStaged((p) => p.filter((s) => s.ref.sha256 !== sha))
+        }
+        onApprove={approve}
+        onDiscardAll={() => setStaged([])}
+      />
       <div className="flex flex-wrap items-center gap-2">
-        {refs.length === 0 && (
+        {refs.length === 0 && staged.length === 0 && (
           <span className="inline-flex items-center rounded-full bg-attention-subtle px-3 py-1 text-xs font-semibold text-attention-emphasis">
             empty
           </span>
@@ -311,6 +351,12 @@ export function restrictionHints(field: Field): string[] {
     case 'integer':
     case 'float':
       range(r.min, r.max)
+      if (typeof r.unit === 'string' && r.unit) hints.push(`in ${r.unit}`)
+      break
+    case 'geo':
+      if (Array.isArray(r.geometry_types) && r.geometry_types.length)
+        hints.push((r.geometry_types as string[]).join(', '))
+      if (Array.isArray(r.bbox)) hints.push('limited area')
       break
     case 'date':
     case 'datetime':
@@ -403,6 +449,17 @@ export function RecordFieldGrid({
                 referenceCollections={referenceCollections}
                 onSave={(v) => onSave(field.name, v)}
               />
+              {field.type === 'geo' && isGeometry(data[field.name]) && (
+                <LocatorMap
+                  bbox={
+                    Array.isArray(field.restrictions?.bbox)
+                      ? (field.restrictions.bbox as number[])
+                      : null
+                  }
+                  location={data[field.name] as Geometry}
+                  className="mt-2 max-w-xs"
+                />
+              )}
               {extra?.(field)}
               {errors?.[field.name] && (
                 <div className="mt-1 flex items-start gap-2 rounded-md border border-danger-subtle-border bg-danger-subtle px-3 py-2">

@@ -25,6 +25,30 @@ export const FILTER_OPERATORS: { value: FilterOp; label: string }[] = [
   { value: 'is_null', label: 'is empty' },
 ]
 
+const REFERENCE_OPS: FilterOp[] = ['eq', 'ne', 'in', 'is_null']
+const REFERENCE_LIST_OPS: FilterOp[] = ['contains', 'is_null']
+
+/** The operators that mean something for a field of this type. A
+ * `reference_list` holds an array, so `eq`/`ne`/`in` compare against the
+ * whole array and never behave; only `contains` (a member test) and
+ * `is_null` do. A `reference` is one id: no ordering, no substring. */
+export function operatorsFor(
+  type: string | undefined,
+): { value: FilterOp; label: string }[] {
+  const allowed =
+    type === 'reference'
+      ? REFERENCE_OPS
+      : type === 'reference_list'
+        ? REFERENCE_LIST_OPS
+        : null
+  if (!allowed) return FILTER_OPERATORS
+  return FILTER_OPERATORS.filter((o) => allowed.includes(o.value)).map((o) =>
+    type === 'reference_list' && o.value === 'contains'
+      ? { ...o, label: 'includes' }
+      : o,
+  )
+}
+
 /** Operators whose value isn't a plain scalar the builder can render as a
  * single text input. */
 export const OPERATORS_WITHOUT_VALUE: FilterOp[] = ['is_null']

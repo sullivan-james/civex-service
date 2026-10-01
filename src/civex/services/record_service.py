@@ -12,9 +12,12 @@ from civex.domain.dtos import (
     FieldDTO,
     FileRef,
     RecordDTO,
+    ReferrerGroupDTO,
     ResolvedField,
     SchemaDTO,
 )
+from civex.domain import geo as geo_domain
+from civex.domain import partial_dates, units
 from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
 from civex.domain.filters import (
     SELF,
@@ -56,7 +59,8 @@ def _is_uuid(value: str) -> bool:
 
 
 def _parse_date(v: str) -> str:
-    return _date.fromisoformat(v.strip()).isoformat()
+    """A year, month or day, kept at the precision it was written at."""
+    return partial_dates.normalise(v)
 
 
 def _parse_datetime(v: str, tz: str | None = None) -> str:
@@ -98,10 +102,33 @@ def _check_restrictions(
             )
         return
 
+    if dtype == "geo":
+        try:
+            geo_domain.check(value, restrictions or {})
+        except ValidationError as e:
+            raise ValidationError(f"Field '{field_name}': {e}") from None
+        return
+
+    if dtype == "date" and isinstance(value, str):
+        # Fields without a `precision` take full dates only, as they always have.
+        try:
+            partial_dates.precision_of(value)
+        except ValueError:
+            pass  # not date-shaped; left to the caller as before
+        else:
+            try:
+                partial_dates.check_precision(
+                    value, (restrictions or {}).get("precision", "day")
+                )
+            except ValidationError as e:
+                raise ValidationError(f"Field '{field_name}': {e}") from None
+
     if not restrictions:
         return
 
     if dtype in ("integer", "float"):
+        if isinstance(value, str) or isinstance(value, bool):
+            raise ValidationError(f"Field '{field_name}': '{value}' is not a number")
         mn = restrictions.get("min")
         mx = restrictions.get("max")
         if mn is not None and value < mn:
@@ -131,6 +158,16 @@ def _check_restrictions(
             raise ValidationError(
                 f"Field '{field_name}': '{value}' must be one of: {', '.join(str(c) for c in choices)}"
             )
+
+    elif dtype == "date" and isinstance(value, str):
+        try:
+            problem = partial_dates.check_bounds(
+                value, restrictions.get("min"), restrictions.get("max")
+            )
+        except ValueError:
+            problem = None  # malformed value or bound; see the datetime branch
+        if problem:
+            raise ValidationError(f"Field '{field_name}': {problem}")
 
     elif dtype in ("date", "datetime"):
         mn = restrictions.get("min")
@@ -283,7 +320,7 @@ def _apply_filename_templates(
 
 # Types that skip the generic _COERCE path (handled explicitly in coerce_value)
 # and are also excluded from natural-name computation (they're collection/blob types).
-_SKIP_TYPES = {"reference", "reference_list", "file", "file_list", "tags"}
+_SKIP_TYPES = {"reference", "reference_list", "file", "file_list", "tags", "geo"}
 
 
 def _natural_name(
@@ -515,6 +552,27 @@ class RecordService:
                 raise CoercionError(field_name, dtype, raw)
             _check_restrictions(parsed, dtype, restrictions or {}, field_name)
             return parsed
+        if dtype == "geo":
+            if isinstance(raw, dict):
+                geometry = raw
+            else:
+                try:
+                    geometry = geo_domain.parse_text(str(raw))
+                except ValueError:
+                    raise CoercionError(field_name, dtype, raw) from None
+            _check_restrictions(geometry, dtype, restrictions or {}, field_name)
+            return geometry
+        field_unit = (restrictions or {}).get("unit")
+        if dtype == "float" and isinstance(raw, str) and field_unit:
+            # "1024 ft" is read in the field's unit; a bare number already is.
+            try:
+                number = units.to_field_unit(raw, field_unit)
+            except ValueError:
+                raise CoercionError(field_name, dtype, raw) from None
+            except ValidationError as e:
+                raise ValidationError(f"Field '{field_name}': {e}") from None
+            _check_restrictions(number, dtype, restrictions or {}, field_name)
+            return number
         if dtype == "file":
             path = Path(raw)
             if not path.exists():
@@ -679,6 +737,42 @@ class RecordService:
                 f"{where}, which is local. A record can only reference "
                 f"records in its own collection or in a global collection."
             )
+
+    def referrer_counts(self, record_id: str) -> list[ReferrerGroupDTO]:
+        """What points at this record: live records holding a reference to it,
+        grouped by (collection, schema, field) with a distinct-record count.
+        A record stores only its own schema's fields, so the referrer's schema
+        is the one that owns the field. Sorted by collection, schema, field."""
+        target = self.get(record_id)
+        field_map = self._reference_field_map(target.schema_name)
+        groups: dict[tuple[uuid.UUID, str, str], tuple[str, int]] = {}
+        for rec, matched in self._find_referrers(
+            {target.id}, exclude_ids=set(), target_schema=target.schema_name
+        ):
+            for fid_str, fname in matched.items():
+                key = (rec.dataset_id, rec.schema_name, fname)
+                dtype, count = groups.get(key, (field_map[fid_str][1], 0))
+                groups[key] = (dtype, count + 1)
+        datasets: dict[uuid.UUID, Any] = {}
+        result = []
+        for (dataset_id, schema_name, fname), (dtype, count) in groups.items():
+            if dataset_id not in datasets:
+                datasets[dataset_id] = self._datasets.get_by_id(
+                    dataset_id, include_deleted=True
+                )
+            ds = datasets[dataset_id]
+            result.append(
+                ReferrerGroupDTO(
+                    dataset_id=dataset_id,
+                    dataset_name=ds.name if ds else "",
+                    schema_name=schema_name,
+                    field_name=fname,
+                    dtype=dtype,
+                    count=count,
+                )
+            )
+        result.sort(key=lambda g: (g.dataset_name, g.schema_name, g.field_name))
+        return result
 
     def collection_referrers(
         self, dataset_id: uuid.UUID
@@ -1631,25 +1725,40 @@ class RecordService:
             ids |= self._collect_delete_set(child.id)
         return ids
 
-    def _reference_field_map(self) -> dict[str, tuple[str, str]]:
+    def _reference_field_map(
+        self, target_schema: str | None = None
+    ) -> dict[str, tuple[str, str]]:
         """field id (str) -> (field name, dtype) for every reference/reference_list
         field across all schemas -- record data is stored id-keyed (see
         _names_to_ids), and a reference field on any schema can point at a
-        record of any other schema, so this has to span all of them."""
+        record of any other schema, so this has to span all of them.
+
+        With `target_schema`, fields restricted to a different target schema
+        are left out (an unrestricted field can point anywhere)."""
         result: dict[str, tuple[str, str]] = {}
         for schema in self._schema_svc.list_all():
             for f in schema.fields:
                 if f.dtype in ("reference", "reference_list"):
+                    restricted_to = (f.restrictions or {}).get("schema")
+                    if target_schema and restricted_to not in (None, target_schema):
+                        continue
                     result[str(f.id)] = (f.name, f.dtype)
         return result
 
     def _find_referrers(
-        self, target_ids: set[uuid.UUID], exclude_ids: set[uuid.UUID]
+        self,
+        target_ids: set[uuid.UUID],
+        exclude_ids: set[uuid.UUID],
+        target_schema: str | None = None,
     ) -> list[tuple[RecordDTO, dict[str, str]]]:
         """Records outside exclude_ids holding a reference/reference_list value
         that points at any of target_ids. Returns (referrer, {field_id: field_name})
-        pairs so callers know exactly which field(s) to null out or report."""
-        field_map = self._reference_field_map()
+        pairs so callers know exactly which field(s) to null out or report.
+
+        `target_schema` (the targets' schema name) skips fields whose `schema`
+        restriction names a different schema -- they can't hold these targets,
+        so the lookup scans fewer fields."""
+        field_map = self._reference_field_map(target_schema)
         if not field_map:
             return []
         ref_ids = [

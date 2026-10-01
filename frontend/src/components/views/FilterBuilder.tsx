@@ -1,7 +1,7 @@
 import { Select, Input, Button, IconButton } from '../ui'
 import { X } from '../ui/icons'
 import {
-  FILTER_OPERATORS,
+  operatorsFor,
   emptyCondition,
   emptyGroup,
   updateNodeById,
@@ -17,6 +17,10 @@ import {
   type FieldRelation,
 } from '../../utils/hierarchy'
 import { displayLabel } from '../../utils/naming'
+import {
+  MultiRecordSearchPicker,
+  RecordSearchPicker,
+} from '../records/RecordSearchPicker'
 import {
   effectiveTimeZone,
   utcToZonedLocal,
@@ -78,6 +82,35 @@ function FilterValueInput({
   value: unknown
   onChange: (value: unknown) => void
 }) {
+  // A reference is picked by name, not typed as a UUID. Without a target
+  // schema there is nothing to search, so it falls through to the text input.
+  const targetSchema = field?.restrictions?.schema
+  if (
+    (field?.type === 'reference' || field?.type === 'reference_list') &&
+    typeof targetSchema === 'string' &&
+    op !== 'is_null'
+  ) {
+    if (op === 'in') {
+      return (
+        <MultiRecordSearchPicker
+          schemaName={targetSchema}
+          value={Array.isArray(value) ? (value as string[]) : []}
+          onChange={onChange}
+          aria-label="Value"
+          className="w-64"
+        />
+      )
+    }
+    return (
+      <RecordSearchPicker
+        schemaName={targetSchema}
+        value={typeof value === 'string' && value ? value : undefined}
+        onChange={(id) => onChange(id ?? '')}
+        aria-label="Value"
+        className="w-56"
+      />
+    )
+  }
   if (op === 'in') {
     const text = Array.isArray(value) ? value.join(', ') : ''
     return (
@@ -211,10 +244,14 @@ function ConditionEditor({
         value={field ? fieldKey(field) : ''}
         onChange={(e) => {
           const picked = fields.find((f) => fieldKey(f) === e.target.value)
+          const ops = operatorsFor(picked?.type)
           update({
             field: picked?.name ?? '',
             schema: picked?.sourceSchemaName,
             value: '',
+            // Keep the operator when the new field supports it; otherwise
+            // fall back to its first (e.g. reference lists have no "is").
+            op: ops.some((o) => o.value === node.op) ? node.op : ops[0].value,
           })
         }}
         className="w-56"
@@ -236,10 +273,19 @@ function ConditionEditor({
       <Select
         aria-label="Operator"
         value={node.op}
-        onChange={(e) => update({ op: e.target.value as FilterOp })}
+        onChange={(e) => {
+          const op = e.target.value as FilterOp
+          // "is any of" holds a list, every other operator one id; a value
+          // of the wrong shape would render as nothing in the picker.
+          const isReference =
+            field?.type === 'reference' || field?.type === 'reference_list'
+          const reshape =
+            isReference && (op === 'in') !== Array.isArray(node.value)
+          update(reshape ? { op, value: op === 'in' ? [] : '' } : { op })
+        }}
         className="w-32"
       >
-        {FILTER_OPERATORS.map((o) => (
+        {operatorsFor(field?.type).map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>

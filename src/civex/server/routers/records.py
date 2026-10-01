@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 
 from civex.context import AppContext
+from civex.domain import geo as geo_domain
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.query import RecordQuery
 from civex.server.background import run_pending_jobs
@@ -16,6 +17,7 @@ from civex.server.models import (
     PaginatedRecordResponse,
     RecordRef,
     RecordResponse,
+    ReferrerGroupResponse,
     UpdateRecordRequest,
 )
 from civex.server.query_params import record_query
@@ -215,6 +217,20 @@ def get_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
     return response
 
 
+@router.get(
+    "/records/{record_id}/referrers", response_model=list[ReferrerGroupResponse]
+)
+def get_record_referrers(record_id: str, ctx: AppContext = Depends(get_ctx)):
+    """What points at this record: live records referencing it through a
+    `reference` or `reference_list` field, counted per (collection, schema,
+    field) -- the reverse of the record's own reference values."""
+    try:
+        groups = ctx.record_svc.referrer_counts(record_id)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    return [ReferrerGroupResponse.from_dto(g) for g in groups]
+
+
 @router.get("/records/{record_id}/files.zip")
 def export_record_files_zip(
     record_id: str,
@@ -384,7 +400,10 @@ def export_records_csv(
                         "updated_at": r.updated_at.isoformat(),
                     }
                     for k, v in r.data.items():
-                        row[k] = v if not isinstance(v, (list, dict)) else str(v)
+                        if geo_domain.is_geometry(v):
+                            row[k] = geo_domain.to_text(v)
+                        else:
+                            row[k] = v if not isinstance(v, (list, dict)) else str(v)
                     writer.writerow(row)
         tmp.remove(path)
         return serve(path, "text/csv", f"{collection_name}.csv")

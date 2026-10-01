@@ -16,6 +16,7 @@ from civex.domain.dtos import (
     FieldDTO,
     NameIssue,
     RecordDTO,
+    ReferrerGroupDTO,
     SchemaDeleteImpactDTO,
     SchemaDTO,
     ViewDTO,
@@ -421,6 +422,32 @@ class RecordRef(BaseModel):
     natural_name: str | None
 
 
+class ReferrerGroupResponse(BaseModel):
+    dataset_id: str = Field(description="Id of the collection the referrers live in.")
+    collection: str = Field(description="Name of that collection.")
+    schema_name: str = Field(
+        description="Schema of the referring records; it owns the field."
+    )
+    field_name: str = Field(
+        description="The reference field that points at the record."
+    )
+    dtype: str = Field(description="'reference' or 'reference_list'.")
+    count: int = Field(
+        description="Live records of this schema, in this collection, referencing it."
+    )
+
+    @classmethod
+    def from_dto(cls, dto: ReferrerGroupDTO) -> "ReferrerGroupResponse":
+        return cls(
+            dataset_id=str(dto.dataset_id),
+            collection=dto.dataset_name,
+            schema_name=dto.schema_name,
+            field_name=dto.field_name,
+            dtype=dto.dtype,
+            count=dto.count,
+        )
+
+
 class RecordResponse(BaseModel):
     id: str
     dataset_id: str
@@ -796,6 +823,28 @@ class UpdateUISettingsRequest(BaseModel):
     show_advanced: bool
 
 
+class MapSettingsResponse(BaseModel):
+    tile_url: str | None = Field(
+        description=(
+            "XYZ tile URL for the location editor's street-level map, with "
+            "{z}, {x} and {y} placeholders. Null means the editor uses only "
+            "its bundled coastlines."
+        )
+    )
+    attribution: str | None = Field(
+        description="Credit shown on the map for the tile provider, as plain text."
+    )
+
+
+class UpdateMapSettingsRequest(BaseModel):
+    tile_url: str | None = Field(
+        description="XYZ tile URL (http or https, with {z}, {x}, {y}), or null to clear."
+    )
+    attribution: str | None = Field(
+        default=None, description="Plain-text credit for the provider, or null."
+    )
+
+
 class RetentionSettingsResponse(BaseModel):
     purge_after_days: int = Field(
         description="Soft-deleted items become eligible for permanent "
@@ -973,3 +1022,66 @@ class TokenUsageBucketResponse(BaseModel):
 class AiTokenUsageResponse(BaseModel):
     bucket: str
     items: list[TokenUsageBucketResponse]
+
+
+class RestrictionDescriptorResponse(BaseModel):
+    key: str = Field(description="Key in a field's `restrictions` dict.")
+    label: str = Field(description="Name shown beside the control.")
+    control: str = Field(
+        description=(
+            "Which editor to show: number, integer, bytes, choices, accept, "
+            "filename_template, schema, timezone, date_bound, datetime_bound, "
+            "unit, precision, geometry_types or bbox."
+        )
+    )
+    help: str = Field(description="One sentence of guidance; may be empty.")
+
+
+class FieldTypeDescriptorResponse(BaseModel):
+    type: str = Field(description="The field type name, as used in `type`.")
+    label: str = Field(description="Plain-language name of the type.")
+    description: str = Field(description="What the type is for.")
+    stored_as: str = Field(description="How a value is held, in plain language.")
+    entry_hint: str = Field(
+        description="One line of guidance shown beside the input on the record page."
+    )
+    example: str = Field(description="An example value as a person would type it.")
+    restrictions: list[RestrictionDescriptorResponse] = Field(
+        description="The rules a field of this type can carry, in display order."
+    )
+    supports_default: bool = Field(
+        description="Whether a default value can be set when creating the field."
+    )
+
+
+class FieldKindResponse(BaseModel):
+    key: str = Field(description="Stable identifier of the kind.")
+    label: str = Field(description="Name shown in the field-kind picker.")
+    type: str = Field(description="The field type a field of this kind is created as.")
+    description: str = Field(description="What the kind is for.")
+    focus: str | None = Field(
+        description="Restriction key the editor should lead with, if any."
+    )
+
+
+class FieldTypesResponse(BaseModel):
+    types: list[FieldTypeDescriptorResponse] = Field(
+        description="Every field type, with the rules each can carry."
+    )
+    kinds: list[FieldKindResponse] = Field(
+        description="The 'what kind of data is this?' picker, in display order."
+    )
+
+    @classmethod
+    def build(cls) -> FieldTypesResponse:
+        from dataclasses import asdict
+
+        from civex.domain.field_descriptors import FIELD_KINDS, FIELD_TYPES
+
+        return cls(
+            types=[
+                FieldTypeDescriptorResponse.model_validate(asdict(d))
+                for d in FIELD_TYPES.values()
+            ],
+            kinds=[FieldKindResponse.model_validate(asdict(k)) for k in FIELD_KINDS],
+        )

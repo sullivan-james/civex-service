@@ -137,6 +137,14 @@ export function useRecord(
   })
 }
 
+/** Under `records` so any record edit refreshes the counts. */
+export function useReferrers(id: string) {
+  return useQuery({
+    queryKey: ['records', 'referrers', id],
+    queryFn: () => recordsApi.referrers(id),
+  })
+}
+
 export function useCreateRecord(datasetName: string) {
   const qc = useQueryClient()
   const toast = useToast()

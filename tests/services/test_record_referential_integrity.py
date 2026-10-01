@@ -209,3 +209,70 @@ def test_find_dangling_references_empty_when_consistent(
     make_record("study", "visit", {"patient_ref": str(patient.id)})
 
     assert ctx.record_svc.find_dangling_references() == []
+
+
+def test_referrer_counts_group_by_collection_schema_and_field(
+    ctx: AppContext, make_schema, make_collection, make_record
+):
+    make_schema("patient")
+    make_schema("visit", fields=[("patient_ref", "reference")])
+    make_schema("cohort", fields=[("members", "reference_list")])
+    make_collection("hub", scope="global")
+    make_collection("study")
+
+    patient = make_record("hub", "patient", {})
+    other = make_record("hub", "patient", {})
+    make_record("study", "visit", {"patient_ref": str(patient.id)})
+    make_record("study", "visit", {"patient_ref": str(patient.id)})
+    make_record("study", "visit", {"patient_ref": str(other.id)})
+    make_record("study", "cohort", {"members": [str(patient.id), str(other.id)]})
+
+    groups = ctx.record_svc.referrer_counts(str(patient.id))
+
+    assert [
+        (g.dataset_name, g.schema_name, g.field_name, g.dtype, g.count)
+        for g in groups
+    ] == [
+        ("study", "cohort", "members", "reference_list", 1),
+        ("study", "visit", "patient_ref", "reference", 2),
+    ]
+    assert ctx.record_svc.referrer_counts(str(other.id))[1].count == 1
+
+
+def test_referrer_counts_ignores_deleted_referrers_and_includes_self(
+    ctx: AppContext, make_schema, make_collection, make_record
+):
+    make_schema("person", fields=[("friend", "reference")])
+    make_collection("study")
+
+    a = make_record("study", "person", {})
+    b = make_record("study", "person", {"friend": str(a.id)})
+    assert ctx.record_svc.referrer_counts(str(a.id))[0].count == 1
+
+    ctx.record_svc.delete(str(b.id))
+    assert ctx.record_svc.referrer_counts(str(a.id)) == []
+
+    ctx.record_svc.update(str(a.id), {"friend": str(a.id)})
+    assert ctx.record_svc.referrer_counts(str(a.id))[0].count == 1
+
+
+def test_referrer_counts_skips_fields_restricted_to_another_schema(
+    ctx: AppContext, make_schema, make_collection, make_record
+):
+    make_schema("patient")
+    make_schema("vet")
+    make_schema("visit")
+    ctx.schema_svc.add_field(
+        "visit", "patient_ref", "reference", restrictions={"schema": "patient"}
+    )
+    ctx.schema_svc.add_field(
+        "visit", "vet_ref", "reference", restrictions={"schema": "vet"}
+    )
+    ctx.commit()
+    make_collection("study")
+
+    patient = make_record("study", "patient", {})
+    make_record("study", "visit", {"patient_ref": str(patient.id)})
+
+    groups = ctx.record_svc.referrer_counts(str(patient.id))
+    assert [(g.field_name, g.count) for g in groups] == [("patient_ref", 1)]

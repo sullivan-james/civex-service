@@ -335,13 +335,22 @@ class LocalRecordRepository:
             )
             return [_to_dto(r) for r in rows]
 
-        # SQLite has no JSONB containment operator -- scan and check in Python.
-        # Acceptable for target dataset sizes (see CIVEX-169).
+        # SQLite has no JSONB containment operator. Let the database discard
+        # every record whose JSON text doesn't even mention a target id (a
+        # superset test -- ids are hyphenated hex, so nothing to escape), then
+        # check the survivors exactly in Python.
         target_set = set(target_strs)
         ref_ids = {str(fid) for fid in reference_field_ids}
         ref_list_ids = {str(fid) for fid in reference_list_field_ids}
         result = []
-        for row in self._s.query(Record).filter(Record.deleted_at.is_(None)).all():
+        candidates = (
+            self._s.query(Record)
+            .filter(Record.deleted_at.is_(None))
+            .filter(
+                or_(*[cast(Record.data, String).like(f"%{t}%") for t in target_strs])
+            )
+        )
+        for row in candidates.all():
             data = row.data or {}
             hit = any(data.get(fid) in target_set for fid in ref_ids)
             if not hit:

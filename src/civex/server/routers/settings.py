@@ -5,6 +5,8 @@ from fastapi import APIRouter, HTTPException
 from civex.config import load_config, save_config
 from civex.domain.exceptions import ConfigError
 from civex.server.models import (
+    MapSettingsResponse,
+    UpdateMapSettingsRequest,
     RetentionSettingsResponse,
     UISettingsResponse,
     UpdateRetentionSettingsRequest,
@@ -35,6 +37,38 @@ def update_ui_settings(body: UpdateUISettingsRequest):
     config.ui.show_advanced = body.show_advanced
     save_config(config)
     return UISettingsResponse(show_advanced=config.ui.show_advanced)
+
+
+@router.get("/map", response_model=MapSettingsResponse)
+def get_map_settings():
+    """Where the location editor gets street-level map tiles, if anywhere."""
+    config = _load_config()
+    return MapSettingsResponse(
+        tile_url=config.map.tile_url, attribution=config.map.attribution
+    )
+
+
+@router.patch("/map", response_model=MapSettingsResponse)
+def update_map_settings(body: UpdateMapSettingsRequest):
+    """Set (or clear, with null) the map tile URL. It must be an http(s) XYZ
+    URL containing {z}, {x} and {y}. The provider's terms of use apply."""
+    url = (body.tile_url or "").strip() or None
+    if url is not None:
+        if not url.startswith(("http://", "https://")) or not all(
+            token in url for token in ("{z}", "{x}", "{y}")
+        ):
+            raise HTTPException(
+                422,
+                detail="Tile URL must start with http:// or https:// and "
+                "contain {z}, {x} and {y}, e.g. https://tile.example.org/{z}/{x}/{y}.png",
+            )
+    config = _load_config()
+    config.map.tile_url = url
+    config.map.attribution = (body.attribution or "").strip() or None if url else None
+    save_config(config)
+    return MapSettingsResponse(
+        tile_url=config.map.tile_url, attribution=config.map.attribution
+    )
 
 
 @router.get("/retention", response_model=RetentionSettingsResponse)

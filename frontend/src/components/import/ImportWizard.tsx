@@ -154,9 +154,12 @@ export default function ImportWizard({
     }
   }
 
-  function resolvedColumnTarget(
-    col: string,
-  ): { fieldName: string; dtype: string } | null {
+  function resolvedColumnTarget(col: string): {
+    fieldName: string
+    dtype: string
+    fieldUnit?: string
+    columnUnit?: string
+  } | null {
     const choice = mapState.columnMap[col]
     if (!choice || choice === '__skip__') return null
     if (choice === NEW_FIELD) {
@@ -166,7 +169,17 @@ export default function ImportWizard({
         : null
     }
     const f = availableFields.find((f) => f.name === choice)
-    return f ? { fieldName: f.name, dtype: f.type } : null
+    if (!f) return null
+    const fieldUnit =
+      f.type === 'float' && typeof f.restrictions?.unit === 'string'
+        ? f.restrictions.unit
+        : undefined
+    return {
+      fieldName: f.name,
+      dtype: f.type,
+      fieldUnit,
+      columnUnit: fieldUnit ? mapState.columnUnits[col] : undefined,
+    }
   }
 
   // ── Files mapping ────────────────────────────────────────────────────
@@ -235,7 +248,10 @@ export default function ImportWizard({
       let skip: string | null = null
       for (const { col, target } of targets) {
         if (!target) continue
-        const { value, error } = coerceCsvValue(row[col] ?? '', target.dtype)
+        const { value, error } = coerceCsvValue(row[col] ?? '', target.dtype, {
+          fieldUnit: target.fieldUnit,
+          columnUnit: target.columnUnit,
+        })
         if (error) {
           skip = error
           break

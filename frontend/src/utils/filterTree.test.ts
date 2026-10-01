@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   addChildById,
+  operatorsFor,
   emptyCondition,
   emptyGroup,
   removeNodeById,
@@ -207,5 +208,28 @@ describe('wireConditions / pruneWireConditions', () => {
   it('is null when nothing is left', () => {
     expect(pruneWireConditions(tree, () => false)).toBeNull()
     expect(pruneWireConditions(null, () => true)).toBeNull()
+  })
+})
+
+describe('operatorsFor', () => {
+  it('keeps every operator for ordinary fields', () => {
+    expect(operatorsFor('string').map((o) => o.value)).toContain('gt')
+    expect(operatorsFor(undefined)).toHaveLength(9)
+  })
+
+  it('offers a reference only the operators that compare one id', () => {
+    expect(operatorsFor('reference').map((o) => o.value)).toEqual([
+      'eq',
+      'ne',
+      'in',
+      'is_null',
+    ])
+  })
+
+  it('offers a reference list a member test, not whole-array comparison', () => {
+    expect(operatorsFor('reference_list')).toEqual([
+      { value: 'contains', label: 'includes' },
+      { value: 'is_null', label: 'is empty' },
+    ])
   })
 })

@@ -8,7 +8,15 @@ export interface RetentionSettings {
   purge_after_days: number
 }
 
+export interface MapSettings {
+  tile_url: string | null
+  attribution: string | null
+}
+
 export const settingsApi = {
+  getMap: () => api.get<MapSettings>('/settings/map'),
+  updateMap: (body: MapSettings) =>
+    api.patch<MapSettings>('/settings/map', body),
   getUi: () => api.get<UISettings>('/settings/ui'),
   updateUi: (show_advanced: boolean) =>
     api.patch<UISettings>('/settings/ui', { show_advanced }),
