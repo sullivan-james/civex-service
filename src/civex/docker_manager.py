@@ -80,6 +80,20 @@ def container_status(name: str) -> str | None:
     return result.stdout.strip()
 
 
+def container_host_port(name: str) -> int | None:
+    """The host port a running container publishes PostgreSQL on, or None --
+    read-only, unlike starting the container to find out."""
+    result = subprocess.run(
+        ["docker", "port", name, "5432/tcp"], capture_output=True, text=True
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    try:
+        return int(result.stdout.splitlines()[0].rsplit(":", 1)[1])
+    except (IndexError, ValueError):
+        return None
+
+
 def container_exists(name: str) -> bool:
     return container_status(name) is not None
 

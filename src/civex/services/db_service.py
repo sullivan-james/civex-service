@@ -446,6 +446,39 @@ def migrate(config: Config) -> DbStatus:
     return get_status(config)
 
 
+def refuse_to_abandon_data(config: Config, new_url: str) -> None:
+    """Switching to an empty database while the current one holds records
+    would leave them behind -- the data hasn't gone anywhere, but the project
+    would look empty, and nothing says why. Refuse, and point at `move`.
+
+    If either side can't be read (a broken URL being fixed, a database not
+    migrated yet) there is nothing to compare, so the switch is allowed."""
+    if not config.db.url or new_url == config.db.url:
+        return
+    from sqlalchemy import create_engine
+
+    from civex.db.move import row_counts
+
+    current = target = None
+    try:
+        current, target = create_engine(config.db.url), create_engine(new_url)
+        held = row_counts(current).get("records", 0)
+        target_empty = sum(row_counts(target).values()) == 0
+    except Exception:
+        return
+    finally:
+        for engine in (current, target):
+            if engine is not None:
+                engine.dispose()
+    if held and target_empty:
+        raise ValidationError(
+            f"Your current database holds {held:,} records and the one you're "
+            "switching to is empty, so they would be left behind. Use "
+            "`civex db move` (Settings → Database → Move database) to carry "
+            "your data across instead."
+        )
+
+
 def set_url(config: Config, url: str) -> DbStatus:
     """Point civex at a different database. Tests the connection, saves it
     (clearing docker_managed — a manually supplied URL is no longer ours to
@@ -453,6 +486,7 @@ def set_url(config: Config, url: str) -> DbStatus:
     err = test_connection(url)
     if err:
         raise ValidationError(f"Could not connect: {err}")
+    refuse_to_abandon_data(config, url)
     config.db = DBConfig(url=url, docker_managed=False)
     save_config(config)
     apply_migrations(url)
@@ -494,6 +528,7 @@ def setup_docker(config: Config, project_name: str | None = None) -> DbStatus:
     """Start (or reuse) this project's Docker-managed Postgres container,
     point config at it, and migrate."""
     url = provision_docker_postgres(project_name or config.project_root.name)
+    refuse_to_abandon_data(config, url)
     config.db = DBConfig(url=url, docker_managed=True)
     save_config(config)
     apply_migrations(url)
