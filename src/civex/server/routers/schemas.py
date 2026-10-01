@@ -11,6 +11,7 @@ from civex.server.models import (
     AddFieldRequest,
     CreateSchemaRequest,
     FieldResponse,
+    FieldTypesResponse,
     NameIssueResponse,
     ReorderFieldsRequest,
     SchemaDeleteImpactResponse,
@@ -39,6 +40,15 @@ def lint_schema_names(ctx: AppContext = Depends(get_ctx)):
     report `civex schema lint` prints, exposed for the analytics
     naming-health widget. Nothing is broken; these names still resolve."""
     return [NameIssueResponse.from_dto(i) for i in ctx.schema_svc.lint_names()]
+
+
+@router.get("/field-types", response_model=FieldTypesResponse)
+def field_types():
+    """Every field type, the rules each can carry and how to present them,
+    plus the field-kind picker. The web UI builds its field editor and its
+    record-form guidance from this, so a new type or rule appears there
+    without a frontend change."""
+    return FieldTypesResponse.build()
 
 
 @router.post("", response_model=SchemaResponse, status_code=201)

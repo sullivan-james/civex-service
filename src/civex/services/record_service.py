@@ -15,6 +15,8 @@ from civex.domain.dtos import (
     ResolvedField,
     SchemaDTO,
 )
+from civex.domain import geo as geo_domain
+from civex.domain import partial_dates, units
 from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
 from civex.domain.filters import (
     SELF,
@@ -56,7 +58,8 @@ def _is_uuid(value: str) -> bool:
 
 
 def _parse_date(v: str) -> str:
-    return _date.fromisoformat(v.strip()).isoformat()
+    """A year, month or day, kept at the precision it was written at."""
+    return partial_dates.normalise(v)
 
 
 def _parse_datetime(v: str, tz: str | None = None) -> str:
@@ -98,10 +101,33 @@ def _check_restrictions(
             )
         return
 
+    if dtype == "geo":
+        try:
+            geo_domain.check(value, restrictions or {})
+        except ValidationError as e:
+            raise ValidationError(f"Field '{field_name}': {e}") from None
+        return
+
+    if dtype == "date" and isinstance(value, str):
+        # Fields without a `precision` take full dates only, as they always have.
+        try:
+            partial_dates.precision_of(value)
+        except ValueError:
+            pass  # not date-shaped; left to the caller as before
+        else:
+            try:
+                partial_dates.check_precision(
+                    value, (restrictions or {}).get("precision", "day")
+                )
+            except ValidationError as e:
+                raise ValidationError(f"Field '{field_name}': {e}") from None
+
     if not restrictions:
         return
 
     if dtype in ("integer", "float"):
+        if isinstance(value, str) or isinstance(value, bool):
+            raise ValidationError(f"Field '{field_name}': '{value}' is not a number")
         mn = restrictions.get("min")
         mx = restrictions.get("max")
         if mn is not None and value < mn:
@@ -131,6 +157,16 @@ def _check_restrictions(
             raise ValidationError(
                 f"Field '{field_name}': '{value}' must be one of: {', '.join(str(c) for c in choices)}"
             )
+
+    elif dtype == "date" and isinstance(value, str):
+        try:
+            problem = partial_dates.check_bounds(
+                value, restrictions.get("min"), restrictions.get("max")
+            )
+        except ValueError:
+            problem = None  # malformed value or bound; see the datetime branch
+        if problem:
+            raise ValidationError(f"Field '{field_name}': {problem}")
 
     elif dtype in ("date", "datetime"):
         mn = restrictions.get("min")
@@ -283,7 +319,7 @@ def _apply_filename_templates(
 
 # Types that skip the generic _COERCE path (handled explicitly in coerce_value)
 # and are also excluded from natural-name computation (they're collection/blob types).
-_SKIP_TYPES = {"reference", "reference_list", "file", "file_list", "tags"}
+_SKIP_TYPES = {"reference", "reference_list", "file", "file_list", "tags", "geo"}
 
 
 def _natural_name(
@@ -515,6 +551,27 @@ class RecordService:
                 raise CoercionError(field_name, dtype, raw)
             _check_restrictions(parsed, dtype, restrictions or {}, field_name)
             return parsed
+        if dtype == "geo":
+            if isinstance(raw, dict):
+                geometry = raw
+            else:
+                try:
+                    geometry = geo_domain.parse_text(str(raw))
+                except ValueError:
+                    raise CoercionError(field_name, dtype, raw) from None
+            _check_restrictions(geometry, dtype, restrictions or {}, field_name)
+            return geometry
+        field_unit = (restrictions or {}).get("unit")
+        if dtype == "float" and isinstance(raw, str) and field_unit:
+            # "1024 ft" is read in the field's unit; a bare number already is.
+            try:
+                number = units.to_field_unit(raw, field_unit)
+            except ValueError:
+                raise CoercionError(field_name, dtype, raw) from None
+            except ValidationError as e:
+                raise ValidationError(f"Field '{field_name}': {e}") from None
+            _check_restrictions(number, dtype, restrictions or {}, field_name)
+            return number
         if dtype == "file":
             path = Path(raw)
             if not path.exists():

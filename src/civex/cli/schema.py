@@ -115,6 +115,49 @@ def schema_show(name: str = typer.Argument(..., help="Schema name")) -> None:
     console.print(table)
 
 
+def _parse_bbox(text: str) -> list[float]:
+    try:
+        parts = [float(x) for x in text.split(",")]
+    except ValueError:
+        parts = []
+    if len(parts) != 4:
+        console.print("[error]--bbox must be WEST,SOUTH,EAST,NORTH in degrees.[/error]")
+        raise typer.Exit(1)
+    return parts
+
+
+def _typed_restrictions(
+    dtype: str,
+    unit: Optional[str],
+    precision: Optional[str],
+    geometry_types: Optional[str],
+    bbox: Optional[str],
+) -> dict:
+    """Restrictions for the float/date/geo flags, rejecting a flag used on the
+    wrong type the way the older flags do."""
+    out: dict = {}
+    for flag, value, types, key in (
+        ("--unit", unit, ("float",), "unit"),
+        ("--precision", precision, ("date",), "precision"),
+        ("--geometry-types", geometry_types, ("geo",), "geometry_types"),
+        ("--bbox", bbox, ("geo",), "bbox"),
+    ):
+        if value is None:
+            continue
+        if dtype not in types:
+            console.print(
+                f"[error]{flag} is only valid for --type {' or '.join(types)}.[/error]"
+            )
+            raise typer.Exit(1)
+        if key == "geometry_types":
+            out[key] = [t.strip() for t in value.split(",") if t.strip()]
+        elif key == "bbox":
+            out[key] = _parse_bbox(value)
+        else:
+            out[key] = value
+    return out
+
+
 @app.command("add-field")
 def schema_add_field(
     schema_name: str = typer.Argument(..., help="Schema to add the field to"),
@@ -133,7 +176,7 @@ def schema_add_field(
         ...,
         "--type",
         "-t",
-        help="Field type: integer | float | string | boolean | date | datetime | file | file_list | reference",
+        help="Field type: integer | float | string | boolean | date | datetime | geo | file | file_list | reference",
     ),
     required: bool = typer.Option(
         False, "--required/--optional", help="Whether the field is required"
@@ -163,6 +206,31 @@ def schema_add_field(
     max_size: Optional[int] = typer.Option(
         None, "--max-size", help="Maximum file size in bytes (file/file_list)"
     ),
+    # float
+    unit: Optional[str] = typer.Option(
+        None,
+        "--unit",
+        help="Unit every value is stored in, e.g. m or degC (float). Values are "
+        "never converted after the fact.",
+    ),
+    # date
+    precision: Optional[str] = typer.Option(
+        None,
+        "--precision",
+        help="Least precise date accepted: year | month | day (date)",
+    ),
+    # geo
+    geometry_types: Optional[str] = typer.Option(
+        None,
+        "--geometry-types",
+        help="Comma-separated shapes allowed, e.g. Point,Polygon (geo)",
+    ),
+    bbox: Optional[str] = typer.Option(
+        None,
+        "--bbox",
+        help="Allowed area as WEST,SOUTH,EAST,NORTH in degrees; west greater "
+        "than east crosses the 180th meridian (geo)",
+    ),
 ) -> None:
     """Add a field to a schema.
 
@@ -175,6 +243,9 @@ def schema_add_field(
       --type string --choices "left,right,bilateral"
       --type string --max-length 255
       --type file --accept ".csv,.txt" --max-size 10485760
+      --type float --unit m --min 0
+      --type date --precision month
+      --type geo --geometry-types Point --bbox "-12,48,4,62"
     """
     restrictions: dict = {}
 
@@ -223,6 +294,10 @@ def schema_add_field(
             "[error]--accept/--max-size are only valid for --type file or file_list.[/error]"
         )
         raise typer.Exit(1)
+
+    restrictions.update(
+        _typed_restrictions(dtype, unit, precision, geometry_types, bbox)
+    )
 
     ctx = _ctx()
     try:
@@ -343,13 +418,50 @@ def schema_update_field(
     max_size: Optional[int] = typer.Option(
         None, "--max-size", help="Maximum file size in bytes"
     ),
+    # float
+    unit: Optional[str] = typer.Option(
+        None,
+        "--unit",
+        help="Unit every value is stored in, e.g. m or degC (float). Values are "
+        "never converted after the fact.",
+    ),
+    # date
+    precision: Optional[str] = typer.Option(
+        None,
+        "--precision",
+        help="Least precise date accepted: year | month | day (date)",
+    ),
+    # geo
+    geometry_types: Optional[str] = typer.Option(
+        None,
+        "--geometry-types",
+        help="Comma-separated shapes allowed, e.g. Point,Polygon (geo)",
+    ),
+    bbox: Optional[str] = typer.Option(
+        None,
+        "--bbox",
+        help="Allowed area as WEST,SOUTH,EAST,NORTH in degrees; west greater "
+        "than east crosses the 180th meridian (geo)",
+    ),
     clear_restrictions: bool = typer.Option(
         False, "--clear-restrictions", help="Remove all restrictions"
     ),
 ) -> None:
     """Update a field's name, label, required flag, or restrictions."""
     has_restriction_flags = any(
-        v is not None for v in [min_val, max_val, choices, max_length, accept, max_size]
+        v is not None
+        for v in [
+            min_val,
+            max_val,
+            choices,
+            max_length,
+            accept,
+            max_size,
+            unit,
+            precision,
+            geometry_types,
+            bbox,
+        ]
     )
 
     if (
@@ -423,6 +535,17 @@ def schema_update_field(
                     new_restrictions["accept"] = accept
                 if max_size is not None:
                     new_restrictions["max_size"] = max_size
+            new_restrictions.update(
+                _typed_restrictions(dtype, unit, precision, geometry_types, bbox)
+            )
+            old_unit = (field.restrictions or {}).get("unit")
+            if unit is not None and old_unit and old_unit != unit:
+                console.print(
+                    f"[warning]This relabels '{field_name}' from {old_unit} to {unit}. "
+                    "Stored values are NOT converted: use it only to correct a wrong "
+                    "label. For a different unit going forward, add a new field.[/warning]"
+                )
+                typer.confirm("Relabel the unit anyway?", abort=True)
 
         updated = ctx.schema_svc.update_field(
             schema_name,

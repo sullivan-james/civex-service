@@ -12,6 +12,13 @@ from civex.domain.dtos import (
     SchemaDTO,
 )
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
+from civex.domain import geo as geo_domain
+from civex.domain import partial_dates, units
+from civex.domain.field_descriptors import (
+    FIELD_TYPES,
+    RestrictionDescriptor,
+    restriction_keys,
+)
 from civex.domain.naming import is_slug, slugify, validate_name
 from civex.domain.timezones import validate_timezone
 from civex.repositories.protocols import (
@@ -35,28 +42,81 @@ VALID_DTYPES = frozenset(
         "url",
         "reference_list",
         "tags",
+        "geo",
     ]
 )
 
-# Valid `restrictions` keys per dtype — the single source of truth for what
-# RecordService._check_restrictions() actually reads. Anything else is
-# silently ignored at write time, which would let a field look restricted
-# in the UI while enforcing nothing — so we reject unknown keys up front.
-VALID_RESTRICTION_KEYS: dict[str, frozenset[str]] = {
-    "integer": frozenset({"min", "max"}),
-    "float": frozenset({"min", "max"}),
-    "string": frozenset({"choices", "max_length"}),
-    "date": frozenset({"min", "max"}),
-    "datetime": frozenset({"min", "max", "timezone"}),
-    "file": frozenset({"accept", "max_size", "filename_template"}),
-    "file_list": frozenset({"accept", "max_size", "filename_template"}),
-    "reference": frozenset({"schema"}),
-    "reference_list": frozenset({"schema"}),
-    "enum": frozenset({"choices"}),
-    "boolean": frozenset(),
-    "url": frozenset(),
-    "tags": frozenset(),
-}
+# Valid `restrictions` keys per dtype -- what RecordService._check_restrictions()
+# actually reads. Anything else would be silently ignored at write time,
+# letting a field look restricted in the UI while enforcing nothing, so unknown
+# keys are rejected up front. Derived from the field descriptors, which are
+# also what the web UI renders its editors from, so the two cannot drift.
+VALID_RESTRICTION_KEYS: dict[str, frozenset[str]] = restriction_keys()
+
+
+def _check_control_value(desc: RestrictionDescriptor, value: Any) -> None:
+    """The shape every value of a given control has, whatever the type."""
+    problem = None
+    if desc.control == "number":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            problem = "a number"
+    elif desc.control in ("integer", "bytes"):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            problem = "a whole number of at least 1"
+    elif desc.control == "choices":
+        if not isinstance(value, list) or not all(
+            isinstance(c, str) and c.strip() for c in value
+        ):
+            problem = "a list of non-empty text values"
+    elif desc.control in ("schema", "accept"):
+        if not isinstance(value, str) or not value.strip():
+            problem = "non-empty text"
+    if problem:
+        raise ValidationError(
+            f"Restriction '{desc.key}' must be {problem}, got {value!r}"
+        )
+
+
+def _validate_restriction_values(dtype: str, restrictions: dict[str, Any]) -> None:
+    """Values of the keys that carry structure: checked once, when the field
+    is saved, so `_check_restrictions` can trust them."""
+    for desc in FIELD_TYPES[dtype].restrictions if dtype in FIELD_TYPES else ():
+        if desc.key in restrictions:
+            _check_control_value(desc, restrictions[desc.key])
+    if "unit" in restrictions:
+        restrictions["unit"] = units.validate_symbol(restrictions["unit"])
+    if "precision" in restrictions:
+        if restrictions["precision"] not in partial_dates.PRECISIONS:
+            raise ValidationError(
+                f"Restriction 'precision' must be one of: "
+                f"{', '.join(partial_dates.PRECISIONS)}"
+            )
+    if dtype == "date":
+        for key in ("min", "max"):
+            bound = restrictions.get(key)
+            if bound is None:
+                continue
+            try:
+                partial_dates.period(str(bound))
+            except ValueError:
+                raise ValidationError(
+                    f"Restriction '{key}' must be a year, month or day "
+                    f"(2020, 2020-03 or 2020-03-14), got {bound!r}"
+                ) from None
+    if "geometry_types" in restrictions:
+        types = restrictions["geometry_types"]
+        bad = (
+            [t for t in types if t not in geo_domain.GEOMETRY_TYPES]
+            if isinstance(types, list)
+            else [types]
+        )
+        if bad or not types:
+            raise ValidationError(
+                f"Restriction 'geometry_types' must be a list drawn from: "
+                f"{', '.join(geo_domain.GEOMETRY_TYPES)}"
+            )
+    if "bbox" in restrictions:
+        restrictions["bbox"] = geo_domain.validate_bbox(restrictions["bbox"])
 
 
 def _validate_restriction_keys(dtype: str, restrictions: dict[str, Any] | None) -> None:
@@ -69,6 +129,7 @@ def _validate_restriction_keys(dtype: str, restrictions: dict[str, Any] | None) 
         raise ValidationError(
             f"Unknown restriction key(s) {unknown} for type '{dtype}'. Valid keys: {valid}"
         )
+    _validate_restriction_values(dtype, restrictions)
     tz = restrictions.get("timezone")
     if tz is not None:
         # Stored verbatim and later handed to ZoneInfo, so it has to be exact.

@@ -72,6 +72,18 @@ class UIConfig:
 
 
 @dataclass
+class MapConfig:
+    # An XYZ tile URL for the location editor's street-level map, e.g.
+    # "https://tile.example.org/{z}/{x}/{y}.png". Unset (the default) keeps
+    # the editor on its bundled coastlines, which need no account and work
+    # offline. Whoever sets this is responsible for the tile provider's
+    # terms of use (the public OpenStreetMap servers, for one, rule out
+    # heavy use).
+    tile_url: str | None = None
+    attribution: str | None = None
+
+
+@dataclass
 class DBConfig:
     url: str
     docker_managed: bool = False
@@ -126,6 +138,7 @@ class Config:
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
     plugins: PluginsConfig = field(default_factory=PluginsConfig)
     ui: UIConfig = field(default_factory=UIConfig)
+    map: MapConfig = field(default_factory=MapConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
 
     @property
@@ -248,6 +261,12 @@ def load_config() -> Config:
     ui_data = data.get("ui", {})
     ui_cfg = UIConfig(show_advanced=bool(ui_data.get("show_advanced", False)))
 
+    map_data = data.get("map", {})
+    map_cfg = MapConfig(
+        tile_url=map_data.get("tile_url") or None,
+        attribution=map_data.get("attribution") or None,
+    )
+
     retention_data = data.get("retention", {})
     retention_cfg = RetentionConfig(
         purge_after_days=int(retention_data.get("purge_after_days", 30)),
@@ -266,6 +285,7 @@ def load_config() -> Config:
         telemetry=telemetry_cfg,
         plugins=plugins_cfg,
         ui=ui_cfg,
+        map=map_cfg,
         retention=retention_cfg,
     )
 
@@ -273,6 +293,13 @@ def load_config() -> Config:
 def _ts(s: str) -> str:
     """Escape a string for use inside a TOML double-quoted value."""
     return s.replace("\\", "/")  # backslashes → forward slashes (valid on all OSes)
+
+
+def _tv(s: str) -> str:
+    """A TOML basic string for free text that may contain quotes."""
+    import json
+
+    return json.dumps(s)
 
 
 def _tk(s: str) -> str:
@@ -348,6 +375,13 @@ def save_config(config: Config) -> None:
 
     if config.ui.show_advanced:
         lines += ["\n[ui]\n", "show_advanced = true\n"]
+
+    if config.map.tile_url or config.map.attribution:
+        lines.append("\n[map]\n")
+        if config.map.tile_url:
+            lines.append(f"tile_url = {_tv(config.map.tile_url)}\n")
+        if config.map.attribution:
+            lines.append(f"attribution = {_tv(config.map.attribution)}\n")
 
     if config.retention.purge_after_days != 30:
         lines += [

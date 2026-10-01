@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 
 from civex.context import AppContext
+from civex.domain import geo as geo_domain
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.query import RecordQuery
 from civex.server.background import run_pending_jobs
@@ -384,7 +385,10 @@ def export_records_csv(
                         "updated_at": r.updated_at.isoformat(),
                     }
                     for k, v in r.data.items():
-                        row[k] = v if not isinstance(v, (list, dict)) else str(v)
+                        if geo_domain.is_geometry(v):
+                            row[k] = geo_domain.to_text(v)
+                        else:
+                            row[k] = v if not isinstance(v, (list, dict)) else str(v)
                     writer.writerow(row)
         tmp.remove(path)
         return serve(path, "text/csv", f"{collection_name}.csv")
