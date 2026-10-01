@@ -269,6 +269,34 @@ def preflight(config: Config, spec: TargetSpec) -> Preflight:
     )
 
 
+def is_running() -> bool:
+    return _active.locked()
+
+
+def explain_connection_error(message: str) -> str:
+    """A PostgreSQL connection failure in plain words, for a person who isn't
+    reading driver tracebacks."""
+    low = message.lower()
+    first = message.strip().splitlines()[0] if message.strip() else "Unknown error"
+    if "password authentication failed" in low or "authentication failed" in low:
+        return "The server rejected the user name or password."
+    if "does not exist" in low and "database" in low:
+        return "That database doesn't exist on the server. Create it first, or check the name."
+    if "role" in low and "does not exist" in low:
+        return "That user doesn't exist on the server."
+    if "connection refused" in low or "could not connect" in low:
+        return "Nothing answered at that host and port. Is the server running, and is the address right?"
+    if "could not translate host name" in low or "name or service not known" in low:
+        return "That host name couldn't be found."
+    if "timeout" in low or "timed out" in low:
+        return (
+            "The server didn't answer in time. Check the host, port and any firewall."
+        )
+    if "ssl" in low:
+        return "The server's SSL settings didn't match. Check whether it requires SSL."
+    return first
+
+
 # ---------------------------------------------------------------------------
 # History
 # ---------------------------------------------------------------------------
@@ -309,7 +337,14 @@ def list_moves(config: Config) -> list[MoveRecord]:
         rows = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         return []
-    return [MoveRecord(**r) for r in reversed(rows)]
+    records = [MoveRecord(**r) for r in reversed(rows)]
+    if not is_running():
+        # "running" with nothing running: the process died mid-move.
+        for r in records:
+            if r.status == "running":
+                r.status = "failed"
+                r.error = "Interrupted before it finished. Nothing was switched."
+    return records
 
 
 def _save(config: Config, record: MoveRecord) -> None:

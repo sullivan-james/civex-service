@@ -6,7 +6,7 @@ DTOs (domain/dtos.py) stay as plain dataclasses throughout the service layer.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -797,6 +797,115 @@ class DbStatusResponse(BaseModel):
 
 class SetDbUrlRequest(BaseModel):
     url: str
+
+
+class MoveTargetRequest(BaseModel):
+    kind: Literal["sqlite", "docker", "postgres"] = Field(
+        description=(
+            "Where to move to: 'sqlite' (a new file in the project), 'docker' "
+            "(this project's Civex-managed PostgreSQL container) or 'postgres' "
+            "(a PostgreSQL server you run)."
+        )
+    )
+    url: str | None = Field(
+        default=None,
+        description="Full connection URL, for kind 'postgres' (instead of the fields below).",
+    )
+    path: str | None = Field(
+        default=None,
+        description="File to create, for kind 'sqlite'. Defaults to a new file in _civex/.",
+    )
+    host: str | None = Field(
+        default=None, description="Server host, for kind 'postgres'."
+    )
+    port: int = Field(default=5432, description="Server port, for kind 'postgres'.")
+    database: str | None = Field(
+        default=None, description="Database name, for kind 'postgres'."
+    )
+    user: str | None = Field(
+        default=None, description="User name, for kind 'postgres'."
+    )
+    password: str | None = Field(
+        default=None, description="Password, for kind 'postgres'."
+    )
+
+
+class ConnectionCheckResponse(BaseModel):
+    ok: bool = Field(description="Whether a connection was made.")
+    error: str | None = Field(
+        default=None, description="Why not, in plain words, when ok is false."
+    )
+
+
+class DatabaseSummaryResponse(BaseModel):
+    label: str = Field(
+        description="'SQLite file', 'Docker PostgreSQL' or 'PostgreSQL server'."
+    )
+    dialect: str = Field(description="'sqlite' or 'postgresql'.")
+    location: str = Field(description="Where it is, with any password hidden.")
+    reachable: bool = Field(description="Whether it could be read.")
+    error: str | None = Field(default=None, description="Why not, when unreachable.")
+    records: int = Field(description="Number of records.")
+    rows: int = Field(description="Rows across every table.")
+    size_bytes: int | None = Field(
+        default=None, description="On-disk size, when known."
+    )
+
+
+class MovePreflightResponse(BaseModel):
+    source: DatabaseSummaryResponse = Field(description="The database now in use.")
+    target: DatabaseSummaryResponse = Field(description="The destination.")
+    target_label: str = Field(description="Kind of destination, for display.")
+    can_proceed: bool = Field(description="False when `problems` is not empty.")
+    problems: list[str] = Field(description="Reasons the move can't go ahead.")
+    warnings: list[str] = Field(description="Things worth knowing that don't block it.")
+    estimate_seconds: int = Field(description="Rough time the copy will take.")
+
+
+class MoveProgressResponse(BaseModel):
+    phase: str = Field(description="'copy', 'verify' or 'finalize'.")
+    table: str | None = Field(default=None, description="Table being copied.")
+    rows_done: int = Field(description="Rows copied so far.")
+    rows_total: int = Field(description="Rows to copy in all.")
+    tables_done: int = Field(description="Tables finished.")
+    tables_total: int = Field(description="Tables to copy.")
+    message: str = Field(description="What it is doing, for display.")
+
+
+class MoveRecordResponse(BaseModel):
+    id: str = Field(description="Identifier of the move.")
+    started_at: str = Field(description="When it started (ISO 8601).")
+    finished_at: str | None = Field(default=None, description="When it ended.")
+    status: Literal["running", "done", "failed", "cancelled"] = Field(
+        description="Outcome. Only 'done' means the project now uses the new database."
+    )
+    source_label: str = Field(description="Kind of database moved from.")
+    source_location: str = Field(description="Where it was, password hidden.")
+    target_label: str = Field(description="Kind of database moved to.")
+    target_location: str = Field(description="Where it is, password hidden.")
+    seconds: float | None = Field(default=None, description="How long the copy took.")
+    counts: dict[str, int] = Field(description="Rows copied per table.")
+    error: str | None = Field(default=None, description="Why it didn't finish.")
+    problems: list[str] = Field(
+        description="What didn't match, if verification failed."
+    )
+    reverted_at: str | None = Field(
+        default=None, description="When it was undone, if it was."
+    )
+
+
+class MoveJobResponse(BaseModel):
+    id: str = Field(description="Job id to poll.")
+    status: Literal["running", "done", "failed", "cancelled"] = Field(
+        description="State of the move."
+    )
+    progress: MoveProgressResponse = Field(description="Latest progress.")
+    error: str | None = Field(
+        default=None, description="Why it failed or was cancelled."
+    )
+    record: MoveRecordResponse | None = Field(
+        default=None, description="The history entry, once the move has ended."
+    )
 
 
 # --- Legal ---
