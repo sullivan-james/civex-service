@@ -63,13 +63,7 @@ Click the star on a saved filter, a collection, a record or a drilled-down place
 
 **Home** shows your pinned saved filters with their live counts under *Needs your attention*, and what you opened lately under *Pick up where you left off*, each with a star to pin it.
 
-Press **Ctrl+K** (**⌘K** on a Mac), or click **Jump to** in the top bar, to search collections, schemas, saved filters, records and places by name. With nothing typed it lists your pins and recents. The star on a result pins it.
-
-### Working through a list
-
-On a collection or schema's records, **Work through these** opens the first matching record and steps through the rest one at a time. A bar on each record shows where you are (*3 of 14*), with **Previous**, **Next**, **Skip** and **Mark reviewed & next**. The list is frozen when you start, so a record that drops out of the filter once it is marked doesn't shift the rest. A record opened any other way — from search, a link, or a new tab — has no list and no bar.
-
-*Mark reviewed* sets a yes/no (`boolean`) field on the record to true: the one named `reviewed` if the schema has one, otherwise its first yes/no field, or whichever you pick in the bar (remembered in your browser). A schema with no yes/no field can still be stepped through, just not marked. Pair it with a saved filter such as "reviewed is no" to have the work list shrink as you go.
+Press **Ctrl+K** (**⌘K** on a Mac), or click **Jump to** in the top bar, to search collections, schemas, saved filters, records and places by name. Records are searched across every collection in one go, and each result shows which collection it is in. With nothing typed it lists your pins and recents. The star on a result pins it.
 
 ## HTTP API
 

@@ -74,7 +74,9 @@ function renderPalette(onClose = vi.fn()) {
   return onClose
 }
 
+let searches: string[]
 beforeEach(() => {
+  searches = []
   localStorage.clear()
   vi.stubGlobal(
     'fetch',
@@ -83,6 +85,20 @@ beforeEach(() => {
       if (path === '/api/collections') return json(COLLECTIONS)
       if (path === '/api/schemas') return json(SCHEMAS)
       if (path === '/api/views') return json(VIEWS)
+      if (path === '/api/records/search') {
+        searches.push(new URL(String(input), 'http://x').search)
+        return json([
+          {
+            id: 'r1',
+            dataset_id: 'c1',
+            schema_name: 'selection',
+            parent_record_id: null,
+            data: {},
+            natural_name: 'Humpback unit 3',
+            collection: 'Whale song',
+          },
+        ])
+      }
       return json([])
     }),
   )
@@ -146,5 +162,23 @@ describe('CommandPalette', () => {
     renderPalette()
     await user.type(screen.getByRole('combobox'), 'zzzz')
     expect(await screen.findByText(/Nothing matches/)).toBeInTheDocument()
+  })
+
+  it('finds records with one request, showing which collection each is in', async () => {
+    const user = userEvent.setup()
+    renderPalette()
+    await user.type(screen.getByRole('combobox'), 'humpback')
+    expect(await screen.findByText('Humpback unit 3')).toBeInTheDocument()
+    expect(screen.getByText('selection · Whale song')).toBeInTheDocument()
+    expect(searches).toHaveLength(1)
+    expect(searches[0]).toContain('q=humpback')
+  })
+
+  it('does not search records for a single character', async () => {
+    const user = userEvent.setup()
+    renderPalette()
+    await user.type(screen.getByRole('combobox'), 'z')
+    await screen.findByText(/Nothing matches/)
+    expect(searches).toHaveLength(0)
   })
 })

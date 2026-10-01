@@ -205,6 +205,12 @@ class RecordRepository(Protocol):
         limit: int = 20,
         dataset_ids: list[uuid.UUID] | None = None,
     ) -> list[RecordDTO]: ...
+    def search_all(
+        self,
+        search: str,
+        limit: int = 20,
+        dataset_id: uuid.UUID | None = None,
+    ) -> list[RecordDTO]: ...
     def count_schema_matches(
         self, schema_id: uuid.UUID, search: str | None = None
     ) -> int: ...

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams, useNavigate, useSearchParams } from 'react-router'
+import { Link, useParams, useNavigate } from 'react-router'
 import {
   useRecord,
   useRecordCounts,
@@ -39,13 +39,10 @@ import RecordProvenance from '../components/jobs/RecordProvenance'
 import { AuditTrail } from '../components/audit/AuditTrail'
 import { describeAuditEntry as describeRecordAuditEntry } from '../utils/recordAudit'
 import { RecordFieldGrid } from '../components/records/RecordFieldGrid'
-import { TriageBar } from '../components/records/TriageBar'
-import { TRIAGE_PARAM } from '../utils/triage'
 
 export default function RecordDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
   const [runWorkflow, setRunWorkflow] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -165,12 +162,6 @@ export default function RecordDetailPage() {
           </>
         }
       >
-        <TriageBar
-          sessionId={searchParams.get(TRIAGE_PARAM)}
-          record={record}
-          fields={schema?.fields ?? []}
-        />
-
         {/* Own fields */}
         <Section title="Fields">
           <RecordFieldGrid

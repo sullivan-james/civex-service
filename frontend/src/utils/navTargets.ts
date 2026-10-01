@@ -17,13 +17,17 @@ export function recordTarget(r: {
   id: string
   natural_name: string | null
   schema_name: string
+  /** Name of the collection it lives in, when known. */
+  collection?: string | null
 }): NavTarget {
   return {
     key: targetKeys.record(r.id),
     kind: 'record',
     label: r.natural_name ?? r.id.slice(0, 8),
     to: `/records/${r.id}`,
-    context: r.schema_name,
+    context: r.collection
+      ? `${r.schema_name} · ${r.collection}`
+      : r.schema_name,
   }
 }
 

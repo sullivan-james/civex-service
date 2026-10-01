@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { useQueries } from '@tanstack/react-query'
-import { recordsApi } from '../api/records'
+import { useQuery } from '@tanstack/react-query'
+import { recordsApi, type CivexRecord } from '../api/records'
 import { useCollections } from '../hooks/useCollections'
 import { usePins, useRecents } from '../hooks/usePins'
 import { useSchemas } from '../hooks/useSchemas'
@@ -21,6 +21,7 @@ import { Modal, ModalHeader } from './ui/Modal'
 import { Search, Star } from './ui/icons'
 
 const MIN_RECORD_QUERY = 2
+const NO_RECORDS: CivexRecord[] = []
 
 function useDebounced<T>(value: T, ms: number): T {
   const [debounced, setDebounced] = useState(value)
@@ -47,19 +48,16 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const { data: schemas } = useSchemas()
   const { data: views } = useAllViews()
 
-  // Records have no search-everything endpoint, so ask each schema for a few
-  // matches once the person has paused typing.
+  // One request for records of every schema and collection, once the
+  // person has paused typing.
   const recordQuery = useDebounced(query.trim(), 250)
-  const recordSearches = useQueries({
-    queries: (schemas ?? []).map((s) => ({
-      queryKey: ['palette-records', s.name, recordQuery],
-      queryFn: () => recordsApi.searchBySchema(s.name, recordQuery, 5),
-      enabled: recordQuery.length >= MIN_RECORD_QUERY,
-      staleTime: 10_000,
-    })),
+  const recordSearch = useQuery({
+    queryKey: ['palette-records', recordQuery],
+    queryFn: () => recordsApi.search(recordQuery, 8),
+    enabled: recordQuery.length >= MIN_RECORD_QUERY,
+    staleTime: 10_000,
   })
-  const foundRecords = recordSearches.flatMap((r) => r.data ?? [])
-  const foundKey = foundRecords.map((r) => r.id).join(',')
+  const foundRecords = recordSearch.data ?? NO_RECORDS
 
   const groups = useMemo(
     () =>
@@ -82,9 +80,16 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             ? foundRecords.map(recordTarget)
             : [],
       }),
-    // foundKey stands in for foundRecords (a new array every render)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [query, pins, recents, collections, schemas, views, recordQuery, foundKey],
+    [
+      query,
+      pins,
+      recents,
+      collections,
+      schemas,
+      views,
+      recordQuery,
+      foundRecords,
+    ],
   )
   const flat = groups.flatMap((g) => g.items)
 
@@ -120,7 +125,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const searching = recordSearches.some((r) => r.isFetching)
+  const searching = recordSearch.isFetching
   let index = -1
   return (
     <Modal onClose={onClose} size="lg" className="self-start mt-[10vh]">

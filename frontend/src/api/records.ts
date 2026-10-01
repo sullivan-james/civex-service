@@ -133,6 +133,15 @@ export const recordsApi = {
     return api.get<CivexRecord[]>(`/records?${qs}`)
   },
 
+  /** Records of any schema matching `q`, best match first. Every
+   * collection unless `collection` narrows it; each result carries its
+   * collection's name. */
+  search: (q: string, limit = 20, collection?: string) => {
+    const qs = new URLSearchParams({ q, limit: String(limit) })
+    if (collection) qs.set('collection', collection)
+    return api.get<CivexRecord[]>(`/records/search?${qs}`)
+  },
+
   listDeleted: (datasetName?: string) => {
     const qs = datasetName ? `?dataset=${encodeURIComponent(datasetName)}` : ''
     return api.get<CivexRecord[]>(`/records/deleted${qs}`)

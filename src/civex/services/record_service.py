@@ -1277,6 +1277,28 @@ class RecordService:
         )
         return self._attach_reference_labels([self._with_names(r) for r in records])
 
+    def search(
+        self,
+        query: str,
+        limit: int = 20,
+        collection: str | None = None,
+    ) -> list[RecordDTO]:
+        """Records of any schema matching `query`, best match first -- what a
+        jump-to box searches. Every collection unless `collection` (a name)
+        narrows it; each result carries its collection's name, since the same
+        schema's records can live in several."""
+        query = query.strip()
+        if not query:
+            return []
+        dataset_id = None
+        if collection:
+            dataset = self._datasets.get_by_name(collection)
+            if not dataset:
+                raise NotFoundError(f"Dataset '{collection}' not found")
+            dataset_id = dataset.id
+        records = self._records.search_all(query, limit=limit, dataset_id=dataset_id)
+        return self._attach_reference_labels([self._with_names(r) for r in records])
+
     # ------------------------------------------------------------------
     # Columns that aren't in a record's own data
     # ------------------------------------------------------------------

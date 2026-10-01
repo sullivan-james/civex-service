@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router'
+import { Link, useLocation } from 'react-router'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import { viewsApi } from '../../api/views'
 import {
@@ -23,7 +23,7 @@ import {
   TableSkeleton,
   Field,
 } from '../ui'
-import { Columns3, Download, ListChecks, Plus } from '../ui/icons'
+import { Columns3, Download, Plus } from '../ui/icons'
 import { toTableRows } from '../records/tableRows'
 import {
   RecordsTable,
@@ -39,9 +39,7 @@ import { SelectionBar } from './SelectionBar'
 import { useExplorer, type ExplorerScope } from './useExplorer'
 import { useCollection } from '../../hooks/useCollections'
 import { recordRecent } from '../../hooks/usePins'
-import { useToast } from '../ui/ToastProvider'
 import { placeTarget, viewTarget } from '../../utils/navTargets'
-import { startSession, triagePath } from '../../utils/triage'
 import { viewPatch } from '../../utils/explorerState'
 import { ancestorSchemas } from '../../utils/hierarchy'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../../lib/deleteImpact'
@@ -73,10 +71,7 @@ export function RecordsExplorer({
   const { state, patch, listed, listedName } = x
   const dataset = scope.dataset
   const { data: collection } = useCollection(dataset ?? '')
-  const navigate = useNavigate()
   const location = useLocation()
-  const toast = useToast()
-  const [startingTriage, setStartingTriage] = useState(false)
 
   // --- search box: local text, pushed to the URL after a pause
   const [searchInput, setSearchInput] = useState(state.q)
@@ -249,38 +244,6 @@ export function RecordsExplorer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recentKey, recentLabel])
 
-  // Freezes the rows the current selection matches (up to the API's page
-  // limit) and opens the first one with the triage bar.
-  async function startTriageSession() {
-    if (!listedName) return
-    setStartingTriage(true)
-    try {
-      const params = { ...x.query, sort: x.sort, limit: 1000 }
-      const found = dataset
-        ? await recordsApi.list(dataset, params)
-        : await recordsApi.listBySchema(listedName, params)
-      const ids = found.items.map((r) => r.id)
-      if (ids.length === 0) {
-        toast.error('Nothing to work through — no records match.')
-        return
-      }
-      if (found.total > ids.length)
-        toast.success(
-          `Working through the first ${ids.length.toLocaleString()} of ${found.total.toLocaleString()}.`,
-        )
-      const session = startSession(
-        sessionStorage,
-        x.activeView?.name ?? placeLabel,
-        ids,
-      )
-      navigate(triagePath(ids[0], session.id))
-    } catch (e) {
-      toast.error(errorMessage(e))
-    } finally {
-      setStartingTriage(false)
-    }
-  }
-
   function confirmBulkDelete() {
     const done = {
       onSuccess: () => {
@@ -389,17 +352,6 @@ export function RecordsExplorer({
             ) : (
               <Button size="sm" disabled title="Save as a view to export">
                 <Download size={14} /> Export
-              </Button>
-            )}
-            {listed && total > 0 && (
-              <Button
-                size="sm"
-                onClick={startTriageSession}
-                disabled={startingTriage}
-                title="Open the first record, then step through the rest one by one"
-              >
-                <ListChecks size={14} />{' '}
-                {startingTriage ? 'Opening…' : 'Work through these'}
               </Button>
             )}
             {pinTarget && (
