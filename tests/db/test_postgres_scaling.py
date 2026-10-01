@@ -21,6 +21,7 @@ from civex.config import StoreConfig, VolumeConfig
 from civex.db.migrate import ensure_schema_current
 from civex.db.models import Dataset, FileReference, Record, Schema, StoredObject
 from civex.domain.filters import SortKey
+from civex.domain.query import ResolvedQuery
 from civex.repositories.local.file_ref_repo import LocalFileReferenceRepository
 from civex.repositories.local.file_store import VolumeAwareFileObjectStore
 from civex.repositories.local.record_repo import LocalRecordRepository
@@ -115,8 +116,13 @@ def test_jsonb_sort_is_numeric_with_nulls_last(session: Session) -> None:
 
     def scores(desc: bool, offset=0, limit=10):
         rows = repo.list_filtered(
-            ds.id, sch.id, None, [], None, offset, limit,
-            sort=[SortKey(field_id=key, numeric=True, descending=desc)],
+            ResolvedQuery(
+                dataset_id=ds.id,
+                schema_id=sch.id,
+                sort=[SortKey(field_id=key, numeric=True, descending=desc)],
+            ),
+            offset,
+            limit,
         )
         return [r.data.get(key) for r in rows]
 

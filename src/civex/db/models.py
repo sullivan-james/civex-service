@@ -297,6 +297,15 @@ class Record(Base):
         # GIN index enables containment (@>) queries on JSONB data fields.
         # On SQLite this degrades to a plain B-tree on the JSON text column (harmless).
         Index("ix_records_data_gin", "data", postgresql_using="gin"),
+        # Full-text search (`search_vector @@ plainto_tsquery`) is a scan of
+        # every record without this. SQLite never populates the column, so
+        # there the (partial) index stays empty.
+        Index(
+            "ix_records_search_vector",
+            "search_vector",
+            postgresql_using="gin",
+            sqlite_where=text("search_vector IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
@@ -519,6 +528,22 @@ class JobAffectedSchema(Base):
     schema_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("schemas.id", ondelete="CASCADE"), primary_key=True
     )
+
+
+class JobAffectedRecord(Base):
+    """Which records a workflow run created or changed -- the indexed form of
+    the `affected_records` JSON on WorkflowJob, so "runs that touched record
+    X" (shown on every record's page) is a lookup rather than a scan of every
+    job. `record_id` is not a FK: it mirrors what the run reported, and a
+    record may since have been purged."""
+
+    __tablename__ = "job_affected_records"
+    __table_args__ = (Index("ix_job_affected_records_record", "record_id"),)
+
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workflow_jobs.id", ondelete="CASCADE"), primary_key=True
+    )
+    record_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
 
 
 class StoredObject(Base):

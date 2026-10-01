@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from collections import Counter
 from typing import Optional
 
 import typer
@@ -11,6 +10,7 @@ from rich.tree import Tree
 from civex.cli.utils import get_ctx as _ctx
 from civex.console import console
 from civex.domain.dtos import SchemaDTO
+from civex.domain.query import RecordQuery
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 
 app = typer.Typer(
@@ -106,8 +106,7 @@ def dataset_show(name: str = typer.Argument(..., help="Collection name")) -> Non
     console.print(f"  Schemas   {', '.join(d.schemas) or 'none'}")
 
     if d.record_count > 0:
-        records = ctx.record_svc.find(name, schema_name=None, filters=[], limit=100_000)
-        counts = Counter(r.schema_name for r in records)
+        counts = ctx.record_svc.schema_counts(RecordQuery(dataset=name))
         table = Table("Schema", "Records")
         for schema_name, count in sorted(counts.items()):
             table.add_row(schema_name, str(count))
@@ -270,16 +269,17 @@ def dataset_graph(name: str = typer.Argument(..., help="Collection name")) -> No
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
-    records = ctx.record_svc.find(name, schema_name=None, filters=[], limit=100_000)
-    if not records:
+    counts_by_name = ctx.record_svc.schema_counts(RecordQuery(dataset=name))
+    if not counts_by_name:
         console.print("[info]Collection has no records yet.[/info]")
         return
 
-    schema_counts: Counter[uuid.UUID] = Counter(r.schema_id for r in records)
-    schema_ids_present = set(schema_counts)
-
     all_schemas = ctx.schema_svc.list_all()
     by_id: dict[uuid.UUID, SchemaDTO] = {s.id: s for s in all_schemas}
+    schema_counts: dict[uuid.UUID, int] = {
+        s.id: counts_by_name[s.name] for s in all_schemas if s.name in counts_by_name
+    }
+    schema_ids_present = set(schema_counts)
 
     # Find root ancestors of all present schemas.
     def _root(schema_id: uuid.UUID) -> uuid.UUID:
