@@ -49,6 +49,9 @@ interface Props {
   id?: string
   'aria-describedby'?: string
   'aria-invalid'?: boolean
+  /** Overrides the default "Required"/"Optional" hint on text and number
+   * inputs, for callers (a filter) where neither word makes sense. */
+  placeholder?: string
 }
 
 function validateFileSize(
@@ -554,6 +557,7 @@ export function DynamicField({
   id,
   'aria-describedby': ariaDescribedby,
   'aria-invalid': ariaInvalid,
+  placeholder,
 }: Props) {
   const timeZone = useFieldTimeZone(field)
   switch (field.type) {
@@ -590,7 +594,9 @@ export function DynamicField({
           type="text"
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
-          placeholder={field.required ? 'Required' : 'Optional'}
+          placeholder={
+            placeholder ?? (field.required ? 'Required' : 'Optional')
+          }
           maxLength={maxLength}
           className="w-full"
         />
@@ -612,7 +618,9 @@ export function DynamicField({
           max={rMax}
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
-          placeholder={field.required ? 'Required' : 'Optional'}
+          placeholder={
+            placeholder ?? (field.required ? 'Required' : 'Optional')
+          }
           className="w-full"
         />
       )
@@ -647,7 +655,9 @@ export function DynamicField({
           max={rMax}
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
-          placeholder={field.required ? 'Required' : 'Optional'}
+          placeholder={
+            placeholder ?? (field.required ? 'Required' : 'Optional')
+          }
           className="w-full"
         />
       )
@@ -784,7 +794,10 @@ export function DynamicField({
           type="url"
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
-          placeholder={field.required ? 'https://example.com' : 'Optional URL'}
+          placeholder={
+            placeholder ??
+            (field.required ? 'https://example.com' : 'Optional URL')
+          }
           className="w-full"
         />
       )

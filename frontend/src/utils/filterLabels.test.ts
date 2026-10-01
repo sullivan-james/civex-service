@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest'
 import {
   conditionLabel,
   describeTree,
+  referenceIdsIn,
   topLevelTerms,
   withoutTerm,
 } from './filterLabels'
+import type { FilterTreeWire } from './filterTree'
 import type { FilterableField } from './hierarchy'
 
 function field(
@@ -92,5 +94,41 @@ describe('terms', () => {
 
   it('describes a nested group in brackets', () => {
     expect(describeTree({ or: [a, b] }, [], 'x')).toBe('(a is 1 or b is 2)')
+  })
+})
+
+describe('reference labels', () => {
+  const ref = {
+    id: 'f',
+    name: 'patient_ref',
+    label: null,
+    type: 'reference',
+    required: false,
+    restrictions: {},
+    default: null,
+    position: 0,
+    sourceSchemaName: 'visit',
+    relation: 'self',
+  } as unknown as FilterableField
+  const id = 'abcdef12-0000-0000-0000-000000000000'
+
+  it('swaps a reference id for the record name, or its short id until known', () => {
+    const cond = { field: 'patient_ref', op: 'eq', value: id } as const
+    expect(conditionLabel(cond, [ref], 'visit', { [id]: 'Ada' })).toBe(
+      'Patient Ref is Ada',
+    )
+    expect(conditionLabel(cond, [ref], 'visit')).toBe('Patient Ref is abcdef12')
+  })
+
+  it('collects the ids of reference conditions only, through nested groups', () => {
+    const text = { ...ref, name: 'note', type: 'string' } as FilterableField
+    const wire: FilterTreeWire = {
+      and: [
+        { field: 'patient_ref', op: 'in', value: [id, 'other'] },
+        { or: [{ field: 'note', op: 'eq', value: 'not-an-id' }] },
+      ],
+    }
+    expect(referenceIdsIn(wire, [ref, text])).toEqual([id, 'other'])
+    expect(referenceIdsIn(null, [ref])).toEqual([])
   })
 })

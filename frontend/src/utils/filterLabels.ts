@@ -6,7 +6,7 @@ import {
   type FilterConditionWire,
   type FilterTreeWire,
 } from './filterTree'
-import type { FilterableField } from './hierarchy'
+import { findFilterField, type FilterableField } from './hierarchy'
 import { displayLabel } from './naming'
 
 function isGroup(
@@ -15,8 +15,16 @@ function isGroup(
   return 'and' in wire || 'or' in wire
 }
 
-function formatValue(value: unknown): string {
-  if (Array.isArray(value)) return value.join(', ')
+/** Record id -> display name, for reference values. */
+export type RecordLabels = Readonly<Record<string, string>>
+
+function formatValue(
+  value: unknown,
+  recordLabel?: (id: string) => string,
+): string {
+  if (Array.isArray(value))
+    return value.map((v) => formatValue(v, recordLabel)).join(', ')
+  if (recordLabel && typeof value === 'string') return recordLabel(value)
   if (typeof value === 'boolean') return value ? 'true' : 'false'
   return String(value ?? '')
 }
@@ -27,20 +35,23 @@ export function conditionLabel(
   c: FilterConditionWire,
   fields: FilterableField[],
   listedSchema: string,
+  labels?: RecordLabels,
 ): string {
-  const field = fields.find(
-    (f) =>
-      f.name === c.field &&
-      (c.schema
-        ? f.sourceSchemaName === c.schema
-        : f.relation !== 'descendant'),
-  )
+  const field = findFilterField(fields, c)
   const owner = c.schema ?? listedSchema
   const name = field ? displayLabel(field.name, field.label) : c.field
   const prefix = owner === listedSchema ? '' : `${displayLabel(owner)} · `
   if (c.op === 'is_null') return `${prefix}${name} is empty`
   const op = FILTER_OPERATORS.find((o) => o.value === c.op)?.label ?? c.op
-  return `${prefix}${name} ${op} ${formatValue(c.value)}`
+  // Only a reference's value is a record id. A name not fetched yet (or of a
+  // record since deleted) falls back to the id's short form.
+  const isReference =
+    field?.type === 'reference' || field?.type === 'reference_list'
+  const value = formatValue(
+    c.value,
+    isReference ? (id) => labels?.[id] ?? id.slice(0, 8) : undefined,
+  )
+  return `${prefix}${name} ${op} ${value}`
 }
 
 /** A whole tree as one phrase: "(a and b)" for a nested group. */
@@ -48,11 +59,12 @@ export function describeTree(
   wire: FilterTreeWire,
   fields: FilterableField[],
   listedSchema: string,
+  labels?: RecordLabels,
 ): string {
-  if (!isGroup(wire)) return conditionLabel(wire, fields, listedSchema)
+  if (!isGroup(wire)) return conditionLabel(wire, fields, listedSchema, labels)
   const op = 'and' in wire ? 'and' : 'or'
   const parts = (wire.and ?? wire.or ?? []).map((c) =>
-    describeTree(c, fields, listedSchema),
+    describeTree(c, fields, listedSchema, labels),
   )
   return parts.length === 1 ? parts[0] : `(${parts.join(` ${op} `)})`
 }
@@ -73,4 +85,25 @@ export function withoutTerm(
   const rest = topLevelTerms(wire).filter((_, i) => i !== index)
   if (rest.length === 0) return null
   return rest.length === 1 ? rest[0] : { and: rest }
+}
+
+/** Every record id a tree's reference conditions mention, so their names can
+ * be fetched once for the chips. */
+export function referenceIdsIn(
+  wire: FilterTreeWire | null,
+  fields: FilterableField[],
+): string[] {
+  const ids = new Set<string>()
+  function walk(node: FilterTreeWire) {
+    if (isGroup(node)) {
+      for (const child of node.and ?? node.or ?? []) walk(child)
+      return
+    }
+    const type = findFilterField(fields, node)?.type
+    if (type !== 'reference' && type !== 'reference_list') return
+    for (const v of Array.isArray(node.value) ? node.value : [node.value])
+      if (typeof v === 'string' && v) ids.add(v)
+  }
+  if (wire) walk(wire)
+  return [...ids]
 }

@@ -72,6 +72,23 @@ export interface FilterableField extends ResolvedField {
   relation: FieldRelation
 }
 
+/** The field a filter condition names. A condition without a schema (saved
+ * before conditions could name one) means the listed schema's, or an
+ * ancestor's -- never a descendant's, which only a schema-qualified
+ * condition can reach. */
+export function findFilterField(
+  fields: FilterableField[],
+  condition: { field: string; schema?: string },
+): FilterableField | undefined {
+  return fields.find(
+    (f) =>
+      f.name === condition.field &&
+      (condition.schema
+        ? f.sourceSchemaName === condition.schema
+        : f.relation !== 'descendant'),
+  )
+}
+
 /** Stable key for a field within one picker: a name alone is ambiguous
  * across schemas. */
 export function fieldKey(f: { sourceSchemaName: string; name: string }) {

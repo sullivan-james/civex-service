@@ -22,6 +22,10 @@ interface PopoverProps {
   /** Minimum width in px; defaults to the anchor's own width so a popover
    * under a wide column isn't narrower than the thing it edits. */
   minWidth?: number
+  /** Which edge of the anchor the panel lines up with before it is clamped
+   * into the viewport. */
+  align?: 'left' | 'right'
+  /** A `max-w-*` class here replaces the default cap. */
   className?: string
 }
 
@@ -37,6 +41,7 @@ export function Popover({
   label,
   children,
   minWidth,
+  align = 'left',
   className = '',
 }: PopoverProps) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -65,12 +70,13 @@ export function Popover({
     const top = fitsBelow
       ? below
       : Math.max(VIEWPORT_MARGIN, r.top - GAP - height)
+    const wanted = align === 'right' ? r.right - width : r.left
     const left = Math.min(
-      Math.max(VIEWPORT_MARGIN, r.left),
+      Math.max(VIEWPORT_MARGIN, wanted),
       Math.max(VIEWPORT_MARGIN, window.innerWidth - width - VIEWPORT_MARGIN),
     )
     setPos({ top, left, minWidth: minWidth ?? r.width })
-  }, [minWidth])
+  }, [minWidth, align])
 
   useLayoutEffect(() => {
     reposition()
@@ -111,7 +117,9 @@ export function Popover({
         // Invisible until measured so it never flashes at 0,0.
         visibility: pos ? 'visible' : 'hidden',
       }}
-      className={`z-50 bg-canvas border border-border rounded-md shadow-lg p-3 max-w-[min(32rem,calc(100vw-1rem))] ${className}`}
+      className={`z-50 bg-canvas border border-border rounded-md shadow-lg p-3 ${
+        /\bmax-w-/.test(className) ? '' : 'max-w-[min(32rem,calc(100vw-1rem))]'
+      } ${className}`}
     >
       {children}
     </div>,
