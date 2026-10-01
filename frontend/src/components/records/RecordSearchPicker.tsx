@@ -95,6 +95,7 @@ interface SingleProps {
   onChange: (id: string | undefined) => void
   id?: string
   'aria-describedby'?: string
+  'aria-label'?: string
   'aria-invalid'?: boolean
   required?: boolean
   placeholder?: string
@@ -108,6 +109,7 @@ export function RecordSearchPicker({
   onChange,
   id,
   'aria-describedby': ariaDescribedby,
+  'aria-label': ariaLabel,
   'aria-invalid': ariaInvalid,
   required,
   placeholder,
@@ -167,6 +169,7 @@ export function RecordSearchPicker({
       <Input
         id={id}
         aria-describedby={ariaDescribedby}
+        aria-label={ariaLabel}
         aria-invalid={ariaInvalid}
         required={required}
         aria-required={required}
@@ -212,6 +215,7 @@ interface MultiProps {
   onChange: (ids: string[]) => void
   id?: string
   'aria-describedby'?: string
+  'aria-label'?: string
   'aria-invalid'?: boolean
   placeholder?: string
   className?: string
@@ -224,6 +228,7 @@ export function MultiRecordSearchPicker({
   onChange,
   id,
   'aria-describedby': ariaDescribedby,
+  'aria-label': ariaLabel,
   'aria-invalid': ariaInvalid,
   placeholder,
   className,
@@ -303,6 +308,7 @@ export function MultiRecordSearchPicker({
       <Input
         id={id}
         aria-describedby={ariaDescribedby}
+        aria-label={ariaLabel}
         aria-invalid={ariaInvalid}
         type="text"
         value={search}

@@ -17,6 +17,7 @@ from civex.server.models import (
     PaginatedRecordResponse,
     RecordRef,
     RecordResponse,
+    ReferrerGroupResponse,
     UpdateRecordRequest,
 )
 from civex.server.query_params import record_query
@@ -214,6 +215,20 @@ def get_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
         for a in ancestors
     ]
     return response
+
+
+@router.get(
+    "/records/{record_id}/referrers", response_model=list[ReferrerGroupResponse]
+)
+def get_record_referrers(record_id: str, ctx: AppContext = Depends(get_ctx)):
+    """What points at this record: live records referencing it through a
+    `reference` or `reference_list` field, counted per (collection, schema,
+    field) -- the reverse of the record's own reference values."""
+    try:
+        groups = ctx.record_svc.referrer_counts(record_id)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    return [ReferrerGroupResponse.from_dto(g) for g in groups]
 
 
 @router.get("/records/{record_id}/files.zip")

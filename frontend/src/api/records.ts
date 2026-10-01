@@ -40,6 +40,18 @@ export interface RecordRef {
   natural_name: string | null
 }
 
+/** One row of a record's "Referenced by": how many live records of one
+ * schema, in one collection, point at it through one reference field. */
+export interface ReferrerGroup {
+  dataset_id: string
+  collection: string
+  /** The referring records' schema, which owns the field. */
+  schema_name: string
+  field_name: string
+  dtype: 'reference' | 'reference_list'
+  count: number
+}
+
 export interface PaginatedRecords {
   items: CivexRecord[]
   total: number
@@ -89,6 +101,10 @@ export const recordsApi = {
     ),
 
   get: (id: string) => api.get<CivexRecord>(`/records/${id}`),
+
+  /** What references this record, counted per collection/schema/field. */
+  referrers: (id: string) =>
+    api.get<ReferrerGroup[]>(`/records/${id}/referrers`),
 
   create: (
     datasetName: string,

@@ -395,6 +395,19 @@ class RecordDTO:
 
 
 @dataclass
+class ReferrerGroupDTO:
+    """How many live records of one schema, in one collection, reference a
+    record through one field -- one row of a record's "Referenced by"."""
+
+    dataset_id: uuid.UUID
+    dataset_name: str
+    schema_name: str  # the referrers' schema, which owns the field
+    field_name: str
+    dtype: str  # "reference" | "reference_list"
+    count: int
+
+
+@dataclass
 class CommitDTO:
     id: uuid.UUID
     seq: int | None

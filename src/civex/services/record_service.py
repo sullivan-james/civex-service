@@ -12,6 +12,7 @@ from civex.domain.dtos import (
     FieldDTO,
     FileRef,
     RecordDTO,
+    ReferrerGroupDTO,
     ResolvedField,
     SchemaDTO,
 )
@@ -736,6 +737,42 @@ class RecordService:
                 f"{where}, which is local. A record can only reference "
                 f"records in its own collection or in a global collection."
             )
+
+    def referrer_counts(self, record_id: str) -> list[ReferrerGroupDTO]:
+        """What points at this record: live records holding a reference to it,
+        grouped by (collection, schema, field) with a distinct-record count.
+        A record stores only its own schema's fields, so the referrer's schema
+        is the one that owns the field. Sorted by collection, schema, field."""
+        target = self.get(record_id)
+        field_map = self._reference_field_map(target.schema_name)
+        groups: dict[tuple[uuid.UUID, str, str], tuple[str, int]] = {}
+        for rec, matched in self._find_referrers(
+            {target.id}, exclude_ids=set(), target_schema=target.schema_name
+        ):
+            for fid_str, fname in matched.items():
+                key = (rec.dataset_id, rec.schema_name, fname)
+                dtype, count = groups.get(key, (field_map[fid_str][1], 0))
+                groups[key] = (dtype, count + 1)
+        datasets: dict[uuid.UUID, Any] = {}
+        result = []
+        for (dataset_id, schema_name, fname), (dtype, count) in groups.items():
+            if dataset_id not in datasets:
+                datasets[dataset_id] = self._datasets.get_by_id(
+                    dataset_id, include_deleted=True
+                )
+            ds = datasets[dataset_id]
+            result.append(
+                ReferrerGroupDTO(
+                    dataset_id=dataset_id,
+                    dataset_name=ds.name if ds else "",
+                    schema_name=schema_name,
+                    field_name=fname,
+                    dtype=dtype,
+                    count=count,
+                )
+            )
+        result.sort(key=lambda g: (g.dataset_name, g.schema_name, g.field_name))
+        return result
 
     def collection_referrers(
         self, dataset_id: uuid.UUID
@@ -1688,25 +1725,40 @@ class RecordService:
             ids |= self._collect_delete_set(child.id)
         return ids
 
-    def _reference_field_map(self) -> dict[str, tuple[str, str]]:
+    def _reference_field_map(
+        self, target_schema: str | None = None
+    ) -> dict[str, tuple[str, str]]:
         """field id (str) -> (field name, dtype) for every reference/reference_list
         field across all schemas -- record data is stored id-keyed (see
         _names_to_ids), and a reference field on any schema can point at a
-        record of any other schema, so this has to span all of them."""
+        record of any other schema, so this has to span all of them.
+
+        With `target_schema`, fields restricted to a different target schema
+        are left out (an unrestricted field can point anywhere)."""
         result: dict[str, tuple[str, str]] = {}
         for schema in self._schema_svc.list_all():
             for f in schema.fields:
                 if f.dtype in ("reference", "reference_list"):
+                    restricted_to = (f.restrictions or {}).get("schema")
+                    if target_schema and restricted_to not in (None, target_schema):
+                        continue
                     result[str(f.id)] = (f.name, f.dtype)
         return result
 
     def _find_referrers(
-        self, target_ids: set[uuid.UUID], exclude_ids: set[uuid.UUID]
+        self,
+        target_ids: set[uuid.UUID],
+        exclude_ids: set[uuid.UUID],
+        target_schema: str | None = None,
     ) -> list[tuple[RecordDTO, dict[str, str]]]:
         """Records outside exclude_ids holding a reference/reference_list value
         that points at any of target_ids. Returns (referrer, {field_id: field_name})
-        pairs so callers know exactly which field(s) to null out or report."""
-        field_map = self._reference_field_map()
+        pairs so callers know exactly which field(s) to null out or report.
+
+        `target_schema` (the targets' schema name) skips fields whose `schema`
+        restriction names a different schema -- they can't hold these targets,
+        so the lookup scans fewer fields."""
+        field_map = self._reference_field_map(target_schema)
         if not field_map:
             return []
         ref_ids = [

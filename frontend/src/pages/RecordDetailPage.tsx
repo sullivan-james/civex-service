@@ -23,6 +23,7 @@ import {
   PinButton,
 } from '../components/ui'
 import { Play } from '../components/ui/icons'
+import { ReferencedBy } from '../components/records/ReferencedBy'
 import { ContainsPreview } from '../components/records/ContainsPreview'
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { RecordPageFrame } from '../components/records/RecordPageFrame'
@@ -197,6 +198,8 @@ export default function RecordDetailPage() {
             />
           </Section>
         )}
+
+        <ReferencedBy recordId={record.id} />
 
         {applicableWorkflows.length > 0 && (
           <div>

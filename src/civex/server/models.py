@@ -16,6 +16,7 @@ from civex.domain.dtos import (
     FieldDTO,
     NameIssue,
     RecordDTO,
+    ReferrerGroupDTO,
     SchemaDeleteImpactDTO,
     SchemaDTO,
     ViewDTO,
@@ -419,6 +420,32 @@ class RecordRef(BaseModel):
     id: str
     schema_name: str
     natural_name: str | None
+
+
+class ReferrerGroupResponse(BaseModel):
+    dataset_id: str = Field(description="Id of the collection the referrers live in.")
+    collection: str = Field(description="Name of that collection.")
+    schema_name: str = Field(
+        description="Schema of the referring records; it owns the field."
+    )
+    field_name: str = Field(
+        description="The reference field that points at the record."
+    )
+    dtype: str = Field(description="'reference' or 'reference_list'.")
+    count: int = Field(
+        description="Live records of this schema, in this collection, referencing it."
+    )
+
+    @classmethod
+    def from_dto(cls, dto: ReferrerGroupDTO) -> "ReferrerGroupResponse":
+        return cls(
+            dataset_id=str(dto.dataset_id),
+            collection=dto.dataset_name,
+            schema_name=dto.schema_name,
+            field_name=dto.field_name,
+            dtype=dto.dtype,
+            count=dto.count,
+        )
 
 
 class RecordResponse(BaseModel):

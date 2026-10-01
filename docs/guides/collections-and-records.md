@@ -100,13 +100,17 @@ The web UI's collection page (and the **Contains** section of a record's page) i
 - **Hierarchy rail** — the collection's schemas from the top down (for example Encounter → Recording → Selection), each with how many records are in scope. Pick one to list its records. It opens on the top level, not on a mixed list of everything.
 - **Drilling down** — a row shows how many children it has ("3 recordings →"). Click it to list them in the same table, scoped to that record. Drill again and you are looking at that record's grandchildren. The trail above the table takes you back up, and so does the rail. On a record's own page the same explorer lists *everything* under that record, at any depth.
 - **Search** — always available, and scoped to wherever you are.
-- **Filters** — click **+ Filter** to add conditions on this level's fields, on a *parent* record's fields, or on *any child* record's fields. "Recordings that have a selection whose `selection_table` is empty" is one condition; drill into a recording and the filter still applies, now to its selections. Conditions are AND/OR groups, like a view's.
+- **Filters** — click **+ Filter** to add conditions on this level's fields, on a *parent* record's fields, or on *any child* record's fields. "Recordings that have a selection whose `selection_table` is empty" is one condition; drill into a recording and the filter still applies, now to its selections. Conditions are AND/OR groups, like a view's. On a `reference` or `reference_list` field the value is picked by name from a searchable list, not typed as an ID; a reference list is matched with **includes** (does the list contain this record).
 - **Saved filters** — the chips are the current schema's [views](views.md): click one to apply it. Save your own with **Save as view…**. They belong to the schema, so everyone sees them.
 - **Columns, sort and export** — choose columns (including inherited fields and one-hop reference joins), click a header to sort, and **Export** downloads exactly the rows listed.
 
 Everything you choose is in the page's URL, so a filtered list can be bookmarked or shared, and Back undoes a drill-down.
 
 The same selection is available to scripts: the records API takes `schema`, `within` (a record — list only its descendants), `filter`, `sort` and `search`, and a filter condition may name another `schema` (see the [HTTP API reference](../reference/http-api.md)).
+
+### What references a record
+
+A record's page has a **Referenced by** section (collapsed until you open it) counting the records that point at it through a `reference` or `reference_list` field, per collection, schema and field. **View all** opens that collection's page filtered to those records. Referrers can sit in another collection when the record lives in a [global collection](#schemas-and-scope). Scripts get the same counts from `GET /records/{id}/referrers`.
 
 ## Updating records
 
