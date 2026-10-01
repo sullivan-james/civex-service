@@ -26,10 +26,14 @@ import {
 import { pluralise } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 import { dumpApi, type RestoreResult } from '../api/dump'
+import { CollectionScopeFields } from '../components/collections/CollectionScopeFields'
+import type { CollectionScope } from '../api/collections'
 
 function CreateCollectionModal({ onClose }: { onClose: () => void }) {
   const create = useCreateCollection()
   const [timezone, setTimezone] = useState('')
+  const [scope, setScope] = useState<CollectionScope>('local')
+  const [schemas, setSchemas] = useState<string[]>([])
 
   return (
     <CreateResourceModal
@@ -40,23 +44,33 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
       isPending={create.isPending}
       error={create.error}
       extraFields={
-        <Field
-          label="Timezone"
-          hint="Datetimes without a UTC offset are read in this zone, and everyone sees them in it. Leave unset to use each viewer's own timezone."
-        >
-          <TimeZoneSelect
-            value={timezone}
-            onChange={setTimezone}
-            unsetLabel="Not set — each viewer's own timezone"
-            className="w-full"
+        <>
+          <Field
+            label="Timezone"
+            hint="Datetimes without a UTC offset are read in this zone, and everyone sees them in it. Leave unset to use each viewer's own timezone."
+          >
+            <TimeZoneSelect
+              value={timezone}
+              onChange={setTimezone}
+              unsetLabel="Not set — each viewer's own timezone"
+              className="w-full"
+            />
+          </Field>
+          <CollectionScopeFields
+            scope={scope}
+            onScopeChange={setScope}
+            schemas={schemas}
+            onSchemasChange={setSchemas}
           />
-        </Field>
+        </>
       }
       onSubmit={async ({ name, description }) => {
         await create.mutateAsync({
           name,
           description: description || undefined,
           timezone: timezone || undefined,
+          scope,
+          schemas,
         })
       }}
     />

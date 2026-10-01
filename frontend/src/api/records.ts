@@ -20,6 +20,11 @@ export interface CivexRecord {
    * value on this record. Null target label means the target has no
    * natural_name (not that it's missing). */
   reference_labels: Record<string, string | null> | null
+  /** Name of the collection this record lives in. */
+  collection?: string | null
+  /** Reference targets that live in a different (global) collection:
+   * target id -> that collection's name. Own-collection targets are absent. */
+  reference_collections?: Record<string, string> | null
   /** Only when requested: live child count per child schema name. */
   child_counts?: Record<string, number> | null
   /** Only when `columns` were requested: the columns this record's own
@@ -113,11 +118,28 @@ export const recordsApi = {
   exportCsvUrl: (datasetName: string, params?: RecordQueryParams) =>
     `/api/collections/${encodeURIComponent(datasetName)}/export.csv${recordQueryString(params)}`,
 
-  searchBySchema: (schemaName: string, search?: string, limit = 20) => {
+  /** `reachableFrom` (a collection name) limits results to records a record
+   * there may reference: its own collection's and global collections'. */
+  searchBySchema: (
+    schemaName: string,
+    search?: string,
+    limit = 20,
+    reachableFrom?: string,
+  ) => {
     const qs = new URLSearchParams({ schema: schemaName })
     if (search) qs.set('search', search)
+    if (reachableFrom) qs.set('reachable_from', reachableFrom)
     qs.set('limit', String(limit))
     return api.get<CivexRecord[]>(`/records?${qs}`)
+  },
+
+  /** Records of any schema matching `q`, best match first. Every
+   * collection unless `collection` narrows it; each result carries its
+   * collection's name. */
+  search: (q: string, limit = 20, collection?: string) => {
+    const qs = new URLSearchParams({ q, limit: String(limit) })
+    if (collection) qs.set('collection', collection)
+    return api.get<CivexRecord[]>(`/records/search?${qs}`)
   },
 
   listDeleted: (datasetName?: string) => {

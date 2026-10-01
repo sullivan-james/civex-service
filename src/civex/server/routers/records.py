@@ -30,12 +30,47 @@ def search_records_global(
     schema: str = Query(..., description="Schema name to search within"),
     search: Optional[str] = Query(default=None),
     limit: int = Query(default=20, le=100),
+    reachable_from: Optional[str] = Query(
+        default=None,
+        description="Collection name: only records a record in that "
+        "collection may reference -- its own collection's and those of "
+        "global collections. What a reference picker should pass.",
+    ),
     ctx: AppContext = Depends(get_ctx),
 ):
     try:
         items = ctx.record_svc.find_by_schema(
-            schema, search=search or None, limit=limit
+            schema,
+            search=search or None,
+            limit=limit,
+            reachable_from=reachable_from or None,
         )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    return [RecordResponse.from_dto(r) for r in items]
+
+
+@router.get("/records/search", response_model=list[RecordResponse])
+def search_records(
+    q: str = Query(
+        ...,
+        min_length=1,
+        description="Text to find in a record's values, or the start of its id.",
+    ),
+    limit: int = Query(default=20, ge=1, le=100),
+    collection: Optional[str] = Query(
+        default=None,
+        description="Collection name: only search records in it. Omitted, "
+        "every collection is searched.",
+    ),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Search records of every schema in one query, best match first -- what
+    the web UI's jump-to box uses. Each result's `collection` says where it
+    lives. Records that are deleted, or in a deleted collection or schema,
+    are never returned."""
+    try:
+        items = ctx.record_svc.search(q, limit=limit, collection=collection or None)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     return [RecordResponse.from_dto(r) for r in items]

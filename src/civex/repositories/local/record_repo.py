@@ -225,15 +225,60 @@ class LocalRecordRepository:
         return q
 
     def list_by_schema(
-        self, schema_id: uuid.UUID, search: str | None = None, limit: int = 20
+        self,
+        schema_id: uuid.UUID,
+        search: str | None = None,
+        limit: int = 20,
+        dataset_ids: list[uuid.UUID] | None = None,
     ) -> list[RecordDTO]:
-        rows = (
-            self._by_schema_query(schema_id, search)
-            .order_by(Record.created_at.desc(), Record.id.desc())
-            .limit(limit)
-            .all()
-        )
+        q = self._by_schema_query(schema_id, search)
+        if dataset_ids is not None:
+            q = q.filter(Record.dataset_id.in_(dataset_ids))
+        rows = q.order_by(Record.created_at.desc(), Record.id.desc()).limit(limit).all()
         return [_to_dto(r) for r in rows]
+
+    def search_all(
+        self,
+        search: str,
+        limit: int = 20,
+        dataset_id: uuid.UUID | None = None,
+    ) -> list[RecordDTO]:
+        """Live records of any schema matching `search`, best match first.
+
+        One query across every schema (and, unless `dataset_id` narrows it,
+        every collection). Records whose collection or schema is soft-deleted
+        are left out, even though the record row itself may not be marked.
+        On PostgreSQL the match is the same indexed full-text search the
+        explorer uses, ranked by relevance; elsewhere it is a substring match
+        on the record's data, newest first. An id prefix always matches, so a
+        pasted id finds its record."""
+        q = (
+            self._s.query(Record)
+            .join(Dataset, Record.dataset_id == Dataset.id)
+            .join(Schema, Record.schema_id == Schema.id)
+            .filter(
+                Record.deleted_at.is_(None),
+                Dataset.deleted_at.is_(None),
+                Schema.deleted_at.is_(None),
+            )
+        )
+        if dataset_id is not None:
+            q = q.filter(Record.dataset_id == dataset_id)
+        like = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        id_match = cast(Record.id, String).ilike(f"{like}%", escape="\\")
+        newest: list[Any] = [Record.created_at.desc(), Record.id.desc()]
+        if self._pg:
+            tsquery = func.plainto_tsquery("simple", search)
+            q = q.filter(or_(Record.search_vector.op("@@")(tsquery), id_match))
+            q = q.order_by(func.ts_rank(Record.search_vector, tsquery).desc(), *newest)
+        else:
+            q = q.filter(
+                or_(
+                    cast(Record.data, String).ilike(f"%{like}%", escape="\\"),
+                    id_match,
+                )
+            ).order_by(*newest)
+        return [_to_dto(r) for r in q.limit(limit).all()]
 
     def count_schema_matches(
         self, schema_id: uuid.UUID, search: str | None = None

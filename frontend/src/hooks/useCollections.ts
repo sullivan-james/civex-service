@@ -36,7 +36,7 @@ export function useUpdateCollection() {
       body,
     }: {
       name: string
-      body: { rename?: string; description?: string; timezone?: string }
+      body: Parameters<typeof collectionsApi.update>[1]
     }) => collectionsApi.update(name, body),
     onSuccess: (updated) => {
       qc.invalidateQueries({ queryKey: ['collections'] })

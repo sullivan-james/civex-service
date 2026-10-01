@@ -67,7 +67,11 @@ def demo(
     ctx.schema_svc.add_field("detection", "time", "string")
 
     # --- Collection ---
-    ctx.dataset_svc.create("amazon-survey-2024", description="Amazon field survey 2024")
+    ctx.dataset_svc.create(
+        "amazon-survey-2024",
+        description="Amazon field survey 2024",
+        schemas=["deployment", "detection"],
+    )
 
     # --- Deployment records ---
     dep1 = ctx.record_svc.add(

@@ -163,6 +163,11 @@ class DatasetDTO:
     deleted_at: datetime | None = None
     # IANA zone datetime values are read and shown in; None = unset.
     timezone: str | None = None
+    # "local" | "global" -- see civex.domain.scopes.
+    scope: str = "local"
+    # Names of the schemas this collection is for; records here can only be
+    # of these. Sorted by name.
+    schemas: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         # record_count excluded — it's a computed value, not stored on the entity
@@ -171,6 +176,8 @@ class DatasetDTO:
             "name": self.name,
             "description": self.description,
             "timezone": self.timezone,
+            "scope": self.scope,
+            "schemas": list(self.schemas),
             "created_at": self.created_at.isoformat(),
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
@@ -186,6 +193,9 @@ class DatasetDTO:
             deleted_at=_parse_dt(d.get("deleted_at")),
             # Absent in bundles/audit rows written before timezones existed.
             timezone=d.get("timezone"),
+            # Likewise absent before collection scopes existed.
+            scope=d.get("scope") or "local",
+            schemas=list(d.get("schemas") or []),
         )
 
 
@@ -340,6 +350,12 @@ class RecordDTO:
     # value on this record. Response-only, like schema_name -- computed by
     # RecordService._attach_reference_labels, never stored or round-tripped.
     reference_labels: dict[str, str | None] | None = None
+    # Response-only, like reference_labels: the name of the collection this
+    # record lives in, and -- only for reference targets living in a
+    # *different* collection (a global one) -- target id -> that collection's
+    # name, so a client can mark where a reference comes from.
+    dataset_name: str | None = None
+    reference_collections: dict[str, str] | None = None
     # Response-only, like reference_labels: live child counts per child schema
     # name, and the requested columns the record's own data can't answer
     # (inherited fields, `ref.field` joins). See RecordService.query_records.

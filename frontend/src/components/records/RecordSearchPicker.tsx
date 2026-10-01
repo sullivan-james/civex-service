@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import { Input } from '../ui'
+import { CollectionMarker } from './CollectionMarker'
+import { useCollectionName } from './timeZoneContext'
 import { X } from '../ui/icons'
 
 export function recordLabel(r: CivexRecord): string {
@@ -11,6 +13,9 @@ export function recordLabel(r: CivexRecord): string {
 export function useRecordSearch(schemaName: string, search: string) {
   const [results, setResults] = useState<CivexRecord[]>([])
   const [loading, setLoading] = useState(false)
+  // Only what a record in this collection may reference: its own and global
+  // collections' records, never another local collection's.
+  const reachableFrom = useCollectionName() ?? undefined
 
   useEffect(() => {
     if (!schemaName) return
@@ -23,6 +28,8 @@ export function useRecordSearch(schemaName: string, search: string) {
         const records = await recordsApi.searchBySchema(
           schemaName,
           search || undefined,
+          undefined,
+          reachableFrom,
         )
         if (!stale) setResults(records)
       } finally {
@@ -33,18 +40,20 @@ export function useRecordSearch(schemaName: string, search: string) {
       stale = true
       clearTimeout(timer)
     }
-  }, [schemaName, search])
+  }, [schemaName, search, reachableFrom])
 
   return { results, loading }
 }
 
 function ResultsDropdown({
+  currentCollection,
   loading,
   results,
   emptyMessage,
   isSelected,
   onSelect,
 }: {
+  currentCollection: string | null
   loading: boolean
   results: CivexRecord[]
   emptyMessage: string
@@ -70,6 +79,9 @@ function ResultsDropdown({
           </span>
           {record.natural_name && (
             <span className="ml-2 text-fg">{record.natural_name}</span>
+          )}
+          {record.collection && record.collection !== currentCollection && (
+            <CollectionMarker name={record.collection} />
           )}
         </button>
       ))}
@@ -108,6 +120,7 @@ export function RecordSearchPicker({
   // outside the default/unfiltered first page.
   const [fetchedRecord, setFetchedRecord] = useState<CivexRecord | null>(null)
   const { results, loading } = useRecordSearch(schemaName, search)
+  const currentCollection = useCollectionName()
 
   const selectedRecord = value
     ? (results.find((r) => r.id === value) ??
@@ -181,6 +194,7 @@ export function RecordSearchPicker({
       )}
       {open && (
         <ResultsDropdown
+          currentCollection={currentCollection}
           loading={loading}
           results={results}
           emptyMessage="No records found"
@@ -217,6 +231,7 @@ export function MultiRecordSearchPicker({
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
   const { results, loading } = useRecordSearch(schemaName, search)
+  const currentCollection = useCollectionName()
 
   const resultLabels = useMemo(
     () => Object.fromEntries(results.map((r) => [r.id, recordLabel(r)])),
@@ -302,6 +317,7 @@ export function MultiRecordSearchPicker({
       />
       {open && (
         <ResultsDropdown
+          currentCollection={currentCollection}
           loading={loading}
           results={results}
           emptyMessage="No records found"

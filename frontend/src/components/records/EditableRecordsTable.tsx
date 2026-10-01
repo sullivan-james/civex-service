@@ -101,6 +101,7 @@ export function EditableRecordsTable({
                   field={col}
                   value={r.data[col.name]}
                   referenceLabels={r.reference_labels}
+                  referenceCollections={r.reference_collections}
                   rowLabel={recordName(r)}
                   onCommit={async (value) => {
                     await updateRecord.mutateAsync({

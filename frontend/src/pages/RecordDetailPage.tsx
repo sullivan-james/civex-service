@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router'
 import {
   useRecord,
@@ -20,6 +20,7 @@ import {
   ConfirmDialog,
   Section,
   CollapsibleSection,
+  PinButton,
 } from '../components/ui'
 import { Play } from '../components/ui/icons'
 import { ContainsPreview } from '../components/records/ContainsPreview'
@@ -27,6 +28,8 @@ import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { RecordPageFrame } from '../components/records/RecordPageFrame'
 import { fieldSaveErrors } from '../components/records/saveErrors'
 import { recordTrail } from '../utils/recordTrail'
+import { recordTarget } from '../utils/navTargets'
+import { recordRecent } from '../hooks/usePins'
 import { formatDate } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
@@ -65,6 +68,14 @@ export default function RecordDetailPage() {
   const hasActiveJobs = (recordJobs ?? []).some(
     (j) => j.status === 'pending' || j.status === 'running',
   )
+
+  // Opened records feed Home's "pick up where you left off".
+  const recordKey = record?.id
+  const recordLabel = record?.natural_name
+  useEffect(() => {
+    if (recordKey && record) recordRecent(recordTarget(record))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordKey, recordLabel])
 
   const breadcrumbs = recordTrail(undefined)
 
@@ -115,7 +126,10 @@ export default function RecordDetailPage() {
   }
 
   return (
-    <CollectionTimeZone timeZone={collection?.timezone}>
+    <CollectionTimeZone
+      timeZone={collection?.timezone}
+      collection={collection?.name}
+    >
       <RecordPageFrame
         collection={collection?.name}
         collectionId={record.dataset_id}
@@ -136,6 +150,9 @@ export default function RecordDetailPage() {
               <Badge variant="accent">{record.schema_name}</Badge>
             )}
           </span>
+        }
+        action={
+          <PinButton target={recordTarget(record)} noun="record" size="md" />
         }
         description={
           <>
@@ -163,6 +180,7 @@ export default function RecordDetailPage() {
             }
             data={record.data}
             referenceLabels={record.reference_labels}
+            referenceCollections={record.reference_collections}
             onSave={saveField}
             errors={saveErrors}
             onDismissError={() => updateRecord.reset()}

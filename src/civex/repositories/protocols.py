@@ -114,7 +114,11 @@ class DatasetRepository(Protocol):
     def list_all(self) -> list[DatasetDTO]: ...
     def list_deleted(self) -> list[DatasetDTO]: ...
     def create(
-        self, name: str, description: str | None, timezone: str | None = None
+        self,
+        name: str,
+        description: str | None,
+        timezone: str | None = None,
+        scope: str = "local",
     ) -> DatasetDTO: ...
     def update(
         self,
@@ -122,7 +126,16 @@ class DatasetRepository(Protocol):
         name: str | None,
         description: str | None,
         timezone: str | None = None,
+        scope: str | None = None,
     ) -> DatasetDTO: ...
+    def set_schemas(self, id: uuid.UUID, schema_names: list[str]) -> DatasetDTO:
+        """Replace the collection's schema list (names must be live schemas)."""
+        ...
+
+    def schemas_in_use(self, id: uuid.UUID) -> set[str]:
+        """Names of the schemas live records in the collection are typed by."""
+        ...
+
     def delete(self, id: uuid.UUID) -> None: ...
     def restore(self, id: uuid.UUID) -> DatasetDTO: ...
     def purge(self, id: uuid.UUID) -> None: ...
@@ -186,7 +199,17 @@ class RecordRepository(Protocol):
         end: datetime | None,
     ) -> list[RecordGrowthRow]: ...
     def list_by_schema(
-        self, schema_id: uuid.UUID, search: str | None = None, limit: int = 20
+        self,
+        schema_id: uuid.UUID,
+        search: str | None = None,
+        limit: int = 20,
+        dataset_ids: list[uuid.UUID] | None = None,
+    ) -> list[RecordDTO]: ...
+    def search_all(
+        self,
+        search: str,
+        limit: int = 20,
+        dataset_id: uuid.UUID | None = None,
     ) -> list[RecordDTO]: ...
     def count_schema_matches(
         self, schema_id: uuid.UUID, search: str | None = None

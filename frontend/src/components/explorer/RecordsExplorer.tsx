@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link } from 'react-router'
+import { Link, useLocation } from 'react-router'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import { viewsApi } from '../../api/views'
 import {
@@ -18,6 +18,7 @@ import {
   ErrorState,
   Input,
   Pagination,
+  PinButton,
   TriggerPopover,
   TableSkeleton,
   Field,
@@ -36,6 +37,9 @@ import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
 import { SelectionBar } from './SelectionBar'
 import { useExplorer, type ExplorerScope } from './useExplorer'
+import { useCollection } from '../../hooks/useCollections'
+import { recordRecent } from '../../hooks/usePins'
+import { placeTarget, viewTarget } from '../../utils/navTargets'
 import { viewPatch } from '../../utils/explorerState'
 import { ancestorSchemas } from '../../utils/hierarchy'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../../lib/deleteImpact'
@@ -66,6 +70,8 @@ export function RecordsExplorer({
   const x = useExplorer(scope)
   const { state, patch, listed, listedName } = x
   const dataset = scope.dataset
+  const { data: collection } = useCollection(dataset ?? '')
+  const location = useLocation()
 
   // --- search box: local text, pushed to the URL after a pause
   const [searchInput, setSearchInput] = useState(state.q)
@@ -200,6 +206,44 @@ export function RecordsExplorer({
   const bulkCount = allMatching ? total : selected.size
   const listedLabel = listed ? displayLabel(listed.name, listed.label) : ''
 
+  // What the star pins: the saved filter when one is applied as saved,
+  // otherwise this place in the explorer exactly as the address bar has it.
+  const placeLabel = [
+    listedLabel,
+    x.chain.length > 0 &&
+      `in ${x.chain[x.chain.length - 1].natural_name ?? x.chain[x.chain.length - 1].id.slice(0, 8)}`,
+    state.q && `matching “${state.q}”`,
+  ]
+    .filter(Boolean)
+    .join(' ')
+  const pinTarget =
+    listed && x.activeView && !x.modified
+      ? viewTarget(listed, x.activeView.name)
+      : listed
+        ? placeTarget(
+            location.pathname + location.search,
+            placeLabel,
+            dataset ?? 'All collections',
+          )
+        : null
+
+  // Opening a saved filter or a drilled-down place counts as visiting it.
+  const recentKey = pinTarget?.key
+  const recentLabel = pinTarget?.label
+  useEffect(() => {
+    if (!pinTarget || !listed) return
+    // A plain, un-drilled list is just the collection or schema page again.
+    if (
+      pinTarget.kind === 'place' &&
+      !state.within &&
+      !state.q &&
+      !x.hasSelection
+    )
+      return
+    recordRecent(pinTarget)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recentKey, recentLabel])
+
   function confirmBulkDelete() {
     const done = {
       onSuccess: () => {
@@ -212,13 +256,44 @@ export function RecordsExplorer({
     else deleteMany.mutate([...selected], done)
   }
 
-  if (!listed && !x.page.isLoading && x.levels.length === 0)
+  if (!listed && !x.page.isLoading && x.levels.length === 0) {
+    // Levels come from record counts, so an empty collection has none and the
+    // list's own "Add" button never renders -- offer the collection's own
+    // top-level schemas here instead, or there is no way to create the first
+    // record (a child schema needs a parent record, so it can't start one).
+    const enabled = new Set(collection?.schemas ?? [])
+    const starters = dataset
+      ? (x.schemas ?? []).filter((s) => !s.parent_id && enabled.has(s.name))
+      : []
+    const noSchemas = !!collection && collection.schemas.length === 0
     return (
-      <EmptyState
-        title="No records yet"
-        message={emptyHint ?? 'Add a record to get started.'}
-      />
+      <div className="space-y-3">
+        <EmptyState
+          title="No records yet"
+          message={
+            noSchemas
+              ? 'This collection has no schemas yet. Edit the collection and choose the schemas it is for.'
+              : (emptyHint ?? 'Add a record to get started.')
+          }
+        />
+        {starters.length > 0 && (
+          <div className="flex flex-wrap justify-center gap-2">
+            {starters.map((s) => (
+              <Link
+                key={s.id}
+                to={`/collections/${dataset}/new?${new URLSearchParams({ schema: s.name })}`}
+              >
+                <Button variant="primary" size="sm">
+                  <Plus size={14} /> Add{' '}
+                  {displayLabel(s.name, s.label).toLowerCase()}
+                </Button>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
     )
+  }
 
   return (
     <div>
@@ -278,6 +353,13 @@ export function RecordsExplorer({
               <Button size="sm" disabled title="Save as a view to export">
                 <Download size={14} /> Export
               </Button>
+            )}
+            {pinTarget && (
+              <PinButton
+                target={pinTarget}
+                noun={pinTarget.kind === 'view' ? 'filter' : 'place'}
+                size="md"
+              />
             )}
             {dataset && listed && (
               <Link to={newRecordHref}>

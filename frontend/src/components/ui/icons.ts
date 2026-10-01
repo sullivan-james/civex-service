@@ -58,4 +58,6 @@ export {
   Send,
   Square,
   PanelRightClose,
+  FileText,
+  MapPin,
 } from 'lucide-react'

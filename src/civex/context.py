@@ -163,11 +163,11 @@ def build_local_context(
         )
 
     schema_svc = SchemaService(schema_repo, audit_repo, record_repo)
-    dataset_svc = DatasetService(dataset_repo, audit_repo)
     job_svc = WorkflowJobService(job_repo, config.civex_dir)
     record_svc = RecordService(
         schema_svc, dataset_repo, record_repo, file_store, job_svc, audit_repo
     )
+    dataset_svc = DatasetService(dataset_repo, audit_repo, schema_svc, record_svc)
     file_svc = FileService(file_store, remote_transport=remote_transport)
     store_svc = StoreService(config, file_store)
     gc_svc = GCService(file_store, LocalFileReferenceRepository(session))

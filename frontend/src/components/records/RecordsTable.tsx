@@ -24,6 +24,7 @@ export interface RecordsTableRow {
   schema_name?: string
   created_at?: string
   reference_labels?: Record<string, string | null> | null
+  reference_collections?: Record<string, string> | null
   child_counts?: Record<string, number> | null
 }
 
@@ -200,7 +201,11 @@ export function RecordsTable({
                   {value === undefined || value === null ? (
                     <span className="text-fg-subtle">—</span>
                   ) : col.type === 'reference' && typeof value === 'string' ? (
-                    <ReferenceLink id={value} labels={r.reference_labels} />
+                    <ReferenceLink
+                      id={value}
+                      labels={r.reference_labels}
+                      collections={r.reference_collections}
+                    />
                   ) : col.type === 'reference_list' && Array.isArray(value) ? (
                     value.length === 0 ? (
                       <span className="text-fg-subtle">—</span>
@@ -211,6 +216,7 @@ export function RecordsTable({
                             key={id}
                             id={id}
                             labels={r.reference_labels}
+                            collections={r.reference_collections}
                           />
                         ))}
                       </span>

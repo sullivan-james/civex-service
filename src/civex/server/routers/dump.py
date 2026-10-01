@@ -56,7 +56,12 @@ def export_dump(
     schemas_out = _sort_schemas(schemas_out)
 
     datasets_out = [
-        {"name": d.name, "description": d.description}
+        {
+            "name": d.name,
+            "description": d.description,
+            "scope": d.scope,
+            "schemas": d.schemas,
+        }
         for d in ctx.dataset_svc.list_all()
     ]
 
@@ -188,7 +193,12 @@ async def import_dump(
     datasets_restored = 0
     for d in doc.get("datasets", []):
         try:
-            ctx.dataset_svc.create(d["name"], description=d.get("description"))
+            ctx.dataset_svc.create(
+                d["name"],
+                description=d.get("description"),
+                scope=d.get("scope") or "local",
+                schemas=d.get("schemas") or [],
+            )
             ctx.commit()
             datasets_restored += 1
         except AlreadyExistsError:

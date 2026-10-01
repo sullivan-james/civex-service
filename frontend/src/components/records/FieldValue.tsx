@@ -8,12 +8,14 @@ export function FieldValue({
   value,
   field,
   referenceLabels,
+  referenceCollections,
 }: {
   value: unknown
   /** Reference/reference_list values render as links; every other type
    * falls back to the existing shape-based rendering below. */
   field?: Field
   referenceLabels?: Record<string, string | null> | null
+  referenceCollections?: Record<string, string> | null
 }) {
   const timeZone = useFieldTimeZone(field)
   if (value === null || value === undefined)
@@ -22,13 +24,24 @@ export function FieldValue({
     // Shown as wall time in the field's zone; the stored UTC value is on hover.
     return <span title={value}>{formatDateTime(value, timeZone)}</span>
   if (field?.type === 'reference' && typeof value === 'string')
-    return <ReferenceLink id={value} labels={referenceLabels} />
+    return (
+      <ReferenceLink
+        id={value}
+        labels={referenceLabels}
+        collections={referenceCollections}
+      />
+    )
   if (field?.type === 'reference_list' && Array.isArray(value)) {
     if (value.length === 0) return <span className="text-fg-subtle">—</span>
     return (
       <span className="flex flex-wrap gap-x-2 gap-y-1">
         {(value as string[]).map((id) => (
-          <ReferenceLink key={id} id={id} labels={referenceLabels} />
+          <ReferenceLink
+            key={id}
+            id={id}
+            labels={referenceLabels}
+            collections={referenceCollections}
+          />
         ))}
       </span>
     )

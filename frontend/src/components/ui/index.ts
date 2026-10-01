@@ -60,3 +60,4 @@ export {
 } from './FormGrid'
 export { ToastProvider, useToast, type ToastOptions } from './ToastProvider'
 export { type ToastVariant, type ToastAction } from './Toast'
+export { PinButton } from './PinButton'

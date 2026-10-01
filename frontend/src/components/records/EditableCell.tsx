@@ -22,6 +22,7 @@ interface EditableCellProps {
   field: Field
   value: unknown
   referenceLabels?: Record<string, string | null> | null
+  referenceCollections?: Record<string, string> | null
   /** Persist the new (already coerced; `undefined` = cleared) value. Reject
    * to keep the cell in edit mode with the error shown. The caller decides
    * what "persist" means -- a PATCH for an existing row, or just local state
@@ -40,6 +41,7 @@ export function EditableCell({
   field,
   value,
   referenceLabels,
+  referenceCollections,
   onCommit,
   rowLabel,
   disabled = false,
@@ -198,6 +200,7 @@ export function EditableCell({
           value={value}
           field={field}
           referenceLabels={referenceLabels}
+          referenceCollections={referenceCollections}
         />
       )}
 

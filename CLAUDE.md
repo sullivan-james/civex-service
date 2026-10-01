@@ -99,6 +99,16 @@ On PostgreSQL, JSON columns use `JSONB` via `with_variant`.
 
 Schema inheritance is resolved recursively by `SchemaService.collect_fields()` — parent fields are appended after own fields and labelled with their source schema.
 
+### Collection scope and schema lists
+
+A collection (`datasets` table) carries a `scope` (`local` | `global`, `domain/scopes.py`) and a schema list (`dataset_schemas`, surfaced as `DatasetDTO.schemas` — names). Both are managed by `DatasetService`:
+
+- `RecordService.add` rejects a record whose schema isn't in its collection's list (`_check_schema_allowed`); an empty list allows nothing. A child schema's ancestors must be listed too, and a schema with live records can't be removed (`DatasetService._check_schema_list`/`update`).
+- `RecordService.add`/`update` check every `reference`/`reference_list` value (`_check_references`): the target must be a live record in the same collection or in a `global` one. Values equal to the stored ones are skipped on update. Schema-level reference restrictions are *not* checked against collections — schemas are global and can't know their collection.
+- A `global` collection that other collections' records reference can't be made `local` or deleted (`RecordService.collection_referrers`).
+- `find_by_schema(..., reachable_from=<collection>)` / `GET /records?reachable_from=` is what reference pickers search; `RecordDTO.dataset_name` and `reference_collections` (set in `_attach_reference_labels`) drive the "from collection X" marker in the UI.
+- Tests: the schema-list check is disabled by an autouse fixture in `tests/conftest.py`; request `strict_schema_lists` to exercise it.
+
 ### Names vs. labels
 
 Schemas and fields each carry a `name` and a `label` (see `domain/naming.py`, mirrored in `frontend/src/utils/naming.ts`):
@@ -163,6 +173,8 @@ frontend/src/
   components/   # Shared UI (records/DynamicField.tsx, jobs/JobsTable.tsx, …)
   utils/dates.ts  # timezone-aware datetime helpers (utcToZonedLocal / zonedLocalToUTC / formatDateTime / effectiveTimeZone)
 ```
+
+Pins, recents and the Ctrl+K palette are per-browser (localStorage, `utils/pins.ts` + `hooks/usePins.ts`; there are no user accounts). A pin's `NavTarget` is built in `utils/navTargets.ts`; a pinned saved filter's live count is `hooks/useViewCount.ts` (keyed under `records`, so any record edit refreshes it).
 
 `DynamicField` is the single component that renders an editable input for any field type, including restriction-aware behaviour (choices→select, min/max, accept/max_size on files). `JobsTable` owns its own pagination state and accepts `recordId?` + `statusFilter?` props — do not duplicate pagination in parent pages.
 

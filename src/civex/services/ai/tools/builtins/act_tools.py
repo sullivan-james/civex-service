@@ -541,7 +541,22 @@ class CreateCollectionTool(AiTool):
     mutating = True
     input_schema = {
         "type": "object",
-        "properties": {"name": {"type": "string"}, "description": {"type": "string"}},
+        "properties": {
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "scope": {
+                "type": "string",
+                "enum": ["local", "global"],
+                "description": "'global' collections hold shared reference data "
+                "any collection's records may reference; default 'local'.",
+            },
+            "schemas": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Schemas the collection is for. Records in it can "
+                "only be of these (a child schema's parent must be listed too).",
+            },
+        },
         "required": ["name"],
     }
 
@@ -554,13 +569,19 @@ class CreateCollectionTool(AiTool):
                 "To change it, use update_collection instead."
             )
         err = validate_via(
-            ctx, ctx.dataset_svc.create, name, tool_input.get("description")
+            ctx,
+            ctx.dataset_svc.create,
+            name,
+            tool_input.get("description"),
+            scope=tool_input.get("scope") or "local",
+            schemas=tool_input.get("schemas") or [],
         )
         if err:
             return err
-        body = {"name": name}
-        if tool_input.get("description"):
-            body["description"] = tool_input["description"]
+        body: dict[str, Any] = {"name": name}
+        for key in ("description", "scope", "schemas"):
+            if tool_input.get(key):
+                body[key] = tool_input[key]
         return propose(
             "create_collection",
             f"Create collection '{name}'.",
@@ -573,7 +594,10 @@ class CreateCollectionTool(AiTool):
 
 class UpdateCollectionTool(AiTool):
     name = "update_collection"
-    description = "Propose renaming a collection or changing its description. Requires user approval."
+    description = (
+        "Propose renaming a collection or changing its description, scope or "
+        "schemas. Requires user approval."
+    )
     mutating = True
     input_schema = {
         "type": "object",
@@ -584,6 +608,12 @@ class UpdateCollectionTool(AiTool):
             },
             "rename": {"type": "string"},
             "description": {"type": "string"},
+            "scope": {"type": "string", "enum": ["local", "global"]},
+            "schemas": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Replaces the collection's schema list.",
+            },
         },
         "required": ["name"],
     }
@@ -595,17 +625,21 @@ class UpdateCollectionTool(AiTool):
             return tool_error(f"Collection '{name}' does not exist.")
         body = {
             k: tool_input[k]
-            for k in ("rename", "description")
+            for k in ("rename", "description", "scope", "schemas")
             if tool_input.get(k) is not None
         }
         if not body:
-            return tool_error("Nothing to change (provide rename or description).")
+            return tool_error(
+                "Nothing to change (provide rename, description, scope or schemas)."
+            )
         err = validate_via(
             ctx,
             ctx.dataset_svc.update,
             name,
             new_name=body.get("rename"),
             description=body.get("description"),
+            scope=body.get("scope"),
+            schemas=body.get("schemas"),
         )
         if err:
             return err

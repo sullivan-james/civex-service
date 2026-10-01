@@ -42,6 +42,9 @@ export interface PreviewViewBody {
 }
 
 export const viewsApi = {
+  /** Every saved view across every schema. */
+  listAll: () => api.get<View[]>('/views'),
+
   list: (schemaName: string) =>
     api.get<View[]>(`/schemas/${encodeURIComponent(schemaName)}/views`),
 

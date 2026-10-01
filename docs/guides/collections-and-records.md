@@ -2,7 +2,7 @@
 
 ## Collections
 
-A **collection** is a named container for records. One project might have a single collection; a multi-site study might have one per site. There is no schema constraint on a collection — a single collection can hold records of different schemas.
+A **collection** is a named container for records. One project might have a single collection; a multi-site study might have one per site. A collection is *for* a set of schemas you choose (see [Schemas and scope](#schemas-and-scope)) and can hold records of any of them.
 
 === "CLI"
     ```bash
@@ -15,7 +15,31 @@ A **collection** is a named container for records. One project might have a sing
     ```
 
 === "Web UI"
-    Go to **Collections → New collection**. On a collection's detail page, **Delete collection** moves it and every record inside to Recently Deleted — see [Deleting & restoring data](deleting-and-restoring.md).
+    Go to **Collections → New collection**, then choose its scope and schemas. On a collection's detail page, **Delete collection** moves it and every record inside to Recently Deleted — see [Deleting & restoring data](deleting-and-restoring.md).
+
+## Schemas and scope
+
+Each collection has two settings beyond its name.
+
+**Schemas** — the schemas the collection is for. Records in it can only be of these, so a new collection holds nothing until you enable at least one. A child schema needs its parent schema enabled too (a child record's parent lives in the same collection). A schema that still has records in a collection can't be removed from it.
+
+**Scope** — who may reference the collection's records:
+
+- `local` (the default): only records in the same collection.
+- `global`: records in any collection. Use it for shared reference data — species, sites, people — that many studies point at.
+
+A `reference` field can therefore point at a record in its own collection or in a global one, never in another local collection. Reference pickers only search what the record being edited may reference, and a reference to a record from another collection is marked with that collection's name. A global collection that other collections reference can't be made local or deleted.
+
+=== "CLI"
+    ```bash
+    civex collection create taxonomy --scope global --schema species
+    civex collection create study-2024 --schema deployment --schema detection
+    civex collection add-schema study-2024 observation   # also enables its parent schemas
+    civex collection update study-2024 --scope local
+    ```
+
+=== "Web UI"
+    Pick the scope and tick the schemas on the **New collection** form, or later from **Edit** on the collection's page.
 
 ## Adding records
 

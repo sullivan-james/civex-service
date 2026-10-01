@@ -217,6 +217,47 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('RecordsExplorer', () => {
+  describe('an empty collection', () => {
+    const emptyCollection = (schemas: string[]) => (url: URL) => {
+      if (url.pathname === '/api/collections/hb')
+        return json({
+          id: 'c1',
+          name: 'hb',
+          description: null,
+          timezone: null,
+          record_count: 0,
+          deleted_at: null,
+          scope: 'local',
+          schemas,
+        })
+      if (url.pathname.endsWith('/record-counts')) return json({})
+      return undefined
+    }
+
+    it('offers an Add button for each enabled top-level schema', async () => {
+      override = emptyCollection(['encounter', 'recording'])
+      renderExplorer({}, '/collections/hb')
+      const add = await screen.findByRole('link', { name: /Add encounter/ })
+      expect(add).toHaveAttribute(
+        'href',
+        '/collections/hb/new?schema=encounter',
+      )
+      // a child schema can't start a collection: it needs a parent record
+      expect(
+        screen.queryByRole('link', { name: /Add recording/ }),
+      ).not.toBeInTheDocument()
+    })
+
+    it('says so when no schemas are enabled yet', async () => {
+      override = emptyCollection([])
+      renderExplorer({}, '/collections/hb')
+      expect(await screen.findByText(/has no schemas yet/)).toBeInTheDocument()
+      expect(
+        screen.queryByRole('link', { name: /Add / }),
+      ).not.toBeInTheDocument()
+    })
+  })
+
   it('starts at the top of the hierarchy, not at "all records"', async () => {
     renderExplorer()
     expect(await screen.findByText('Stellwagen')).toBeInTheDocument()

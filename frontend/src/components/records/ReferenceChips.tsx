@@ -6,6 +6,8 @@ import { toInputProps } from '../../utils/restrictions'
 import { Input } from '../ui'
 import { Plus, X } from '../ui/icons'
 import { recordLabel, useRecordSearch } from './RecordSearchPicker'
+import { CollectionMarker } from './CollectionMarker'
+import { useCollectionName } from './timeZoneContext'
 
 /** Reference / reference_list values as removable bubbles, with an inline
  * search to add more. Every change is saved straight away (`onSave`).
@@ -17,12 +19,15 @@ export function ReferenceChips({
   field,
   value,
   labels,
+  collections,
   onSave,
 }: {
   field: Field
   value: unknown
   /** id -> natural name, as the server resolved them for this record. */
   labels?: Record<string, string | null> | null
+  /** id -> collection name, for targets outside the record's own collection. */
+  collections?: Record<string, string> | null
   onSave: (value: unknown | undefined) => void
 }) {
   const multiple = field.type === 'reference_list'
@@ -42,6 +47,12 @@ export function ReferenceChips({
   const [picked, setPicked] = useState<Record<string, string>>({})
   const { results, loading } = useRecordSearch(schemaName, adding ? search : '')
   const options = results.filter((r) => !ids.includes(r.id))
+
+  const currentCollection = useCollectionName()
+  // Records picked this session carry their own collection until the
+  // server's reference_collections arrive.
+  const [pickedFrom, setPickedFrom] = useState<Record<string, string>>({})
+  const collectionOf = (id: string) => collections?.[id] ?? pickedFrom[id]
 
   const labelOf = (id: string) => labels?.[id] ?? picked[id] ?? id.slice(0, 8)
 
@@ -67,6 +78,8 @@ export function ReferenceChips({
 
   function choose(record: CivexRecord) {
     setPicked((p) => ({ ...p, [record.id]: recordLabel(record) }))
+    if (record.collection && record.collection !== currentCollection)
+      setPickedFrom((p) => ({ ...p, [record.id]: record.collection! }))
     save(multiple ? [...ids, record.id] : [record.id])
     setSearch('')
     setActive(0)
@@ -106,6 +119,7 @@ export function ReferenceChips({
           <Link to={`/records/${id}`} className="hover:underline" tabIndex={-1}>
             {labelOf(id)}
           </Link>
+          {collectionOf(id) && <CollectionMarker name={collectionOf(id)!} />}
           <button
             type="button"
             tabIndex={-1}
@@ -177,6 +191,9 @@ export function ReferenceChips({
                 }`}
               >
                 <span className="text-fg">{recordLabel(r)}</span>
+                {r.collection && r.collection !== currentCollection && (
+                  <CollectionMarker name={r.collection} />
+                )}
                 <span className="ml-2 font-mono text-xs text-fg-muted">
                   {r.id.slice(0, 8)}
                 </span>

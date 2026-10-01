@@ -135,7 +135,10 @@ export default function NewRecordPage() {
   }
 
   return (
-    <CollectionTimeZone timeZone={collection.timezone}>
+    <CollectionTimeZone
+      timeZone={collection.timezone}
+      collection={collection.name}
+    >
       <RecordPageFrame
         collection={collection.name}
         collectionId={id!}

@@ -205,9 +205,41 @@ class Dataset(Base):
         _UTCDateTime(), nullable=True, default=None
     )
 
+    # "local": records here can only be referenced from within this collection.
+    # "global": records here can be referenced from every collection. See
+    # civex.domain.scopes.
+    scope: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="local", server_default="local"
+    )
+
     records: Mapped[list[Record]] = relationship(
         "Record", back_populates="dataset", cascade="all, delete-orphan"
     )
+    schema_links: Mapped[list[DatasetSchema]] = relationship(
+        "DatasetSchema", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        CheckConstraint("scope IN ('local', 'global')", name="ck_datasets_scope"),
+    )
+
+
+class DatasetSchema(Base):
+    """A schema a collection is for: records in the collection can only be of
+    these schemas. Schemas are global, so this is many-to-many. A child
+    schema's parent must be listed too (its parent record lives in the same
+    collection) -- enforced by DatasetService."""
+
+    __tablename__ = "dataset_schemas"
+
+    dataset_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True
+    )
+    schema_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("schemas.id"), primary_key=True
+    )
+
+    __table_args__ = (Index("ix_dataset_schemas_schema", "schema_id"),)
 
 
 class Record(Base):
