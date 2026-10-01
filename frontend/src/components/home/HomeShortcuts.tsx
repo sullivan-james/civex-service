@@ -1,10 +1,9 @@
 import { Link } from 'react-router'
-import { useJobsPaged } from '../../hooks/useWorkflows'
 import { usePins, useRecents } from '../../hooks/usePins'
 import { PinCount } from '../PinnedNav'
 import { PIN_ICONS } from '../pinIcons'
 import { IconButton } from '../ui'
-import { AlertTriangle, Star } from '../ui/icons'
+import { Star } from '../ui/icons'
 import type { NavTarget } from '../../utils/pins'
 
 function AttentionCard({ pin }: { pin: NavTarget }) {
@@ -27,37 +26,15 @@ function AttentionCard({ pin }: { pin: NavTarget }) {
   )
 }
 
-function FailedRunsCard() {
-  const { total } = useJobsPaged(0, 1, 'failed')
-  if (total === 0) return null
-  return (
-    <Link
-      to="/runs?status=failed"
-      className="flex items-center gap-3 rounded-lg border border-danger-muted bg-danger-subtle p-4 transition-colors hover:border-danger"
-    >
-      <AlertTriangle size={18} className="shrink-0 text-danger" aria-hidden />
-      <div>
-        <p className="text-sm font-semibold text-danger">
-          {total.toLocaleString()} failed {total === 1 ? 'run' : 'runs'}
-        </p>
-        <p className="text-xs text-fg-muted">
-          Open them to see what went wrong.
-        </p>
-      </div>
-    </Link>
-  )
-}
-
 /** The top of Home once there is something to come back to: pinned filters
- * with their live counts (and any failed runs) under "Needs your attention",
+ * with their live counts under "Needs your attention",
  * then what was opened lately. Pinned collections and records live in the
  * nav; Home is for what needs working through. */
 export function HomeShortcuts() {
   const { pins, isPinned, toggle } = usePins()
   const recents = useRecents()
   const filters = pins.filter((p) => p.kind === 'view')
-  const { total: failed } = useJobsPaged(0, 1, 'failed')
-  const showAttention = filters.length > 0 || failed > 0
+  const showAttention = filters.length > 0
 
   if (!showAttention && recents.length === 0) return null
   return (
@@ -74,7 +51,6 @@ export function HomeShortcuts() {
             {filters.map((pin) => (
               <AttentionCard key={pin.key} pin={pin} />
             ))}
-            <FailedRunsCard />
           </div>
         </section>
       )}

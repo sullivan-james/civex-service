@@ -61,7 +61,7 @@ Opening [http://localhost:8000](http://localhost:8000) (or wherever you configur
 
 Click the star on a saved filter, a collection, a record or a drilled-down place in the explorer to **pin** it. Pins appear in a **Pinned** section at the top of the left-hand navigation; a pinned saved filter shows how many records it matches right now. Pins and the list of things you opened lately are kept in your browser (they don't follow you to another machine or browser profile, and clearing site data removes them).
 
-**Home** shows your pinned saved filters with their live counts (plus a card for failed runs) under *Needs your attention*, and what you opened lately under *Pick up where you left off*, each with a star to pin it.
+**Home** shows your pinned saved filters with their live counts under *Needs your attention*, and what you opened lately under *Pick up where you left off*, each with a star to pin it.
 
 Press **Ctrl+K** (**⌘K** on a Mac), or click **Jump to** in the top bar, to search collections, schemas, saved filters, records and places by name. With nothing typed it lists your pins and recents. The star on a result pins it.
 
