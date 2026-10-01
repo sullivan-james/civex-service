@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from civex.db.models import (
+    JobAffectedRecord,
     JobAffectedSchema,
     Record,
     Schema,
@@ -80,6 +81,7 @@ class LocalWorkflowJobRepository:
             row.affected_records = affected_records or None
             _replace_step_executions(self._s, job_id, step_executions)
             _replace_affected_schemas(self._s, job_id, affected_records)
+            _replace_affected_records(self._s, job_id, affected_records)
             self._s.flush()
 
     def mark_failed(
@@ -106,6 +108,7 @@ class LocalWorkflowJobRepository:
             row.affected_records = affected_records or None
             _replace_step_executions(self._s, job_id, step_executions)
             _replace_affected_schemas(self._s, job_id, affected_records)
+            _replace_affected_records(self._s, job_id, affected_records)
             self._s.flush()
 
     def list_all(
@@ -131,13 +134,10 @@ class LocalWorkflowJobRepository:
             q = q.filter(_touches_schema(affected_schema))
         q = q.order_by(WorkflowJob.created_at.desc(), WorkflowJob.id.desc())
         if affected_record_id:
-            # affected_records is a small per-job JSON list -- no index to
-            # filter on, so this scans and checks in Python rather than
-            # adding a JSON containment query (mirrors record_repo's SQLite
-            # fallback for the same tradeoff, CIVEX-169).
-            rows = [r for r in q.all() if _touches(r, affected_record_id)]
-            rows = rows[offset : offset + limit if limit is not None else None]
-            return [_to_dto(r) for r in rows]
+            touched = _touches_record(affected_record_id)
+            if touched is None:
+                return []
+            q = q.filter(touched)
         q = q.offset(offset)
         if limit is not None:
             q = q.limit(limit)
@@ -161,7 +161,10 @@ class LocalWorkflowJobRepository:
             except ValueError:
                 return 0
         if affected_record_id:
-            return sum(1 for r in q.all() if _touches(r, affected_record_id))
+            touched = _touches_record(affected_record_id)
+            if touched is None:
+                return 0
+            q = q.filter(touched)
         return q.count()
 
     def get_by_id(self, job_id: uuid.UUID) -> WorkflowJobDTO | None:
@@ -326,8 +329,34 @@ def _replace_affected_schemas(
     session.add_all(JobAffectedSchema(job_id=job_id, schema_id=sid) for sid in ids)
 
 
-def _touches(row: WorkflowJob, record_id: str) -> bool:
-    return any(e.get("record_id") == record_id for e in row.affected_records or [])
+def _touches_record(record_id: str):
+    """Indexed membership test against job_affected_records; None for a
+    string that is not a record id (nothing can match it)."""
+    try:
+        rid = uuid.UUID(record_id)
+    except ValueError:
+        return None
+    return WorkflowJob.id.in_(
+        select(JobAffectedRecord.job_id).where(JobAffectedRecord.record_id == rid)
+    )
+
+
+def _replace_affected_records(
+    session: Session, job_id: uuid.UUID, affected_records: list[dict] | None
+) -> None:
+    """Rewrites this job's record links from its affected_records entries."""
+    session.query(JobAffectedRecord).filter_by(job_id=job_id).delete(
+        synchronize_session=False
+    )
+    ids: set[uuid.UUID] = set()
+    for entry in affected_records or []:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            ids.add(uuid.UUID(str(entry.get("record_id"))))
+        except ValueError:
+            continue
+    session.add_all(JobAffectedRecord(job_id=job_id, record_id=rid) for rid in ids)
 
 
 def _replace_step_executions(

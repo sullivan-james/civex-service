@@ -106,12 +106,26 @@ class SchemaRepository(Protocol):
 @runtime_checkable
 class DatasetRepository(Protocol):
     def get_by_name(
-        self, name: str, include_deleted: bool = False
-    ) -> DatasetDTO | None: ...
+        self,
+        name: str,
+        include_deleted: bool = False,
+        with_count: bool = True,
+        with_schemas: bool = True,
+    ) -> DatasetDTO | None:
+        """`with_count=False` skips the live-record count (an O(records) scan)
+        and leaves `record_count` at 0; `with_schemas=False` skips the schema
+        list lookup and leaves `schemas` empty -- for callers that don't read
+        them."""
+        ...
+
     def get_by_id(
-        self, id: uuid.UUID, include_deleted: bool = False
+        self,
+        id: uuid.UUID,
+        include_deleted: bool = False,
+        with_count: bool = True,
+        with_schemas: bool = True,
     ) -> DatasetDTO | None: ...
-    def list_all(self) -> list[DatasetDTO]: ...
+    def list_all(self, with_count: bool = True) -> list[DatasetDTO]: ...
     def list_deleted(self) -> list[DatasetDTO]: ...
     def create(
         self,
@@ -184,9 +198,14 @@ class RecordRepository(Protocol):
     def list_by_dataset(self, dataset_id: uuid.UUID) -> list[RecordDTO]: ...
     def list_by_ids(self, ids: list[uuid.UUID]) -> list[RecordDTO]: ...
     def list_filtered(
-        self, query: ResolvedQuery, offset: int, limit: int
+        self,
+        query: ResolvedQuery,
+        offset: int,
+        limit: int,
+        after: tuple[datetime, uuid.UUID] | None = None,
     ) -> list[RecordDTO]: ...
     def count(self, query: ResolvedQuery) -> int: ...
+    def list_ids(self, query: ResolvedQuery) -> list[uuid.UUID]: ...
     def count_by_schema(self, query: ResolvedQuery) -> dict[str, int]: ...
     def count_children(
         self, parent_ids: list[uuid.UUID]
@@ -214,18 +233,38 @@ class RecordRepository(Protocol):
     def count_schema_matches(
         self, schema_id: uuid.UUID, search: str | None = None
     ) -> int: ...
-    def list_ids_by_schema_ids(
-        self, schema_ids: list[uuid.UUID]
-    ) -> list[uuid.UUID]: ...
+    def count_by_schema_ids(self, schema_ids: list[uuid.UUID]) -> int: ...
     def list_children(
         self, parent_id: uuid.UUID, include_deleted: bool = False
     ) -> list[RecordDTO]: ...
-    def list_referencing(
-        self,
-        target_ids: list[uuid.UUID],
-        reference_field_ids: list[uuid.UUID],
-        reference_list_field_ids: list[uuid.UUID],
-    ) -> list[RecordDTO]: ...
+    def referrers_of(
+        self, target_ids: list[uuid.UUID], field_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]:
+        """(referrer id, field id, target id) for live records whose value in
+        one of `field_ids` points at any of `target_ids`."""
+        ...
+
+    def referrer_groups(
+        self, target_id: uuid.UUID, field_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, str, uuid.UUID, int]]:
+        """Live referrers of a record counted per (collection id, schema name,
+        field id)."""
+        ...
+
+    def referrers_into_dataset(
+        self, dataset_id: uuid.UUID, field_ids: list[uuid.UUID], limit: int
+    ) -> tuple[int, list[tuple[uuid.UUID, uuid.UUID]]]:
+        """Records in other collections pointing into `dataset_id`: their
+        number, and (record id, field id) pairs for the first `limit`."""
+        ...
+
+    def dangling_references(
+        self, field_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, str, uuid.UUID, uuid.UUID]]:
+        """(record id, schema name, field id, target id) for values naming no
+        live record."""
+        ...
+
     def create(
         self,
         dataset_id: uuid.UUID,
@@ -237,6 +276,16 @@ class RecordRepository(Protocol):
     def delete(self, id: uuid.UUID) -> None: ...
     def restore(self, id: uuid.UUID) -> RecordDTO: ...
     def purge(self, id: uuid.UUID) -> None: ...
+    def subtree_levels(
+        self, root_ids: list[uuid.UUID], deleted: bool | None = None
+    ) -> list[list[uuid.UUID]]:
+        """Records under `root_ids` a level at a time (roots first), one query
+        per level. `deleted`: False = live only, True = deleted only."""
+        ...
+
+    def delete_many(self, ids: list[uuid.UUID]) -> None: ...
+    def restore_many(self, ids: list[uuid.UUID]) -> None: ...
+    def purge_many(self, ids: list[uuid.UUID]) -> None: ...
 
 
 @runtime_checkable

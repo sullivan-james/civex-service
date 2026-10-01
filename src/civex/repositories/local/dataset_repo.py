@@ -17,40 +17,49 @@ class LocalDatasetRepository:
         self._s = session
 
     def get_by_name(
-        self, name: str, include_deleted: bool = False
+        self,
+        name: str,
+        include_deleted: bool = False,
+        with_count: bool = True,
+        with_schemas: bool = True,
     ) -> DatasetDTO | None:
         q = self._s.query(Dataset).filter_by(name=name)
         if not include_deleted:
             q = q.filter(Dataset.deleted_at.is_(None))
         row = q.first()
-        return _to_dto(self._s, row) if row else None
+        return _to_dto(self._s, row, with_count, with_schemas) if row else None
 
     def get_by_id(
-        self, id: uuid.UUID, include_deleted: bool = False
+        self,
+        id: uuid.UUID,
+        include_deleted: bool = False,
+        with_count: bool = True,
+        with_schemas: bool = True,
     ) -> DatasetDTO | None:
         q = self._s.query(Dataset).filter_by(id=id)
         if not include_deleted:
             q = q.filter(Dataset.deleted_at.is_(None))
         row = q.first()
-        return _to_dto(self._s, row) if row else None
+        return _to_dto(self._s, row, with_count, with_schemas) if row else None
 
-    def list_all(self) -> list[DatasetDTO]:
-        return [
-            _to_dto(self._s, r)
-            for r in self._s.query(Dataset)
+    def list_all(self, with_count: bool = True) -> list[DatasetDTO]:
+        return _to_dtos(
+            self._s,
+            self._s.query(Dataset)
             .filter(Dataset.deleted_at.is_(None))
             .order_by(Dataset.created_at)
-            .all()
-        ]
+            .all(),
+            with_count,
+        )
 
     def list_deleted(self) -> list[DatasetDTO]:
-        return [
-            _to_dto(self._s, r)
-            for r in self._s.query(Dataset)
+        return _to_dtos(
+            self._s,
+            self._s.query(Dataset)
             .filter(Dataset.deleted_at.is_not(None))
             .order_by(Dataset.deleted_at.desc())
-            .all()
-        ]
+            .all(),
+        )
 
     def create(
         self,
@@ -176,28 +185,67 @@ class LocalDatasetRepository:
         self._s.flush()
 
 
-def _to_dto(session: Session, row: Dataset) -> DatasetDTO:
-    record_count = (
-        session.query(func.count(Record.id))
-        .filter(Record.dataset_id == row.id, Record.deleted_at.is_(None))
-        .scalar()
-    )
-    schema_names = [
-        name
-        for (name,) in session.query(Schema.name)
-        .join(DatasetSchema, DatasetSchema.schema_id == Schema.id)
-        .filter(DatasetSchema.dataset_id == row.id)
-        .order_by(Schema.name)
-        .all()
+def _to_dto(
+    session: Session,
+    row: Dataset,
+    with_count: bool = True,
+    with_schemas: bool = True,
+) -> DatasetDTO:
+    return _to_dtos(session, [row], with_count, with_schemas)[0]
+
+
+def _to_dtos(
+    session: Session,
+    rows: list[Dataset],
+    with_count: bool = True,
+    with_schemas: bool = True,
+) -> list[DatasetDTO]:
+    """DTOs for `rows`, their schema lists from one query for the lot.
+
+    The live-record count scans a collection's records, so a caller that only
+    needs the collections themselves (every record write looks one up) skips
+    it, leaving `record_count` at 0; one that doesn't read `schemas` skips
+    that lookup too."""
+    if not rows:
+        return []
+    ids = [r.id for r in rows]
+    counts: dict[uuid.UUID, int] = {}
+    if with_count:
+        # One indexed count per collection, not a single GROUP BY: counted
+        # per collection the query is answered from the live-record covering
+        # index (ix_records_live_dataset_created) -- a GROUP BY over the lot
+        # was measured ~5x slower, the planner picking a scan plus a sort.
+        for row in rows:
+            counts[row.id] = (
+                session.query(func.count(Record.id))
+                .filter(Record.dataset_id == row.id, Record.deleted_at.is_(None))
+                .scalar()
+                or 0
+            )
+    schema_names: dict[uuid.UUID, list[str]] = {}
+    for dataset_id, name in (
+        ()
+        if not with_schemas
+        else (
+            session.query(DatasetSchema.dataset_id, Schema.name)
+            .join(Schema, DatasetSchema.schema_id == Schema.id)
+            .filter(DatasetSchema.dataset_id.in_(ids))
+            .order_by(Schema.name)
+            .all()
+        )
+    ):
+        schema_names.setdefault(dataset_id, []).append(name)
+    return [
+        DatasetDTO(
+            id=row.id,
+            name=row.name,
+            description=row.description,
+            record_count=counts.get(row.id, 0),
+            created_at=row.created_at,
+            deleted_at=row.deleted_at,
+            timezone=row.timezone,
+            scope=row.scope,
+            schemas=schema_names.get(row.id, []),
+        )
+        for row in rows
     ]
-    return DatasetDTO(
-        id=row.id,
-        name=row.name,
-        description=row.description,
-        record_count=record_count or 0,
-        created_at=row.created_at,
-        deleted_at=row.deleted_at,
-        timezone=row.timezone,
-        scope=row.scope,
-        schemas=schema_names,
-    )

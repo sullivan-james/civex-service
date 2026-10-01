@@ -8,6 +8,7 @@ from rich.table import Table
 from civex.cli.utils import get_ctx as _ctx
 from civex.console import console
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
+from civex.domain.query import RecordQuery
 
 app = typer.Typer(help="Manage schemas (data structure definitions)")
 
@@ -488,18 +489,23 @@ def schema_update_field(
 
         # Warn if making required but existing records are missing this field.
         if required:
-            all_datasets = ctx.dataset_svc.list_all()
+            all_datasets = ctx.dataset_svc.list_all(with_count=False)
             affected = []
             for d in all_datasets:
-                missing = [
-                    r
-                    for r in ctx.record_svc.find(
-                        d.name, schema_name=schema_name, filters=[], limit=100_000
+                # Counted in SQL: records of this schema without a value.
+                missing = ctx.record_svc.count_records(
+                    RecordQuery(
+                        dataset=d.name,
+                        schema=schema_name,
+                        filter_tree={
+                            "field": field_name,
+                            "op": "is_null",
+                            "value": True,
+                        },
                     )
-                    if field_name not in r.data
-                ]
+                )
                 if missing:
-                    affected.append((d.name, len(missing)))
+                    affected.append((d.name, missing))
             if affected:
                 for dataset_name, count in affected:
                     console.print(

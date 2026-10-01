@@ -17,17 +17,26 @@ class WorkflowJobService:
     def __init__(self, repo: WorkflowJobRepository, civex_dir: Path) -> None:
         self._repo = repo
         self._civex_dir = civex_dir
+        self._loaded: tuple[tuple, list[WorkflowDef]] | None = None
 
     def _load_workflows(self) -> list[WorkflowDef]:
+        """Every parseable workflow. Every record write asks, so the files are
+        only re-read when one has changed (name, size or mtime) -- a stat per
+        file, not a YAML parse per file, per record."""
         wf_dir = self._civex_dir / "workflows"
         if not wf_dir.exists():
             return []
+        paths = sorted(wf_dir.glob("*.yaml")) + sorted(wf_dir.glob("*.yml"))
+        stamp = tuple((p.name, p.stat().st_mtime_ns, p.stat().st_size) for p in paths)
+        if self._loaded is not None and self._loaded[0] == stamp:
+            return self._loaded[1]
         result: list[WorkflowDef] = []
-        for path in sorted(wf_dir.glob("*.yaml")) + sorted(wf_dir.glob("*.yml")):
+        for path in paths:
             try:
                 result.append(load_workflow(path))
             except Exception as e:
                 log.warning("Skipping unparseable workflow file %s: %s", path, e)
+        self._loaded = (stamp, result)
         return result
 
     def find_workflow(self, name: str) -> WorkflowDef | None:

@@ -13,6 +13,7 @@ import {
 } from '../../utils/filterTree'
 import {
   fieldKey,
+  findFilterField,
   type FilterableField,
   type FieldRelation,
 } from '../../utils/hierarchy'
@@ -21,11 +22,19 @@ import {
   MultiRecordSearchPicker,
   RecordSearchPicker,
 } from '../records/RecordSearchPicker'
-import {
-  effectiveTimeZone,
-  utcToZonedLocal,
-  zonedLocalToUTC,
-} from '../../utils/dates'
+import { DynamicField } from '../records/DynamicField'
+
+/** Field types whose record-form input also works as a filter value. The
+ * rest (geo, files, tags, ...) are matched as text. */
+const TYPED_INPUT = new Set([
+  'string',
+  'integer',
+  'float',
+  'enum',
+  'date',
+  'datetime',
+  'url',
+])
 
 interface FilterBuilderProps {
   root: FilterGroupNode
@@ -37,21 +46,6 @@ const RELATION_HINT: Record<FieldRelation, string> = {
   self: 'this level',
   ancestor: 'parent record',
   descendant: 'any child record',
-}
-
-/** The field a condition names. A condition without a schema (saved before
- * conditions could name one) means the listed schema's, or an ancestor's. */
-function fieldOf(
-  fields: FilterableField[],
-  node: FilterConditionNode,
-): FilterableField | undefined {
-  return fields.find(
-    (f) =>
-      f.name === node.field &&
-      (node.schema
-        ? f.sourceSchemaName === node.schema
-        : f.relation !== 'descendant'),
-  )
 }
 
 /** Airtable/Notion-style groupable AND/OR filter builder. Operates on the
@@ -143,65 +137,25 @@ function FilterValueInput({
       </Select>
     )
   }
-  const choices = field?.restrictions?.choices
-  if (Array.isArray(choices)) {
+  // A substring test is always free text, whatever the field's type.
+  if (field && op !== 'contains' && TYPED_INPUT.has(field.type)) {
+    const numeric = field.type === 'integer' || field.type === 'float'
     return (
-      <Select
-        aria-label="Value"
-        value={String(value ?? '')}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-40"
-      >
-        <option value="">Select…</option>
-        {choices.map((c) => (
-          <option key={String(c)} value={String(c)}>
-            {String(c)}
-          </option>
-        ))}
-      </Select>
-    )
-  }
-  if (field?.type === 'date') {
-    return (
-      <Input
-        aria-label="Value"
-        type="date"
-        value={String(value ?? '')}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-40"
-      />
-    )
-  }
-  if (field?.type === 'datetime') {
-    // A view belongs to a schema, not a collection, so only the field's own
-    // timezone override is known here; otherwise it's the viewer's zone.
-    const timeZone = effectiveTimeZone(field, null)
-    return (
-      <Input
-        aria-label="Value"
-        type="datetime-local"
-        value={utcToZonedLocal(String(value ?? ''), timeZone)}
-        onChange={(e) => {
-          // A wall time in a DST gap/overlap resolves to no single instant;
-          // keep the previous filter value rather than store a guess.
-          const utc = zonedLocalToUTC(e.target.value, timeZone)
-          if (utc !== null) onChange(utc)
-        }}
-        className="w-56"
-      />
-    )
-  }
-  if (field?.type === 'integer' || field?.type === 'float') {
-    return (
-      <Input
-        aria-label="Value"
-        type="number"
-        value={value === '' || value == null ? '' : String(value)}
-        onChange={(e) =>
-          onChange(e.target.value === '' ? '' : Number(e.target.value))
-        }
-        className="w-32"
-      />
+      // The record form's own input for this type -- choices, enums,
+      // partial dates, units, timezones -- so a filter can't drift from it.
+      <label className="block w-48">
+        <span className="sr-only">Value</span>
+        <DynamicField
+          // Whether a record *needs* the field says nothing about a filter.
+          field={{ ...field, required: false }}
+          value={value}
+          placeholder="Value"
+          onChange={(v) =>
+            // The server compares by JSON type: "30" would sort as text.
+            onChange(numeric && v !== '' && !isNaN(Number(v)) ? Number(v) : v)
+          }
+        />
+      </label>
     )
   }
   return (
@@ -226,7 +180,7 @@ function ConditionEditor({
   fields: FilterableField[]
   onChange: (root: FilterGroupNode) => void
 }) {
-  const field = fieldOf(fields, node)
+  const field = findFilterField(fields, node)
 
   function update(patch: Partial<FilterConditionNode>) {
     onChange(

@@ -14,6 +14,7 @@ from civex.domain.dtos import (
     RecordDTO,
     ReferrerGroupDTO,
     ResolvedField,
+    ResolvedSchema,
     SchemaDTO,
 )
 from civex.domain import geo as geo_domain
@@ -38,7 +39,7 @@ from civex.repositories.protocols import (
     FileObjectStore,
     RecordRepository,
 )
-from civex.services.schema_service import SchemaService
+from civex.services.schema_service import SchemaResolver, SchemaService
 
 from typing import TYPE_CHECKING
 
@@ -380,35 +381,42 @@ class RecordService:
     # ------------------------------------------------------------------
 
     def _names_to_ids(
-        self, data: dict[str, Any], schema_id: uuid.UUID
+        self, data: dict[str, Any], shape: ResolvedSchema | None
     ) -> dict[str, Any]:
-        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
-        if schema is None:
+        if shape is None:
             return data
-        name_map = self._schema_svc.name_to_id_map(schema)
-        return {name_map.get(k, k): v for k, v in data.items()}
+        return {shape.name_to_id.get(k, k): v for k, v in data.items()}
 
     def _ids_to_names(
-        self, data: dict[str, Any], schema_id: uuid.UUID
+        self, data: dict[str, Any], shape: ResolvedSchema | None
     ) -> dict[str, Any]:
-        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
-        if schema is None:
+        if shape is None:
             return data
-        id_map = self._schema_svc.id_to_name_map(schema)
-        return {id_map.get(k, k): v for k, v in data.items()}
+        return {shape.id_to_name.get(k, k): v for k, v in data.items()}
 
-    def _with_names(self, dto: RecordDTO) -> RecordDTO:
-        schema = self._schema_svc._repo.get_by_id(dto.schema_id, include_deleted=True)
-        if schema is None:
+    def _with_names(
+        self, dto: RecordDTO, shapes: SchemaResolver | None = None
+    ) -> RecordDTO:
+        """`dto` with name-keyed data and its natural name. Pass the
+        operation's `shapes` when naming several records, so each schema is
+        resolved once, not once per record."""
+        shape = (shapes or self._schema_svc.resolver())(dto.schema_id)
+        if shape is None:
             return dataclasses.replace(dto)
-        id_map = self._schema_svc.id_to_name_map(schema)
-        named_data = {id_map.get(k, k): v for k, v in dto.data.items()}
-        fields = self._schema_svc.collect_fields(schema)
-        natural_name = _natural_name(named_data, fields, schema.display_fields)
-        named_data = _apply_filename_templates(named_data, fields)
+        named_data = {shape.id_to_name.get(k, k): v for k, v in dto.data.items()}
+        natural_name = _natural_name(
+            named_data, shape.fields, shape.schema.display_fields
+        )
+        named_data = _apply_filename_templates(named_data, shape.fields)
         return dataclasses.replace(dto, data=named_data, natural_name=natural_name)
 
-    def _attach_reference_labels(self, records: list[RecordDTO]) -> list[RecordDTO]:
+    def _with_names_many(self, dtos: list[RecordDTO]) -> list[RecordDTO]:
+        shapes = self._schema_svc.resolver()
+        return [self._with_names(r, shapes) for r in dtos]
+
+    def _attach_reference_labels(
+        self, records: list[RecordDTO], shapes: SchemaResolver | None = None
+    ) -> list[RecordDTO]:
         """Batch-resolve reference/reference_list values to their target's
         natural_name, attached as RecordDTO.reference_labels -- one extra
         query for the whole batch instead of one per reference value, so a
@@ -428,7 +436,12 @@ class RecordService:
             if dataset_id is None:
                 return None
             if dataset_id not in dataset_names:
-                ds = self._datasets.get_by_id(dataset_id, include_deleted=True)
+                ds = self._datasets.get_by_id(
+                    dataset_id,
+                    include_deleted=True,
+                    with_count=False,
+                    with_schemas=False,
+                )
                 dataset_names[dataset_id] = ds.name if ds else None
             return dataset_names[dataset_id]
 
@@ -437,19 +450,11 @@ class RecordService:
             for r in records
         ]
 
-        # schema_id -> fields, cached so repeated schemas in the batch (the
-        # common case: a whole page of one schema) resolve once.
-        fields_by_schema: dict[uuid.UUID, list[ResolvedField]] = {}
+        shapes = shapes or self._schema_svc.resolver()
 
         def fields_for(schema_id: uuid.UUID) -> list[ResolvedField]:
-            if schema_id not in fields_by_schema:
-                schema = self._schema_svc._repo.get_by_id(
-                    schema_id, include_deleted=True
-                )
-                fields_by_schema[schema_id] = (
-                    self._schema_svc.collect_fields(schema) if schema else []
-                )
-            return fields_by_schema[schema_id]
+            shape = shapes(schema_id)
+            return shape.fields if shape else []
 
         def reference_ids(
             data: dict[str, Any], fields: list[ResolvedField]
@@ -485,15 +490,12 @@ class RecordService:
         target_dataset = {t.id: t.dataset_id for t in targets}
         label_by_id: dict[uuid.UUID, str | None] = {}
         for t in targets:
-            t_schema = self._schema_svc._repo.get_by_id(
-                t.schema_id, include_deleted=True
-            )
-            if t_schema is None:
+            t_shape = shapes(t.schema_id)
+            if t_shape is None:
                 continue
-            id_map = self._schema_svc.id_to_name_map(t_schema)
-            named_data = {id_map.get(k, k): v for k, v in t.data.items()}
+            named_data = {t_shape.id_to_name.get(k, k): v for k, v in t.data.items()}
             label_by_id[t.id] = _natural_name(
-                named_data, fields_for(t.schema_id), t_schema.display_fields
+                named_data, t_shape.fields, t_shape.schema.display_fields
             )
 
         def foreign_collections(
@@ -519,15 +521,13 @@ class RecordService:
         ]
 
     def _apply_defaults(
-        self, data: dict[str, Any], schema_id: uuid.UUID
+        self, data: dict[str, Any], shape: ResolvedSchema | None
     ) -> dict[str, Any]:
         """For any field with a default_value that is absent from data, insert the default."""
-        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
-        if schema is None:
+        if shape is None:
             return data
-        all_fields = self._schema_svc.collect_fields(schema)
         result = dict(data)
-        for rf in all_fields:
+        for rf in shape.fields:
             f = rf.field
             if f.default_value is not None and f.name not in result:
                 result[f.name] = f.default_value
@@ -641,7 +641,7 @@ class RecordService:
     def _normalise_datetimes(
         self,
         data: dict[str, Any],
-        schema_id: uuid.UUID,
+        shape: ResolvedSchema | None,
         dataset_timezone: str | None,
         unchanged: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -654,15 +654,11 @@ class RecordService:
         offset-less value must not be re-read in a zone set after it was
         stored -- that would silently shift it.
         """
-        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
-        if schema is None:
+        if shape is None:
             return data
-        fields_by_name = {
-            rf.field.name: rf.field for rf in self._schema_svc.collect_fields(schema)
-        }
         out = dict(data)
         for name, value in data.items():
-            field = fields_by_name.get(name)
+            field = shape.by_name.get(name)
             if field is None or field.dtype != "datetime":
                 continue
             if not isinstance(value, str) or (
@@ -690,7 +686,7 @@ class RecordService:
     def _check_references(
         self,
         data: dict[str, Any],
-        schema_id: uuid.UUID,
+        shape: ResolvedSchema | None,
         dataset: DatasetDTO,
         unchanged: dict[str, Any] | None = None,
     ) -> None:
@@ -698,10 +694,10 @@ class RecordService:
         this collection or in a global one (see civex.domain.scopes). Values
         equal to the record's stored ones (`unchanged`) are not re-checked, so
         editing a record never fails over a reference it already held."""
-        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
-        if schema is None:
+        if shape is None:
             return
-        for rf in self._schema_svc.collect_fields(schema):
+        wanted: list[tuple[str, Any]] = []
+        for rf in shape.fields:
             field = rf.field
             if field.dtype not in ("reference", "reference_list"):
                 continue
@@ -710,63 +706,78 @@ class RecordService:
                 unchanged is not None and unchanged.get(field.name) == value
             ):
                 continue
-            items = value if isinstance(value, list) else [value]
-            for item in items:
-                self._check_reference_target(field.name, item, dataset)
+            for item in value if isinstance(value, list) else [value]:
+                wanted.append((field.name, item))
+        self._check_reference_targets(wanted, dataset)
 
-    def _check_reference_target(
-        self, field_name: str, raw: Any, dataset: DatasetDTO
+    def _check_reference_targets(
+        self, wanted: list[tuple[str, Any]], dataset: DatasetDTO
     ) -> None:
-        try:
-            target_id = uuid.UUID(str(raw))
-        except ValueError:
-            raise ValidationError(
-                f"Field '{field_name}': '{raw}' is not a record id"
-            ) from None
-        found = self._records.list_by_ids([target_id])
-        target = found[0] if found else None
-        if target is None or target.deleted_at is not None:
-            raise ValidationError(f"Field '{field_name}': record {raw} not found")
-        if target.dataset_id == dataset.id:
+        """Check every (field name, record id) in `wanted` against `dataset`:
+        the target must be a live record here or in a global collection. All
+        the targets are fetched together, and each collection looked up once,
+        however many references a record holds."""
+        if not wanted:
             return
-        owner = self._datasets.get_by_id(target.dataset_id, include_deleted=True)
-        if owner is None or not can_reference(dataset.id, owner.id, owner.scope):
-            where = f"collection '{owner.name}'" if owner else "another collection"
-            raise ValidationError(
-                f"Field '{field_name}': record {str(target_id)[:8]} is in "
-                f"{where}, which is local. A record can only reference "
-                f"records in its own collection or in a global collection."
-            )
+        ids: list[uuid.UUID] = []
+        for field_name, raw in wanted:
+            try:
+                ids.append(uuid.UUID(str(raw)))
+            except ValueError:
+                raise ValidationError(
+                    f"Field '{field_name}': '{raw}' is not a record id"
+                ) from None
+        targets = {t.id: t for t in self._records.list_by_ids(ids)}
+        owners: dict[uuid.UUID, DatasetDTO | None] = {}
+        for (field_name, raw), target_id in zip(wanted, ids):
+            target = targets.get(target_id)
+            if target is None or target.deleted_at is not None:
+                raise ValidationError(f"Field '{field_name}': record {raw} not found")
+            if target.dataset_id == dataset.id:
+                continue
+            if target.dataset_id not in owners:
+                owners[target.dataset_id] = self._datasets.get_by_id(
+                    target.dataset_id,
+                    include_deleted=True,
+                    with_count=False,
+                    with_schemas=False,
+                )
+            owner = owners[target.dataset_id]
+            if owner is None or not can_reference(dataset.id, owner.id, owner.scope):
+                where = f"collection '{owner.name}'" if owner else "another collection"
+                raise ValidationError(
+                    f"Field '{field_name}': record {str(target_id)[:8]} is in "
+                    f"{where}, which is local. A record can only reference "
+                    f"records in its own collection or in a global collection."
+                )
 
     def referrer_counts(self, record_id: str) -> list[ReferrerGroupDTO]:
         """What points at this record: live records holding a reference to it,
-        grouped by (collection, schema, field) with a distinct-record count.
-        A record stores only its own schema's fields, so the referrer's schema
-        is the one that owns the field. Sorted by collection, schema, field."""
+        grouped by (collection, schema, field) with a record count. A record
+        stores only its own schema's fields, so the referrer's schema is the
+        one that owns the field. Sorted by collection, schema, field."""
         target = self.get(record_id)
         field_map = self._reference_field_map(target.schema_name)
-        groups: dict[tuple[uuid.UUID, str, str], tuple[str, int]] = {}
-        for rec, matched in self._find_referrers(
-            {target.id}, exclude_ids=set(), target_schema=target.schema_name
-        ):
-            for fid_str, fname in matched.items():
-                key = (rec.dataset_id, rec.schema_name, fname)
-                dtype, count = groups.get(key, (field_map[fid_str][1], 0))
-                groups[key] = (dtype, count + 1)
         datasets: dict[uuid.UUID, Any] = {}
         result = []
-        for (dataset_id, schema_name, fname), (dtype, count) in groups.items():
+        for dataset_id, schema_name, field_id, count in self._records.referrer_groups(
+            target.id, [uuid.UUID(f) for f in field_map]
+        ):
             if dataset_id not in datasets:
                 datasets[dataset_id] = self._datasets.get_by_id(
-                    dataset_id, include_deleted=True
+                    dataset_id,
+                    include_deleted=True,
+                    with_count=False,
+                    with_schemas=False,
                 )
             ds = datasets[dataset_id]
+            field_name, dtype = field_map[str(field_id)]
             result.append(
                 ReferrerGroupDTO(
                     dataset_id=dataset_id,
                     dataset_name=ds.name if ds else "",
                     schema_name=schema_name,
-                    field_name=fname,
+                    field_name=field_name,
                     dtype=dtype,
                     count=count,
                 )
@@ -775,30 +786,32 @@ class RecordService:
         return result
 
     def collection_referrers(
-        self, dataset_id: uuid.UUID
-    ) -> list[tuple[RecordDTO, dict[str, str]]]:
-        """Records in *other* collections that reference a record in this one,
-        with the referencing fields -- what stops a global collection from
-        being made local or deleted."""
-        own = {r.id for r in self._records.list_by_dataset(dataset_id)}
-        found: dict[uuid.UUID, tuple[RecordDTO, dict[str, str]]] = {}
-        ids = list(own)
-        for start in range(0, len(ids), 500):
-            chunk = set(ids[start : start + 500])
-            for rec, fields in self._find_referrers(chunk, exclude_ids=own):
-                found.setdefault(rec.id, (rec, fields))
-        return list(found.values())
+        self, dataset_id: uuid.UUID, limit: int = 5
+    ) -> tuple[int, list[tuple[RecordDTO, dict[str, str]]]]:
+        """Records in *other* collections that reference a record in this one --
+        how many there are, and the first `limit` with their referencing
+        fields. What stops a global collection from being made local or
+        deleted."""
+        field_map = self._reference_field_map()
+        total, pairs = self._records.referrers_into_dataset(
+            dataset_id, [uuid.UUID(f) for f in field_map], limit
+        )
+        fields: dict[uuid.UUID, dict[str, str]] = {}
+        for record_id, field_id in pairs:
+            fields.setdefault(record_id, {})[str(field_id)] = field_map[str(field_id)][
+                0
+            ]
+        records = {r.id: r for r in self._records.list_by_ids(list(fields))}
+        return total, [(records[rid], f) for rid, f in fields.items() if rid in records]
 
-    def _validate_data(self, data: dict[str, Any], schema_id: uuid.UUID) -> None:
+    def _validate_data(
+        self, data: dict[str, Any], shape: ResolvedSchema | None
+    ) -> None:
         """Validate all field values in data against their restrictions."""
-        schema = self._schema_svc._repo.get_by_id(schema_id, include_deleted=True)
-        if schema is None:
+        if shape is None:
             return
-        fields_by_name = {
-            rf.field.name: rf.field for rf in self._schema_svc.collect_fields(schema)
-        }
         for name, value in data.items():
-            field = fields_by_name.get(name)
+            field = shape.by_name.get(name)
             if field is None or value is None:
                 continue
             _check_restrictions(value, field.dtype, field.restrictions, name)
@@ -833,8 +846,12 @@ class RecordService:
         data: dict[str, Any],
         parent_record_id: str | None = None,
         _job_depth: int = 0,
+        with_labels: bool = True,
     ) -> RecordDTO:
-        dataset = self._datasets.get_by_name(dataset_name)
+        """Create a record. `with_labels=False` skips resolving its reference
+        values' display names and collection for the returned DTO (a few
+        queries) -- for loops, like a restore, that discard the result."""
+        dataset = self._datasets.get_by_name(dataset_name, with_count=False)
         if not dataset:
             raise NotFoundError(f"Dataset '{dataset_name}' not found")
 
@@ -842,8 +859,9 @@ class RecordService:
         self._check_schema_allowed(dataset, schema)
 
         # Apply field defaults before validation
-        data = self._apply_defaults(data, schema.id)
-        data = self._normalise_datetimes(data, schema.id, dataset.timezone)
+        shape = self._schema_svc.resolve(schema)
+        data = self._apply_defaults(data, shape)
+        data = self._normalise_datetimes(data, shape, dataset.timezone)
 
         resolved_parent_id = None
         if schema.parent_id:
@@ -858,10 +876,10 @@ class RecordService:
                 raise ValidationError(
                     f"Parent record must belong to dataset '{dataset_name}'"
                 )
-            expected_parent = self._schema_svc._repo.get_by_id(
-                schema.parent_id, include_deleted=True
-            )
             if parent_record.schema_id != schema.parent_id:
+                expected_parent = self._schema_svc._repo.get_by_id(
+                    schema.parent_id, include_deleted=True
+                )
                 raise ValidationError(
                     f"Parent record uses schema '{parent_record.schema_name}', "
                     f"expected '{expected_parent.name if expected_parent else schema.parent_id}'"
@@ -873,18 +891,20 @@ class RecordService:
             ]
             self.validate(data, own_fields)
         else:
-            self.validate(data, self._schema_svc.collect_fields(schema))
+            self.validate(data, shape.fields)
 
-        self._validate_data(data, schema.id)
-        self._check_references(data, schema.id, dataset)
-        id_data = self._names_to_ids(data, schema.id)
+        self._validate_data(data, shape)
+        self._check_references(data, shape, dataset)
+        id_data = self._names_to_ids(data, shape)
         dto = self._records.create(
             dataset_id=dataset.id,
             schema_id=schema.id,
             data=id_data,
             parent_record_id=resolved_parent_id,
         )
-        named = self._with_names(dto)
+        shapes = self._schema_svc.resolver()
+        shapes.prime(shape)
+        named = self._with_names(dto, shapes)
         if self._audit:
             self._audit.log_change("create", "record", dto.id, None, named.to_dict())
         if self._job_svc:
@@ -900,7 +920,9 @@ class RecordService:
                         changed_fields=set_fields,
                         depth=_job_depth,
                     )
-        return self._attach_reference_labels([named])[0]
+        return (
+            self._attach_reference_labels([named], shapes)[0] if with_labels else named
+        )
 
     def get(self, record_id: str) -> RecordDTO:
         record = self._records.get_by_prefix(record_id)
@@ -991,25 +1013,32 @@ class RecordService:
         if not raw:
             raise NotFoundError(f"Record '{record_id}' not found")
         # Apply field defaults before validation
-        data = self._apply_defaults(data, raw.schema_id)
-        old_data = self._ids_to_names(raw.data, raw.schema_id)
+        shapes = self._schema_svc.resolver()
+        shape = shapes(raw.schema_id)
+        data = self._apply_defaults(data, shape)
+        old_data = self._ids_to_names(raw.data, shape)
         dataset = (
-            self._datasets.get_by_id(raw.dataset_id, include_deleted=True)
+            self._datasets.get_by_id(
+                raw.dataset_id,
+                include_deleted=True,
+                with_count=False,
+                with_schemas=False,
+            )
             if raw.dataset_id
             else None
         )
         data = self._normalise_datetimes(
             data,
-            raw.schema_id,
+            shape,
             dataset.timezone if dataset else None,
             unchanged=old_data,
         )
-        self._validate_data(data, raw.schema_id)
+        self._validate_data(data, shape)
         if dataset:
-            self._check_references(data, raw.schema_id, dataset, unchanged=old_data)
-        id_data = self._names_to_ids(data, raw.schema_id)
+            self._check_references(data, shape, dataset, unchanged=old_data)
+        id_data = self._names_to_ids(data, shape)
         dto = self._records.update(id=raw.id, data=id_data)
-        named = self._with_names(dto)
+        named = self._with_names(dto, shapes)
         if self._audit:
             old_named = dataclasses.replace(
                 raw, data=old_data, schema_name=named.schema_name
@@ -1026,7 +1055,7 @@ class RecordService:
             self._job_svc.trigger_for_record(
                 named, "record_updated", changed_fields=changed, depth=_job_depth
             )
-        return self._attach_reference_labels([named])[0]
+        return self._attach_reference_labels([named], shapes)[0]
 
     # ------------------------------------------------------------------
     # Queries -- every read path (collection list, a record's descendants,
@@ -1040,7 +1069,9 @@ class RecordService:
         resolve, so a bad query fails loudly instead of matching nothing."""
         dataset_id = None
         if query.dataset:
-            dataset = self._datasets.get_by_name(query.dataset)
+            dataset = self._datasets.get_by_name(
+                query.dataset, with_count=False, with_schemas=False
+            )
             if not dataset:
                 raise NotFoundError(f"Dataset '{query.dataset}' not found")
             dataset_id = dataset.id
@@ -1209,12 +1240,16 @@ class RecordService:
         offset: int = 0,
         columns: list[str] | None = None,
         child_counts: bool = False,
+        after: tuple[_dt, uuid.UUID] | None = None,
     ) -> list[RecordDTO]:
         """One page of `query`. `columns` asks for values that aren't in a
         record's own data (an inherited field, a `ref.field` join), attached
-        as `derived`; `child_counts` attaches per-child-schema counts."""
-        records = self._records.list_filtered(self.resolve(query), offset, limit)
-        named = self._attach_reference_labels([self._with_names(r) for r in records])
+        as `derived`; `child_counts` attaches per-child-schema counts. `after`
+        continues an unsorted listing past a record (see `stream_records`)."""
+        records = self._records.list_filtered(
+            self.resolve(query), offset, limit, after=after
+        )
+        named = self._attach_reference_labels(self._with_names_many(records))
         if columns and query.schema:
             named = self._attach_derived(query.schema, named, columns)
         if child_counts:
@@ -1234,18 +1269,31 @@ class RecordService:
         columns: list[str] | None = None,
     ) -> Iterator[list[RecordDTO]]:
         """Every matching record, one page at a time -- for exports, which
-        must not hold the whole result set in memory."""
+        must not hold the whole result set in memory.
+
+        An unsorted walk continues from the last record's (created_at, id)
+        rather than an ever-growing OFFSET, which would re-read every row it
+        skips and make a large export quadratic. A custom sort has no such
+        cursor, so it still pages by offset."""
         offset = 0
+        after: tuple[_dt, uuid.UUID] | None = None
         while True:
             page = self.query_records(
-                query, limit=page_size, offset=offset, columns=columns
+                query,
+                limit=page_size,
+                offset=0 if after else offset,
+                columns=columns,
+                after=after,
             )
             if not page:
                 return
             yield page
             if len(page) < page_size:
                 return
-            offset += page_size
+            if query.sort:
+                offset += page_size
+            else:
+                after = (page[-1].created_at, page[-1].id)
 
     def schema_counts(self, query: RecordQuery) -> dict[str, int]:
         """Matching records per schema name -- one GROUP BY, no rows loaded.
@@ -1358,18 +1406,20 @@ class RecordService:
         schema = self._schema_svc.get(schema_name)
         dataset_ids = None
         if reachable_from:
-            source = self._datasets.get_by_name(reachable_from)
+            source = self._datasets.get_by_name(
+                reachable_from, with_count=False, with_schemas=False
+            )
             if not source:
                 raise NotFoundError(f"Dataset '{reachable_from}' not found")
             dataset_ids = [source.id] + [
                 d.id
-                for d in self._datasets.list_all()
+                for d in self._datasets.list_all(with_count=False)
                 if d.scope == GLOBAL and d.id != source.id
             ]
         records = self._records.list_by_schema(
             schema.id, search=search, limit=limit, dataset_ids=dataset_ids
         )
-        return self._attach_reference_labels([self._with_names(r) for r in records])
+        return self._attach_reference_labels(self._with_names_many(records))
 
     def search(
         self,
@@ -1386,12 +1436,14 @@ class RecordService:
             return []
         dataset_id = None
         if collection:
-            dataset = self._datasets.get_by_name(collection)
+            dataset = self._datasets.get_by_name(
+                collection, with_count=False, with_schemas=False
+            )
             if not dataset:
                 raise NotFoundError(f"Dataset '{collection}' not found")
             dataset_id = dataset.id
         records = self._records.search_all(query, limit=limit, dataset_id=dataset_id)
-        return self._attach_reference_labels([self._with_names(r) for r in records])
+        return self._attach_reference_labels(self._with_names_many(records))
 
     # ------------------------------------------------------------------
     # Columns that aren't in a record's own data
@@ -1587,32 +1639,26 @@ class RecordService:
 
     def delete(self, record_id: str, force: bool = False) -> None:
         record = self.get(record_id)
-        delete_set = self._collect_delete_set(record.id)
-        self._handle_referrers(delete_set, force)
-        self._delete_recursive(record.id)
+        self._delete_records([record.id], force)
 
     def delete_many(self, record_ids: list[str], force: bool = False) -> int:
-        records = []
+        """Delete the records `record_ids` name (full ids or unique prefixes);
+        ids that are missing or already deleted are skipped."""
+        full: list[uuid.UUID] = []
         for rid in record_ids:
             try:
-                records.append(self.get(rid))
-            except NotFoundError:
-                continue
-        return self._delete_records([r.id for r in records], force)
+                full.append(uuid.UUID(rid))
+            except ValueError:
+                record = self._records.get_by_prefix(rid)
+                if record:
+                    full.append(record.id)
+        live = [r.id for r in self._records.list_by_ids(full) if r.deleted_at is None]
+        return self._delete_records(live, force)
 
     def delete_matching(self, query: RecordQuery, force: bool = False) -> int:
         """Delete every record `query` matches -- what "select all N
         matching" means, as opposed to deleting the ids on one page."""
-        resolved = self.resolve(query)
-        ids: list[uuid.UUID] = []
-        offset = 0
-        while True:
-            page = self._records.list_filtered(resolved, offset, EXPORT_PAGE)
-            ids.extend(r.id for r in page)
-            if len(page) < EXPORT_PAGE:
-                break
-            offset += EXPORT_PAGE
-        return self._delete_records(ids, force)
+        return self._delete_records(self._records.list_ids(self.resolve(query)), force)
 
     def delete_all(
         self, dataset_name: str, schema_name: str | None = None, force: bool = False
@@ -1622,18 +1668,31 @@ class RecordService:
         )
 
     def _delete_records(self, ids: list[uuid.UUID], force: bool) -> int:
-        delete_set: set[uuid.UUID] = set()
-        for rid in ids:
-            delete_set |= self._collect_delete_set(rid)
-        self._handle_referrers(delete_set, force)
+        """Delete `ids` and everything beneath them. Returns how many of `ids`
+        were deleted in their own right -- one already beneath another is
+        deleted with it, and not counted again.
 
-        deleted = 0
-        for rid in ids:
-            if not self._records.get_by_id(rid):
-                continue  # already gone via a parent cascade earlier in this batch
-            self._delete_recursive(rid)
-            deleted += 1
-        return deleted
+        The whole subtree is found a level at a time and soft-deleted with a
+        bulk UPDATE, not a query and a flush per record."""
+        levels = self._records.subtree_levels(ids, deleted=False)
+        if not levels:
+            return 0
+        every = [rid for level in levels for rid in level]
+        doomed = set(every)
+        self._handle_referrers(doomed, force)
+        records = self._records.list_by_ids(every)
+        if self._audit:
+            for record in records:
+                self._audit.log_change(
+                    "delete", "record", record.id, record.to_dict(), None
+                )
+        self._records.delete_many(every)
+        requested = set(ids)
+        return sum(
+            1
+            for record in records
+            if record.id in requested and record.parent_record_id not in doomed
+        )
 
     def list_deleted(
         self,
@@ -1643,28 +1702,40 @@ class RecordService:
     ) -> list[RecordDTO]:
         dataset_id = None
         if dataset_name:
-            dataset = self._datasets.get_by_name(dataset_name)
+            dataset = self._datasets.get_by_name(
+                dataset_name, with_count=False, with_schemas=False
+            )
             if not dataset:
                 raise NotFoundError(f"Dataset '{dataset_name}' not found")
             dataset_id = dataset.id
         return self._attach_reference_labels(
-            [
-                self._with_names(r)
-                for r in self._records.list_deleted(
-                    dataset_id, offset=offset, limit=limit
-                )
-            ]
+            self._with_names_many(
+                self._records.list_deleted(dataset_id, offset=offset, limit=limit)
+            )
         )
 
     def restore(self, record_id: str) -> RecordDTO:
         """Undo delete(): the record and every descendant cascade-deleted
-        with it (see _restore_recursive) become live again."""
+        with it become live again."""
         record = self._records.get_by_prefix(record_id, include_deleted=True)
         if record is None:
             raise NotFoundError(f"Record '{record_id}' not found")
         if record.deleted_at is None:
             raise ValidationError(f"Record '{record_id}' is not deleted")
-        self._restore_recursive(record.id)
+        levels = self._records.subtree_levels([record.id], deleted=True)
+        every = [rid for level in levels for rid in level]
+        before = {r.id: r for r in self._records.list_by_ids(every)}
+        self._records.restore_many(every)
+        if self._audit:
+            shapes = self._schema_svc.resolver()
+            for restored in self._records.list_by_ids(every):
+                self._audit.log_change(
+                    "restore",
+                    "record",
+                    restored.id,
+                    before[restored.id].to_dict(),
+                    self._with_names(restored, shapes).to_dict(),
+                )
         return self.get(str(record.id))
 
     def purge(self, record_id: str) -> None:
@@ -1678,52 +1749,19 @@ class RecordService:
             raise ValidationError(
                 f"Record '{record_id}' must be deleted before it can be purged"
             )
-        self._purge_recursive(record.id)
-
-    def _restore_recursive(self, id: uuid.UUID) -> None:
-        for child in self._records.list_children(id, include_deleted=True):
-            if child.deleted_at is not None:
-                self._restore_recursive(child.id)
-        record_dto = self._records.get_by_id(id, include_deleted=True)
-        restored = self._records.restore(id)
-        if self._audit and record_dto:
-            old_named = dataclasses.replace(
-                record_dto, schema_name=self._with_names(record_dto).schema_name
-            )
-            self._audit.log_change(
-                "restore",
-                "record",
-                id,
-                old_named.to_dict(),
-                self._with_names(restored).to_dict(),
-            )
-
-    def _purge_recursive(self, id: uuid.UUID) -> None:
-        for child in self._records.list_children(id, include_deleted=True):
-            self._purge_recursive(child.id)
-        record_dto = self._records.get_by_id(id, include_deleted=True)
-        if self._audit and record_dto:
-            self._audit.log_change(
-                "purge", "record", id, self._with_names(record_dto).to_dict(), None
-            )
-        self._records.purge(id)
-
-    def _delete_recursive(self, id: uuid.UUID) -> None:
-        for child in self._records.list_children(id):
-            self._delete_recursive(child.id)
-        record_dto = self._records.get_by_id(id)
-        if self._audit and record_dto:
-            self._audit.log_change("delete", "record", id, record_dto.to_dict(), None)
-        self._records.delete(id)
-
-    def _collect_delete_set(self, root_id: uuid.UUID) -> set[uuid.UUID]:
-        """A record plus every descendant that cascades with it via
-        parent_record_id -- the full set of ids that will disappear together,
-        so referrers *within* the set don't block the delete."""
-        ids = {root_id}
-        for child in self._records.list_children(root_id):
-            ids |= self._collect_delete_set(child.id)
-        return ids
+        levels = self._records.subtree_levels([record.id], deleted=None)
+        every = [rid for level in levels for rid in level]
+        if self._audit:
+            shapes = self._schema_svc.resolver()
+            for gone in self._records.list_by_ids(every):
+                self._audit.log_change(
+                    "purge",
+                    "record",
+                    gone.id,
+                    self._with_names(gone, shapes).to_dict(),
+                    None,
+                )
+        self._records.purge_many(every)
 
     def _reference_field_map(
         self, target_schema: str | None = None
@@ -1756,42 +1794,20 @@ class RecordService:
         pairs so callers know exactly which field(s) to null out or report.
 
         `target_schema` (the targets' schema name) skips fields whose `schema`
-        restriction names a different schema -- they can't hold these targets,
-        so the lookup scans fewer fields."""
+        restriction names a different schema -- they can't hold these targets."""
         field_map = self._reference_field_map(target_schema)
         if not field_map:
             return []
-        ref_ids = [
-            uuid.UUID(fid) for fid, (_, dt) in field_map.items() if dt == "reference"
-        ]
-        ref_list_ids = [
-            uuid.UUID(fid)
-            for fid, (_, dt) in field_map.items()
-            if dt == "reference_list"
-        ]
-        target_strs = {str(t) for t in target_ids}
-        candidates = self._records.list_referencing(
-            list(target_ids), ref_ids, ref_list_ids
-        )
-
-        results = []
-        for rec in candidates:
-            if rec.id in exclude_ids:
-                continue
-            matched: dict[str, str] = {}
-            for fid_str, (fname, dt) in field_map.items():
-                val = rec.data.get(fid_str)
-                if dt == "reference" and val in target_strs:
-                    matched[fid_str] = fname
-                elif (
-                    dt == "reference_list"
-                    and isinstance(val, list)
-                    and target_strs & set(val)
-                ):
-                    matched[fid_str] = fname
-            if matched:
-                results.append((rec, matched))
-        return results
+        matched: dict[uuid.UUID, dict[str, str]] = {}
+        for referrer_id, field_id, _ in self._records.referrers_of(
+            list(target_ids), [uuid.UUID(f) for f in field_map]
+        ):
+            if referrer_id not in exclude_ids:
+                matched.setdefault(referrer_id, {})[str(field_id)] = field_map[
+                    str(field_id)
+                ][0]
+        records = {r.id: r for r in self._records.list_by_ids(list(matched))}
+        return [(records[rid], m) for rid, m in matched.items() if rid in records]
 
     def _handle_referrers(self, target_ids: set[uuid.UUID], force: bool) -> None:
         """Block a delete of target_ids if anything outside the batch still
@@ -1824,37 +1840,18 @@ class RecordService:
                 )
 
     def find_dangling_references(self) -> list[dict[str, Any]]:
-        """Scan every record for reference/reference_list values pointing at a
-        record id that no longer exists. Surfaces integrity violations left
-        over from before delete-time enforcement existed (CIVEX-169) --
-        used by `civex doctor`."""
+        """Every reference/reference_list value pointing at a record that no
+        longer exists. Surfaces integrity violations left over from before
+        delete-time enforcement existed (CIVEX-169) -- used by `civex doctor`."""
         field_map = self._reference_field_map()
-        if not field_map:
-            return []
-        all_records = self._records.list_all()
-        existing_ids = {r.id for r in all_records}
-
-        dangling: list[dict[str, Any]] = []
-        for rec in all_records:
-            for fid_str, (fname, dt) in field_map.items():
-                val = rec.data.get(fid_str)
-                if val is None:
-                    continue
-                targets = val if dt == "reference_list" else [val]
-                if not isinstance(targets, list):
-                    continue
-                for t in targets:
-                    try:
-                        tid = uuid.UUID(str(t))
-                    except ValueError:
-                        continue
-                    if tid not in existing_ids:
-                        dangling.append(
-                            {
-                                "record_id": rec.id,
-                                "schema_name": rec.schema_name,
-                                "field_name": fname,
-                                "dangling_target_id": tid,
-                            }
-                        )
-        return dangling
+        return [
+            {
+                "record_id": record_id,
+                "schema_name": schema_name,
+                "field_name": field_map[str(field_id)][0],
+                "dangling_target_id": target_id,
+            }
+            for record_id, schema_name, field_id, target_id in (
+                self._records.dangling_references([uuid.UUID(f) for f in field_map])
+            )
+        ]

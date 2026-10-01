@@ -136,6 +136,19 @@ class ResolvedField:
     source_schema_name: str
 
 
+@dataclass(frozen=True)
+class ResolvedSchema:
+    """A schema with its inherited fields flattened and indexed. Resolving a
+    schema walks its parent chain, so a caller does it once per operation and
+    hands this down rather than each helper re-resolving from a schema id."""
+
+    schema: SchemaDTO
+    fields: list[ResolvedField]  # own fields first, then inherited
+    by_name: dict[str, FieldDTO]
+    name_to_id: dict[str, str]  # field name -> str(field.id)
+    id_to_name: dict[str, str]  # str(field.id) -> field name
+
+
 @dataclass
 class NameIssue:
     """A schema or field whose `name` predates slug validation.

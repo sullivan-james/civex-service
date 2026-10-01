@@ -127,3 +127,29 @@ def test_jobs_are_filterable_by_affected_schema(
     assert {j.id for j in found} == {touched.id, failed.id}  # partial work counts
     assert ctx.job_svc.count_jobs(affected_schema="other") == 2
     assert ctx.job_svc.count_jobs(affected_schema="doc") == 0
+
+
+def test_filtering_by_affected_record_reads_the_link_table_not_every_job(
+    ctx: AppContext, make_collection, make_schema, make_record
+) -> None:
+    from sqlalchemy import event
+
+    make_collection("study")
+    make_schema("subject", fields=[])
+    trigger = make_record("study", "subject", {})
+    touched = "44444444-4444-4444-4444-444444444444"
+    for _ in range(5):
+        job = ctx.job_svc.enqueue_manual("noop", trigger)
+        ctx.commit()
+        ctx.job_svc.mark_completed(
+            job.id, affected_records=[{"record_id": touched, "schema_name": "x"}]
+        )
+    ctx.commit()
+
+    seen: list[str] = []
+    engine = ctx._session.get_bind()
+    event.listen(engine, "before_cursor_execute", lambda c, cur, st, *a: seen.append(st))
+    jobs = ctx.job_svc.list_jobs(affected_record_id=touched, limit=2)
+
+    assert len(jobs) == 2
+    assert any("job_affected_records" in s for s in seen)

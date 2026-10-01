@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 
 from civex.db.models import AuditLog, Commit
@@ -74,38 +74,38 @@ class LocalAuditRepository:
     # ------------------------------------------------------------------
 
     def create_commit(self, message: str | None = None) -> CommitDTO:
-        staged = self._staged_entries()
-        if not staged:
+        by_type = self._staged_counts()
+        if not by_type:
             raise ValueError("Nothing to commit — no staged changes")
-
-        record_count = sum(1 for e in staged if e.entity_type == "record")
-        schema_count = sum(1 for e in staged if e.entity_type in ("schema", "field"))
-        dataset_count = sum(1 for e in staged if e.entity_type == "dataset")
 
         next_seq = (self._s.query(func.max(Commit.seq)).scalar() or 0) + 1
         commit = Commit(
             seq=next_seq,
             message=message,
-            record_count=record_count,
-            schema_count=schema_count,
-            dataset_count=dataset_count,
+            record_count=by_type.get("record", 0),
+            schema_count=by_type.get("schema", 0) + by_type.get("field", 0),
+            dataset_count=by_type.get("dataset", 0),
         )
         self._s.add(commit)
         self._s.flush()
 
-        for entry in staged:
-            entry.commit_id = commit.id
-
-        self._s.flush()
+        # One UPDATE however many entries are staged, not one per entry.
+        self._s.execute(
+            update(AuditLog)
+            .where(AuditLog.commit_id.is_(None))
+            .values(commit_id=commit.id)
+            .execution_options(synchronize_session=False)
+        )
+        self._s.expire_all()
         return _commit_dto(commit)
 
     def count_staged(self) -> dict[str, int]:
-        staged = self._staged_entries()
+        by_type = self._staged_counts()
         return {
-            "total": len(staged),
-            "records": sum(1 for e in staged if e.entity_type == "record"),
-            "schemas": sum(1 for e in staged if e.entity_type in ("schema", "field")),
-            "datasets": sum(1 for e in staged if e.entity_type == "dataset"),
+            "total": sum(by_type.values()),
+            "records": by_type.get("record", 0),
+            "schemas": by_type.get("schema", 0) + by_type.get("field", 0),
+            "datasets": by_type.get("dataset", 0),
         }
 
     def list_commits(self, limit: int = 50, offset: int = 0) -> list[CommitDTO]:
@@ -229,8 +229,15 @@ class LocalAuditRepository:
             if row:
                 row.pushed_at = now
 
-    def _staged_entries(self) -> list[AuditLog]:
-        return self._s.query(AuditLog).filter(AuditLog.commit_id.is_(None)).all()
+    def _staged_counts(self) -> dict[str, int]:
+        """Uncommitted audit entries per entity type -- one grouped count over
+        the staged index, not every entry (with its record JSON) loaded."""
+        return dict(
+            self._s.query(AuditLog.entity_type, func.count(AuditLog.id))
+            .filter(AuditLog.commit_id.is_(None))
+            .group_by(AuditLog.entity_type)
+            .all()  # type: ignore[arg-type]
+        )
 
 
 def _commit_dto(r: Commit) -> CommitDTO:

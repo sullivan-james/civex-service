@@ -10,6 +10,7 @@ Objects are never transferred here — only their sha256 hashes in object_refs.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 from datetime import timezone
 
 from sqlalchemy.orm import Session
@@ -101,6 +102,22 @@ def _upsert_fields(session: Session, rows: list[dict]) -> None:
             existing.restrictions = dto.restrictions
 
 
+# Ids per IN (...) when looking rows up in bulk -- well under SQLite's
+# bound-variable limit.
+_CHUNK = 500
+
+
+def _existing(session: Session, model: Any, ids: list[uuid.UUID]) -> dict:
+    """The `model` rows among `ids`, by id -- a lookup per chunk rather than a
+    `session.get` (and a SELECT) per row of a bundle."""
+    found: dict = {}
+    for start in range(0, len(ids), _CHUNK):
+        chunk = ids[start : start + _CHUNK]
+        for row in session.query(model).filter(model.id.in_(chunk)):
+            found[row.id] = row
+    return found
+
+
 def _upsert_datasets(session: Session, rows: list[dict]) -> None:
     for d in rows:
         dto = DatasetDTO.from_dict(d)
@@ -152,9 +169,10 @@ def _upsert_records(session: Session, rows: list[dict]) -> None:
             r.get("created_at") or "",
         ),
     )
-    for d in sorted_rows:
-        dto = RecordDTO.from_dict(d)
-        existing = session.get(Record, dto.id)
+    dtos = [RecordDTO.from_dict(d) for d in sorted_rows]
+    present = _existing(session, Record, [dto.id for dto in dtos])
+    for dto in dtos:
+        existing = present.get(dto.id)
         if existing is None:
             session.add(
                 Record(
@@ -180,10 +198,8 @@ def _upsert_records(session: Session, rows: list[dict]) -> None:
 
 
 def _delete_records(session: Session, record_ids: list[str]) -> None:
-    for rid in record_ids:
-        row = session.get(Record, uuid.UUID(rid))
-        if row:
-            session.delete(row)
+    for row in _existing(session, Record, [uuid.UUID(r) for r in record_ids]).values():
+        session.delete(row)
 
 
 def _upsert_commits(
@@ -192,12 +208,13 @@ def _upsert_commits(
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc)
+    counts = _commit_counts(audit_log_rows)
     for d in rows:
         dto = CommitDTO.from_dict(d)
         existing = session.get(Commit, dto.id)
         if existing is None:
-            record_count, schema_count, dataset_count = _recompute_commit_counts(
-                dto.id, audit_log_rows
+            record_count, schema_count, dataset_count = counts.get(
+                str(dto.id), (0, 0, 0)
             )
             session.add(
                 Commit(
@@ -216,25 +233,30 @@ def _upsert_commits(
                 existing.pushed_at = now
 
 
-def _recompute_commit_counts(
-    commit_id: uuid.UUID, audit_log_rows: list[dict]
-) -> tuple[int, int, int]:
-    """Recompute a commit's aggregate counts from the entries it actually
-    shipped with, rather than trusting the counts a peer put on the wire
-    (CIVEX-173) -- a commit and all of its audit_log entries always travel
-    together in the same bundle (see exporter.export_bundle), so this is a
-    complete recount, not a partial one."""
-    entries = [e for e in audit_log_rows if e.get("commit_id") == str(commit_id)]
-    record_count = sum(1 for e in entries if e["entity_type"] == "record")
-    schema_count = sum(1 for e in entries if e["entity_type"] in ("schema", "field"))
-    dataset_count = sum(1 for e in entries if e["entity_type"] == "dataset")
-    return record_count, schema_count, dataset_count
+def _commit_counts(audit_log_rows: list[dict]) -> dict[str, tuple[int, int, int]]:
+    """Each commit's (record, schema, dataset) counts, recomputed from the
+    entries it actually shipped with rather than trusting the counts a peer put
+    on the wire (CIVEX-173) -- a commit and all of its audit_log entries always
+    travel together in the same bundle (see exporter.export_bundle), so this is
+    a complete recount, not a partial one. One pass over the entries, not one
+    per commit."""
+    tally: dict[str, list[int]] = {}
+    for e in audit_log_rows:
+        counts = tally.setdefault(str(e.get("commit_id")), [0, 0, 0])
+        if e["entity_type"] == "record":
+            counts[0] += 1
+        elif e["entity_type"] in ("schema", "field"):
+            counts[1] += 1
+        elif e["entity_type"] == "dataset":
+            counts[2] += 1
+    return {k: (v[0], v[1], v[2]) for k, v in tally.items()}
 
 
 def _upsert_audit_log(session: Session, rows: list[dict]) -> None:
-    for d in rows:
-        dto = AuditLogDTO.from_dict(d)
-        if session.get(AuditLog, dto.id) is None:
+    dtos = [AuditLogDTO.from_dict(d) for d in rows]
+    present = _existing(session, AuditLog, [dto.id for dto in dtos])
+    for dto in dtos:
+        if dto.id not in present:
             session.add(
                 AuditLog(
                     id=dto.id,

@@ -15,6 +15,7 @@ import math
 from datetime import datetime, timezone
 from typing import Any, cast
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from civex.db.models import (
@@ -105,17 +106,27 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
         else []
     )
 
-    # Split record audit entries into live (create/update) and deleted.
-    live_record_ids: set = set()
-    deleted_record_ids: list[str] = []
-    for entry in audit_entries:
-        if entry.entity_type != "record":
-            continue
-        if entry.action == "delete":
-            deleted_record_ids.append(str(entry.entity_id))
-        else:
-            live_record_ids.add(entry.entity_id)
+    # Record audit entries that deleted a record, in the bundle order.
+    deleted_record_ids = [
+        str(e.entity_id)
+        for e in audit_entries
+        if e.entity_type == "record" and e.action == "delete"
+    ]
 
+    # The records those commits created or updated, selected by a subquery on
+    # the audit entries rather than an IN (...) of every id: a big push would
+    # otherwise exceed SQLite's bound-variable limit and fail outright.
+    live_in_commits = (
+        select(AuditLog.entity_id)
+        .where(
+            AuditLog.commit_id.in_(commit_ids),
+            AuditLog.entity_type == "record",
+            AuditLog.action != "delete",
+        )
+        .scalar_subquery()
+        if commit_ids
+        else None
+    )
     records = [
         RecordDTO(
             id=r.id,
@@ -129,9 +140,9 @@ def export_bundle(session: Session, since_seq: int = 0) -> SyncBundle:
         ).to_dict()
         for r in (
             session.query(Record)
-            .filter(Record.id.in_(live_record_ids), Record.deleted_at.is_(None))
+            .filter(Record.id.in_(live_in_commits), Record.deleted_at.is_(None))
             .all()
-            if live_record_ids
+            if live_in_commits is not None
             else []
         )
     ]
