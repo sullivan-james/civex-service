@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import type { Field as SchemaField } from '../api/schemas'
 import { useCollection } from '../hooks/useCollections'
+import { UploadCollectionContext } from '../hooks/uploadCollection'
 import { useCreateRecord, useRecord } from '../hooks/useRecords'
 import { useSchemas } from '../hooks/useSchemas'
 import {
@@ -152,52 +153,54 @@ export default function NewRecordPage() {
         }
         description="Fill in what you have — click a value to edit it. Nothing is saved until you add the record."
       >
-        <Section title="Fields">
-          <RecordFieldGrid
-            fields={fields}
-            data={values}
-            onSave={(name, value) =>
-              setValues((prev) => {
-                const next = { ...prev }
-                if (value === undefined) delete next[name]
-                else next[name] = value
-                return next
-              })
-            }
-            errors={errors}
-            onDismissError={() => createRecord.reset()}
-            extra={(field) => {
-              if (
-                field.name === PARENT ||
-                !EXTRACTABLE_TYPES.has(field.type) ||
-                fileSources.length === 0
-              )
-                return null
-              const open = extracting === field.name
-              return (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setExtracting(open ? null : field.name)}
-                    className="mt-1 inline-flex items-center gap-1 text-xs text-fg-muted hover:text-accent cursor-pointer"
-                  >
-                    <ScanText size={11} /> fill from filename
-                  </button>
-                  {open && (
-                    <FilenameExtractor
-                      sources={fileSources}
-                      fieldType={field.type}
-                      onApply={(v) =>
-                        setValues((prev) => ({ ...prev, [field.name]: v }))
-                      }
-                      onClose={() => setExtracting(null)}
-                    />
-                  )}
-                </>
-              )
-            }}
-          />
-        </Section>
+        <UploadCollectionContext.Provider value={collection.id}>
+          <Section title="Fields">
+            <RecordFieldGrid
+              fields={fields}
+              data={values}
+              onSave={(name, value) =>
+                setValues((prev) => {
+                  const next = { ...prev }
+                  if (value === undefined) delete next[name]
+                  else next[name] = value
+                  return next
+                })
+              }
+              errors={errors}
+              onDismissError={() => createRecord.reset()}
+              extra={(field) => {
+                if (
+                  field.name === PARENT ||
+                  !EXTRACTABLE_TYPES.has(field.type) ||
+                  fileSources.length === 0
+                )
+                  return null
+                const open = extracting === field.name
+                return (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setExtracting(open ? null : field.name)}
+                      className="mt-1 inline-flex items-center gap-1 text-xs text-fg-muted hover:text-accent cursor-pointer"
+                    >
+                      <ScanText size={11} /> fill from filename
+                    </button>
+                    {open && (
+                      <FilenameExtractor
+                        sources={fileSources}
+                        fieldType={field.type}
+                        onApply={(v) =>
+                          setValues((prev) => ({ ...prev, [field.name]: v }))
+                        }
+                        onClose={() => setExtracting(null)}
+                      />
+                    )}
+                  </>
+                )
+              }}
+            />
+          </Section>
+        </UploadCollectionContext.Provider>
         <div className="flex gap-2">
           <Button
             variant="primary"

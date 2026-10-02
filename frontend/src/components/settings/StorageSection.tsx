@@ -27,6 +27,7 @@ import {
 } from '../ui/icons'
 import { errorMessage } from '../../lib/errors'
 import GCPanel from './GCPanel'
+import { PlacementPanel } from './PlacementPanel'
 
 const STATE_LABEL: Record<VolumeStats['state'], string> = {
   online: 'online',
@@ -629,6 +630,8 @@ export default function StorageSection() {
           allocation is full or disk space is below the headroom threshold.
         </p>
       </div>
+
+      <PlacementPanel />
 
       <GCPanel />
     </div>

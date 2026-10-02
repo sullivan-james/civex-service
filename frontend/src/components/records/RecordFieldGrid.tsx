@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { filesApi } from '../../api/files'
+import { useUploadCollection } from '../../hooks/uploadCollection'
 import type { Field } from '../../api/schemas'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
 import { displayLabel } from '../../utils/naming'
@@ -86,6 +87,7 @@ function FileControl({
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [staged, setStaged] = useState<StagedFile[]>([])
+  const collectionId = useUploadCollection()
   const { accept, maxSize } = toInputProps(field)
 
   async function pick(e: React.ChangeEvent<HTMLInputElement>) {
@@ -106,7 +108,11 @@ function FileControl({
             ? `Uploading ${i + 1} of ${files.length}…`
             : 'Uploading…',
         )
-        const ref = await filesApi.uploadStreaming(files[i], () => {})
+        const ref = await filesApi.uploadStreaming(
+          files[i],
+          () => {},
+          collectionId,
+        )
         uploaded.push({
           ref,
           problem:

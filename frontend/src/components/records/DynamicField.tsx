@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { filesApi } from '../../api/files'
+import { useUploadCollection } from '../../hooks/uploadCollection'
 import type { Field } from '../../api/schemas'
 import { utcToZonedLocal, datetimeInputToWire } from '../../utils/dates'
 import { useFieldTimeZone } from './timeZoneContext'
@@ -98,6 +99,7 @@ function FileField({
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const collectionId = useUploadCollection()
   const ref = value as FileRef | null | undefined
   const { accept, maxSize } = toInputProps(field)
 
@@ -113,7 +115,11 @@ function FileField({
     setProgress(0)
     setError(null)
     try {
-      const result = await filesApi.uploadStreaming(file, setProgress)
+      const result = await filesApi.uploadStreaming(
+        file,
+        setProgress,
+        collectionId,
+      )
       onChange(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed')
@@ -183,6 +189,7 @@ function FileListField({
     fraction: number
   } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const collectionId = useUploadCollection()
   const existing = (value as FileRef[] | null | undefined) ?? []
   const { accept, maxSize } = toInputProps(field)
 
@@ -201,8 +208,11 @@ function FileListField({
     try {
       const newRefs: FileRef[] = []
       for (let i = 0; i < files.length; i++) {
-        const ref = await filesApi.uploadStreaming(files[i], (fraction) =>
-          setProgress({ index: i, total: files.length, fraction }),
+        const ref = await filesApi.uploadStreaming(
+          files[i],
+          (fraction) =>
+            setProgress({ index: i, total: files.length, fraction }),
+          collectionId,
         )
         newRefs.push(ref)
       }

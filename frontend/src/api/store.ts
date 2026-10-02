@@ -15,6 +15,16 @@ export interface VolumeStats {
   in_queue: boolean
 }
 
+export type PlacementPolicy = 'spill' | 'fail'
+
+export interface Placement {
+  collection_id: string
+  /** null when the collection no longer exists. */
+  collection_name: string | null
+  volume: string
+  on_unavailable: PlacementPolicy
+}
+
 export interface StoredObject {
   sha256: string
   volume: string
@@ -53,6 +63,13 @@ export const storeApi = {
     api.post<VolumeStats>(`/store/volumes/${name}/adopt`, {}),
   removeVolume: (name: string) => api.delete<void>(`/store/volumes/${name}`),
   setQueue: (queue: string[]) => api.put<string[]>('/store/queue', { queue }),
+  listPlacements: () => api.get<Placement[]>('/store/placement'),
+  setPlacement: (
+    collectionId: string,
+    body: { volume: string; on_unavailable?: PlacementPolicy },
+  ) => api.put<Placement>(`/store/placement/${collectionId}`, body),
+  clearPlacement: (collectionId: string) =>
+    api.delete<void>(`/store/placement/${collectionId}`),
   runGC: (body: { apply?: boolean; grace_days?: number }) =>
     api.post<GCReport>('/store/gc', body),
 }

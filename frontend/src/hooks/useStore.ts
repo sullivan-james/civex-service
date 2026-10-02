@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { storeApi } from '../api/store'
+import { storeApi, type PlacementPolicy } from '../api/store'
 
 const KEY = ['store', 'volumes']
 
@@ -62,5 +62,42 @@ export function useRunGC() {
   return useMutation({
     mutationFn: storeApi.runGC,
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  })
+}
+
+const PLACEMENT_KEY = ['store', 'placement']
+
+export function usePlacements() {
+  return useQuery({
+    queryKey: PLACEMENT_KEY,
+    queryFn: storeApi.listPlacements,
+  })
+}
+
+export function useSetPlacement() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      collectionId,
+      volume,
+      onUnavailable,
+    }: {
+      collectionId: string
+      volume: string
+      onUnavailable: PlacementPolicy
+    }) =>
+      storeApi.setPlacement(collectionId, {
+        volume,
+        on_unavailable: onUnavailable,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: PLACEMENT_KEY }),
+  })
+}
+
+export function useClearPlacement() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: storeApi.clearPlacement,
+    onSuccess: () => qc.invalidateQueries({ queryKey: PLACEMENT_KEY }),
   })
 }

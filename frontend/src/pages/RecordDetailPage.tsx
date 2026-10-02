@@ -8,6 +8,7 @@ import {
 } from '../hooks/useRecords'
 import { recordsApi } from '../api/records'
 import { useCollection } from '../hooks/useCollections'
+import { UploadCollectionContext } from '../hooks/uploadCollection'
 import { useSchemas } from '../hooks/useSchemas'
 import { useWorkflows, useJobs } from '../hooks/useWorkflows'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
@@ -165,27 +166,29 @@ export default function RecordDetailPage() {
       >
         {/* Own fields */}
         <Section title="Fields">
-          <RecordFieldGrid
-            fields={
-              schema?.fields ??
-              Object.keys(record.data).map(
-                (name) =>
-                  ({
-                    name,
-                    label: null,
-                    type: 'string',
-                    required: false,
-                    id: name,
-                  }) as SchemaField,
-              )
-            }
-            data={record.data}
-            referenceLabels={record.reference_labels}
-            referenceCollections={record.reference_collections}
-            onSave={saveField}
-            errors={saveErrors}
-            onDismissError={() => updateRecord.reset()}
-          />
+          <UploadCollectionContext.Provider value={record.dataset_id}>
+            <RecordFieldGrid
+              fields={
+                schema?.fields ??
+                Object.keys(record.data).map(
+                  (name) =>
+                    ({
+                      name,
+                      label: null,
+                      type: 'string',
+                      required: false,
+                      id: name,
+                    }) as SchemaField,
+                )
+              }
+              data={record.data}
+              referenceLabels={record.reference_labels}
+              referenceCollections={record.reference_collections}
+              onSave={saveField}
+              errors={saveErrors}
+              onDismissError={() => updateRecord.reset()}
+            />
+          </UploadCollectionContext.Provider>
         </Section>
 
         {(hasChildSchemas || descendantTotal > 0) && collection && (

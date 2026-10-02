@@ -21,6 +21,7 @@ import {
   TableSkeleton,
 } from '../components/ui'
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
+import { CollectionStorage } from '../components/collections/CollectionStorage'
 import { recordCollectionVisit } from '../hooks/useFrequentCollections'
 import { recordRecent } from '../hooks/usePins'
 import { collectionTarget } from '../utils/navTargets'
@@ -245,6 +246,8 @@ export default function CollectionDetailPage() {
               </>
             }
           />
+
+          <CollectionStorage collectionId={collection.id} />
 
           <CollapsibleSection title="Activity">
             <AuditTrail
