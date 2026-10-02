@@ -314,3 +314,20 @@ def test_reads_of_other_volumes_are_not_stalled_by_a_dead_one(hung_drive) -> Non
     started = time.monotonic()
     hung_drive.get(ref.sha256)
     assert time.monotonic() - started < 0.5
+
+
+def test_volume_stats_flags_network_volumes(
+    ctx: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    nas = _drive(tmp_path, "nas")
+    ctx.store_svc.add_volume("nas", str(nas))
+    monkeypatch.setattr(
+        fs_locations,
+        "all_mounts",
+        lambda: [fs_locations.Mount("nas:/export", str(nas), "nfs4")],
+    )
+
+    stats = {v["name"]: v for v in ctx.store_svc.volume_stats()}
+
+    assert stats["nas"]["network"] is True
+    assert stats["default"]["network"] is False

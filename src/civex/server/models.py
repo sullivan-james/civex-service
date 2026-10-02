@@ -574,6 +574,9 @@ class VolumeStatsResponse(BaseModel):
     )
     warning: bool
     in_queue: bool
+    network: bool = Field(
+        default=False, description="The volume's folder is on a network drive."
+    )
 
 
 class PlacementResponse(BaseModel):
@@ -627,6 +630,13 @@ class DirectoryListingResponse(BaseModel):
     )
     locations: list[StorageLocationResponse] = Field(
         description="Places to start browsing from: the project, home and mounted drives."
+    )
+    hint: str | None = Field(
+        default=None,
+        description=(
+            "Why a drive might be missing from `locations`, where the platform has a "
+            "known reason (for example a Windows drive not yet mounted under WSL)."
+        ),
     )
 
 

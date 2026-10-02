@@ -593,7 +593,13 @@ class VolumeAwareFileObjectStore:
         return fs_locations.guarded(f"{path}#usage", shutil.disk_usage, path)
 
     def _stat_volume(
-        self, name: str, vc: VolumeConfig, warn_pct: float, *, in_queue: bool
+        self,
+        name: str,
+        vc: VolumeConfig,
+        warn_pct: float,
+        *,
+        in_queue: bool,
+        mounts: list[fs_locations.Mount] | None = None,
     ) -> dict:
         path = self._resolve_path(vc)
         status = self.volume_status(name)
@@ -635,20 +641,28 @@ class VolumeAwareFileObjectStore:
             "fix": status.fix,
             "warning": warning,
             "in_queue": in_queue,
+            "network": fs_locations.is_network_path(
+                fs_locations.normalise(str(path)), mounts
+            ),
         }
 
     def volume_stats(self) -> list[dict]:
         warn_pct = self._cfg.warn_below_pct / 100.0
+        mounts = fs_locations.all_mounts()  # read once for every volume
         results = []
         for name in self._cfg.volume_queue:
             vc = self._cfg.volumes.get(name)
             if vc is None:
                 continue
-            results.append(self._stat_volume(name, vc, warn_pct, in_queue=True))
+            results.append(
+                self._stat_volume(name, vc, warn_pct, in_queue=True, mounts=mounts)
+            )
         # Include volumes defined but not in queue
         for name, vc in self._cfg.volumes.items():
             if name not in self._cfg.volume_queue:
-                results.append(self._stat_volume(name, vc, warn_pct, in_queue=False))
+                results.append(
+                    self._stat_volume(name, vc, warn_pct, in_queue=False, mounts=mounts)
+                )
         return results
 
     # ------------------------------------------------------------------

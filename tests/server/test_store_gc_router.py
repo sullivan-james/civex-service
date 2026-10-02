@@ -180,6 +180,7 @@ def test_browse_lists_folders_and_places_to_start(client: TestClient, tmp_path) 
     assert body["path"] == str(pick) and body["parent"] == str(tmp_path)
     assert [e["name"] for e in body["entries"]] == ["alpha", "beta"]
     assert body["truncated"] is False
+    assert "hint" in body  # None except where the platform has a known reason
     assert {"Project", "Home"} <= {loc["label"] for loc in body["locations"]}
     assert all("network" in loc for loc in body["locations"])
 

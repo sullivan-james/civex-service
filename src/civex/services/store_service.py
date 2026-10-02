@@ -223,6 +223,7 @@ class StoreService:
             entries=[DirectoryEntry(name=n, path=p) for n, p in raw],
             truncated=truncated,
             locations=self._locations(),
+            hint=fs_locations.platform_hint(),
         )
 
     def create_folder(self, parent: str, name: str) -> str:

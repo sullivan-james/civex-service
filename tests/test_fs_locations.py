@@ -174,3 +174,18 @@ def test_a_call_that_never_returns_is_reported_not_waited_on(
 
     time.sleep(0.2)  # the stuck call has now returned: the location works again
     assert fs.guarded("t-hang", lambda: "recovered") == "recovered"
+
+
+def test_platform_hint_explains_missing_drives_under_wsl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        fs, "_proc_version", lambda: "Linux version 6.6.1-microsoft-standard-WSL2"
+    )
+    hint = fs.platform_hint()
+    assert hint is not None and "drvfs" in hint and "rescan" in hint
+
+    monkeypatch.setattr(fs, "_proc_version", lambda: "Linux version 6.8.0-generic")
+    assert fs.platform_hint() is None
+    monkeypatch.setattr(fs, "_proc_version", lambda: "")
+    assert fs.platform_hint() is None

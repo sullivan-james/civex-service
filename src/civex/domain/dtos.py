@@ -339,6 +339,7 @@ class DirectoryListing:
     entries: list[DirectoryEntry]  # folders only
     truncated: bool
     locations: list[StorageLocation]
+    hint: str | None = None  # why a drive might be missing, where it's known
 
 
 @dataclass

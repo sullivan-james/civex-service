@@ -162,6 +162,27 @@ def looks_like_network_address(raw: str) -> bool:
     return sys.platform != "win32" and text.replace("\\", "/").startswith("//")
 
 
+def _proc_version() -> str:
+    try:
+        return Path("/proc/version").read_text("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def platform_hint() -> str | None:
+    """Why a drive might be missing from the list, where the platform has a
+    well-known reason. Under WSL a Windows drive is only listed once it has
+    been mounted into the Linux side, which doesn't happen on its own for a
+    drive plugged in after WSL started."""
+    if "microsoft" in _proc_version().lower():
+        return (
+            "On WSL, a Windows drive appears here once it is mounted. In a WSL "
+            "terminal run: sudo mkdir -p /mnt/f && sudo mount -t drvfs F: /mnt/f "
+            "(use your drive's letter), then rescan."
+        )
+    return None
+
+
 def all_mounts() -> list[Mount]:
     """Every mount the OS reports (best effort; empty if it can't tell)."""
     if sys.platform == "darwin":
