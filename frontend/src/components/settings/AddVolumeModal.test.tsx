@@ -60,6 +60,7 @@ beforeEach(() => {
           entries: [{ name: 'civex', path: '/media/usb/civex' }],
           truncated: false,
           locations: [],
+          hint: null,
         })
       return json({})
     }),

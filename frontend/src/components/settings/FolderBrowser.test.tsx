@@ -51,11 +51,13 @@ const LOCATIONS = [
 ]
 
 let fs: Record<string, string[]>
+let hint: string | null
 let calls: { method: string; path: string; body?: unknown }[]
 
 const dirname = (p: string) => p.replace(/\/[^/]+$/, '') || '/'
 
 beforeEach(() => {
+  hint = null
   fs = {
     '/': ['home', 'mnt'],
     '/home/me': ['archive', 'docs'],
@@ -94,6 +96,7 @@ beforeEach(() => {
           })),
           truncated: false,
           locations: LOCATIONS,
+          hint,
         })
       }
       return json({})
@@ -209,6 +212,50 @@ describe('FolderBrowser', () => {
     expect(await screen.findByText('archive')).toBeInTheDocument()
     expect(calls[0].path).toBe('/api/store/browse?path=%2Fgone%2Fdrive')
     expect(calls[calls.length - 1]?.path).toBe('/api/store/browse')
+  })
+
+  it('rescans drives, so one plugged in meanwhile appears', async () => {
+    const user = userEvent.setup()
+    renderIt()
+    await screen.findByText('archive')
+    expect(screen.queryByText('f')).not.toBeInTheDocument()
+
+    LOCATIONS.push({
+      label: 'f',
+      path: '/mnt/f',
+      kind: 'drive',
+      free_bytes: 1e11,
+      total_bytes: 1e12,
+      network: false,
+      source: null,
+    })
+    try {
+      await user.click(screen.getByRole('button', { name: 'Rescan drives' }))
+      expect(
+        await screen.findByRole('button', { name: /^f/ }),
+      ).toBeInTheDocument()
+    } finally {
+      LOCATIONS.pop()
+    }
+  })
+
+  it('explains why a drive may be missing', async () => {
+    hint = 'On WSL, a Windows drive appears here once it is mounted.'
+    renderIt()
+
+    expect(
+      await screen.findByText(
+        'On WSL, a Windows drive appears here once it is mounted.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('has a general hint when the platform has none', async () => {
+    renderIt()
+
+    expect(
+      await screen.findByText(/listed once your computer has mounted it/),
+    ).toBeInTheDocument()
   })
 
   it('cancels', async () => {

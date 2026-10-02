@@ -26,6 +26,9 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // Interaction-heavy tests take ~0.5s alone but several times that when the
+    // whole suite runs in parallel; the 5s default made them fail intermittently.
+    testTimeout: 15_000,
   },
   server: {
     proxy: {

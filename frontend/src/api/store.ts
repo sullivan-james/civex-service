@@ -13,6 +13,8 @@ export interface VolumeStats {
   fix: string
   warning: boolean
   in_queue: boolean
+  /** The volume's folder is on a network drive. */
+  network: boolean
 }
 
 export interface StorageLocation {
@@ -33,6 +35,8 @@ export interface DirectoryListing {
   entries: { name: string; path: string }[]
   truncated: boolean
   locations: StorageLocation[]
+  /** Why a drive might be missing, where the platform has a known reason. */
+  hint: string | null
 }
 
 /** What adding a folder as a volume would involve. `problems` block it;
@@ -113,7 +117,9 @@ export const storeApi = {
   ) => api.patch<VolumeStats>(`/store/volumes/${name}`, body),
   adoptVolume: (name: string) =>
     api.post<VolumeStats>(`/store/volumes/${name}/adopt`, {}),
-  removeVolume: (name: string) => api.delete<void>(`/store/volumes/${name}`),
+  /** `force` removes a volume that still holds files or homes collections. */
+  removeVolume: (name: string, force = false) =>
+    api.delete<void>(`/store/volumes/${name}${force ? '?force=true' : ''}`),
   setQueue: (queue: string[]) => api.put<string[]>('/store/queue', { queue }),
   listPlacements: () => api.get<Placement[]>('/store/placement'),
   setPlacement: (

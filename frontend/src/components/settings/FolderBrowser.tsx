@@ -11,6 +11,7 @@ import {
   HardDrive,
   House,
   Network,
+  RefreshCw,
 } from '../ui/icons'
 import { errorMessage } from '../../lib/errors'
 import { breadcrumbs, formatSize } from '../../utils/storage'
@@ -163,9 +164,24 @@ export function FolderBrowser({
             </ul>
           </div>
           <div>
-            <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-fg-muted">
-              Drives
-            </p>
+            <div className="flex items-center justify-between px-2 pb-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
+                Drives
+              </p>
+              <button
+                type="button"
+                aria-label="Rescan drives"
+                title="Rescan drives"
+                disabled={isFetching}
+                onClick={() => refetch()}
+                className="rounded p-1 text-fg-muted cursor-pointer hover:bg-border hover:text-fg disabled:opacity-50"
+              >
+                <RefreshCw
+                  size={13}
+                  className={isFetching ? 'animate-spin' : undefined}
+                />
+              </button>
+            </div>
             {drives.length === 0 ? (
               <p className="px-2 text-xs text-fg-muted">
                 {isLoading ? 'Looking…' : 'No other drives found.'}
@@ -182,6 +198,10 @@ export function FolderBrowser({
                 ))}
               </ul>
             )}
+            <p className="mt-2 px-2 text-xs text-fg-muted">
+              {listing?.hint ??
+                'A drive is listed once your computer has mounted it. Plugged one in just now? Rescan.'}
+            </p>
           </div>
         </nav>
 
