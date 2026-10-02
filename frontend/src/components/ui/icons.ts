@@ -60,4 +60,7 @@ export {
   PanelRightClose,
   FileText,
   MapPin,
+  HardDrive,
+  Network,
+  House,
 } from 'lucide-react'

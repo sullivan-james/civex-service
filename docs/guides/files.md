@@ -28,6 +28,26 @@ If a volume is reported as the wrong drive but this is in fact the right one —
 
 Uploads skip a volume that isn't usable and go to the next one in the write queue; if none can take the file, the upload fails with the reason for each volume.
 
+### Adding a volume
+
+In **Settings → Storage → Add volume**, or
+
+```bash
+civex store add archive --path /media/archive-drive/civex --allocated-gb 500 --queue
+```
+
+The form has three steps: a name, a folder, and how it is used. **Browse…** opens a folder browser for the machine running Civex, starting from your project, your home folder and the drives that are mounted (with free space; network drives are marked and show where they really live). You can make a new folder there. A browser can't reveal the real path of a folder picked in its own dialog, which is why Civex lists the folders itself.
+
+As you type a path, Civex checks it and says what adding it would involve: whether the folder exists or will be created, whether Civex can write to it, how much room it has, whether it is a separate drive or the same disk as the project, and whether it is already a volume or carries another volume's identity. Anything that would make the add fail is shown before you press the button, and adding it enforces the same rules.
+
+By default a new volume is **not** put in the general write queue, so it can be reserved for particular collections (see below). Tick *Use it for new files in general* (or pass `--queue`) to include it.
+
+#### Network drives
+
+Civex uses a network drive your operating system has already mounted: an NFS or SMB share mounted under `/mnt` or `/Volumes`, a mapped drive letter, or a UNC path on Windows. It doesn't mount shares or keep credentials, so for an address such as `smb://host/share`, mount it first and then choose the folder it appears as.
+
+A network drive can be slow, and it can stop answering. Civex never waits on one for more than a few seconds: a volume that doesn't respond is reported as offline ("not responding"), uploads go to the next volume, and reading files on your other volumes carries on as normal. It returns to normal by itself when the connection does.
+
 ### Choosing where a collection's files go
 
 By default new files go to the first usable volume in the write queue. To keep a collection's files together — on an archive drive, say — give it a **home volume**: on the collection's page under **Storage**, or

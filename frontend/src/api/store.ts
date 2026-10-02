@@ -15,6 +15,46 @@ export interface VolumeStats {
   in_queue: boolean
 }
 
+export interface StorageLocation {
+  label: string
+  path: string
+  kind: 'project' | 'home' | 'drive'
+  free_bytes: number | null
+  total_bytes: number | null
+  /** The drive lives on another machine. */
+  network: boolean
+  /** Where a network drive really is, e.g. nas:/export. */
+  source: string | null
+}
+
+export interface DirectoryListing {
+  path: string
+  parent: string | null
+  entries: { name: string; path: string }[]
+  truncated: boolean
+  locations: StorageLocation[]
+}
+
+/** What adding a folder as a volume would involve. `problems` block it;
+ * `warnings` are worth knowing but don't. */
+export interface PathInspection {
+  path: string
+  exists: boolean
+  is_dir: boolean
+  writable: boolean
+  will_create: boolean
+  inside_project: boolean
+  same_disk_as_project: boolean | null
+  free_bytes: number | null
+  total_bytes: number | null
+  existing_volume: string | null
+  marker_volume: string | null
+  has_civex_data: boolean
+  is_network: boolean
+  problems: string[]
+  warnings: string[]
+}
+
 export type PlacementPolicy = 'spill' | 'fail'
 
 export interface Placement {
@@ -50,7 +90,19 @@ export const storeApi = {
     name: string
     path: string
     allocated_gb?: number | null
+    add_to_queue?: boolean
   }) => api.post<VolumeStats>('/store/volumes', body),
+  browse: (path?: string, showHidden = false) => {
+    const params = new URLSearchParams()
+    if (path) params.set('path', path)
+    if (showHidden) params.set('show_hidden', 'true')
+    const query = params.toString()
+    return api.get<DirectoryListing>(`/store/browse${query ? `?${query}` : ''}`)
+  },
+  createFolder: (parent: string, name: string) =>
+    api.post<{ path: string }>('/store/browse/folder', { parent, name }),
+  inspectPath: (path: string) =>
+    api.get<PathInspection>(`/store/inspect?path=${encodeURIComponent(path)}`),
   updateVolume: (
     name: string,
     body: {

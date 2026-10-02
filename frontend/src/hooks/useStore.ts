@@ -1,4 +1,9 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useQuery,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { storeApi, type PlacementPolicy } from '../api/store'
 
 const KEY = ['store', 'volumes']
@@ -99,5 +104,38 @@ export function useClearPlacement() {
   return useMutation({
     mutationFn: storeApi.clearPlacement,
     onSuccess: () => qc.invalidateQueries({ queryKey: PLACEMENT_KEY }),
+  })
+}
+
+/** The folders inside `path` (home when undefined), for the folder browser. */
+export function useBrowse(path: string | undefined, showHidden: boolean) {
+  return useQuery({
+    queryKey: ['store', 'browse', path ?? '', showHidden],
+    queryFn: () => storeApi.browse(path, showHidden),
+    retry: false,
+    staleTime: 5_000,
+    // Keep the places and the last folder on screen while the next one loads.
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useCreateFolder() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ parent, name }: { parent: string; name: string }) =>
+      storeApi.createFolder(parent, name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['store', 'browse'] }),
+  })
+}
+
+/** What adding `path` as a volume would involve; idle until there is a path. */
+export function useInspectPath(path: string) {
+  return useQuery({
+    queryKey: ['store', 'inspect', path],
+    queryFn: () => storeApi.inspectPath(path),
+    enabled: path.trim() !== '',
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
   })
 }

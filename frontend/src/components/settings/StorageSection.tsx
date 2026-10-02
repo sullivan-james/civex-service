@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import {
   useVolumes,
-  useAddVolume,
   useUpdateVolume,
   useAdoptVolume,
   useRemoveVolume,
@@ -28,6 +27,9 @@ import {
 import { errorMessage } from '../../lib/errors'
 import GCPanel from './GCPanel'
 import { PlacementPanel } from './PlacementPanel'
+import { AddVolumeModal } from './AddVolumeModal'
+import { FolderPickerModal } from './FolderPickerModal'
+import { browseFolderDesktop, isDesktop } from '../../utils/nativeFolder'
 
 const STATE_LABEL: Record<VolumeStats['state'], string> = {
   online: 'online',
@@ -37,16 +39,8 @@ const STATE_LABEL: Record<VolumeStats['state'], string> = {
   retired: 'retired',
 }
 
-const isDesktop = typeof window !== 'undefined' && !!window.pywebview
-
 function normalizePath(p: string): string {
   return p.replace(/\\/g, '/')
-}
-
-async function browseFolderDesktop(): Promise<string | null> {
-  if (!window.pywebview) return null
-  const r = await window.pywebview.api.browse_folder()
-  return r.path ?? null
 }
 
 const inputCls = 'w-full'
@@ -113,6 +107,7 @@ function VolumeCard({
   const removeVolume = useRemoveVolume()
   const adoptVolume = useAdoptVolume()
   const [confirmAdopt, setConfirmAdopt] = useState(false)
+  const [pickingPath, setPickingPath] = useState(false)
   const [removeError, setRemoveError] = useState<string | null>(null)
 
   const allocBytes =
@@ -357,6 +352,9 @@ function VolumeCard({
                 className={inputCls}
               />
             </Field>
+            <Button size="sm" onClick={() => setPickingPath(true)}>
+              Browse…
+            </Button>
             {isDesktop && (
               <Button
                 size="sm"
@@ -365,10 +363,17 @@ function VolumeCard({
                   if (p) setEditPath(p)
                 }}
               >
-                Browse…
+                System dialog…
               </Button>
             )}
           </div>
+          {pickingPath && (
+            <FolderPickerModal
+              initialPath={editPath}
+              onSelect={(chosen) => setEditPath(chosen)}
+              onClose={() => setPickingPath(false)}
+            />
+          )}
           <div className="flex items-end gap-2">
             <Field label="Allocation (GB)" className="flex-1">
               <Input
@@ -416,95 +421,6 @@ function VolumeCard({
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-function AddVolumeForm({ onDone }: { onDone: () => void }) {
-  const [name, setName] = useState('')
-  const [path, setPath] = useState('')
-  const [allocStr, setAllocStr] = useState('')
-  const addVolume = useAddVolume()
-
-  function handleAdd() {
-    if (!name.trim() || !path.trim()) return
-    addVolume.mutate(
-      {
-        name: name.trim(),
-        path: path.trim(),
-        allocated_gb: allocStr ? Number(allocStr) : null,
-      },
-      { onSuccess: onDone },
-    )
-  }
-
-  return (
-    <div className="border border-dashed border-accent-muted rounded-md p-4 bg-canvas-subtle space-y-3">
-      <p className="text-xs font-semibold text-accent uppercase tracking-wide">
-        New volume
-      </p>
-      <div className="grid grid-cols-3 gap-3">
-        <Field label="Name" hint="letters, digits, - _" required>
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. external"
-            autoFocus
-            className={inputCls}
-          />
-        </Field>
-        <div className="flex items-end gap-2">
-          <Field label="Path" className="flex-1" required>
-            <Input
-              value={path}
-              onChange={(e) => setPath(normalizePath(e.target.value))}
-              onBlur={(e) => setPath(normalizePath(e.target.value))}
-              placeholder="/media/WD-8TB/civex-objects"
-              className={inputCls}
-            />
-          </Field>
-          {isDesktop && (
-            <Button
-              size="sm"
-              onClick={async () => {
-                const p = await browseFolderDesktop()
-                if (p) setPath(p)
-              }}
-            >
-              Browse…
-            </Button>
-          )}
-        </div>
-        <Field label="Allocation (GB, optional)">
-          <Input
-            type="number"
-            min="0.1"
-            step="0.1"
-            value={allocStr}
-            onChange={(e) => setAllocStr(e.target.value)}
-            placeholder="unlimited"
-            className={inputCls}
-          />
-        </Field>
-      </div>
-      {addVolume.error && (
-        <p role="alert" className="text-xs text-danger">
-          {errorMessage(addVolume.error)}
-        </p>
-      )}
-      <div className="flex gap-2">
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={handleAdd}
-          disabled={addVolume.isPending || !name.trim() || !path.trim()}
-        >
-          {addVolume.isPending ? 'Adding…' : 'Add volume'}
-        </Button>
-        <Button size="sm" onClick={onDone}>
-          Cancel
-        </Button>
-      </div>
     </div>
   )
 }
@@ -588,7 +504,12 @@ export default function StorageSection() {
         </div>
       )}
 
-      {addingVolume && <AddVolumeForm onDone={() => setAddingVolume(false)} />}
+      {addingVolume && (
+        <AddVolumeModal
+          existingNames={volumes.map((v) => v.name)}
+          onClose={() => setAddingVolume(false)}
+        />
+      )}
 
       <div className="space-y-3">
         {volumes.length === 0 && (
