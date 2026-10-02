@@ -7,6 +7,7 @@ import {
 import { storeApi, type PlacementPolicy } from '../api/store'
 
 const KEY = ['store', 'volumes']
+const PLACEMENT_KEY = ['store', 'placement']
 
 export function useVolumes() {
   return useQuery({
@@ -49,8 +50,13 @@ export function useAdoptVolume() {
 export function useRemoveVolume() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: storeApi.removeVolume,
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+    mutationFn: ({ name, force }: { name: string; force?: boolean }) =>
+      storeApi.removeVolume(name, force),
+    // Removing a volume can also clear collections' homes.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEY })
+      qc.invalidateQueries({ queryKey: PLACEMENT_KEY })
+    },
   })
 }
 
@@ -69,8 +75,6 @@ export function useRunGC() {
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   })
 }
-
-const PLACEMENT_KEY = ['store', 'placement']
 
 export function usePlacements() {
   return useQuery({
@@ -137,5 +141,32 @@ export function useInspectPath(path: string) {
     retry: false,
     staleTime: 0,
     gcTime: 0,
+  })
+}
+
+/** Give several collections the same home (or clear it, with an empty
+ * `volume`) in one go. */
+export function useBulkPlacement() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      collectionIds,
+      volume,
+      onUnavailable = 'spill',
+    }: {
+      collectionIds: string[]
+      volume: string
+      onUnavailable?: PlacementPolicy
+    }) => {
+      for (const id of collectionIds) {
+        if (volume === '') await storeApi.clearPlacement(id)
+        else
+          await storeApi.setPlacement(id, {
+            volume,
+            on_unavailable: onUnavailable,
+          })
+      }
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: PLACEMENT_KEY }),
   })
 }

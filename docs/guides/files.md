@@ -22,6 +22,8 @@ Files live on one or more **volumes** — directories, usually on different driv
 | `wrong drive` | Something is at the path, but it isn't this volume — a different drive, or an empty mount point. |
 | `read-only` / `retired` | Readable, but never written to. |
 
+**Settings → Storage** has three tabs. **Volumes** lists each volume on one row: its state and, when it isn't usable, why and what to do; free space; its place in the write queue; and how many collections use it. A row's menu edits it, adds or removes it from the write queue, or removes it. **Collections** assigns a volume to each collection (see below). **Maintenance** holds garbage collection. Each tab has its own address (for example `/settings/storage?tab=collections`), so it can be linked to.
+
 A volume is recognised by an identity, not by its path. `civex store add` writes a small `.civex-volume` marker (a random id) into the volume and records the same id beside the volume's path in `_civex/config.toml`. A drive is therefore recognised wherever it is mounted, and a different drive mounted at the same path is reported as the wrong drive instead of being written to. Nothing is written to a volume that fails this check, and Civex never creates a missing volume directory on its own — an unmounted drive's path would otherwise be recreated on the wrong disk. (Volumes inside the project, such as the default `_civex/objects`, are always trusted.)
 
 If a volume is reported as the wrong drive but this is in fact the right one — the marker was deleted, or the drive was re-formatted — run `civex store adopt <name>` to rewrite the marker. A volume added before identities existed has none and is checked by path alone until you adopt it.
@@ -30,7 +32,7 @@ Uploads skip a volume that isn't usable and go to the next one in the write queu
 
 ### Adding a volume
 
-In **Settings → Storage → Add volume**, or
+In **Settings → Storage → Volumes → Add volume**, or
 
 ```bash
 civex store add archive --path /media/archive-drive/civex --allocated-gb 500 --queue
@@ -50,7 +52,7 @@ A network drive can be slow, and it can stop answering. Civex never waits on one
 
 ### Choosing where a collection's files go
 
-By default new files go to the first usable volume in the write queue. To keep a collection's files together — on an archive drive, say — give it a **home volume**: on the collection's page under **Storage**, or
+By default new files go to the first usable volume in the write queue. To keep a collection's files together — on an archive drive, say — give it a **home volume**: on the collection's page under **Storage**; in **Settings → Storage → Collections**, which lists every collection with its home, changes it as soon as you pick another, and can set the same home for several selected collections at once; or
 
 ```bash
 civex store place set study archive
@@ -63,7 +65,7 @@ A home need not be in the write queue. If the home can't take a file (unplugged,
 
 A home only decides where **new** files are written. Deduplication always wins: a file whose content is already stored on any volume is reused where it lives and is never copied to the home — including when the only copy is on a volume that is currently unplugged. Two collections with different homes that attach the same file therefore share one stored copy.
 
-Homes are stored in `_civex/config.toml` by collection id (`[store.placement.<id>]`), so renaming a collection changes nothing, and they belong to this machine alongside the volumes they name. Removing a volume that is a home needs `--force`, which clears those homes.
+Homes are stored in `_civex/config.toml` by collection id (`[store.placement.<id>]`), so renaming a collection changes nothing, and they belong to this machine alongside the volumes they name. Removing a volume that is a home needs `--force` (in the app, the removal dialog says what will happen and asks you to type the volume's name when it holds files), which clears those homes. Nothing is ever deleted from the drive.
 
 ## File field types
 

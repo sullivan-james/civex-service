@@ -193,6 +193,8 @@ frontend/src/
   utils/dates.ts  # timezone-aware datetime helpers (utcToZonedLocal / zonedLocalToUTC / formatDateTime / effectiveTimeZone)
 ```
 
+Settings is a set of sub-pages, not one scroll: `pages/settings/SettingsLayout.tsx` is a section list plus an `<Outlet/>`, with routes `/settings/<appearance|database|storage|recently-deleted|map|advanced>` and `/settings` redirecting to Appearance. Settings > Storage (`components/settings/storage/StorageSettings.tsx`) has Volumes / Collections / Maintenance tabs, with the tab and a volume filter held in the address (`?tab=collections&volume=archive`). The Collections tab is where homes are assigned (per row, or in bulk); a collection page's own Storage section edits the same placement. There is deliberately no Storage item in the sidebar.
+
 Pins, recents and the Ctrl+K palette are per-browser (localStorage, `utils/pins.ts` + `hooks/usePins.ts`; there are no user accounts). A pin's `NavTarget` is built in `utils/navTargets.ts`; a pinned saved filter's live count is `hooks/useViewCount.ts` (keyed under `records`, so any record edit refreshes it).
 
 On the record page, `RecordFieldGrid`'s `FileControl` stages an upload: the file sits in `PendingFiles` (with `accept`/`max_size` checks from `utils/fileChecks.ts`) until someone approves it, and only approval saves the record (and so fires workflow triggers). Pending state is page-local; unreferenced objects are left to `gc_service`.

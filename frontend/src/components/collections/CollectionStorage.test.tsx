@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router'
 import { CollectionStorage } from './CollectionStorage'
 
 const json = (body: unknown, status = 200) =>
@@ -69,7 +70,9 @@ function renderIt() {
   })
   return render(
     <QueryClientProvider client={client}>
-      <CollectionStorage collectionId={CID} />
+      <MemoryRouter>
+        <CollectionStorage collectionId={CID} />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -148,6 +151,16 @@ describe('CollectionStorage', () => {
         body: undefined,
       }),
     )
+  })
+
+  it('links to the page that manages every collection home', async () => {
+    const user = userEvent.setup()
+    renderIt()
+    await user.click(await screen.findByRole('button', { name: /storage/i }))
+
+    expect(
+      screen.getByRole('link', { name: /manage all collections/i }),
+    ).toHaveAttribute('href', '/settings/storage?tab=collections')
   })
 
   it('warns when the home volume is offline, with the reason', async () => {

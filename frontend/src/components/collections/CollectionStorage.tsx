@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { AlertTriangle } from '../ui/icons'
 import { Button, CollapsibleSection, Field, Select } from '../ui'
 import type { PlacementPolicy } from '../../api/store'
@@ -102,16 +103,24 @@ export function CollectionStorage({ collectionId }: { collectionId: string }) {
           </p>
         )}
 
-        <Button
-          size="sm"
-          variant="primary"
-          disabled={
-            !dirty || setPlacement.isPending || clearPlacement.isPending
-          }
-          onClick={save}
-        >
-          Save
-        </Button>
+        <div className="flex items-center gap-4">
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={
+              !dirty || setPlacement.isPending || clearPlacement.isPending
+            }
+            onClick={save}
+          >
+            Save
+          </Button>
+          <Link
+            to="/settings/storage?tab=collections"
+            className="text-sm text-accent hover:underline"
+          >
+            Manage all collections&apos; homes
+          </Link>
+        </div>
       </div>
     </CollapsibleSection>
   )

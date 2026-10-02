@@ -8,7 +8,7 @@ import { WidgetCard } from '../WidgetCard'
 /** Storage usage per volume, from `VolumeStatsResponse` -- a snapshot, not
  * governed by the shared date-range/dataset/schema filter bar since volume
  * usage isn't scoped to any of those dimensions. Full volume management
- * (add/edit/remove, write-queue order) lives in Settings; this widget only
+ * (add/edit/remove, write-queue order) lives in Settings > Storage; this widget only
  * summarizes. */
 export function StorageUsageWidget() {
   const { data: volumes, isLoading, error } = useVolumes()
@@ -17,7 +17,7 @@ export function StorageUsageWidget() {
     <WidgetCard
       title="Storage usage"
       description="Used space by volume"
-      viewRunsTo="/settings"
+      viewRunsTo="/settings/storage"
       viewRunsLabel="Manage volumes"
     >
       {error ? (

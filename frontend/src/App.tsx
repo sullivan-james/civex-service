@@ -28,7 +28,21 @@ const PluginEditorPage = lazy(() => import('./pages/PluginEditorPage'))
 const ContainerPluginEditorPage = lazy(
   () => import('./pages/ContainerPluginEditorPage'),
 )
-const SettingsPage = lazy(() => import('./pages/SettingsPage'))
+const SettingsLayout = lazy(() => import('./pages/settings/SettingsLayout'))
+const ThemeSection = lazy(() => import('./components/settings/ThemeSection'))
+const DatabaseSection = lazy(
+  () => import('./components/settings/DatabaseSection'),
+)
+const StorageSettings = lazy(
+  () => import('./components/settings/storage/StorageSettings'),
+)
+const RetentionSection = lazy(
+  () => import('./components/settings/RetentionSection'),
+)
+const MapSection = lazy(() => import('./components/settings/MapSection'))
+const AdvancedSection = lazy(
+  () => import('./components/settings/AdvancedSection'),
+)
 const LegalPage = lazy(() => import('./pages/LegalPage'))
 
 export default function App() {
@@ -85,11 +99,19 @@ export default function App() {
               path="/plugins/container/:name/edit"
               element={<ContainerPluginEditorPage />}
             />
-            <Route path="/settings" element={<SettingsPage />} />
-            {/* Legacy redirect — Storage moved into Settings */}
+            <Route path="/settings" element={<SettingsLayout />}>
+              <Route index element={<Navigate to="appearance" replace />} />
+              <Route path="appearance" element={<ThemeSection />} />
+              <Route path="database" element={<DatabaseSection />} />
+              <Route path="storage" element={<StorageSettings />} />
+              <Route path="recently-deleted" element={<RetentionSection />} />
+              <Route path="map" element={<MapSection />} />
+              <Route path="advanced" element={<AdvancedSection />} />
+            </Route>
+            {/* Legacy redirect — Storage lives under Settings */}
             <Route
               path="/storage"
-              element={<Navigate to="/settings" replace />}
+              element={<Navigate to="/settings/storage" replace />}
             />
             <Route path="/legal" element={<LegalPage />} />
           </Routes>
