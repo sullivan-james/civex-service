@@ -47,6 +47,7 @@ from civex.domain.dtos import (
     StoredObjectInfo,
     VolumeStatus,
 )
+from civex.domain.placement import PLACEMENT_FAIL
 from civex.domain.exceptions import (
     AllVolumesFull,
     GCAlreadyRunningError,
@@ -103,20 +104,21 @@ class VolumeAwareFileObjectStore:
     # Protocol implementation
     # ------------------------------------------------------------------
 
-    def put(self, data: bytes, original_filename: str) -> FileRef:
+    def put(
+        self, data: bytes, original_filename: str, collection_id: str | None = None
+    ) -> FileRef:
         sha256 = hashlib.sha256(data).hexdigest()
         size = len(data)
 
-        # If already stored in any volume, return immediately (idempotent).
-        located = self._locate(sha256)
-        if located is not None:
-            self._touch(located[1])
-            return FileRef(
-                sha256=sha256, filename=original_filename, size=size, volume=located[0]
-            )
+        # If the content is already stored anywhere, reuse it (idempotent).
+        # Placement never overrides this: a collection's home volume decides
+        # where *new* content goes, not whether to copy existing content.
+        existing = self._existing_copy(sha256)
+        if existing is not None:
+            return self._reuse(existing, sha256, original_filename, size)
 
         reasons: list[str] = []
-        for vol_name in self._cfg.volume_queue:
+        for vol_name in self._write_candidates(collection_id):
             can, reason = self._can_write(vol_name, size)
             if not can:
                 reasons.append(f"{vol_name}: {reason}")
@@ -155,16 +157,14 @@ class VolumeAwareFileObjectStore:
                 volume=vol_name,
             )
 
-        raise AllVolumesFull(
-            f"No volume in queue has space for {size / 1_048_576:.1f} MB. "
-            + "; ".join(reasons)
-        )
+        raise self._all_volumes_full(size, reasons, collection_id)
 
     async def put_stream(
         self,
         chunks: AsyncIterable[bytes],
         original_filename: str,
         size_hint: int | None = None,
+        collection_id: str | None = None,
     ) -> FileRef:
         """Stream-write `chunks` straight to disk, hashing incrementally so
         the full content never has to fit in memory at once -- unlike put(),
@@ -183,7 +183,7 @@ class VolumeAwareFileObjectStore:
         partway through fails the upload outright instead of retrying on
         the next volume in queue.
         """
-        vol_name, tmp_path = self._open_scratch(size_hint)
+        vol_name, tmp_path = self._open_scratch(size_hint, collection_id)
         hasher = hashlib.sha256()
         size = 0
         try:
@@ -203,7 +203,12 @@ class VolumeAwareFileObjectStore:
             vol_name, tmp_path, hasher.hexdigest(), size, original_filename
         )
 
-    def put_path(self, path: Path, original_filename: str | None = None) -> FileRef:
+    def put_path(
+        self,
+        path: Path,
+        original_filename: str | None = None,
+        collection_id: str | None = None,
+    ) -> FileRef:
         """Store a file from disk by copying it in fixed-size chunks, so a
         multi-GB file never has to fit in memory (put(path.read_bytes())
         would). Unlike put_stream, the source is replayable, so a volume that
@@ -211,7 +216,7 @@ class VolumeAwareFileObjectStore:
         name = original_filename or path.name
         size = path.stat().st_size
         reasons: list[str] = []
-        for vol_name in self._cfg.volume_queue:
+        for vol_name in self._write_candidates(collection_id):
             can, reason = self._can_write(vol_name, size)
             if not can:
                 reasons.append(f"{vol_name}: {reason}")
@@ -236,12 +241,73 @@ class VolumeAwareFileObjectStore:
                     continue
                 raise self._write_error(vol_name, e, written, streamed=False) from e
             return self._finalize(vol_name, tmp_path, hasher.hexdigest(), written, name)
-        raise AllVolumesFull(
-            f"No volume in queue has space for {size / 1_048_576:.1f} MB. "
-            + "; ".join(reasons)
-        )
+        raise self._all_volumes_full(size, reasons, collection_id)
 
     # -- shared write plumbing -------------------------------------------
+
+    # -- placement and dedup: one place each ------------------------------
+
+    def _write_candidates(self, collection_id: str | None) -> list[str]:
+        """The volumes to try for a new write, in order. A collection with a
+        placement tries its home first -- which need not be in the general
+        write queue -- then, unless it is set to fail, the queue. Everything
+        that picks a volume for new content calls this."""
+        queue = list(self._cfg.volume_queue)
+        place = self._cfg.placement.get(collection_id) if collection_id else None
+        if place is None or place.volume not in self._cfg.volumes:
+            return queue
+        if place.on_unavailable == PLACEMENT_FAIL:
+            return [place.volume]
+        return [place.volume, *(v for v in queue if v != place.volume)]
+
+    def _all_volumes_full(
+        self, size: int | None, reasons: list[str], collection_id: str | None
+    ) -> AllVolumesFull:
+        place = self._cfg.placement.get(collection_id) if collection_id else None
+        fail = place is not None and place.on_unavailable == PLACEMENT_FAIL
+        what = f" for {size / 1_048_576:.1f} MB" if size else ""
+        head = (
+            f"This collection's home volume '{place.volume}' can't take the file"
+            f"{what}, and the collection is set to fail rather than use another volume."
+            if fail and place is not None
+            else f"No volume in queue has space{what}."
+        )
+        return AllVolumesFull(f"{head} " + "; ".join(reasons))
+
+    def _existing_copy(self, sha256: str) -> tuple[str, Path | None] | None:
+        """(volume, path) of content that is already stored, so it is reused
+        and never written twice. `path` is None when the only copy is on a
+        volume that can't be reached right now: the inventory says it is
+        there, and the same content is not copied onto another volume just
+        because the first one is unplugged."""
+        located = self._locate(sha256)
+        if located is not None:
+            return located
+        return self._offline_copy(sha256)
+
+    def _offline_copy(self, sha256: str) -> tuple[str, None] | None:
+        if self._session is None:
+            return None
+        from civex.db.models import StoredObject
+
+        row = self._session.get(StoredObject, sha256)
+        if row is None or row.volume not in self._cfg.volumes:
+            return None
+        if self.volume_status(row.volume).reachable:
+            return None  # reachable but the file is gone: the row is stale
+        return row.volume, None
+
+    def _reuse(
+        self,
+        existing: tuple[str, Path | None],
+        sha256: str,
+        filename: str,
+        size: int,
+    ) -> FileRef:
+        volume, path = existing
+        if path is not None:
+            self._touch(path)  # refreshes mtime, so GC's grace period protects it
+        return FileRef(sha256=sha256, filename=filename, size=size, volume=volume)
 
     def _scratch_path(self, vol_name: str) -> Path:
         """A fresh scratch path on `vol_name`. Creates only the scratch
@@ -257,11 +323,13 @@ class VolumeAwareFileObjectStore:
             ) from e
         return scratch_dir / f"{uuid.uuid4().hex}.part"
 
-    def _open_scratch(self, size_hint: int | None) -> tuple[str, Path]:
-        """First queued volume passing the allocation/headroom gates, plus a
-        fresh scratch path on it."""
+    def _open_scratch(
+        self, size_hint: int | None, collection_id: str | None = None
+    ) -> tuple[str, Path]:
+        """First candidate volume passing the allocation/headroom gates, plus
+        a fresh scratch path on it."""
         reasons: list[str] = []
-        for vol_name in self._cfg.volume_queue:
+        for vol_name in self._write_candidates(collection_id):
             can, reason = self._can_write(vol_name, size_hint or 0)
             if not can:
                 reasons.append(f"{vol_name}: {reason}")
@@ -270,12 +338,7 @@ class VolumeAwareFileObjectStore:
                 return vol_name, self._scratch_path(vol_name)
             except VolumeUnavailableError as e:
                 reasons.append(f"{vol_name}: {e}")
-        raise AllVolumesFull(
-            "No volume in queue has space"
-            + (f" for {size_hint / 1_048_576:.1f} MB" if size_hint else "")
-            + ". "
-            + "; ".join(reasons)
-        )
+        raise self._all_volumes_full(size_hint, reasons, collection_id)
 
     @staticmethod
     def _write_error(
@@ -300,16 +363,10 @@ class VolumeAwareFileObjectStore:
     ) -> FileRef:
         """Rename a fully-written scratch file into its content-addressed
         path, or discard it if the same content is already stored."""
-        located = self._locate(sha256)
-        if located is not None:
+        existing = self._existing_copy(sha256)
+        if existing is not None:
             tmp_path.unlink(missing_ok=True)
-            self._touch(located[1])
-            return FileRef(
-                sha256=sha256,
-                filename=original_filename,
-                size=size,
-                volume=located[0],
-            )
+            return self._reuse(existing, sha256, original_filename, size)
         dest = self._object_path(sha256, vol_name)
         try:
             dest.parent.mkdir(exist_ok=True)

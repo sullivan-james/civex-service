@@ -115,6 +115,15 @@ class VolumeConfig:
 
 
 @dataclass
+class PlacementConfig:
+    """A collection's home volume. Keyed in `StoreConfig.placement` by the
+    collection's id, so renaming a collection changes nothing here."""
+
+    volume: str  # a key of StoreConfig.volumes
+    on_unavailable: str = "spill"  # domain.placement: spill | fail
+
+
+@dataclass
 class StoreConfig:
     volumes: dict[str, VolumeConfig]
     volume_queue: list[str]
@@ -124,6 +133,9 @@ class StoreConfig:
     full_below_gb: float = (
         1.0  # treat volume as full below this disk headroom (absolute)
     )
+    # collection id -> home volume. Per-machine like the volumes it names, so
+    # it lives here and not on the collection (which dump/sync carry elsewhere).
+    placement: dict[str, PlacementConfig] = field(default_factory=dict)
 
 
 def _default_store(project_root: Path) -> StoreConfig:
@@ -223,11 +235,19 @@ def load_config() -> Config:
         if not volumes:
             volumes = {"default": VolumeConfig(name="default", path="_civex/objects")}
         queue = sd.get("volume_queue", list(volumes.keys()))
+        placement = {
+            cid: PlacementConfig(
+                volume=pcfg["volume"],
+                on_unavailable=pcfg.get("on_unavailable", "spill"),
+            )
+            for cid, pcfg in sd.get("placement", {}).items()
+        }
         store = StoreConfig(
             volumes=volumes,
             volume_queue=queue,
             warn_below_pct=float(sd.get("warn_below_pct", 10.0)),
             full_below_gb=float(sd.get("full_below_gb", 1.0)),
+            placement=placement,
         )
 
     ai: AIConfig | None = None
@@ -361,6 +381,7 @@ def save_config(config: Config) -> None:
             and sc.volume_queue == ["default"]
             and sc.warn_below_pct == 10.0
             and sc.full_below_gb == 1.0
+            and not sc.placement
         )
         if not is_default:
             queue_str = ", ".join(f'"{_ts(n)}"' for n in sc.volume_queue)
@@ -380,6 +401,11 @@ def save_config(config: Config) -> None:
                     lines.append(f'id = "{_ts(vol.id)}"\n')
                 if vol.state != "active":
                     lines.append(f'state = "{_ts(vol.state)}"\n')
+            for cid, place in sc.placement.items():
+                lines.append(f"\n[store.placement.{_tk(cid)}]\n")
+                lines.append(f'volume = "{_ts(place.volume)}"\n')
+                if place.on_unavailable != "spill":
+                    lines.append(f'on_unavailable = "{_ts(place.on_unavailable)}"\n')
 
     if config.plugins.default_timeout_seconds != 60.0:
         lines += [
