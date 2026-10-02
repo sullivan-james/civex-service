@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from civex.domain.dtos import DatasetDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
@@ -21,11 +21,15 @@ class DatasetService:
         audit_repo: AuditRepository | None = None,
         schema_svc: SchemaService | None = None,
         record_svc: RecordService | None = None,
+        on_purge: Callable[[uuid.UUID], object] | None = None,
     ) -> None:
         self._datasets = dataset_repo
         self._audit = audit_repo
         self._schema_svc = schema_svc
         self._record_svc = record_svc
+        # Called with the id of every purged collection, so anything keyed by
+        # collection id elsewhere (storage placement) can drop it.
+        self._on_purge = on_purge
 
     def _check_schema_list(self, names: list[str]) -> list[str]:
         """Every name must be a live schema, and every listed child schema's
@@ -217,3 +221,5 @@ class DatasetService:
                 "purge", "dataset", dataset.id, dataset.to_dict(), None
             )
         self._datasets.purge(dataset.id)
+        if self._on_purge:
+            self._on_purge(dataset.id)

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
+import uuid
 
-from civex.config import Config, VolumeConfig, save_config
+from civex.config import Config, PlacementConfig, VolumeConfig, save_config
 from civex.domain.dtos import VOLUME_WRONG_DRIVE, VolumeStatus
+from civex.domain.placement import PLACEMENT_POLICIES, PLACEMENT_SPILL
 from civex.domain.exceptions import (
     AlreadyExistsError,
     NotFoundError,
@@ -85,6 +87,12 @@ class StoreService:
         sc = self._config.store_config
         if name not in sc.volumes:
             raise NotFoundError(f"Volume '{name}' not found")
+        homed = [cid for cid, place in sc.placement.items() if place.volume == name]
+        if homed and not force:
+            raise ValidationError(
+                f"{len(homed)} collection(s) are homed on volume '{name}'. Clear "
+                "their placement first, or use force to clear it for them."
+            )
         if not force:
             used = self._store._civex_used(name)
             if used > 0:
@@ -99,6 +107,8 @@ class StoreService:
                     "(existing file references will become unresolvable)."
                 )
         sc.volume_queue = [n for n in sc.volume_queue if n != name]
+        for cid in homed:
+            del sc.placement[cid]
         del sc.volumes[name]
         save_config(self._config)
 
@@ -109,3 +119,43 @@ class StoreService:
                 raise NotFoundError(f"Volume '{n}' not found")
         sc.volume_queue = list(names)
         save_config(self._config)
+
+    # -- placement: which volume a collection's new files go to ------------
+    #
+    # Held in config.toml keyed by collection *id*, so renaming a collection
+    # changes nothing here. A placement only steers where content that isn't
+    # stored yet is written; existing content is reused wherever it lives.
+
+    def placements(self) -> dict[str, PlacementConfig]:
+        return dict(self._config.store_config.placement)
+
+    def set_placement(
+        self,
+        collection_id: str,
+        volume: str,
+        on_unavailable: str = PLACEMENT_SPILL,
+    ) -> PlacementConfig:
+        try:
+            collection_id = str(uuid.UUID(collection_id))
+        except ValueError:
+            raise ValidationError(f"'{collection_id}' is not a collection id") from None
+        sc = self._config.store_config
+        if volume not in sc.volumes:
+            raise NotFoundError(f"Volume '{volume}' not found")
+        if on_unavailable not in PLACEMENT_POLICIES:
+            raise ValidationError(
+                f"on_unavailable must be one of: {', '.join(PLACEMENT_POLICIES)}"
+            )
+        place = PlacementConfig(volume=volume, on_unavailable=on_unavailable)
+        sc.placement[collection_id] = place
+        save_config(self._config)
+        return place
+
+    def clear_placement(self, collection_id: str) -> bool:
+        """Remove a collection's placement. True if it had one."""
+        sc = self._config.store_config
+        if collection_id not in sc.placement:
+            return False
+        del sc.placement[collection_id]
+        save_config(self._config)
+        return True

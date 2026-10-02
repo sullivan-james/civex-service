@@ -576,6 +576,27 @@ class VolumeStatsResponse(BaseModel):
     in_queue: bool
 
 
+class PlacementResponse(BaseModel):
+    collection_id: str = Field(
+        description="Id of the collection this placement is for."
+    )
+    collection_name: str | None = Field(
+        description="The collection's name, or null if it no longer exists."
+    )
+    volume: str = Field(description="The collection's home volume.")
+    on_unavailable: str = Field(
+        description=(
+            "spill: use the general write queue when the home volume can't take a "
+            "file. fail: refuse the upload instead."
+        )
+    )
+
+
+class SetPlacementRequest(BaseModel):
+    volume: str = Field(description="Name of the volume that becomes the home.")
+    on_unavailable: str = Field(default="spill", description="spill (default) or fail.")
+
+
 class AddVolumeRequest(BaseModel):
     name: str
     path: str

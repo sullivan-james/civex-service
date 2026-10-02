@@ -15,6 +15,10 @@ from civex.domain.exceptions import (
 )
 
 app = typer.Typer(help="Manage file storage volumes", no_args_is_help=True)
+place_app = typer.Typer(
+    help="Choose which volume a collection's new files go to", no_args_is_help=True
+)
+app.add_typer(place_app, name="place")
 
 
 def _fmt_bytes(b: int | None) -> str:
@@ -310,3 +314,85 @@ def store_gc(
         console.print(
             "\n[dim]Dry run -- re-run with --apply to actually delete these.[/dim]"
         )
+
+
+@place_app.command("set")
+def place_set(
+    collection: str = typer.Argument(..., help="Collection name"),
+    volume: str = typer.Argument(..., help="Volume that becomes its home"),
+    on_unavailable: str = typer.Option(
+        "spill",
+        "--on-unavailable",
+        help=(
+            "What to do when the home volume can't take a file: 'spill' uses "
+            "the general write queue (default); 'fail' refuses the upload."
+        ),
+    ),
+) -> None:
+    """Make a volume the home of a collection's new files.
+
+    A collection's home need not be in the write queue. It only decides where
+    content that is not stored yet is written: a file whose content already
+    exists on any volume is reused where it lives, never copied again.
+    """
+    ctx = get_ctx()
+    try:
+        dataset = ctx.dataset_svc.get(collection)
+        ctx.store_svc.set_placement(str(dataset.id), volume, on_unavailable)
+        console.print(
+            f"[green]New files for '{collection}' now go to '{volume}'"
+            f" ({on_unavailable} when it is unavailable).[/green]"
+        )
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+
+
+@place_app.command("clear")
+def place_clear(
+    collection: str = typer.Argument(..., help="Collection name"),
+) -> None:
+    """Send a collection's new files back to the general write queue."""
+    ctx = get_ctx()
+    try:
+        dataset = ctx.dataset_svc.get(collection)
+        if ctx.store_svc.clear_placement(str(dataset.id)):
+            console.print(f"[green]'{collection}' uses the write queue again.[/green]")
+        else:
+            console.print(f"[dim]'{collection}' has no placement.[/dim]")
+    except NotFoundError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+
+
+@place_app.command("list")
+def place_list() -> None:
+    """List collections that have a home volume."""
+    ctx = get_ctx()
+    try:
+        places = ctx.store_svc.placements()
+        names = {str(d.id): d.name for d in ctx.dataset_svc.list_all(with_count=False)}
+    finally:
+        ctx.close()
+
+    if not places:
+        console.print("[dim]No collection has a home volume.[/dim]")
+        return
+
+    from rich.table import Table
+
+    table = Table(show_header=True, header_style="bold", box=None, pad_edge=False)
+    table.add_column("Collection", style="bold")
+    table.add_column("Home volume")
+    table.add_column("When unavailable")
+    for cid, place in places.items():
+        table.add_row(
+            names.get(cid, "[dim](deleted collection)[/dim]"),
+            place.volume,
+            place.on_unavailable,
+        )
+    console.print(table)

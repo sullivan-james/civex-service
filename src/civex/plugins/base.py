@@ -135,7 +135,7 @@ class WorkflowContext:
         return self._app_ctx.file_svc.retrieve(sha256)
 
     def store_file(self, data: bytes, filename: str) -> FileRef:
-        return self._app_ctx.file_svc.store_bytes(data, filename)
+        return self._app_ctx.file_svc.store_bytes(data, filename, str(self.dataset.id))
 
     def update_record(self, record_id: str, data: dict[str, Any]) -> RecordDTO:
         dto = self._app_ctx.record_svc.update(

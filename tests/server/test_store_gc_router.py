@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi.testclient import TestClient
 
 
@@ -79,3 +81,87 @@ def test_volumes_report_state_and_adopt_restores_a_marker(
     assert adopted.json()["state"] == "online"
 
     assert client.post("/api/store/volumes/nope/adopt").status_code == 404
+
+
+def _volume(client: TestClient, tmp_path, name: str = "archive") -> None:
+    drive = tmp_path / name
+    drive.mkdir()
+    assert (
+        client.post(
+            "/api/store/volumes", json={"name": name, "path": str(drive)}
+        ).status_code
+        == 201
+    )
+
+
+def _collection(client: TestClient, name: str = "study") -> str:
+    resp = client.post("/api/collections", json={"name": name, "description": None})
+    assert resp.status_code in (200, 201), resp.text
+    return resp.json()["id"]
+
+
+def test_placement_endpoints_and_uploads_follow_the_home(
+    client: TestClient, tmp_path
+) -> None:
+    _volume(client, tmp_path)
+    cid = _collection(client)
+
+    put = client.put(f"/api/store/placement/{cid}", json={"volume": "archive"})
+    assert put.status_code == 200
+    assert put.json() == {
+        "collection_id": cid,
+        "collection_name": "study",
+        "volume": "archive",
+        "on_unavailable": "spill",
+    }
+    assert client.get("/api/store/placement").json() == [put.json()]
+
+    homed = client.put(
+        f"/api/files/stream?filename=a.txt&collection={cid}", content=b"homed bytes"
+    )
+    plain = client.put("/api/files/stream?filename=b.txt", content=b"queue bytes")
+    assert homed.status_code == 201 and homed.json()["volume"] == "archive"
+    assert plain.json()["volume"] == "default"
+
+    # Dedup beats placement: the same bytes uploaded for the homed collection
+    # are the existing copy on `default`, not a second one on `archive`.
+    again = client.put(
+        f"/api/files/stream?filename=c.txt&collection={cid}", content=b"queue bytes"
+    )
+    assert again.json()["volume"] == "default"
+    multipart = client.post(
+        f"/api/files?collection={cid}", files={"file": ("d.txt", b"homed bytes")}
+    )
+    assert multipart.json()["volume"] == "archive"
+
+    assert client.delete(f"/api/store/placement/{cid}").status_code == 204
+    assert client.get("/api/store/placement").json() == []
+
+
+def test_placement_endpoint_errors(client: TestClient, tmp_path) -> None:
+    _volume(client, tmp_path)
+    cid = _collection(client)
+
+    assert (
+        client.put(
+            "/api/store/placement/not-a-uuid", json={"volume": "archive"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.put(
+            f"/api/store/placement/{uuid.uuid4()}", json={"volume": "archive"}
+        ).status_code
+        == 404
+    )
+    assert (
+        client.put(f"/api/store/placement/{cid}", json={"volume": "nope"}).status_code
+        == 404
+    )
+    assert (
+        client.put(
+            f"/api/store/placement/{cid}",
+            json={"volume": "archive", "on_unavailable": "x"},
+        ).status_code
+        == 422
+    )

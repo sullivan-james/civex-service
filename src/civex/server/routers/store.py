@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from civex.context import AppContext
@@ -14,6 +16,8 @@ from civex.server.models import (
     AddVolumeRequest,
     GCReportResponse,
     GCRequest,
+    PlacementResponse,
+    SetPlacementRequest,
     SetQueueRequest,
     UpdateVolumeRequest,
     VolumeStatsResponse,
@@ -112,3 +116,60 @@ def run_gc(body: GCRequest = GCRequest(), ctx: AppContext = Depends(get_ctx)):
         ctx.gc_svc.rebuild_references()
     report = ctx.gc_svc.run(dry_run=not body.apply, grace_days=body.grace_days)
     return report.to_dict()
+
+
+def _placement_response(
+    ctx: AppContext, collection_id: str, volume: str, on_unavailable: str
+) -> PlacementResponse:
+    names = {str(d.id): d.name for d in ctx.dataset_svc.list_all(with_count=False)}
+    return PlacementResponse(
+        collection_id=collection_id,
+        collection_name=names.get(collection_id),
+        volume=volume,
+        on_unavailable=on_unavailable,
+    )
+
+
+@router.get("/placement", response_model=list[PlacementResponse])
+def list_placements(ctx: AppContext = Depends(get_ctx)):
+    """Every collection that has a home volume.
+
+    A placement only steers where a collection's *new* files are written. A file
+    whose content already exists on any volume is reused where it lives and is
+    never copied again.
+    """
+    names = {str(d.id): d.name for d in ctx.dataset_svc.list_all(with_count=False)}
+    return [
+        PlacementResponse(
+            collection_id=cid,
+            collection_name=names.get(cid),
+            volume=place.volume,
+            on_unavailable=place.on_unavailable,
+        )
+        for cid, place in ctx.store_svc.placements().items()
+    ]
+
+
+@router.put("/placement/{collection_id}", response_model=PlacementResponse)
+def set_placement(
+    collection_id: str, body: SetPlacementRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """Make a volume the home of a collection's new files.
+
+    The collection is identified by id, so renaming it changes nothing here. The
+    home need not be in the general write queue.
+    """
+    try:
+        ctx.dataset_svc.get_by_id(uuid.UUID(collection_id))
+    except ValueError:
+        raise HTTPException(422, detail=f"'{collection_id}' is not a collection id")
+    place = ctx.store_svc.set_placement(collection_id, body.volume, body.on_unavailable)
+    return _placement_response(
+        ctx, str(uuid.UUID(collection_id)), place.volume, place.on_unavailable
+    )
+
+
+@router.delete("/placement/{collection_id}", status_code=204)
+def clear_placement(collection_id: str, ctx: AppContext = Depends(get_ctx)):
+    """Send a collection's new files back to the general write queue."""
+    ctx.store_svc.clear_placement(collection_id)

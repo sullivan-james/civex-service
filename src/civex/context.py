@@ -167,7 +167,13 @@ def build_local_context(
     record_svc = RecordService(
         schema_svc, dataset_repo, record_repo, file_store, job_svc, audit_repo
     )
-    dataset_svc = DatasetService(dataset_repo, audit_repo, schema_svc, record_svc)
+    dataset_svc = DatasetService(
+        dataset_repo,
+        audit_repo,
+        schema_svc,
+        record_svc,
+        on_purge=lambda collection_id: store_svc.clear_placement(str(collection_id)),
+    )
     file_svc = FileService(file_store, remote_transport=remote_transport)
     store_svc = StoreService(config, file_store)
     gc_svc = GCService(file_store, LocalFileReferenceRepository(session))

@@ -540,8 +540,10 @@ class RecordService:
         field_name: str,
         restrictions: dict[str, Any] | None = None,
         timezone: str | None = None,
+        collection_id: str | None = None,
     ) -> Any:
-        """`timezone` is the collection's zone, used to read an offset-less
+        """`collection_id` steers where a new file is stored (placement).
+        `timezone` is the collection's zone, used to read an offset-less
         datetime; the field's own `timezone` restriction takes precedence."""
         if dtype == "datetime":
             try:
@@ -577,7 +579,7 @@ class RecordService:
             path = Path(raw)
             if not path.exists():
                 raise CoercionError(field_name, dtype, raw)
-            file_ref = self._files.put_path(path)
+            file_ref = self._files.put_path(path, collection_id=collection_id)
             value = file_ref.to_dict()
             _check_restrictions(value, dtype, restrictions or {}, field_name)
             return value
@@ -586,7 +588,7 @@ class RecordService:
             path = Path(raw)
             if not path.exists():
                 raise CoercionError(field_name, dtype, raw)
-            file_ref = self._files.put_path(path)
+            file_ref = self._files.put_path(path, collection_id=collection_id)
             file_list_value = [file_ref.to_dict()]
             _check_restrictions(file_list_value, dtype, restrictions or {}, field_name)
             return file_list_value
