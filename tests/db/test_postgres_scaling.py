@@ -92,6 +92,7 @@ def test_file_references_follow_record_writes_and_cascade(session: Session) -> N
 
 
 def test_store_inventory_upsert_is_idempotent_and_sums(session: Session, tmp_path: Path) -> None:
+    (tmp_path / "v").mkdir()  # an absolute volume path must already exist
     vc = VolumeConfig(name="v", path=str(tmp_path / "v"))
     store = VolumeAwareFileObjectStore(
         StoreConfig(volumes={"v": vc}, volume_queue=["v"]), tmp_path, session=session

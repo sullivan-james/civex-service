@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, AsyncIterable, Iterator, cast
 
 from civex.config import StoreConfig, VolumeConfig
-from civex.domain.dtos import FileRef, StoredObjectInfo
+from civex.domain.dtos import FileRef, StoredObjectInfo, VolumeStatus
 from civex.domain.exceptions import (
     AllVolumesFull,
     GCAlreadyRunningError,
@@ -104,10 +104,11 @@ class VolumeAwareFileObjectStore:
                 reasons.append(f"{vol_name}: {reason}")
                 continue
 
-            vc = self._cfg.volumes[vol_name]
-            scratch_dir = self._resolve_path(vc) / _SCRATCH_DIRNAME
-            scratch_dir.mkdir(parents=True, exist_ok=True)
-            tmp_path = scratch_dir / f"{uuid.uuid4().hex}.part"
+            try:
+                tmp_path = self._scratch_path(vol_name)
+            except VolumeUnavailableError as e:
+                reasons.append(f"{vol_name}: {e}")
+                continue
             dest = self._object_path(sha256, vol_name)
             try:
                 # Written to a scratch file and renamed into place, same as
@@ -116,7 +117,7 @@ class VolumeAwareFileObjectStore:
                 # content-addressed path, since dest is only ever created by
                 # an atomic same-filesystem rename.
                 tmp_path.write_bytes(data)
-                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.parent.mkdir(exist_ok=True)
                 os.replace(tmp_path, dest)
             except OSError as e:
                 tmp_path.unlink(missing_ok=True)
@@ -197,7 +198,11 @@ class VolumeAwareFileObjectStore:
             if not can:
                 reasons.append(f"{vol_name}: {reason}")
                 continue
-            tmp_path = self._scratch_path(vol_name)
+            try:
+                tmp_path = self._scratch_path(vol_name)
+            except VolumeUnavailableError as e:
+                reasons.append(f"{vol_name}: {e}")
+                continue
             hasher = hashlib.sha256()
             written = 0
             try:
@@ -221,8 +226,17 @@ class VolumeAwareFileObjectStore:
     # -- shared write plumbing -------------------------------------------
 
     def _scratch_path(self, vol_name: str) -> Path:
+        """A fresh scratch path on `vol_name`. Creates only the scratch
+        directory itself, never the volume root: if the volume went away
+        after `_can_write` checked it, this fails instead of quietly
+        recreating the root on the parent filesystem."""
         scratch_dir = self._resolve_path(self._cfg.volumes[vol_name]) / _SCRATCH_DIRNAME
-        scratch_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            scratch_dir.mkdir(exist_ok=True)
+        except OSError as e:
+            raise VolumeUnavailableError(
+                f"Cannot write to volume '{vol_name}': {e}"
+            ) from e
         return scratch_dir / f"{uuid.uuid4().hex}.part"
 
     def _open_scratch(self, size_hint: int | None) -> tuple[str, Path]:
@@ -234,7 +248,10 @@ class VolumeAwareFileObjectStore:
             if not can:
                 reasons.append(f"{vol_name}: {reason}")
                 continue
-            return vol_name, self._scratch_path(vol_name)
+            try:
+                return vol_name, self._scratch_path(vol_name)
+            except VolumeUnavailableError as e:
+                reasons.append(f"{vol_name}: {e}")
         raise AllVolumesFull(
             "No volume in queue has space"
             + (f" for {size_hint / 1_048_576:.1f} MB" if size_hint else "")
@@ -277,7 +294,7 @@ class VolumeAwareFileObjectStore:
             )
         dest = self._object_path(sha256, vol_name)
         try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.parent.mkdir(exist_ok=True)
             os.replace(tmp_path, dest)
         except OSError as e:
             tmp_path.unlink(missing_ok=True)
@@ -326,6 +343,12 @@ class VolumeAwareFileObjectStore:
         the two-level object layout is visited -- scratch files, the
         manifest and anything foreign are skipped without being stat'd. One
         bad directory or unavailable volume costs only its own objects."""
+        status = self.volume_status(name)
+        if not status.online:
+            log.warning(
+                "Skipping volume '%s' while listing objects: %s", name, status.reason
+            )
+            return
         root = self._resolve_path(self._cfg.volumes[name])
         try:
             top = list(os.scandir(root))
@@ -472,15 +495,17 @@ class VolumeAwareFileObjectStore:
         self, name: str, vc: VolumeConfig, warn_pct: float, *, in_queue: bool
     ) -> dict:
         path = self._resolve_path(vc)
-        available = path.exists()
+        status = self.volume_status(name)
+        available = status.online
         disk_free = disk_total = None
         if available:
             try:
                 du = shutil.disk_usage(path)
                 disk_free = du.free
                 disk_total = du.total
-            except OSError:
+            except OSError as e:
                 available = False
+                status = VolumeStatus("offline", f"cannot read disk usage: {e}")
 
         civex_used = self._civex_used(name) if available else None
         allocated_bytes = (
@@ -504,6 +529,7 @@ class VolumeAwareFileObjectStore:
             "disk_free_bytes": disk_free,
             "disk_total_bytes": disk_total,
             "available": available,
+            "reason": status.reason,
             "warning": warning,
             "in_queue": in_queue,
         }
@@ -671,6 +697,16 @@ class VolumeAwareFileObjectStore:
 
         from civex.db.models import StoredObject
 
+        # An unavailable volume says nothing about what is on it: dropping
+        # its rows because "no blob was found" would erase the accounting
+        # for every object on a drive that is simply unplugged.
+        status = self.volume_status(name)
+        if not status.online:
+            log.warning(
+                "Skipping inventory reconcile of volume '%s': %s", name, status.reason
+            )
+            return 0, 0
+
         upserted = 0
         batch: list[tuple[str, str, int]] = []
         for obj in self._walk_volume(name):
@@ -682,6 +718,27 @@ class VolumeAwareFileObjectStore:
         if batch:
             self._upsert_inventory(batch)
             upserted += len(batch)
+
+        # An online root with no objects that this store never wrote to is
+        # an empty directory -- most likely a mount point with nothing
+        # mounted -- so it can't be taken as proof that the inventory rows
+        # are stale. (A volume that was written to and then emptied has its
+        # manifest, and is reconciled normally.)
+        if (
+            upserted == 0
+            and not self._was_initialised(name)
+            and self._session.execute(
+                select(StoredObject.sha256).where(StoredObject.volume == name).limit(1)
+            ).first()
+        ):
+            log.warning(
+                "Volume '%s' is available but was never initialised and holds "
+                "no objects, while the inventory lists some; leaving its rows "
+                "in place.",
+                name,
+            )
+            self._used_cache.pop(name, None)
+            return upserted, 0
 
         removed = 0
         root = self._resolve_path(self._cfg.volumes[name])
@@ -746,17 +803,76 @@ class VolumeAwareFileObjectStore:
         ).scalar_one()
         return int(total)
 
+    # -- volume availability: the single place that decides ----------------
+    #
+    # Every code path that asks "can I use this volume?" -- writes, stats,
+    # directory walks, inventory reconcile -- goes through volume_status().
+    # Nothing else stats a volume root to decide that, so changing what
+    # "available" means (e.g. checking a per-volume identity marker) is a
+    # change to this one method.
+
+    def volume_status(self, name: str) -> VolumeStatus:
+        vc = self._cfg.volumes.get(name)
+        if vc is None:
+            return VolumeStatus("offline", "volume not configured")
+        root = self._resolve_path(vc)
+        try:
+            if not root.exists():
+                return VolumeStatus("offline", f"path missing: {root}")
+            if not root.is_dir():
+                return VolumeStatus("offline", f"not a directory: {root}")
+            if not os.access(root, os.R_OK | os.X_OK):
+                return VolumeStatus("offline", f"not readable: {root}")
+        except OSError as e:  # e.g. a stale network mount
+            return VolumeStatus("offline", f"cannot reach {root}: {e}")
+        return VolumeStatus("online")
+
+    def volume_available(self, name: str) -> bool:
+        return self.volume_status(name).online
+
+    def _inside_project(self, vc: VolumeConfig) -> bool:
+        """True for a volume whose path is relative and stays within the
+        project root (the default `_civex/objects`). Only those may be
+        created on demand: an absolute path can sit under a mount point that
+        is currently empty, and creating it would silently write to the
+        parent filesystem instead of the drive that belongs there."""
+        if Path(vc.path).is_absolute():
+            return False
+        root = Path(os.path.normpath(self._root))
+        return Path(os.path.normpath(root / vc.path)).is_relative_to(root)
+
+    def _ensure_volume(self, name: str) -> VolumeStatus:
+        """volume_status(), first creating the root if (and only if) the
+        volume lives inside the project. The one place a volume root is ever
+        created implicitly."""
+        status = self.volume_status(name)
+        vc = self._cfg.volumes.get(name)
+        if status.online or vc is None or not self._inside_project(vc):
+            return status
+        try:
+            self._resolve_path(vc).mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            return VolumeStatus("offline", f"cannot create {vc.path}: {e}")
+        return self.volume_status(name)
+
+    def _was_initialised(self, name: str) -> bool:
+        """Whether this volume root has ever held objects written by this
+        store. Every write appends to <root>/manifest.jsonl, which nothing
+        deletes, so its absence means "an empty directory", not "a volume
+        someone emptied". Lets reconcile tell an unmounted mount point
+        (empty, uninitialised) from a drive that is really empty."""
+        vc = self._cfg.volumes.get(name)
+        return vc is not None and (self._resolve_path(vc) / "manifest.jsonl").is_file()
+
     def _can_write(self, volume: str, incoming_size: int) -> tuple[bool, str]:
         vc = self._cfg.volumes.get(volume)
         if vc is None:
             return False, "volume not configured"
 
+        status = self._ensure_volume(volume)
+        if not status.online:
+            return False, f"volume offline: {status.reason}"
         path = self._resolve_path(vc)
-        if not path.exists():
-            try:
-                path.mkdir(parents=True, exist_ok=True)
-            except OSError as e:
-                return False, f"path unavailable: {e}"
 
         if vc.allocated_gb is not None:
             allocated = int(vc.allocated_gb * 1024**3)

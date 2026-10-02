@@ -285,6 +285,19 @@ class FileRef:
         )
 
 
+@dataclass(frozen=True)
+class VolumeStatus:
+    """Whether a volume can be used right now, and if not, why. Produced only
+    by `VolumeAwareFileObjectStore.volume_status()`."""
+
+    state: str  # "online" | "offline"
+    reason: str = ""  # empty when online
+
+    @property
+    def online(self) -> bool:
+        return self.state == "online"
+
+
 @dataclass
 class StoredObjectInfo:
     """One object on disk in the content-addressed store, as seen by GC --
