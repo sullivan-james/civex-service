@@ -34,8 +34,9 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, AsyncIterable, Iterator, cast
+from typing import TYPE_CHECKING, Any, AsyncIterable, Iterator, cast
 
+from civex import fs_locations
 from civex.config import StoreConfig, VolumeConfig
 from civex.domain.dtos import (
     VOLUME_OFFLINE,
@@ -72,6 +73,23 @@ _GC_LOCK_FILENAME = ".gc.lock"
 # mid-run rather than one still working, and is reclaimed rather than
 # deadlocking every future run.
 _GC_LOCK_STALE_SECONDS = 3600
+
+
+def _probe_root(root: Path) -> tuple[str | None, str | None]:
+    """(why `root` can't be used, or None; the volume marker found there).
+
+    Everything here can block on a dead network mount, so callers outside the
+    project go through `fs_locations.guarded`."""
+    try:
+        if not root.exists():
+            return f"path missing: {root}", None
+        if not root.is_dir():
+            return f"not a directory: {root}", None
+        if not os.access(root, os.R_OK | os.X_OK):
+            return f"not readable: {root}", None
+    except OSError as e:  # e.g. a stale mount
+        return f"cannot reach {root}: {e}", None
+    return None, _read_marker(root)
 
 
 def _read_marker(root: Path) -> str | None:
@@ -566,6 +584,14 @@ class VolumeAwareFileObjectStore:
     # Stats (for CLI / UI)
     # ------------------------------------------------------------------
 
+    def _disk_usage(self, vc: VolumeConfig, path: Path) -> Any:
+        """shutil.disk_usage, time-limited for a volume outside the project (a
+        network mount can stop answering). Raises OSError, or
+        fs_locations.Unresponsive on timeout."""
+        if self._inside_project(vc):
+            return shutil.disk_usage(path)
+        return fs_locations.guarded(f"{path}#usage", shutil.disk_usage, path)
+
     def _stat_volume(
         self, name: str, vc: VolumeConfig, warn_pct: float, *, in_queue: bool
     ) -> dict:
@@ -575,10 +601,10 @@ class VolumeAwareFileObjectStore:
         disk_free = disk_total = None
         if available:
             try:
-                du = shutil.disk_usage(path)
+                du = self._disk_usage(vc, path)
                 disk_free = du.free
                 disk_total = du.total
-            except OSError as e:
+            except (OSError, fs_locations.Unresponsive) as e:
                 available = False
                 status = VolumeStatus(VOLUME_OFFLINE, f"cannot read disk usage: {e}")
 
@@ -682,6 +708,10 @@ class VolumeAwareFileObjectStore:
         (each of which is a stat per volume, i.e. a network round trip on
         NFS-style mounts)."""
         for name, vc in self._cfg.volumes.items():
+            # One dead network mount must not stall every read: a volume
+            # outside the project that isn't answering is skipped.
+            if not self._inside_project(vc) and self._probe_volume(name)[0]:
+                continue
             p = self._resolve_path(vc) / sha256[:2] / sha256[2:]
             if p.exists():
                 return name, p
@@ -896,35 +926,57 @@ class VolumeAwareFileObjectStore:
     # single-volume install out of its own uploads. Without a database
     # session (standalone use) there is no identity to check at all.
 
-    def _path_status(self, name: str) -> VolumeStatus | None:
-        """An offline status if the volume's root can't be reached, else None."""
+    def _probe_volume(self, name: str) -> tuple[VolumeStatus | None, str | None]:
+        """(an offline status if the volume's root can't be reached, else None;
+        the identity marker found there). A volume outside the project may be a
+        network mount that has stopped answering, so it is probed under a time
+        limit and reported offline rather than freezing the caller."""
         vc = self._cfg.volumes.get(name)
         if vc is None:
-            return VolumeStatus(
-                VOLUME_OFFLINE,
-                "volume not configured",
-                "Add it with `civex store add`.",
+            return (
+                VolumeStatus(
+                    VOLUME_OFFLINE,
+                    "volume not configured",
+                    "Add it with `civex store add`.",
+                ),
+                None,
             )
         root = self._resolve_path(vc)
-        fix = "Plug the drive in, or change the volume's path."
         try:
-            if not root.exists():
-                return VolumeStatus(VOLUME_OFFLINE, f"path missing: {root}", fix)
-            if not root.is_dir():
-                return VolumeStatus(VOLUME_OFFLINE, f"not a directory: {root}", fix)
-            if not os.access(root, os.R_OK | os.X_OK):
-                return VolumeStatus(VOLUME_OFFLINE, f"not readable: {root}", fix)
-        except OSError as e:  # e.g. a stale network mount
-            return VolumeStatus(VOLUME_OFFLINE, f"cannot reach {root}: {e}", fix)
-        return None
+            if self._inside_project(vc):
+                problem, marker = _probe_root(root)
+            else:
+                problem, marker = fs_locations.guarded(str(root), _probe_root, root)
+        except fs_locations.Unresponsive as e:
+            return (
+                VolumeStatus(
+                    VOLUME_OFFLINE,
+                    f"not responding: {root} ({e})",
+                    "Check the network connection or the drive, then try again.",
+                ),
+                None,
+            )
+        if problem is not None:
+            return (
+                VolumeStatus(
+                    VOLUME_OFFLINE,
+                    problem,
+                    "Plug the drive in, or change the volume's path.",
+                ),
+                None,
+            )
+        return None, marker
+
+    def _path_status(self, name: str) -> VolumeStatus | None:
+        """An offline status if the volume's root can't be reached, else None."""
+        return self._probe_volume(name)[0]
 
     def volume_status(self, name: str) -> VolumeStatus:
-        offline = self._path_status(name)
+        offline, marker = self._probe_volume(name)
         if offline is not None:
             return offline
         vc = self._cfg.volumes[name]
         root = self._resolve_path(vc)
-        marker = _read_marker(root)
 
         if not self._inside_project(vc):
             if vc.id is None:
@@ -1081,8 +1133,8 @@ class VolumeAwareFileObjectStore:
                 )
 
         try:
-            disk = shutil.disk_usage(path)
-        except OSError as e:
+            disk = self._disk_usage(vc, path)
+        except (OSError, fs_locations.Unresponsive) as e:
             return False, f"cannot check disk space: {e}"
         full_bytes = int(self._cfg.full_below_gb * 1024**3)
         if disk.free < full_bytes + incoming_size:

@@ -177,14 +177,14 @@ def test_a_marker_no_volume_has_is_kept_when_the_drive_is_added(
     assert _id(ctx, "ext") == marker_id
 
 
-def test_adding_the_drive_of_another_volume_is_refused(
+def test_adding_the_folder_of_another_volume_is_refused(
     ctx: AppContext, tmp_path: Path
 ) -> None:
     drive = _drive(tmp_path, "a")
     ctx.store_svc.add_volume("a", str(drive))
     marker_before = (drive / MARKER).read_text()
 
-    with pytest.raises(ValidationError, match="drive of volume 'a'"):
+    with pytest.raises(ValidationError, match="already the volume 'a'"):
         ctx.store_svc.add_volume("b", str(drive))
 
     assert "b" not in ctx.store_svc._config.store_config.volumes

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 
+from dataclasses import asdict
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from civex.context import AppContext
@@ -14,8 +16,12 @@ from civex.domain.exceptions import (
 from civex.server.deps import get_ctx
 from civex.server.models import (
     AddVolumeRequest,
+    CreateFolderRequest,
+    CreateFolderResponse,
+    DirectoryListingResponse,
     GCReportResponse,
     GCRequest,
+    PathInspectionResponse,
     PlacementResponse,
     SetPlacementRequest,
     SetQueueRequest,
@@ -35,7 +41,9 @@ def list_volumes(ctx: AppContext = Depends(get_ctx)):
 @router.post("/volumes", response_model=VolumeStatsResponse, status_code=201)
 def add_volume(body: AddVolumeRequest, ctx: AppContext = Depends(get_ctx)):
     try:
-        ctx.store_svc.add_volume(body.name, body.path, body.allocated_gb)
+        ctx.store_svc.add_volume(
+            body.name, body.path, body.allocated_gb, body.add_to_queue
+        )
     except AlreadyExistsError as e:
         raise HTTPException(409, detail=str(e))
     except (ValidationError, VolumeUnavailableError) as e:
@@ -173,3 +181,41 @@ def set_placement(
 def clear_placement(collection_id: str, ctx: AppContext = Depends(get_ctx)):
     """Send a collection's new files back to the general write queue."""
     ctx.store_svc.clear_placement(collection_id)
+
+
+@router.get("/browse", response_model=DirectoryListingResponse)
+def browse_directory(
+    path: str | None = None,
+    show_hidden: bool = False,
+    ctx: AppContext = Depends(get_ctx),
+):
+    """List the folders inside a directory on the machine running Civex, for
+    choosing where a volume lives.
+
+    Folders only, never files. Starts at the home folder when `path` is omitted,
+    and also returns places to start from: the project, home and mounted drives
+    (network drives marked as such). A location that doesn't answer in a few
+    seconds is reported as not responding rather than waited on.
+    """
+    return asdict(ctx.store_svc.browse_directory(path, show_hidden=show_hidden))
+
+
+@router.post("/browse/folder", response_model=CreateFolderResponse, status_code=201)
+def create_folder(body: CreateFolderRequest, ctx: AppContext = Depends(get_ctx)):
+    """Create a folder while choosing a volume location."""
+    return CreateFolderResponse(
+        path=ctx.store_svc.create_folder(body.parent, body.name)
+    )
+
+
+@router.get("/inspect", response_model=PathInspectionResponse)
+def inspect_path(path: str, ctx: AppContext = Depends(get_ctx)):
+    """What adding a folder as a volume would involve, before doing it.
+
+    Reports whether it exists or would be created, whether Civex can write to
+    it, free space, whether it is on a network drive or on the same disk as the
+    project, and whether it is already a volume or carries another volume's
+    identity. `problems` are reasons adding it would be refused; `warnings` are
+    things worth knowing. Adding a volume enforces exactly these rules.
+    """
+    return asdict(ctx.store_svc.inspect_path(path))

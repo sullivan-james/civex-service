@@ -106,17 +106,32 @@ def store_add(
     allocated_gb: Optional[float] = typer.Option(
         None, "--allocated-gb", help="Max GB civex may use (omit for unlimited)"
     ),
+    queue: bool = typer.Option(
+        False,
+        "--queue",
+        help="Also add the volume to the general write queue.",
+    ),
 ) -> None:
-    """Add a new storage volume."""
+    """Add a new storage volume.
+
+    The path can be on a removable drive or a network drive that is already
+    mounted on this computer. Civex doesn't mount network drives itself: mount
+    it first, then give the mounted folder.
+    """
     ctx = get_ctx()
     try:
-        ctx.store_svc.add_volume(name, path, allocated_gb)
+        ctx.store_svc.add_volume(name, path, allocated_gb, add_to_queue=queue)
         console.print(f"[green]Added volume '{name}' at {path}.[/green]")
         if allocated_gb:
             console.print(f"  Allocation: {allocated_gb:.1f} GB")
-        console.print(
-            "  Add it to the write queue with: [bold]civex store queue set[/bold]"
-        )
+        if queue:
+            console.print("  Added to the write queue.")
+        else:
+            console.print(
+                "  Add it to the write queue with: [bold]civex store queue[/bold], "
+                "or give a collection this volume as its home with "
+                "[bold]civex store place set[/bold]."
+            )
     except (AlreadyExistsError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)

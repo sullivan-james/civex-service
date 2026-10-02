@@ -54,7 +54,7 @@ def test_wrong_drive_is_reported_and_adopt_fixes_it(
     assert "wrong drive" not in _plain(runner.invoke(app, ["store", "list"]))
 
 
-def test_adding_another_volumes_drive_is_refused_cleanly(
+def test_adding_another_volumes_folder_is_refused_cleanly(
     project_dir: Path, tmp_path: Path
 ) -> None:
     drive = tmp_path / "usb"
@@ -64,5 +64,31 @@ def test_adding_another_volumes_drive_is_refused_cleanly(
     result = runner.invoke(app, ["store", "add", "other", "--path", str(drive)])
 
     assert result.exit_code == 1
-    assert "drive of volume 'usb'" in _plain(result)
+    assert "already the volume 'usb'" in _plain(result)
     assert "other" not in _plain(runner.invoke(app, ["store", "list"]))
+
+
+def test_add_can_join_the_write_queue(project_dir: Path, tmp_path: Path) -> None:
+    (tmp_path / "queued").mkdir()
+    (tmp_path / "homed").mkdir()
+
+    queued = runner.invoke(
+        app, ["store", "add", "queued", "--path", str(tmp_path / "queued"), "--queue"]
+    )
+    homed = runner.invoke(
+        app, ["store", "add", "homed", "--path", str(tmp_path / "homed")]
+    )
+
+    assert queued.exit_code == 0 and "Added to the write queue" in _plain(queued)
+    assert homed.exit_code == 0 and "store place set" in _plain(homed)
+    from civex.config import load_config
+
+    queue = load_config().store_config.volume_queue
+    assert "queued" in queue and "homed" not in queue
+
+
+def test_add_explains_a_network_address(project_dir: Path) -> None:
+    result = runner.invoke(app, ["store", "add", "nas", "--path", "smb://nas/share"])
+
+    assert result.exit_code == 1
+    assert "mount it first" in _plain(result)

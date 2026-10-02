@@ -314,6 +314,57 @@ class VolumeStatus:
 
 
 @dataclass
+class DirectoryEntry:
+    name: str
+    path: str
+
+
+@dataclass
+class StorageLocation:
+    """A place to start browsing from: the project, home, or a mounted drive."""
+
+    label: str
+    path: str
+    kind: str  # "project" | "home" | "drive"
+    free_bytes: int | None = None
+    total_bytes: int | None = None
+    network: bool = False
+    source: str | None = None  # where a network drive really lives (host:/share)
+
+
+@dataclass
+class DirectoryListing:
+    path: str
+    parent: str | None  # None at the top of the filesystem
+    entries: list[DirectoryEntry]  # folders only
+    truncated: bool
+    locations: list[StorageLocation]
+
+
+@dataclass
+class PathInspection:
+    """What adding a folder as a volume would involve, decided in one place
+    (`StoreService.inspect_path`) so the preview in the UI and the real
+    `add_volume` can't disagree. `problems` block the add; `warnings` don't."""
+
+    path: str
+    exists: bool
+    is_dir: bool
+    writable: bool
+    will_create: bool
+    inside_project: bool
+    same_disk_as_project: bool | None
+    free_bytes: int | None
+    total_bytes: int | None
+    existing_volume: str | None  # a configured volume already at this path
+    marker_volume: str | None  # configured volume whose drive this is
+    has_civex_data: bool
+    problems: list[str]
+    warnings: list[str]
+    is_network: bool = False
+
+
+@dataclass
 class StoredObjectInfo:
     """One object on disk in the content-addressed store, as seen by GC --
     not what a FileRef claims to point at, but what's actually there."""

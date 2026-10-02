@@ -165,3 +165,83 @@ def test_placement_endpoint_errors(client: TestClient, tmp_path) -> None:
         ).status_code
         == 422
     )
+
+
+def test_browse_lists_folders_and_places_to_start(client: TestClient, tmp_path) -> None:
+    pick = tmp_path / "pick"
+    for name in ("beta", "alpha"):
+        (pick / name).mkdir(parents=True)
+    (pick / "file.txt").write_text("x")
+
+    resp = client.get("/api/store/browse", params={"path": str(pick)})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["path"] == str(pick) and body["parent"] == str(tmp_path)
+    assert [e["name"] for e in body["entries"]] == ["alpha", "beta"]
+    assert body["truncated"] is False
+    assert {"Project", "Home"} <= {loc["label"] for loc in body["locations"]}
+    assert all("network" in loc for loc in body["locations"])
+
+
+def test_browse_errors(client: TestClient, tmp_path) -> None:
+    assert (
+        client.get(
+            "/api/store/browse", params={"path": str(tmp_path / "no")}
+        ).status_code
+        == 404
+    )
+    shaky = client.get("/api/store/browse", params={"path": "smb://nas/share"})
+    assert shaky.status_code == 422 and "mount it first" in shaky.json()["detail"]
+
+
+def test_create_folder_endpoint(client: TestClient, tmp_path) -> None:
+    made = client.post(
+        "/api/store/browse/folder", json={"parent": str(tmp_path), "name": "new"}
+    )
+    assert made.status_code == 201 and made.json() == {"path": str(tmp_path / "new")}
+    assert (tmp_path / "new").is_dir()
+    assert (
+        client.post(
+            "/api/store/browse/folder", json={"parent": str(tmp_path), "name": "new"}
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            "/api/store/browse/folder", json={"parent": str(tmp_path), "name": "a/b"}
+        ).status_code
+        == 422
+    )
+
+
+def test_inspect_endpoint_previews_what_add_would_do(
+    client: TestClient, tmp_path
+) -> None:
+    ok = client.get("/api/store/inspect", params={"path": str(tmp_path / "fresh")})
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["problems"] == [] and body["will_create"] is True
+    assert body["is_network"] is False and body["warnings"]
+
+    f = tmp_path / "file.txt"
+    f.write_text("x")
+    bad = client.get("/api/store/inspect", params={"path": str(f)}).json()
+    assert any("is a file" in p for p in bad["problems"])
+    # ...and adding it is refused with the same reason.
+    refused = client.post("/api/store/volumes", json={"name": "f", "path": str(f)})
+    assert refused.status_code == 422 and "is a file" in refused.json()["detail"]
+
+
+def test_adding_a_volume_over_http_can_join_the_queue(
+    client: TestClient, tmp_path
+) -> None:
+    (tmp_path / "q").mkdir()
+    (tmp_path / "n").mkdir()
+    for name, queued in (("q", True), ("n", False)):
+        resp = client.post(
+            "/api/store/volumes",
+            json={"name": name, "path": str(tmp_path / name), "add_to_queue": queued},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["in_queue"] is queued

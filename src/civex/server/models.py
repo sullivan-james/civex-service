@@ -597,10 +597,85 @@ class SetPlacementRequest(BaseModel):
     on_unavailable: str = Field(default="spill", description="spill (default) or fail.")
 
 
+class DirectoryEntryResponse(BaseModel):
+    name: str
+    path: str = Field(description="Absolute path of the folder.")
+
+
+class StorageLocationResponse(BaseModel):
+    label: str
+    path: str
+    kind: str = Field(description="project, home or drive.")
+    free_bytes: int | None = Field(
+        description="Free space; null if unknown, and not read for network drives."
+    )
+    total_bytes: int | None
+    network: bool = Field(description="True for a drive that lives on another machine.")
+    source: str | None = Field(
+        description="Where a network drive really lives, e.g. nas:/export."
+    )
+
+
+class DirectoryListingResponse(BaseModel):
+    path: str = Field(description="The folder that was listed, as an absolute path.")
+    parent: str | None = Field(description="Its parent folder; null at the top.")
+    entries: list[DirectoryEntryResponse] = Field(
+        description="The folders directly inside it (never files)."
+    )
+    truncated: bool = Field(
+        description="True if there were more folders than are shown."
+    )
+    locations: list[StorageLocationResponse] = Field(
+        description="Places to start browsing from: the project, home and mounted drives."
+    )
+
+
+class PathInspectionResponse(BaseModel):
+    path: str
+    exists: bool
+    is_dir: bool
+    writable: bool
+    will_create: bool = Field(
+        description="The folder doesn't exist and would be created."
+    )
+    inside_project: bool
+    same_disk_as_project: bool | None
+    free_bytes: int | None
+    total_bytes: int | None
+    existing_volume: str | None = Field(
+        description="The configured volume already at this path, if any."
+    )
+    marker_volume: str | None = Field(
+        description="The configured volume whose drive this is, if any."
+    )
+    has_civex_data: bool
+    is_network: bool = Field(description="The folder is on a network filesystem.")
+    problems: list[str] = Field(description="Reasons it can't be added as a volume.")
+    warnings: list[str] = Field(
+        description="Things to know; they don't block adding it."
+    )
+
+
+class CreateFolderRequest(BaseModel):
+    parent: str = Field(description="Absolute path of the folder to create it in.")
+    name: str = Field(description="Name of the new folder (no slashes).")
+
+
+class CreateFolderResponse(BaseModel):
+    path: str
+
+
 class AddVolumeRequest(BaseModel):
     name: str
     path: str
     allocated_gb: float | None = None
+    add_to_queue: bool = Field(
+        default=False,
+        description=(
+            "Also put the volume in the general write queue. Leave false for a "
+            "volume that only homes particular collections."
+        ),
+    )
 
 
 class UpdateVolumeRequest(BaseModel):
