@@ -20,6 +20,27 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## v1.1.2 - startup and scaling reliability, geographical data types (2026-10-02)
+
+### Features
+
+- Web server when started would send a number of HTTP requests to the API,
+  each of which would attempt to apply migrations to the datbaase schema.
+  This fix does two things:
+  - Run database migrations when the server is first started, not just
+    when the HTTP endpoints are hit.
+  - Put a lock on database migrations preventing a race condition.
+- Add quick access and recent collections in the nav bar in order to facilitate
+  quick access for users. Data for recent and favourits are stored in browser
+  memory, not in a database.
+- Add a database wide search for a Ctrl+K quick access bar. This was inspired
+  by Ctrl+Shift+P functionality in VSCode.
+- Add the following data types:
+  - geo (for geographic types)
+  - partial dates
+  - float units
+
+
 ## v1.1.1 — collection timezones, scalable file store & queries (2026-09-30)
 
 ### Breaking
