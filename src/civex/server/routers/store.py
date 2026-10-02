@@ -61,6 +61,24 @@ def update_volume(
     return vol
 
 
+@router.post("/volumes/{name}/adopt", response_model=VolumeStatsResponse)
+def adopt_volume(name: str, ctx: AppContext = Depends(get_ctx)):
+    """Declare that the drive at the volume's path is that volume.
+
+    Volumes are recognised by an identity marker in their root, so civex can
+    tell an unplugged drive from a different drive mounted at the same path.
+    Use this when a volume is reported as `wrong_drive` but the drive is in fact
+    the right one (the marker was deleted, or the drive was re-formatted): it
+    rewrites the marker. Nothing else on the drive is changed.
+    """
+    try:
+        ctx.store_svc.adopt_volume(name)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    stats = ctx.store_svc.volume_stats()
+    return next((v for v in stats if v["name"] == name), None)
+
+
 @router.delete("/volumes/{name}", status_code=204)
 def remove_volume(name: str, force: bool = False, ctx: AppContext = Depends(get_ctx)):
     # ValidationError (e.g. volume still has objects, force=False) isn't

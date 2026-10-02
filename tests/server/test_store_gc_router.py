@@ -57,3 +57,25 @@ def test_gc_defaults_to_dry_run_with_no_body(client: TestClient) -> None:
     assert resp.status_code == 200
     assert resp.json()["dry_run"] is True
     assert resp.json()["grace_days"] == 14
+
+
+def test_volumes_report_state_and_adopt_restores_a_marker(
+    client: TestClient, tmp_path
+) -> None:
+    drive = tmp_path / "usb"
+    drive.mkdir()
+    added = client.post("/api/store/volumes", json={"name": "usb", "path": str(drive)})
+    assert added.status_code == 201
+    assert added.json()["state"] == "online"
+
+    (drive / ".civex-volume").unlink()
+    listed = {v["name"]: v for v in client.get("/api/store/volumes").json()}
+    assert listed["usb"]["state"] == "wrong_drive"
+    assert listed["usb"]["available"] is False
+    assert "adopt it" in listed["usb"]["fix"]
+
+    adopted = client.post("/api/store/volumes/usb/adopt")
+    assert adopted.status_code == 200
+    assert adopted.json()["state"] == "online"
+
+    assert client.post("/api/store/volumes/nope/adopt").status_code == 404

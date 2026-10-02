@@ -106,6 +106,12 @@ class VolumeConfig:
         str  # raw string — may be relative (resolved against project root) or absolute
     )
     allocated_gb: float | None = None  # None = unlimited
+    # Identity: also written to a `.civex-volume` marker in the volume's root,
+    # so the drive is recognised wherever it is mounted and a different drive
+    # at the same path is not mistaken for it. Set by `store add` / `store
+    # adopt`; None for a volume that predates identities (checked by path only).
+    id: str | None = None
+    state: str = "active"  # active | readonly | retired
 
 
 @dataclass
@@ -209,6 +215,8 @@ def load_config() -> Config:
                 name=name,
                 path=vcfg["path"],
                 allocated_gb=vcfg.get("allocated_gb"),
+                id=vcfg.get("id"),
+                state=vcfg.get("state", "active"),
             )
             for name, vcfg in raw_vols.items()
         }
@@ -348,6 +356,8 @@ def save_config(config: Config) -> None:
             list(sc.volumes.keys()) == ["default"]
             and sc.volumes["default"].path == "_civex/objects"
             and sc.volumes["default"].allocated_gb is None
+            and sc.volumes["default"].id is None
+            and sc.volumes["default"].state == "active"
             and sc.volume_queue == ["default"]
             and sc.warn_below_pct == 10.0
             and sc.full_below_gb == 1.0
@@ -366,6 +376,10 @@ def save_config(config: Config) -> None:
                 lines.append(f'path = "{_ts(vol.path)}"\n')
                 if vol.allocated_gb is not None:
                     lines.append(f"allocated_gb = {vol.allocated_gb}\n")
+                if vol.id:
+                    lines.append(f'id = "{_ts(vol.id)}"\n')
+                if vol.state != "active":
+                    lines.append(f'state = "{_ts(vol.state)}"\n')
 
     if config.plugins.default_timeout_seconds != 60.0:
         lines += [

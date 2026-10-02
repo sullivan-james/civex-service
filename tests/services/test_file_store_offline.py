@@ -138,7 +138,9 @@ def _inventory_rows(store: VolumeAwareFileObjectStore, volume: str) -> int:
     from civex.db.models import StoredObject
 
     return store._session.execute(
-        select(func.count()).select_from(StoredObject).where(StoredObject.volume == volume)
+        select(func.count())
+        .select_from(StoredObject)
+        .where(StoredObject.volume == volume)
     ).scalar_one()
 
 
@@ -174,9 +176,11 @@ def test_gc_with_a_volume_offline_keeps_its_inventory(
     assert store._civex_used("ext") == len(b"on the drive")
 
 
-def test_reconcile_does_not_mass_drop_rows_of_an_empty_mount_point(
+def test_reconcile_does_not_mass_drop_rows_of_an_unidentified_empty_mount_point(
     ctx: AppContext, tmp_path: Path
 ) -> None:
+    """For a volume with no identity (one that predates them), an empty root
+    that this store never wrote to is not proof the rows are stale."""
     store, ext_path = _with_external_volume(ctx, tmp_path)
     store.put(b"one", "1.txt")
     store.put(b"two", "2.txt")
@@ -220,7 +224,8 @@ def test_volume_status_gives_one_answer_with_a_reason(tmp_path: Path) -> None:
     store = _store(tmp_path, ext)
 
     missing = store.volume_status("ext")
-    assert not missing.online and "path missing" in missing.reason
+    assert not missing.reachable and "path missing" in missing.reason
+    assert missing.fix
 
     ext_path.parent.mkdir()
     ext_path.write_text("a file, not a directory")
@@ -228,7 +233,7 @@ def test_volume_status_gives_one_answer_with_a_reason(tmp_path: Path) -> None:
 
     ext_path.unlink()
     ext_path.mkdir()
-    assert store.volume_status("ext").online
+    assert store.volume_status("ext").writable
 
     assert store.volume_status("nope").reason == "volume not configured"
     assert store.volume_stats()[0]["reason"] == ""

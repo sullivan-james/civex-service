@@ -8,6 +8,9 @@ export interface VolumeStats {
   disk_free_bytes: number | null
   disk_total_bytes: number | null
   available: boolean
+  state: 'online' | 'offline' | 'wrong_drive' | 'readonly' | 'retired'
+  reason: string
+  fix: string
   warning: boolean
   in_queue: boolean
 }
@@ -46,6 +49,8 @@ export const storeApi = {
       clear_allocation?: boolean
     },
   ) => api.patch<VolumeStats>(`/store/volumes/${name}`, body),
+  adoptVolume: (name: string) =>
+    api.post<VolumeStats>(`/store/volumes/${name}/adopt`, {}),
   removeVolume: (name: string) => api.delete<void>(`/store/volumes/${name}`),
   setQueue: (queue: string[]) => api.put<string[]>('/store/queue', { queue }),
   runGC: (body: { apply?: boolean; grace_days?: number }) =>

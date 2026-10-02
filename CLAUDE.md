@@ -111,6 +111,14 @@ A collection (`datasets` table) carries a `scope` (`local` | `global`, `domain/s
 - `find_by_schema(..., reachable_from=<collection>)` / `GET /records?reachable_from=` is what reference pickers search; `RecordDTO.dataset_name` and `reference_collections` (set in `_attach_reference_labels`) drive the "from collection X" marker in the UI.
 - Tests: the schema-list check is disabled by an autouse fixture in `tests/conftest.py`; request `strict_schema_lists` to exercise it.
 
+### Storage volumes
+
+`VolumeAwareFileObjectStore` (`repositories/local/file_store.py`) writes to the first usable volume in `store.volume_queue`. A volume's whole definition lives in `config.toml` (`[store.volumes.<name>]`: `path`, `allocated_gb`, `id`, `state`); the DB holds only the blob inventory (`stored_objects`), never volume configuration.
+
+- `volume_status(name)` is the **single** decision point for "can this volume be used?" — writes, stats, directory walks and inventory reconcile all go through it, and it returns a `VolumeStatus` (`domain/dtos.py`: `state`, `reason`, `fix`). `fix` is interface-neutral prose; the CLI adds the command and the UI a button.
+- Identity: `VolumeConfig.id` + a `.civex-volume` marker in the volume root. Enforced only for volumes outside the project, and only once a volume has an `id` (assigned by `StoreService.add_volume`/`adopt_volume`, never during an upload, which must not rewrite `config.toml`). A mismatch is `wrong_drive`.
+- A missing volume root is **never created on demand** unless the volume is a relative path inside the project (`_ensure_volume`); and reconcile skips unreachable volumes, so an unplugged drive never loses its inventory rows.
+
 ### Names vs. labels
 
 Schemas and fields each carry a `name` and a `label` (see `domain/naming.py`, mirrored in `frontend/src/utils/naming.ts`):

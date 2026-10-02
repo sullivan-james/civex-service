@@ -285,17 +285,32 @@ class FileRef:
         )
 
 
+# Volume states. "online" is the only one that accepts writes.
+VOLUME_ONLINE = "online"
+VOLUME_OFFLINE = "offline"  # the path isn't there (drive not plugged in)
+VOLUME_WRONG_DRIVE = "wrong_drive"  # something is there, but it isn't this volume
+VOLUME_READONLY = "readonly"  # reachable; marked read-only
+VOLUME_RETIRED = "retired"  # reachable; no longer written to
+
+
 @dataclass(frozen=True)
 class VolumeStatus:
-    """Whether a volume can be used right now, and if not, why. Produced only
-    by `VolumeAwareFileObjectStore.volume_status()`."""
+    """Whether a volume can be used right now, and if not, why and what to do
+    about it. Produced only by `VolumeAwareFileObjectStore.volume_status()`."""
 
-    state: str  # "online" | "offline"
-    reason: str = ""  # empty when online
+    state: str  # one of the VOLUME_* constants
+    reason: str = ""  # what civex expected vs found; empty when online
+    fix: str = ""  # plain-language next step; empty when online
+    volume_id: str | None = None  # the verified identity, once the volume has one
 
     @property
-    def online(self) -> bool:
-        return self.state == "online"
+    def reachable(self) -> bool:
+        """Its objects can be read and listed."""
+        return self.state in (VOLUME_ONLINE, VOLUME_READONLY, VOLUME_RETIRED)
+
+    @property
+    def writable(self) -> bool:
+        return self.state == VOLUME_ONLINE
 
 
 @dataclass

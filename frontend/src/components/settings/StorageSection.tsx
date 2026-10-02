@@ -3,6 +3,7 @@ import {
   useVolumes,
   useAddVolume,
   useUpdateVolume,
+  useAdoptVolume,
   useRemoveVolume,
   useSetQueue,
 } from '../../hooks/useStore'
@@ -26,6 +27,14 @@ import {
 } from '../ui/icons'
 import { errorMessage } from '../../lib/errors'
 import GCPanel from './GCPanel'
+
+const STATE_LABEL: Record<VolumeStats['state'], string> = {
+  online: 'online',
+  offline: 'offline',
+  wrong_drive: 'wrong drive',
+  readonly: 'read-only',
+  retired: 'retired',
+}
 
 const isDesktop = typeof window !== 'undefined' && !!window.pywebview
 
@@ -101,6 +110,8 @@ function VolumeCard({
   const [clearAlloc, setClearAlloc] = useState(false)
   const updateVolume = useUpdateVolume()
   const removeVolume = useRemoveVolume()
+  const adoptVolume = useAdoptVolume()
+  const [confirmAdopt, setConfirmAdopt] = useState(false)
   const [removeError, setRemoveError] = useState<string | null>(null)
 
   const allocBytes =
@@ -132,9 +143,15 @@ function VolumeCard({
                 queue #{queueIndex + 1}
               </span>
             )}
-            {!vol.available && (
-              <span className="text-xs font-medium px-2 py-1 rounded-full bg-border-muted text-fg-muted border border-border">
-                unavailable
+            {vol.state !== 'online' && (
+              <span
+                className={`text-xs font-medium px-2 py-1 rounded-full border ${
+                  vol.state === 'wrong_drive'
+                    ? 'bg-danger-subtle text-danger border-danger-muted'
+                    : 'bg-border-muted text-fg-muted border-border'
+                }`}
+              >
+                {STATE_LABEL[vol.state]}
               </span>
             )}
             {vol.warning && (
@@ -242,6 +259,52 @@ function VolumeCard({
           >
             {removeError}
           </p>
+        </div>
+      )}
+
+      {(vol.state === 'offline' || vol.state === 'wrong_drive') && (
+        <div className="px-4 pb-3">
+          <div className="text-xs bg-attention-subtle border border-attention-muted rounded-md px-3 py-2 space-y-1">
+            <p className="text-fg">{vol.reason}</p>
+            {vol.fix && <p className="text-fg-muted">{vol.fix}</p>}
+            {vol.state === 'wrong_drive' &&
+              (confirmAdopt ? (
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="text-fg">
+                    Treat the drive at this path as {vol.name}?
+                  </span>
+                  <button
+                    onClick={() =>
+                      adoptVolume.mutate(vol.name, {
+                        onSuccess: () => setConfirmAdopt(false),
+                      })
+                    }
+                    disabled={adoptVolume.isPending}
+                    className="px-2 py-1 rounded-md bg-accent-emphasis text-fg-on-emphasis disabled:opacity-50"
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    onClick={() => setConfirmAdopt(false)}
+                    className="px-2 py-1 text-fg-muted hover:underline"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmAdopt(true)}
+                  className="pt-1 text-accent hover:underline"
+                >
+                  This is the right drive
+                </button>
+              ))}
+            {adoptVolume.isError && (
+              <p role="alert" className="text-danger">
+                {errorMessage(adoptVolume.error)}
+              </p>
+            )}
+          </div>
         </div>
       )}
 

@@ -11,6 +11,7 @@ from civex.domain.exceptions import (
     CivexError,
     NotFoundError,
     ValidationError,
+    VolumeUnavailableError,
 )
 
 app = typer.Typer(help="Manage file storage volumes", no_args_is_help=True)
@@ -59,8 +60,12 @@ def store_list() -> None:
             else "unlimited"
         )
         free = _fmt_bytes(v["disk_free_bytes"])
-        if not v["available"]:
-            status = "[dim]unavailable[/dim]"
+        if v["state"] == "offline":
+            status = "[dim]offline[/dim]"
+        elif v["state"] == "wrong_drive":
+            status = "[red]wrong drive[/red]"
+        elif v["state"] in ("readonly", "retired"):
+            status = f"[dim]{v['state'].replace('readonly', 'read-only')}[/dim]"
         elif v["warning"]:
             status = "[yellow]⚠ low space[/yellow]"
         else:
@@ -68,6 +73,24 @@ def store_list() -> None:
         table.add_row(v["name"], v["path"], in_queue, used, alloc, free, status)
 
     console.print(table)
+
+    from rich.markup import escape
+
+    for v in stats:
+        if v["state"] in ("offline", "wrong_drive"):
+            console.print(f"\n[bold]{escape(v['name'])}[/bold]: {escape(v['reason'])}")
+            if v["fix"]:
+                console.print(f"  {escape(v['fix'])}")
+            if v["state"] == "offline":
+                console.print(
+                    f"  Change the path: [bold]civex store update {escape(v['name'])}"
+                    " --path <new path>[/bold]"
+                )
+            else:
+                console.print(
+                    f"  Adopt the drive: [bold]civex store adopt {escape(v['name'])}"
+                    "[/bold]"
+                )
 
 
 @app.command("add")
@@ -90,7 +113,38 @@ def store_add(
         console.print(
             "  Add it to the write queue with: [bold]civex store queue set[/bold]"
         )
-    except AlreadyExistsError as e:
+    except (AlreadyExistsError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+
+
+@app.command("adopt")
+def store_adopt(
+    name: str = typer.Argument(..., help="Volume name"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation"),
+) -> None:
+    """Declare that the drive at a volume's path is that volume.
+
+    A volume is recognised by an identity marker in its root, so civex can tell
+    an unplugged drive from a different drive mounted at the same path. If a
+    volume is reported as the wrong drive but this is in fact the right one
+    (the marker was deleted, or the drive was re-formatted), this rewrites the
+    marker. Nothing else on the drive is changed.
+    """
+    ctx = get_ctx()
+    try:
+        if not yes:
+            status = ctx.store_svc.volume_stats()
+            current = next((v for v in status if v["name"] == name), None)
+            if current is not None and current["reason"]:
+                console.print(f"[warning]{current['reason']}[/warning]")
+            if not typer.confirm(f"Treat the drive at this path as volume '{name}'?"):
+                raise typer.Exit(1)
+        result = ctx.store_svc.adopt_volume(name)
+        console.print(f"[green]Volume '{name}' is now {result.state}.[/green]")
+    except (NotFoundError, VolumeUnavailableError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
     finally:

@@ -557,7 +557,21 @@ class VolumeStatsResponse(BaseModel):
     civex_used_bytes: int | None
     disk_free_bytes: int | None
     disk_total_bytes: int | None
-    available: bool
+    available: bool = Field(
+        description="True if the volume's files can be read right now (online, read-only or retired)."
+    )
+    state: str = Field(
+        description=(
+            "online, offline (path not there, e.g. drive unplugged), wrong_drive "
+            "(something else is mounted there), readonly or retired."
+        )
+    )
+    reason: str = Field(
+        description="What civex expected versus what it found; empty when online."
+    )
+    fix: str = Field(
+        description="A plain-language next step for an offline or wrong-drive volume; empty otherwise."
+    )
     warning: bool
     in_queue: bool
 

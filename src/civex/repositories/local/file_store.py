@@ -37,7 +37,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, AsyncIterable, Iterator, cast
 
 from civex.config import StoreConfig, VolumeConfig
-from civex.domain.dtos import FileRef, StoredObjectInfo, VolumeStatus
+from civex.domain.dtos import (
+    VOLUME_OFFLINE,
+    VOLUME_ONLINE,
+    VOLUME_READONLY,
+    VOLUME_RETIRED,
+    VOLUME_WRONG_DRIVE,
+    FileRef,
+    StoredObjectInfo,
+    VolumeStatus,
+)
 from civex.domain.exceptions import (
     AllVolumesFull,
     GCAlreadyRunningError,
@@ -55,12 +64,21 @@ _COPY_CHUNK = 1024 * 1024
 _RECONCILE_BATCH = 5000
 
 _SCRATCH_DIRNAME = ".tmp"
+_MARKER_FILENAME = ".civex-volume"
 _GC_LOCK_FILENAME = ".gc.lock"
 # Long enough that no real GC pass should ever take this long; a lock file
 # older than this is assumed to be left behind by a process that crashed
 # mid-run rather than one still working, and is reclaimed rather than
 # deadlocking every future run.
 _GC_LOCK_STALE_SECONDS = 3600
+
+
+def _read_marker(root: Path) -> str | None:
+    """The volume id in `root`'s marker file, or None if there is no valid one."""
+    try:
+        return str(uuid.UUID((root / _MARKER_FILENAME).read_text("utf-8").strip()))
+    except (OSError, ValueError):
+        return None
 
 
 class VolumeAwareFileObjectStore:
@@ -344,7 +362,7 @@ class VolumeAwareFileObjectStore:
         manifest and anything foreign are skipped without being stat'd. One
         bad directory or unavailable volume costs only its own objects."""
         status = self.volume_status(name)
-        if not status.online:
+        if not status.reachable:
             log.warning(
                 "Skipping volume '%s' while listing objects: %s", name, status.reason
             )
@@ -496,7 +514,7 @@ class VolumeAwareFileObjectStore:
     ) -> dict:
         path = self._resolve_path(vc)
         status = self.volume_status(name)
-        available = status.online
+        available = status.reachable
         disk_free = disk_total = None
         if available:
             try:
@@ -505,7 +523,7 @@ class VolumeAwareFileObjectStore:
                 disk_total = du.total
             except OSError as e:
                 available = False
-                status = VolumeStatus("offline", f"cannot read disk usage: {e}")
+                status = VolumeStatus(VOLUME_OFFLINE, f"cannot read disk usage: {e}")
 
         civex_used = self._civex_used(name) if available else None
         allocated_bytes = (
@@ -529,7 +547,9 @@ class VolumeAwareFileObjectStore:
             "disk_free_bytes": disk_free,
             "disk_total_bytes": disk_total,
             "available": available,
+            "state": status.state,
             "reason": status.reason,
+            "fix": status.fix,
             "warning": warning,
             "in_queue": in_queue,
         }
@@ -701,7 +721,7 @@ class VolumeAwareFileObjectStore:
         # its rows because "no blob was found" would erase the accounting
         # for every object on a drive that is simply unplugged.
         status = self.volume_status(name)
-        if not status.online:
+        if not status.reachable:
             log.warning(
                 "Skipping inventory reconcile of volume '%s': %s", name, status.reason
             )
@@ -719,13 +739,14 @@ class VolumeAwareFileObjectStore:
             self._upsert_inventory(batch)
             upserted += len(batch)
 
-        # An online root with no objects that this store never wrote to is
-        # an empty directory -- most likely a mount point with nothing
-        # mounted -- so it can't be taken as proof that the inventory rows
-        # are stale. (A volume that was written to and then emptied has its
-        # manifest, and is reconciled normally.)
+        # A volume with no verified identity, no objects, and no sign this
+        # store ever wrote to it is an empty directory -- most likely a mount
+        # point with nothing mounted -- so it can't be taken as proof that the
+        # inventory rows are stale. (A volume whose identity is verified, or
+        # that was written to and then emptied, is reconciled normally.)
         if (
             upserted == 0
+            and status.volume_id is None
             and not self._was_initialised(name)
             and self._session.execute(
                 select(StoredObject.sha256).where(StoredObject.volume == name).limit(1)
@@ -803,32 +824,145 @@ class VolumeAwareFileObjectStore:
         ).scalar_one()
         return int(total)
 
-    # -- volume availability: the single place that decides ----------------
+    # -- volume status: the single place that decides ------------------------
     #
     # Every code path that asks "can I use this volume?" -- writes, stats,
     # directory walks, inventory reconcile -- goes through volume_status().
-    # Nothing else stats a volume root to decide that, so changing what
-    # "available" means (e.g. checking a per-volume identity marker) is a
-    # change to this one method.
+    # Nothing else stats a volume root or reads its marker to decide that, so
+    # changing what "usable" means is a change to this one method.
+    #
+    # A volume's identity is a UUID held in the `volumes` table and repeated in
+    # a `.civex-volume` marker file in its root. It is *enforced* only for
+    # volumes outside the project: a drive can only be unplugged, or swapped
+    # for another, if it lives outside the project, and enforcing a marker on
+    # the default `_civex/objects` would let a deleted dotfile lock a
+    # single-volume install out of its own uploads. Without a database
+    # session (standalone use) there is no identity to check at all.
 
-    def volume_status(self, name: str) -> VolumeStatus:
+    def _path_status(self, name: str) -> VolumeStatus | None:
+        """An offline status if the volume's root can't be reached, else None."""
         vc = self._cfg.volumes.get(name)
         if vc is None:
-            return VolumeStatus("offline", "volume not configured")
+            return VolumeStatus(
+                VOLUME_OFFLINE,
+                "volume not configured",
+                "Add it with `civex store add`.",
+            )
         root = self._resolve_path(vc)
+        fix = "Plug the drive in, or change the volume's path."
         try:
             if not root.exists():
-                return VolumeStatus("offline", f"path missing: {root}")
+                return VolumeStatus(VOLUME_OFFLINE, f"path missing: {root}", fix)
             if not root.is_dir():
-                return VolumeStatus("offline", f"not a directory: {root}")
+                return VolumeStatus(VOLUME_OFFLINE, f"not a directory: {root}", fix)
             if not os.access(root, os.R_OK | os.X_OK):
-                return VolumeStatus("offline", f"not readable: {root}")
+                return VolumeStatus(VOLUME_OFFLINE, f"not readable: {root}", fix)
         except OSError as e:  # e.g. a stale network mount
-            return VolumeStatus("offline", f"cannot reach {root}: {e}")
-        return VolumeStatus("online")
+            return VolumeStatus(VOLUME_OFFLINE, f"cannot reach {root}: {e}", fix)
+        return None
+
+    def volume_status(self, name: str) -> VolumeStatus:
+        offline = self._path_status(name)
+        if offline is not None:
+            return offline
+        vc = self._cfg.volumes[name]
+        root = self._resolve_path(vc)
+        marker = _read_marker(root)
+
+        if not self._inside_project(vc):
+            if vc.id is None:
+                owner = next(
+                    (
+                        n
+                        for n, other in self._cfg.volumes.items()
+                        if n != name and other.id and other.id == marker
+                    ),
+                    None,
+                )
+                if owner is not None:
+                    return VolumeStatus(
+                        VOLUME_WRONG_DRIVE,
+                        f"{root} is the drive of volume '{owner}', not '{name}'",
+                        f"Plug in the drive for '{name}', or change the volume's path.",
+                    )
+            elif marker != vc.id:
+                seen = (
+                    f"the marker of a different volume ({marker[:8]}...)"
+                    if marker
+                    else "no volume marker"
+                )
+                return VolumeStatus(
+                    VOLUME_WRONG_DRIVE,
+                    f"expected volume '{name}' ({vc.id[:8]}...) at {root}, found {seen}",
+                    "Plug in the right drive. If this is the right drive, adopt it "
+                    "to give it this volume's identity.",
+                )
+
+        verified = vc.id if vc.id and marker == vc.id else None
+        if vc.state == "readonly":
+            return VolumeStatus(VOLUME_READONLY, "marked read-only", volume_id=verified)
+        if vc.state == "retired":
+            return VolumeStatus(VOLUME_RETIRED, "retired", volume_id=verified)
+        return VolumeStatus(VOLUME_ONLINE, volume_id=verified)
 
     def volume_available(self, name: str) -> bool:
-        return self.volume_status(name).online
+        return self.volume_status(name).reachable
+
+    # -- volume identity ----------------------------------------------------
+    #
+    # A volume's id lives in its VolumeConfig (config.toml, next to its path)
+    # and is repeated in the marker file. These methods change the in-memory
+    # config and the marker; the caller (StoreService) persists the config.
+
+    def register_volume(self, name: str) -> VolumeStatus:
+        """Give `name` an identity if it has none. Leaves a drive that
+        belongs to another volume alone."""
+        status = self.volume_status(name)
+        if self._cfg.volumes[name].id is None and status.state == VOLUME_ONLINE:
+            self._assign_identity(name)
+            return self.volume_status(name)
+        return status
+
+    def adopt_volume(self, name: str) -> VolumeStatus:
+        """Declare that the drive at this volume's path *is* the volume,
+        whatever its marker says: rewrite the marker with the volume's id (or
+        give the volume one, if it has none yet)."""
+        offline = self._path_status(name)
+        if offline is not None:
+            raise VolumeUnavailableError(
+                f"Cannot adopt '{name}': {offline.reason}. {offline.fix}"
+            )
+        self._assign_identity(name)
+        return self.volume_status(name)
+
+    def _assign_identity(self, name: str) -> None:
+        """Make the marker in `name`'s root carry the volume's id, first
+        choosing one if it has none: the id already in the marker when no
+        other configured volume has it (a drive from another project, a lost
+        config), otherwise a new one."""
+        vc = self._cfg.volumes[name]
+        root = self._resolve_path(vc)
+        vid = vc.id
+        if vid is None:
+            marker = _read_marker(root)
+            taken = {v.id for n, v in self._cfg.volumes.items() if n != name and v.id}
+            vid = marker if marker and marker not in taken else str(uuid.uuid4())
+        if not self._write_marker(root, vid):
+            raise VolumeUnavailableError(f"Cannot write a volume marker in {root}")
+        vc.id = vid
+
+    @staticmethod
+    def _write_marker(root: Path, vid: str) -> bool:
+        try:
+            tmp = root / f"{_MARKER_FILENAME}.tmp"
+            tmp.write_text(vid + "\n", encoding="utf-8")
+            os.replace(tmp, root / _MARKER_FILENAME)
+        except OSError:
+            log.warning("Cannot write the volume marker in %s", root, exc_info=True)
+            return False
+        return True
+
+    # -- on-demand creation -------------------------------------------------
 
     def _inside_project(self, vc: VolumeConfig) -> bool:
         """True for a volume whose path is relative and stays within the
@@ -842,25 +976,30 @@ class VolumeAwareFileObjectStore:
         return Path(os.path.normpath(root / vc.path)).is_relative_to(root)
 
     def _ensure_volume(self, name: str) -> VolumeStatus:
-        """volume_status(), first creating the root if (and only if) the
-        volume lives inside the project. The one place a volume root is ever
-        created implicitly."""
+        """volume_status() for a volume about to be written: first creates
+        the root if (and only if) the volume lives inside the project -- the
+        one place a root is ever created implicitly. A volume's identity is
+        never assigned here: that changes config.toml, which an upload must
+        not do (`store add` and `store adopt` do it)."""
         status = self.volume_status(name)
         vc = self._cfg.volumes.get(name)
-        if status.online or vc is None or not self._inside_project(vc):
+        if vc is None:
             return status
-        try:
-            self._resolve_path(vc).mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            return VolumeStatus("offline", f"cannot create {vc.path}: {e}")
-        return self.volume_status(name)
+        if not status.reachable and self._inside_project(vc):
+            try:
+                self._resolve_path(vc).mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                return VolumeStatus(VOLUME_OFFLINE, f"cannot create {vc.path}: {e}")
+            status = self.volume_status(name)
+        return status
 
     def _was_initialised(self, name: str) -> bool:
         """Whether this volume root has ever held objects written by this
         store. Every write appends to <root>/manifest.jsonl, which nothing
         deletes, so its absence means "an empty directory", not "a volume
-        someone emptied". Lets reconcile tell an unmounted mount point
-        (empty, uninitialised) from a drive that is really empty."""
+        someone emptied". Used for a volume with no identity yet, where
+        reconcile can't otherwise tell an unmounted mount point from an
+        emptied drive."""
         vc = self._cfg.volumes.get(name)
         return vc is not None and (self._resolve_path(vc) / "manifest.jsonl").is_file()
 
@@ -870,8 +1009,8 @@ class VolumeAwareFileObjectStore:
             return False, "volume not configured"
 
         status = self._ensure_volume(volume)
-        if not status.online:
-            return False, f"volume offline: {status.reason}"
+        if not status.writable:
+            return False, f"volume {status.state.replace('_', ' ')}: {status.reason}"
         path = self._resolve_path(vc)
 
         if vc.allocated_gb is not None:

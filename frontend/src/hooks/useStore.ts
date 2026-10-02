@@ -33,6 +33,14 @@ export function useUpdateVolume() {
   })
 }
 
+export function useAdoptVolume() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: storeApi.adoptVolume,
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  })
+}
+
 export function useRemoveVolume() {
   const qc = useQueryClient()
   return useMutation({

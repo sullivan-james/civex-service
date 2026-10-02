@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from civex.config import Config, VolumeConfig, save_config
+from civex.domain.dtos import VOLUME_WRONG_DRIVE, VolumeStatus
 from civex.domain.exceptions import (
     AlreadyExistsError,
     NotFoundError,
@@ -47,7 +48,24 @@ class StoreService:
                 f"Cannot access volume path '{resolved}': {e}"
             ) from e
         sc.volumes[name] = vc
+        try:
+            status = self._store.register_volume(name)
+            if status.state == VOLUME_WRONG_DRIVE:
+                raise ValidationError(f"{status.reason}. {status.fix}")
+        except Exception:
+            del sc.volumes[name]
+            raise
         save_config(self._config)
+
+    def adopt_volume(self, name: str) -> VolumeStatus:
+        """Declare that the drive at the volume's path is that volume: rewrite
+        its identity marker. For a volume reported as the wrong drive when it
+        is in fact the right one (marker lost, drive re-formatted)."""
+        if name not in self._config.store_config.volumes:
+            raise NotFoundError(f"Volume '{name}' not found")
+        status = self._store.adopt_volume(name)
+        save_config(self._config)
+        return status
 
     def update_volume(
         self, name: str, *, path: str | None = None, allocated_gb=_UNSET
