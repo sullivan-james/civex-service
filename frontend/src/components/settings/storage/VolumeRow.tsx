@@ -1,4 +1,4 @@
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import type { VolumeStats } from '../../../api/store'
 import { Badge, IconButton, Menu, Td, Tr, type MenuItem } from '../../ui'
 import {
@@ -73,6 +73,7 @@ export function VolumeRow({
   onMove: (delta: -1 | 1) => void
   onToggleQueue: () => void
 }) {
+  const navigate = useNavigate()
   const queued = queueIndex >= 0
   const attention = NEEDS_ATTENTION.includes(vol.state)
   const items: MenuItem[] = [
@@ -81,6 +82,17 @@ export function VolumeRow({
       label: queued ? 'Remove from write queue' : 'Add to write queue',
       onClick: onToggleQueue,
     },
+    ...(vol.state === 'online' || vol.state === 'readonly'
+      ? [
+          {
+            label: 'Move files off this volume…',
+            onClick: () =>
+              navigate(
+                `/settings/storage?tab=transfers&from=${encodeURIComponent(vol.name)}`,
+              ),
+          },
+        ]
+      : []),
     ...(vol.state === 'wrong_drive'
       ? [{ label: 'This is the right drive…', onClick: onAdopt }]
       : []),

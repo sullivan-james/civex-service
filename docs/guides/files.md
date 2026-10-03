@@ -82,6 +82,44 @@ A home only decides where **new** files are written. Deduplication always wins: 
 
 Homes are stored in `_civex/config.toml` by collection id (`[store.placement.<id>]`), so renaming a collection changes nothing, and they belong to this machine alongside the volumes they name. Removing a volume that is a home needs `--force` (in the app, the removal dialog says what will happen and asks you to type the volume's name when it holds files), which clears those homes. Nothing is ever deleted from the drive.
 
+### Moving files between volumes
+
+To retire a drive, free up space, or keep a collection's files together, move
+them. There are two kinds of move:
+
+- **Empty a volume**: everything on it goes to the volume you choose.
+- **Gather a collection**: the collection's files are moved onto one volume.
+  Files that a collection kept on a *different* volume also uses stay put unless
+  you ask for them, because moving one would only split that collection instead.
+
+In the app this is **Settings → Storage → Moves** (or **Move files off this
+volume…** on a volume's menu); from a terminal:
+
+```bash
+civex store move --off old-drive --to archive --dry-run   # what would happen
+civex store move --off old-drive --to archive             # do it
+civex store move --collection field-notes --to archive
+civex store transfers list                                # and show, pause, resume, cancel
+```
+
+You always see a preview first: how many files and bytes, where they would go,
+and anything that would stop it (a drive that is unplugged or too full).
+
+**A move can't lose your files.** Each file is copied and checked against its
+recorded hash (optionally read back and checked again), recorded in Civex, and
+only then removed from where it was. Stopping at any point, whether you pause,
+cancel, close the terminal, or lose power, leaves every file either in its old
+place, its new place, or both. Resuming picks up where it left off.
+
+- A file that can't be moved (damaged, or gone) is listed with the reason and
+  left where it is; the rest carry on.
+- If the destination fills up, the next listed one is used, and with none left
+  the move pauses. If a drive stops responding it pauses, and a move started in
+  the app carries on by itself when the drive is back.
+- While a volume is being emptied it is made read-only so new files don't keep
+  arriving, and it is put back as it was afterwards.
+- Press **Ctrl+C** in the terminal to pause rather than quit.
+
 ## File field types
 
 | Type | Stores |

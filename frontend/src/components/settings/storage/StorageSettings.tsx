@@ -2,13 +2,15 @@ import { useSearchParams } from 'react-router'
 import { Tabs, type TabDef } from '../../ui'
 import { CollectionsTab } from './CollectionsTab'
 import { MaintenanceTab } from './MaintenanceTab'
+import { TransfersTab } from './TransfersTab'
 import { VolumesTab } from './VolumesTab'
 
-type TabId = 'volumes' | 'collections' | 'maintenance'
+type TabId = 'volumes' | 'collections' | 'transfers' | 'maintenance'
 
 const TABS: TabDef<TabId>[] = [
   { id: 'volumes', label: 'Volumes' },
   { id: 'collections', label: 'Collections' },
+  { id: 'transfers', label: 'Moves' },
   { id: 'maintenance', label: 'Maintenance' },
 ]
 
@@ -60,6 +62,15 @@ export default function StorageSettings() {
               )
             }
             onGoToVolumes={() => go('volumes')}
+          />
+        )}
+        {tab === 'transfers' && (
+          <TransfersTab
+            preset={
+              params.get('from')
+                ? { source: params.get('from') ?? undefined }
+                : undefined
+            }
           />
         )}
         {tab === 'maintenance' && <MaintenanceTab />}
