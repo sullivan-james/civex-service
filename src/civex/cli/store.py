@@ -4,7 +4,7 @@ from typing import Optional
 
 import typer
 
-from civex.cli.utils import get_ctx
+from civex.cli.utils import format_bytes, get_ctx
 from civex.console import console
 from civex.domain.exceptions import (
     AlreadyExistsError,
@@ -24,16 +24,6 @@ from civex.cli import transfers as _transfers  # noqa: E402
 
 app.command("move")(_transfers.move)
 app.add_typer(_transfers.transfers_app, name="transfers")
-
-
-def _fmt_bytes(b: int | None) -> str:
-    if b is None:
-        return "—"
-    if b >= 1_073_741_824:
-        return f"{b / 1_073_741_824:.1f} GB"
-    if b >= 1_048_576:
-        return f"{b / 1_048_576:.0f} MB"
-    return f"{b / 1024:.0f} KB"
 
 
 @app.command("list")
@@ -62,13 +52,13 @@ def store_list() -> None:
 
     for v in stats:
         in_queue = "✓" if v["in_queue"] else ""
-        used = _fmt_bytes(v["civex_used_bytes"])
+        used = format_bytes(v["civex_used_bytes"])
         alloc = (
-            _fmt_bytes(int(v["allocated_gb"] * 1_073_741_824))
+            format_bytes(int(v["allocated_gb"] * 1_073_741_824))
             if v["allocated_gb"]
             else "unlimited"
         )
-        free = _fmt_bytes(v["disk_free_bytes"])
+        free = format_bytes(v["disk_free_bytes"])
         if v["state"] == "offline":
             status = "[dim]offline[/dim]"
         elif v["state"] == "wrong_drive":

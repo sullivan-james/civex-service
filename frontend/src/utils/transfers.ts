@@ -20,12 +20,3 @@ export function percentDone(p: TransferProgress): number {
     Math.round(((p.bytes_done + p.current_bytes) / p.bytes_total) * 100),
   )
 }
-
-export function formatEta(seconds: number | null): string {
-  if (seconds == null) return '—'
-  const s = Math.round(seconds)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ${s % 60}s`
-  return `${Math.floor(m / 60)}h ${m % 60}m`
-}

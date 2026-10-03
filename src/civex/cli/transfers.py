@@ -6,7 +6,7 @@ from typing import Optional
 
 import typer
 
-from civex.cli.utils import get_ctx
+from civex.cli.utils import format_bytes, get_ctx
 from civex.console import console
 from civex.domain.exceptions import CivexError
 from civex.domain.transfers import (
@@ -26,15 +26,6 @@ transfers_app = typer.Typer(
 )
 
 
-def _bytes(n: float | None) -> str:
-    if n is None:
-        return "—"
-    for unit, size in (("GB", 1 << 30), ("MB", 1 << 20), ("KB", 1 << 10)):
-        if n >= size:
-            return f"{n / size:.1f} {unit}"
-    return f"{int(n)} B"
-
-
 def _eta(seconds: float | None) -> str:
     if seconds is None:
         return "—"
@@ -48,7 +39,7 @@ def _summary(record: TransferRecord) -> None:
     console.print(
         f"[bold]{record.id[:8]}[/bold] {record.kind}  [cyan]{record.status}[/cyan]  "
         f"{p.files_done}/{p.files_total} files, "
-        f"{_bytes(p.bytes_done)} of {_bytes(p.bytes_total)}"
+        f"{format_bytes(p.bytes_done)} of {format_bytes(p.bytes_total)}"
     )
     if record.pause_reason:
         console.print(f"  [yellow]{record.pause_reason}[/yellow]")
@@ -61,17 +52,17 @@ def _summary(record: TransferRecord) -> None:
 def _print_plan(spec: TransferSpec, ctx) -> bool:
     plan = ctx.transfer_svc.plan(spec)
     console.print(
-        f"Would move [bold]{plan.files}[/bold] files ({_bytes(plan.bytes)}); "
+        f"Would move [bold]{plan.files}[/bold] files ({format_bytes(plan.bytes)}); "
         f"{plan.already_there} already on a target."
     )
     for t in plan.targets:
         console.print(
-            f"  → {t.volume}: about {t.files} files ({_bytes(t.bytes)}), "
-            f"{_bytes(t.free_bytes)} free"
+            f"  → {t.volume}: about {t.files} files ({format_bytes(t.bytes)}), "
+            f"{format_bytes(t.free_bytes)} free"
         )
     if plan.shared_left:
         console.print(
-            f"  {plan.shared_left} files ({_bytes(plan.shared_left_bytes)}) stay: "
+            f"  {plan.shared_left} files ({format_bytes(plan.shared_left_bytes)}) stay: "
             "another collection uses them. Add --include-shared to move them too."
         )
     for w in plan.warnings:
@@ -233,7 +224,7 @@ def transfers_show(
         p = record.progress
         if record.status == STATUS_RUNNING:
             console.print(
-                f"  {_bytes(p.rate_bytes_per_second)}/s, about {_eta(p.eta_seconds)} left"
+                f"  {format_bytes(p.rate_bytes_per_second)}/s, about {_eta(p.eta_seconds)} left"
             )
         for f in record.failures:
             console.print(f"  [red]{f.sha256[:12]} on {f.volume}: {f.reason}[/red]")

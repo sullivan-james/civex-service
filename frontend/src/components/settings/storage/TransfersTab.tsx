@@ -7,13 +7,9 @@ import {
   useTransfers,
 } from '../../../hooks/useTransfers'
 import { errorMessage } from '../../../lib/errors'
+import { formatEstimate } from '../../../utils/dbFormat'
 import { formatSize } from '../../../utils/storage'
-import {
-  RESUMABLE,
-  STATUS_LABEL,
-  formatEta,
-  percentDone,
-} from '../../../utils/transfers'
+import { RESUMABLE, STATUS_LABEL, percentDone } from '../../../utils/transfers'
 import {
   Badge,
   Button,
@@ -84,7 +80,9 @@ function TransferCard({ t }: { t: Transfer }) {
       {active && (
         <p className="mt-1 text-xs text-fg-muted">
           {formatSize(p.rate_bytes_per_second)}/s · about{' '}
-          {formatEta(p.eta_seconds)} left
+          {p.eta_seconds == null
+            ? 'time left unknown'
+            : `${formatEstimate(p.eta_seconds)} left`}
         </p>
       )}
       {t.pause_reason && (

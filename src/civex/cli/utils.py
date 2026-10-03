@@ -219,3 +219,13 @@ def drain_jobs(ctx: AppContext) -> None:
                 "[dim]Stopping -- remaining jobs will be picked up on the next run.[/dim]"
             )
             break
+
+
+def format_bytes(b: float | None) -> str:
+    if b is None:
+        return "—"
+    if b >= 1_073_741_824:
+        return f"{b / 1_073_741_824:.1f} GB"
+    if b >= 1_048_576:
+        return f"{b / 1_048_576:.0f} MB"
+    return f"{b / 1024:.0f} KB"
