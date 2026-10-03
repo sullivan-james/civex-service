@@ -4,6 +4,7 @@ The template is rendered over the record's values (domain/templating.py);
 a variable with no value is dropped along with the separator beside it. A
 schema with no template falls back to the first non-empty scalar field value.
 """
+
 from __future__ import annotations
 
 from civex.context import AppContext
@@ -12,9 +13,7 @@ from civex.context import AppContext
 def test_natural_name_renders_the_template(
     ctx: AppContext, make_schema, make_collection
 ) -> None:
-    make_schema(
-        "patient", fields=[("first_name", "string"), ("last_name", "string")]
-    )
+    make_schema("patient", fields=[("first_name", "string"), ("last_name", "string")])
     ctx.schema_svc.update("patient", display_template="{first_name} {last_name}")
     make_collection("study")
     ctx.commit()
@@ -30,9 +29,7 @@ def test_natural_name_renders_the_template(
 def test_natural_name_skips_missing_variables(
     ctx: AppContext, make_schema, make_collection
 ) -> None:
-    make_schema(
-        "patient", fields=[("first_name", "string"), ("last_name", "string")]
-    )
+    make_schema("patient", fields=[("first_name", "string"), ("last_name", "string")])
     ctx.schema_svc.update("patient", display_template="{first_name} {last_name}")
     make_collection("study")
     ctx.commit()
@@ -46,9 +43,7 @@ def test_natural_name_skips_missing_variables(
 def test_natural_name_none_when_all_template_missing(
     ctx: AppContext, make_schema, make_collection
 ) -> None:
-    make_schema(
-        "patient", fields=[("first_name", "string"), ("last_name", "string")]
-    )
+    make_schema("patient", fields=[("first_name", "string"), ("last_name", "string")])
     ctx.schema_svc.update("patient", display_template="{first_name} {last_name}")
     make_collection("study")
     ctx.commit()
@@ -87,9 +82,7 @@ def test_natural_name_formats_values_and_uses_builtins(
     )
     ctx.commit()
 
-    assert (
-        ctx.record_svc.get(str(rec.id)).natural_name == "SAMPLE/north_ridge/2019-06"
-    )
+    assert ctx.record_svc.get(str(rec.id)).natural_name == "SAMPLE/north_ridge/2019-06"
 
 
 def test_natural_name_uses_the_short_record_id(
@@ -116,9 +109,7 @@ def _site_and_sample(ctx, make_schema, make_collection, template):
     make_collection("study")
     ctx.commit()
     site = ctx.record_svc.add("study", "site", {"name": "Ridge", "code": "RG"})
-    sample = ctx.record_svc.add(
-        "study", "sample", {"n": 4, "site": str(site.id)}
-    )
+    sample = ctx.record_svc.add("study", "sample", {"n": 4, "site": str(site.id)})
     ctx.commit()
     return site, sample
 
@@ -158,7 +149,5 @@ def test_listing_names_records_in_one_batch(
     ctx: AppContext, make_schema, make_collection
 ) -> None:
     _site_and_sample(ctx, make_schema, make_collection, "{site.name}/{n}")
-    names = {
-        r.natural_name for r in ctx.record_svc.find_by_schema("sample")
-    }
+    names = {r.natural_name for r in ctx.record_svc.find_by_schema("sample")}
     assert names == {"Ridge/4"}

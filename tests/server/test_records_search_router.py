@@ -1,5 +1,6 @@
 """GET /records/search: one query across every schema and collection, for the
 web UI's jump-to box."""
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -17,7 +18,9 @@ def _record(client: TestClient, collection: str, schema: str, **data) -> dict:
 def _seed(client: TestClient) -> dict[str, dict]:
     for schema in ("recording", "selection"):
         client.post("/api/schemas", json={"name": schema})
-        client.post(f"/api/schemas/{schema}/fields", json={"name": "name", "type": "string"})
+        client.post(
+            f"/api/schemas/{schema}/fields", json={"name": "name", "type": "string"}
+        )
     client.post("/api/collections", json={"name": "whales"})
     client.post("/api/collections", json={"name": "birds"})
     return {
@@ -37,7 +40,11 @@ def test_searches_every_schema_and_collection_in_one_call(client: TestClient) ->
     resp = _search(client, "humpback")
     assert resp.status_code == 200, resp.text
     found = {r["id"] for r in resp.json()}
-    assert found == {recs["whale_rec"]["id"], recs["whale_sel"]["id"], recs["bird_rec"]["id"]}
+    assert found == {
+        recs["whale_rec"]["id"],
+        recs["whale_sel"]["id"],
+        recs["bird_rec"]["id"],
+    }
 
 
 def test_each_result_names_its_schema_and_collection(client: TestClient) -> None:

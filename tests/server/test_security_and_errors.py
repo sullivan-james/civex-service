@@ -7,6 +7,7 @@ generic (non-leaking) 500s with a correlation id, preserved domain-error
 messages, validation errors with submitted input stripped, and secret redaction
 in logs.
 """
+
 from __future__ import annotations
 
 import io
@@ -22,6 +23,7 @@ from fastapi.testclient import TestClient
 # ---------------------------------------------------------------------------
 # LocalGuardMiddleware — DNS rebinding (Host header allowlist)
 # ---------------------------------------------------------------------------
+
 
 def test_loopback_host_allowed(client: TestClient) -> None:
     # TestClient's default Host is "testserver", which is on the allowlist.
@@ -46,6 +48,7 @@ def test_allow_remote_env_bypasses_host_guard(
 # ---------------------------------------------------------------------------
 # LocalGuardMiddleware — CSRF (Origin check on mutating requests)
 # ---------------------------------------------------------------------------
+
 
 def test_cross_origin_mutation_blocked(client: TestClient) -> None:
     resp = client.post(
@@ -75,8 +78,11 @@ def test_get_needs_no_origin(client: TestClient) -> None:
 # SSRF guard on the Ollama models endpoint
 # ---------------------------------------------------------------------------
 
+
 def test_ollama_models_rejects_non_local_base_url(client: TestClient) -> None:
-    resp = client.get("/api/ai/ollama/models", params={"base_url": "http://169.254.169.254/v1"})
+    resp = client.get(
+        "/api/ai/ollama/models", params={"base_url": "http://169.254.169.254/v1"}
+    )
     assert resp.status_code == 400
     assert "local" in resp.json()["detail"].lower()
 
@@ -85,13 +91,16 @@ def test_ollama_models_allows_local_base_url(client: TestClient) -> None:
     # A localhost base_url passes the SSRF guard. With no Ollama running the
     # endpoint reports 503 (connection refused) — the point is it's NOT the 400
     # SSRF rejection. If Ollama happens to be running locally, 200 is fine too.
-    resp = client.get("/api/ai/ollama/models", params={"base_url": "http://localhost:11434/v1"})
+    resp = client.get(
+        "/api/ai/ollama/models", params={"base_url": "http://localhost:11434/v1"}
+    )
     assert resp.status_code != 400
 
 
 # ---------------------------------------------------------------------------
 # HTTP error boundary — unhandled exceptions, domain errors, validation
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def boundary_client() -> TestClient:
@@ -170,6 +179,7 @@ def test_validation_error_strips_submitted_input(boundary_client: TestClient) ->
 # Log scrubbing
 # ---------------------------------------------------------------------------
 
+
 def test_sensitive_keys_are_redacted_in_logs() -> None:
     import structlog
 
@@ -179,16 +189,20 @@ def test_sensitive_keys_are_redacted_in_logs() -> None:
 
     buf = io.StringIO()
     handler = logging.StreamHandler(buf)
-    handler.setFormatter(structlog.stdlib.ProcessorFormatter(
-        processors=[
-            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            structlog.processors.JSONRenderer(),
-        ],
-    ))
+    handler.setFormatter(
+        structlog.stdlib.ProcessorFormatter(
+            processors=[
+                structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                structlog.processors.JSONRenderer(),
+            ],
+        )
+    )
     root = logging.getLogger()
     root.addHandler(handler)
     try:
-        get_logger("civex.test").info("login", api_key="sk-ant-SECRET", token="tok-SECRET", user="jim")
+        get_logger("civex.test").info(
+            "login", api_key="sk-ant-SECRET", token="tok-SECRET", user="jim"
+        )
     finally:
         root.removeHandler(handler)
 
@@ -196,5 +210,5 @@ def test_sensitive_keys_are_redacted_in_logs() -> None:
     record = json.loads(out.strip().splitlines()[-1])
     assert record["api_key"] == "***"
     assert record["token"] == "***"
-    assert record["user"] == "jim"          # non-sensitive fields survive
+    assert record["user"] == "jim"  # non-sensitive fields survive
     assert "SECRET" not in out

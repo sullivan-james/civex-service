@@ -70,6 +70,4 @@ def test_redact_url_masks_password_only() -> None:
         db_service.redact_url("postgresql://user:secret@host:5432/db")
         == "postgresql://user:***@host:5432/db"
     )
-    assert (
-        db_service.redact_url("sqlite:///foo/bar.db") == "sqlite:///foo/bar.db"
-    )
+    assert db_service.redact_url("sqlite:///foo/bar.db") == "sqlite:///foo/bar.db"

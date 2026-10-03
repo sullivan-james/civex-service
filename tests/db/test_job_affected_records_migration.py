@@ -35,8 +35,18 @@ def test_backfill_links_each_job_to_the_valid_records_it_touched(
         command.upgrade(cfg, _PRE)
         conn.commit()
         ds, sch = str(uuid.uuid4()), str(uuid.uuid4())
-        conn.execute(text("INSERT INTO datasets (id, name, created_at) VALUES (:i,'ds','2024-01-01')"), {"i": ds})
-        conn.execute(text("INSERT INTO schemas (id, name, created_at) VALUES (:i,'doc','2024-01-01')"), {"i": sch})
+        conn.execute(
+            text(
+                "INSERT INTO datasets (id, name, created_at) VALUES (:i,'ds','2024-01-01')"
+            ),
+            {"i": ds},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO schemas (id, name, created_at) VALUES (:i,'doc','2024-01-01')"
+            ),
+            {"i": sch},
+        )
         rec = str(uuid.uuid4())
         conn.execute(
             text(

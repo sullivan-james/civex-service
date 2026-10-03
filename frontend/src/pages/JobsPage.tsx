@@ -1,32 +1,9 @@
-import { useEffect } from 'react'
-import { useSearchParams } from 'react-router'
 import { useActiveJobCount, useDrainJobs } from '../hooks/useWorkflows'
 import { Page, Button } from '../components/ui'
 import { RefreshCw } from '../components/ui/icons'
 import JobsTable from '../components/jobs/JobsTable'
 
 export default function JobsPage() {
-  // `?status=failed` (the analytics widgets' "View runs" links) becomes the
-  // same filter the table's own editor builds, so there is one way to say it.
-  const [searchParams, setSearchParams] = useSearchParams()
-  const legacyStatus = searchParams.get('status')
-  useEffect(() => {
-    if (!legacyStatus) return
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev)
-        next.delete('status')
-        if (!next.has('filter'))
-          next.set(
-            'filter',
-            JSON.stringify({ field: 'status', op: 'eq', value: legacyStatus }),
-          )
-        return next
-      },
-      { replace: true },
-    )
-  }, [legacyStatus, setSearchParams])
-
   const { data: activeJobs } = useActiveJobCount()
   const drain = useDrainJobs()
 
@@ -55,6 +32,7 @@ export default function JobsPage() {
         </Button>
       }
     >
+      {/* `?status=failed` from a dashboard link is just the status dropdown. */}
       <JobsTable />
     </Page>
   )

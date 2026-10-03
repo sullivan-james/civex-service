@@ -1,4 +1,5 @@
 """CLI-level coverage for CIVEX-169: `record delete --force` and `doctor`."""
+
 from __future__ import annotations
 
 import re
@@ -37,12 +38,16 @@ def _setup_patient_and_visit(project_dir: Path) -> tuple[str, str]:
     )
     runner.invoke(app, ["collection", "create", "study"])
 
-    add_patient = runner.invoke(app, ["record", "add", "--to", "study", "--schema", "patient"])
+    add_patient = runner.invoke(
+        app, ["record", "add", "--to", "study", "--schema", "patient"]
+    )
     assert add_patient.exit_code == 0, add_patient.output
     patient_id = _added_id(add_patient.output)
 
     add_visit = runner.invoke(
-        app, ["record", "add", "--to", "study", "--schema", "visit"], input=f"{patient_id}\n"
+        app,
+        ["record", "add", "--to", "study", "--schema", "visit"],
+        input=f"{patient_id}\n",
     )
     assert add_visit.exit_code == 0, add_visit.output
     visit_id = _added_id(add_visit.output)

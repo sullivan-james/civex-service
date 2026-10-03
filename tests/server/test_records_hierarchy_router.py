@@ -21,9 +21,17 @@ def seeded(client: TestClient) -> dict[str, str]:
     _post(client, "/api/schemas", {"name": "encounter"})
     _post(client, "/api/schemas/encounter/fields", {"name": "site", "type": "string"})
     _post(client, "/api/schemas", {"name": "recording", "parent": "encounter"})
-    _post(client, "/api/schemas/recording/fields", {"name": "sample_rate", "type": "integer"})
+    _post(
+        client,
+        "/api/schemas/recording/fields",
+        {"name": "sample_rate", "type": "integer"},
+    )
     _post(client, "/api/schemas", {"name": "selection", "parent": "recording"})
-    _post(client, "/api/schemas/selection/fields", {"name": "selection_table", "type": "string"})
+    _post(
+        client,
+        "/api/schemas/selection/fields",
+        {"name": "selection_table", "type": "string"},
+    )
     _post(client, "/api/collections", {"name": "hb"})
 
     def add(schema, data, parent=None):

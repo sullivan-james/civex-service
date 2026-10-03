@@ -1,6 +1,7 @@
 """Per-record write costs that must not creep back: a prefix lookup is an index
 range (not a scan), workflow files are parsed when they change (not per
 record), and an insert that cites no file doesn't read file_references."""
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -73,9 +74,7 @@ def test_workflow_files_are_parsed_once_until_they_change(
     )
     calls = []
     real = mod.load_workflow
-    monkeypatch.setattr(
-        mod, "load_workflow", lambda p: calls.append(p) or real(p)
-    )
+    monkeypatch.setattr(mod, "load_workflow", lambda p: calls.append(p) or real(p))
     svc = ctx.job_svc
 
     for _ in range(5):

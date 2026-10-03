@@ -349,9 +349,7 @@ def test_create_view_rejects_multi_hop_join_column(ctx: AppContext, make_schema)
     ctx.commit()
 
     with pytest.raises(ValidationError):
-        ctx.view_svc.create(
-            "invoice", "bad", columns=["customer.region_ref.email"]
-        )
+        ctx.view_svc.create("invoice", "bad", columns=["customer.region_ref.email"])
 
 
 def test_create_view_rejects_join_through_non_reference_field(
@@ -485,12 +483,8 @@ def test_preview_sorts_by_joined_column(ctx: AppContext, make_schema, make_colle
     bob = ctx.record_svc.add(
         "study", "customer", {"email": "bob@example.com", "region": "east"}
     )
-    ctx.record_svc.add(
-        "study", "invoice", {"amount": 1, "customer": str(bob.id)}
-    )
-    ctx.record_svc.add(
-        "study", "invoice", {"amount": 2, "customer": str(alice.id)}
-    )
+    ctx.record_svc.add("study", "invoice", {"amount": 1, "customer": str(bob.id)})
+    ctx.record_svc.add("study", "invoice", {"amount": 2, "customer": str(alice.id)})
     ctx.commit()
 
     rows, total = ctx.view_svc.preview(
@@ -678,13 +672,9 @@ def test_export_ignores_joined_file_columns_for_zip_bundling(
     customer = ctx.record_svc.add(
         "study", "customer", {"avatar": _file_ref("b" * 64, "pic.png")}
     )
-    ctx.record_svc.add(
-        "study", "invoice", {"amount": 10, "customer": str(customer.id)}
-    )
+    ctx.record_svc.add("study", "invoice", {"amount": 10, "customer": str(customer.id)})
     ctx.commit()
-    ctx.view_svc.create(
-        "invoice", "with_avatar", columns=["amount", "customer.avatar"]
-    )
+    ctx.view_svc.create("invoice", "with_avatar", columns=["amount", "customer.avatar"])
     ctx.commit()
 
     export = ctx.view_svc.export("invoice", "with_avatar")
@@ -703,14 +693,20 @@ def test_view_filter_may_test_a_descendants_field(
     make_collection("hb")
     e1 = make_record("hb", "encounter", {"site": "A"})
     e2 = make_record("hb", "encounter", {"site": "B"})
-    make_record("hb", "selection", {"selection_table": "t.txt"}, parent_record_id=str(e1.id))
+    make_record(
+        "hb", "selection", {"selection_table": "t.txt"}, parent_record_id=str(e1.id)
+    )
     make_record("hb", "selection", {}, parent_record_id=str(e2.id))
 
     view = ctx.view_svc.create(
         "encounter",
         "missing_table",
         columns=["site"],
-        filter_tree={"schema": "selection", "field": "selection_table", "op": "is_null"},
+        filter_tree={
+            "schema": "selection",
+            "field": "selection_table",
+            "op": "is_null",
+        },
     )
     ctx.commit()
 
@@ -741,9 +737,7 @@ def test_view_columns_and_sort_may_use_inherited_fields(
     assert rows == [{"rate": 2, "site": "A"}, {"rate": 1, "site": "B"}]
 
 
-def test_view_rejects_a_condition_on_an_unrelated_schema(
-    ctx: AppContext, make_schema
-):
+def test_view_rejects_a_condition_on_an_unrelated_schema(ctx: AppContext, make_schema):
     make_schema("a", fields=[("x", "string")])
     make_schema("b", fields=[("y", "string")])
     with pytest.raises(ValidationError, match="neither 'a' nor one of"):

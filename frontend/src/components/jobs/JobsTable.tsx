@@ -1,9 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { useTableState } from '../../hooks/useTableState'
-import { TableControls } from '../table/TableControls'
-import { tableFields } from '../../utils/tableFields'
-import { nextSort } from '../../utils/tableState'
+import { useListParams } from '../../hooks/useListParams'
 import { useJobsPaged, useRerunJob } from '../../hooks/useWorkflows'
 import { type WorkflowJob } from '../../api/workflows'
 import {
@@ -11,6 +8,7 @@ import {
   type DataTableColumn,
   Badge,
   Button,
+  ListToolbar,
   Pagination,
 } from '../ui'
 import { RefreshCw } from '../ui/icons'
@@ -43,44 +41,33 @@ function WhatHappened({ job }: { job: WorkflowJob }) {
   return <span>{summary.join(', ')}</span>
 }
 
-/** What a run can be filtered and sorted by: the columns the API names. */
-const RUN_FIELDS = tableFields([
-  { name: 'workflow_name', label: 'Workflow', type: 'string' },
-  {
-    name: 'status',
-    label: 'Status',
-    type: 'enum',
-    choices: ['pending', 'running', 'completed', 'failed'],
-  },
-  {
-    name: 'trigger',
-    label: 'Trigger',
-    type: 'enum',
-    choices: ['record_created', 'record_updated', 'manual'],
-  },
-  { name: 'schema_name', label: 'Schema', type: 'string' },
-  { name: 'created_at', label: 'Created', type: 'datetime' },
-  { name: 'started_at', label: 'Started', type: 'datetime' },
-  { name: 'finished_at', label: 'Finished', type: 'datetime' },
-  { name: 'error', label: 'Error', type: 'string' },
-])
+const STATUSES = ['pending', 'running', 'completed', 'failed']
+const TRIGGERS = ['record_created', 'record_updated', 'manual']
+const anyOf = (values: string[]) => [
+  { value: '', label: '' },
+  ...values.map((v) => ({ value: v, label: v.replace('_', ' ') })),
+]
 
 interface Props {
   /** Only runs triggered by this record (the record page's Runs tab). */
   recordId?: string
-  /** Prefix for this table's address parameters, so two tables on a page
-   * stay apart. */
+  /** Prefix for this table's address parameters, when a page has more than
+   * one list. */
   ns?: string
 }
 
 export default function JobsTable({ recordId, ns = '' }: Props) {
-  const { state, patch } = useTableState(ns, 25)
+  const list = useListParams(ns, ['status', 'trigger'])
   const { jobs, total, isLoading, isFetching, error } = useJobsPaged(
-    state.page,
-    state.pageSize,
-    undefined,
+    list.page,
+    list.size,
+    list.picks.status || undefined,
     recordId,
-    { search: state.q, filter: state.filter, sort: state.sort },
+    {
+      trigger: list.picks.trigger || undefined,
+      search: list.q || undefined,
+      sort: list.sortParam,
+    },
   )
   const rerun = useRerunJob()
 
@@ -217,25 +204,44 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
   return (
     <div aria-busy={isFetching} className="space-y-3">
       {liveRegion}
-      <TableControls
-        state={state}
-        patch={patch}
-        fields={RUN_FIELDS}
-        searchLabel="Search runs"
+      <ListToolbar
+        search={{
+          value: list.q,
+          label: 'Search runs',
+          onChange: (q) => list.set({ q }),
+        }}
+        picks={[
+          {
+            label: 'Any status',
+            value: list.picks.status,
+            options: anyOf(STATUSES),
+            onChange: (status) => list.set({ status }),
+          },
+          {
+            label: 'Any trigger',
+            value: list.picks.trigger,
+            options: anyOf(TRIGGERS),
+            onChange: (trigger) => list.set({ trigger }),
+          },
+        ]}
       />
       <DataTable
         sort={
-          state.sort[0]
-            ? { key: state.sort[0].field, direction: state.sort[0].direction }
+          list.sort
+            ? { key: list.sort.field, direction: list.sort.dir }
             : undefined
         }
-        onSortChange={(key) => patch({ sort: nextSort(state.sort, key) })}
+        onSortChange={list.toggleSort}
         columns={columns}
         rows={jobs.data ?? []}
         getRowId={(job) => job.id}
         isLoading={isLoading}
         error={error?.message}
-        emptyTitle={state.q || state.filter ? 'No runs match' : 'No runs yet'}
+        emptyTitle={
+          list.q || list.picks.status || list.picks.trigger
+            ? 'No runs match'
+            : 'No runs yet'
+        }
         actions={(job) => (
           <Button
             size="sm"
@@ -251,11 +257,11 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
         actionsWidth="64px"
       />
       <Pagination
-        page={state.page}
-        pageSize={state.pageSize}
+        page={list.page}
+        pageSize={list.size}
         total={total}
-        onPage={(page) => patch({ page })}
-        onPageSize={(pageSize) => patch({ pageSize })}
+        onPage={(page) => list.set({ page })}
+        onPageSize={(size) => list.set({ size })}
       />
     </div>
   )

@@ -260,8 +260,8 @@ export default function RecordDetailPage() {
         <TabPanel id="history" value={shownTab}>
           <AuditTrail
             queryKey={['records', record.id, 'audit']}
-            fetchPage={(offset, limit, table) =>
-              recordsApi.audit(record.id, offset, limit, table)
+            fetchPage={(offset, limit, view) =>
+              recordsApi.audit(record.id, offset, limit, view)
             }
             describeEntry={(entry) => describeRecordAuditEntry(entry, schema)}
             emptyMessage="Changes to this record will appear here."

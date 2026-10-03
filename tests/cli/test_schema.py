@@ -10,7 +10,9 @@ runner = CliRunner()
 
 
 def test_schema_create_and_list(project_dir: Path) -> None:
-    result = runner.invoke(app, ["schema", "create", "trial", "--description", "A trial"])
+    result = runner.invoke(
+        app, ["schema", "create", "trial", "--description", "A trial"]
+    )
     assert result.exit_code == 0
 
     result = runner.invoke(app, ["schema", "list"])
@@ -20,7 +22,10 @@ def test_schema_create_and_list(project_dir: Path) -> None:
 
 def test_schema_add_field(project_dir: Path) -> None:
     runner.invoke(app, ["schema", "create", "trial"])
-    result = runner.invoke(app, ["schema", "add-field", "trial", "subject", "--type", "string", "--required"])
+    result = runner.invoke(
+        app,
+        ["schema", "add-field", "trial", "subject", "--type", "string", "--required"],
+    )
     assert result.exit_code == 0
 
     result = runner.invoke(app, ["schema", "show", "trial"])
@@ -46,5 +51,7 @@ def test_schema_create_duplicate_name_fails(project_dir: Path) -> None:
 
 def test_schema_add_field_unknown_dtype_fails(project_dir: Path) -> None:
     runner.invoke(app, ["schema", "create", "trial"])
-    result = runner.invoke(app, ["schema", "add-field", "trial", "subject", "--type", "not-a-real-type"])
+    result = runner.invoke(
+        app, ["schema", "add-field", "trial", "subject", "--type", "not-a-real-type"]
+    )
     assert result.exit_code != 0

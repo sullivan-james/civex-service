@@ -60,7 +60,6 @@ def test_rerun_carries_forward_the_original_run_s_input_data(
 
 
 def _seed_runs(client: TestClient) -> None:
-    """Two runs of one workflow on one record, one finished and one failed."""
     from civex.config import load_config
     from civex.context import build_local_context
 
@@ -74,70 +73,32 @@ def _seed_runs(client: TestClient) -> None:
     ctx = build_local_context(load_config())
     try:
         repo = ctx.job_svc._repo
-        a = repo.enqueue("parse-audio-dates", uuid.UUID(rec["id"]), "manual")
-        b = repo.enqueue("other-flow", uuid.UUID(rec["id"]), "record_created")
+        repo.enqueue("parse-audio-dates", uuid.UUID(rec["id"]), "manual")
+        repo.enqueue("other-flow", uuid.UUID(rec["id"]), "record_created")
         ctx.commit()
     finally:
         ctx.close()
-    assert a and b
 
 
-def test_runs_filter_and_sort_share_the_record_filter_shape(
-    client: TestClient,
-) -> None:
-    import json
-
+def test_runs_can_be_filtered_searched_and_sorted(client: TestClient) -> None:
     _seed_runs(client)
 
-    everything = client.get("/api/jobs").json()
-    assert len(everything) >= 2
+    manual = client.get("/api/jobs", params={"trigger": "manual"}).json()
+    assert {j["trigger"] for j in manual} == {"manual"}
+    assert client.get("/api/jobs/count", params={"trigger": "manual"}).json() == {
+        "total": len(manual)
+    }
 
-    only = client.get(
-        "/api/jobs",
-        params={
-            "filter": json.dumps(
-                {"field": "workflow_name", "op": "eq", "value": "other-flow"}
-            )
-        },
-    ).json()
-    assert {j["workflow_name"] for j in only} == {"other-flow"}
-    count = client.get(
-        "/api/jobs/count",
-        params={
-            "filter": json.dumps(
-                {"field": "workflow_name", "op": "eq", "value": "other-flow"}
-            )
-        },
-    ).json()
-    assert count["total"] == len(only)
+    found = client.get("/api/jobs", params={"search": "other"}).json()
+    assert {j["workflow_name"] for j in found} == {"other-flow"}
 
-    by_name = client.get("/api/jobs", params={"sort": "workflow_name:asc"}).json()
-    names = [j["workflow_name"] for j in by_name]
+    names = [
+        j["workflow_name"]
+        for j in client.get("/api/jobs", params={"sort": "workflow_name:asc"}).json()
+    ]
     assert names == sorted(names)
-
-    grouped = client.get(
-        "/api/jobs",
-        params={
-            "filter": json.dumps(
-                {
-                    "or": [
-                        {"field": "trigger", "op": "eq", "value": "manual"},
-                        {"field": "schema_name", "op": "eq", "value": "doc"},
-                    ]
-                }
-            ),
-            "search": "parse",
-        },
-    ).json()
-    assert {j["workflow_name"] for j in grouped} == {"parse-audio-dates"}
-
-
-def test_runs_reject_columns_that_do_not_exist(client: TestClient) -> None:
-    import json
-
-    response = client.get(
-        "/api/jobs",
-        params={"filter": json.dumps({"field": "nope", "op": "eq", "value": 1})},
-    )
-    assert response.status_code in (400, 422)
-    assert client.get("/api/jobs", params={"sort": "nope"}).status_code in (400, 422)
+    newest_name_first = [
+        j["workflow_name"]
+        for j in client.get("/api/jobs", params={"sort": "workflow_name:desc"}).json()
+    ]
+    assert newest_name_first == sorted(names, reverse=True)

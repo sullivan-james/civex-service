@@ -43,7 +43,12 @@ def test_display_fields_become_a_template_and_back(tmp_path) -> None:
                     "INSERT INTO schemas (id, name, display_fields, created_at) "
                     "VALUES (:id, :name, :df, :created_at)"
                 ),
-                {"id": sid.hex, "name": name, "df": json.dumps(fields), "created_at": now},
+                {
+                    "id": sid.hex,
+                    "name": name,
+                    "df": json.dumps(fields),
+                    "created_at": now,
+                },
             )
 
     with engine.connect() as c:
@@ -60,4 +65,7 @@ def test_display_fields_become_a_template_and_back(tmp_path) -> None:
         c.commit()
     with engine.connect() as c:
         back = dict(c.execute(text("SELECT name, display_fields FROM schemas")).all())
-    assert {k: json.loads(v) for k, v in back.items()} == {"a": ["first", "last"], "b": []}
+    assert {k: json.loads(v) for k, v in back.items()} == {
+        "a": ["first", "last"],
+        "b": [],
+    }

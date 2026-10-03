@@ -321,9 +321,7 @@ def test_export_view_invalid_format_returns_422(client: TestClient):
     _make_schema(client, "trial")
     client.post("/api/schemas/trial/views", json={"name": "view1"})
 
-    resp = client.get(
-        "/api/schemas/trial/views/view1/export", params={"format": "xml"}
-    )
+    resp = client.get("/api/schemas/trial/views/view1/export", params={"format": "xml"})
     assert resp.status_code == 422
 
 

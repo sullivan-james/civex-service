@@ -9,18 +9,8 @@ from sqlalchemy.orm import Session
 
 from civex.db.models import AuditLog, Commit
 from civex.domain.dtos import AuditLogDTO, CommitDTO
-from civex.domain.query import TableQuery
 from civex.repositories.local._bucketing import day_bucket
-from civex.repositories.local._table_query import apply_table_query
 from civex.repositories.protocols import AuditEventRow
-
-
-# What an audit table can filter and sort by.
-AUDIT_COLUMNS = {
-    "timestamp": AuditLog.timestamp,
-    "action": AuditLog.action,
-    "entity_type": AuditLog.entity_type,
-}
 
 
 class LocalAuditRepository:
@@ -136,10 +126,13 @@ class LocalAuditRepository:
         entity_ids: list[uuid.UUID] | None = None,
         limit: int = 50,
         offset: int = 0,
-        table: TableQuery | None = None,
+        action: str | None = None,
+        sort: str | None = None,
     ) -> list[AuditLogDTO]:
-        q = self._audit_query(entity_id, entity_type, commit_id, entity_ids)
-        q, terms, _ = apply_table_query(q, table, AUDIT_COLUMNS)
+        q = self._audit_query(entity_id, entity_type, commit_id, entity_ids, action)
+        name, _, direction = (sort or "").partition(":")
+        col = {"timestamp": AuditLog.timestamp, "action": AuditLog.action}.get(name)
+        terms = [] if col is None else [col.asc() if direction == "asc" else col.desc()]
         return [
             _audit_dto(r)
             for r in q.order_by(*terms, AuditLog.timestamp.desc())
@@ -154,11 +147,11 @@ class LocalAuditRepository:
         entity_type: str | None = None,
         commit_id: uuid.UUID | None = None,
         entity_ids: list[uuid.UUID] | None = None,
-        table: TableQuery | None = None,
+        action: str | None = None,
     ) -> int:
-        q = self._audit_query(entity_id, entity_type, commit_id, entity_ids)
-        q, _, _ = apply_table_query(q, table, AUDIT_COLUMNS)
-        return q.count()
+        return self._audit_query(
+            entity_id, entity_type, commit_id, entity_ids, action
+        ).count()
 
     def _audit_query(
         self,
@@ -166,8 +159,11 @@ class LocalAuditRepository:
         entity_type: str | None,
         commit_id: uuid.UUID | None,
         entity_ids: list[uuid.UUID] | None,
+        action: str | None = None,
     ):
         q = self._s.query(AuditLog)
+        if action:
+            q = q.filter(AuditLog.action == action)
         if entity_ids is not None:
             q = q.filter(AuditLog.entity_id.in_(entity_ids))
         elif entity_id is not None:

@@ -11,12 +11,11 @@ from sqlalchemy.orm import Session, aliased
 
 from civex.db.models import Dataset, Record, RecordReference, Schema, WorkflowJob
 from civex.domain.dtos import RecordDTO
-from civex.domain.exceptions import NotFoundError
+from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode, SortKey
 from civex.domain.query import ResolvedQuery
 from civex.repositories.local._bucketing import day_bucket
 from civex.repositories.local._jobs import bulk_delete_jobs
-from civex.repositories.local._table_query import compare, fold_group
 from civex.repositories.protocols import RecordGrowthRow
 
 
@@ -683,7 +682,8 @@ def _base_query(session: Session, query: ResolvedQuery, is_postgres: bool = Fals
 
 def _build_filter_condition(node: FilterNode):
     if isinstance(node, FilterGroup):
-        return fold_group(node, _build_filter_condition)
+        clauses = [_build_filter_condition(c) for c in node.conditions]
+        return and_(*clauses) if node.op == "and" else or_(*clauses)
     rel = node.rel
     if rel.direction == "up":
         return _exists_up(rel.hops, lambda a: _build_leaf_condition(node, a))
@@ -722,7 +722,19 @@ def _typed_comparison(col, op: str, value: Any):
         typed_col, typed_value = col.as_float(), float(value)
     else:
         typed_col, typed_value = col.as_string(), value
-    return compare(typed_col, op, typed_value)
+    if op == "eq":
+        return typed_col == typed_value
+    if op == "ne":
+        return typed_col != typed_value
+    if op == "gt":
+        return typed_col > typed_value
+    if op == "gte":
+        return typed_col >= typed_value
+    if op == "lt":
+        return typed_col < typed_value
+    if op == "lte":
+        return typed_col <= typed_value
+    raise ValidationError(f"Unsupported filter operator '{op}'")
 
 
 def _prefix_span(prefix: str) -> tuple[uuid.UUID, uuid.UUID] | None:

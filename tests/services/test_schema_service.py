@@ -1,10 +1,13 @@
 """SchemaService.collect_fields() inheritance behavior."""
+
 from __future__ import annotations
 
 from civex.context import AppContext
 
 
-def test_collect_fields_includes_own_fields_only_for_root_schema(ctx: AppContext, make_schema):
+def test_collect_fields_includes_own_fields_only_for_root_schema(
+    ctx: AppContext, make_schema
+):
     schema = make_schema("base", fields=[("subject", "string")])
     resolved = ctx.schema_svc.collect_fields(schema)
     assert [rf.field.name for rf in resolved] == ["subject"]
@@ -25,10 +28,14 @@ def test_collect_fields_appends_parent_fields_after_own(ctx: AppContext, make_sc
     assert resolved[1].source_schema_name == "base"
 
 
-def test_collect_fields_own_field_shadows_parent_field_of_same_name(ctx: AppContext, make_schema):
+def test_collect_fields_own_field_shadows_parent_field_of_same_name(
+    ctx: AppContext, make_schema
+):
     make_schema("base", fields=[("subject", "string")])
     ctx.schema_svc.create("child", parent="base")
-    ctx.schema_svc.add_field("child", "subject", "integer")  # same name, different dtype
+    ctx.schema_svc.add_field(
+        "child", "subject", "integer"
+    )  # same name, different dtype
     ctx.commit()
 
     child = ctx.schema_svc.get("child")

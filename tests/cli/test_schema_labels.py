@@ -1,4 +1,5 @@
 """CLI surface for the name/label split: --label, slug enforcement, and lint."""
+
 from __future__ import annotations
 
 from pathlib import Path

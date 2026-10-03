@@ -59,9 +59,7 @@ def test_patch_ai_config_missing_api_key(client: TestClient) -> None:
 
 
 def test_patch_ai_config_invalid_provider(client: TestClient) -> None:
-    resp = client.patch(
-        "/api/ai/config", json={"api_key": "x", "provider": "bogus"}
-    )
+    resp = client.patch("/api/ai/config", json={"api_key": "x", "provider": "bogus"})
     assert resp.status_code == 422
     assert resp.json()["detail"] == "provider must be 'anthropic' or 'openai-compat'"
 
@@ -114,7 +112,9 @@ def test_patch_then_get_ai_config_round_trips(client: TestClient) -> None:
 _CHAT_BODY = {"messages": [{"role": "user", "content": "hi"}]}
 
 
-def test_chat_sse_no_civex_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_chat_sse_no_civex_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.chdir(tmp_path)  # no _civex/ dir here
     from civex.server.app import create_app
 

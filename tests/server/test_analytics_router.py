@@ -216,9 +216,7 @@ def test_job_trigger_breakdown(client: TestClient) -> None:
     # _run_workflows triggers every job manually.
     assert by_trigger == {"manual": 3}
 
-    resp = client.get(
-        "/api/analytics/jobs/by-trigger", params={"status": "failed"}
-    )
+    resp = client.get("/api/analytics/jobs/by-trigger", params={"status": "failed"})
     by_trigger = {item["trigger"]: item["count"] for item in resp.json()["items"]}
     assert by_trigger == {"manual": 2}
 
@@ -250,9 +248,7 @@ def test_audit_event_counts_filters_by_entity_type_and_action(
         json={"schema_name": "doc", "data": {}},
     )
 
-    resp = client.get(
-        "/api/analytics/audit/events", params={"entity_type": "record"}
-    )
+    resp = client.get("/api/analytics/audit/events", params={"entity_type": "record"})
     assert resp.status_code == 200
     items = resp.json()["items"]
     assert {item["entity_type"] for item in items} == {"record"}

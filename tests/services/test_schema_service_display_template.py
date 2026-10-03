@@ -5,6 +5,7 @@ validated at write time and kept in sync when a field it mentions is renamed
 or deleted -- including through inheritance, and respecting name-shadowing
 (an inherited field shadowed by a closer schema's own field of the same name).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -13,9 +14,7 @@ from civex.context import AppContext
 from civex.domain.exceptions import ValidationError
 
 
-def test_update_accepts_known_fields_and_builtins(
-    ctx: AppContext, make_schema
-) -> None:
+def test_update_accepts_known_fields_and_builtins(ctx: AppContext, make_schema) -> None:
     make_schema("trial", fields=[("subject", "string"), ("site", "string")])
     updated = ctx.schema_svc.update(
         "trial", display_template="{schema}: {subject:upper} @ {site}"
@@ -32,7 +31,9 @@ def test_update_accepts_inherited_field_name(ctx: AppContext, make_schema) -> No
     assert updated.display_template == "{subject}"
 
 
-@pytest.mark.parametrize("bad", ["{ghost}", "{subject} {ghost}", "{subject", "{subject:nope}"])
+@pytest.mark.parametrize(
+    "bad", ["{ghost}", "{subject} {ghost}", "{subject", "{subject:nope}"]
+)
 def test_update_rejects_bad_templates(ctx: AppContext, make_schema, bad) -> None:
     make_schema("trial", fields=[("subject", "string")])
     with pytest.raises(ValidationError):
@@ -45,9 +46,7 @@ def test_update_rejects_ext_in_a_record_name(ctx: AppContext, make_schema) -> No
         ctx.schema_svc.update("trial", display_template="{subject}.{ext}")
 
 
-def test_update_empty_string_clears_the_template(
-    ctx: AppContext, make_schema
-) -> None:
+def test_update_empty_string_clears_the_template(ctx: AppContext, make_schema) -> None:
     make_schema("trial", fields=[("subject", "string")])
     ctx.schema_svc.update("trial", display_template="{subject}")
     ctx.commit()
@@ -84,9 +83,7 @@ def test_delete_field_removes_its_variable_and_separator(
     assert ctx.schema_svc.get("trial").display_template == "{last_name}"
 
 
-def test_delete_last_variable_clears_the_template(
-    ctx: AppContext, make_schema
-) -> None:
+def test_delete_last_variable_clears_the_template(ctx: AppContext, make_schema) -> None:
     make_schema("trial", fields=[("subject", "string")])
     ctx.schema_svc.update("trial", display_template="{subject}")
     ctx.commit()
@@ -148,9 +145,7 @@ def test_shadowed_parent_field_changes_do_not_touch_child_template(
     assert ctx.schema_svc.get("child").display_template == "{subject}"
 
 
-def test_rename_does_not_affect_unrelated_schema(
-    ctx: AppContext, make_schema
-) -> None:
+def test_rename_does_not_affect_unrelated_schema(ctx: AppContext, make_schema) -> None:
     make_schema("trial", fields=[("subject", "string")])
     make_schema("other", fields=[("subject", "string")])
     ctx.schema_svc.update("trial", display_template="{subject}")
@@ -288,9 +283,7 @@ def test_first_nameable_field_becomes_the_template(
     assert ctx.schema_svc.get("trial").display_template == "{subject}"
 
 
-def test_fields_that_cannot_be_named_are_skipped(
-    ctx: AppContext, make_schema
-) -> None:
+def test_fields_that_cannot_be_named_are_skipped(ctx: AppContext, make_schema) -> None:
     make_schema("trial", fields=[("where", "geo"), ("scan", "file")])
     assert ctx.schema_svc.get("trial").display_template is None
 

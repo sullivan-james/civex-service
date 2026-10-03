@@ -1,6 +1,5 @@
 import { api } from './client'
-import { auditUrl, type PaginatedAuditLog } from './audit'
-import type { TableQueryParams } from './query'
+import { auditUrl, type AuditView, type PaginatedAuditLog } from './audit'
 
 export interface Field {
   id: string
@@ -91,9 +90,9 @@ export const schemasApi = {
   get: (name: string) => api.get<Schema>(`/schemas/${name}`),
   getDeleteImpact: (name: string) =>
     api.get<SchemaDeleteImpact>(`/schemas/${name}/delete-impact`),
-  getAudit: (name: string, offset = 0, limit = 50, table?: TableQueryParams) =>
+  getAudit: (name: string, offset = 0, limit = 50, view?: AuditView) =>
     api.get<PaginatedAuditLog>(
-      auditUrl(`/schemas/${name}`, offset, limit, table),
+      auditUrl(`/schemas/${name}`, offset, limit, view),
     ),
   previewName: (
     name: string,

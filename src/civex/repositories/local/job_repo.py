@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from civex.db.models import (
@@ -15,9 +15,7 @@ from civex.db.models import (
     WorkflowJob,
 )
 from civex.domain.dtos import WorkflowJobDTO
-from civex.domain.query import TableQuery
 from civex.repositories.local._bucketing import day_bucket, rebucket
-from civex.repositories.local._table_query import apply_table_query
 from civex.repositories.protocols import JobStatusRow, PluginFailureRow
 
 # schema_name isn't a column (CIVEX-171) -- every query needs the record's
@@ -25,15 +23,12 @@ from civex.repositories.protocols import JobStatusRow, PluginFailureRow
 _WITH_SCHEMA = joinedload(WorkflowJob.record).joinedload(Record.schema)
 
 
-# What a run table can filter and sort by, by the name the API uses. The
-# schema is the run's record's, resolved by join (see _WITH_SCHEMA).
-JOB_COLUMNS = {
+# Columns a run list can be ordered by.
+_SORTABLE = {
     "workflow_name": WorkflowJob.workflow_name,
     "status": WorkflowJob.status,
     "trigger": WorkflowJob.trigger,
     "created_at": WorkflowJob.created_at,
-    "started_at": WorkflowJob.started_at,
-    "finished_at": WorkflowJob.finished_at,
     "schema_name": (
         select(Schema.name)
         .join(Record, Record.schema_id == Schema.id)
@@ -42,8 +37,34 @@ JOB_COLUMNS = {
         .scalar_subquery()
     ),
 }
-_JOB_SEARCH = ("workflow_name", "error")
-JOB_COLUMNS["error"] = WorkflowJob.error
+
+
+def _narrow(q, status: str | None, trigger: str | None, search: str | None):
+    """The run filters a person picks in the UI, shared by list and count."""
+    if status:
+        q = q.filter(WorkflowJob.status == status)
+    if trigger:
+        q = q.filter(WorkflowJob.trigger == trigger)
+    if search:
+        like = f"%{search}%"
+        q = q.filter(
+            or_(
+                WorkflowJob.workflow_name.ilike(like),
+                cast(WorkflowJob.error, String).ilike(like),
+            )
+        )
+    return q
+
+
+def _order(sort: str | None) -> list:
+    """ORDER BY terms for `column[:asc|desc]`; unknown columns are ignored.
+    Newest first is always the tie-break."""
+    name, _, direction = (sort or "").partition(":")
+    col = _SORTABLE.get(name)
+    terms = []
+    if col is not None:
+        terms.append(col.desc() if direction == "desc" else col.asc())
+    return [*terms, WorkflowJob.created_at.desc(), WorkflowJob.id.desc()]
 
 
 def _now() -> datetime:
@@ -142,13 +163,14 @@ class LocalWorkflowJobRepository:
         offset: int = 0,
         limit: int | None = None,
         affected_schema: str | None = None,
-        table: TableQuery | None = None,
+        trigger: str | None = None,
+        search: str | None = None,
+        sort: str | None = None,
     ) -> list[WorkflowJobDTO]:
         q = self._s.query(WorkflowJob).options(
             selectinload(WorkflowJob.steps), _WITH_SCHEMA
         )
-        if status:
-            q = q.filter_by(status=status)
+        q = _narrow(q, status, trigger, search)
         if record_id:
             try:
                 q = q.filter_by(record_id=uuid.UUID(record_id))
@@ -156,8 +178,7 @@ class LocalWorkflowJobRepository:
                 return []
         if affected_schema:
             q = q.filter(_touches_schema(affected_schema))
-        q, terms, _ = apply_table_query(q, table, JOB_COLUMNS, _JOB_SEARCH)
-        q = q.order_by(*terms, WorkflowJob.created_at.desc(), WorkflowJob.id.desc())
+        q = q.order_by(*_order(sort))
         if affected_record_id:
             touched = _touches_record(affected_record_id)
             if touched is None:
@@ -174,14 +195,12 @@ class LocalWorkflowJobRepository:
         record_id: str | None = None,
         affected_record_id: str | None = None,
         affected_schema: str | None = None,
-        table: TableQuery | None = None,
+        trigger: str | None = None,
+        search: str | None = None,
     ) -> int:
-        q = self._s.query(WorkflowJob)
-        q, _, _ = apply_table_query(q, table, JOB_COLUMNS, _JOB_SEARCH)
+        q = _narrow(self._s.query(WorkflowJob), status, trigger, search)
         if affected_schema:
             q = q.filter(_touches_schema(affected_schema))
-        if status:
-            q = q.filter_by(status=status)
         if record_id:
             try:
                 q = q.filter_by(record_id=uuid.UUID(record_id))

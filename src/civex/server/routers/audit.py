@@ -7,23 +7,42 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from civex.context import AppContext
 from civex.domain.exceptions import NotFoundError
 from civex.server.deps import get_ctx
-from civex.domain.query import TableQuery
 from civex.server.models import AuditLogResponse, PaginatedAuditLogResponse
-from civex.server.query_params import table_query
 
 router = APIRouter(tags=["audit"])
 
 
+class AuditView:
+    """The two things a history table can ask for: one kind of action, and an
+    order. Taken as a dependency by every audit endpoint."""
+
+    def __init__(
+        self,
+        action: str | None = Query(
+            default=None,
+            description="Only entries of this action (create, update, ...).",
+        ),
+        sort: str | None = Query(
+            default=None,
+            description="'timestamp' or 'action', optionally ':asc' / ':desc'. "
+            "Newest first by default.",
+        ),
+    ) -> None:
+        self.action = action
+        self.sort = sort
+
+
 def audit_page(
-    ctx: AppContext, table: TableQuery, offset: int, limit: int, **scope
+    ctx: AppContext, view: AuditView, offset: int, limit: int, **scope
 ) -> PaginatedAuditLogResponse:
     """One page of audit entries for `scope` (entity_id / entity_type /
-    entity_ids), narrowed and ordered by the shared table query. Every audit
-    endpoint answers through this, so they filter and sort identically."""
-    items = ctx.audit_svc.list_audit(offset=offset, limit=limit, table=table, **scope)
+    entity_ids). Every audit endpoint answers through this."""
+    items = ctx.audit_svc.list_audit(
+        offset=offset, limit=limit, action=view.action, sort=view.sort, **scope
+    )
     return PaginatedAuditLogResponse(
         items=[AuditLogResponse.from_dto(a) for a in items],
-        total=ctx.audit_svc.count_audit(table=table, **scope),
+        total=ctx.audit_svc.count_audit(action=view.action, **scope),
         offset=offset,
         limit=limit,
     )
@@ -40,7 +59,7 @@ def list_audit(
     ),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, le=1000),
-    table: TableQuery = Depends(table_query),
+    view: AuditView = Depends(),
     ctx: AppContext = Depends(get_ctx),
 ):
     """General-purpose audit search, filterable by entity type and/or id.
@@ -50,7 +69,7 @@ def list_audit(
         uid = uuid.UUID(entity_id) if entity_id else None
     except ValueError:
         raise HTTPException(400, detail="Invalid entity ID")
-    return audit_page(ctx, table, offset, limit, entity_id=uid, entity_type=entity_type)
+    return audit_page(ctx, view, offset, limit, entity_id=uid, entity_type=entity_type)
 
 
 @router.get("/records/{record_id}/audit", response_model=PaginatedAuditLogResponse)
@@ -58,7 +77,7 @@ def list_record_audit(
     record_id: str,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, le=1000),
-    table: TableQuery = Depends(table_query),
+    view: AuditView = Depends(),
     ctx: AppContext = Depends(get_ctx),
 ):
     """Audit entries for a single record — every create/update/delete recorded
@@ -68,7 +87,7 @@ def list_record_audit(
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     return audit_page(
-        ctx, table, offset, limit, entity_id=record.id, entity_type="record"
+        ctx, view, offset, limit, entity_id=record.id, entity_type="record"
     )
 
 
@@ -77,7 +96,7 @@ def list_schema_audit(
     name: str,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, le=1000),
-    table: TableQuery = Depends(table_query),
+    view: AuditView = Depends(),
     ctx: AppContext = Depends(get_ctx),
 ):
     """Audit entries for a schema and its own fields (not inherited ones),
@@ -88,4 +107,4 @@ def list_schema_audit(
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     entity_ids = [schema.id] + [f.id for f in schema.fields]
-    return audit_page(ctx, table, offset, limit, entity_ids=entity_ids)
+    return audit_page(ctx, view, offset, limit, entity_ids=entity_ids)

@@ -6,10 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
-from civex.domain.query import RecordQuery, TableQuery
+from civex.domain.query import RecordQuery
 from civex.server.deps import get_ctx
-from civex.server.query_params import record_query, table_query
-from civex.server.routers.audit import audit_page
+from civex.server.query_params import record_query
+from civex.server.routers.audit import AuditView, audit_page
 from civex.server.models import (
     CreateDatasetRequest,
     DatasetResponse,
@@ -101,7 +101,7 @@ def list_dataset_audit(
     name_or_id: str,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, le=1000),
-    table: TableQuery = Depends(table_query),
+    view: AuditView = Depends(),
     ctx: AppContext = Depends(get_ctx),
 ):
     """Audit entries for a collection — renames, description changes,
@@ -118,7 +118,7 @@ def list_dataset_audit(
         except NotFoundError as e:
             raise HTTPException(404, detail=str(e))
     return audit_page(
-        ctx, table, offset, limit, entity_id=dataset.id, entity_type="dataset"
+        ctx, view, offset, limit, entity_id=dataset.id, entity_type="dataset"
     )
 
 

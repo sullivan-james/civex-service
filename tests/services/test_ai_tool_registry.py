@@ -167,9 +167,7 @@ def test_query_records_count_only_omits_records(ctx: AppContext) -> None:
 def test_query_records_search_filters_results(ctx: AppContext) -> None:
     _seed_query_records(ctx)
     result = json.loads(
-        dispatch(
-            "query_records", {"schema": "trial", "search": "S02"}, _tool_ctx(ctx)
-        )
+        dispatch("query_records", {"schema": "trial", "search": "S02"}, _tool_ctx(ctx))
     )
     assert result["total"] == "1"
     assert result["records"][0]["data"]["subject"] == "S02"

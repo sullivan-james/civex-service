@@ -1,5 +1,6 @@
 """HTTP contract for the schema delete-impact endpoint and delete's cascade
 to the schema's own records (not to schemas that inherit from it)."""
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient

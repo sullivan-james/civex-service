@@ -168,9 +168,7 @@ def test_unreadable_reference_source_reports_error_and_deletes_nothing(
     def _boom():
         raise RuntimeError("corrupt row")
 
-    monkeypatch.setattr(
-        ctx.gc_svc._refs, "referenced_subset", lambda shas: _boom()
-    )
+    monkeypatch.setattr(ctx.gc_svc._refs, "referenced_subset", lambda shas: _boom())
 
     report = ctx.gc_svc.run(dry_run=False, grace_days=0)
 
@@ -257,9 +255,7 @@ def test_rebuild_references_recovers_from_a_wiped_table(
     assert ctx.file_svc._store.exists(ref.sha256)
 
 
-def test_gc_processes_more_objects_than_one_batch(
-    ctx: AppContext, monkeypatch
-) -> None:
+def test_gc_processes_more_objects_than_one_batch(ctx: AppContext, monkeypatch) -> None:
     import civex.services.gc_service as gc
 
     monkeypatch.setattr(gc, "_BATCH", 3)

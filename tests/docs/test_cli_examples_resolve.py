@@ -7,6 +7,7 @@ they were, and commands renamed or deleted (`civex dataset` -> `civex
 collection`, `civex commit`/`civex log`, `civex workflow drain`) that kept
 appearing in prose long after the code moved on.
 """
+
 from __future__ import annotations
 
 import difflib

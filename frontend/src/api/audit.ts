@@ -1,5 +1,3 @@
-import { setTableQuery, type TableQueryParams } from './query'
-
 export interface AuditLogEntry {
   id: string
   commit_id: string | null
@@ -18,18 +16,25 @@ export interface PaginatedAuditLog {
   limit: number
 }
 
-/** `<base>/audit` with paging and the table's filter, sort and search --
- * every entity's history is fetched through this. */
+/** What a history table can ask for: one kind of action, and an order
+ * (`timestamp` or `action`, then `:asc` / `:desc`). */
+export interface AuditView {
+  action?: string
+  sort?: string
+}
+
+/** `<base>/audit` with paging and the view, for every entity's history. */
 export function auditUrl(
   base: string,
   offset: number,
   limit: number,
-  table?: TableQueryParams,
+  view?: AuditView,
 ): string {
   const qs = new URLSearchParams({
     offset: String(offset),
     limit: String(limit),
   })
-  if (table) setTableQuery(qs, table)
+  if (view?.action) qs.set('action', view.action)
+  if (view?.sort) qs.set('sort', view.sort)
   return `${base}/audit?${qs}`
 }

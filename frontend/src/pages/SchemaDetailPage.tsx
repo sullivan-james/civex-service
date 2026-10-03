@@ -264,8 +264,8 @@ export default function SchemaDetailPage() {
       <TabPanel id="history" value={tab}>
         <AuditTrail
           queryKey={['schemas', schema.name, 'audit']}
-          fetchPage={(offset, limit, table) =>
-            schemasApi.getAudit(schema.name, offset, limit, table)
+          fetchPage={(offset, limit, view) =>
+            schemasApi.getAudit(schema.name, offset, limit, view)
           }
           describeEntry={describeSchemaAuditEntry}
           emptyMessage="No changes yet."

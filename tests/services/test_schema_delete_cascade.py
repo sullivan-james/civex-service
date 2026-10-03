@@ -10,6 +10,7 @@ its parent's -- RecordService.add() requires and validates this -- so the
 record hierarchy always mirrors the schema hierarchy; there's no way for a
 record of an unrelated schema to end up nested under one of these.
 """
+
 from __future__ import annotations
 
 from civex.context import AppContext
@@ -25,9 +26,7 @@ def _record_gone(ctx: AppContext, record_id) -> bool:
         return True
 
 
-def test_impact_is_zero_for_a_schema_with_no_dependents(
-    ctx: AppContext, make_schema
-):
+def test_impact_is_zero_for_a_schema_with_no_dependents(ctx: AppContext, make_schema):
     make_schema("trial")
     impact = ctx.schema_svc.get_delete_impact("trial")
     assert impact.child_schema_count == 0

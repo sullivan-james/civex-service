@@ -3,6 +3,7 @@
 Mirrored by frontend/src/utils/naming.ts — a change here that isn't made
 there shows up as a form that accepts a name the API then rejects with 422.
 """
+
 from __future__ import annotations
 
 import pytest

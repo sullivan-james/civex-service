@@ -1,12 +1,12 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import type { AuditLogEntry, PaginatedAuditLog } from '../../api/audit'
-import type { TableQueryParams } from '../../api/query'
-import { useTableState } from '../../hooks/useTableState'
-import { TableControls } from '../table/TableControls'
-import { tableFields } from '../../utils/tableFields'
-import { nextSort } from '../../utils/tableState'
+import type {
+  AuditLogEntry,
+  AuditView,
+  PaginatedAuditLog,
+} from '../../api/audit'
+import { useListParams } from '../../hooks/useListParams'
 import type { AuditSummary } from '../../utils/schemaAudit'
-import { DataTable, Badge, Pagination } from '../ui'
+import { DataTable, Badge, ListToolbar, Pagination } from '../ui'
 import { errorMessage } from '../../lib/errors'
 
 const ACTION_VARIANT: Record<
@@ -20,20 +20,9 @@ const ACTION_VARIANT: Record<
   purge: 'danger',
 }
 
-const AUDIT_FIELDS = tableFields([
-  { name: 'timestamp', label: 'When', type: 'datetime' },
-  {
-    name: 'action',
-    label: 'Action',
-    type: 'enum',
-    choices: Object.keys(ACTION_VARIANT),
-  },
-])
-
 /**
  * The audit trail for a single entity (record, schema or collection):
- * a "when / action / change" table, filterable and sortable like any list.
- * Mount it in a History tab.
+ * a "when / action / change" table. Mount it in a History tab.
  */
 export function AuditTrail({
   queryKey,
@@ -47,32 +36,49 @@ export function AuditTrail({
   fetchPage: (
     offset: number,
     limit: number,
-    table: TableQueryParams,
+    view: AuditView,
   ) => Promise<PaginatedAuditLog>
   describeEntry: (entry: AuditLogEntry) => AuditSummary
   emptyMessage: string
   /** Prefix for this table's address parameters. */
   ns?: string
 }) {
-  const { state, patch } = useTableState(ns, 25)
-  const table: TableQueryParams = { filter: state.filter, sort: state.sort }
+  const list = useListParams(ns, ['action'])
+  const view: AuditView = {
+    action: list.picks.action || undefined,
+    sort: list.sortParam,
+  }
   const { data, isLoading, error } = useQuery({
-    queryKey: [...queryKey, state.page, state.pageSize, table],
-    queryFn: () =>
-      fetchPage(state.page * state.pageSize, state.pageSize, table),
+    queryKey: [...queryKey, list.page, list.size, view],
+    queryFn: () => fetchPage(list.page * list.size, list.size, view),
     placeholderData: keepPreviousData,
   })
 
   return (
     <div className="space-y-3">
-      <TableControls state={state} patch={patch} fields={AUDIT_FIELDS} />
+      <ListToolbar
+        picks={[
+          {
+            label: 'Any action',
+            value: list.picks.action,
+            options: [
+              { value: '', label: '' },
+              ...Object.keys(ACTION_VARIANT).map((a) => ({
+                value: a,
+                label: a,
+              })),
+            ],
+            onChange: (action) => list.set({ action }),
+          },
+        ]}
+      />
       <DataTable
         sort={
-          state.sort[0]
-            ? { key: state.sort[0].field, direction: state.sort[0].direction }
+          list.sort
+            ? { key: list.sort.field, direction: list.sort.dir }
             : undefined
         }
-        onSortChange={(key) => patch({ sort: nextSort(state.sort, key) })}
+        onSortChange={list.toggleSort}
         layout="auto"
         columns={[
           {
@@ -115,16 +121,16 @@ export function AuditTrail({
         getRowId={(e) => String(e.id)}
         isLoading={isLoading}
         error={error ? errorMessage(error) : undefined}
-        emptyTitle={state.filter ? 'No entries match' : 'No history yet'}
-        emptyMessage={state.filter ? undefined : emptyMessage}
+        emptyTitle={list.picks.action ? 'No entries match' : 'No history yet'}
+        emptyMessage={list.picks.action ? undefined : emptyMessage}
       />
       {data && data.items.length > 0 && (
         <Pagination
-          page={state.page}
-          pageSize={state.pageSize}
+          page={list.page}
+          pageSize={list.size}
           total={data.total}
-          onPage={(page) => patch({ page })}
-          onPageSize={(pageSize) => patch({ pageSize })}
+          onPage={(page) => list.set({ page })}
+          onPageSize={(size) => list.set({ size })}
         />
       )}
     </div>

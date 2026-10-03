@@ -33,8 +33,18 @@ def test_backfill_and_indexes(tmp_path: Path) -> None:
         cfg.attributes["connection"] = conn
         command.upgrade(cfg, _PRE)
         conn.commit()
-        conn.execute(text("INSERT INTO datasets (id, name, created_at) VALUES (:i,'ds','2024-01-01')"), {"i": ds})
-        conn.execute(text("INSERT INTO schemas (id, name, created_at) VALUES (:i,'doc','2024-01-01')"), {"i": sch})
+        conn.execute(
+            text(
+                "INSERT INTO datasets (id, name, created_at) VALUES (:i,'ds','2024-01-01')"
+            ),
+            {"i": ds},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO schemas (id, name, created_at) VALUES (:i,'doc','2024-01-01')"
+            ),
+            {"i": sch},
+        )
         data = {
             "f1": {"sha256": sha_a, "filename": "a", "size": 1},
             "f2": [
@@ -61,7 +71,9 @@ def test_backfill_and_indexes(tmp_path: Path) -> None:
                 "i": job,
                 "r": rec,
                 "inp": json.dumps({"files": [{"sha256": sha_a}]}),
-                "aff": json.dumps([{"record_id": rec, "schema_name": "doc", "action": "created"}]),
+                "aff": json.dumps(
+                    [{"record_id": rec, "schema_name": "doc", "action": "created"}]
+                ),
             },
         )
         conn.commit()
@@ -69,7 +81,9 @@ def test_backfill_and_indexes(tmp_path: Path) -> None:
         command.upgrade(cfg, _POST)
         conn.commit()
 
-        rows = conn.execute(text("SELECT sha256, record_id, job_id FROM file_references")).all()
+        rows = conn.execute(
+            text("SELECT sha256, record_id, job_id FROM file_references")
+        ).all()
         by_owner = {(r[0], r[1] is not None) for r in rows}
         assert by_owner == {
             (sha_a, True),
@@ -77,13 +91,18 @@ def test_backfill_and_indexes(tmp_path: Path) -> None:
             (sha_dup, True),  # deduped per owner
             (sha_a, False),  # the job input
         }
-        links = conn.execute(text("SELECT job_id, schema_id FROM job_affected_schemas")).all()
+        links = conn.execute(
+            text("SELECT job_id, schema_id FROM job_affected_schemas")
+        ).all()
         assert [(str(uuid.UUID(str(a))), str(uuid.UUID(str(b)))) for a, b in links] == [
             (str(uuid.UUID(job)), str(uuid.UUID(sch)))
         ]
 
-        idx = {i["name"] for t in ("records", "workflow_jobs", "audit_log", "step_executions")
-               for i in inspect(conn).get_indexes(t)}
+        idx = {
+            i["name"]
+            for t in ("records", "workflow_jobs", "audit_log", "step_executions")
+            for i in inspect(conn).get_indexes(t)
+        }
         assert {
             "ix_records_parent",
             "ix_records_live_dataset_created",

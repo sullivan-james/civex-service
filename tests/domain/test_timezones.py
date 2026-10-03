@@ -38,7 +38,10 @@ def test_naive_read_in_zone_daylight_time() -> None:
 
 
 def test_half_hour_offset_zone() -> None:
-    assert parse_datetime("2024-03-01T12:00", "Asia/Kolkata") == "2024-03-01T06:30:00+00:00"
+    assert (
+        parse_datetime("2024-03-01T12:00", "Asia/Kolkata")
+        == "2024-03-01T06:30:00+00:00"
+    )
 
 
 def test_explicit_offset_wins_over_zone() -> None:
@@ -46,7 +49,9 @@ def test_explicit_offset_wins_over_zone() -> None:
         parse_datetime("2024-01-01T12:00:00-05:00", "Asia/Kolkata")
         == "2024-01-01T17:00:00+00:00"
     )
-    assert parse_datetime("2024-01-01T12:00:00Z", CHICAGO) == "2024-01-01T12:00:00+00:00"
+    assert (
+        parse_datetime("2024-01-01T12:00:00Z", CHICAGO) == "2024-01-01T12:00:00+00:00"
+    )
 
 
 def test_nonexistent_time_is_rejected() -> None:
@@ -69,8 +74,14 @@ def test_times_either_side_of_a_transition_are_fine() -> None:
 
 
 def test_offset_resolves_an_ambiguous_time() -> None:
-    assert parse_datetime("2024-11-03T01:30:00-05:00", CHICAGO) == "2024-11-03T06:30:00+00:00"
-    assert parse_datetime("2024-11-03T01:30:00-06:00", CHICAGO) == "2024-11-03T07:30:00+00:00"
+    assert (
+        parse_datetime("2024-11-03T01:30:00-05:00", CHICAGO)
+        == "2024-11-03T06:30:00+00:00"
+    )
+    assert (
+        parse_datetime("2024-11-03T01:30:00-06:00", CHICAGO)
+        == "2024-11-03T07:30:00+00:00"
+    )
 
 
 def test_utc_zone_has_no_transitions() -> None:

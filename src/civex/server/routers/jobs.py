@@ -8,9 +8,7 @@ from civex.context import AppContext
 from civex.domain.exceptions import NotFoundError
 from civex.server.background import run_pending_jobs
 from civex.server.deps import get_ctx
-from civex.domain.query import TableQuery
 from civex.server.models import WorkflowJobResponse
-from civex.server.query_params import table_query
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -21,17 +19,18 @@ def count_jobs(
     record_id: str | None = None,
     affected_record_id: str | None = None,
     affected_schema: str | None = None,
-    table: TableQuery = Depends(table_query),
+    trigger: str | None = None,
+    search: str | None = None,
     ctx: AppContext = Depends(get_ctx),
 ):
-    """Run count under the same `filter`/`search` as the list."""
     return {
         "total": ctx.job_svc.count_jobs(
             status=status,
             record_id=record_id,
             affected_record_id=affected_record_id,
             affected_schema=affected_schema,
-            table=table,
+            trigger=trigger,
+            search=search,
         )
     }
 
@@ -42,17 +41,23 @@ def list_jobs(
     record_id: str | None = None,
     affected_record_id: str | None = None,
     affected_schema: str | None = None,
+    trigger: str | None = None,
+    search: str | None = Query(
+        default=None, description="Match on workflow name or error text."
+    ),
+    sort: str | None = Query(
+        default=None,
+        description="'column[:asc|desc]' over workflow_name, status, trigger, "
+        "schema_name, created_at. Newest first otherwise.",
+    ),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=500),
-    table: TableQuery = Depends(table_query),
     ctx: AppContext = Depends(get_ctx),
 ):
     """`record_id` filters to runs *triggered by* that record; `affected_record_id`
     filters to runs that created or updated that record -- the two directions of
     the run/record audit trail (a record can be both for different runs).
     `affected_schema` filters to runs that wrote to that schema (indexed).
-    `filter`, `sort` and `search` work over the run columns: workflow_name,
-    status, trigger, schema_name, created_at, started_at, finished_at, error.
     Results are paginated: `limit` defaults to 50 and is capped at 500."""
     jobs = ctx.job_svc.list_jobs(
         status=status,
@@ -61,7 +66,9 @@ def list_jobs(
         affected_schema=affected_schema,
         offset=offset,
         limit=limit,
-        table=table,
+        trigger=trigger,
+        search=search,
+        sort=sort,
     )
     return [WorkflowJobResponse.from_dto(j) for j in jobs]
 

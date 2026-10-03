@@ -106,7 +106,5 @@ def test_view_export_invalid_format_exits_nonzero(project_dir: Path) -> None:
     ctx.commit()
     ctx.close()
 
-    result = runner.invoke(
-        app, ["view", "export", "trial", "all", "--format", "xml"]
-    )
+    result = runner.invoke(app, ["view", "export", "trial", "all", "--format", "xml"])
     assert result.exit_code != 0

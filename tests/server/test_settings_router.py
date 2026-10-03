@@ -42,7 +42,13 @@ def test_map_settings_round_trip_with_quotes_in_the_credit(client: TestClient) -
     assert cleared == {"tile_url": None, "attribution": None}
 
 
-def test_map_settings_reject_a_url_that_is_not_a_tile_template(client: TestClient) -> None:
-    for bad in ("tile.example.org/{z}/{x}/{y}", "https://tile.example.org/map.png", "ftp://x/{z}/{x}/{y}"):
+def test_map_settings_reject_a_url_that_is_not_a_tile_template(
+    client: TestClient,
+) -> None:
+    for bad in (
+        "tile.example.org/{z}/{x}/{y}",
+        "https://tile.example.org/map.png",
+        "ftp://x/{z}/{x}/{y}",
+    ):
         resp = client.patch("/api/settings/map", json={"tile_url": bad})
         assert resp.status_code == 422, bad

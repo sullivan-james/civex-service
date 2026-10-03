@@ -97,8 +97,12 @@ def test_malformed_json_on_stdin_returns_a_protocol_error(plugin_binary: Path) -
     assert frame["error"]["kind"] == "protocol_error"
 
 
-def test_wrong_frame_type_for_the_mode_returns_a_protocol_error(plugin_binary: Path) -> None:
-    stdout, _stderr, rc = _run(plugin_binary, "describe", '{"type":"run","inputs":{}}\n')
+def test_wrong_frame_type_for_the_mode_returns_a_protocol_error(
+    plugin_binary: Path,
+) -> None:
+    stdout, _stderr, rc = _run(
+        plugin_binary, "describe", '{"type":"run","inputs":{}}\n'
+    )
     assert rc == 0
     frame = json.loads(stdout.strip())
     assert frame["type"] == "error"

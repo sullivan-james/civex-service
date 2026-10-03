@@ -1,4 +1,5 @@
 """Multi-operator, AND/OR grouped filtering for RecordService.find()/count()."""
+
 from __future__ import annotations
 
 from civex.context import AppContext
@@ -45,25 +46,29 @@ def test_eq_leaf(ctx: AppContext, employees):
 def test_gt_gte_lt_lte(ctx: AppContext, employees):
     assert _names(
         ctx.record_svc.find(
-            "acme", schema_name="employee",
+            "acme",
+            schema_name="employee",
             filter_tree={"field": "age", "op": "gt", "value": 30},
         )
     ) == {"Carol"}
     assert _names(
         ctx.record_svc.find(
-            "acme", schema_name="employee",
+            "acme",
+            schema_name="employee",
             filter_tree={"field": "age", "op": "gte", "value": 30},
         )
     ) == {"Alice", "Carol"}
     assert _names(
         ctx.record_svc.find(
-            "acme", schema_name="employee",
+            "acme",
+            schema_name="employee",
             filter_tree={"field": "age", "op": "lt", "value": 30},
         )
     ) == {"Bob"}
     assert _names(
         ctx.record_svc.find(
-            "acme", schema_name="employee",
+            "acme",
+            schema_name="employee",
             filter_tree={"field": "age", "op": "lte", "value": 30},
         )
     ) == {"Alice", "Bob"}
@@ -72,7 +77,8 @@ def test_gt_gte_lt_lte(ctx: AppContext, employees):
 def test_ne_excludes_matching_and_missing(ctx: AppContext, employees):
     # Dave has no dept at all, so a strict "not equal to eng" excludes him too.
     records = ctx.record_svc.find(
-        "acme", schema_name="employee",
+        "acme",
+        schema_name="employee",
         filter_tree={"field": "dept", "op": "ne", "value": "eng"},
     )
     assert _names(records) == {"Bob"}
@@ -80,7 +86,8 @@ def test_ne_excludes_matching_and_missing(ctx: AppContext, employees):
 
 def test_contains_is_case_insensitive_substring(ctx: AppContext, employees):
     records = ctx.record_svc.find(
-        "acme", schema_name="employee",
+        "acme",
+        schema_name="employee",
         filter_tree={"field": "name", "op": "contains", "value": "AR"},
     )
     assert _names(records) == {"Carol"}
@@ -88,7 +95,8 @@ def test_contains_is_case_insensitive_substring(ctx: AppContext, employees):
 
 def test_in_operator(ctx: AppContext, employees):
     records = ctx.record_svc.find(
-        "acme", schema_name="employee",
+        "acme",
+        schema_name="employee",
         filter_tree={"field": "dept", "op": "in", "value": ["eng", "sales"]},
     )
     assert _names(records) == {"Alice", "Bob", "Carol"}
@@ -96,13 +104,15 @@ def test_in_operator(ctx: AppContext, employees):
 
 def test_is_null(ctx: AppContext, employees):
     missing_age = ctx.record_svc.find(
-        "acme", schema_name="employee",
+        "acme",
+        schema_name="employee",
         filter_tree={"field": "age", "op": "is_null"},
     )
     assert _names(missing_age) == {"Dave"}
 
     has_age = ctx.record_svc.find(
-        "acme", schema_name="employee",
+        "acme",
+        schema_name="employee",
         filter_tree={"field": "age", "op": "is_null", "value": False},
     )
     assert _names(has_age) == {"Alice", "Bob", "Carol"}
@@ -164,7 +174,8 @@ def test_combines_with_legacy_where_filters(ctx: AppContext, employees):
 def test_unknown_operator_rejected(ctx: AppContext, employees):
     with pytest.raises(ValidationError, match="Unknown filter operator"):
         ctx.record_svc.find(
-            "acme", schema_name="employee",
+            "acme",
+            schema_name="employee",
             filter_tree={"field": "age", "op": "between", "value": [1, 2]},
         )
 
@@ -172,7 +183,8 @@ def test_unknown_operator_rejected(ctx: AppContext, employees):
 def test_in_requires_list_value(ctx: AppContext, employees):
     with pytest.raises(ValidationError, match="requires a list"):
         ctx.record_svc.find(
-            "acme", schema_name="employee",
+            "acme",
+            schema_name="employee",
             filter_tree={"field": "dept", "op": "in", "value": "eng"},
         )
 
@@ -180,7 +192,8 @@ def test_in_requires_list_value(ctx: AppContext, employees):
 def test_malformed_group_rejected(ctx: AppContext, employees):
     with pytest.raises(ValidationError, match="exactly one key"):
         ctx.record_svc.find(
-            "acme", schema_name="employee",
+            "acme",
+            schema_name="employee",
             filter_tree={
                 "and": [{"field": "dept", "op": "eq", "value": "eng"}],
                 "or": [{"field": "dept", "op": "eq", "value": "sales"}],

@@ -1,4 +1,5 @@
 """HTTP contract for a schema's record name template."""
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient

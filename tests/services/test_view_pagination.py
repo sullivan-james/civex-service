@@ -37,7 +37,7 @@ def test_preview_sorts_and_pages_in_sql(ctx, make_schema, make_collection) -> No
     assert len(seen) == 25
     present = [s for s in seen if s is not None]
     assert present == sorted(present, reverse=True)  # numeric, not lexical
-    assert seen[len(present):] == [None] * 5  # nulls last, even descending
+    assert seen[len(present) :] == [None] * 5  # nulls last, even descending
 
 
 def test_export_stream_walks_every_page(

@@ -1,4 +1,5 @@
 """A dump streams every record (no per-collection cap) as one valid document."""
+
 from __future__ import annotations
 
 import io

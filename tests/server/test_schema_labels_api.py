@@ -1,4 +1,5 @@
 """HTTP contract for the name/label split on schemas and fields."""
+
 from __future__ import annotations
 
 import yaml
