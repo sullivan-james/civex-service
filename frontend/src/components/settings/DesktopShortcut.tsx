@@ -20,10 +20,14 @@ export function DesktopShortcut({ prompt = false }: { prompt?: boolean }) {
           <Check size={16} className="text-success" aria-hidden="true" />
           Desktop shortcut added
         </span>
+      ) : data.path === null ? (
+        <span className="text-sm text-fg-muted">
+          No Desktop folder found on this computer
+        </span>
       ) : (
         <Button
           size="sm"
-          disabled={create.isPending || data.path === null}
+          disabled={create.isPending}
           onClick={() => create.mutate()}
         >
           <Monitor size={14} /> Add desktop shortcut

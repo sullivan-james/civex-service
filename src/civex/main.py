@@ -185,13 +185,12 @@ def serve(
         os.environ["CIVEX_ALLOW_REMOTE"] = "1"
 
     if open_browser:
-        from civex.launcher import is_serving, open_when_ready
-        import webbrowser
+        from civex.launcher import is_serving, open_url, open_when_ready
 
         url = f"http://{host}:{port}"
         if is_serving(host, port):
             typer.echo(f"Civex is already running at {url}; opening it.")
-            webbrowser.open(url)
+            open_url(url)
             raise typer.Exit(0)
         open_when_ready(url)
 

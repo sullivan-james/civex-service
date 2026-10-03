@@ -32,12 +32,54 @@ def _platform() -> str:
         return "windows"
     if sys.platform == "darwin":
         return "macos"
+    if _is_wsl():
+        return "wsl"
     return "linux"
+
+
+def _is_wsl() -> bool:
+    try:
+        return "microsoft" in Path("/proc/version").read_text().lower()
+    except OSError:
+        return False
+
+
+def _windows_desktop() -> Path | None:
+    """From inside WSL, the Windows user's Desktop (as a Linux path)."""
+    try:
+        profile = subprocess.run(
+            ["cmd.exe", "/c", "echo %USERPROFILE%"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd="/mnt/c",
+        ).stdout.strip()
+        if profile:
+            path = subprocess.run(
+                ["wslpath", "-u", profile],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            ).stdout.strip()
+            if path and (Path(path) / "Desktop").is_dir():
+                return Path(path) / "Desktop"
+    except (OSError, subprocess.SubprocessError):
+        pass
+    for candidate in sorted(Path("/mnt/c/Users").glob("*/Desktop")):
+        if candidate.parent.name not in {"Public", "Default", "All Users"}:
+            return candidate
+    return None
 
 
 def desktop_dir() -> Path:
     """The person's Desktop folder, or ConfigError when there is none."""
     candidates: list[Path] = []
+    if _platform() == "wsl":
+        # The Linux home has no desktop; the one the person sees is Windows'.
+        found = _windows_desktop()
+        if found is not None:
+            return found
+        raise ConfigError("Could not find your Windows Desktop from WSL.")
     if _platform() == "windows":
         candidates.append(Path(os.environ.get("USERPROFILE", Path.home())) / "Desktop")
     else:
@@ -57,12 +99,21 @@ def desktop_dir() -> Path:
     for c in candidates:
         if c.is_dir():
             return c
+    if _platform() == "linux" and candidates:
+        # Some desktops create the folder lazily; make it so the icon has a home.
+        try:
+            candidates[0].mkdir(parents=True, exist_ok=True)
+            return candidates[0]
+        except OSError:
+            pass
     raise ConfigError("There is no Desktop folder to put a shortcut in.")
 
 
 def _filename(project_root: Path) -> str:
     safe = re.sub(r'[\\/:*?"<>|]+', "-", project_root.name).strip() or "project"
-    ext = {"linux": ".desktop", "macos": ".command", "windows": ".bat"}[_platform()]
+    ext = {"linux": ".desktop", "macos": ".command", "windows": ".bat", "wsl": ".bat"}[
+        _platform()
+    ]
     return f"Civex - {safe}{ext}"
 
 
@@ -85,7 +136,7 @@ def _command() -> list[str]:
 
 
 def _quoted(parts: list[str], style: str) -> str:
-    if style == "windows":
+    if style in ("windows", "wsl"):
         return " ".join(f'"{p}"' for p in parts)
     return " ".join(
         '"' + p.replace("\\", "\\\\").replace('"', '\\"') + '"' for p in parts
@@ -111,10 +162,13 @@ def create_shortcut(project_root: Path) -> Path:
         )
     elif kind == "macos":
         text = f'#!/bin/bash\ncd "{project_root}" || exit 1\nexec {cmd}\n'
+    elif kind == "wsl":
+        # A Windows double-click that runs civex inside WSL, in the project.
+        text = f'@echo off\r\nwsl.exe --cd "{project_root}" -e {cmd}\r\npause\r\n'
     else:
         text = f'@echo off\r\ncd /d "{project_root}"\r\n{cmd}\r\npause\r\n'
     path.write_text(text, encoding="utf-8", newline="")
-    if kind != "windows":
+    if kind in ("linux", "macos"):
         path.chmod(0o755)
     if kind == "linux":
         # GNOME will not run a launcher on the Desktop until it is trusted.
@@ -137,6 +191,17 @@ def is_serving(host: str, port: int) -> bool:
         return False
 
 
+def open_url(url: str) -> None:
+    """Open `url` in the person's browser (from WSL, the Windows one)."""
+    if _is_wsl():
+        try:
+            subprocess.run(["cmd.exe", "/c", "start", "", url], cwd="/mnt/c", timeout=5)
+            return
+        except (OSError, subprocess.SubprocessError):
+            pass
+    webbrowser.open(url)
+
+
 def open_when_ready(url: str, timeout: float = 30.0) -> None:
     """Open `url` in the browser as soon as the server answers (in the
     background, so the server can start meanwhile)."""
@@ -149,6 +214,6 @@ def open_when_ready(url: str, timeout: float = 30.0) -> None:
                 break
             except OSError:
                 time.sleep(0.3)
-        webbrowser.open(url)
+        open_url(url)
 
     threading.Thread(target=wait_then_open, daemon=True).start()

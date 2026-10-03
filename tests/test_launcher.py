@@ -45,6 +45,20 @@ def test_each_platform_gets_its_own_kind_of_file(tmp_path, desktop, monkeypatch)
         assert str(project.resolve()) in path.read_text()
 
 
+def test_under_wsl_the_shortcut_is_a_windows_batch_file_that_calls_wsl(
+    tmp_path, desktop, monkeypatch
+):
+    monkeypatch.setattr(launcher, "_platform", lambda: "wsl")
+    project = tmp_path / "study"
+    project.mkdir()
+    path = launcher.create_shortcut(project)
+
+    assert path.suffix == ".bat" and path.parent == desktop
+    text = path.read_text()
+    assert f'wsl.exe --cd "{project.resolve()}"' in text
+    assert "serve" in text and "--open" in text
+
+
 def test_no_desktop_is_a_clear_error(tmp_path, monkeypatch):
     def none():
         raise ConfigError("There is no Desktop folder to put a shortcut in.")
