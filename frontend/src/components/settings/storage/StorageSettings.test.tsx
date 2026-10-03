@@ -102,6 +102,8 @@ beforeEach(() => {
       if (p === '/api/store/volumes' && method === 'GET') return json(volumes)
       if (p === '/api/store/placement' && method === 'GET')
         return json(placements)
+      if (p === '/api/store/transfers' && method === 'GET') return json([])
+      if (p === '/api/store/collections' && method === 'GET') return json([])
       if (p === '/api/collections')
         return json([
           collection('c1', 'study', 120),
@@ -574,11 +576,11 @@ describe('Storage tabs', () => {
       await screen.findByLabelText('Home volume for study'),
     ).toBeInTheDocument()
 
-    await user.click(screen.getByRole('tab', { name: 'Maintenance' }))
-    expect(screen.getByTestId('where')).toHaveTextContent('?tab=maintenance')
+    await user.click(screen.getByRole('tab', { name: 'Tasks' }))
+    expect(screen.getByTestId('where')).toHaveTextContent('?tab=tasks')
     expect(screen.getByRole('tabpanel')).toHaveAttribute(
       'aria-labelledby',
-      'tab-maintenance',
+      'tab-tasks',
     )
 
     await user.click(screen.getByRole('tab', { name: 'Volumes' }))

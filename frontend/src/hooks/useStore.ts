@@ -27,6 +27,15 @@ export function useCollectionStorage(collectionId: string) {
   })
 }
 
+/** Where every collection's files are (those that have any), in one request. */
+export function useAllCollectionStorage() {
+  return useQuery({
+    queryKey: ['store', 'collection', 'all'],
+    queryFn: storeApi.allCollectionStorage,
+    staleTime: 10_000,
+  })
+}
+
 export function useAddVolume() {
   const qc = useQueryClient()
   return useMutation({

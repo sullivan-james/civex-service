@@ -88,7 +88,7 @@ export function VolumeRow({
             label: 'Move files off this volume…',
             onClick: () =>
               navigate(
-                `/settings/storage?tab=transfers&from=${encodeURIComponent(vol.name)}`,
+                `/settings/storage?tab=tasks&from=${encodeURIComponent(vol.name)}`,
               ),
           },
         ]

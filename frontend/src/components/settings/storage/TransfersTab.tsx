@@ -9,7 +9,12 @@ import {
 import { errorMessage } from '../../../lib/errors'
 import { formatEstimate } from '../../../utils/dbFormat'
 import { formatSize } from '../../../utils/storage'
-import { RESUMABLE, STATUS_LABEL, percentDone } from '../../../utils/transfers'
+import {
+  RESUMABLE,
+  STATUS_LABEL,
+  STATUS_VARIANT,
+  percentDone,
+} from '../../../utils/transfers'
 import {
   Badge,
   Button,
@@ -46,15 +51,7 @@ function TransferCard({ t }: { t: Transfer }) {
             of {formatSize(p.bytes_total)}
           </p>
         </div>
-        <Badge
-          variant={
-            t.status === 'completed'
-              ? 'success'
-              : t.status === 'running'
-                ? 'accent'
-                : 'attention'
-          }
-        >
+        <Badge variant={STATUS_VARIANT[t.status]}>
           {t.control && active
             ? `${t.control === 'pause' ? 'Pausing' : 'Cancelling'}…`
             : STATUS_LABEL[t.status]}

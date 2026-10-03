@@ -1,17 +1,17 @@
 import { useSearchParams } from 'react-router'
 import { Tabs, type TabDef } from '../../ui'
+import type { StorageTab } from '../../../hooks/useStorageAttention'
 import { CollectionsTab } from './CollectionsTab'
-import { MaintenanceTab } from './MaintenanceTab'
-import { TransfersTab } from './TransfersTab'
+import { StorageAttention } from './StorageAttention'
+import { TasksTab } from './TasksTab'
 import { VolumesTab } from './VolumesTab'
 
-type TabId = 'volumes' | 'collections' | 'transfers' | 'maintenance'
+type TabId = StorageTab
 
 const TABS: TabDef<TabId>[] = [
   { id: 'volumes', label: 'Volumes' },
   { id: 'collections', label: 'Collections' },
-  { id: 'transfers', label: 'Moves' },
-  { id: 'maintenance', label: 'Maintenance' },
+  { id: 'tasks', label: 'Tasks' },
 ]
 
 /** Settings > Storage: the volumes files live on, which collections use which,
@@ -19,7 +19,11 @@ const TABS: TabDef<TabId>[] = [
  * (`?tab=collections&volume=archive`), so every view can be linked to. */
 export default function StorageSettings() {
   const [params, setParams] = useSearchParams()
-  const tab = TABS.find((t) => t.id === params.get('tab'))?.id ?? 'volumes'
+  // Addresses from before Moves and Maintenance became Tasks still land there.
+  const asked = params.get('tab')
+  const wanted =
+    asked === 'transfers' || asked === 'maintenance' ? 'tasks' : asked
+  const tab = TABS.find((t) => t.id === wanted)?.id ?? 'volumes'
   const volumeFilter = params.get('volume')
 
   function go(id: TabId) {
@@ -44,6 +48,8 @@ export default function StorageSettings() {
         </p>
       </div>
 
+      <StorageAttention onGo={go} />
+
       <Tabs label="Storage" tabs={TABS} value={tab} onChange={go} />
 
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
@@ -64,8 +70,8 @@ export default function StorageSettings() {
             onGoToVolumes={() => go('volumes')}
           />
         )}
-        {tab === 'transfers' && (
-          <TransfersTab
+        {tab === 'tasks' && (
+          <TasksTab
             preset={
               params.get('from') || params.get('collection')
                 ? {
@@ -77,7 +83,6 @@ export default function StorageSettings() {
             }
           />
         )}
-        {tab === 'maintenance' && <MaintenanceTab />}
       </div>
     </div>
   )

@@ -2,12 +2,14 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import type { Collection } from '../../../api/collections'
 import type {
+  CollectionStorageReport,
   Placement,
   PlacementPolicy,
   VolumeStats,
 } from '../../../api/store'
 import { useCollections } from '../../../hooks/useCollections'
 import {
+  useAllCollectionStorage,
   useBulkPlacement,
   useClearPlacement,
   usePlacements,
@@ -33,6 +35,10 @@ import {
 import { X } from '../../ui/icons'
 import { errorMessage } from '../../../lib/errors'
 import { STATE_LABEL } from './volumeState'
+import { SpreadBar } from '../../collections/SpreadBar'
+import { gatherPlan } from '../../../utils/collectionStorage'
+import { formatSize } from '../../../utils/storage'
+import { NewTransferModal } from './NewTransferModal'
 
 const NONE = ''
 
@@ -57,12 +63,14 @@ function CollectionRow({
   collection,
   placement,
   volumes,
+  spread,
   selected,
   onSelect,
 }: {
   collection: Collection
   placement: Placement | undefined
   volumes: VolumeStats[]
+  spread: CollectionStorageReport | undefined
   selected: boolean
   onSelect: (on: boolean) => void
 }) {
@@ -71,6 +79,8 @@ function CollectionRow({
   const pending = setPlacement.isPending || clearPlacement.isPending
   const error = setPlacement.error ?? clearPlacement.error
   const home = volumes.find((v) => v.name === placement?.volume)
+  const gather = spread ? gatherPlan(spread, placement?.volume) : null
+  const [gathering, setGathering] = useState(false)
 
   function changeHome(volume: string) {
     if (volume === NONE) clearPlacement.mutate(collection.id)
@@ -111,6 +121,37 @@ function CollectionRow({
           {collection.record_count.toLocaleString()}{' '}
           {collection.record_count === 1 ? 'record' : 'records'}
         </span>
+      </Td>
+      <Td className="min-w-48">
+        {spread && spread.files > 0 ? (
+          <div className="space-y-1">
+            <SpreadBar report={spread} className="h-1.5" />
+            <p className="text-xs text-fg-muted">
+              {spread.volumes
+                .map((v) => `${v.volume} ${formatSize(v.bytes)}`)
+                .join(' · ')}
+            </p>
+            {gather && (
+              <button
+                type="button"
+                onClick={() => setGathering(true)}
+                className="cursor-pointer text-xs text-accent hover:underline"
+              >
+                Gather {gather.elsewhere}{' '}
+                {gather.elsewhere === 1 ? 'file' : 'files'} onto {gather.target}
+                …
+              </button>
+            )}
+            {gathering && gather && (
+              <NewTransferModal
+                preset={{ collectionId: collection.id, target: gather.target }}
+                onClose={() => setGathering(false)}
+              />
+            )}
+          </div>
+        ) : (
+          <span className="text-xs text-fg-subtle">No files</span>
+        )}
       </Td>
       <Td>
         <Select
@@ -173,11 +214,16 @@ export function CollectionsTab({
   const { data: collections, isLoading, error } = useCollections()
   const { data: placements = [] } = usePlacements()
   const { data: volumes = [] } = useVolumes()
+  const { data: spreads = [] } = useAllCollectionStorage()
   const bulk = useBulkPlacement()
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkVolume, setBulkVolume] = useState(NONE)
 
+  const spreadById = useMemo(
+    () => new Map(spreads.map((r) => [r.collection_id, r])),
+    [spreads],
+  )
   const byId = useMemo(
     () => new Map(placements.map((p) => [p.collection_id, p])),
     [placements],
@@ -319,6 +365,7 @@ export function CollectionsTab({
                 />
               </Th>
               <Th>Collection</Th>
+              <Th>Files are on</Th>
               <Th>Home volume</Th>
               <Th>If the home can&apos;t take a file</Th>
               <Th>Status</Th>
@@ -331,6 +378,7 @@ export function CollectionsTab({
                 collection={c}
                 placement={byId.get(c.id)}
                 volumes={volumes}
+                spread={spreadById.get(c.id)}
                 selected={selected.has(c.id)}
                 onSelect={(on) => toggle(c.id, on)}
               />

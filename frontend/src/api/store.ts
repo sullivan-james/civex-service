@@ -112,6 +112,8 @@ export interface GCReport {
 
 export const storeApi = {
   listVolumes: () => api.get<VolumeStats[]>('/store/volumes'),
+  allCollectionStorage: () =>
+    api.get<CollectionStorageReport[]>('/store/collections'),
   collectionStorage: (collectionId: string) =>
     api.get<CollectionStorageReport>(`/store/collections/${collectionId}`),
   addVolume: (body: {

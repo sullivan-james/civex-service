@@ -22,7 +22,7 @@ Files live on one or more **volumes** — directories, usually on different driv
 | `wrong drive` | Something is at the path, but it isn't this volume — a different drive, or an empty mount point. |
 | `read-only` / `retired` | Readable, but never written to. |
 
-**Settings → Storage** has three tabs. **Volumes** lists each volume on one row: its state and, when it isn't usable, why and what to do; free space; its place in the write queue; and how many collections use it. A row's menu edits it, adds or removes it from the write queue, or removes it. **Collections** assigns a volume to each collection (see below). **Maintenance** holds garbage collection. Each tab has its own address (for example `/settings/storage?tab=collections`), so it can be linked to.
+**Settings → Storage** has three tabs. **Volumes** lists each volume on one row: its state and, when it isn't usable, why and what to do; free space; its place in the write queue; and how many collections use it. A row's menu edits it, adds or removes it from the write queue, or removes it. **Collections** shows, for each collection, which volumes hold its files (a bar split by volume, with a **Gather** shortcut when they are split) and lets you assign it a home volume (see below). **Tasks** is where Civex does things to stored files: moving them between volumes, and cleaning up files nothing uses (garbage collection). Each tab has its own address (for example `/settings/storage?tab=collections`), so it can be linked to. Above the tabs, a short list appears only when something needs a look (an unplugged volume that holds files, a volume low on space, a move that is running, paused or was interrupted), each with a link to where it is dealt with.
 
 A volume is recognised by an identity, not by its path. `civex store add` writes a small `.civex-volume` marker (a random id) into the volume and records the same id beside the volume's path in `_civex/config.toml`. A drive is therefore recognised wherever it is mounted, and a different drive mounted at the same path is reported as the wrong drive instead of being written to. Nothing is written to a volume that fails this check, and Civex never creates a missing volume directory on its own — an unmounted drive's path would otherwise be recreated on the wrong disk. (Volumes inside the project, such as the default `_civex/objects`, are always trusted.)
 
@@ -92,14 +92,15 @@ them. There are two kinds of move:
   Files that a collection kept on a *different* volume also uses stay put unless
   you ask for them, because moving one would only split that collection instead.
 
-In the app this is **Settings → Storage → Moves** (or **Move files off this
-volume…** on a volume's menu); from a terminal:
+In the app this is **Settings → Storage → Tasks** (or **Move files off this
+volume…** on a volume's menu, or **Gather** on a collection); from a terminal:
 
 ```bash
 civex store move --off old-drive --to archive --dry-run   # what would happen
 civex store move --off old-drive --to archive             # do it
 civex store move --collection field-notes --to archive
 civex store transfers list                                # and show, pause, resume, cancel
+civex store collections                                   # which volumes hold each collection's files
 ```
 
 You always see a preview first: how many files and bytes, where they would go,

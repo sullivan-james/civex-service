@@ -3,13 +3,7 @@ import { useRunGC } from '../../hooks/useStore'
 import type { GCReport } from '../../api/store'
 import { Button, Field, Input, ConfirmDialog } from '../ui'
 import { errorMessage } from '../../lib/errors'
-
-function fmtBytes(b: number): string {
-  if (b >= 1_073_741_824) return `${(b / 1_073_741_824).toFixed(1)} GB`
-  if (b >= 1_048_576) return `${(b / 1_048_576).toFixed(1)} MB`
-  if (b >= 1024) return `${(b / 1024).toFixed(1)} KB`
-  return `${b} B`
-}
+import { formatSize } from '../../utils/storage'
 
 export default function GCPanel() {
   const [graceDays, setGraceDays] = useState('14')
@@ -39,11 +33,14 @@ export default function GCPanel() {
   return (
     <div className="space-y-3">
       <div>
-        <h2 className="text-lg font-semibold text-fg">Garbage collection</h2>
+        <h3 className="text-base font-semibold text-fg">
+          Clean up unused files
+        </h3>
         <p className="text-sm text-fg-muted mt-1">
-          Reclaims stored files no longer referenced by any record or workflow
-          run. Files only referenced by old audit history are not protected — an
-          old audit diff may point at a file GC has since removed.
+          Garbage collection: reclaims stored files no longer referenced by any
+          record or workflow run. Files only referenced by old audit history are
+          not protected — an old audit diff may point at a file GC has since
+          removed.
         </p>
       </div>
 
@@ -93,7 +90,7 @@ export default function GCPanel() {
                     <span className="font-semibold text-fg">
                       {report.deleted_count} object(s)
                     </span>{' '}
-                    ({fmtBytes(report.deleted_bytes)})
+                    ({formatSize(report.deleted_bytes)})
                     {report.stale_scratch_removed > 0 &&
                       ` + ${report.stale_scratch_removed} abandoned upload(s)`}{' '}
                     {verb}.
@@ -109,7 +106,7 @@ export default function GCPanel() {
               ) : (
                 <p className="text-success">
                   Reclaimed {report.deleted_count} object(s) (
-                  {fmtBytes(report.deleted_bytes)})
+                  {formatSize(report.deleted_bytes)})
                   {report.stale_scratch_removed > 0 &&
                     ` + ${report.stale_scratch_removed} abandoned upload(s)`}
                   .
@@ -128,7 +125,7 @@ export default function GCPanel() {
               <span className="font-semibold">
                 {report.deleted_count} object(s)
               </span>{' '}
-              ({fmtBytes(report.deleted_bytes)})
+              ({formatSize(report.deleted_bytes)})
               {report.stale_scratch_removed > 0 &&
                 ` and ${report.stale_scratch_removed} abandoned upload scratch file(s)`}{' '}
               from the object store. This cannot be undone.
