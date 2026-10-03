@@ -20,6 +20,11 @@ place_app = typer.Typer(
 )
 app.add_typer(place_app, name="place")
 
+from civex.cli import transfers as _transfers  # noqa: E402
+
+app.command("move")(_transfers.move)
+app.add_typer(_transfers.transfers_app, name="transfers")
+
 
 def _fmt_bytes(b: int | None) -> str:
     if b is None:
@@ -491,3 +496,22 @@ def store_where(
             + (f": {used}" if used else "")
             + (f"; {info.jobs} workflow run(s)" if info.jobs else "")
         )
+
+
+@app.command("set-state")
+def store_set_state(
+    name: str = typer.Argument(..., help="Volume name."),
+    state: str = typer.Argument(
+        ..., help="active, readonly (readable, never written to) or retired."
+    ),
+) -> None:
+    """Change what a volume may be used for."""
+    ctx = get_ctx()
+    try:
+        ctx.store_svc.set_volume_state(name, state)
+        console.print(f"[green]{name} is now {state}.[/green]")
+    except CivexError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
