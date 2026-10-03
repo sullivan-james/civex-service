@@ -238,35 +238,6 @@ describe('Storage page', () => {
       volumes: vols.map(([v, b]) => share(v, 1, b)),
     })
 
-    it('explains what part of a volume is unused', async () => {
-      volumes = [
-        volume('default', {
-          civex_used_bytes: 442 * 1024 ** 2,
-          unused_files: 4,
-          unused_bytes: 439 * 1024 ** 2,
-          history_files: 10,
-          history_bytes: 3 * 1024 ** 2,
-        }),
-      ]
-      renderAt()
-      expect(
-        await screen.findByText(/439 MB of it is unused/),
-      ).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: 'Clean up' })).toHaveAttribute(
-        'href',
-        '/settings/storage?tab=tasks',
-      )
-      expect(
-        screen.getByText(/3\.0 MB is kept only for workflow history/),
-      ).toBeInTheDocument()
-    })
-
-    it('says nothing about unused files when there are none', async () => {
-      renderAt()
-      await screen.findByText('archive')
-      expect(screen.queryByText(/is unused/)).toBeNull()
-    })
-
     it('counts the collections that have files on a drive', async () => {
       spreads = [
         report('c1', [['archive', GB]]),
@@ -282,9 +253,7 @@ describe('Storage page', () => {
       })
       const byVolume = Object.fromEntries(
         links.map((l) => [
-          new URL(l.getAttribute('href') ?? '', 'http://x').searchParams.get(
-            'volume',
-          ),
+          (l.getAttribute('href') ?? '').split('/').pop(),
           l.textContent,
         ]),
       )

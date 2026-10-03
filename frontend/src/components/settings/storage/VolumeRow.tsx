@@ -10,60 +10,9 @@ import {
   Pencil,
   Trash2,
 } from '../../ui/icons'
-import { formatSize } from '../../../utils/storage'
 import { StatusDot } from './StatusDot'
+import { VolumeSpace } from './VolumeSpace'
 import { NEEDS_ATTENTION, STATE_LABEL } from './volumeState'
-
-function Space({ vol }: { vol: VolumeStats }) {
-  if (
-    !vol.available ||
-    vol.disk_total_bytes == null ||
-    vol.disk_free_bytes == null
-  )
-    return <span className="text-fg-subtle">—</span>
-  const used = Math.round(
-    ((vol.disk_total_bytes - vol.disk_free_bytes) / vol.disk_total_bytes) * 100,
-  )
-  return (
-    <div className="w-44">
-      <div
-        role="img"
-        aria-label={`${used}% of the disk is used`}
-        className="h-1.5 overflow-hidden rounded-full bg-canvas-inset"
-      >
-        <div
-          className={`h-full ${vol.warning ? 'bg-attention' : 'bg-accent'}`}
-          style={{ width: `${used}%` }}
-        />
-      </div>
-      <p className="mt-1 text-xs text-fg-muted">
-        {formatSize(vol.disk_free_bytes)} free of{' '}
-        {formatSize(vol.disk_total_bytes)}
-      </p>
-      <p className="text-xs text-fg-subtle">
-        Civex uses {formatSize(vol.civex_used_bytes)}
-        {vol.allocated_gb != null ? ` · limit ${vol.allocated_gb} GB` : ''}
-      </p>
-      {vol.unused_files > 0 && (
-        <p className="text-xs text-fg-subtle">
-          {formatSize(vol.unused_bytes)} of it is unused ({vol.unused_files}{' '}
-          {vol.unused_files === 1 ? 'file' : 'files'}) ·{' '}
-          <Link
-            to="/settings/storage?tab=tasks"
-            className="text-accent hover:underline"
-          >
-            Clean up
-          </Link>
-        </p>
-      )}
-      {vol.history_files > 0 && (
-        <p className="text-xs text-fg-subtle">
-          {formatSize(vol.history_bytes)} is kept only for workflow history
-        </p>
-      )}
-    </div>
-  )
-}
 
 /** One volume: what it is and whether it can be used on one line, with what
  * to do about a problem right under its name. */
@@ -125,13 +74,12 @@ export function VolumeRow({
     <Tr>
       <Td className="align-top">
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onEdit}
-            className="font-medium text-fg hover:underline cursor-pointer"
+          <Link
+            to={`/settings/storage/volumes/${encodeURIComponent(vol.name)}`}
+            className="font-medium text-accent hover:underline"
           >
             {vol.name}
-          </button>
+          </Link>
           {vol.network && (
             <Badge variant="accent">
               <Network size={11} className="mr-1" aria-hidden="true" />
@@ -179,7 +127,7 @@ export function VolumeRow({
         )}
       </Td>
       <Td className="align-top">
-        <Space vol={vol} />
+        <VolumeSpace vol={vol} />
       </Td>
       <Td className="align-top whitespace-nowrap">
         {queued ? (
@@ -207,7 +155,7 @@ export function VolumeRow({
       <Td className="align-top whitespace-nowrap">
         {collections > 0 ? (
           <Link
-            to={`/settings/storage?tab=collections&volume=${encodeURIComponent(vol.name)}`}
+            to={`/settings/storage/volumes/${encodeURIComponent(vol.name)}`}
             className="text-accent hover:underline"
           >
             {collections} {collections === 1 ? 'collection' : 'collections'}

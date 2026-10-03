@@ -25,6 +25,7 @@ import { formatSize } from '../../../utils/storage'
 import { AddVolumeModal } from '../AddVolumeModal'
 import { EditVolumeModal } from './EditVolumeModal'
 import { RemoveVolumeDialog } from './RemoveVolumeDialog'
+import { useVolumeActions } from './useVolumeActions'
 import { VolumeRow } from './VolumeRow'
 import { NEEDS_ATTENTION } from './volumeState'
 
@@ -33,12 +34,8 @@ export function VolumesTab() {
   const { data: volumes, isLoading, error } = useVolumes()
   const { data: placements = [] } = usePlacements()
   const { data: spreads = [] } = useAllCollectionStorage()
-  const setQueue = useSetQueue()
-  const adopt = useAdoptVolume()
+  const actions = useVolumeActions()
   const [adding, setAdding] = useState(false)
-  const [editing, setEditing] = useState<VolumeStats | null>(null)
-  const [removing, setRemoving] = useState<VolumeStats | null>(null)
-  const [adopting, setAdopting] = useState<VolumeStats | null>(null)
 
   if (isLoading)
     return (
@@ -54,9 +51,6 @@ export function VolumesTab() {
       />
     )
 
-  const queueNames = volumes.filter((v) => v.in_queue).map((v) => v.name)
-  const homesOf = (name: string) =>
-    placements.filter((p) => p.volume === name).length
   // Collections with files on a volume, or that use it as their home.
   const collectionsOn = (name: string) =>
     new Set([
@@ -71,23 +65,6 @@ export function VolumesTab() {
   const used = volumes
     .filter((v) => v.available)
     .reduce((sum, v) => sum + (v.civex_used_bytes ?? 0), 0)
-
-  function move(name: string, delta: -1 | 1) {
-    const i = queueNames.indexOf(name)
-    const j = i + delta
-    if (i < 0 || j < 0 || j >= queueNames.length) return
-    const next = [...queueNames]
-    ;[next[i], next[j]] = [next[j], next[i]]
-    setQueue.mutate(next)
-  }
-
-  function toggleQueue(name: string) {
-    setQueue.mutate(
-      queueNames.includes(name)
-        ? queueNames.filter((n) => n !== name)
-        : [...queueNames, name],
-    )
-  }
 
   return (
     <div className="space-y-4">
@@ -147,14 +124,14 @@ export function VolumesTab() {
               <VolumeRow
                 key={vol.name}
                 vol={vol}
-                queueIndex={queueNames.indexOf(vol.name)}
-                queueLength={queueNames.length}
+                queueIndex={actions.queueNames.indexOf(vol.name)}
+                queueLength={actions.queueNames.length}
                 collections={collectionsOn(vol.name)}
-                onEdit={() => setEditing(vol)}
-                onRemove={() => setRemoving(vol)}
-                onAdopt={() => setAdopting(vol)}
-                onMove={(delta) => move(vol.name, delta)}
-                onToggleQueue={() => toggleQueue(vol.name)}
+                onEdit={() => actions.edit(vol)}
+                onRemove={() => actions.remove(vol)}
+                onAdopt={() => actions.adopt(vol)}
+                onMove={(delta) => actions.moveInQueue(vol.name, delta)}
+                onToggleQueue={() => actions.toggleQueue(vol.name)}
               />
             ))}
           </Tbody>
@@ -164,8 +141,8 @@ export function VolumesTab() {
       <div className="rounded-md border border-border bg-canvas-subtle px-4 py-3 text-xs text-fg-muted">
         <p className="flex flex-wrap items-center gap-1">
           <span className="font-semibold text-fg">Write queue:</span>
-          {queueNames.length ? (
-            queueNames.map((name, i) => (
+          {actions.queueNames.length ? (
+            actions.queueNames.map((name, i) => (
               <span key={name} className="inline-flex items-center gap-1">
                 {i > 0 && <ArrowRight size={11} aria-hidden="true" />}
                 {name}
@@ -188,35 +165,7 @@ export function VolumesTab() {
           onClose={() => setAdding(false)}
         />
       )}
-      {editing && (
-        <EditVolumeModal vol={editing} onClose={() => setEditing(null)} />
-      )}
-      {removing && (
-        <RemoveVolumeDialog
-          vol={removing}
-          homedCount={homesOf(removing.name)}
-          onClose={() => setRemoving(null)}
-        />
-      )}
-      {adopting && (
-        <ConfirmDialog
-          title={`Treat this drive as “${adopting.name}”?`}
-          confirmLabel="Yes, this is the drive"
-          isPending={adopt.isPending}
-          warning={adopt.isError ? errorMessage(adopt.error) : undefined}
-          body={
-            <p className="text-sm text-fg">
-              {adopting.reason} If this is in fact the right drive — its marker
-              was deleted, or it was re-formatted — Civex rewrites the marker so
-              it is recognised again. Nothing else on the drive changes.
-            </p>
-          }
-          onConfirm={() =>
-            adopt.mutate(adopting.name, { onSuccess: () => setAdopting(null) })
-          }
-          onClose={() => setAdopting(null)}
-        />
-      )}
+      {actions.dialogs}
     </div>
   )
 }

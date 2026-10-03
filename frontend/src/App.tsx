@@ -28,6 +28,9 @@ const PluginEditorPage = lazy(() => import('./pages/PluginEditorPage'))
 const ContainerPluginEditorPage = lazy(
   () => import('./pages/ContainerPluginEditorPage'),
 )
+const VolumePage = lazy(
+  () => import('./components/settings/storage/VolumePage'),
+)
 const SettingsLayout = lazy(() => import('./pages/settings/SettingsLayout'))
 const ThemeSection = lazy(() => import('./components/settings/ThemeSection'))
 const DatabaseSection = lazy(
@@ -104,6 +107,7 @@ export default function App() {
               <Route path="appearance" element={<ThemeSection />} />
               <Route path="database" element={<DatabaseSection />} />
               <Route path="storage" element={<StorageSettings />} />
+              <Route path="storage/volumes/:name" element={<VolumePage />} />
               <Route path="recently-deleted" element={<RetentionSection />} />
               <Route path="map" element={<MapSection />} />
               <Route path="advanced" element={<AdvancedSection />} />
