@@ -258,6 +258,55 @@ describe('RecordsExplorer', () => {
     })
   })
 
+  describe('a collection with records at only one level', () => {
+    const species = schema('species', null, ['common_name'])
+    const withEnabled = (schemas: string[]) => (url: URL) => {
+      if (url.pathname === '/api/collections/hb')
+        return json({
+          id: 'c1',
+          name: 'hb',
+          description: null,
+          timezone: null,
+          record_count: 2,
+          deleted_at: null,
+          scope: 'local',
+          schemas,
+        })
+      if (url.pathname === '/api/schemas') return json([...SCHEMAS, species])
+      return undefined
+    }
+
+    it('still offers to start a record of any other top-level schema it is for', async () => {
+      // records exist at "encounter" only; "species" has none yet, so it has no
+      // level of its own, and used to have no way to be created either.
+      override = withEnabled(['encounter', 'recording', 'selection', 'species'])
+      renderExplorer({}, '/collections/hb')
+
+      expect(
+        await screen.findByRole('link', { name: /Add encounter/ }),
+      ).toBeInTheDocument()
+      expect(
+        await screen.findByRole('link', { name: /Add species/ }),
+      ).toHaveAttribute('href', '/collections/hb/new?schema=species')
+      // children need a parent record, so they aren't offered from here
+      expect(screen.queryByRole('link', { name: /Add recording/ })).toBeNull()
+    })
+
+    it('does not offer a top-level schema the collection is not for', async () => {
+      override = withEnabled(['encounter'])
+      renderExplorer({}, '/collections/hb')
+      await screen.findByRole('link', { name: /Add encounter/ })
+      expect(screen.queryByRole('link', { name: /Add species/ })).toBeNull()
+    })
+
+    it('offers them only at the top of the collection, not inside a record', async () => {
+      override = withEnabled(['encounter', 'recording', 'selection', 'species'])
+      renderExplorer({}, '/collections/hb?schema=recording&within=e1')
+      await screen.findByRole('link', { name: /Add recording/ })
+      expect(screen.queryByRole('link', { name: /Add species/ })).toBeNull()
+    })
+  })
+
   it('starts at the top of the hierarchy, not at "all records"', async () => {
     renderExplorer()
     expect(await screen.findByText('Stellwagen')).toBeInTheDocument()

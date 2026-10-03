@@ -256,15 +256,25 @@ export function RecordsExplorer({
     else deleteMany.mutate([...selected], done)
   }
 
+  // The collection's own top-level schemas: where a record can start. Levels
+  // come from record counts, so a schema with no records yet has none, and
+  // without these there would be no way to create the first of its kind.
+  const enabledSchemas = new Set(collection?.schemas ?? [])
+  const starters = dataset
+    ? (x.schemas ?? []).filter(
+        (s) => !s.parent_id && enabledSchemas.has(s.name),
+      )
+    : []
+  // At the top of a collection, the starters other than the one being listed.
+  const otherStarters = x.rootId
+    ? []
+    : starters.filter((s) => s.name !== listed?.name)
+
   if (!listed && !x.page.isLoading && x.levels.length === 0) {
     // Levels come from record counts, so an empty collection has none and the
     // list's own "Add" button never renders -- offer the collection's own
     // top-level schemas here instead, or there is no way to create the first
     // record (a child schema needs a parent record, so it can't start one).
-    const enabled = new Set(collection?.schemas ?? [])
-    const starters = dataset
-      ? (x.schemas ?? []).filter((s) => !s.parent_id && enabled.has(s.name))
-      : []
     const noSchemas = !!collection && collection.schemas.length === 0
     return (
       <div className="space-y-3">
@@ -368,6 +378,18 @@ export function RecordsExplorer({
                 </Button>
               </Link>
             )}
+            {dataset &&
+              otherStarters.map((s) => (
+                <Link
+                  key={s.id}
+                  to={`/collections/${dataset}/new?${new URLSearchParams({ schema: s.name })}`}
+                >
+                  <Button size="sm">
+                    <Plus size={14} /> Add{' '}
+                    {displayLabel(s.name, s.label).toLowerCase()}
+                  </Button>
+                </Link>
+              ))}
           </div>
         </div>
 
