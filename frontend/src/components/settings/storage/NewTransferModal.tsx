@@ -16,6 +16,8 @@ export interface TransferPreset {
   source?: string
   /** Collection to gather. */
   collectionId?: string
+  /** Volume to put the files on. */
+  target?: string
 }
 
 /** Choose what to move and where, see exactly what it would do, then start it. */
@@ -35,7 +37,7 @@ export function NewTransferModal({
   )
   const [source, setSource] = useState(preset.source ?? '')
   const [collectionId, setCollectionId] = useState(preset.collectionId ?? '')
-  const [target, setTarget] = useState('')
+  const [target, setTarget] = useState(preset.target ?? '')
   const [includeShared, setIncludeShared] = useState(false)
   const [verifyFull, setVerifyFull] = useState(false)
   const [freeze, setFreeze] = useState(true)

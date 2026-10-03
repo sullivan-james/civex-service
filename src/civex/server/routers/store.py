@@ -15,6 +15,7 @@ from civex.domain.exceptions import (
 )
 from civex.server.deps import get_ctx
 from civex.server.models import (
+    CollectionStorageResponse,
     AddVolumeRequest,
     CreateFolderRequest,
     CreateFolderResponse,
@@ -138,6 +139,19 @@ def _placement_response(
         volume=volume,
         on_unavailable=on_unavailable,
     )
+
+
+@router.get("/collections/{collection_id}", response_model=CollectionStorageResponse)
+def collection_storage(collection_id: str, ctx: AppContext = Depends(get_ctx)):
+    """Where a collection's files are stored.
+
+    Lists each volume that holds some of the collection's files, with how many
+    files and bytes, how many of those another collection also uses, and whether
+    the volume can be read now. Answered from the catalog, so it is quick however
+    many files there are.
+    """
+    ctx.dataset_svc.get_by_id(uuid.UUID(collection_id))
+    return asdict(ctx.file_info_svc.collection_storage(collection_id))
 
 
 @router.get("/placement", response_model=list[PlacementResponse])

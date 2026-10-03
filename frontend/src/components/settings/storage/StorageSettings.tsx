@@ -67,8 +67,12 @@ export default function StorageSettings() {
         {tab === 'transfers' && (
           <TransfersTab
             preset={
-              params.get('from')
-                ? { source: params.get('from') ?? undefined }
+              params.get('from') || params.get('collection')
+                ? {
+                    source: params.get('from') ?? undefined,
+                    collectionId: params.get('collection') ?? undefined,
+                    target: params.get('to') ?? undefined,
+                  }
                 : undefined
             }
           />

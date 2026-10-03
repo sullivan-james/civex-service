@@ -41,6 +41,7 @@ function useAction<A>(fn: (arg: A) => Promise<Transfer>) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY })
       qc.invalidateQueries({ queryKey: ['store', 'volumes'] })
+      qc.invalidateQueries({ queryKey: ['store', 'collection'] })
     },
   })
 }

@@ -39,6 +39,28 @@ export interface DirectoryListing {
   hint: string | null
 }
 
+/** How much of a collection's data one volume holds. */
+export interface CollectionVolumeShare {
+  volume: string
+  files: number
+  bytes: number
+  /** Of those, files another collection uses too. */
+  shared_files: number
+  state: VolumeStats['state']
+  available: boolean
+}
+
+/** Where a collection's files are stored. */
+export interface CollectionStorageReport {
+  collection_id: string
+  files: number
+  bytes: number
+  /** Largest first. */
+  volumes: CollectionVolumeShare[]
+  /** Used by records but not placed on any volume by the catalog. */
+  unlocated_files: number
+}
+
 /** What adding a folder as a volume would involve. `problems` block it;
  * `warnings` are worth knowing but don't. */
 export interface PathInspection {
@@ -90,6 +112,8 @@ export interface GCReport {
 
 export const storeApi = {
   listVolumes: () => api.get<VolumeStats[]>('/store/volumes'),
+  collectionStorage: (collectionId: string) =>
+    api.get<CollectionStorageReport>(`/store/collections/${collectionId}`),
   addVolume: (body: {
     name: string
     path: string

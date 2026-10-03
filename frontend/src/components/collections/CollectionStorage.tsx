@@ -5,11 +5,13 @@ import { Button, CollapsibleSection, Field, Select } from '../ui'
 import type { PlacementPolicy } from '../../api/store'
 import {
   useClearPlacement,
+  useCollectionStorage,
   usePlacements,
   useSetPlacement,
   useVolumes,
 } from '../../hooks/useStore'
 import { errorMessage } from '../../lib/errors'
+import { CollectionFileLocations } from './CollectionFileLocations'
 
 const NONE = ''
 
@@ -21,12 +23,17 @@ export function CollectionStorage({ collectionId }: { collectionId: string }) {
   const { data: placements = [] } = usePlacements()
   const setPlacement = useSetPlacement()
   const clearPlacement = useClearPlacement()
+  // The same query the locations block uses (one request, shared by the cache).
+  const spread = useCollectionStorage(collectionId)
 
   const current = placements.find((p) => p.collection_id === collectionId)
   const [draftVolume, setDraftVolume] = useState<string | null>(null)
   const [draftPolicy, setDraftPolicy] = useState<PlacementPolicy | null>(null)
 
   if (volumes.length < 2 && !current) return null
+  // Wait, so the section opens by itself when the files are split.
+  if (spread.isPending) return null
+  const split = (spread.data?.volumes.length ?? 0) > 1
 
   const volume = draftVolume ?? current?.volume ?? NONE
   const policy = draftPolicy ?? current?.on_unavailable ?? 'spill'
@@ -52,8 +59,13 @@ export function CollectionStorage({ collectionId }: { collectionId: string }) {
   }
 
   return (
-    <CollapsibleSection title="Storage" defaultOpen={!!current}>
+    <CollapsibleSection title="Storage" defaultOpen={!!current || split}>
       <div className="mt-2 space-y-3 max-w-xl">
+        <CollectionFileLocations
+          collectionId={collectionId}
+          home={current?.volume}
+        />
+
         <p className="text-sm text-fg-muted">
           Choose which volume receives this collection&apos;s new files. This
           only decides where new files are written: a file whose content is

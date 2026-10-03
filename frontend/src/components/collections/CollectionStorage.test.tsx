@@ -32,11 +32,19 @@ const CID = '3f2b8c1e-0000-4000-8000-123456789abc'
 let volumes: ReturnType<typeof volume>[]
 let placements: Record<string, unknown>[]
 let calls: { method: string; path: string; body: unknown }[]
+let spread: Record<string, unknown>
 
 beforeEach(() => {
   volumes = [volume('default'), volume('archive')]
   placements = []
   calls = []
+  spread = {
+    collection_id: CID,
+    files: 0,
+    bytes: 0,
+    volumes: [],
+    unlocated_files: 0,
+  }
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -48,6 +56,7 @@ beforeEach(() => {
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       })
       if (url.pathname === '/api/store/volumes') return json(volumes)
+      if (url.pathname === `/api/store/collections/${CID}`) return json(spread)
       if (url.pathname === '/api/store/placement' && method === 'GET')
         return json(placements)
       if (url.pathname.startsWith('/api/store/placement/')) {
@@ -185,5 +194,82 @@ describe('CollectionStorage', () => {
     expect(
       await screen.findByText('path missing: /mnt/archive'),
     ).toBeInTheDocument()
+  })
+
+  describe('where the files are', () => {
+    const split = (over: Record<string, unknown> = {}) => ({
+      collection_id: CID,
+      files: 12,
+      bytes: 3e9,
+      unlocated_files: 0,
+      volumes: [
+        {
+          volume: 'archive',
+          files: 9,
+          bytes: 2.5e9,
+          shared_files: 0,
+          state: 'online',
+          available: true,
+        },
+        {
+          volume: 'usb',
+          files: 3,
+          bytes: 5e8,
+          shared_files: 2,
+          state: 'offline',
+          available: false,
+        },
+      ],
+      ...over,
+    })
+
+    it('opens by itself and lists each volume when files are split', async () => {
+      spread = split()
+      renderIt()
+      const block = await screen.findByTestId('file-locations')
+      expect(block).toHaveTextContent('12 files')
+      expect(block).toHaveTextContent('on 2 volumes')
+      expect(block).toHaveTextContent('archive')
+      expect(block).toHaveTextContent('3 files')
+      expect(block).toHaveTextContent('2 also used by other collections')
+      // a volume that is unplugged says its files can't be opened
+      expect(block).toHaveTextContent(/can.t be opened right now/)
+    })
+
+    it('offers to gather onto the home volume', async () => {
+      spread = split()
+      placements = [
+        {
+          collection_id: CID,
+          collection_name: 'study',
+          volume: 'archive',
+          on_unavailable: 'spill',
+        },
+      ]
+      renderIt()
+      expect(
+        await screen.findByRole('button', { name: /Gather onto archive/ }),
+      ).toBeInTheDocument()
+    })
+
+    it('has nothing to gather when everything is on one volume', async () => {
+      spread = split({
+        volumes: [split().volumes[0]],
+        files: 9,
+      })
+      placements = [
+        {
+          collection_id: CID,
+          collection_name: 'study',
+          volume: 'archive',
+          on_unavailable: 'spill',
+        },
+      ]
+      renderIt()
+      expect(await screen.findByTestId('file-locations')).toHaveTextContent(
+        'on one volume',
+      )
+      expect(screen.queryByRole('button', { name: /Gather/ })).toBeNull()
+    })
   })
 })

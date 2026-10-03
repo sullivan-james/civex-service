@@ -706,6 +706,31 @@ class CreateFolderResponse(BaseModel):
     path: str
 
 
+class CollectionVolumeShareResponse(BaseModel):
+    volume: str
+    files: int = Field(description="Files of the collection on this volume.")
+    bytes: int
+    shared_files: int = Field(
+        description="Of those, files another collection uses too (moving one affects both)."
+    )
+    state: str = Field(
+        description="The volume's state now: online, offline, wrong_drive, readonly or retired."
+    )
+    available: bool = Field(description="Whether the volume can be read right now.")
+
+
+class CollectionStorageResponse(BaseModel):
+    collection_id: str
+    files: int = Field(description="Distinct files the collection's records use.")
+    bytes: int = Field(description="Total size of the files the catalog knows.")
+    volumes: list[CollectionVolumeShareResponse] = Field(
+        description="Each volume that holds some of them, largest first."
+    )
+    unlocated_files: int = Field(
+        description="Files records use that the catalog doesn't place on any volume."
+    )
+
+
 class TransferRequest(BaseModel):
     kind: str = Field(
         description="drain: move everything off the `sources` volumes. consolidate: move the files of the `collection_ids` collections."

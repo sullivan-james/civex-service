@@ -74,6 +74,52 @@ class LocalFileReferenceRepository:
             query = query.where(FileReference.sha256 > after)
         return [sha for (sha,) in self._s.execute(query)]
 
+    def volume_breakdown(
+        self, collection_id: str
+    ) -> tuple[int, list[tuple[str, int, int, int]]]:
+        """Where a collection's files are, from the catalog in three queries (no
+        file is read): the number of distinct files its records use, and per
+        volume (volume, files, bytes, files another collection also uses)."""
+        from civex.db.models import StoredObject
+
+        cid = uuid.UUID(collection_id)
+        mine = (
+            select(FileReference.sha256)
+            .join(Record, Record.id == FileReference.record_id)
+            .where(Record.dataset_id == cid)
+            .distinct()
+            .subquery()
+        )
+        total = self._s.execute(select(func.count()).select_from(mine)).scalar_one()
+        rows = self._s.execute(
+            select(
+                StoredObject.volume,
+                func.count(),
+                func.coalesce(func.sum(StoredObject.size), 0),
+            )
+            .where(StoredObject.sha256.in_(select(mine.c.sha256)))
+            .group_by(StoredObject.volume)
+        ).all()
+        others = (
+            select(FileReference.sha256)
+            .join(Record, Record.id == FileReference.record_id)
+            .where(Record.dataset_id != cid)
+            .where(FileReference.sha256.in_(select(mine.c.sha256)))
+            .distinct()
+            .subquery()
+        )
+        shared: dict[str, int] = {
+            vol: int(n)
+            for vol, n in self._s.execute(
+                select(StoredObject.volume, func.count())
+                .where(StoredObject.sha256.in_(select(others.c.sha256)))
+                .group_by(StoredObject.volume)
+            )
+        }
+        return total, [
+            (vol, int(n), int(size), int(shared.get(vol, 0))) for vol, n, size in rows
+        ]
+
     def collections_using(self, shas: Iterable[str]) -> dict[str, set[str]]:
         """For each file, the ids of the collections whose records use it."""
         wanted = list(shas)

@@ -399,6 +399,29 @@ class FileInfo:
 
 
 @dataclass
+class CollectionVolumeShare:
+    """How much of a collection's data one volume holds."""
+
+    volume: str
+    files: int
+    bytes: int
+    shared_files: int  # of those, files another collection uses too
+    state: str = "online"  # the volume's state now (see VolumeStatus)
+    available: bool = True
+
+
+@dataclass
+class CollectionStorage:
+    """Where a collection's files are: one share per volume that holds any."""
+
+    collection_id: str
+    files: int  # distinct files the collection's records use
+    bytes: int  # of those the catalog has a size for
+    volumes: list[CollectionVolumeShare]
+    unlocated_files: int  # used by records but not in the catalog on any volume
+
+
+@dataclass
 class StoredObjectInfo:
     """One object on disk in the content-addressed store, as seen by GC --
     not what a FileRef claims to point at, but what's actually there."""
