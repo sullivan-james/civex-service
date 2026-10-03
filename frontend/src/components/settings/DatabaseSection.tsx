@@ -1,12 +1,22 @@
-import { useDbStatus } from '../../hooks/useDb'
-import { ErrorState, Skeleton } from '../ui'
+import { useDbMoves, useDbStatus } from '../../hooks/useDb'
+import { ErrorState, Skeleton, TabNav, TabPanel, useTabParam } from '../ui'
 import { errorMessage } from '../../lib/errors'
 import { AdvancedDatabase } from './database/AdvancedDatabase'
 import { CurrentDatabaseCard } from './database/CurrentDatabaseCard'
 import { MoveHistory } from './database/MoveHistory'
 
+const DB_TABS = [
+  { id: 'current' },
+  { id: 'history' },
+  { id: 'advanced' },
+] as const
+
 export default function DatabaseSection() {
   const { data: status, isLoading, error } = useDbStatus()
+  const { data: moves } = useDbMoves()
+  const [tab, setTab] = useTabParam(DB_TABS, 'current')
+  const hasHistory = !!moves && moves.length > 0
+  const shownTab = tab === 'history' && !hasHistory ? 'current' : tab
 
   if (isLoading)
     return (
@@ -26,17 +36,28 @@ export default function DatabaseSection() {
     )
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold text-fg">Database</h2>
-        <p className="text-sm text-fg-muted mt-1">
-          Where this project&rsquo;s records are stored. You can move them to
-          another kind of database at any time; your original is kept.
-        </p>
-      </div>
-      <CurrentDatabaseCard />
-      <MoveHistory />
-      <AdvancedDatabase />
+    <div className="space-y-5">
+      <TabNav
+        label="Database"
+        value={shownTab}
+        onChange={setTab}
+        tabs={[
+          { id: 'current' as const, label: 'Current' },
+          ...(hasHistory
+            ? [{ id: 'history' as const, label: `History (${moves.length})` }]
+            : []),
+          { id: 'advanced' as const, label: 'Advanced' },
+        ]}
+      />
+      <TabPanel id="current" value={shownTab}>
+        <CurrentDatabaseCard />
+      </TabPanel>
+      <TabPanel id="history" value={shownTab}>
+        <MoveHistory />
+      </TabPanel>
+      <TabPanel id="advanced" value={shownTab}>
+        <AdvancedDatabase />
+      </TabPanel>
     </div>
   )
 }

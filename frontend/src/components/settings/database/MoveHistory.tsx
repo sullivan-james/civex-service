@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Badge, Button, CollapsibleSection, ConfirmDialog } from '../../ui'
+import { Badge, Button, ConfirmDialog } from '../../ui'
 import { useDbMoves, useRevertMove } from '../../../hooks/useDb'
 import type { MoveRecord } from '../../../api/db'
 import { errorMessage } from '../../../lib/errors'
@@ -23,7 +23,7 @@ export function MoveHistory() {
   const revertable = moves.find((m) => m.status === 'done' && !m.reverted_at)
 
   return (
-    <CollapsibleSection title="Move history" count={moves.length}>
+    <>
       <ul className="divide-y divide-border-muted rounded-md border border-border bg-canvas">
         {moves.map((m) => (
           <li
@@ -79,6 +79,6 @@ export function MoveHistory() {
           }}
         />
       )}
-    </CollapsibleSection>
+    </>
   )
 }

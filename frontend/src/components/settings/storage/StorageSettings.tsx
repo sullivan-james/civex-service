@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router'
-import { Tabs, type TabDef } from '../../ui'
+import { TabNav, TabPanel, type TabDef } from '../../ui'
 import type { StorageTab } from '../../../hooks/useStorageAttention'
 import { CollectionsTab } from './CollectionsTab'
 import { StorageAttention } from './StorageAttention'
@@ -41,49 +41,42 @@ export default function StorageSettings() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="text-lg font-semibold text-fg">Storage</h2>
-        <p className="mt-1 text-sm text-fg-muted">
-          Where Civex keeps your files, and which collections use which volume.
-        </p>
-      </div>
-
       <StorageAttention onGo={go} />
 
-      <Tabs label="Storage" tabs={TABS} value={tab} onChange={go} />
+      <TabNav label="Storage" tabs={TABS} value={tab} onChange={go} />
 
-      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-        {tab === 'volumes' && <VolumesTab />}
-        {tab === 'collections' && (
-          <CollectionsTab
-            volumeFilter={volumeFilter}
-            onClearVolumeFilter={() =>
-              setParams(
-                (prev) => {
-                  const next = new URLSearchParams(prev)
-                  next.delete('volume')
-                  return next
-                },
-                { replace: true },
-              )
-            }
-            onGoToVolumes={() => go('volumes')}
-          />
-        )}
-        {tab === 'tasks' && (
-          <TasksTab
-            preset={
-              params.get('from') || params.get('collection')
-                ? {
-                    source: params.get('from') ?? undefined,
-                    collectionId: params.get('collection') ?? undefined,
-                    target: params.get('to') ?? undefined,
-                  }
-                : undefined
-            }
-          />
-        )}
-      </div>
+      <TabPanel id="volumes" value={tab}>
+        <VolumesTab />
+      </TabPanel>
+      <TabPanel id="collections" value={tab}>
+        <CollectionsTab
+          volumeFilter={volumeFilter}
+          onClearVolumeFilter={() =>
+            setParams(
+              (prev) => {
+                const next = new URLSearchParams(prev)
+                next.delete('volume')
+                return next
+              },
+              { replace: true },
+            )
+          }
+          onGoToVolumes={() => go('volumes')}
+        />
+      </TabPanel>
+      <TabPanel id="tasks" value={tab}>
+        <TasksTab
+          preset={
+            params.get('from') || params.get('collection')
+              ? {
+                  source: params.get('from') ?? undefined,
+                  collectionId: params.get('collection') ?? undefined,
+                  target: params.get('to') ?? undefined,
+                }
+              : undefined
+          }
+        />
+      </TabPanel>
     </div>
   )
 }

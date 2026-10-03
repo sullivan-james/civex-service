@@ -1,11 +1,9 @@
 import { useState } from 'react'
-import { Link } from 'react-router'
 import { AlertTriangle } from '../ui/icons'
-import { Button, CollapsibleSection, Field, Select } from '../ui'
+import { Button, Field, Select } from '../ui'
 import type { PlacementPolicy } from '../../api/store'
 import {
   useClearPlacement,
-  useCollectionStorage,
   usePlacements,
   useSetPlacement,
   useVolumes,
@@ -15,25 +13,28 @@ import { CollectionFileLocations } from './CollectionFileLocations'
 
 const NONE = ''
 
-/** Where this collection's new files are written. Shown only once there is a
- * choice to make (a second volume exists) or a home is already set, so a
- * single-volume project never sees it. */
+/** Whether a collection has any storage choice to make: a second volume
+ * exists, or a home is already set. A single-volume project never needs the
+ * Storage tab. */
+export function useHasStorageChoice(collectionId: string): boolean {
+  const { data: volumes = [] } = useVolumes()
+  const { data: placements = [] } = usePlacements()
+  return (
+    volumes.length >= 2 ||
+    placements.some((p) => p.collection_id === collectionId)
+  )
+}
+
+/** Where this collection's files are and where its new files are written. */
 export function CollectionStorage({ collectionId }: { collectionId: string }) {
   const { data: volumes = [] } = useVolumes()
   const { data: placements = [] } = usePlacements()
   const setPlacement = useSetPlacement()
   const clearPlacement = useClearPlacement()
-  // The same query the locations block uses (one request, shared by the cache).
-  const spread = useCollectionStorage(collectionId)
 
   const current = placements.find((p) => p.collection_id === collectionId)
   const [draftVolume, setDraftVolume] = useState<string | null>(null)
   const [draftPolicy, setDraftPolicy] = useState<PlacementPolicy | null>(null)
-
-  if (volumes.length < 2 && !current) return null
-  // Wait, so the section opens by itself when the files are split.
-  if (spread.isPending) return null
-  const split = (spread.data?.volumes.length ?? 0) > 1
 
   const volume = draftVolume ?? current?.volume ?? NONE
   const policy = draftPolicy ?? current?.on_unavailable ?? 'spill'
@@ -59,81 +60,67 @@ export function CollectionStorage({ collectionId }: { collectionId: string }) {
   }
 
   return (
-    <CollapsibleSection title="Storage" defaultOpen={!!current || split}>
-      <div className="mt-2 space-y-3 max-w-xl">
-        <CollectionFileLocations
-          collectionId={collectionId}
-          home={current?.volume}
-        />
+    <div className="max-w-xl space-y-4">
+      <CollectionFileLocations
+        collectionId={collectionId}
+        home={current?.volume}
+      />
 
-        <p className="text-sm text-fg-muted">
-          Choose which volume receives this collection&apos;s new files. This
-          only decides where new files are written: a file whose content is
-          already stored — on any volume — is reused where it is, never copied
-          again.
-        </p>
+      <Field
+        label="Home volume"
+        info="Which volume receives this collection's new files. A file whose content is already stored, on any volume, is reused where it is and never copied again."
+      >
+        <Select value={volume} onChange={(e) => setDraftVolume(e.target.value)}>
+          <option value={NONE}>General write order (default)</option>
+          {volumes.map((v) => (
+            <option key={v.name} value={v.name}>
+              {v.name}
+              {v.state !== 'online' ? ` — ${v.state.replace('_', ' ')}` : ''}
+            </option>
+          ))}
+        </Select>
+      </Field>
 
-        <Field label="Home volume">
+      {volume !== NONE && (
+        <Field label="If the home volume can't take a file">
           <Select
-            value={volume}
-            onChange={(e) => setDraftVolume(e.target.value)}
+            value={policy}
+            onChange={(e) => setDraftPolicy(e.target.value as PlacementPolicy)}
           >
-            <option value={NONE}>General write queue (default)</option>
-            {volumes.map((v) => (
-              <option key={v.name} value={v.name}>
-                {v.name}
-                {v.state !== 'online' ? ` — ${v.state.replace('_', ' ')}` : ''}
-              </option>
-            ))}
+            <option value="spill">Use the general write order instead</option>
+            <option value="fail">Refuse the upload</option>
           </Select>
         </Field>
+      )}
 
-        {volume !== NONE && (
-          <Field label="If the home volume can't take a file">
-            <Select
-              value={policy}
-              onChange={(e) =>
-                setDraftPolicy(e.target.value as PlacementPolicy)
-              }
-            >
-              <option value="spill">Use the general write queue instead</option>
-              <option value="fail">Refuse the upload</option>
-            </Select>
-          </Field>
-        )}
+      {home && home.state !== 'online' && (
+        <p className="flex items-start gap-1.5 text-xs text-attention">
+          <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+          {home.reason || `The home volume is ${home.state}.`}
+        </p>
+      )}
 
-        {home && home.state !== 'online' && (
-          <p className="flex items-start gap-1.5 text-xs text-attention">
-            <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-            {home.reason || `The home volume is ${home.state}.`}
-          </p>
-        )}
+      {error != null && (
+        <p role="alert" className="text-xs text-danger">
+          {errorMessage(error)}
+        </p>
+      )}
 
-        {error != null && (
-          <p role="alert" className="text-xs text-danger">
-            {errorMessage(error)}
-          </p>
-        )}
-
-        <div className="flex items-center gap-4">
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={
-              !dirty || setPlacement.isPending || clearPlacement.isPending
-            }
-            onClick={save}
-          >
-            Save
-          </Button>
-          <Link
-            to="/settings/storage?tab=collections"
-            className="text-sm text-accent hover:underline"
-          >
-            Manage all collections&apos; homes
-          </Link>
-        </div>
+      <div className="flex items-center gap-4">
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={
+            !dirty || setPlacement.isPending || clearPlacement.isPending
+          }
+          onClick={save}
+        >
+          Save
+        </Button>
+        <Button size="sm" variant="link" to="/settings/storage?tab=collections">
+          All collections
+        </Button>
       </div>
-    </CollapsibleSection>
+    </div>
   )
 }

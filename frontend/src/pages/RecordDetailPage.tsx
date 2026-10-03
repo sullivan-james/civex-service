@@ -20,11 +20,11 @@ import {
   ErrorState,
   Page,
   ConfirmDialog,
-  Section,
-  CollapsibleSection,
   PinButton,
+  TabNav,
+  TabPanel,
+  useTabParam,
 } from '../components/ui'
-import { Play } from '../components/ui/icons'
 import { ReferencedBy } from '../components/records/ReferencedBy'
 import { ContainsPreview } from '../components/records/ContainsPreview'
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
@@ -43,11 +43,20 @@ import { AuditTrail } from '../components/audit/AuditTrail'
 import { describeAuditEntry as describeRecordAuditEntry } from '../utils/recordAudit'
 import { RecordFieldGrid } from '../components/records/RecordFieldGrid'
 
+const RECORD_TABS = [
+  { id: 'fields' },
+  { id: 'contains' },
+  { id: 'referenced' },
+  { id: 'runs' },
+  { id: 'history' },
+] as const
+
 export default function RecordDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [runWorkflow, setRunWorkflow] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [tab, setTab] = useTabParam(RECORD_TABS, 'fields')
 
   const { data: record, isLoading, error } = useRecord(id, 3000)
   const { data: collection } = useCollection(record?.dataset_id ?? '')
@@ -108,6 +117,8 @@ export default function RecordDetailPage() {
   const applicableWorkflows = (workflows ?? []).filter(
     (wf) => !wf.record_schema || wf.record_schema === record.schema_name,
   )
+  const showContains = (hasChildSchemas || descendantTotal > 0) && !!collection
+  const shownTab = tab === 'contains' && !showContains ? 'fields' : tab
   const runWorkflowDef = runWorkflow
     ? (applicableWorkflows.find((wf) => wf.name === runWorkflow) ?? null)
     : null
@@ -157,6 +168,38 @@ export default function RecordDetailPage() {
         action={
           <PinButton target={recordTarget(record)} noun="record" size="md" />
         }
+        secondaryActions={[
+          ...applicableWorkflows.map((wf) => ({
+            label: `Run ${wf.name}…`,
+            onClick: () => setRunWorkflow(wf.name),
+          })),
+          {
+            label: 'Delete record…',
+            variant: 'danger' as const,
+            onClick: () => setConfirmDelete(true),
+          },
+        ]}
+        tabs={
+          <TabNav
+            label="Record"
+            value={shownTab}
+            onChange={setTab}
+            tabs={[
+              { id: 'fields' as const, label: 'Fields' },
+              ...(showContains
+                ? [
+                    {
+                      id: 'contains' as const,
+                      label: `Contains (${descendantTotal.toLocaleString()})`,
+                    },
+                  ]
+                : []),
+              { id: 'referenced' as const, label: 'Referenced by' },
+              { id: 'runs' as const, label: 'Runs' },
+              { id: 'history' as const, label: 'History' },
+            ]}
+          />
+        }
         description={
           <>
             Added {formatDate(record.created_at)}
@@ -165,8 +208,7 @@ export default function RecordDetailPage() {
           </>
         }
       >
-        {/* Own fields */}
-        <Section title="Fields">
+        <TabPanel id="fields" value={shownTab}>
           <UploadCollectionContext.Provider value={record.dataset_id}>
             <div className="mb-3">
               <RecordStorageSummary data={record.data} />
@@ -193,44 +235,40 @@ export default function RecordDetailPage() {
               onDismissError={() => updateRecord.reset()}
             />
           </UploadCollectionContext.Provider>
-        </Section>
+        </TabPanel>
 
-        {(hasChildSchemas || descendantTotal > 0) && collection && (
-          <Section title="Contains" count={descendantTotal}>
+        <TabPanel id="contains" value={shownTab}>
+          {collection && (
             <ContainsPreview
               record={record}
               collection={collection.name}
               collectionId={record.dataset_id}
               pollMs={hasActiveJobs ? 2000 : 5000}
             />
-          </Section>
-        )}
+          )}
+        </TabPanel>
 
-        <ReferencedBy recordId={record.id} />
+        <TabPanel id="referenced" value={shownTab}>
+          <ReferencedBy recordId={record.id} />
+        </TabPanel>
 
-        {applicableWorkflows.length > 0 && (
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-base font-semibold text-fg">Workflows</h2>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {applicableWorkflows.map((wf) => (
-                <button
-                  key={wf.name}
-                  onClick={() => setRunWorkflow(wf.name)}
-                  className="flex items-center gap-2 px-3 py-2 text-sm border border-border rounded-md hover:bg-canvas-subtle hover:border-accent transition-colors text-fg"
-                >
-                  <Play size={12} />
-                  <span className="font-mono text-xs">{wf.name}</span>
-                  {wf.inputs &&
-                    Object.values(wf.inputs).some(
-                      (i) => i.type === 'files',
-                    ) && <span className="text-xs text-fg-muted">· files</span>}
-                </button>
-              ))}
-            </div>
+        <TabPanel id="runs" value={shownTab}>
+          <div className="space-y-6">
+            <JobsTable recordId={record.id} />
+            <RecordProvenance recordId={record.id} />
           </div>
-        )}
+        </TabPanel>
+
+        <TabPanel id="history" value={shownTab}>
+          <AuditTrail
+            queryKey={['records', record.id, 'audit']}
+            fetchPage={(offset, limit) =>
+              recordsApi.audit(record.id, offset, limit)
+            }
+            describeEntry={(entry) => describeRecordAuditEntry(entry, schema)}
+            emptyMessage="Changes to this record will appear here."
+          />
+        </TabPanel>
 
         {runWorkflowDef && (
           <WorkflowRunModal
@@ -239,44 +277,6 @@ export default function RecordDetailPage() {
             onClose={() => setRunWorkflow(null)}
           />
         )}
-
-        <RecordProvenance recordId={record.id} />
-
-        <AuditTrail
-          queryKey={['records', record.id, 'audit']}
-          fetchPage={(offset, limit) =>
-            recordsApi.audit(record.id, offset, limit)
-          }
-          describeEntry={(entry) => describeRecordAuditEntry(entry, schema)}
-          emptyMessage="Changes to this record will appear here."
-        />
-
-        <CollapsibleSection title="Runs">
-          <JobsTable recordId={record.id} />
-        </CollapsibleSection>
-
-        {/* Danger zone */}
-        <div className="border border-danger-muted rounded-md">
-          <div className="px-4 py-3 border-b border-danger-muted bg-danger-subtle rounded-t-md">
-            <h2 className="text-sm font-semibold text-danger">Danger zone</h2>
-          </div>
-          <div className="px-4 py-3 flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-fg">Delete this record</p>
-              <p className="text-xs text-fg-muted">
-                Moves this record (and everything under it) to Recently Deleted
-                — restore it any time before it's permanently purged.
-              </p>
-            </div>
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setConfirmDelete(true)}
-            >
-              Delete record
-            </Button>
-          </div>
-        </div>
 
         {confirmDelete && (
           <ConfirmDialog

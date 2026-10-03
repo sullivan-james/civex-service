@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
-import { CollectionStorage } from './CollectionStorage'
+import { CollectionStorage, useHasStorageChoice } from './CollectionStorage'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -87,20 +87,30 @@ function renderIt() {
 }
 
 describe('CollectionStorage', () => {
-  it('shows nothing on a single-volume project', async () => {
+  it('is only worth a tab once there is a choice to make', async () => {
+    function Probe() {
+      return <p>{useHasStorageChoice(CID) ? 'choice' : 'no choice'}</p>
+    }
     volumes = [volume('default')]
-    const { container } = renderIt()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <Probe />
+      </QueryClientProvider>,
+    )
     await waitFor(() =>
       expect(calls.some((c) => c.path === '/api/store/volumes')).toBe(true),
     )
-    expect(container).toBeEmptyDOMElement()
+    expect(screen.getByText('no choice')).toBeInTheDocument()
   })
 
   it('sets a home volume', async () => {
     const user = userEvent.setup()
     renderIt()
-    await user.click(await screen.findByRole('button', { name: /storage/i }))
 
+    await screen.findByRole('option', { name: /archive/ })
     const [home] = screen.getAllByRole('combobox')
     await user.selectOptions(home, 'archive')
     await user.click(screen.getByRole('button', { name: 'Save' }))
@@ -117,7 +127,7 @@ describe('CollectionStorage', () => {
   it('can refuse uploads instead of spilling', async () => {
     const user = userEvent.setup()
     renderIt()
-    await user.click(await screen.findByRole('button', { name: /storage/i }))
+    await screen.findByRole('option', { name: /archive/ })
     const [home] = screen.getAllByRole('combobox')
     await user.selectOptions(home, 'archive')
     const [, policy] = screen.getAllByRole('combobox')
@@ -133,7 +143,7 @@ describe('CollectionStorage', () => {
     )
   })
 
-  it('opens by default when a home is set, and clears it', async () => {
+  it('shows the home that is set, and clears it', async () => {
     placements = [
       {
         collection_id: CID,
@@ -147,6 +157,7 @@ describe('CollectionStorage', () => {
 
     const save = await screen.findByRole('button', { name: 'Save' })
     expect(save).toBeDisabled()
+    await screen.findByRole('option', { name: /archive/ })
     const [home] = screen.getAllByRole('combobox')
     expect(home).toHaveValue('archive')
 
@@ -165,10 +176,9 @@ describe('CollectionStorage', () => {
   it('links to the page that manages every collection home', async () => {
     const user = userEvent.setup()
     renderIt()
-    await user.click(await screen.findByRole('button', { name: /storage/i }))
 
     expect(
-      screen.getByRole('link', { name: /manage all collections/i }),
+      await screen.findByRole('link', { name: /all collections/i }),
     ).toHaveAttribute('href', '/settings/storage?tab=collections')
   })
 
@@ -223,7 +233,7 @@ describe('CollectionStorage', () => {
       ...over,
     })
 
-    it('opens by itself and lists each volume when files are split', async () => {
+    it('lists each volume when files are split', async () => {
       spread = split()
       renderIt()
       const block = await screen.findByTestId('file-locations')

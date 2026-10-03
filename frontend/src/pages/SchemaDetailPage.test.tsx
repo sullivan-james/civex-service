@@ -64,14 +64,14 @@ describe('SchemaDetailPage', () => {
     expect(await screen.findByLabelText('Record name')).toBeInTheDocument()
   })
 
-  it('keeps delete out of the way, in Settings', async () => {
+  it('keeps delete out of the way, in the actions menu', async () => {
     const user = userEvent.setup()
     renderPage()
-    await screen.findByRole('tab', { name: 'Settings' })
-    expect(screen.queryByRole('button', { name: 'Delete schema' })).toBeNull()
-    await user.click(screen.getByRole('tab', { name: 'Settings' }))
+    await screen.findByRole('tab', { name: 'Fields' })
+    expect(screen.queryByRole('menuitem', { name: /Delete schema/ })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'More actions' }))
     expect(
-      screen.getByRole('button', { name: 'Delete schema' }),
+      screen.getByRole('menuitem', { name: /Delete schema/ }),
     ).toBeInTheDocument()
   })
 })

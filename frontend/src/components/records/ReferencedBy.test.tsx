@@ -77,13 +77,8 @@ function renderIt(recordId: string) {
 }
 
 describe('ReferencedBy', () => {
-  it('fetches nothing until opened, then lists the groups', async () => {
-    const user = userEvent.setup()
+  it('lists the groups', async () => {
     renderIt('p1')
-    expect(referrerCalls).toHaveLength(0)
-
-    await user.click(screen.getByRole('button', { name: /Referenced by/ }))
-
     expect(await screen.findByText(/via Patient Ref/)).toBeInTheDocument()
     expect(screen.getByText(/via Members/)).toBeInTheDocument()
     expect(referrerCalls).toHaveLength(1)
@@ -92,10 +87,11 @@ describe('ReferencedBy', () => {
   it('links a group to its collection, filtered to this record', async () => {
     const user = userEvent.setup()
     renderIt('p1')
-    await user.click(screen.getByRole('button', { name: /Referenced by/ }))
     await screen.findByText(/via Patient Ref/)
 
-    await user.click(screen.getAllByRole('button', { name: 'View all' })[0])
+    await user.click(
+      (await screen.findAllByRole('link', { name: 'View all' }))[0],
+    )
 
     const where = screen.getByTestId('where').textContent!
     const url = new URL(where, 'http://x')
@@ -111,7 +107,6 @@ describe('ReferencedBy', () => {
   it('says so when nothing references the record', async () => {
     const user = userEvent.setup()
     renderIt('none')
-    await user.click(screen.getByRole('button', { name: /Referenced by/ }))
     expect(
       await screen.findByText('Nothing references this record.'),
     ).toBeInTheDocument()

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { AuditLogEntry, PaginatedAuditLog } from '../../api/audit'
 import type { AuditSummary } from '../../utils/schemaAudit'
-import { CollapsibleSection, DataTable, Badge, Pagination } from '../ui'
+import { DataTable, Badge, Pagination } from '../ui'
 import { errorMessage } from '../../lib/errors'
 
 const ACTION_VARIANT: Record<
@@ -18,9 +18,7 @@ const ACTION_VARIANT: Record<
 
 /**
  * The audit trail for a single entity (record, schema or collection):
- * a "when / action / change" table, collapsed by default. It's a backup
- * feature for tracing what happened, not a primary surface, so it stays
- * out of the way until someone opens it.
+ * a "when / action / change" table. Mount it in a History tab.
  */
 export function AuditTrail({
   queryKey,
@@ -42,7 +40,7 @@ export function AuditTrail({
   })
 
   return (
-    <CollapsibleSection title="History" count={data?.total}>
+    <>
       <DataTable
         layout="auto"
         columns={[
@@ -99,6 +97,6 @@ export function AuditTrail({
           }}
         />
       )}
-    </CollapsibleSection>
+    </>
   )
 }

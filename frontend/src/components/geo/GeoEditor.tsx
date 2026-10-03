@@ -1,5 +1,5 @@
 import { lazy, Suspense, useMemo, useRef, useState } from 'react'
-import { Button, Input, Select, Skeleton } from '../ui'
+import { Button, Input, Select, Skeleton, TabNav } from '../ui'
 import { locationProblem, toWkt, type Geometry } from '../../utils/geo'
 import {
   COORD_FORMATS,
@@ -205,24 +205,12 @@ export function GeoEditor({
   return (
     <div className="space-y-4">
       {shapes.length > 1 && (
-        <div role="tablist" aria-label="Shape" className="flex gap-1">
-          {shapes.map((s) => (
-            <button
-              key={s}
-              role="tab"
-              type="button"
-              aria-selected={draft.shape === s}
-              onClick={() => chooseShape(s)}
-              className={`rounded-md border px-3 py-1 text-sm cursor-pointer ${
-                draft.shape === s
-                  ? 'border-accent bg-accent-subtle font-medium text-accent'
-                  : 'border-border bg-canvas hover:bg-canvas-subtle'
-              }`}
-            >
-              {SHAPE_LABEL[s]}
-            </button>
-          ))}
-        </div>
+        <TabNav
+          label="Shape"
+          tabs={shapes.map((s) => ({ id: s, label: SHAPE_LABEL[s] }))}
+          value={draft.shape}
+          onChange={chooseShape}
+        />
       )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">

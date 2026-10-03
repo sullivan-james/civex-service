@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router'
+import { useParams, useNavigate, Link } from 'react-router'
 import { errorMessage } from '../lib/errors'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
 import { schemasApi } from '../api/schemas'
@@ -22,7 +22,9 @@ import {
   Page,
   FormGrid,
   NameLabelFields,
-  Tabs,
+  TabNav,
+  TabPanel,
+  useTabParam,
 } from '../components/ui'
 import { displayLabel, nameError } from '../utils/naming'
 import { Upload } from '../components/ui/icons'
@@ -130,7 +132,7 @@ const TABS = [
   { id: 'fields', label: 'Fields' },
   { id: 'naming', label: 'Naming' },
   { id: 'automations', label: 'Automations' },
-  { id: 'settings', label: 'Settings' },
+  { id: 'history', label: 'History' },
 ] as const
 type TabId = (typeof TABS)[number]['id']
 
@@ -138,9 +140,7 @@ export default function SchemaDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [editing, setEditing] = useState(false)
-  const [params, setParams] = useSearchParams()
-  const tab: TabId =
-    TABS.find((t) => t.id === params.get('tab'))?.id ?? 'fields'
+  const [tab, setTab] = useTabParam<TabId>(TABS, 'fields')
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   // Fetch by UUID — name changes don't affect the URL
@@ -216,14 +216,23 @@ export default function SchemaDetailPage() {
           {schema.description && <span>{schema.description}</span>}
         </p>
       }
+      secondaryActions={[
+        {
+          label: 'Delete schema…',
+          variant: 'danger',
+          onClick: () => setConfirmDelete(true),
+        },
+      ]}
       action={
         !editing && (
           <div className="flex items-center gap-2">
-            <Link to={`/schemas/${schema.id}/import`}>
-              <Button size="sm" variant="primary">
-                <Upload size={14} /> Import data
-              </Button>
-            </Link>
+            <Button
+              size="sm"
+              variant="primary"
+              to={`/schemas/${schema.id}/import`}
+            >
+              <Upload size={14} /> Import data
+            </Button>
             <Button size="sm" onClick={() => setEditing(true)}>
               Edit
             </Button>
@@ -235,54 +244,33 @@ export default function SchemaDetailPage() {
         <MetaEditor schema={schema} onDone={() => setEditing(false)} />
       )}
 
-      <Tabs
-        label="Schema"
-        tabs={[...TABS]}
-        value={tab}
-        onChange={(next) =>
-          setParams(next === 'fields' ? {} : { tab: next }, { replace: true })
-        }
-      />
-      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-        {tab === 'fields' && (
-          <SchemaFieldsSection schema={schema} allSchemas={allSchemas} />
-        )}
+      <TabNav label="Schema" tabs={[...TABS]} value={tab} onChange={setTab} />
+      <TabPanel id="fields" value={tab}>
+        <SchemaFieldsSection schema={schema} allSchemas={allSchemas} />
+      </TabPanel>
 
-        {tab === 'naming' && (
-          <NamingSection schema={schema} allSchemas={allSchemas} />
-        )}
+      <TabPanel id="naming" value={tab}>
+        <NamingSection schema={schema} allSchemas={allSchemas} />
+      </TabPanel>
 
-        {tab === 'automations' && (
-          <WorkflowsPanel
-            schemaName={schema.name}
-            onRun={(wf) => setRunTarget(wf)}
-            onView={(wf) => setSummaryTarget(wf)}
-          />
-        )}
+      <TabPanel id="automations" value={tab}>
+        <WorkflowsPanel
+          schemaName={schema.name}
+          onRun={(wf) => setRunTarget(wf)}
+          onView={(wf) => setSummaryTarget(wf)}
+        />
+      </TabPanel>
 
-        {tab === 'settings' && (
-          <div className="space-y-8">
-            <AuditTrail
-              queryKey={['schemas', schema.name, 'audit']}
-              fetchPage={(offset, limit) =>
-                schemasApi.getAudit(schema.name, offset, limit)
-              }
-              describeEntry={describeSchemaAuditEntry}
-              emptyMessage="No changes yet."
-            />
-            <div className="flex items-center justify-between rounded-md border border-danger-muted px-4 py-3">
-              <p className="text-sm font-medium text-fg">Delete this schema</p>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => setConfirmDelete(true)}
-              >
-                Delete schema
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
+      <TabPanel id="history" value={tab}>
+        <AuditTrail
+          queryKey={['schemas', schema.name, 'audit']}
+          fetchPage={(offset, limit) =>
+            schemasApi.getAudit(schema.name, offset, limit)
+          }
+          describeEntry={describeSchemaAuditEntry}
+          emptyMessage="No changes yet."
+        />
+      </TabPanel>
 
       {summaryTarget && (
         <WorkflowSummaryModal
