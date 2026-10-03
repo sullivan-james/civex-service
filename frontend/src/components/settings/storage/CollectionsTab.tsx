@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router'
 import type { Collection } from '../../../api/collections'
 import type {
   CollectionStorageReport,
@@ -19,18 +18,12 @@ import {
 import {
   Badge,
   Button,
-  Checkbox,
-  EmptyState,
+  DataTable,
   ErrorState,
+  InfoTip,
   Input,
   Select,
   Skeleton,
-  Table,
-  Tbody,
-  Td,
-  Th,
-  Thead,
-  Tr,
 } from '../../ui'
 import { X } from '../../ui/icons'
 import { errorMessage } from '../../../lib/errors'
@@ -45,7 +38,7 @@ const NONE = ''
 function VolumeOptions({ volumes }: { volumes: VolumeStats[] }) {
   return (
     <>
-      <option value={NONE}>General write queue</option>
+      <option value={NONE}>General write order</option>
       {volumes.map((v) => (
         <option key={v.name} value={v.name}>
           {v.name}
@@ -58,157 +51,132 @@ function VolumeOptions({ volumes }: { volumes: VolumeStats[] }) {
   )
 }
 
-/** One collection's home, changed in place and saved as soon as it changes. */
-function CollectionRow({
+/** A collection's home, changed in place and saved as soon as it changes. */
+function useHome(collection: Collection, placement: Placement | undefined) {
+  const setPlacement = useSetPlacement()
+  const clearPlacement = useClearPlacement()
+  return {
+    pending: setPlacement.isPending || clearPlacement.isPending,
+    error: setPlacement.error ?? clearPlacement.error,
+    changeHome(volume: string) {
+      if (volume === NONE) clearPlacement.mutate(collection.id)
+      else
+        setPlacement.mutate({
+          collectionId: collection.id,
+          volume,
+          onUnavailable: placement?.on_unavailable ?? 'spill',
+        })
+    },
+    changePolicy(onUnavailable: PlacementPolicy) {
+      if (placement)
+        setPlacement.mutate({
+          collectionId: collection.id,
+          volume: placement.volume,
+          onUnavailable,
+        })
+    },
+  }
+}
+
+function FilesCell({
+  collection,
+  placement,
+  spread,
+  highlight,
+}: {
+  collection: Collection
+  placement: Placement | undefined
+  spread: CollectionStorageReport | undefined
+  /** A volume being looked at; its share is picked out in the row. */
+  highlight: string | null
+}) {
+  const gather = spread ? gatherPlan(spread, placement?.volume) : null
+  const [gathering, setGathering] = useState(false)
+  if (!spread || spread.files === 0)
+    return <span className="text-fg-subtle">No files</span>
+  return (
+    <div className="min-w-48 space-y-1">
+      <SpreadBar report={spread} className="h-1.5" />
+      <p className="text-xs text-fg-muted">
+        {spread.volumes.map((v, i) => (
+          <span key={v.volume}>
+            {i > 0 && ' · '}
+            <span
+              className={
+                v.volume === highlight ? 'font-medium text-fg' : undefined
+              }
+            >
+              {v.volume} {formatSize(v.bytes)}
+            </span>
+          </span>
+        ))}
+      </p>
+      {gather && (
+        <Button size="sm" variant="link" onClick={() => setGathering(true)}>
+          Gather {gather.elsewhere} {gather.elsewhere === 1 ? 'file' : 'files'}{' '}
+          onto {gather.target}…
+        </Button>
+      )}
+      {gathering && gather && (
+        <NewTransferModal
+          preset={{ collectionId: collection.id, target: gather.target }}
+          onClose={() => setGathering(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+function HomeCell({
   collection,
   placement,
   volumes,
-  spread,
-  highlight,
-  selected,
-  onSelect,
 }: {
   collection: Collection
   placement: Placement | undefined
   volumes: VolumeStats[]
-  spread: CollectionStorageReport | undefined
-  /** A volume being looked at; its share is picked out in the row. */
-  highlight: string | null
-  selected: boolean
-  onSelect: (on: boolean) => void
 }) {
-  const setPlacement = useSetPlacement()
-  const clearPlacement = useClearPlacement()
-  const pending = setPlacement.isPending || clearPlacement.isPending
-  const error = setPlacement.error ?? clearPlacement.error
-  const home = volumes.find((v) => v.name === placement?.volume)
-  const gather = spread ? gatherPlan(spread, placement?.volume) : null
-  const [gathering, setGathering] = useState(false)
-
-  function changeHome(volume: string) {
-    if (volume === NONE) clearPlacement.mutate(collection.id)
-    else
-      setPlacement.mutate({
-        collectionId: collection.id,
-        volume,
-        onUnavailable: placement?.on_unavailable ?? 'spill',
-      })
-  }
-
-  function changePolicy(onUnavailable: PlacementPolicy) {
-    if (placement)
-      setPlacement.mutate({
-        collectionId: collection.id,
-        volume: placement.volume,
-        onUnavailable,
-      })
-  }
-
+  const { pending, error, changeHome } = useHome(collection, placement)
   return (
-    <Tr>
-      <Td className="w-10">
-        <Checkbox
-          aria-label={`Select ${collection.name}`}
-          checked={selected}
-          onChange={(e) => onSelect(e.target.checked)}
-        />
-      </Td>
-      <Td>
-        <Link
-          to={`/collections/${collection.id}`}
-          className="font-medium text-accent hover:underline"
-        >
-          {collection.name}
-        </Link>
-        <span className="ml-2 text-xs text-fg-subtle">
-          {collection.record_count.toLocaleString()}{' '}
-          {collection.record_count === 1 ? 'record' : 'records'}
-        </span>
-      </Td>
-      <Td className="min-w-48">
-        {spread && spread.files > 0 ? (
-          <div className="space-y-1">
-            <SpreadBar report={spread} className="h-1.5" />
-            <p className="text-xs text-fg-muted">
-              {spread.volumes.map((v, i) => (
-                <span key={v.volume}>
-                  {i > 0 && ' · '}
-                  <span
-                    className={
-                      v.volume === highlight ? 'font-medium text-fg' : undefined
-                    }
-                  >
-                    {v.volume} {formatSize(v.bytes)}
-                  </span>
-                </span>
-              ))}
-            </p>
-            {gather && (
-              <button
-                type="button"
-                onClick={() => setGathering(true)}
-                className="cursor-pointer text-xs text-accent hover:underline"
-              >
-                Gather {gather.elsewhere}{' '}
-                {gather.elsewhere === 1 ? 'file' : 'files'} onto {gather.target}
-                …
-              </button>
-            )}
-            {gathering && gather && (
-              <NewTransferModal
-                preset={{ collectionId: collection.id, target: gather.target }}
-                onClose={() => setGathering(false)}
-              />
-            )}
-          </div>
-        ) : (
-          <span className="text-xs text-fg-subtle">No files</span>
-        )}
-      </Td>
-      <Td>
-        <Select
-          size="sm"
-          aria-label={`Home volume for ${collection.name}`}
-          value={placement?.volume ?? NONE}
-          disabled={pending}
-          onChange={(e) => changeHome(e.target.value)}
-        >
-          <VolumeOptions volumes={volumes} />
-        </Select>
-        {error != null && (
-          <p role="alert" className="mt-1 text-xs text-danger">
-            {errorMessage(error)}
-          </p>
-        )}
-      </Td>
-      <Td>
-        {placement ? (
-          <Select
-            size="sm"
-            aria-label={`If the home volume of ${collection.name} can't take a file`}
-            value={placement.on_unavailable}
-            disabled={pending}
-            onChange={(e) => changePolicy(e.target.value as PlacementPolicy)}
-          >
-            <option value="spill">Use the write queue</option>
-            <option value="fail">Refuse the upload</option>
-          </Select>
-        ) : (
-          <span className="text-fg-subtle">—</span>
-        )}
-      </Td>
-      <Td className="whitespace-nowrap">
-        {home && home.state !== 'online' ? (
-          <Badge variant="danger">
-            Home {STATE_LABEL[home.state].toLowerCase()}
-          </Badge>
-        ) : placement ? (
-          <span className="text-fg-muted">Has a home</span>
-        ) : (
-          <span className="text-fg-subtle">Write queue</span>
-        )}
-      </Td>
-    </Tr>
+    <>
+      <Select
+        size="sm"
+        aria-label={`Home volume for ${collection.name}`}
+        value={placement?.volume ?? NONE}
+        disabled={pending}
+        onChange={(e) => changeHome(e.target.value)}
+      >
+        <VolumeOptions volumes={volumes} />
+      </Select>
+      {error != null && (
+        <p role="alert" className="mt-1 text-xs text-danger">
+          {errorMessage(error)}
+        </p>
+      )}
+    </>
+  )
+}
+
+function PolicyCell({
+  collection,
+  placement,
+}: {
+  collection: Collection
+  placement: Placement | undefined
+}) {
+  const { pending, changePolicy } = useHome(collection, placement)
+  if (!placement) return <span className="text-fg-subtle">—</span>
+  return (
+    <Select
+      size="sm"
+      aria-label={`If the home volume of ${collection.name} can't take a file`}
+      value={placement.on_unavailable}
+      disabled={pending}
+      onChange={(e) => changePolicy(e.target.value as PlacementPolicy)}
+    >
+      <option value="spill">Use the write order</option>
+      <option value="fail">Refuse the upload</option>
+    </Select>
   )
 }
 
@@ -279,21 +247,11 @@ export function CollectionsTab({
 
   return (
     <div className="space-y-4">
-      <p className="max-w-prose text-sm text-fg-muted">
-        Choose which volume receives each collection&apos;s <em>new</em> files.
-        This only decides where new files are written: a file whose content is
-        already stored, on any volume, is reused where it is and never copied
-        again.
-      </p>
-
       {volumes.length < 2 && placements.length === 0 && (
         <div className="flex items-center justify-between gap-4 rounded-md border border-border bg-canvas-subtle px-4 py-3 text-sm text-fg-muted">
-          <span>
-            You only have one volume, so every collection uses it. Add another
-            to give a collection its own home.
-          </span>
+          <span>One volume: every collection uses it.</span>
           <Button size="sm" onClick={onGoToVolumes}>
-            Go to volumes
+            Add a volume
           </Button>
         </div>
       )}
@@ -306,15 +264,16 @@ export function CollectionsTab({
           onChange={(e) => setQuery(e.target.value)}
           className="w-64"
         />
+        <InfoTip>
+          Choose which volume receives each collection&apos;s new files. A file
+          whose content is already stored, on any volume, is reused where it is
+          and never copied again.
+        </InfoTip>
         {volumeFilter && (
-          <button
-            type="button"
-            onClick={onClearVolumeFilter}
-            className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-accent-muted bg-accent-subtle px-2 py-1 text-xs font-medium text-accent"
-          >
+          <Button size="sm" variant="link" onClick={onClearVolumeFilter}>
             On {volumeFilter}
             <X size={12} aria-label="Clear volume filter" />
-          </button>
+          </Button>
         )}
       </div>
 
@@ -358,53 +317,99 @@ export function CollectionsTab({
         </div>
       )}
 
-      {collections.length === 0 ? (
-        <EmptyState
-          title="No collections yet"
-          message="Create a collection first, then choose where its files go."
-        />
-      ) : shown.length === 0 ? (
-        <EmptyState title="No collections match" />
-      ) : (
-        <Table>
-          <Thead>
-            <Tr>
-              <Th className="w-10">
-                <Checkbox
-                  aria-label="Select all shown collections"
-                  checked={allShownSelected}
-                  onChange={(e) =>
-                    setSelected(
-                      e.target.checked
-                        ? new Set(shown.map((c) => c.id))
-                        : new Set(),
-                    )
-                  }
-                />
-              </Th>
-              <Th>Collection</Th>
-              <Th>Files are on</Th>
-              <Th>Home volume</Th>
-              <Th>If the home can&apos;t take a file</Th>
-              <Th>Status</Th>
-            </Tr>
-          </Thead>
-          <Tbody>
-            {shown.map((c) => (
-              <CollectionRow
-                key={c.id}
+      <DataTable
+        layout="auto"
+        columns={[
+          {
+            key: 'collection',
+            header: 'Collection',
+            render: (c: Collection) => (
+              <>
+                <span className="font-medium">{c.name}</span>
+                <span className="ml-2 text-xs text-fg-subtle">
+                  {c.record_count.toLocaleString()}{' '}
+                  {c.record_count === 1 ? 'record' : 'records'}
+                </span>
+              </>
+            ),
+          },
+          {
+            key: 'files',
+            header: 'Files are on',
+            render: (c) => (
+              <FilesCell
+                collection={c}
+                placement={byId.get(c.id)}
+                spread={spreadById.get(c.id)}
+                highlight={volumeFilter}
+              />
+            ),
+          },
+          {
+            key: 'home',
+            header: 'Home volume',
+            render: (c) => (
+              <HomeCell
                 collection={c}
                 placement={byId.get(c.id)}
                 volumes={volumes}
-                spread={spreadById.get(c.id)}
-                highlight={volumeFilter}
-                selected={selected.has(c.id)}
-                onSelect={(on) => toggle(c.id, on)}
               />
-            ))}
-          </Tbody>
-        </Table>
-      )}
+            ),
+          },
+          {
+            key: 'policy',
+            header: (
+              <span className="inline-flex items-center gap-1">
+                If home is full
+                <InfoTip>
+                  What happens when the home volume can&apos;t take a file:
+                  write it by the general write order, or refuse the upload.
+                </InfoTip>
+              </span>
+            ),
+            render: (c) => (
+              <PolicyCell collection={c} placement={byId.get(c.id)} />
+            ),
+          },
+          {
+            key: 'status',
+            header: 'Status',
+            className: 'whitespace-nowrap',
+            render: (c) => {
+              const placement = byId.get(c.id)
+              const home = volumes.find((v) => v.name === placement?.volume)
+              return home && home.state !== 'online' ? (
+                <Badge variant="danger">
+                  Home {STATE_LABEL[home.state].toLowerCase()}
+                </Badge>
+              ) : placement ? (
+                <span className="text-fg-muted">Has a home</span>
+              ) : (
+                <span className="text-fg-subtle">Write order</span>
+              )
+            },
+          },
+        ]}
+        rows={shown}
+        getRowId={(c) => c.id}
+        rowHref={(c) => `/collections/${c.id}`}
+        selection={{
+          selected,
+          onToggle: (id) => toggle(id, !selected.has(id)),
+          onToggleAll: () =>
+            setSelected(
+              allShownSelected ? new Set() : new Set(shown.map((c) => c.id)),
+            ),
+          allLabel: 'Select all shown collections',
+          rowLabel: (id) =>
+            `Select ${collections.find((c) => c.id === id)?.name ?? id}`,
+        }}
+        emptyTitle={
+          collections.length === 0
+            ? 'No collections yet'
+            : 'No collections match'
+        }
+      />
     </div>
   )
 }

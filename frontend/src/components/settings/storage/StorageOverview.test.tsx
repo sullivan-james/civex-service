@@ -249,18 +249,15 @@ describe('Storage page', () => {
       ]
       renderAt()
       const links = await screen.findAllByRole('link', {
-        name: /collections?$/,
+        name: /^(archive|default)/,
       })
       const byVolume = Object.fromEntries(
         links.map((l) => [
           (l.getAttribute('href') ?? '').split('/').pop(),
-          l.textContent,
+          l.closest('tr')?.querySelectorAll('td')[3]?.textContent,
         ]),
       )
-      expect(byVolume).toEqual({
-        archive: '2 collections',
-        default: '2 collections',
-      })
+      expect(byVolume).toEqual({ archive: '2', default: '2' })
     })
 
     it('lists the collections on a drive, picking out its share', async () => {

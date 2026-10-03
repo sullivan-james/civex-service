@@ -136,6 +136,9 @@ function renderAt(name: string) {
   )
 }
 
+const openActions = async () =>
+  userEvent.click(await screen.findByRole('button', { name: 'More actions' }))
+
 describe('a volume’s page', () => {
   it('lists the collections on the drive, largest first, with their share', async () => {
     renderAt('default')
@@ -144,7 +147,10 @@ describe('a volume’s page', () => {
     expect(within(rows[0]).getByText('study')).toBeInTheDocument()
     expect(rows[0]).toHaveTextContent('9')
     expect(rows[0]).toHaveTextContent('200 MB')
-    expect(rows[0]).toHaveTextContent(
+    await userEvent.click(
+      within(rows[0]).getByRole('button', { name: 'More information' }),
+    )
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
       '2 files are also used by other collections',
     )
     // field-notes has nothing on default, so isn't listed here
@@ -179,18 +185,18 @@ describe('a volume’s page', () => {
 
   it('says where the volume sits in the write queue', async () => {
     renderAt('default')
+    expect(await screen.findByText('Write order #1')).toBeInTheDocument()
+    await openActions()
     expect(
-      await screen.findByText(/number 1 in the write queue/),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: 'Remove from write queue' }),
+      screen.getByRole('menuitem', { name: 'Remove from write order' }),
     ).toBeInTheDocument()
   })
 
   it('adds an unqueued volume to the queue', async () => {
     renderAt('archive')
+    await openActions()
     await userEvent.click(
-      await screen.findByRole('button', { name: 'Add to write queue' }),
+      screen.getByRole('menuitem', { name: 'Add to write order' }),
     )
     await waitFor(() =>
       expect(calls).toContainEqual({
@@ -225,19 +231,25 @@ describe('a volume’s page', () => {
     renderAt('usb')
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('path missing: /media/usb')
-    expect(alert).toHaveTextContent('Plug the drive in.')
-    expect(alert).toHaveTextContent('complete even while the drive is away')
+    await userEvent.click(
+      within(alert).getByRole('button', { name: 'More information' }),
+    )
+    const tip = screen.getByRole('tooltip')
+    expect(tip).toHaveTextContent('Plug the drive in.')
+    expect(tip).toHaveTextContent('complete even while the drive is away')
     expect(await screen.findByText('study')).toBeInTheDocument()
     // moving files off a drive that can't be read isn't offered
+    await openActions()
     expect(
-      screen.queryByRole('button', { name: /Move everything off/ }),
+      screen.queryByRole('menuitem', { name: /Move everything off/ }),
     ).toBeNull()
   })
 
   it('starts a move off the drive from its page', async () => {
     renderAt('default')
+    await openActions()
     await userEvent.click(
-      await screen.findByRole('button', { name: 'Move everything off…' }),
+      screen.getByRole('menuitem', { name: 'Move everything off…' }),
     )
     expect(await screen.findByLabelText(/Move everything off/)).toHaveValue(
       'default',
@@ -288,6 +300,7 @@ describe('a volume’s page', () => {
     })
     transfers = [t('t1', ['default'], ['archive']), t('t2', ['x'], ['y'])]
     renderAt('archive')
+    await userEvent.click(await screen.findByRole('tab', { name: /Moves/ }))
     expect(
       await screen.findByText('Empty default onto archive'),
     ).toBeInTheDocument()

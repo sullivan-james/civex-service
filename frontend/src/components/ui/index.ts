@@ -1,9 +1,10 @@
 export { Button } from './Button'
 export { IconButton } from './IconButton'
 export { Badge } from './Badge'
-export { Table, Thead, Th, Tbody, Tr, Td } from './Table'
 export {
   DataTable,
+  DataTableCell,
+  type DataTableSelection,
   type DataTableColumn,
   type DataTableSort,
   type DataTableAlign,

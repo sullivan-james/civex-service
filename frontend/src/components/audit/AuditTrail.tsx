@@ -2,20 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { AuditLogEntry, PaginatedAuditLog } from '../../api/audit'
 import type { AuditSummary } from '../../utils/schemaAudit'
-import {
-  CollapsibleSection,
-  Table,
-  Thead,
-  Th,
-  Tbody,
-  Tr,
-  Td,
-  Badge,
-  Pagination,
-  TableSkeleton,
-  ErrorState,
-  EmptyState,
-} from '../ui'
+import { CollapsibleSection, DataTable, Badge, Pagination } from '../ui'
 import { errorMessage } from '../../lib/errors'
 
 const ACTION_VARIANT: Record<
@@ -56,63 +43,61 @@ export function AuditTrail({
 
   return (
     <CollapsibleSection title="History" count={data?.total}>
-      {isLoading ? (
-        <TableSkeleton columns={['w-40', 'w-20', 'w-full']} rows={5} />
-      ) : error ? (
-        <ErrorState message={errorMessage(error)} />
-      ) : !data || data.items.length === 0 ? (
-        <EmptyState title="No history yet" message={emptyMessage} />
-      ) : (
-        <>
-          <Table>
-            <Thead>
-              <tr>
-                <Th className="w-44">When</Th>
-                <Th className="w-24">Action</Th>
-                <Th>Change</Th>
-              </tr>
-            </Thead>
-            <Tbody>
-              {data.items.map((entry) => {
-                const { title, detail } = describeEntry(entry)
-                return (
-                  <Tr key={entry.id}>
-                    <Td className="text-xs text-fg-muted whitespace-nowrap">
-                      {new Date(entry.timestamp).toLocaleString()}
-                    </Td>
-                    <Td>
-                      <Badge
-                        variant={ACTION_VARIANT[entry.action] ?? 'default'}
-                      >
-                        {entry.action}
-                      </Badge>
-                    </Td>
-                    <Td>
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-sm text-fg">{title}</span>
-                        {detail && (
-                          <span className="text-xs text-fg-muted">
-                            {detail}
-                          </span>
-                        )}
-                      </div>
-                    </Td>
-                  </Tr>
-                )
-              })}
-            </Tbody>
-          </Table>
-          <Pagination
-            page={page}
-            pageSize={pageSize}
-            total={data.total}
-            onPage={setPage}
-            onPageSize={(size) => {
-              setPageSize(size)
-              setPage(0)
-            }}
-          />
-        </>
+      <DataTable
+        layout="auto"
+        columns={[
+          {
+            key: 'when',
+            header: 'When',
+            width: '12rem',
+            className: 'text-fg-muted whitespace-nowrap',
+            render: (e: AuditLogEntry) =>
+              new Date(e.timestamp).toLocaleString(),
+          },
+          {
+            key: 'action',
+            header: 'Action',
+            width: '7rem',
+            render: (e) => (
+              <Badge variant={ACTION_VARIANT[e.action] ?? 'default'}>
+                {e.action}
+              </Badge>
+            ),
+          },
+          {
+            key: 'change',
+            header: 'Change',
+            render: (e) => {
+              const { title, detail } = describeEntry(e)
+              return (
+                <div className="flex flex-col gap-0.5">
+                  <span>{title}</span>
+                  {detail && (
+                    <span className="text-xs text-fg-muted">{detail}</span>
+                  )}
+                </div>
+              )
+            },
+          },
+        ]}
+        rows={data?.items ?? []}
+        getRowId={(e) => String(e.id)}
+        isLoading={isLoading}
+        error={error ? errorMessage(error) : undefined}
+        emptyTitle="No history yet"
+        emptyMessage={emptyMessage}
+      />
+      {data && data.items.length > 0 && (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={data.total}
+          onPage={setPage}
+          onPageSize={(size) => {
+            setPageSize(size)
+            setPage(0)
+          }}
+        />
       )}
     </CollapsibleSection>
   )

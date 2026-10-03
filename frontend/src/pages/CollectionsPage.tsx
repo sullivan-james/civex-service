@@ -1,27 +1,19 @@
 import { useRef, useState } from 'react'
-import { Link } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCollections, useCreateCollection } from '../hooks/useCollections'
 import {
   Badge,
   Button,
   CreateResourceModal,
-  ErrorState,
   Field,
   TimeZoneSelect,
-  TableSkeleton,
   Modal,
   ModalBody,
   ModalFooter,
   ModalHeader,
   MonoId,
   Page,
-  Table,
-  Tbody,
-  Td,
-  Th,
-  Thead,
-  Tr,
+  DataTable,
 } from '../components/ui'
 import { pluralise } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
@@ -39,7 +31,6 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
     <CreateResourceModal
       resourceLabel="collection"
       namePlaceholder="my-collection"
-      nameHint="A collection is a named container for records — e.g. one per field season or per site."
       onClose={onClose}
       isPending={create.isPending}
       error={create.error}
@@ -47,12 +38,12 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
         <>
           <Field
             label="Timezone"
-            hint="Datetimes without a UTC offset are read in this zone, and everyone sees them in it. Leave unset to use each viewer's own timezone."
+            info="Datetimes without a UTC offset are read in this zone, and everyone sees them in it. Unset: each viewer's own timezone."
           >
             <TimeZoneSelect
               value={timezone}
               onChange={setTimezone}
-              unsetLabel="Not set — each viewer's own timezone"
+              unsetLabel="Viewer's own"
               className="w-full"
             />
           </Field>
@@ -157,30 +148,18 @@ export default function CollectionsPage() {
     <Page
       title="Collections"
       action={
-        <div className="flex items-center gap-2">
-          {importError && (
-            <span className="text-xs text-danger">{importError}</span>
-          )}
-          <Button
-            variant="default"
-            onClick={() => dumpApi.exportDump()}
-            title="Download a YAML dump of all schemas, collections, and records"
-          >
-            Export dump
-          </Button>
-          <Button
-            variant="default"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importing}
-            title="Restore from a civex-dump.yaml file"
-          >
-            {importing ? 'Importing…' : 'Import dump'}
-          </Button>
-          <Button variant="primary" onClick={() => setShowCreate(true)}>
-            New collection
-          </Button>
-        </div>
+        <Button variant="primary" onClick={() => setShowCreate(true)}>
+          New collection
+        </Button>
       }
+      secondaryActions={[
+        { label: 'Export dump', onClick: () => dumpApi.exportDump() },
+        {
+          label: importing ? 'Importing…' : 'Import dump',
+          onClick: () => fileInputRef.current?.click(),
+          disabled: importing,
+        },
+      ]}
     >
       {showCreate && (
         <CreateCollectionModal onClose={() => setShowCreate(false)} />
@@ -201,85 +180,54 @@ export default function CollectionsPage() {
         onChange={handleImportFile}
       />
 
-      {isLoading && (
-        <TableSkeleton columns={['w-32', 'w-20', 'w-48', 'w-20']} rows={8} />
+      {importError && (
+        <p role="alert" className="text-sm text-danger">
+          {importError}
+        </p>
       )}
-      {error && <ErrorState message={errorMessage(error)} />}
 
-      {data?.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <svg
-            width="40"
-            height="40"
-            viewBox="0 0 16 16"
-            fill="none"
-            className="mb-4 text-border"
-            aria-hidden
-          >
-            <rect
-              x="1"
-              y="3"
-              width="14"
-              height="10"
-              rx="2"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            />
-            <path
-              d="M4 7h8M4 9.5h5"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-          </svg>
-          <h2 className="text-lg font-semibold text-fg mb-2">
-            No collections yet
-          </h2>
-          <p className="text-sm text-fg-muted mb-6 max-w-sm">
-            A collection is a named container for your records. Create one to
-            start adding data.
-          </p>
+      <DataTable
+        layout="auto"
+        columns={[
+          {
+            key: 'name',
+            header: 'Name',
+            render: (d) => <span className="font-medium">{d.name}</span>,
+          },
+          {
+            key: 'records',
+            header: 'Records',
+            render: (d) => (
+              <Badge variant={d.record_count > 0 ? 'success' : 'default'}>
+                {pluralise(d.record_count, 'record')}
+              </Badge>
+            ),
+          },
+          {
+            key: 'description',
+            header: 'Description',
+            className: 'text-fg-muted',
+            render: (d) => d.description ?? '',
+          },
+          {
+            key: 'id',
+            header: 'ID',
+            width: '7rem',
+            render: (d) => <MonoId id={d.id} />,
+          },
+        ]}
+        rows={data ?? []}
+        getRowId={(d) => d.id}
+        rowHref={(d) => `/collections/${d.id}`}
+        isLoading={isLoading}
+        error={error ? errorMessage(error) : undefined}
+        emptyTitle="No collections yet"
+        emptyAction={
           <Button variant="primary" onClick={() => setShowCreate(true)}>
-            Create collection
+            New collection
           </Button>
-        </div>
-      )}
-
-      {data && data.length > 0 && (
-        <Table>
-          <Thead>
-            <tr>
-              <Th>Name</Th>
-              <Th>Records</Th>
-              <Th>Description</Th>
-              <Th className="w-28">ID</Th>
-            </tr>
-          </Thead>
-          <Tbody>
-            {data.map((d) => (
-              <Tr key={d.id}>
-                <Td>
-                  <Link
-                    to={`/collections/${d.id}`}
-                    className="font-medium text-accent hover:underline"
-                  >
-                    {d.name}
-                  </Link>
-                </Td>
-                <Td>
-                  <Badge variant={d.record_count > 0 ? 'success' : 'default'}>
-                    {pluralise(d.record_count, 'record')}
-                  </Badge>
-                </Td>
-                <Td className="text-fg-muted">{d.description ?? ''}</Td>
-                <Td>
-                  <MonoId id={d.id} />
-                </Td>
-              </Tr>
-            ))}
-          </Tbody>
-        </Table>
-      )}
+        }
+      />
     </Page>
   )
 }

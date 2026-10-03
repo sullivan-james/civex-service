@@ -12,17 +12,17 @@ import { formatSize } from '../../../utils/storage'
 import {
   Badge,
   Button,
+  DataTable,
   EmptyState,
   ErrorState,
+  InfoTip,
+  Page,
   Skeleton,
-  Table,
-  Tbody,
-  Td,
-  Th,
-  Thead,
-  Tr,
+  TabNav,
+  TabPanel,
+  useTabParam,
 } from '../../ui'
-import { ArrowLeft, Network } from '../../ui/icons'
+import { Network } from '../../ui/icons'
 import { NewTransferModal, type TransferPreset } from './NewTransferModal'
 import { StatusDot } from './StatusDot'
 import { TransferCard } from './TransferCard'
@@ -31,10 +31,23 @@ import { NEEDS_ATTENTION, STATE_LABEL } from './volumeState'
 import { VolumeSpace } from './VolumeSpace'
 
 const STORAGE = '/settings/storage'
+const VOLUME_TABS = [{ id: 'contents' }, { id: 'moves' }] as const
 
-/** One volume, with everything about it in one place: its state and what to do
- * about a problem, its space, its part in the write queue, which collections
- * are on it, what on it is unused, and the moves that involve it. */
+interface ContentRow {
+  key: string
+  name: string
+  files: number
+  bytes: number
+  muted?: boolean
+  collectionId?: string
+  home?: boolean
+  shared?: number
+  note?: string
+  kind: 'collection' | 'history' | 'unused'
+}
+
+/** One volume: its state and space in the header, then tabs for what is on it
+ * and the moves that involve it. */
 export default function VolumePage() {
   const { name = '' } = useParams()
   const navigate = useNavigate()
@@ -45,6 +58,7 @@ export default function VolumePage() {
   const { data: transfers = [] } = useTransfers()
   const actions = useVolumeActions(() => navigate(STORAGE))
   const [moving, setMoving] = useState<TransferPreset | null>(null)
+  const [tab, setTab] = useTabParam(VOLUME_TABS, 'contents')
 
   const vol = volumes?.find((v) => v.name === name)
 
@@ -100,13 +114,12 @@ export default function VolumePage() {
   if (error) return <ErrorState message={errorMessage(error)} />
   if (!vol)
     return (
-      <div className="space-y-4">
-        <BackLink />
+      <Page breadcrumbs={crumbs(name)}>
         <EmptyState
           title={`No volume called “${name}”`}
           message="It may have been removed."
         />
-      </div>
+      </Page>
     )
 
   const attention = NEEDS_ATTENTION.includes(vol.state)
@@ -118,234 +131,237 @@ export default function VolumePage() {
   )
   const homed = placements.filter((p) => p.volume === vol.name).length
 
-  return (
-    <div className="space-y-6">
-      <BackLink />
+  const contents: ContentRow[] = [
+    ...rows.map((r): ContentRow => ({
+      key: r.id,
+      name: r.name,
+      files: r.files,
+      bytes: r.bytes,
+      collectionId: r.id,
+      home: r.home,
+      shared: r.shared,
+      kind: 'collection',
+    })),
+    ...(vol.history_files > 0
+      ? [
+          {
+            key: '__history',
+            name: 'Workflow run history',
+            files: vol.history_files,
+            bytes: vol.history_bytes,
+            muted: true,
+            note: 'Kept because a workflow run took these files as input. No collection uses them now.',
+            kind: 'history' as const,
+          },
+        ]
+      : []),
+    ...(vol.unused_files > 0
+      ? [
+          {
+            key: '__unused',
+            name: 'Unused',
+            files: vol.unused_files,
+            bytes: vol.unused_bytes,
+            muted: true,
+            note: 'Nothing uses these files. Cleaning up reclaims the space.',
+            kind: 'unused' as const,
+          },
+        ]
+      : []),
+  ]
 
-      <header className="space-y-2">
-        <div className="flex flex-wrap items-center gap-3">
-          <h2 className="text-lg font-semibold text-fg">{vol.name}</h2>
-          <span className="inline-flex items-center gap-2 text-sm text-fg">
+  const tabs = [
+    { id: 'contents' as const, label: 'Contents' },
+    ...(mine.length > 0
+      ? [{ id: 'moves' as const, label: `Moves (${mine.length})` }]
+      : []),
+  ]
+  const shownTab = tab === 'moves' && mine.length === 0 ? 'contents' : tab
+
+  return (
+    <Page
+      breadcrumbs={crumbs(vol.name)}
+      title={
+        <span className="flex flex-wrap items-center gap-3">
+          {vol.name}
+          <span className="inline-flex items-center gap-2 text-sm font-normal">
             <StatusDot state={vol.state} />
             {STATE_LABEL[vol.state]}
           </span>
           {vol.network && (
             <Badge variant="accent">
-              <Network size={11} className="mr-1" aria-hidden="true" />
+              <Network size={12} className="mr-1" aria-hidden="true" />
               Network
             </Badge>
           )}
-        </div>
+        </span>
+      }
+      action={
+        attention && vol.state === 'wrong_drive' ? (
+          <Button variant="primary" onClick={() => actions.adopt(vol)}>
+            This is the right drive…
+          </Button>
+        ) : undefined
+      }
+      secondaryActions={[
+        { label: 'Edit…', onClick: () => actions.edit(vol) },
+        {
+          label:
+            queueIndex >= 0 ? 'Remove from write order' : 'Add to write order',
+          onClick: () => actions.toggleQueue(vol.name),
+        },
+        ...(attention
+          ? []
+          : [
+              {
+                label: 'Move everything off…',
+                onClick: () => setMoving({ source: vol.name }),
+              },
+            ]),
+        {
+          label: 'Remove…',
+          variant: 'danger' as const,
+          onClick: () => actions.remove(vol),
+        },
+      ]}
+      tabs={
+        tabs.length > 1 ? (
+          <TabNav
+            label="Volume"
+            tabs={tabs}
+            value={shownTab}
+            onChange={setTab}
+          />
+        ) : undefined
+      }
+    >
+      <div className="space-y-3">
         <p className="break-all font-mono text-xs text-fg-muted">{vol.path}</p>
         {attention && (
           <div
             role="alert"
-            className="space-y-1 rounded-md border border-attention-muted bg-attention-subtle px-4 py-3 text-sm"
+            className="flex items-center gap-2 rounded-md border border-attention-muted bg-attention-subtle px-4 py-3 text-sm"
           >
-            <p
+            <span
               className={
                 vol.state === 'wrong_drive' ? 'text-danger' : 'text-attention'
               }
             >
               {vol.reason}
-            </p>
-            {vol.fix && <p className="text-fg-muted">{vol.fix}</p>}
-            {vol.state === 'wrong_drive' && (
-              <button
-                type="button"
-                onClick={() => actions.adopt(vol)}
-                className="cursor-pointer text-accent hover:underline"
-              >
-                This is the right drive…
-              </button>
-            )}
-            <p className="text-fg-muted">
-              The list below comes from Civex&apos;s records, so it is complete
-              even while the drive is away; its files can&apos;t be opened until
-              it is back.
-            </p>
+            </span>
+            <InfoTip>
+              {vol.fix} The list below comes from Civex&apos;s records, so it is
+              complete even while the drive is away; its files can&apos;t be
+              opened until it is back.
+            </InfoTip>
           </div>
         )}
-      </header>
-
-      <section aria-label="Summary" className="grid gap-6 md:grid-cols-3">
-        <div>
-          <h3 className="mb-2 text-sm font-semibold text-fg">Space</h3>
+        <div className="grid items-center gap-x-8 gap-y-2 md:grid-cols-[minmax(0,24rem)_1fr]">
           <VolumeSpace vol={vol} />
-        </div>
-        <div>
-          <h3 className="mb-2 text-sm font-semibold text-fg">Used for</h3>
-          <p className="text-sm text-fg-muted">
-            {queueIndex >= 0
-              ? `New files: number ${queueIndex + 1} in the write queue.`
-              : 'Not in the write queue, so only collections that have it as their home put new files here.'}
+          <p className="flex flex-wrap gap-2 text-sm">
+            <Badge variant={queueIndex >= 0 ? 'accent' : 'default'}>
+              {queueIndex >= 0
+                ? `Write order #${queueIndex + 1}`
+                : 'Not in write order'}
+            </Badge>
+            {homed > 0 && (
+              <Badge>
+                Home of {homed} {homed === 1 ? 'collection' : 'collections'}
+              </Badge>
+            )}
           </p>
-          <p className="mt-1 text-sm text-fg-muted">
-            {homed > 0
-              ? `Home of ${homed} ${homed === 1 ? 'collection' : 'collections'}.`
-              : 'Not the home of any collection.'}
-          </p>
         </div>
-        <div className="flex flex-wrap content-start gap-2">
-          <Button size="sm" onClick={() => actions.edit(vol)}>
-            Edit…
-          </Button>
-          <Button size="sm" onClick={() => actions.toggleQueue(vol.name)}>
-            {queueIndex >= 0 ? 'Remove from write queue' : 'Add to write queue'}
-          </Button>
-          {!attention && (
-            <Button size="sm" onClick={() => setMoving({ source: vol.name })}>
-              Move everything off…
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant="danger"
-            onClick={() => actions.remove(vol)}
-          >
-            Remove…
-          </Button>
-        </div>
-      </section>
+      </div>
 
-      <section aria-labelledby="on-volume" className="space-y-3">
-        <h3 id="on-volume" className="text-base font-semibold text-fg">
-          What is on this volume
-        </h3>
-        {rows.length === 0 &&
-        vol.unused_files === 0 &&
-        vol.history_files === 0 ? (
-          <EmptyState title="Nothing is stored here yet" />
-        ) : (
-          <Table>
-            <Thead>
-              <Tr>
-                <Th>Collection</Th>
-                <Th>Files</Th>
-                <Th>Size</Th>
-                <Th>Share of this volume</Th>
-                <Th>
-                  <span className="sr-only">Actions</span>
-                </Th>
-              </Tr>
-            </Thead>
-            <Tbody>
-              {rows.map((r) => (
-                <Tr key={r.id}>
-                  <Td>
-                    <Link
-                      to={`/collections/${r.id}`}
-                      className="font-medium text-accent hover:underline"
-                    >
-                      {r.name}
-                    </Link>
-                    {r.home && (
-                      <span className="ml-2 text-xs text-fg-muted">home</span>
-                    )}
-                    {r.shared > 0 && (
-                      <p className="text-xs text-fg-subtle">
-                        {r.shared} {r.shared === 1 ? 'file is' : 'files are'}{' '}
-                        also used by other collections
-                      </p>
-                    )}
-                  </Td>
-                  <Td>{r.files.toLocaleString()}</Td>
-                  <Td>{formatSize(r.bytes)}</Td>
-                  <Td className="w-48">
-                    <ShareBar bytes={r.bytes} total={total} />
-                  </Td>
-                  <Td className="text-right">
-                    {r.files > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setMoving({ collectionId: r.id })}
-                        className="cursor-pointer text-sm text-accent hover:underline"
-                      >
-                        Move…
-                      </button>
-                    )}
-                  </Td>
-                </Tr>
-              ))}
-              {vol.history_files > 0 && (
-                <Tr>
-                  <Td>
-                    <span className="text-fg">Workflow run history</span>
-                    <p className="text-xs text-fg-subtle">
-                      Kept because a workflow run took these files as input. No
-                      collection uses them now.
-                    </p>
-                  </Td>
-                  <Td>{vol.history_files.toLocaleString()}</Td>
-                  <Td>{formatSize(vol.history_bytes)}</Td>
-                  <Td>
-                    <ShareBar bytes={vol.history_bytes} total={total} muted />
-                  </Td>
-                  <Td />
-                </Tr>
-              )}
-              {vol.unused_files > 0 && (
-                <Tr>
-                  <Td>
-                    <span className="text-fg">Unused</span>
-                    <p className="text-xs text-fg-subtle">
-                      Nothing uses these files. Cleaning up reclaims the space.
-                    </p>
-                  </Td>
-                  <Td>{vol.unused_files.toLocaleString()}</Td>
-                  <Td>{formatSize(vol.unused_bytes)}</Td>
-                  <Td>
-                    <ShareBar bytes={vol.unused_bytes} total={total} muted />
-                  </Td>
-                  <Td className="text-right">
-                    <Link
-                      to={`${STORAGE}?tab=tasks`}
-                      className="text-sm text-accent hover:underline"
-                    >
-                      Clean up
-                    </Link>
-                  </Td>
-                </Tr>
-              )}
-            </Tbody>
-          </Table>
-        )}
-        <p className="text-xs text-fg-subtle">
-          A file used by several collections is counted in each, so these rows
-          can add up to more than the volume holds.
-        </p>
-      </section>
+      <TabPanel id="contents" value={shownTab}>
+        <DataTable
+          layout="auto"
+          columns={[
+            {
+              key: 'name',
+              header: 'Collection',
+              render: (r: ContentRow) => (
+                <>
+                  <span className="font-medium">{r.name}</span>
+                  {r.home && (
+                    <span className="ml-2 text-xs text-fg-muted">home</span>
+                  )}
+                  {r.note && <InfoTip>{r.note}</InfoTip>}
+                  {!!r.shared && (
+                    <InfoTip>
+                      {r.shared} {r.shared === 1 ? 'file is' : 'files are'} also
+                      used by other collections, so rows can add up to more than
+                      the volume holds.
+                    </InfoTip>
+                  )}
+                </>
+              ),
+            },
+            {
+              key: 'files',
+              header: 'Files',
+              render: (r) => r.files.toLocaleString(),
+            },
+            { key: 'size', header: 'Size', render: (r) => formatSize(r.bytes) },
+            {
+              key: 'share',
+              header: 'Share',
+              width: '12rem',
+              render: (r) => (
+                <ShareBar bytes={r.bytes} total={total} muted={r.muted} />
+              ),
+            },
+          ]}
+          rows={contents}
+          getRowId={(r) => r.key}
+          rowHref={(r) =>
+            r.collectionId ? `/collections/${r.collectionId}` : undefined
+          }
+          onRowClick={(r) => {
+            if (r.kind === 'unused') navigate(`${STORAGE}?tab=tasks`)
+          }}
+          emptyTitle="Nothing is stored here yet"
+          actionsWidth="8rem"
+          actions={(r) =>
+            r.kind === 'collection' && r.files > 0 ? (
+              <Button
+                size="sm"
+                variant="link"
+                onClick={() => setMoving({ collectionId: r.collectionId })}
+              >
+                Move…
+              </Button>
+            ) : r.kind === 'unused' ? (
+              <Button size="sm" variant="link" to={`${STORAGE}?tab=tasks`}>
+                Clean up
+              </Button>
+            ) : null
+          }
+        />
+      </TabPanel>
 
-      {mine.length > 0 && (
-        <section aria-labelledby="its-moves" className="space-y-3">
-          <h3 id="its-moves" className="text-base font-semibold text-fg">
-            Moves involving this volume
-          </h3>
-          <ul className="space-y-3">
-            {mine.map((t) => (
-              <TransferCard key={t.id} t={t} />
-            ))}
-          </ul>
-        </section>
-      )}
+      <TabPanel id="moves" value={shownTab}>
+        <ul className="space-y-3">
+          {mine.map((t) => (
+            <TransferCard key={t.id} t={t} />
+          ))}
+        </ul>
+      </TabPanel>
 
       {actions.dialogs}
       {moving && (
         <NewTransferModal preset={moving} onClose={() => setMoving(null)} />
       )}
-    </div>
+    </Page>
   )
 }
 
-function BackLink() {
-  return (
-    <Link
-      to={STORAGE}
-      className="inline-flex items-center gap-1 text-sm text-accent hover:underline"
-    >
-      <ArrowLeft size={14} aria-hidden="true" /> Storage
-    </Link>
-  )
+function crumbs(name: string) {
+  return [
+    { label: 'Settings', to: '/settings' },
+    { label: 'Storage', to: STORAGE },
+    { label: name },
+  ]
 }
 
 function ShareBar({

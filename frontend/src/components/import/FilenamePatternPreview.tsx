@@ -1,4 +1,4 @@
-import { Field, Input } from '../ui'
+import { DataTable, Field, Input } from '../ui'
 import { ArrowRight } from '../ui/icons'
 import {
   FILENAME_FORMAT_TOKENS_HELP,
@@ -127,32 +127,32 @@ export function FilenamePatternPreview({
 
       {pattern && (
         <div className="border border-border rounded-md overflow-hidden">
-          <table className="w-full text-xs">
-            <tbody>
-              {preview.map((row) => (
-                <tr
-                  key={row.filename}
-                  className="border-t border-border-muted first:border-t-0"
-                >
-                  <td className="px-2 py-1.5 font-mono text-fg-muted truncate max-w-[16rem]">
-                    {row.filename}
-                  </td>
-                  <td className="px-2 py-1.5 text-fg-subtle">
-                    <ArrowRight size={11} className="inline" />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    {row.error ? (
-                      <span className="text-danger">{row.error}</span>
-                    ) : (
-                      <code className="bg-success-subtle border border-success-muted px-1.5 py-0.5 rounded-md text-success">
-                        {String(row.value)}
-                      </code>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            layout="auto"
+            columns={[
+              {
+                key: 'filename',
+                header: 'Filename',
+                className: 'font-mono text-fg-muted',
+                render: (row: (typeof preview)[number]) => row.filename,
+              },
+              {
+                key: 'value',
+                header: 'Extracted',
+                render: (row) =>
+                  row.error ? (
+                    <span className="text-danger">{row.error}</span>
+                  ) : (
+                    <code className="bg-success-subtle border border-success-muted px-1.5 py-0.5 rounded-md text-success">
+                      {String(row.value)}
+                    </code>
+                  ),
+              },
+            ]}
+            rows={preview}
+            getRowId={(row) => row.filename}
+            className="border-0 rounded-none"
+          />
           <div className="px-2 py-1.5 text-xs text-fg-muted bg-canvas-subtle border-t border-border-muted">
             {matchCount} of {filenames.length} filename
             {filenames.length === 1 ? '' : 's'} match

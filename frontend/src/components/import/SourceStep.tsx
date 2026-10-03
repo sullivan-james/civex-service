@@ -1,4 +1,4 @@
-import { Button, FormError } from '../ui'
+import { Button, DataTable, FormError } from '../ui'
 import { ArrowRight, Upload, Database } from '../ui/icons'
 import type { ParsedCsv } from '../../utils/csv'
 import type { Mode } from './importWizardTypes'
@@ -108,36 +108,19 @@ export function SourceStep({
                 {parsedCsv.rows.length} row
                 {parsedCsv.rows.length === 1 ? '' : 's'}
               </div>
-              <div className="overflow-x-auto max-h-64">
-                <table className="text-xs w-full">
-                  <thead>
-                    <tr>
-                      {parsedCsv.columns.map((c) => (
-                        <th
-                          key={c}
-                          className="text-left px-2 py-1.5 font-medium text-fg-muted whitespace-nowrap border-b border-border"
-                        >
-                          {c}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {parsedCsv.rows.slice(0, 5).map((row, i) => (
-                      <tr key={i} className="border-t border-border-muted">
-                        {parsedCsv.columns.map((c) => (
-                          <td
-                            key={c}
-                            className="px-2 py-1.5 text-fg whitespace-nowrap"
-                          >
-                            {row[c]}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                layout="auto"
+                maxHeight="16rem"
+                className="border-0 rounded-none"
+                columns={parsedCsv.columns.map((c) => ({
+                  key: c,
+                  header: c,
+                  className: 'whitespace-nowrap',
+                  render: (i: number) => parsedCsv.rows[i][c],
+                }))}
+                rows={parsedCsv.rows.slice(0, 5).map((_, i) => i)}
+                getRowId={(i) => String(i)}
+              />
             </div>
           )}
           {parsedCsv && parsedCsv.rows.length === 0 && (

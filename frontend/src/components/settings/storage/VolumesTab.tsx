@@ -1,40 +1,48 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router'
 import type { VolumeStats } from '../../../api/store'
 import {
-  useAdoptVolume,
   useAllCollectionStorage,
   usePlacements,
-  useSetQueue,
   useVolumes,
 } from '../../../hooks/useStore'
 import {
+  Badge,
   Button,
-  ConfirmDialog,
-  EmptyState,
+  Card,
+  DataTable,
   ErrorState,
+  IconButton,
+  InfoTip,
+  Menu,
   Skeleton,
-  Table,
-  Tbody,
-  Th,
-  Thead,
-  Tr,
+  SortableList,
+  type MenuItem,
 } from '../../ui'
-import { AlertTriangle, ArrowRight, Plus } from '../../ui/icons'
+import {
+  AlertTriangle,
+  MoreVertical,
+  Network,
+  Pencil,
+  Plus,
+  Trash2,
+} from '../../ui/icons'
 import { errorMessage } from '../../../lib/errors'
 import { formatSize } from '../../../utils/storage'
 import { AddVolumeModal } from '../AddVolumeModal'
-import { EditVolumeModal } from './EditVolumeModal'
-import { RemoveVolumeDialog } from './RemoveVolumeDialog'
+import { StatusDot } from './StatusDot'
 import { useVolumeActions } from './useVolumeActions'
-import { VolumeRow } from './VolumeRow'
-import { NEEDS_ATTENTION } from './volumeState'
+import { VolumeSpace } from './VolumeSpace'
+import { NEEDS_ATTENTION, STATE_LABEL } from './volumeState'
 
-/** The volumes Civex keeps files on, one row each. */
+/** The volumes Civex keeps files on, one row each, and the order new files
+ * are written in. */
 export function VolumesTab() {
   const { data: volumes, isLoading, error } = useVolumes()
   const { data: placements = [] } = usePlacements()
   const { data: spreads = [] } = useAllCollectionStorage()
   const actions = useVolumeActions()
+  const navigate = useNavigate()
   const [adding, setAdding] = useState(false)
 
   if (isLoading)
@@ -65,15 +73,54 @@ export function VolumesTab() {
   const used = volumes
     .filter((v) => v.available)
     .reduce((sum, v) => sum + (v.civex_used_bytes ?? 0), 0)
+  const queued = volumes.filter((v) => v.in_queue)
+  const byName = new Map(volumes.map((v) => [v.name, v]))
+  const ordered = actions.queueNames
+    .map((n) => byName.get(n))
+    .filter((v): v is VolumeStats => !!v)
+
+  function menuItems(vol: VolumeStats): MenuItem[] {
+    const inQueue = actions.queueNames.includes(vol.name)
+    return [
+      { label: 'Edit…', icon: Pencil, onClick: () => actions.edit(vol) },
+      {
+        label: inQueue ? 'Remove from write order' : 'Add to write order',
+        onClick: () => actions.toggleQueue(vol.name),
+      },
+      ...(vol.state === 'online' || vol.state === 'readonly'
+        ? [
+            {
+              label: 'Move files off this volume…',
+              onClick: () =>
+                navigate(
+                  `/settings/storage?tab=tasks&from=${encodeURIComponent(vol.name)}`,
+                ),
+            },
+          ]
+        : []),
+      ...(vol.state === 'wrong_drive'
+        ? [
+            {
+              label: 'This is the right drive…',
+              onClick: () => actions.adopt(vol),
+            },
+          ]
+        : []),
+      {
+        label: 'Remove…',
+        icon: Trash2,
+        variant: 'danger' as const,
+        onClick: () => actions.remove(vol),
+      },
+    ]
+  }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4">
-        <p className="max-w-prose text-sm text-fg-muted">
-          Volumes are the folders — usually on separate drives — where Civex
-          keeps files. {volumes.length}{' '}
-          {volumes.length === 1 ? 'volume' : 'volumes'}
-          {' · '}Civex uses {formatSize(used)}.
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-sm text-fg-muted">
+          {volumes.length} {volumes.length === 1 ? 'volume' : 'volumes'} ·{' '}
+          {formatSize(used)} used
         </p>
         <Button variant="primary" size="sm" onClick={() => setAdding(true)}>
           <Plus size={14} /> Add volume
@@ -83,81 +130,144 @@ export function VolumesTab() {
       {attention.length > 0 && (
         <div
           role="alert"
-          className="flex items-start gap-2 rounded-md border border-attention-muted bg-attention-subtle px-4 py-3 text-sm text-attention"
+          className="flex items-center gap-2 rounded-md border border-attention-muted bg-attention-subtle px-4 py-3 text-sm text-attention"
         >
-          <AlertTriangle
-            size={15}
-            className="mt-0.5 shrink-0"
-            aria-hidden="true"
-          />
-          <span>
-            {attention.length === 1
-              ? `${attention[0].name} needs attention.`
-              : `${attention.length} volumes need attention: ${attention.map((v) => v.name).join(', ')}.`}{' '}
-            Files on {attention.length === 1 ? 'it' : 'them'} can&apos;t be
-            opened until {attention.length === 1 ? 'it is' : 'they are'} back.
-          </span>
+          <AlertTriangle size={16} className="shrink-0" aria-hidden="true" />
+          {attention.length === 1
+            ? `${attention[0].name} needs attention`
+            : `${attention.length} volumes need attention: ${attention.map((v) => v.name).join(', ')}`}
         </div>
       )}
 
-      {volumes.length === 0 ? (
-        <EmptyState
-          title="No volumes yet"
-          message="Add a folder, a drive or a network share for Civex to keep files on."
-        />
-      ) : (
-        <Table>
-          <Thead>
-            <Tr>
-              <Th>Volume</Th>
-              <Th>Status</Th>
-              <Th>Space</Th>
-              <Th>Write queue</Th>
-              <Th>Collections</Th>
-              <Th className="w-12">
-                <span className="sr-only">Actions</span>
-              </Th>
-            </Tr>
-          </Thead>
-          <Tbody>
-            {volumes.map((vol) => (
-              <VolumeRow
-                key={vol.name}
-                vol={vol}
-                queueIndex={actions.queueNames.indexOf(vol.name)}
-                queueLength={actions.queueNames.length}
-                collections={collectionsOn(vol.name)}
-                onEdit={() => actions.edit(vol)}
-                onRemove={() => actions.remove(vol)}
-                onAdopt={() => actions.adopt(vol)}
-                onMove={(delta) => actions.moveInQueue(vol.name, delta)}
-                onToggleQueue={() => actions.toggleQueue(vol.name)}
+      <DataTable
+        layout="auto"
+        columns={[
+          {
+            key: 'volume',
+            header: 'Volume',
+            render: (vol) => (
+              <>
+                <span className="flex items-center gap-2 font-medium">
+                  {vol.name}
+                  {vol.network && (
+                    <Badge variant="accent">
+                      <Network size={12} className="mr-1" aria-hidden="true" />
+                      Network
+                    </Badge>
+                  )}
+                </span>
+                <span
+                  className="block max-w-96 truncate font-mono text-xs text-fg-muted"
+                  title={vol.path}
+                >
+                  {vol.path}
+                </span>
+              </>
+            ),
+          },
+          {
+            key: 'status',
+            header: 'Status',
+            className: 'whitespace-nowrap',
+            render: (vol) => (
+              <>
+                <span className="inline-flex items-center gap-2">
+                  <StatusDot state={vol.state} />
+                  {STATE_LABEL[vol.state]}
+                  {NEEDS_ATTENTION.includes(vol.state) && (
+                    <InfoTip>
+                      {vol.reason}
+                      {vol.fix ? ` ${vol.fix}` : ''}
+                    </InfoTip>
+                  )}
+                </span>
+                {vol.warning && vol.state === 'online' && (
+                  <span className="mt-1 flex items-center gap-1 text-xs text-attention">
+                    <AlertTriangle size={12} aria-hidden="true" /> Low space
+                  </span>
+                )}
+              </>
+            ),
+          },
+          {
+            key: 'space',
+            header: 'Space',
+            render: (vol) => <VolumeSpace vol={vol} />,
+          },
+          {
+            key: 'collections',
+            header: 'Collections',
+            render: (vol) => {
+              const n = collectionsOn(vol.name)
+              return n > 0 ? n : <span className="text-fg-subtle">—</span>
+            },
+          },
+        ]}
+        rows={volumes}
+        getRowId={(vol) => vol.name}
+        rowHref={(vol) =>
+          `/settings/storage/volumes/${encodeURIComponent(vol.name)}`
+        }
+        emptyTitle="No volumes yet"
+        emptyAction={
+          <Button variant="primary" size="sm" onClick={() => setAdding(true)}>
+            <Plus size={14} /> Add volume
+          </Button>
+        }
+        actionsWidth="4rem"
+        actions={(vol) => (
+          <Menu
+            items={menuItems(vol)}
+            trigger={({ open, toggle }) => (
+              <IconButton
+                icon={MoreVertical}
+                aria-label={`Actions for ${vol.name}`}
+                aria-haspopup="menu"
+                aria-expanded={open}
+                onClick={toggle}
               />
-            ))}
-          </Tbody>
-        </Table>
-      )}
+            )}
+          />
+        )}
+      />
 
-      <div className="rounded-md border border-border bg-canvas-subtle px-4 py-3 text-xs text-fg-muted">
-        <p className="flex flex-wrap items-center gap-1">
-          <span className="font-semibold text-fg">Write queue:</span>
-          {actions.queueNames.length ? (
-            actions.queueNames.map((name, i) => (
-              <span key={name} className="inline-flex items-center gap-1">
-                {i > 0 && <ArrowRight size={11} aria-hidden="true" />}
-                {name}
-              </span>
-            ))
+      {volumes.length > 0 && (
+        <Card
+          title={
+            <>
+              Write order
+              <InfoTip>
+                New files go to the first volume here that is online and has
+                room. A volume outside this list is only used by collections
+                that have it as their home.
+              </InfoTip>
+            </>
+          }
+          flush
+        >
+          {queued.length === 0 ? (
+            <p className="px-4 py-3 text-sm text-fg-muted">None</p>
           ) : (
-            <span>empty</span>
+            <SortableList
+              label="Write order"
+              items={ordered}
+              getKey={(v) => v.name}
+              getLabel={(v) => v.name}
+              moveButtons="always"
+              onReorder={(next) =>
+                actions.setQueueOrder(next.map((v) => v.name))
+              }
+              renderItem={(vol, i) => (
+                <span className="flex min-h-12 items-center gap-3 px-2 text-sm">
+                  <span className="w-5 text-fg-muted">{i + 1}</span>
+                  <span className="font-medium">{vol.name}</span>
+                  <StatusDot state={vol.state} />
+                </span>
+              )}
+            />
           )}
-        </p>
-        <p className="mt-1">
-          New files go to the first volume in the queue that is online and has
-          room. A volume outside the queue is only used by collections that have
-          it as their home. Files that already exist are never copied again.
-        </p>
-      </div>
+        </Card>
+      )}
 
       {adding && (
         <AddVolumeModal

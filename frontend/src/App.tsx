@@ -102,12 +102,15 @@ export default function App() {
               path="/plugins/container/:name/edit"
               element={<ContainerPluginEditorPage />}
             />
+            <Route
+              path="/settings/storage/volumes/:name"
+              element={<VolumePage />}
+            />
             <Route path="/settings" element={<SettingsLayout />}>
               <Route index element={<Navigate to="appearance" replace />} />
               <Route path="appearance" element={<ThemeSection />} />
               <Route path="database" element={<DatabaseSection />} />
               <Route path="storage" element={<StorageSettings />} />
-              <Route path="storage/volumes/:name" element={<VolumePage />} />
               <Route path="recently-deleted" element={<RetentionSection />} />
               <Route path="map" element={<MapSection />} />
               <Route path="advanced" element={<AdvancedSection />} />

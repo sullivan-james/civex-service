@@ -34,6 +34,10 @@ export function useVolumeActions(onRemoved?: () => void) {
     setQueue.mutate(next)
   }
 
+  function setQueueOrder(names: string[]) {
+    setQueue.mutate(names)
+  }
+
   function toggleQueue(name: string) {
     setQueue.mutate(
       queueNames.includes(name)
@@ -85,6 +89,7 @@ export function useVolumeActions(onRemoved?: () => void) {
   return {
     queueNames,
     moveInQueue,
+    setQueueOrder,
     toggleQueue,
     edit: setEditing,
     remove: setRemoving,

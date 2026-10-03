@@ -166,8 +166,9 @@ function renderAt(path = '/settings/storage') {
   )
 }
 
-const rowOf = (name: string) =>
-  screen.getByRole('link', { name }).closest('tr') as HTMLElement
+const volumeLink = (name: string) =>
+  screen.getByRole('link', { name: new RegExp(`^${name}`) })
+const rowOf = (name: string) => volumeLink(name).closest('tr') as HTMLElement
 
 async function openMenu(
   user: ReturnType<typeof userEvent.setup>,
@@ -182,7 +183,7 @@ describe('Storage > Volumes', () => {
   it('shows one compact row per volume with its state and path', async () => {
     renderAt()
 
-    await screen.findByRole('link', { name: 'archive' })
+    await screen.findByRole('link', { name: /^archive/ })
     expect(within(rowOf('default')).getByText('Online')).toBeInTheDocument()
     expect(
       within(rowOf('archive')).getByText('/media/archive'),
@@ -198,44 +199,41 @@ describe('Storage > Volumes', () => {
     expect(within(rowOf('usb')).getByText('Wrong drive')).toBeInTheDocument()
   })
 
-  it('says what is wrong with a volume right under its name', async () => {
-    renderAt()
-
-    await screen.findByRole('link', { name: 'nas' })
-    expect(
-      within(rowOf('nas')).getByText('path missing: /mnt/nas/civex'),
-    ).toBeInTheDocument()
-    expect(
-      within(rowOf('usb')).getByText(/found no volume marker/),
-    ).toBeInTheDocument()
-    const banner = screen.getByRole('alert')
-    expect(banner).toHaveTextContent('2 volumes need attention: nas, usb.')
-  })
-
-  it('links a volume to its page, with the collections that use it', async () => {
-    renderAt()
-
-    await screen.findByRole('link', { name: 'archive' })
-    const link = within(rowOf('archive')).getByRole('link', {
-      name: '1 collection',
-    })
-    expect(link).toHaveAttribute('href', '/settings/storage/volumes/archive')
-    expect(
-      within(rowOf('default')).queryByRole('link', { name: /collection/ }),
-    ).not.toBeInTheDocument()
-  })
-
-  it('reorders the write queue', async () => {
+  it('flags volumes that need attention and explains them in a tooltip', async () => {
     const user = userEvent.setup()
     renderAt()
-    await screen.findByRole('link', { name: 'archive' })
 
-    expect(within(rowOf('default')).getByText('#1')).toBeInTheDocument()
+    await screen.findByRole('link', { name: /^nas/ })
+    const banner = screen.getByRole('alert')
+    expect(banner).toHaveTextContent('2 volumes need attention: nas, usb')
     await user.click(
-      screen.getByRole('button', {
-        name: 'Move default later in the write queue',
-      }),
+      within(rowOf('nas')).getByRole('button', { name: 'More information' }),
     )
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      'path missing: /mnt/nas/civex',
+    )
+  })
+
+  it('links the whole row to the volume page and counts its collections', async () => {
+    renderAt()
+
+    await screen.findByRole('link', { name: /^archive/ })
+    expect(volumeLink('archive')).toHaveAttribute(
+      'href',
+      '/settings/storage/volumes/archive',
+    )
+    expect(within(rowOf('archive')).getByText('1')).toBeInTheDocument()
+    expect(within(rowOf('default')).getByText('—')).toBeInTheDocument()
+  })
+
+  it('reorders the write order', async () => {
+    const user = userEvent.setup()
+    renderAt()
+    await screen.findByRole('link', { name: /^archive/ })
+
+    const order = screen.getByRole('list', { name: 'Write order' })
+    expect(within(order).getByText('default')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Move default down' }))
 
     await waitFor(() =>
       expect(calls).toContainEqual({
@@ -252,7 +250,7 @@ describe('Storage > Volumes', () => {
     await openMenu(user, 'scratch')
 
     await user.click(
-      screen.getByRole('menuitem', { name: 'Add to write queue' }),
+      screen.getByRole('menuitem', { name: 'Add to write order' }),
     )
 
     await waitFor(() =>
@@ -357,12 +355,11 @@ describe('Storage > Volumes', () => {
   it('confirms before treating a wrong drive as the volume', async () => {
     const user = userEvent.setup()
     renderAt()
-    await screen.findByRole('link', { name: 'usb' })
+    await screen.findByRole('link', { name: /^usb/ })
 
+    await openMenu(user, 'usb')
     await user.click(
-      within(rowOf('usb')).getByRole('button', {
-        name: 'This is the right drive',
-      }),
+      screen.getByRole('menuitem', { name: 'This is the right drive…' }),
     )
     expect(
       await screen.findByRole('heading', {
@@ -403,7 +400,7 @@ describe('Storage > Collections', () => {
     expect(study).toHaveValue('archive')
     expect(screen.getByLabelText('Home volume for field-notes')).toHaveValue('')
     expect(screen.getByLabelText('Home volume for zoo')).toHaveValue('')
-    expect(screen.getByRole('link', { name: 'study' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /^study/ })).toHaveAttribute(
       'href',
       '/collections/c1',
     )
@@ -550,8 +547,8 @@ describe('Storage > Collections', () => {
     const user = userEvent.setup()
     renderAt('/settings/storage?tab=collections')
 
-    expect(await screen.findByText(/only have one volume/)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Go to volumes' }))
+    expect(await screen.findByText(/One volume/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add a volume' }))
 
     expect(screen.getByTestId('where')).toHaveTextContent('/settings/storage')
     expect(

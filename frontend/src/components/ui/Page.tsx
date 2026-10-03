@@ -2,6 +2,7 @@ import { type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { IconButton } from './IconButton'
 import { Menu } from './Menu'
+import { InfoTip } from './Tooltip'
 import { ChevronRight, MoreVertical } from './icons'
 
 export interface BreadcrumbItem {
@@ -94,6 +95,9 @@ function PageActionsMenu({ actions }: { actions: PageMenuAction[] }) {
 export interface PageProps {
   breadcrumbs?: BreadcrumbItem[]
   title?: ReactNode
+  /** Explanation of the page, shown as a tooltip beside the title. */
+  info?: ReactNode
+  /** @deprecated Standing subtitle text; use `info`. */
   description?: ReactNode
   action?: ReactNode
   secondaryActions?: PageMenuAction[]
@@ -113,6 +117,7 @@ export interface PageProps {
 export function Page({
   breadcrumbs,
   title,
+  info,
   description,
   action,
   secondaryActions,
@@ -141,8 +146,9 @@ export function Page({
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
                 {title && (
-                  <h1 className="text-2xl font-bold tracking-tight text-fg">
+                  <h1 className="flex items-center gap-1 text-xl font-semibold text-fg">
                     {title}
+                    {info && <InfoTip side="bottom">{info}</InfoTip>}
                   </h1>
                 )}
                 {description && (
