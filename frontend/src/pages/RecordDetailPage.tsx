@@ -25,7 +25,7 @@ import {
   useTabParam,
 } from '../components/ui'
 import { ReferencedBy } from '../components/records/ReferencedBy'
-import { ContainsPreview } from '../components/records/ContainsPreview'
+import { RecordsExplorer } from '../components/explorer/RecordsExplorer'
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { RecordPageFrame } from '../components/records/RecordPageFrame'
 import { fieldSaveErrors } from '../components/records/saveErrors'
@@ -238,10 +238,9 @@ export default function RecordDetailPage() {
 
         <TabPanel id="contains" value={shownTab}>
           {collection && (
-            <ContainsPreview
-              record={record}
-              collection={collection.name}
-              collectionId={record.dataset_id}
+            <RecordsExplorer
+              dataset={collection.name}
+              root={{ id: record.id }}
               pollMs={hasActiveJobs ? 2000 : 5000}
             />
           )}

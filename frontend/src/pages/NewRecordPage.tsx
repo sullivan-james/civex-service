@@ -26,6 +26,7 @@ import {
 import { ScanText } from '../components/ui/icons'
 import { displayLabel } from '../utils/naming'
 import { errorMessage } from '../lib/errors'
+import { useBack } from '../hooks/useBack'
 
 const PARENT = '__parent__'
 
@@ -71,14 +72,17 @@ export default function NewRecordPage() {
     [parentSchema, parentParam],
   )
 
-  const listHref = `/collections/${id}${
-    schemaName
-      ? `?${new URLSearchParams({
-          schema: schemaName,
-          ...(parentParam ? { within: parentParam } : {}),
-        })}`
-      : ''
-  }`
+  // Where Cancel goes when there is no history to return to: the parent's
+  // Contains tab for a child record, else the collection's list.
+  const fallbackHref = parentParam
+    ? `/records/${parentParam}?${new URLSearchParams({
+        tab: 'contains',
+        ...(schemaName ? { schema: schemaName } : {}),
+      })}`
+    : `/collections/${id}${
+        schemaName ? `?${new URLSearchParams({ schema: schemaName })}` : ''
+      }`
+  const goBack = useBack(fallbackHref)
   const parentPath = parentRecord
     ? [...(parentRecord.ancestors ?? []), parentRecord]
     : []
@@ -131,7 +135,11 @@ export default function NewRecordPage() {
         parent_record_id:
           parentParam ?? (values[PARENT] as string | undefined) ?? undefined,
       },
-      { onSuccess: (created) => navigate(`/records/${created.id}`) },
+      {
+        // The form is done with: Back from the new record skips it.
+        onSuccess: (created) =>
+          navigate(`/records/${created.id}`, { replace: true }),
+      },
     )
   }
 
@@ -212,7 +220,7 @@ export default function NewRecordPage() {
           >
             {createRecord.isPending ? 'Adding…' : `Add ${label.toLowerCase()}`}
           </Button>
-          <Button to={listHref}>Cancel</Button>
+          <Button onClick={goBack}>Cancel</Button>
         </div>
       </RecordPageFrame>
     </CollectionTimeZone>

@@ -21,7 +21,7 @@ export function useTabParam<T extends string>(
           else out.set(key, next)
           return out
         },
-        { replace: true },
+        // A tab is a place of its own: Back returns to the previous tab.
       ),
     [setParams, defaultTab, key],
   )
