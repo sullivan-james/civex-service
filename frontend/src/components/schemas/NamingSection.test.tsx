@@ -75,4 +75,27 @@ describe('NamingSection', () => {
       }),
     )
   })
+
+  it('says which field names records while no template is set', () => {
+    const wrap = (schema: Schema) => (
+      <QueryClientProvider client={new QueryClient()}>
+        <ToastProvider>
+          <NamingSection schema={schema} allSchemas={[parent, child]} />
+        </ToastProvider>
+      </QueryClientProvider>
+    )
+    const { unmount } = render(wrap(child))
+    expect(screen.getByLabelText('Record name')).toHaveAttribute(
+      'placeholder',
+      'First value, currently {site}',
+    )
+    unmount()
+
+    const empty = { ...parent, fields: [field('where', 'geo')] } as Schema
+    render(wrap(empty))
+    expect(screen.getByLabelText('Record name')).toHaveAttribute(
+      'placeholder',
+      'Add a field to name records',
+    )
+  })
 })

@@ -354,11 +354,6 @@ def _apply_filename_templates(
     return result
 
 
-# Types that skip the generic _COERCE path (handled explicitly in coerce_value)
-# and are also excluded from natural-name computation (they're collection/blob types).
-_SKIP_TYPES = {"reference", "reference_list", "file", "file_list", "tags", "geo"}
-
-
 def _name_builtins(schema_name: str, record_id: Any) -> dict[str, Any]:
     """The `{schema}` and `{id}` variables templates can use."""
     return {"schema": schema_name, "id": str(record_id)[:8]}
@@ -379,7 +374,7 @@ def _natural_name(
             return None  # a template stored before the rules tightened
     for rf in fields:
         f = rf.field
-        if f.dtype in _SKIP_TYPES:
+        if f.dtype in templating.UNNAMEABLE_DTYPES:
             continue
         val = data.get(f.name)
         if val is not None and str(val).strip():

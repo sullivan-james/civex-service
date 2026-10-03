@@ -276,3 +276,74 @@ def test_deleting_the_reference_field_drops_its_paths(
     ctx.schema_svc.delete_field("sample", "site")
     ctx.commit()
     assert ctx.schema_svc.get("sample").display_template == "{n}"
+
+
+# --- a new schema starts with a visible template ---
+
+
+def test_first_nameable_field_becomes_the_template(
+    ctx: AppContext, make_schema
+) -> None:
+    make_schema("trial", fields=[("subject", "string"), ("site", "string")])
+    assert ctx.schema_svc.get("trial").display_template == "{subject}"
+
+
+def test_fields_that_cannot_be_named_are_skipped(
+    ctx: AppContext, make_schema
+) -> None:
+    make_schema("trial", fields=[("where", "geo"), ("scan", "file")])
+    assert ctx.schema_svc.get("trial").display_template is None
+
+    ctx.schema_svc.add_field("trial", "subject", "string")
+    assert ctx.schema_svc.get("trial").display_template == "{subject}"
+
+
+def test_an_existing_template_is_left_alone(ctx: AppContext, make_schema) -> None:
+    make_schema("trial", fields=[("subject", "string"), ("site", "string")])
+    ctx.schema_svc.update("trial", display_template="{site}")
+    ctx.schema_svc.add_field("trial", "notes", "string")
+    assert ctx.schema_svc.get("trial").display_template == "{site}"
+
+
+def test_a_cleared_template_is_not_refilled(ctx: AppContext, make_schema) -> None:
+    make_schema("trial", fields=[("subject", "string")])
+    ctx.schema_svc.update("trial", display_template="")
+    ctx.schema_svc.add_field("trial", "site", "string")
+    assert ctx.schema_svc.get("trial").display_template is None
+
+
+def test_a_child_schema_starts_from_its_own_first_field(
+    ctx: AppContext, make_schema
+) -> None:
+    make_schema("base", fields=[("subject", "string")])
+    ctx.schema_svc.create("child", parent="base")
+    ctx.schema_svc.add_field("child", "depth", "float")
+    assert ctx.schema_svc.get("child").display_template == "{depth}"
+
+
+def test_create_with_fields_names_the_schema(ctx: AppContext) -> None:
+    schema = ctx.schema_svc.create_with_fields(
+        "trial", fields=[{"name": "subject", "type": "string"}]
+    )
+    assert schema.display_template == "{subject}"
+
+
+def test_auto_name_can_be_turned_off(ctx: AppContext, make_schema) -> None:
+    make_schema("trial")
+    ctx.schema_svc.add_field("trial", "subject", "string", auto_name=False)
+    assert ctx.schema_svc.get("trial").display_template is None
+
+
+def test_the_automatic_template_is_recorded_in_the_audit_log(
+    ctx: AppContext, make_schema
+) -> None:
+    make_schema("trial")
+    ctx.schema_svc.add_field("trial", "subject", "string")
+    ctx.commit()
+    schema = ctx.schema_svc.get("trial")
+    entries = ctx.audit_svc.list_audit(entity_id=schema.id)
+    assert any(
+        e.action == "update"
+        and (e.new_data or {}).get("display_template") == "{subject}"
+        for e in entries
+    )

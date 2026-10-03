@@ -56,7 +56,9 @@ def test_schema_audit_includes_field_changes(client: TestClient) -> None:
     response = client.get("/api/schemas/trial/audit")
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 2
+    # schema created, field created, and the schema's name template set to the
+    # first field (see SchemaService.add_field)
+    assert body["total"] == 3
     entity_types = {item["entity_type"] for item in body["items"]}
     assert entity_types == {"schema", "field"}
 

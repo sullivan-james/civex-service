@@ -4,6 +4,7 @@ import type { Schema } from '../../api/schemas'
 import { useUpdateSchema } from '../../hooks/useSchemas'
 import { Button } from '../ui'
 import { fieldsWithInherited } from '../../utils/schemaFields'
+import { NON_NAMEABLE } from '../../utils/templates'
 import {
   TemplateBuilder,
   type TemplateField,
@@ -25,6 +26,11 @@ export function NamingSection({
     [schema, allSchemas],
   )
   const dirty = draft !== saved
+  // With no template, records use their first value: say which field that is.
+  const firstValue = fields.find((f) => !NON_NAMEABLE.has(f.dtype))
+  const placeholder = firstValue
+    ? `First value, currently {${firstValue.name}}`
+    : 'Add a field to name records'
 
   return (
     <div className="space-y-3">
@@ -35,7 +41,7 @@ export function NamingSection({
         onChange={setDraft}
         fields={fields}
         label="Record name"
-        placeholder="First text value"
+        placeholder={placeholder}
       />
       {update.error && (
         <p role="alert" className="text-xs text-danger">

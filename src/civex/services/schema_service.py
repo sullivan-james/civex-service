@@ -273,7 +273,12 @@ class SchemaService:
         default_value: Any = None,
         label: str | None = None,
         allow_legacy_name: bool = False,
+        auto_name: bool = True,
     ) -> FieldDTO:
+        """Add a field. With `auto_name` (restore paths turn it off), a schema
+        that has no record name template yet is given `{field}` when this is
+        its first field that can be written into a name, so a new schema's
+        records have a visible, editable name from the start."""
         if dtype not in VALID_DTYPES:
             raise ValueError(
                 f"Unknown dtype '{dtype}'. Choose from: {', '.join(sorted(VALID_DTYPES))}"
@@ -303,6 +308,28 @@ class SchemaService:
         )
         if self._audit:
             self._audit.log_change("create", "field", field.id, None, field.to_dict())
+        if (
+            auto_name
+            and schema.display_template is None
+            and dtype not in templating.UNNAMEABLE_DTYPES
+            # Another own nameable field means the template was left empty
+            # on purpose (or the old first-value rule is in force): not ours
+            # to fill.
+            and not any(
+                f.dtype not in templating.UNNAMEABLE_DTYPES for f in schema.fields
+            )
+        ):
+            old_dict = schema.to_dict()
+            updated = self._repo.update(
+                schema.id,
+                name=None,
+                description=None,
+                display_template="{" + field_name + "}",
+            )
+            if self._audit:
+                self._audit.log_change(
+                    "update", "schema", updated.id, old_dict, updated.to_dict()
+                )
         return field
 
     def update(

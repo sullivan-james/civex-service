@@ -160,7 +160,8 @@ export function sampleValue(dtype: string, label: string): unknown {
   }
 }
 
-/** Types whose values can't be written into a name. */
+/** Types whose values can't be written into a name (`UNNAMEABLE_DTYPES` in
+ * `civex/domain/templating.py`). */
 export const NON_NAMEABLE = new Set([
   'geo',
   'file',

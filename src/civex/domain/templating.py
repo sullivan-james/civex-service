@@ -30,6 +30,12 @@ from typing import Any, Literal
 from civex.domain.exceptions import ValidationError
 from civex.domain.naming import slugify
 
+# Field types whose values can't be written into a name. Mirrored by
+# NON_NAMEABLE in frontend/src/utils/templates.ts.
+UNNAMEABLE_DTYPES = frozenset(
+    {"reference", "reference_list", "file", "file_list", "tags", "geo"}
+)
+
 BUILTINS_RECORD = ("schema", "id")
 BUILTINS_FILE = ("schema", "id", "ext")
 
