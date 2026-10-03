@@ -1,20 +1,46 @@
 import { Suspense } from 'react'
-import { Outlet } from 'react-router'
-import { Page, Skeleton, TabNav } from '../../components/ui'
+import { Outlet, useLocation } from 'react-router'
+import { InfoTip, Page, Skeleton, TabNav } from '../../components/ui'
 
 /** Settings is a set of pages, one per area, each with its own address
  * (`/settings/storage`), so a section can be linked to and none has to share a
  * long scroll with the others. */
 const settingsSections = [
-  { to: 'appearance', label: 'Appearance' },
-  { to: 'database', label: 'Database' },
-  { to: 'storage', label: 'Storage' },
-  { to: 'recently-deleted', label: 'Recently Deleted' },
-  { to: 'map', label: 'Map' },
-  { to: 'advanced', label: 'Advanced' },
+  {
+    to: 'appearance',
+    label: 'Appearance',
+    info: 'System follows your OS setting.',
+  },
+  {
+    to: 'database',
+    label: 'Database',
+    info: 'Where this project’s records are stored. You can move them to another kind of database at any time; your original is kept.',
+  },
+  {
+    to: 'storage',
+    label: 'Storage',
+    info: 'Where Civex keeps your files, and which collections use which volume.',
+  },
+  {
+    to: 'recently-deleted',
+    label: 'Recently Deleted',
+    info: 'Deleted schemas, collections and records can be restored until they are permanently purged.',
+  },
+  {
+    to: 'map',
+    label: 'Map',
+    info: 'The location editor draws built-in coastlines and a grid, so it works offline. For street-level detail, point it at a tile server; you are responsible for that provider’s terms of use.',
+  },
+  {
+    to: 'advanced',
+    label: 'Advanced',
+    info: 'Power-user surfaces: the terminal, raw YAML workflow editing and the plugin editors.',
+  },
 ] as const
 
 export default function SettingsLayout() {
+  const { pathname } = useLocation()
+  const current = settingsSections.find((s) => pathname.split('/')[2] === s.to)
   return (
     <Page title="Settings">
       <div className="flex flex-col gap-6 md:flex-row md:gap-10">
@@ -29,7 +55,13 @@ export default function SettingsLayout() {
             }))}
           />
         </div>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 space-y-5">
+          {current && (
+            <h2 className="flex items-center gap-1 text-lg font-semibold text-fg">
+              {current.label}
+              <InfoTip side="bottom">{current.info}</InfoTip>
+            </h2>
+          )}
           {/* Sections load on demand; the section list stays put meanwhile. */}
           <Suspense
             fallback={

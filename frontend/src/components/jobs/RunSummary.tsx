@@ -24,9 +24,7 @@ export default function RunSummary({ job }: { job: WorkflowJob }) {
       <p className="text-sm text-fg">{describeTrigger(job)}</p>
 
       {isActive ? (
-        <p className="text-sm text-fg-muted">
-          Still running — the summary will fill in as it goes.
-        </p>
+        <p className="text-sm text-fg-muted">Running…</p>
       ) : summary.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {summary.map((phrase) => (

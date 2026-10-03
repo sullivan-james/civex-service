@@ -8,7 +8,7 @@ import { yaml } from '@codemirror/lang-yaml'
 import { useWorkflow, useSaveWorkflow } from '../hooks/useWorkflows'
 import { usePlugins } from '../hooks/usePlugins'
 import { useCloseOrBack } from '../hooks/useCloseOrBack'
-import { Button, Page, Input } from '../components/ui'
+import { Button, InfoTip, Page, Input } from '../components/ui'
 import { AutocompleteMenu } from '../components/workflows/YamlAutocomplete'
 import {
   getAutocompleteContext,
@@ -264,7 +264,6 @@ export default function WorkflowEditorPage({
             <div className="flex items-center gap-1 max-w-sm">
               <Input
                 id={stemId}
-                aria-describedby={`${stemId}-hint`}
                 type="text"
                 value={stem}
                 onChange={(e) =>
@@ -275,9 +274,6 @@ export default function WorkflowEditorPage({
               />
               <span className="text-sm text-fg-muted">.yaml</span>
             </div>
-            <p id={`${stemId}-hint`} className="text-xs text-fg-subtle">
-              Letters, numbers, hyphens and underscores only.
-            </p>
           </div>
         )}
 
@@ -287,13 +283,15 @@ export default function WorkflowEditorPage({
           </div>
         ) : (
           <div className="flex-1 flex flex-col min-h-0">
-            <span className="text-xs font-medium text-fg mb-1">YAML</span>
-            {isNew && (
-              <p className="text-xs text-fg-subtle mb-1">
-                A trigger tells civex when to run this workflow automatically —
-                e.g. whenever a record of a given schema is created.
-              </p>
-            )}
+            <span className="mb-1 flex items-center gap-1 text-sm font-medium text-fg">
+              YAML
+              {isNew && (
+                <InfoTip>
+                  A trigger tells civex when to run this workflow automatically,
+                  e.g. whenever a record of a given schema is created.
+                </InfoTip>
+              )}
+            </span>
             <div
               ref={editorWrapRef}
               onKeyDownCapture={handleEditorKeyDownCapture}

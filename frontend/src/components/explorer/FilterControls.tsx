@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, IconButton } from '../ui'
+import { Button, IconButton, InfoTip } from '../ui'
 import { Plus, X } from '../ui/icons'
 import { FilterBuilder } from '../views/FilterBuilder'
 import {
@@ -58,9 +58,12 @@ function FilterEditor({
   }
   return (
     <div className="space-y-2">
-      <p className="text-xs text-fg-muted">
-        Match on this level, on a parent record, or on any child record — for
-        example selections in a recording whose selection_table is empty.
+      <p className="flex items-center gap-1 text-sm font-medium text-fg">
+        Filters
+        <InfoTip>
+          Match on this level, on a parent record, or on any child record — for
+          example selections in a recording whose selection_table is empty.
+        </InfoTip>
       </p>
       <FilterBuilder
         root={root}

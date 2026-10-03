@@ -5,6 +5,7 @@ import {
   Button,
   Checkbox,
   Field,
+  InfoTip,
   Input,
   Modal,
   ModalBody,
@@ -97,10 +98,10 @@ export function EditVolumeModal({
                 </Button>
               )}
             </div>
-            <p className="text-xs text-fg-muted">
+            <InfoTip>
               This points the volume at a different folder. It does not move any
               files: Civex looks for them in the new folder.
-            </p>
+            </InfoTip>
           </div>
 
           <div className="space-y-1">

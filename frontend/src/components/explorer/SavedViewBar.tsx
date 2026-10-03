@@ -169,7 +169,6 @@ export function SavedViewBar({
       {dialog === 'save-as' && (
         <ViewNameDialog
           title="Save as view"
-          intro="Saves the current filters, sort and columns on this schema, so anyone can open them again with one click."
           confirmLabel="Save view"
           isPending={pending}
           error={error}

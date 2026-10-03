@@ -218,11 +218,6 @@ export default function AiChatBody({
                   iconProps={busy ? { fill: 'currentColor' } : undefined}
                 />
               </div>
-              <p className="mt-2 text-xs text-fg-subtle text-center">
-                {busy
-                  ? 'Generating… click stop to cancel'
-                  : 'Enter to send · Shift+Enter for new line'}
-              </p>
             </>
           )}
         </div>
