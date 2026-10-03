@@ -92,3 +92,27 @@ def test_collections_shows_where_each_collections_files_are(
     assert "a: 1 files" in out and "b: 1 files" in out
     assert _plain(runner.invoke(app, ["store", "collections", "study"])) == out
     assert "No collection has files" not in out
+
+
+def test_collections_can_be_listed_by_the_drive_they_are_on(
+    project_dir: Path, tmp_path: Path
+) -> None:
+    _two_volumes(tmp_path, files=0)
+    ctx = build_local_context(load_config())
+    ctx.schema_svc.create("doc")
+    ctx.schema_svc.add_field("doc", "scan", "file")
+    store = ctx.file_svc._store
+    for coll, vol, data in (("one", "a", b"x" * 100), ("two", "b", b"y" * 300)):
+        ctx.dataset_svc.create(coll)
+        ctx.store_svc.set_queue([vol])
+        ref = store.put(data, f"{coll}.bin")
+        ctx.record_svc.add(coll, "doc", {"scan": ref.to_dict()})
+    ctx.commit()
+    ctx.close()
+
+    on_a = _plain(runner.invoke(app, ["store", "collections", "--volume", "a"]))
+    assert "one" in on_a and "two" not in on_a
+    nothing = _plain(
+        runner.invoke(app, ["store", "collections", "--volume", "default"])
+    )
+    assert "No collection has files on default" in nothing

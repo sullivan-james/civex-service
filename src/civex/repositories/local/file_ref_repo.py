@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Iterable
+from typing import Any, Iterable
 
 from sqlalchemy import case, delete, func, insert, select
 from sqlalchemy.orm import Session
@@ -73,6 +73,34 @@ class LocalFileReferenceRepository:
         if after is not None:
             query = query.where(FileReference.sha256 > after)
         return [sha for (sha,) in self._s.execute(query)]
+
+    def surplus_by_volume(self) -> dict[str, tuple[int, int, int, int]]:
+        """Per volume, the catalog's files that no collection uses, in one query:
+        (unused files, unused bytes, history-only files, history-only bytes).
+        "Unused" has no owner at all; "history-only" is kept only because a
+        workflow run took it as an input."""
+        from civex.db.models import StoredObject
+
+        def has(column: Any) -> Any:
+            return (
+                select(FileReference.id)
+                .where(FileReference.sha256 == StoredObject.sha256)
+                .where(column.is_not(None))
+                .exists()
+            )
+
+        by_record, by_job = has(FileReference.record_id), has(FileReference.job_id)
+        unused, history = ~by_record & ~by_job, ~by_record & by_job
+        rows = self._s.execute(
+            select(
+                StoredObject.volume,
+                func.coalesce(func.sum(case((unused, 1), else_=0)), 0),
+                func.coalesce(func.sum(case((unused, StoredObject.size), else_=0)), 0),
+                func.coalesce(func.sum(case((history, 1), else_=0)), 0),
+                func.coalesce(func.sum(case((history, StoredObject.size), else_=0)), 0),
+            ).group_by(StoredObject.volume)
+        )
+        return {v: (int(a), int(b), int(c), int(d)) for v, a, b, c, d in rows}
 
     def volume_breakdowns(
         self, collection_ids: list[str] | None

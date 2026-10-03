@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { VolumeStats } from '../../../api/store'
 import {
   useAdoptVolume,
+  useAllCollectionStorage,
   usePlacements,
   useSetQueue,
   useVolumes,
@@ -31,6 +32,7 @@ import { NEEDS_ATTENTION } from './volumeState'
 export function VolumesTab() {
   const { data: volumes, isLoading, error } = useVolumes()
   const { data: placements = [] } = usePlacements()
+  const { data: spreads = [] } = useAllCollectionStorage()
   const setQueue = useSetQueue()
   const adopt = useAdoptVolume()
   const [adding, setAdding] = useState(false)
@@ -55,6 +57,16 @@ export function VolumesTab() {
   const queueNames = volumes.filter((v) => v.in_queue).map((v) => v.name)
   const homesOf = (name: string) =>
     placements.filter((p) => p.volume === name).length
+  // Collections with files on a volume, or that use it as their home.
+  const collectionsOn = (name: string) =>
+    new Set([
+      ...placements
+        .filter((p) => p.volume === name)
+        .map((p) => p.collection_id),
+      ...spreads
+        .filter((r) => r.volumes.some((v) => v.volume === name))
+        .map((r) => r.collection_id),
+    ]).size
   const attention = volumes.filter((v) => NEEDS_ATTENTION.includes(v.state))
   const used = volumes
     .filter((v) => v.available)
@@ -137,7 +149,7 @@ export function VolumesTab() {
                 vol={vol}
                 queueIndex={queueNames.indexOf(vol.name)}
                 queueLength={queueNames.length}
-                homes={homesOf(vol.name)}
+                collections={collectionsOn(vol.name)}
                 onEdit={() => setEditing(vol)}
                 onRemove={() => setRemoving(vol)}
                 onAdopt={() => setAdopting(vol)}

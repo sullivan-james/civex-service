@@ -15,6 +15,12 @@ export interface VolumeStats {
   in_queue: boolean
   /** The volume's folder is on a network drive. */
   network: boolean
+  /** Files here that nothing uses (garbage collection can reclaim them). */
+  unused_files: number
+  unused_bytes: number
+  /** Files here kept only because a workflow run took them as an input. */
+  history_files: number
+  history_bytes: number
 }
 
 export interface StorageLocation {

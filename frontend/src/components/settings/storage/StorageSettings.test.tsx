@@ -512,7 +512,7 @@ describe('Storage > Collections', () => {
     expect(
       screen.queryByLabelText('Home volume for zoo'),
     ).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /Home: archive/ }))
+    await user.click(screen.getByRole('button', { name: /On archive/ }))
     expect(
       await screen.findByLabelText('Home volume for zoo'),
     ).toBeInTheDocument()

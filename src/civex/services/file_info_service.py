@@ -7,6 +7,7 @@ from civex.domain.dtos import (
     CollectionUse,
     CollectionVolumeShare,
     FileInfo,
+    VolumeSurplus,
 )
 from civex.domain.exceptions import NotFoundError
 from civex.repositories.protocols import (
@@ -26,6 +27,16 @@ class FileInfoService:
         self._store = store
         self._refs = refs
         self._datasets = datasets
+
+    def surplus_by_volume(self) -> dict[str, VolumeSurplus]:
+        """For each volume, how much of what it holds no collection uses: files
+        nothing uses (reclaimable) and files kept only for workflow run history.
+        Volumes that hold no such files are absent."""
+        return {
+            volume: VolumeSurplus(*counts)
+            for volume, counts in self._refs.surplus_by_volume().items()
+            if any(counts)
+        }
 
     def collection_storage(self, collection_id: str) -> CollectionStorage:
         """Which volumes hold a collection's files, and how much each holds

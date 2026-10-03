@@ -551,6 +551,16 @@ class FileRefResponse(BaseModel):
 
 
 class VolumeStatsResponse(BaseModel):
+    unused_files: int = Field(
+        default=0,
+        description="Files on the volume that nothing uses; garbage collection can reclaim them.",
+    )
+    unused_bytes: int = 0
+    history_files: int = Field(
+        default=0,
+        description="Files kept only because a workflow run took them as an input.",
+    )
+    history_bytes: int = 0
     name: str
     path: str
     allocated_gb: float | None

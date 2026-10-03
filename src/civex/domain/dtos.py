@@ -422,6 +422,16 @@ class CollectionStorage:
 
 
 @dataclass
+class VolumeSurplus:
+    """Files on a volume that no collection uses."""
+
+    unused_files: int = 0  # nothing at all uses them (garbage collection can reclaim)
+    unused_bytes: int = 0
+    history_files: int = 0  # only workflow run history uses them
+    history_bytes: int = 0
+
+
+@dataclass
 class StoredObjectInfo:
     """One object on disk in the content-addressed store, as seen by GC --
     not what a FileRef claims to point at, but what's actually there."""

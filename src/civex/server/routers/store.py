@@ -36,7 +36,16 @@ router = APIRouter(prefix="/store", tags=["store"])
 
 @router.get("/volumes", response_model=list[VolumeStatsResponse])
 def list_volumes(ctx: AppContext = Depends(get_ctx)):
-    return ctx.store_svc.volume_stats()
+    """Every volume with its state and usage, including how much of what it
+    holds no collection uses (`unused_*`, which garbage collection can reclaim,
+    and `history_*`, kept only for workflow run history)."""
+    surplus = ctx.file_info_svc.surplus_by_volume()
+    return [
+        {**stats, **asdict(surplus[stats["name"]])}
+        if stats["name"] in surplus
+        else stats
+        for stats in ctx.store_svc.volume_stats()
+    ]
 
 
 @router.post("/volumes", response_model=VolumeStatsResponse, status_code=201)

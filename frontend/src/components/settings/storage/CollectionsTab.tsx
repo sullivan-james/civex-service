@@ -64,6 +64,7 @@ function CollectionRow({
   placement,
   volumes,
   spread,
+  highlight,
   selected,
   onSelect,
 }: {
@@ -71,6 +72,8 @@ function CollectionRow({
   placement: Placement | undefined
   volumes: VolumeStats[]
   spread: CollectionStorageReport | undefined
+  /** A volume being looked at; its share is picked out in the row. */
+  highlight: string | null
   selected: boolean
   onSelect: (on: boolean) => void
 }) {
@@ -127,9 +130,18 @@ function CollectionRow({
           <div className="space-y-1">
             <SpreadBar report={spread} className="h-1.5" />
             <p className="text-xs text-fg-muted">
-              {spread.volumes
-                .map((v) => `${v.volume} ${formatSize(v.bytes)}`)
-                .join(' · ')}
+              {spread.volumes.map((v, i) => (
+                <span key={v.volume}>
+                  {i > 0 && ' · '}
+                  <span
+                    className={
+                      v.volume === highlight ? 'font-medium text-fg' : undefined
+                    }
+                  >
+                    {v.volume} {formatSize(v.bytes)}
+                  </span>
+                </span>
+              ))}
             </p>
             {gather && (
               <button
@@ -245,7 +257,13 @@ export function CollectionsTab({
 
   const shown = collections
     .filter((c) => c.name.toLowerCase().includes(query.trim().toLowerCase()))
-    .filter((c) => !volumeFilter || byId.get(c.id)?.volume === volumeFilter)
+    // On a volume: it has files there, or it is the collection's home.
+    .filter(
+      (c) =>
+        !volumeFilter ||
+        byId.get(c.id)?.volume === volumeFilter ||
+        spreadById.get(c.id)?.volumes.some((v) => v.volume === volumeFilter),
+    )
     .sort((a, b) => a.name.localeCompare(b.name))
   const allShownSelected =
     shown.length > 0 && shown.every((c) => selected.has(c.id))
@@ -294,7 +312,7 @@ export function CollectionsTab({
             onClick={onClearVolumeFilter}
             className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-accent-muted bg-accent-subtle px-2 py-1 text-xs font-medium text-accent"
           >
-            Home: {volumeFilter}
+            On {volumeFilter}
             <X size={12} aria-label="Clear volume filter" />
           </button>
         )}
@@ -379,6 +397,7 @@ export function CollectionsTab({
                 placement={byId.get(c.id)}
                 volumes={volumes}
                 spread={spreadById.get(c.id)}
+                highlight={volumeFilter}
                 selected={selected.has(c.id)}
                 onSelect={(on) => toggle(c.id, on)}
               />

@@ -44,6 +44,23 @@ function Space({ vol }: { vol: VolumeStats }) {
         Civex uses {formatSize(vol.civex_used_bytes)}
         {vol.allocated_gb != null ? ` · limit ${vol.allocated_gb} GB` : ''}
       </p>
+      {vol.unused_files > 0 && (
+        <p className="text-xs text-fg-subtle">
+          {formatSize(vol.unused_bytes)} of it is unused ({vol.unused_files}{' '}
+          {vol.unused_files === 1 ? 'file' : 'files'}) ·{' '}
+          <Link
+            to="/settings/storage?tab=tasks"
+            className="text-accent hover:underline"
+          >
+            Clean up
+          </Link>
+        </p>
+      )}
+      {vol.history_files > 0 && (
+        <p className="text-xs text-fg-subtle">
+          {formatSize(vol.history_bytes)} is kept only for workflow history
+        </p>
+      )}
     </div>
   )
 }
@@ -54,7 +71,7 @@ export function VolumeRow({
   vol,
   queueIndex,
   queueLength,
-  homes,
+  collections,
   onEdit,
   onRemove,
   onAdopt,
@@ -65,8 +82,8 @@ export function VolumeRow({
   /** Position in the write queue, or -1 when it isn't in it. */
   queueIndex: number
   queueLength: number
-  /** How many collections use this volume as their home. */
-  homes: number
+  /** How many collections have files on this volume or use it as their home. */
+  collections: number
   onEdit: () => void
   onRemove: () => void
   onAdopt: () => void
@@ -188,12 +205,12 @@ export function VolumeRow({
         )}
       </Td>
       <Td className="align-top whitespace-nowrap">
-        {homes > 0 ? (
+        {collections > 0 ? (
           <Link
             to={`/settings/storage?tab=collections&volume=${encodeURIComponent(vol.name)}`}
             className="text-accent hover:underline"
           >
-            {homes} {homes === 1 ? 'collection' : 'collections'}
+            {collections} {collections === 1 ? 'collection' : 'collections'}
           </Link>
         ) : (
           <span className="text-fg-subtle">—</span>

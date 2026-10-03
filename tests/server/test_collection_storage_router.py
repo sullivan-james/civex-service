@@ -114,3 +114,43 @@ def test_every_collection_is_answered_in_one_call_and_matches_the_single_view(
 def test_collections_without_files_are_left_out_of_the_list(client: TestClient) -> None:
     _api_setup(client)
     assert client.get("/api/store/collections").json() == []
+
+
+def test_volumes_report_files_no_collection_uses(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """The per-volume usage splits out what is used by nothing (reclaimable) and
+    what workflow run history alone keeps, so "Civex uses 442 MB" can be explained."""
+    from civex.db.models import FileReference
+
+    _api_setup(client)
+    ctx = _setup(tmp_path)
+    _file_record(ctx, "one", b"x" * 100, "used.bin", "a")
+    ctx.store_svc.set_queue(["a"])
+    ctx.file_svc._store.put(b"o" * 700, "orphan.bin")  # nothing refers to it
+    history = ctx.file_svc._store.put(b"h" * 50, "input.bin")
+    ctx._session.add(
+        FileReference(sha256=history.sha256, record_id=None, job_id=_job_id(ctx))
+    )
+    ctx.commit()
+    ctx.close()
+
+    by = {v["name"]: v for v in client.get("/api/store/volumes").json()}
+
+    assert (by["a"]["unused_files"], by["a"]["unused_bytes"]) == (1, 700)
+    assert (by["a"]["history_files"], by["a"]["history_bytes"]) == (1, 50)
+    assert by["b"]["unused_files"] == 0 and by["b"]["history_files"] == 0
+
+
+def _job_id(ctx):
+    from civex.db.models import Record, WorkflowJob
+
+    job = WorkflowJob(
+        workflow_name="w",
+        record_id=ctx._session.query(Record).first().id,
+        trigger="manual",
+        status="completed",
+    )
+    ctx._session.add(job)
+    ctx._session.flush()
+    return job.id

@@ -512,13 +512,19 @@ def store_collections(
     name: Optional[str] = typer.Argument(
         None, help="Show just this collection (default: every collection with files)."
     ),
+    volume: Optional[str] = typer.Option(
+        None,
+        "--volume",
+        help="Only collections that have files on this volume: what is on a drive.",
+    ),
 ) -> None:
     """Show which volumes hold each collection's files.
 
     Lists, for each collection, the volumes that hold some of its files with how
     many files and how much space, and flags files that another collection also
     uses and volumes that can't be reached right now. Read from the catalog, so
-    it is quick. To gather a split collection onto one volume, use
+    it is quick. With --volume it answers the other way round: which collections
+    are on a given drive. To gather a split collection onto one volume, use
     `civex store move --collection`.
     """
     ctx = get_ctx()
@@ -530,8 +536,14 @@ def store_collections(
             ids = None
         reports = ctx.file_info_svc.all_collection_storage(ids)
         shown = [r for r in reports.values() if r.files]
+        if volume is not None:
+            shown = [r for r in shown if any(v.volume == volume for v in r.volumes)]
         if not shown:
-            console.print("[dim]No collection has files yet.[/dim]")
+            console.print(
+                f"[dim]No collection has files on {volume}.[/dim]"
+                if volume
+                else "[dim]No collection has files yet.[/dim]"
+            )
             return
         for r in sorted(shown, key=lambda r: names.get(r.collection_id, "")):
             console.print(
@@ -552,7 +564,7 @@ def store_collections(
                 console.print(
                     f"  {v.volume}: {v.files} files, {format_bytes(v.bytes)}{extra}{flag}"
                 )
-            if r.unlocated_files:
+            if r.unlocated_files and volume is None:
                 console.print(
                     f"  [yellow]{r.unlocated_files} files aren't in the catalog; "
                     "a storage scan will find them.[/yellow]"

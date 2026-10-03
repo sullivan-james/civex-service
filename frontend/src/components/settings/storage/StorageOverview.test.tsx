@@ -219,11 +219,92 @@ describe('Storage page', () => {
       },
     ]
     renderAt('/settings/storage?tab=collections')
-    expect(
-      await screen.findByText(/archive 2\.0 GB · default 1\.0 GB/),
-    ).toBeInTheDocument()
+    await waitFor(() =>
+      expect(document.body.textContent).toContain(
+        'archive 2.0 GB · default 1.0 GB',
+      ),
+    )
     expect(
       screen.getByRole('button', { name: /Gather 3 files onto archive/ }),
     ).toBeInTheDocument()
+  })
+
+  describe('inspecting a drive', () => {
+    const report = (id: string, vols: [string, number][]) => ({
+      collection_id: id,
+      files: 3,
+      bytes: vols.reduce((n, [, b]) => n + b, 0),
+      unlocated_files: 0,
+      volumes: vols.map(([v, b]) => share(v, 1, b)),
+    })
+
+    it('explains what part of a volume is unused', async () => {
+      volumes = [
+        volume('default', {
+          civex_used_bytes: 442 * 1024 ** 2,
+          unused_files: 4,
+          unused_bytes: 439 * 1024 ** 2,
+          history_files: 10,
+          history_bytes: 3 * 1024 ** 2,
+        }),
+      ]
+      renderAt()
+      expect(
+        await screen.findByText(/439 MB of it is unused/),
+      ).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Clean up' })).toHaveAttribute(
+        'href',
+        '/settings/storage?tab=tasks',
+      )
+      expect(
+        screen.getByText(/3\.0 MB is kept only for workflow history/),
+      ).toBeInTheDocument()
+    })
+
+    it('says nothing about unused files when there are none', async () => {
+      renderAt()
+      await screen.findByText('archive')
+      expect(screen.queryByText(/is unused/)).toBeNull()
+    })
+
+    it('counts the collections that have files on a drive', async () => {
+      spreads = [
+        report('c1', [['archive', GB]]),
+        report('c2', [
+          ['archive', GB],
+          ['default', GB],
+        ]),
+        report('c3', [['default', GB]]),
+      ]
+      renderAt()
+      const links = await screen.findAllByRole('link', {
+        name: /collections?$/,
+      })
+      const byVolume = Object.fromEntries(
+        links.map((l) => [
+          new URL(l.getAttribute('href') ?? '', 'http://x').searchParams.get(
+            'volume',
+          ),
+          l.textContent,
+        ]),
+      )
+      expect(byVolume).toEqual({
+        archive: '2 collections',
+        default: '2 collections',
+      })
+    })
+
+    it('lists the collections on a drive, picking out its share', async () => {
+      spreads = [
+        report('c1', [['archive', GB]]),
+        report('c9', [['default', GB]]), // not on archive
+      ]
+      renderAt('/settings/storage?tab=collections&volume=archive')
+      expect(await screen.findByText('study')).toBeInTheDocument()
+      expect(
+        screen.getByRole('button', { name: /On archive/ }),
+      ).toBeInTheDocument()
+      expect(screen.getByText('archive 1.0 GB')).toHaveClass('font-medium')
+    })
   })
 })
