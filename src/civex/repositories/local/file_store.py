@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterable, Callable, Iterable, Iterator, cast
 
 from civex import fs_locations
+from civex.processes import pid_alive
 from civex.config import StoreConfig, VolumeConfig
 from civex.domain.dtos import (
     VOLUME_OFFLINE,
@@ -696,7 +697,7 @@ class VolumeAwareFileObjectStore:
         """
         lock_path = self._root / "_civex" / _GC_LOCK_FILENAME
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        if self._lock_is_live(_TRANSFER_LOCK_FILENAME):
+        if self._transfer_lock_is_live():
             raise GCAlreadyRunningError(
                 "A storage transfer is running. Garbage collection waits until "
                 "it has finished, so the two never work on the same files."
@@ -1073,6 +1074,22 @@ class VolumeAwareFileObjectStore:
         except OSError:
             return False
 
+    def _transfer_lock_is_live(self) -> bool:
+        """Whether a transfer is really holding its lock. The lock records the
+        id of the process that took it, and a lock whose process has gone (the
+        server restarted, the terminal was closed, the machine lost power) is
+        free at once, not an hour later. One with no readable id falls back to
+        how recently it was touched."""
+        if not self._lock_is_live(_TRANSFER_LOCK_FILENAME):
+            return False
+        try:
+            owner = int(
+                (self._root / "_civex" / _TRANSFER_LOCK_FILENAME).read_text().strip()
+            )
+        except (OSError, ValueError):
+            return True
+        return pid_alive(owner)
+
     @contextlib.contextmanager
     def transfer_lock(self) -> Iterator[None]:
         """Held for as long as a transfer is moving files. Refuses to start while
@@ -1087,7 +1104,7 @@ class VolumeAwareFileObjectStore:
             )
         lock_path = self._root / "_civex" / _TRANSFER_LOCK_FILENAME
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        if self._lock_is_live(_TRANSFER_LOCK_FILENAME):
+        if self._transfer_lock_is_live():
             raise GCAlreadyRunningError("A storage transfer is already running.")
         lock_path.write_text(str(os.getpid()))
         try:

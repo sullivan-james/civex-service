@@ -657,3 +657,80 @@ def test_only_a_running_transfer_can_be_asked_to_stop(
         ctx.transfer_svc.request_control(record.id, "pause")
     with pytest.raises(ValidationError, match="pause or cancel"):
         ctx.transfer_svc.request_control(record.id, "explode")
+
+
+# -- a lock left behind by a process that died ------------------------------------------------
+
+
+def _lock_file(ctx: AppContext) -> Path:
+    return ctx.file_svc._store._root / "_civex" / ".transfer.lock"
+
+
+def _dead_pid() -> int:
+    import subprocess
+    import sys
+
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait()
+    return child.pid  # exited and reaped: no such process now
+
+
+def test_a_lock_left_by_a_dead_process_does_not_block_the_next_move(
+    ctx: AppContext, tmp_path: Path
+) -> None:
+    """A server restart (or a closed terminal, or a power cut) mid-move leaves
+    the lock file behind; waiting an hour for it to go stale was a trap."""
+    _volumes(ctx, tmp_path, "a", "b")
+    files = _put_on(ctx, "a", 5)
+    lock = _lock_file(ctx)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(str(_dead_pid()))  # fresh, but its owner is gone
+
+    record = ctx.transfer_svc.create(_drain(["a"], ["b"]))
+    done = ctx.transfer_svc.execute(record.id)
+
+    assert done.status == STATUS_COMPLETED
+    store = ctx.file_svc._store
+    assert all(store.get(sha) == data for sha, data in files.items())
+    assert not lock.exists()
+
+
+def test_a_lock_held_by_a_running_process_still_blocks(
+    ctx: AppContext, tmp_path: Path
+) -> None:
+    import os
+
+    _volumes(ctx, tmp_path, "a", "b")
+    _put_on(ctx, "a", 2)
+    lock = _lock_file(ctx)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(str(os.getpid()))  # alive: this very process
+    record = ctx.transfer_svc.create(_drain(["a"], ["b"]))
+
+    with pytest.raises(ValidationError, match="already running"):
+        ctx.transfer_svc.execute(record.id)
+
+    assert lock.exists()  # not ours to remove
+
+
+def test_garbage_collection_is_not_blocked_by_a_dead_transfer(
+    ctx: AppContext,
+) -> None:
+    lock = _lock_file(ctx)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(str(_dead_pid()))
+
+    with ctx.file_svc._store.gc_lock():
+        pass
+
+
+def test_a_lock_with_no_readable_owner_falls_back_to_how_recent_it_is(
+    ctx: AppContext,
+) -> None:
+    lock = _lock_file(ctx)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("")
+
+    with pytest.raises(Exception, match="transfer is running"):
+        with ctx.file_svc._store.gc_lock():
+            pass
