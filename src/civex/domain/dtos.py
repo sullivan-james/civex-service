@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any
 
 from civex.domain.naming import display_label
+from civex.domain.templating import from_field_list
 
 
 def _parse_dt(s: str | None) -> datetime | None:
@@ -77,9 +78,9 @@ class SchemaDTO:
     parent_id: uuid.UUID | None
     created_at: datetime
     fields: list[FieldDTO] = field(default_factory=list)
-    # Ordered field names joined (space-separated) to form the record's natural
-    # name; entries with no value on a given record are skipped at render time.
-    display_fields: list[str] = field(default_factory=list)
+    # Template (domain/templating.py) that builds a record's natural name from
+    # its field values; None means "use the first plain value".
+    display_template: str | None = None
     # Free-text display name; None means "derive one from name".
     label: str | None = None
     # Soft-delete marker; None means live. See SchemaRepository.delete/restore.
@@ -97,7 +98,7 @@ class SchemaDTO:
             "label": self.label,
             "description": self.description,
             "parent_id": str(self.parent_id) if self.parent_id else None,
-            "display_fields": self.display_fields,
+            "display_template": self.display_template,
             "created_at": self.created_at.isoformat(),
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
@@ -110,7 +111,13 @@ class SchemaDTO:
             label=d.get("label"),
             description=d.get("description"),
             parent_id=uuid.UUID(d["parent_id"]) if d.get("parent_id") else None,
-            display_fields=d.get("display_fields") or [],
+            # Dumps and audit rows older than templates carry a field list.
+            display_template=d.get("display_template")
+            or (
+                from_field_list(d["display_fields"])
+                if d.get("display_fields")
+                else None
+            ),
             created_at=datetime.fromisoformat(d["created_at"]),
             deleted_at=_parse_dt(d.get("deleted_at")),
         )

@@ -77,7 +77,13 @@ class SchemaResponse(BaseModel):
     )
     description: str | None
     parent_id: str | None
-    display_fields: list[str]
+    display_template: str | None = Field(
+        default=None,
+        description=(
+            "Template that names this schema's records; fields in braces, "
+            "formats after a colon. Null means the first plain value is used."
+        ),
+    )
     fields: list[FieldResponse]
     deleted_at: datetime | None = Field(
         default=None,
@@ -92,10 +98,36 @@ class SchemaResponse(BaseModel):
             label=dto.label,
             description=dto.description,
             parent_id=str(dto.parent_id) if dto.parent_id else None,
-            display_fields=dto.display_fields,
+            display_template=dto.display_template,
             fields=[FieldResponse.from_dto(f) for f in dto.fields],
             deleted_at=dto.deleted_at,
         )
+
+
+class PreviewNameRequest(BaseModel):
+    template: str = Field(
+        description="The template to try, e.g. '{site}-{taken_on:YYYY-MM}'."
+    )
+    values: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Field values (keyed by field name) of the sample record to render against.",
+    )
+    kind: Literal["record", "file"] = Field(
+        default="record",
+        description=(
+            "'record' renders a record's name; 'file' renders a download name, "
+            "where `{ext}` is available and a blank value makes the result null."
+        ),
+    )
+
+
+class PreviewNameResponse(BaseModel):
+    name: str | None = Field(
+        description="The rendered text, or null when the template renders to nothing."
+    )
+    error: str | None = Field(
+        default=None, description="Why the template is not valid, if it is not."
+    )
 
 
 class SchemaDeleteImpactResponse(BaseModel):
@@ -175,7 +207,13 @@ class UpdateSchemaRequest(BaseModel):
         ),
     )
     description: str | None = None
-    display_fields: list[str] | None = None
+    display_template: str | None = Field(
+        default=None,
+        description=(
+            "Template that names the schema's records. Send an empty string "
+            "to clear it; omit the key to leave it unchanged."
+        ),
+    )
 
 
 class UpdateFieldRequest(BaseModel):

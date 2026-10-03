@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import uuid
 from typing import Any
 
@@ -14,7 +13,7 @@ from civex.domain.dtos import (
 )
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.domain import geo as geo_domain
-from civex.domain import partial_dates, units
+from civex.domain import partial_dates, templating, units
 from civex.domain.field_descriptors import (
     FIELD_TYPES,
     RestrictionDescriptor,
@@ -141,23 +140,16 @@ def _validate_restriction_keys(dtype: str, restrictions: dict[str, Any] | None) 
             )
 
 
-# `{field_name}` placeholders in a `filename_template` restriction; `{ext}`
-# is the one reserved token that isn't a field name (see record_service.py).
-TEMPLATE_TOKEN_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
-
-
 def _validate_filename_template(
     restrictions: dict[str, Any] | None, known_field_names: set[str]
 ) -> None:
     template = (restrictions or {}).get("filename_template")
     if not template:
         return
-    referenced = set(TEMPLATE_TOKEN_RE.findall(template)) - {"ext"}
-    unknown = sorted(referenced - known_field_names)
-    if unknown:
-        raise ValidationError(
-            f"filename_template references unknown field(s) {unknown}"
-        )
+    try:
+        templating.validate(template, known_field_names, templating.BUILTINS_FILE)
+    except ValidationError as e:
+        raise ValidationError(f"filename_template: {e}") from e
 
 
 def _suggest(name: str) -> str | None:
@@ -318,7 +310,7 @@ class SchemaService:
         name: str,
         new_name: str | None = None,
         description: str | None = None,
-        display_fields=...,
+        display_template=...,
         label=...,
     ) -> SchemaDTO:
         schema = self.get(name)
@@ -326,17 +318,22 @@ class SchemaService:
             validate_name(new_name, "schema name")
             if self._repo.get_by_name(new_name):
                 raise AlreadyExistsError(f"Schema '{new_name}' already exists")
-        if display_fields is not ...:
-            entries = list(display_fields or [])
+        if display_template is not ... and display_template:
             names = {rf.field.name for rf in self.collect_fields(schema)}
-            unknown = [n for n in entries if n not in names]
-            if unknown:
-                raise NotFoundError(f"Field(s) {unknown} not found on schema '{name}'")
+            try:
+                templating.validate(
+                    display_template,
+                    names,
+                    templating.BUILTINS_RECORD,
+                    self._reference_targets(schema),
+                )
+            except ValidationError as e:
+                raise ValidationError(f"display_template: {e}") from e
         old_dict = schema.to_dict()
         extra: dict[str, Any] = (
             {}
-            if display_fields is ...
-            else {"display_fields": list(display_fields or [])}
+            if display_template is ...
+            else {"display_template": display_template or None}
         )
         if label is not ...:
             extra["label"] = label or None
@@ -349,32 +346,138 @@ class SchemaService:
             )
         return updated
 
-    def _schemas_displaying_field(
-        self, target_field: FieldDTO
-    ) -> list[tuple[SchemaDTO, list[int]]]:
-        """Every schema whose display_fields currently resolves at least one
-        entry to `target_field` -- resolved by field identity (not just name),
-        respecting name-shadowing in the inheritance chain, so a schema whose
-        own field of the same name shadows an inherited `target_field` is
-        correctly left out.
+    def _reference_targets(self, schema: SchemaDTO) -> dict[str, set[str]]:
+        """For each single-record reference field on `schema` (own or inherited)
+        that names its target schema, the field names of that target schema.
+        These are the `{ref.field}` paths a name template may use."""
+        out: dict[str, set[str]] = {}
+        for rf in self.collect_fields(schema):
+            f = rf.field
+            target = (f.restrictions or {}).get("schema")
+            if f.dtype != "reference" or not isinstance(target, str):
+                continue
+            try:
+                target_schema = self.get(target)
+            except NotFoundError:
+                continue
+            out[f.name] = {t.field.name for t in self.collect_fields(target_schema)}
+        return out
 
-        Returns (schema, [indices into that schema's display_fields]) pairs.
+    def preview_name(
+        self,
+        schema_name: str,
+        template: str,
+        values: dict[str, Any] | None = None,
+        kind: str = "record",
+    ) -> str | None:
+        """What `template` would render for a record with `values`, without
+        saving anything. Raises ValidationError if the template is not valid
+        for this schema. `kind` is "record" (a record's name) or "file" (a
+        download name, where a blank value makes the whole result None and
+        `{ext}` is available)."""
+        schema = self.get(schema_name)
+        names = {rf.field.name for rf in self.collect_fields(schema)}
+        builtins_allowed = (
+            templating.BUILTINS_FILE if kind == "file" else templating.BUILTINS_RECORD
+        )
+        templating.validate(
+            template,
+            names,
+            builtins_allowed,
+            self._reference_targets(schema) if kind != "file" else None,
+        )
+        builtins: dict[str, Any] = {"schema": schema.name, "id": "1a2b3c4d"}
+        if kind == "file":
+            builtins["ext"] = "pdf"
+        return templating.render(
+            template,
+            values or {},
+            builtins,
+            "fallback" if kind == "file" else "skip",
+        )
+
+    def _template_holders(
+        self, target_field: FieldDTO
+    ) -> list[tuple[SchemaDTO, list[str | None], list[FieldDTO]]]:
+        """Everything whose template mentions `target_field`, as
+        (schema, display_template_vias, [file fields]) rows.
+
+        `display_template_vias` says how a schema's record name template uses
+        the field: `None` for directly (`{f}`, or `{f.x}` when `f` is itself a
+        reference field), or the name of a reference field `r` of that schema
+        when it reaches the field through `{r.f}`. File fields are listed
+        when their `filename_template` mentions it.
+
+        A name resolves by field identity (not just text) through the
+        inheritance chain, so a schema whose own field of the same name
+        shadows an inherited `target_field` is correctly left out.
         """
         results = []
         for schema in self._repo.list_all():
-            if not schema.display_fields:
-                continue
-            resolved_by_name = {
-                rf.field.name: rf.field.id for rf in self.collect_fields(schema)
-            }
-            indices = [
-                i
-                for i, entry_name in enumerate(schema.display_fields)
-                if resolved_by_name.get(entry_name) == target_field.id
+            resolved = {rf.field.name: rf.field for rf in self.collect_fields(schema)}
+
+            def direct(name: str) -> bool:
+                found = resolved.get(name.partition(".")[0])
+                return found is not None and found.id == target_field.id
+
+            vias: list[str | None] = []
+            for name in templating.referenced_names(schema.display_template or ""):
+                base, _, sub = name.partition(".")
+                if direct(name) and None not in vias:
+                    vias.append(None)
+                ref = resolved.get(base)
+                target_name = (ref.restrictions or {}).get("schema") if ref else None
+                if sub and ref and ref.dtype == "reference" and target_name:
+                    try:
+                        target_schema = self.get(target_name)
+                    except NotFoundError:
+                        continue
+                    through = {
+                        rf.field.name: rf.field.id
+                        for rf in self.collect_fields(target_schema)
+                    }
+                    if through.get(sub) == target_field.id and base not in vias:
+                        vias.append(base)
+            file_fields = [
+                f
+                for f in schema.fields
+                if any(
+                    direct(n)
+                    for n in templating.referenced_names(
+                        (f.restrictions or {}).get("filename_template") or ""
+                    )
+                )
             ]
-            if indices:
-                results.append((schema, indices))
+            if vias or file_fields:
+                results.append((schema, vias, file_fields))
         return results
+
+    def _rewrite_templates(
+        self,
+        holders: list[tuple[SchemaDTO, list[str | None], list[FieldDTO]]],
+        rewrite: Any,
+    ) -> None:
+        """Apply `rewrite(template, via) -> template` to every template in
+        `holders` (`via` as in `_template_holders`; file names use None)."""
+        for schema, vias, file_fields in holders:
+            if vias:
+                template = schema.display_template or ""
+                for via in vias:
+                    template = rewrite(template, via)
+                self._repo.update(
+                    schema.id,
+                    name=None,
+                    description=None,
+                    display_template=template or None,
+                )
+            for f in file_fields:
+                restrictions = dict(f.restrictions)
+                new_template = rewrite(restrictions["filename_template"], None)
+                if new_template:
+                    restrictions["filename_template"] = new_template
+                else:
+                    del restrictions["filename_template"]
+                self._repo.update_field(f.id, restrictions=restrictions)
 
     def delete_field(self, schema_name: str, field_name: str) -> None:
         schema = self.get(schema_name)
@@ -383,22 +486,13 @@ class SchemaService:
             raise NotFoundError(
                 f"Field '{field_name}' not found on schema '{schema_name}'"
             )
-        affected = self._schemas_displaying_field(field)
+        holders = self._template_holders(field)
         if self._audit:
             self._audit.log_change("delete", "field", field.id, field.to_dict(), None)
         self._repo.delete_field(field.id)
-        for affected_schema, indices in affected:
-            remaining = [
-                entry
-                for i, entry in enumerate(affected_schema.display_fields)
-                if i not in indices
-            ]
-            self._repo.update(
-                affected_schema.id,
-                name=None,
-                description=None,
-                display_fields=remaining,
-            )
+        self._rewrite_templates(
+            holders, lambda tpl, via: templating.remove_field(tpl, field_name, via)
+        )
 
     def update_field(
         self,
@@ -437,15 +531,15 @@ class SchemaService:
             kwargs["default_value"] = default_value
         if label is not ...:
             kwargs["label"] = label or None
-        affected = self._schemas_displaying_field(field) if renaming else []
+        holders = self._template_holders(field) if renaming else []
         updated = self._repo.update_field(field.id, **kwargs)
-        for affected_schema, indices in affected:
+        if renaming:
             assert new_name is not None  # implied by `renaming`
-            renamed = list(affected_schema.display_fields)
-            for i in indices:
-                renamed[i] = new_name
-            self._repo.update(
-                affected_schema.id, name=None, description=None, display_fields=renamed
+            self._rewrite_templates(
+                holders,
+                lambda tpl, via: templating.rename_field(
+                    tpl, field_name, new_name, via
+                ),
             )
         if self._audit:
             self._audit.log_change(

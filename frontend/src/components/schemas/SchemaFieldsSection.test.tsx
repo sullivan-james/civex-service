@@ -94,7 +94,7 @@ const SCHEMA: Schema = {
   label: null,
   description: null,
   parent_id: null,
-  display_fields: [],
+  display_template: null,
   deleted_at: null,
   fields: [
     field('f1', 'species', 'string'),

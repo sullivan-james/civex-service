@@ -22,7 +22,7 @@ const schema = (name: string, parent: string | null, f: string) => ({
   label: null,
   description: null,
   parent_id: parent ? `id-${parent}` : null,
-  display_fields: [],
+  display_template: null,
   deleted_at: null,
   fields: [field(f)],
 })

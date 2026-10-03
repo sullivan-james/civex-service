@@ -13,6 +13,8 @@ from civex.server.models import (
     FieldResponse,
     FieldTypesResponse,
     NameIssueResponse,
+    PreviewNameRequest,
+    PreviewNameResponse,
     ReorderFieldsRequest,
     SchemaDeleteImpactResponse,
     SchemaResponse,
@@ -49,6 +51,24 @@ def field_types():
     record-form guidance from this, so a new type or rule appears there
     without a frontend change."""
     return FieldTypesResponse.build()
+
+
+@router.post("/{name}/preview-name", response_model=PreviewNameResponse)
+def preview_name(
+    name: str, body: PreviewNameRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """Render a name template against sample values without saving it. An
+    invalid template is answered with `error` set, not an HTTP error, so an
+    editor can show the problem as the person types."""
+    try:
+        rendered = ctx.schema_svc.preview_name(
+            name, body.template, body.values, body.kind
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        return PreviewNameResponse(name=None, error=str(e))
+    return PreviewNameResponse(name=rendered)
 
 
 @router.post("", response_model=SchemaResponse, status_code=201)
@@ -92,8 +112,8 @@ def get_schema(name_or_id: str, ctx: AppContext = Depends(get_ctx)):
 def update_schema(
     name: str, body: UpdateSchemaRequest, ctx: AppContext = Depends(get_ctx)
 ):
-    display_fields = (
-        body.display_fields if "display_fields" in body.model_fields_set else ...
+    display_template = (
+        body.display_template if "display_template" in body.model_fields_set else ...
     )
     label = body.label if "label" in body.model_fields_set else ...
     try:
@@ -101,7 +121,7 @@ def update_schema(
             name,
             new_name=body.rename,
             description=body.description,
-            display_fields=display_fields,
+            display_template=display_template,
             label=label,
         )
         ctx.commit()

@@ -8,7 +8,7 @@ Every schema and field carries two identifiers, and they do different jobs.
 
 | | What it is | Constraint | Where it shows up |
 |---|---|---|---|
-| `name` | The machine key | Lowercase letters, digits and underscores, not starting with a digit | Workflow YAML, CSV headers, display fields, API paths |
+| `name` | The machine key | Lowercase letters, digits and underscores, not starting with a digit | Workflow YAML, CSV headers, name templates, API paths |
 | `label` | The human display name | Free text — spaces, capitals, units, anything | The web UI, `civex schema show`, form labels |
 
 The name is constrained because other things reference it *as text*: a workflow step writes `field: recording_date`, a trigger writes `schema: acoustic_recording`, a CSV column header is the field name. Keeping those as slugs is what makes workflow files readable, diffable in git, and portable between projects.
@@ -27,13 +27,44 @@ If you don't set a label, civex derives one from the name for display — `recor
 
 ### Renaming
 
-Renaming a `name` is a real change: stored records are unaffected (they're keyed by field UUID), and `display_fields` is updated for you, but **any workflow YAML that references the old name must be updated by hand**.
+Renaming a `name` is a real change: stored records are unaffected (they're keyed by field UUID), and any name template that uses it is updated for you, but **any workflow YAML that references the old name must be updated by hand**.
 
 `civex schema lint` reports any schema or field whose name isn't a valid slug — typically rows created before this rule existed, or restored from an older dump. Those names still work; the command just tells you where they are and what a slugified version would look like.
 
 ```bash
 civex schema lint
 ```
+
+## Naming records and files
+
+A record has no name field of its own: its name is built from its values by a **template** on the schema. Open a schema's **Naming** tab, or set it from the CLI:
+
+```bash
+civex schema update sample --display-template "{site:upper}-{taken_on:YYYY-MM}-{sample_no:03}"
+civex schema update sample --clear-display-template   # back to "the first text value"
+```
+
+A template is literal text with variables in braces. A variable is a field name, optionally followed by a colon and a format; several formats chain with `|`. Use `{{` and `}}` for a literal brace.
+
+| Write | To get |
+|---|---|
+| `{site}` | the field's value as entered |
+| `{site:upper}`, `{site:lower}`, `{site:title}` | the value in that case |
+| `{site:slug}` | `North Ridge` → `north_ridge` |
+| `{site:trunc(3)}` | the first 3 characters |
+| `{taken_on:YYYY-MM-DD}` | a date or datetime in that pattern (`YYYY MM DD HH mm SS`); a partial date such as `2019-06` stops at the last part it has |
+| `{sample_no:03}` | a number padded to 3 digits (`7` → `007`) |
+| `{depth:.1f}` | a number with 1 decimal place |
+| `{site.code}` | a field of the record that the reference field `site` points at (see below) |
+| `{schema}`, `{id}` | the schema's name and the record's short id |
+
+A value a record doesn't have is left out together with the separator beside it, so `{site} - {sample_no}` on a record with no site is just the sample number. A schema with no template uses the first text value on the record. Renaming or deleting a field updates every template that uses it.
+
+Fields a schema inherits from its parent can be used like its own; the builder lists them under "From <parent>" so you can tell them apart.
+
+**Reaching into a referenced record.** If a `reference` field names the schema it points at, `{field.other}` reads a field of that record, so a sample can be named `{site.code}-{sample_no:03}`. It reaches one record deep only: `{site.region.name}` isn't allowed, and a referenced record's own name doesn't expand its references. The value is read when the name is shown, so editing the site renames its samples at once. The reference field has to set its schema (a reference that may point anywhere can't be checked), only single `reference` fields work (not lists), and download names can't use it. Renaming or deleting a field on either schema updates the templates that reach it.
+
+The same builder names **downloads**: a `file` field's *Download file name* rule takes a template too, where `{ext}` is the file's extension. There, a missing value makes the download keep its original name instead of a partial one.
 
 ## Creating a schema
 

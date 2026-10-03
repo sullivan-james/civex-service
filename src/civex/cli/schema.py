@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import typer
 from rich.table import Table
@@ -337,42 +337,42 @@ def schema_update(
     description: Optional[str] = typer.Option(
         None, "--description", "-d", help="New description for the schema"
     ),
-    display_field: Optional[List[str]] = typer.Option(
+    display_template: Optional[str] = typer.Option(
         None,
-        "--display-field",
-        help="Field name to include in the record's natural name "
-        "(repeatable; order matters, e.g. --display-field first_name --display-field last_name)",
+        "--display-template",
+        help="Template that names the schema's records, e.g. '{site}-{taken_on:YYYY-MM}'. "
+        "Fields go in braces; formats follow a colon.",
     ),
-    clear_display_fields: bool = typer.Option(
+    clear_display_template: bool = typer.Option(
         False,
-        "--clear-display-fields",
-        help="Remove all display fields (revert to auto)",
+        "--clear-display-template",
+        help="Remove the record name template (revert to auto)",
     ),
 ) -> None:
-    """Update a schema's name, label, description, or display fields."""
+    """Update a schema's name, label, description, or record name template."""
     if (
         rename is None
         and label is None
         and description is None
-        and not display_field
-        and not clear_display_fields
+        and display_template is None
+        and not clear_display_template
     ):
         console.print(
-            "[error]Provide at least one of --rename, --label, --description, --display-field, or --clear-display-fields.[/error]"
+            "[error]Provide at least one of --rename, --label, --description, --display-template, or --clear-display-template.[/error]"
         )
         raise typer.Exit(1)
-    df: Any = ...
-    if display_field:
-        df = display_field
-    elif clear_display_fields:
-        df = []
+    tpl: Any = ...
+    if display_template is not None:
+        tpl = display_template
+    elif clear_display_template:
+        tpl = None
     ctx = _ctx()
     try:
         schema = ctx.schema_svc.update(
             name,
             new_name=rename,
             description=description,
-            display_fields=df,
+            display_template=tpl,
             label=... if label is None else label,
         )
         ctx.commit()

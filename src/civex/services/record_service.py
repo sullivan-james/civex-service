@@ -18,7 +18,7 @@ from civex.domain.dtos import (
     SchemaDTO,
 )
 from civex.domain import geo as geo_domain
-from civex.domain import partial_dates, units
+from civex.domain import partial_dates, templating, units
 from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
 from civex.domain.filters import (
     SELF,
@@ -224,41 +224,33 @@ def _check_restrictions(
                 )
 
 
-# `{field_name}` placeholders in a `filename_template` restriction, plus the
-# reserved `{ext}` token — kept in sync with schema_service.TEMPLATE_TOKEN_RE,
-# which validates these references at field-save time.
-_TEMPLATE_TOKEN_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 # Path separators and characters invalid in filenames on common filesystems —
 # template values come from user-entered field data, so they're untrusted.
 _UNSAFE_FILENAME_CHARS_RE = re.compile(r'[\\/\x00-\x1f:*?"<>|]')
 
 
 def resolve_filename(
-    ref: FileRef, template: str | None, field_values: dict[str, Any]
+    ref: FileRef,
+    template: str | None,
+    field_values: dict[str, Any],
+    builtins: dict[str, Any] | None = None,
 ) -> str:
     """Resolve a `filename_template` restriction against a record's
     (name-keyed) field values. Falls back to the file's original name if no
     template is set, or if any referenced field is blank/unset — a
     partially-substituted name (e.g. "_.pdf") is worse than the original.
+    `builtins` supplies `schema` and `id`; `ext` comes from the file.
     """
     if not template:
         return ref.filename
     ext = Path(ref.filename).suffix.lstrip(".")
-    missing = False
-
-    def substitute(match: re.Match[str]) -> str:
-        nonlocal missing
-        token = match.group(1)
-        if token == "ext":
-            return ext
-        value = field_values.get(token)
-        if value is None or (isinstance(value, str) and not value.strip()):
-            missing = True
-            return ""
-        return str(value)
-
-    resolved = _TEMPLATE_TOKEN_RE.sub(substitute, template)
-    if missing:
+    try:
+        resolved = templating.render(
+            template, field_values, {**(builtins or {}), "ext": ext}, "fallback"
+        )
+    except ValidationError:
+        return ref.filename  # a template stored before the rules tightened
+    if resolved is None:
         return ref.filename
     resolved = _UNSAFE_FILENAME_CHARS_RE.sub("_", resolved).strip()
     return resolved or ref.filename
@@ -301,9 +293,14 @@ def _strip_derived_file_keys(
 
 
 def _with_resolved_filename(
-    ref_dict: dict[str, Any], template: str | None, field_values: dict[str, Any]
+    ref_dict: dict[str, Any],
+    template: str | None,
+    field_values: dict[str, Any],
+    builtins: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    resolved = resolve_filename(FileRef.from_dict(ref_dict), template, field_values)
+    resolved = resolve_filename(
+        FileRef.from_dict(ref_dict), template, field_values, builtins
+    )
     return {**ref_dict, "resolved_filename": resolved}
 
 
@@ -332,7 +329,9 @@ def _unique_zip_name(name: str, used: set[str]) -> str:
 
 
 def _apply_filename_templates(
-    data: dict[str, Any], fields: list[ResolvedField]
+    data: dict[str, Any],
+    fields: list[ResolvedField],
+    builtins: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Annotate every file/file_list value in `data` with `resolved_filename`,
     derived from that field's `filename_template` restriction (if any)."""
@@ -344,10 +343,10 @@ def _apply_filename_templates(
         template = (f.restrictions or {}).get("filename_template")
         value = result.get(f.name)
         if isinstance(value, dict):
-            result[f.name] = _with_resolved_filename(value, template, data)
+            result[f.name] = _with_resolved_filename(value, template, data, builtins)
         elif isinstance(value, list):
             result[f.name] = [
-                _with_resolved_filename(item, template, data)
+                _with_resolved_filename(item, template, data, builtins)
                 if isinstance(item, dict)
                 else item
                 for item in value
@@ -360,16 +359,24 @@ def _apply_filename_templates(
 _SKIP_TYPES = {"reference", "reference_list", "file", "file_list", "tags", "geo"}
 
 
+def _name_builtins(schema_name: str, record_id: Any) -> dict[str, Any]:
+    """The `{schema}` and `{id}` variables templates can use."""
+    return {"schema": schema_name, "id": str(record_id)[:8]}
+
+
 def _natural_name(
-    data: dict[str, Any], fields: list, display_fields: list[str] | None = None
+    data: dict[str, Any],
+    fields: list,
+    display_template: str | None = None,
+    builtins: dict[str, Any] | None = None,
 ) -> str | None:
-    if display_fields:
-        parts = []
-        for name in display_fields:
-            val = data.get(name)
-            if val is not None and str(val).strip():
-                parts.append(str(val))
-        return " ".join(parts) if parts else None
+    """A record's name: its schema's template rendered over its values, else
+    the first plain value on the record."""
+    if display_template:
+        try:
+            return templating.render(display_template, data, builtins)
+        except ValidationError:
+            return None  # a template stored before the rules tightened
     for rf in fields:
         f = rf.field
         if f.dtype in _SKIP_TYPES:
@@ -440,10 +447,11 @@ class RecordService:
         if shape is None:
             return dataclasses.replace(dto)
         named_data = {shape.id_to_name.get(k, k): v for k, v in dto.data.items()}
+        builtins = _name_builtins(shape.schema.name, dto.id)
         natural_name = _natural_name(
-            named_data, shape.fields, shape.schema.display_fields
+            named_data, shape.fields, shape.schema.display_template, builtins
         )
-        named_data = _apply_filename_templates(named_data, shape.fields)
+        named_data = _apply_filename_templates(named_data, shape.fields, builtins)
         return dataclasses.replace(dto, data=named_data, natural_name=natural_name)
 
     def _with_names_many(self, dtos: list[RecordDTO]) -> list[RecordDTO]:
@@ -603,13 +611,18 @@ class RecordService:
         targets = self._records.list_by_ids(list(all_ids))
         target_dataset = {t.id: t.dataset_id for t in targets}
         label_by_id: dict[uuid.UUID, str | None] = {}
+        target_data: dict[uuid.UUID, dict[str, Any]] = {}
         for t in targets:
             t_shape = shapes(t.schema_id)
             if t_shape is None:
                 continue
             named_data = {t_shape.id_to_name.get(k, k): v for k, v in t.data.items()}
+            target_data[t.id] = named_data
             label_by_id[t.id] = _natural_name(
-                named_data, t_shape.fields, t_shape.schema.display_fields
+                named_data,
+                t_shape.fields,
+                t_shape.schema.display_template,
+                _name_builtins(t_shape.schema.name, t.id),
             )
 
         def foreign_collections(
@@ -623,11 +636,51 @@ class RecordService:
             }
             return out or None
 
+        reach_paths: dict[uuid.UUID, list[str]] = {}
+
+        def reached_name(r: RecordDTO) -> str | None:
+            """`r`'s name when its template uses `{ref.field}`: the one place
+            another record's values are read. One hop only -- a target's own
+            name, built above, leaves its references out."""
+            shape = shapes(r.schema_id)
+            template = shape.schema.display_template if shape else None
+            if shape is None or not template:
+                return r.natural_name
+            if r.schema_id not in reach_paths:
+                try:
+                    names = templating.referenced_names(template)
+                except ValidationError:
+                    names = []
+                reach_paths[r.schema_id] = [n for n in names if "." in n]
+            paths = reach_paths[r.schema_id]
+            if not paths:
+                return r.natural_name
+            values = dict(r.data)
+            for path in paths:
+                base, _, sub = path.partition(".")
+                ref = r.data.get(base)
+                try:
+                    target_id = uuid.UUID(ref) if isinstance(ref, str) else None
+                except ValueError:
+                    target_id = None
+                values[path] = (
+                    target_data.get(target_id, {}).get(sub)
+                    if target_id is not None
+                    else None
+                )
+            return _natural_name(
+                values,
+                shape.fields,
+                template,
+                _name_builtins(shape.schema.name, r.id),
+            )
+
         return [
             dataclasses.replace(
                 r,
                 reference_labels={str(i): label_by_id.get(i) for i in ids},
                 reference_collections=foreign_collections(r, ids),
+                natural_name=reached_name(r),
             )
             if ids
             else r

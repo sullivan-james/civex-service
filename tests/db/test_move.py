@@ -325,7 +325,6 @@ def test_memory_stays_flat_however_large_the_database(tmp_path: Path):
                     "id": (s_ := uuid.uuid4()),
                     "name": "s",
                     "created_at": now,
-                    "display_fields": [],
                 }
             ],
         )

@@ -278,10 +278,13 @@ class UpdateSchemaTool(AiTool):
                 "description": "Human-facing display name; free text with spaces and capitals.",
             },
             "description": {"type": "string"},
-            "display_fields": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Ordered field names to join (space-separated) for the record's natural name",
+            "display_template": {
+                "type": "string",
+                "description": (
+                    "Template naming the schema's records, e.g. '{site}-{taken_on:YYYY-MM}'. "
+                    "Variables are field names in braces; formats follow a colon "
+                    "(upper, lower, slug, trunc(N), 03, .2f, a date pattern)."
+                ),
             },
         },
         "required": ["name"],
@@ -294,12 +297,12 @@ class UpdateSchemaTool(AiTool):
             return tool_error(f"Schema '{name}' does not exist.")
         body = {
             k: tool_input[k]
-            for k in ("rename", "label", "description", "display_fields")
+            for k in ("rename", "label", "description", "display_template")
             if tool_input.get(k) is not None
         }
         if not body:
             return tool_error(
-                "Nothing to change (provide rename, label, description, or display_fields)."
+                "Nothing to change (provide rename, label, description, or display_template)."
             )
         update_kwargs: dict[str, Any] = {}
         if "rename" in body:
@@ -308,8 +311,8 @@ class UpdateSchemaTool(AiTool):
             update_kwargs["label"] = body["label"]
         if "description" in body:
             update_kwargs["description"] = body["description"]
-        if "display_fields" in body:
-            update_kwargs["display_fields"] = body["display_fields"]
+        if "display_template" in body:
+            update_kwargs["display_template"] = body["display_template"]
         err = validate_via(ctx, ctx.schema_svc.update, name, **update_kwargs)
         if err:
             return err

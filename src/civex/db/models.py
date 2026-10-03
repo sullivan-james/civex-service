@@ -93,16 +93,16 @@ class Schema(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     # Human-facing display name. name stays a slug because workflows, CSV
-    # headers and display_fields reference it as text; label absorbs the
+    # headers and display_template reference it as text; label absorbs the
     # cosmetic churn so renames stay rare. Null → derived from name.
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     description: Mapped[str | None] = mapped_column(String(1000))
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("schemas.id"), nullable=True
     )
-    display_fields: Mapped[list[str]] = mapped_column(
-        _JSON, nullable=False, default=list, server_default="[]"
-    )
+    # Template naming this schema's records (domain/templating.py); null means
+    # "use the first plain value on the record".
+    display_template: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
     # Soft-delete marker. NULL = live. Set instead of a hard DELETE so a
     # schema (and, via SchemaRepository's cascade, the records typed by it)

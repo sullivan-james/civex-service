@@ -2,17 +2,13 @@ import { useCallback, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { errorMessage } from '../../lib/errors'
 import type { Field, FieldKind, Schema } from '../../api/schemas'
-import {
-  useUpdateSchema,
-  useDeleteField,
-  useReorderFields,
-} from '../../hooks/useSchemas'
+import { useDeleteField, useReorderFields } from '../../hooks/useSchemas'
 import { useFieldTypes } from '../../hooks/useFieldTypes'
-import { Button, IconButton, ConfirmDialog, Section } from '../ui'
+import { Button, IconButton, ConfirmDialog } from '../ui'
 import { displayLabel } from '../../utils/naming'
 import { summarise } from '../../utils/restrictions'
+import { fieldsWithInherited } from '../../utils/schemaFields'
 import {
-  Star,
   X,
   ChevronUp,
   ChevronDown,
@@ -32,9 +28,9 @@ interface InspectorSection {
   render: () => ReactNode
 }
 
-/** The schema page's Fields section: a list of fields on the left, and for
- * the selected one an inspector on the right to change its rules. Also owns
- * reordering (drag and keyboard), display-field ordering, and removal. */
+/** The schema page's Fields tab: a list of fields on the left, and for the
+ * selected one an inspector on the right to change its rules. Also owns
+ * reordering (drag and keyboard) and removal. */
 export function SchemaFieldsSection({
   schema,
   allSchemas,
@@ -57,14 +53,13 @@ export function SchemaFieldsSection({
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const deleteField = useDeleteField(schema.name)
-  const updateSchema = useUpdateSchema(schema.name)
   const reorderFields = useReorderFields(schema.name)
   const descriptors = useFieldTypes()
   const typeLabel = (t: string) =>
     descriptors?.types.find((d) => d.type === t)?.label ?? t
 
   const field = schema.fields.find((f) => f.name === selected) ?? null
-  const fieldNames = schema.fields.map((f) => f.name)
+  const fieldInfo = fieldsWithInherited(schema, allSchemas)
 
   /** Run a navigation, asking first if the open form has unsaved edits. */
   function navigate(action: () => void) {
@@ -84,30 +79,6 @@ export function SchemaFieldsSection({
       setDirty(false)
     })
   const onDirtyChange = useCallback((d: boolean) => setDirty(d), [])
-
-  function toggleDisplayField(fieldName: string) {
-    const current = schema.display_fields
-    const next = current.includes(fieldName)
-      ? current.filter((n) => n !== fieldName)
-      : [...current, fieldName]
-    updateSchema.mutate({ display_fields: next })
-  }
-
-  function moveDisplayField(fieldName: string, direction: 'up' | 'down') {
-    const current = [...schema.display_fields]
-    const index = current.indexOf(fieldName)
-    const targetIndex = direction === 'up' ? index - 1 : index + 1
-    if (index === -1 || targetIndex < 0 || targetIndex >= current.length) return
-    ;[current[index], current[targetIndex]] = [
-      current[targetIndex],
-      current[index],
-    ]
-    updateSchema.mutate({ display_fields: current })
-    const f = schema.fields.find((x) => x.name === fieldName)
-    setAnnouncement(
-      `${f ? displayLabel(f.name, f.label) : fieldName} moved to position ${targetIndex + 1} of ${current.length} in display order.`,
-    )
-  }
 
   function reorder(from: number, to: number) {
     const next = [...schema.fields]
@@ -154,7 +125,7 @@ export function SchemaFieldsSection({
           field={f}
           schemaName={schema.name}
           schemas={allSchemas}
-          fieldNames={fieldNames}
+          fields={fieldInfo}
           onDirtyChange={onDirtyChange}
           onDone={() => {
             setDirty(false)
@@ -164,8 +135,6 @@ export function SchemaFieldsSection({
       ),
     },
   ]
-
-  const isDisplay = (n: string) => schema.display_fields.includes(n)
 
   function inspector() {
     if (adding || schema.fields.length === 0) {
@@ -185,7 +154,7 @@ export function SchemaFieldsSection({
             kind={newKind}
             schemaName={schema.name}
             schemas={allSchemas}
-            fieldNames={fieldNames}
+            fields={fieldInfo}
             onChangeKind={() => setNewKind(null)}
             onDirtyChange={onDirtyChange}
             onDone={(savedName) => {
@@ -201,7 +170,7 @@ export function SchemaFieldsSection({
     if (!field)
       return (
         <p className="py-8 text-center text-sm text-fg-muted">
-          Select a field to see and change its rules, or add a new one.
+          Select a field to edit it.
         </p>
       )
     const sections = sectionsFor(field)
@@ -238,48 +207,6 @@ export function SchemaFieldsSection({
           </div>
           <div className="flex items-center gap-1">
             <IconButton
-              icon={Star}
-              aria-label={
-                isDisplay(field.name)
-                  ? 'Remove from display fields'
-                  : "Add to display fields — used to name this type's records"
-              }
-              variant="subtle"
-              className={
-                isDisplay(field.name)
-                  ? '!text-attention hover:!text-attention-emphasis'
-                  : ''
-              }
-              iconProps={{
-                fill: isDisplay(field.name) ? 'currentColor' : 'none',
-              }}
-              onClick={() => toggleDisplayField(field.name)}
-            />
-            {isDisplay(field.name) && schema.display_fields.length > 1 && (
-              <>
-                <IconButton
-                  icon={ChevronUp}
-                  aria-label={`Move ${displayLabel(field.name, field.label)} earlier in display order`}
-                  variant="subtle"
-                  disabled={
-                    schema.display_fields.indexOf(field.name) === 0 ||
-                    updateSchema.isPending
-                  }
-                  onClick={() => moveDisplayField(field.name, 'up')}
-                />
-                <IconButton
-                  icon={ChevronDown}
-                  aria-label={`Move ${displayLabel(field.name, field.label)} later in display order`}
-                  variant="subtle"
-                  disabled={
-                    schema.display_fields.indexOf(field.name) ===
-                      schema.display_fields.length - 1 || updateSchema.isPending
-                  }
-                  onClick={() => moveDisplayField(field.name, 'down')}
-                />
-              </>
-            )}
-            <IconButton
               icon={X}
               aria-label="Remove field"
               variant="danger"
@@ -287,15 +214,6 @@ export function SchemaFieldsSection({
             />
           </div>
         </div>
-        {isDisplay(field.name) && (
-          <p className="text-xs text-attention">
-            Display field
-            {schema.display_fields.length > 1
-              ? ` #${schema.display_fields.indexOf(field.name) + 1}`
-              : ''}
-            : part of the name shown for each record.
-          </p>
-        )}
         {sections.map((section) => (
           <div key={section.id}>
             {sections.length > 1 && (
@@ -315,17 +233,18 @@ export function SchemaFieldsSection({
 
   return (
     <>
-      <Section
-        title="Fields"
-        count={schema.fields.length}
-        action={
-          !adding && (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-fg-muted">
+            {schema.fields.length}{' '}
+            {schema.fields.length === 1 ? 'field' : 'fields'}
+          </p>
+          {!adding && (
             <Button size="sm" onClick={startAdding}>
               + Add field
             </Button>
-          )
-        }
-      >
+          )}
+        </div>
         <div role="status" aria-live="polite" className="sr-only">
           {announcement}
         </div>
@@ -394,14 +313,6 @@ export function SchemaFieldsSection({
                               *
                             </span>
                           )}
-                          {isDisplay(f.name) && (
-                            <Star
-                              size={11}
-                              fill="currentColor"
-                              className="shrink-0 text-attention"
-                              aria-label="display field"
-                            />
-                          )}
                         </span>
                         <span className="block truncate font-mono text-xs text-fg-subtle">
                           {f.name} · {typeLabel(f.type)}
@@ -443,7 +354,7 @@ export function SchemaFieldsSection({
             {inspector()}
           </div>
         </div>
-      </Section>
+      </div>
 
       {pendingNav && (
         <ConfirmDialog

@@ -1,14 +1,16 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { useCallback, useState } from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { schemasApi } from '../../api/schemas'
 import { CONTROLS } from './controlRegistry'
 import type { ControlContext, Rules } from './RestrictionControls'
 import type { RestrictionDescriptor } from '../../api/schemas'
 
 const ctx: ControlContext = {
   schemaName: 's',
-  fieldNames: ['deployment_id'],
+  fields: [{ name: 'deployment_id', label: 'Deployment', dtype: 'string' }],
   schemas: [],
 }
 
@@ -47,7 +49,7 @@ function Harness({
   )
   const Control = CONTROLS[d.control]
   return (
-    <div>
+    <QueryClientProvider client={queryClient}>
       <Control
         desc={d}
         rules={rules}
@@ -59,9 +61,17 @@ function Harness({
       <output data-testid="problems">
         {JSON.stringify(Object.values(problems).filter(Boolean))}
       </output>
-    </div>
+    </QueryClientProvider>
   )
 }
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+})
+vi.spyOn(schemasApi, 'previewName').mockResolvedValue({
+  name: 'preview',
+  error: null,
+})
 
 const rules = () => JSON.parse(screen.getByTestId('rules').textContent!)
 const problems = () => JSON.parse(screen.getByTestId('problems').textContent!)
@@ -266,9 +276,7 @@ describe('filename template and schema controls', () => {
         d={desc('filename_template', 'filename_template', 'Download file name')}
       />,
     )
-    await userEvent.click(
-      screen.getByRole('button', { name: '{deployment_id}' }),
-    )
+    await userEvent.click(screen.getByRole('button', { name: 'Deployment' }))
     await userEvent.type(screen.getByLabelText('Download file name'), '_clip.')
     await userEvent.click(screen.getByRole('button', { name: '{ext}' }))
     expect(rules()).toEqual({ filename_template: '{deployment_id}_clip.{ext}' })

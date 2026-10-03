@@ -91,7 +91,6 @@ _FILE_RULES = (
         "filename_template",
         "Download file name",
         "filename_template",
-        "Name downloads from this record's other fields, e.g. {deployment_id}_clip.{ext}. "
         "Falls back to the original name when a field it uses is empty.",
     ),
 )

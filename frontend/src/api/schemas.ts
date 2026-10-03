@@ -20,7 +20,8 @@ export interface Schema {
   label: string | null
   description: string | null
   parent_id: string | null
-  display_fields: string[]
+  /** Template naming this schema's records; null means the first plain value. */
+  display_template: string | null
   fields: Field[]
   /** When this schema was soft-deleted. Null means live. */
   deleted_at: string | null
@@ -75,6 +76,13 @@ export interface NameIssue {
   suggestion: string | null
 }
 
+export interface NamePreview {
+  /** The rendered text; null when the template renders to nothing. */
+  name: string | null
+  /** Why the template isn't valid, when it isn't. */
+  error: string | null
+}
+
 export const schemasApi = {
   list: () => api.get<Schema[]>('/schemas'),
   lint: () => api.get<NameIssue[]>('/schemas/lint'),
@@ -86,6 +94,14 @@ export const schemasApi = {
     api.get<PaginatedAuditLog>(
       `/schemas/${name}/audit?offset=${offset}&limit=${limit}`,
     ),
+  previewName: (
+    name: string,
+    body: {
+      template: string
+      values: Record<string, unknown>
+      kind: 'record' | 'file'
+    },
+  ) => api.post<NamePreview>(`/schemas/${name}/preview-name`, body),
   create: (body: {
     name: string
     label?: string
@@ -107,7 +123,8 @@ export const schemasApi = {
       // '' clears the label; omit the key to leave it unchanged.
       label?: string
       description?: string
-      display_fields?: string[] | null
+      // '' clears the template; omit the key to leave it unchanged.
+      display_template?: string
     },
   ) => api.patch<Schema>(`/schemas/${name}`, body),
   delete: (name: string) => api.delete<void>(`/schemas/${name}`),

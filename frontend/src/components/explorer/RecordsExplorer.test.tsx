@@ -19,7 +19,7 @@ function schema(name: string, parent: Schema | null, fields: string[]): Schema {
     label: null,
     description: null,
     parent_id: parent?.id ?? null,
-    display_fields: [],
+    display_template: null,
     deleted_at: null,
     fields: fields.map((f) => ({
       id: `${name}-${f}`,

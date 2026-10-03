@@ -95,7 +95,7 @@ class LocalSchemaRepository:
         id: uuid.UUID,
         name: str | None,
         description: str | None,
-        display_fields=_SENTINEL,
+        display_template=_SENTINEL,
         label=_SENTINEL,
     ) -> SchemaDTO:
         row = self._s.query(Schema).filter_by(id=id).first()
@@ -105,8 +105,8 @@ class LocalSchemaRepository:
             row.name = name
         if description is not None:
             row.description = description
-        if display_fields is not self._SENTINEL:
-            row.display_fields = display_fields or []  # None/[] clears it
+        if display_template is not self._SENTINEL:
+            row.display_template = display_template or None  # None/"" clears it
         if label is not self._SENTINEL:
             row.label = label or None  # None/"" reverts to the derived label
         self._s.flush()
@@ -262,7 +262,7 @@ def _schema_to_dto(row: Schema) -> SchemaDTO:
         label=row.label,
         description=row.description,
         parent_id=row.parent_id,
-        display_fields=row.display_fields or [],
+        display_template=row.display_template,
         created_at=row.created_at,
         fields=[_field_to_dto(f) for f in row.fields],
         deleted_at=row.deleted_at,

@@ -22,7 +22,7 @@ function schema(
     label: null,
     description: null,
     parent_id: parent?.id ?? null,
-    display_fields: [],
+    display_template: null,
     deleted_at: null,
     fields: fields.map(([n, type]) => ({
       id: `${name}-${n}`,

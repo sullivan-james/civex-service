@@ -21,14 +21,18 @@ import {
 } from '../../utils/partialDates'
 import { UNIT_GROUPS, canonicalUnit } from '../../utils/units'
 import { displayLabel } from '../../utils/naming'
+import {
+  TemplateBuilder,
+  type TemplateField,
+} from '../templates/TemplateBuilder'
 
 export type Rules = Record<string, unknown>
 
 /** What a control may need to know about the field it is editing. */
 export interface ControlContext {
   schemaName: string
-  /** Names of the schema's fields, for the file-name template. */
-  fieldNames: string[]
+  /** The schema's fields, for the file-name template. */
+  fields: TemplateField[]
   schemas: Schema[]
   /** The field as saved, when editing (not creating). */
   existing?: SchemaField
@@ -286,32 +290,17 @@ export function FilenameTemplateControl({
 }: ControlProps) {
   const value =
     typeof rules[desc.key] === 'string' ? (rules[desc.key] as string) : ''
-  const names = [
-    ...ctx.fieldNames.filter((n) => n !== ctx.existing?.name),
-    'ext',
-  ]
   return (
     <Shell label={desc.label} help={desc.help}>
-      <Input
-        size="sm"
+      <TemplateBuilder
+        schemaName={ctx.schemaName}
+        kind="file"
         value={value}
+        onChange={(next) => set(desc.key, next || undefined)}
+        fields={ctx.fields.filter((f) => f.name !== ctx.existing?.name)}
+        label={desc.label}
         placeholder="Keep the original name"
-        aria-label={desc.label}
-        onChange={(e) => set(desc.key, e.target.value || undefined)}
-        className="max-w-md font-mono"
       />
-      <div className="flex flex-wrap gap-1">
-        {names.map((n) => (
-          <button
-            key={n}
-            type="button"
-            onClick={() => set(desc.key, `${value}{${n}}`)}
-            className="rounded border border-border bg-canvas px-1.5 py-0.5 font-mono text-xs hover:bg-canvas-subtle cursor-pointer"
-          >
-            {`{${n}}`}
-          </button>
-        ))}
-      </div>
     </Shell>
   )
 }
