@@ -706,6 +706,124 @@ class CreateFolderResponse(BaseModel):
     path: str
 
 
+class TransferRequest(BaseModel):
+    kind: str = Field(
+        description="drain: move everything off the `sources` volumes. consolidate: move the files of the `collection_ids` collections."
+    )
+    targets: list[str] = Field(
+        description="Volumes to put the files on, in order of preference: a file goes to the first that is usable and has room."
+    )
+    sources: list[str] = Field(
+        default_factory=list, description="drain: the volumes to empty."
+    )
+    collection_ids: list[str] = Field(
+        default_factory=list, description="consolidate: ids of the collections to move."
+    )
+    include_shared: bool = Field(
+        default=False,
+        description=(
+            "consolidate: also move files that collections kept on a different "
+            "volume use as well. They stay where they are by default, since moving "
+            "one would only split those collections instead."
+        ),
+    )
+    verify: str = Field(
+        default="copy",
+        description=(
+            "copy: each file is hashed as it is copied and must match its recorded "
+            "hash. full: the copy is also read back and hashed (about twice the reading)."
+        ),
+    )
+    freeze_sources: bool = Field(
+        default=True,
+        description=(
+            "drain: make the sources read-only while it runs, so new uploads don't "
+            "keep landing on them, and put them back afterwards."
+        ),
+    )
+
+
+class TargetShareResponse(BaseModel):
+    volume: str
+    files: int = Field(description="About how many files would go to this target.")
+    bytes: int
+    free_bytes: int | None = Field(
+        description="Room the target has; null if it can't be read now."
+    )
+
+
+class TransferPlanResponse(BaseModel):
+    files: int = Field(
+        description="Files that would be moved (from the catalog, so close, not exact)."
+    )
+    bytes: int
+    already_there: int = Field(description="Files already on a target, left alone.")
+    shared_left: int = Field(
+        description="consolidate: files left because collections kept elsewhere use them too."
+    )
+    shared_left_bytes: int
+    targets: list[TargetShareResponse]
+    problems: list[str] = Field(description="Reasons the transfer can't start.")
+    warnings: list[str] = Field(description="Things worth knowing; they don't stop it.")
+    can_proceed: bool
+
+
+class TransferProgressResponse(BaseModel):
+    files_total: int
+    files_done: int
+    files_skipped: int = Field(description="Already on a target.")
+    files_failed: int
+    bytes_total: int
+    bytes_done: int
+    current: str | None = Field(
+        description="The file being copied (a hash prefix), if any."
+    )
+    current_bytes: int = Field(
+        description="Bytes of the current file copied so far; add to bytes_done for a smooth bar."
+    )
+    current_total: int
+    rate_bytes_per_second: float
+    eta_seconds: float | None
+    message: str
+
+
+class TransferFailureResponse(BaseModel):
+    sha256: str
+    volume: str = Field(description="Where the file is (and stays).")
+    reason: str
+
+
+class TransferResponse(BaseModel):
+    id: str
+    kind: str
+    status: str = Field(
+        description="running, paused, completed, failed, cancelled or interrupted (the process died; resumable)."
+    )
+    spec: TransferRequest
+    plan: TransferPlanResponse | None
+    progress: TransferProgressResponse
+    failures: list[TransferFailureResponse] = Field(
+        description="Files that couldn't be moved (the first few hundred)."
+    )
+    failures_total: int
+    pause_reason: str | None
+    auto_resume: bool = Field(
+        description="Paused only because a volume stopped answering, and will carry on by itself when it does."
+    )
+    error: str | None
+    control: str | None = Field(
+        description="A pause or cancel asked for and not yet acted on."
+    )
+    frozen: dict[str, str] = Field(
+        description="Volumes made read-only for the duration, and what each was before."
+    )
+    live: bool = Field(description="Running on a thread of this server right now.")
+    created_at: str | None
+    started_at: str | None
+    finished_at: str | None
+    updated_at: str | None
+
+
 class AddVolumeRequest(BaseModel):
     name: str
     path: str
@@ -723,6 +841,10 @@ class UpdateVolumeRequest(BaseModel):
     path: str | None = None
     allocated_gb: float | None = None
     clear_allocation: bool = False
+    state: str | None = Field(
+        default=None,
+        description="active, readonly (readable, never written to) or retired.",
+    )
 
 
 class SetQueueRequest(BaseModel):

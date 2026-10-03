@@ -66,6 +66,8 @@ def update_volume(
         alloc = None
     try:
         ctx.store_svc.update_volume(name, path=body.path, allocated_gb=alloc)
+        if body.state is not None:
+            ctx.store_svc.set_volume_state(name, body.state)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     stats = ctx.store_svc.volume_stats()
