@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link, useLocation } from 'react-router'
+import { Link, useLocation, useNavigate } from 'react-router'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import { viewsApi } from '../../api/views'
 import {
@@ -18,12 +18,14 @@ import {
   ErrorState,
   Input,
   Pagination,
+  Menu,
   PinButton,
+  type MenuItem,
   TriggerPopover,
   TableSkeleton,
   Field,
 } from '../ui'
-import { Columns3, Download, Plus } from '../ui/icons'
+import { ChevronDown, Columns3, Download, Plus, Upload } from '../ui/icons'
 import { toTableRows } from '../records/tableRows'
 import {
   RecordsTable,
@@ -260,6 +262,7 @@ export function RecordsExplorer({
   // come from record counts, so a schema with no records yet has none, and
   // without these there would be no way to create the first of its kind.
   const enabledSchemas = new Set(collection?.schemas ?? [])
+  const navigate = useNavigate()
   const starters = dataset
     ? (x.schemas ?? []).filter(
         (s) => !s.parent_id && enabledSchemas.has(s.name),
@@ -269,6 +272,52 @@ export function RecordsExplorer({
   const otherStarters = x.rootId
     ? []
     : starters.filter((s) => s.name !== listed?.name)
+
+  // One way to create anything: a single New menu. What is being listed comes
+  // first (under the record being browsed when that is its parent), then the
+  // other places a record can start, then import.
+  const newItems: MenuItem[] = dataset
+    ? [
+        ...(listed
+          ? [
+              {
+                label: `New ${listedLabel.toLowerCase()}`,
+                icon: Plus,
+                onClick: () => navigate(newRecordHref),
+              },
+            ]
+          : []),
+        ...otherStarters.map((s) => ({
+          label: `New ${displayLabel(s.name, s.label).toLowerCase()}`,
+          icon: Plus,
+          onClick: () =>
+            navigate(
+              `/collections/${dataset}/new?${new URLSearchParams({ schema: s.name })}`,
+            ),
+        })),
+        {
+          label: 'Import data…',
+          icon: Upload,
+          onClick: () => navigate(`/collections/${dataset}/import`),
+        },
+      ]
+    : []
+  const newMenu = newItems.length > 0 && (
+    <Menu
+      items={newItems}
+      trigger={({ open, toggle }) => (
+        <Button
+          variant="primary"
+          size="sm"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={toggle}
+        >
+          <Plus size={14} /> New <ChevronDown size={14} />
+        </Button>
+      )}
+    />
+  )
 
   if (!listed && !x.page.isLoading && x.levels.length === 0) {
     // Levels come from record counts, so an empty collection has none and the
@@ -287,19 +336,7 @@ export function RecordsExplorer({
           }
         />
         {starters.length > 0 && (
-          <div className="flex flex-wrap justify-center gap-2">
-            {starters.map((s) => (
-              <Link
-                key={s.id}
-                to={`/collections/${dataset}/new?${new URLSearchParams({ schema: s.name })}`}
-              >
-                <Button variant="primary" size="sm">
-                  <Plus size={14} /> Add{' '}
-                  {displayLabel(s.name, s.label).toLowerCase()}
-                </Button>
-              </Link>
-            ))}
-          </div>
+          <div className="flex justify-center">{newMenu}</div>
         )}
       </div>
     )
@@ -367,23 +404,7 @@ export function RecordsExplorer({
                 size="md"
               />
             )}
-            {dataset && listed && (
-              <Button variant="primary" size="sm" to={newRecordHref}>
-                <Plus size={14} /> Add {listedLabel.toLowerCase()}
-              </Button>
-            )}
-            {dataset &&
-              otherStarters.map((s) => (
-                <Link
-                  key={s.id}
-                  to={`/collections/${dataset}/new?${new URLSearchParams({ schema: s.name })}`}
-                >
-                  <Button size="sm">
-                    <Plus size={14} /> Add{' '}
-                    {displayLabel(s.name, s.label).toLowerCase()}
-                  </Button>
-                </Link>
-              ))}
+            {newMenu}
           </div>
         </div>
 

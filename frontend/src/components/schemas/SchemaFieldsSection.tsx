@@ -10,6 +10,7 @@ import {
   IconButton,
   ListButton,
   SortableList,
+  Subheading,
 } from '../ui'
 import { displayLabel } from '../../utils/naming'
 import { summarise } from '../../utils/restrictions'
@@ -180,9 +181,7 @@ export function SchemaFieldsSection({
         {sections.map((section) => (
           <div key={section.id}>
             {sections.length > 1 && (
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-muted">
-                {section.label}
-              </h4>
+              <Subheading as="h4">{section.label}</Subheading>
             )}
             {section.render()}
           </div>

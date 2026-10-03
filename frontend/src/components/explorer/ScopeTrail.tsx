@@ -36,7 +36,7 @@ export function ScopeTrail({
           <ChevronRight size={12} className="text-fg-subtle" aria-hidden />
         </span>
       ))}
-      <h2 className="text-xl font-bold text-fg">{heading}</h2>
+      <h2 className="text-base font-semibold text-fg">{heading}</h2>
     </nav>
   )
 }

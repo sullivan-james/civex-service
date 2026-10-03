@@ -83,7 +83,7 @@ export function Field({
     ) : (
       <label
         htmlFor={controlId}
-        className={hideLabel ? 'sr-only' : 'text-xs font-medium text-fg-muted'}
+        className={hideLabel ? 'sr-only' : 'text-sm font-medium text-fg'}
       >
         {label}
         {requiredMark}

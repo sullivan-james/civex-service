@@ -1,5 +1,5 @@
 import { Link } from 'react-router'
-import { Badge, Button, FormError } from '../ui'
+import { Badge, Button, Disclosure, FormError } from '../ui'
 import { recordLabel } from '../records/RecordSearchPicker'
 import type { ImportOutcome } from './importWizardTypes'
 
@@ -68,18 +68,15 @@ export function DoneStep({
       )}
 
       {result.skipped.length > 0 && (
-        <details className="text-xs text-fg-muted border border-border rounded-md p-3">
-          <summary className="cursor-pointer font-medium text-fg">
-            {result.skipped.length} skipped
-          </summary>
-          <ul className="mt-2 space-y-0.5 max-h-40 overflow-y-auto">
+        <Disclosure summary={`${result.skipped.length} skipped`}>
+          <ul className="max-h-40 space-y-0.5 overflow-y-auto p-3 text-xs text-fg-muted">
             {result.skipped.map((s, i) => (
               <li key={i} className="font-mono">
                 {s.label}: {s.reason}
               </li>
             ))}
           </ul>
-        </details>
+        </Disclosure>
       )}
 
       <div className="flex gap-2">

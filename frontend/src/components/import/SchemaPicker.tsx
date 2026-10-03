@@ -1,4 +1,4 @@
-import { NameLabelFields, Select } from '../ui'
+import { NameLabelFields, Select, Subheading } from '../ui'
 import { displayLabel } from '../../utils/naming'
 import { NEW_SCHEMA } from './importWizardTypes'
 import type { Schema } from '../../api/schemas'
@@ -24,9 +24,7 @@ export function SchemaPicker({
 }) {
   return (
     <div className="space-y-2">
-      <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
-        Record type
-      </span>
+      <Subheading as="span">Record type</Subheading>
       <Select
         value={value}
         onChange={(e) => onChange(e.target.value)}

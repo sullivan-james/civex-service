@@ -216,6 +216,11 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
+async function openNew() {
+  await userEvent.click(await screen.findByRole('button', { name: /New/ }))
+}
+const item = (name: RegExp) => screen.queryByRole('menuitem', { name })
+
 describe('RecordsExplorer', () => {
   describe('an empty collection', () => {
     const emptyCollection = (schemas: string[]) => (url: URL) => {
@@ -234,18 +239,13 @@ describe('RecordsExplorer', () => {
       return undefined
     }
 
-    it('offers an Add button for each enabled top-level schema', async () => {
+    it('offers a New entry for each enabled top-level schema', async () => {
       override = emptyCollection(['encounter', 'recording'])
       renderExplorer({}, '/collections/hb')
-      const add = await screen.findByRole('link', { name: /Add encounter/ })
-      expect(add).toHaveAttribute(
-        'href',
-        '/collections/hb/new?schema=encounter',
-      )
+      await openNew()
+      expect(item(/New encounter/)).toBeInTheDocument()
       // a child schema can't start a collection: it needs a parent record
-      expect(
-        screen.queryByRole('link', { name: /Add recording/ }),
-      ).not.toBeInTheDocument()
+      expect(item(/New recording/)).not.toBeInTheDocument()
     })
 
     it('says so when no schemas are enabled yet', async () => {
@@ -253,7 +253,7 @@ describe('RecordsExplorer', () => {
       renderExplorer({}, '/collections/hb')
       expect(await screen.findByText(/has no schemas yet/)).toBeInTheDocument()
       expect(
-        screen.queryByRole('link', { name: /Add / }),
+        screen.queryByRole('button', { name: /New/ }),
       ).not.toBeInTheDocument()
     })
   })
@@ -282,28 +282,27 @@ describe('RecordsExplorer', () => {
       override = withEnabled(['encounter', 'recording', 'selection', 'species'])
       renderExplorer({}, '/collections/hb')
 
-      expect(
-        await screen.findByRole('link', { name: /Add encounter/ }),
-      ).toBeInTheDocument()
-      expect(
-        await screen.findByRole('link', { name: /Add species/ }),
-      ).toHaveAttribute('href', '/collections/hb/new?schema=species')
+      await openNew()
+      expect(item(/New encounter/)).toBeInTheDocument()
+      expect(item(/New species/)).toBeInTheDocument()
       // children need a parent record, so they aren't offered from here
-      expect(screen.queryByRole('link', { name: /Add recording/ })).toBeNull()
+      expect(item(/New recording/)).toBeNull()
     })
 
     it('does not offer a top-level schema the collection is not for', async () => {
       override = withEnabled(['encounter'])
       renderExplorer({}, '/collections/hb')
-      await screen.findByRole('link', { name: /Add encounter/ })
-      expect(screen.queryByRole('link', { name: /Add species/ })).toBeNull()
+      await openNew()
+      expect(item(/New encounter/)).toBeInTheDocument()
+      expect(item(/New species/)).toBeNull()
     })
 
     it('offers them only at the top of the collection, not inside a record', async () => {
       override = withEnabled(['encounter', 'recording', 'selection', 'species'])
       renderExplorer({}, '/collections/hb?schema=recording&within=e1')
-      await screen.findByRole('link', { name: /Add recording/ })
-      expect(screen.queryByRole('link', { name: /Add species/ })).toBeNull()
+      await openNew()
+      expect(item(/New recording/)).toBeInTheDocument()
+      expect(item(/New species/)).toBeNull()
     })
   })
 

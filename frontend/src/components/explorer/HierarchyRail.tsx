@@ -29,7 +29,7 @@ export function HierarchyRail({
       aria-label="Data hierarchy"
       className="md:w-60 shrink-0 md:sticky md:top-4 flex md:flex-col gap-1 overflow-x-auto rounded-md border border-border bg-canvas-subtle p-2"
     >
-      <h2 className="hidden md:block px-2 pt-1 pb-2 text-xs font-bold uppercase tracking-wider text-fg border-b border-border mb-1">
+      <h2 className="mb-1 hidden border-b border-border px-2 pb-2 pt-1 text-sm font-semibold text-fg md:block">
         Hierarchy
       </h2>
       {levels.map(({ schema, depth, count }) => {

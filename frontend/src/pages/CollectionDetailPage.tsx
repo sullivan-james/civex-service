@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router'
-import { Upload } from '../components/ui/icons'
 import {
   useCollection,
   useUpdateCollection,
@@ -168,13 +167,6 @@ export default function CollectionDetailPage() {
                 noun="collection"
                 size="md"
               />
-              <Button
-                size="sm"
-                variant="primary"
-                to={`/collections/${id}/import`}
-              >
-                <Upload size={14} /> Guided import
-              </Button>
             </>
           }
           tabs={

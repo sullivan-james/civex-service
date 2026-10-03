@@ -14,7 +14,7 @@ import {
   STATUS_VARIANT,
   percentDone,
 } from '../../../utils/transfers'
-import { Badge, Button, ConfirmDialog } from '../../ui'
+import { Badge, Button, ConfirmDialog, Disclosure } from '../../ui'
 
 export function describeTransfer(t: Transfer): string {
   return t.kind === 'drain'
@@ -87,12 +87,16 @@ export function TransferCard({ t }: { t: Transfer }) {
         </p>
       )}
       {t.failures_total > 0 && (
-        <details className="mt-2 text-sm">
-          <summary className="cursor-pointer text-danger">
-            {t.failures_total} file(s) could not be moved and stay where they
-            were
-          </summary>
-          <ul className="mt-1 space-y-0.5 text-xs text-fg-muted">
+        <Disclosure
+          className="mt-2"
+          summary={
+            <span className="text-danger">
+              {t.failures_total} file(s) could not be moved and stay where they
+              were
+            </span>
+          }
+        >
+          <ul className="space-y-0.5 p-3 text-xs text-fg-muted">
             {t.failures.map((f) => (
               <li key={f.sha256}>
                 <span className="font-mono">{f.sha256.slice(0, 12)}</span> on{' '}
@@ -100,7 +104,7 @@ export function TransferCard({ t }: { t: Transfer }) {
               </li>
             ))}
           </ul>
-        </details>
+        </Disclosure>
       )}
       {error && (
         <p className="mt-2 text-sm text-danger">{errorMessage(error)}</p>

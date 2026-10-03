@@ -406,7 +406,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         >
           <Search size={14} />
           Jump to
-          <kbd className="ml-1 hidden rounded border border-nav-border px-1 text-xs sm:inline">
+          <kbd className="ml-1 hidden rounded-md border border-nav-border px-1 text-xs sm:inline">
             Ctrl K
           </kbd>
         </Button>

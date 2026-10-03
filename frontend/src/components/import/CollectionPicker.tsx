@@ -1,4 +1,4 @@
-import { Field, Input, Select } from '../ui'
+import { Field, Input, Select, Subheading } from '../ui'
 import { NEW_COLLECTION } from './importWizardTypes'
 import type { Collection } from '../../api/collections'
 
@@ -24,9 +24,7 @@ export function CollectionPicker({
 }) {
   return (
     <div className="space-y-2">
-      <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
-        Collection
-      </span>
+      <Subheading as="span">Collection</Subheading>
       <Select
         value={value}
         onChange={(e) => onChange(e.target.value)}

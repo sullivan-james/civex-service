@@ -6,6 +6,7 @@ import {
   FormError,
   Input,
   Spinner,
+  Disclosure,
 } from '../ui'
 import { ArrowLeft, Check } from '../ui/icons'
 import { CollectionPicker } from './CollectionPicker'
@@ -128,9 +129,8 @@ export function ConfirmStep({
         </p>
 
         {(mode === 'csv' ? csvSkipCount : filesSkipCount) > 0 && (
-          <details className="text-xs text-fg-muted">
-            <summary className="cursor-pointer">View skipped items</summary>
-            <ul className="mt-1 space-y-0.5 max-h-40 overflow-y-auto">
+          <Disclosure summary="Skipped items">
+            <ul className="max-h-40 space-y-0.5 overflow-y-auto p-3 text-xs text-fg-muted">
               {(mode === 'csv'
                 ? csvPlan
                     .filter((p) => p.skip)
@@ -144,7 +144,7 @@ export function ConfirmStep({
                 </li>
               ))}
             </ul>
-          </details>
+          </Disclosure>
         )}
       </div>
 

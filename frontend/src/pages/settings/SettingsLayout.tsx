@@ -57,7 +57,7 @@ export default function SettingsLayout() {
         </div>
         <div className="min-w-0 flex-1 space-y-5">
           {current && (
-            <h2 className="flex items-center gap-1 text-lg font-semibold text-fg">
+            <h2 className="flex items-center gap-1 text-base font-semibold text-fg">
               {current.label}
               <InfoTip side="bottom">{current.info}</InfoTip>
             </h2>

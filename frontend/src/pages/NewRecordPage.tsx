@@ -8,10 +8,10 @@ import { useSchemas } from '../hooks/useSchemas'
 import {
   Badge,
   Button,
+  Card,
   DetailSkeleton,
   ErrorState,
   Page,
-  Section,
 } from '../components/ui'
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { RecordPageFrame } from '../components/records/RecordPageFrame'
@@ -154,7 +154,7 @@ export default function NewRecordPage() {
         info="Click a value to edit it. Nothing is saved until you add the record."
       >
         <UploadCollectionContext.Provider value={collection.id}>
-          <Section title="Fields">
+          <Card title="Fields">
             <RecordFieldGrid
               fields={fields}
               data={values}
@@ -200,7 +200,7 @@ export default function NewRecordPage() {
                 )
               }}
             />
-          </Section>
+          </Card>
         </UploadCollectionContext.Provider>
         <div className="flex gap-2">
           <Button

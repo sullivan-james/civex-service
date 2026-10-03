@@ -13,6 +13,7 @@ import {
   ModalHeader,
   IconButton,
   Chip,
+  Subheading,
 } from '../ui'
 import { MoreVertical, Save } from '../ui/icons'
 import { viewNameError } from '../../utils/naming'
@@ -114,9 +115,7 @@ export function SavedViewBar({
   if (views.length === 0 && !hasSelection) return null
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
-        Saved filters
-      </span>
+      <Subheading as="span">Saved filters</Subheading>
       {views.map((v) => {
         const active = activeView?.id === v.id
         return (

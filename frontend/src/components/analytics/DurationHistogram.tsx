@@ -84,7 +84,7 @@ export function DurationHistogram({
               value: p.label,
               position: 'top',
               fill: 'var(--color-fg-muted)',
-              fontSize: 11,
+              fontSize: 12,
             }}
           />
         ))}

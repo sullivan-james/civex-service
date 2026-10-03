@@ -180,3 +180,44 @@ _values_ are decided now so that work doesn't block on design.
 The dark-header (`--color-nav-*`) tokens are intentionally excluded from
 the dark-mode override — the header is fixed dark chrome regardless of
 the rest of the app's theme, both today and in the target design.
+
+## Component and content rules
+
+One component per concept; pages compose these and never restyle them.
+`npm run lint` warns on a raw `<button>`, `<table>` or `<details>` outside
+`src/components/ui/`.
+
+| Concept                        | Component                                                                                                                                |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Action                         | `Button` (`primary` `default` `danger` `ghost` `link`; `to=` for a route, `href=` for a download; `nav`/`navActive` on the dark top bar) |
+| Icon-only action               | `IconButton` (32 px minimum; its label is its tooltip)                                                                                   |
+| Toggle pill, removable value   | `Chip`                                                                                                                                   |
+| Choose one of a few            | `SegmentedControl` (small set), `Card onClick selected` (tiles)                                                                          |
+| Row you click in a list        | `ListButton`                                                                                                                             |
+| Table                          | `DataTable` (row links, selection, sorting, actions column)                                                                              |
+| Bordered block, tile, shortcut | `Card` (`to`/`onClick` makes the whole card the target)                                                                                  |
+| Ordering                       | `SortableList` (drag, Alt/⌘+arrows, move buttons)                                                                                        |
+| Sub-pages                      | `TabNav` + `TabPanel`, tab held in the address with `useTabParam`                                                                        |
+| Detail inside one list row     | `Disclosure`                                                                                                                             |
+| Explanation                    | `InfoTip` / `Tooltip`                                                                                                                    |
+
+### Type scale
+
+Four roles, nothing else: page title (`Page`, `text-xl semibold`), section
+title (`Card` / settings heading, `text-base semibold`), block heading
+(`Subheading`, `text-sm semibold`), body `text-sm`, caption `text-xs`
+muted. Labels are `text-sm medium`. No uppercase labels outside the
+sidebar group names, no arbitrary pixel sizes (`lint:colors` fails on
+them), bold only through `semibold`.
+
+### Content
+
+- No standing prose. A page does not describe itself under its title and a
+  field does not explain itself under its input. Anything that is not a
+  label, a value or something the person must act on goes in an `InfoTip`
+  (`Page info=`, `Field info=`) or is deleted.
+- `Page meta=` is for facts about the thing shown (ids, dates, status).
+- A page with more than two peer blocks is split into tabs. Collapsible
+  sections are not used to structure a page.
+- Everything clickable has a hit area of at least 32 px, and a row or card
+  is clickable as a whole, not just its name.
