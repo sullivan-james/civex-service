@@ -553,7 +553,7 @@ describe('RecordsExplorer', () => {
       screen.getByRole('button', { name: /Remove filter/ }),
     ).toBeInTheDocument()
     expect(screen.getByRole('searchbox')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'clear them all' }))
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }))
     expect(await screen.findByText('a.txt')).toBeInTheDocument()
   })
 

@@ -341,24 +341,20 @@ export function RecordsExplorer({
                 joinable={x.joinable}
               />
               {x.cols && (
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="mt-2"
                   onClick={() => patch({ cols: null })}
-                  className="mt-2 text-xs text-fg-muted underline cursor-pointer"
                 >
                   Reset to default columns
-                </button>
+                </Button>
               )}
             </TriggerPopover>
             {exportHref ? (
-              <a href={exportHref} download>
-                <Button
-                  size="sm"
-                  title="Downloads exactly the rows listed below"
-                >
-                  <Download size={14} /> Export
-                </Button>
-              </a>
+              <Button size="sm" href={exportHref} download>
+                <Download size={14} /> Export
+              </Button>
             ) : (
               <Button size="sm" disabled title="Save as a view to export">
                 <Download size={14} /> Export
@@ -372,11 +368,9 @@ export function RecordsExplorer({
               />
             )}
             {dataset && listed && (
-              <Link to={newRecordHref}>
-                <Button variant="primary" size="sm">
-                  <Plus size={14} /> Add {listedLabel.toLowerCase()}
-                </Button>
-              </Link>
+              <Button variant="primary" size="sm" to={newRecordHref}>
+                <Plus size={14} /> Add {listedLabel.toLowerCase()}
+              </Button>
             )}
             {dataset &&
               otherStarters.map((s) => (
@@ -498,25 +492,20 @@ export function RecordsExplorer({
           <div className="space-y-2">
             <ErrorState message={errorMessage(x.page.error)} />
             {(x.hasSelection || state.q) && (
-              <p className="text-sm text-fg-muted">
-                Change or remove the filters above, or{' '}
-                <button
-                  type="button"
-                  className="text-accent hover:underline cursor-pointer"
-                  onClick={() =>
-                    patch({
-                      filter: null,
-                      sort: [],
-                      cols: null,
-                      view: null,
-                      q: '',
-                    })
-                  }
-                >
-                  clear them all
-                </button>
-                .
-              </p>
+              <Button
+                size="sm"
+                onClick={() =>
+                  patch({
+                    filter: null,
+                    sort: [],
+                    cols: null,
+                    view: null,
+                    q: '',
+                  })
+                }
+              >
+                Clear filters
+              </Button>
             )}
           </div>
         ) : x.page.isLoading ? (

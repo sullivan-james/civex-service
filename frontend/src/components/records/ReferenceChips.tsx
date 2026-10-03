@@ -3,7 +3,7 @@ import { Link } from 'react-router'
 import type { CivexRecord } from '../../api/records'
 import type { Field } from '../../api/schemas'
 import { toInputProps } from '../../utils/restrictions'
-import { Input } from '../ui'
+import { Chip, IconButton, Input, ListButton } from '../ui'
 import { Plus, X } from '../ui/icons'
 import { recordLabel, useRecordSearch } from './RecordSearchPicker'
 import { CollectionMarker } from './CollectionMarker'
@@ -120,15 +120,14 @@ export function ReferenceChips({
             {labelOf(id)}
           </Link>
           {collectionOf(id) && <CollectionMarker name={collectionOf(id)!} />}
-          <button
-            type="button"
+          <IconButton
+            icon={X}
+            size="xs"
             tabIndex={-1}
             onClick={() => remove(i)}
             aria-label={`Remove ${labelOf(id)}`}
-            className="rounded-full p-1 text-accent hover:bg-accent-subtle-border cursor-pointer"
-          >
-            <X size={12} />
-          </button>
+            iconProps={{ size: 12 }}
+          />
         </span>
       ))}
 
@@ -175,20 +174,18 @@ export function ReferenceChips({
               </div>
             )}
             {options.map((r, i) => (
-              <button
+              <ListButton
                 key={r.id}
-                type="button"
                 role="option"
                 aria-selected={i === active}
+                active={i === active}
                 tabIndex={-1}
                 onMouseDown={(e) => {
                   e.preventDefault()
                   choose(r)
                 }}
                 onMouseEnter={() => setActive(i)}
-                className={`block w-full truncate px-3 py-2 text-left cursor-pointer ${
-                  i === active ? 'bg-accent-subtle' : 'hover:bg-canvas-subtle'
-                }`}
+                className="truncate"
               >
                 <span className="text-fg">{recordLabel(r)}</span>
                 {r.collection && r.collection !== currentCollection && (
@@ -197,20 +194,15 @@ export function ReferenceChips({
                 <span className="ml-2 font-mono text-xs text-fg-muted">
                   {r.id.slice(0, 8)}
                 </span>
-              </button>
+              </ListButton>
             ))}
           </div>
         </div>
       ) : (
-        <button
-          type="button"
-          data-add
-          onClick={() => setAdding(true)}
-          className="inline-flex items-center gap-1 rounded-full border border-dashed border-border-strong px-3 py-1 text-sm text-fg-muted hover:border-accent hover:text-accent cursor-pointer"
-        >
+        <Chip dashed onClick={() => setAdding(true)} data-add="">
           <Plus size={12} />
           {ids.length === 0 ? 'Add' : multiple ? 'Add more' : 'Change'}
-        </button>
+        </Chip>
       )}
     </div>
   )

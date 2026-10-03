@@ -1,4 +1,4 @@
-import { Select, Input, Button, IconButton } from '../ui'
+import { Select, Input, Button, IconButton, SegmentedControl } from '../ui'
 import { X } from '../ui/icons'
 import {
   operatorsFor,
@@ -311,24 +311,16 @@ function GroupEditor({
       }
     >
       <div className="flex items-center gap-2 mb-2">
-        <div className="inline-flex rounded-md border border-border overflow-hidden text-xs font-medium">
-          <button
-            type="button"
-            onClick={() => setOp('and')}
-            aria-pressed={node.op === 'and'}
-            className={`px-2 py-1 cursor-pointer ${node.op === 'and' ? 'bg-accent text-fg-on-emphasis' : 'bg-canvas hover:bg-canvas-inset text-fg-muted'}`}
-          >
-            AND
-          </button>
-          <button
-            type="button"
-            onClick={() => setOp('or')}
-            aria-pressed={node.op === 'or'}
-            className={`px-2 py-1 cursor-pointer border-l border-border ${node.op === 'or' ? 'bg-accent text-fg-on-emphasis' : 'bg-canvas hover:bg-canvas-inset text-fg-muted'}`}
-          >
-            OR
-          </button>
-        </div>
+        <SegmentedControl
+          label="Match"
+          size="sm"
+          value={node.op}
+          onChange={setOp}
+          options={[
+            { value: 'and', label: 'AND' },
+            { value: 'or', label: 'OR' },
+          ]}
+        />
         {node.children.length === 0 && (
           <span className="text-xs text-fg-subtle italic">
             No conditions — matches every record

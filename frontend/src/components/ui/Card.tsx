@@ -24,6 +24,8 @@ export interface CardProps {
   /** Router destination: renders the whole card as a link. */
   to?: string
   onClick?: () => void
+  /** For a card that chooses one of several options. */
+  selected?: boolean
   /** Drop the body padding for content that brings its own (tables). */
   flush?: boolean
   className?: string
@@ -39,12 +41,15 @@ export function Card({
   action,
   to,
   onClick,
+  selected,
   flush = false,
   className = '',
   children,
 }: CardProps) {
   const kind: Variant = variant ?? (to || onClick ? 'interactive' : 'static')
-  const classes = `${surface} ${variants[kind]} ${className}`
+  const classes = `${surface} ${
+    selected ? 'border-accent bg-accent-subtle' : variants[kind]
+  } ${className}`
 
   const header =
     title !== undefined || action ? (
@@ -78,6 +83,7 @@ export function Card({
     return (
       <button
         type="button"
+        aria-pressed={selected}
         onClick={onClick}
         className={`block w-full cursor-pointer text-left ${classes}`}
       >

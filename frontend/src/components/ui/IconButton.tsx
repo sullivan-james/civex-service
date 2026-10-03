@@ -2,7 +2,7 @@ import type { ComponentType } from 'react'
 import { Tooltip, type TooltipSide } from './Tooltip'
 
 type Variant = 'default' | 'danger' | 'subtle'
-type Size = 'sm' | 'md'
+type Size = 'xs' | 'sm' | 'md'
 
 interface IconButtonProps extends Omit<
   React.ButtonHTMLAttributes<HTMLButtonElement>,
@@ -28,6 +28,8 @@ const variants: Record<Variant, string> = {
 // Never below the 32px control height; the icon stays 16px and the extra
 // space around it is padding, so the whole square is the click target.
 const sizes: Record<Size, string> = {
+  // Only inside something that is itself a 32px+ target (a chip's remove).
+  xs: 'h-6 w-6',
   sm: 'h-8 w-8',
   md: 'h-9 w-9',
 }

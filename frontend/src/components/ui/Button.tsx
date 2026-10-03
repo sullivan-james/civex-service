@@ -9,11 +9,20 @@ interface CommonProps {
 }
 
 type ButtonAsButton = CommonProps &
-  React.ButtonHTMLAttributes<HTMLButtonElement> & { to?: undefined }
+  React.ButtonHTMLAttributes<HTMLButtonElement> & {
+    to?: undefined
+    href?: undefined
+  }
 type ButtonAsLink = CommonProps &
-  Omit<LinkProps, 'className'> & { className?: string }
+  Omit<LinkProps, 'className'> & { className?: string; href?: undefined }
+/** A plain anchor, for downloads and links off the app. */
+type ButtonAsAnchor = CommonProps &
+  React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+    href: string
+    to?: undefined
+  }
 
-export type ButtonProps = ButtonAsButton | ButtonAsLink
+export type ButtonProps = ButtonAsButton | ButtonAsLink | ButtonAsAnchor
 
 const base =
   'inline-flex items-center justify-center gap-2 font-medium rounded-md border cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50 disabled:cursor-not-allowed'
@@ -43,6 +52,16 @@ export function Button(props: ButtonProps) {
   const { variant = 'default', size = 'md', className = '' } = props
   const classes = `${base} ${variants[variant]} ${sizes[size]} ${className}`
 
+  if (props.href !== undefined) {
+    const {
+      variant: _v,
+      size: _s,
+      className: _c,
+      to: _t,
+      ...anchorProps
+    } = props
+    return <a className={classes} {...anchorProps} />
+  }
   if (props.to !== undefined) {
     const { variant: _v, size: _s, className: _c, ...linkProps } = props
     return <Link className={classes} {...linkProps} />

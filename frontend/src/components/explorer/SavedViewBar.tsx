@@ -12,6 +12,7 @@ import {
   ModalFooter,
   ModalHeader,
   IconButton,
+  Chip,
 } from '../ui'
 import { MoreVertical, Save } from '../ui/icons'
 import { viewNameError } from '../../utils/naming'
@@ -119,19 +120,13 @@ export function SavedViewBar({
       {views.map((v) => {
         const active = activeView?.id === v.id
         return (
-          <button
+          <Chip
             key={v.id}
-            type="button"
-            aria-pressed={active}
+            selected={active}
             onClick={() => (active ? onClear() : onApply(v))}
-            className={`rounded-full border px-3 py-1 text-sm cursor-pointer transition-colors ${
-              active
-                ? 'border-accent bg-accent text-fg-on-emphasis'
-                : 'border-border bg-canvas text-fg hover:bg-canvas-inset'
-            }`}
           >
             {v.name}
-          </button>
+          </Chip>
         )
       })}
       {activeView && (

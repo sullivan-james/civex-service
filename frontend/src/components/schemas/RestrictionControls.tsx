@@ -4,7 +4,15 @@ import type {
   RestrictionDescriptor,
   Schema,
 } from '../../api/schemas'
-import { Button, Checkbox, Input, Select, TimeZoneSelect } from '../ui'
+import {
+  Button,
+  Checkbox,
+  Chip,
+  Input,
+  Select,
+  TimeZoneSelect,
+  Tooltip,
+} from '../ui'
 import { LocatorMap } from '../ui/LocatorMap'
 import {
   zonedLocalToUTC,
@@ -187,22 +195,16 @@ export function ChoicesControl({ desc, rules, set }: ControlProps) {
       {choices.length > 0 && (
         <ul className="flex flex-wrap gap-1.5">
           {choices.map((c) => (
-            <li
-              key={c}
-              className="inline-flex items-center gap-1 rounded-md border border-border bg-canvas-subtle py-0.5 pl-2 pr-1 text-sm"
-            >
-              {c}
-              <button
-                type="button"
-                aria-label={`Remove ${c}`}
-                className="rounded px-1 text-fg-muted hover:text-danger cursor-pointer"
-                onClick={() => {
+            <li key={c}>
+              <Chip
+                removeLabel={`Remove ${c}`}
+                onRemove={() => {
                   const rest = choices.filter((x) => x !== c)
                   set(desc.key, rest.length ? rest : undefined)
                 }}
               >
-                ×
-              </button>
+                {c}
+              </Chip>
             </li>
           ))}
         </ul>
@@ -243,27 +245,21 @@ export function AcceptControl({ desc, rules, set }: ControlProps) {
         {ACCEPT_PRESETS.map((p) => {
           const on = parsed.presets.includes(p.key)
           return (
-            <button
-              key={p.key}
-              type="button"
-              aria-pressed={on}
-              title={p.tokens.join(', ')}
-              onClick={() =>
-                apply(
-                  on
-                    ? parsed.presets.filter((k) => k !== p.key)
-                    : [...parsed.presets, p.key],
-                  custom,
-                )
-              }
-              className={`rounded-full border px-3 py-0.5 text-sm cursor-pointer ${
-                on
-                  ? 'border-accent bg-accent-subtle text-accent font-medium'
-                  : 'border-border bg-canvas hover:bg-canvas-subtle'
-              }`}
-            >
-              {p.label}
-            </button>
+            <Tooltip key={p.key} content={p.tokens.join(', ')}>
+              <Chip
+                selected={on}
+                onClick={() =>
+                  apply(
+                    on
+                      ? parsed.presets.filter((k) => k !== p.key)
+                      : [...parsed.presets, p.key],
+                    custom,
+                  )
+                }
+              >
+                {p.label}
+              </Chip>
+            </Tooltip>
           )
         })}
       </div>

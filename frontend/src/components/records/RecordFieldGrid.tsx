@@ -7,7 +7,7 @@ import { displayLabel } from '../../utils/naming'
 import { isGeometry, parseLocation, type Geometry } from '../../utils/geo'
 import { LocatorMap } from '../ui/LocatorMap'
 import { tidy, toFieldUnit } from '../../utils/units'
-import { Button, Checkbox, FormError } from '../ui'
+import { Button, Checkbox, FormError, IconButton } from '../ui'
 import { Paperclip, X } from '../ui/icons'
 import { DynamicField, type FileRef } from './DynamicField'
 import { PendingFiles, type StagedFile } from './PendingFiles'
@@ -160,14 +160,12 @@ function FileControl({
             {(ref.size / 1024).toFixed(1)} KB
           </span>
           <FileLocationChip file={ref} />
-          <button
-            type="button"
+          <IconButton
+            icon={X}
+            variant="danger"
             onClick={() => remove(ref.sha256)}
             aria-label={`Remove ${ref.filename}`}
-            className="shrink-0 rounded p-1 text-fg-muted hover:bg-canvas-inset hover:text-danger cursor-pointer"
-          >
-            <X size={12} />
-          </button>
+          />
         </div>
       ))}
       <PendingFiles
@@ -477,14 +475,12 @@ export function RecordFieldGrid({
                     />
                   </div>
                   {onDismissError && (
-                    <button
-                      type="button"
+                    <IconButton
+                      icon={X}
+                      variant="danger"
                       onClick={onDismissError}
                       aria-label="Dismiss error"
-                      className="shrink-0 rounded p-1 text-danger hover:bg-canvas/50 cursor-pointer"
-                    >
-                      <X size={12} />
-                    </button>
+                    />
                   )}
                 </div>
               )}

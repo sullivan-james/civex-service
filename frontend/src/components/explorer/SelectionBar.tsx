@@ -32,24 +32,16 @@ export function SelectionBar({
           : `${selectedCount.toLocaleString()} selected`}
       </span>
       {!allMatching && selectedCount === pageCount && total > pageCount && (
-        <button
-          type="button"
-          onClick={onSelectAllMatching}
-          className="text-accent underline cursor-pointer"
-        >
+        <Button size="sm" variant="link" onClick={onSelectAllMatching}>
           Select all {total.toLocaleString()} matching
-        </button>
+        </Button>
       )}
       <Button variant="danger" size="sm" disabled={deleting} onClick={onDelete}>
         {deleting ? 'Deleting…' : `Delete ${count.toLocaleString()}`}
       </Button>
-      <button
-        type="button"
-        onClick={onClear}
-        className="text-xs text-fg-muted hover:text-fg cursor-pointer"
-      >
+      <Button size="sm" variant="ghost" onClick={onClear}>
         Clear selection
-      </button>
+      </Button>
     </div>
   )
 }

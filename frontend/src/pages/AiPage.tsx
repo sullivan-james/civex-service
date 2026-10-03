@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router'
 import { useAiSession } from '../hooks/useAiSession'
 import AiChatBody from '../components/ai/AiChatBody'
 import AiAttestationGate from '../components/ai/AiAttestationGate'
-import { Page } from '../components/ui'
+import { Button, Page } from '../components/ui'
 import { History, Settings } from '../components/ui/icons'
 
 // Standalone full-page mount of the AI assistant, reached via "Open in new
@@ -22,37 +22,30 @@ export default function AiPage() {
     <AiAttestationGate open onClose={() => navigate('/')}>
       <Page
         title="AI Assistant"
-        description="Ask about your data or describe a workflow to build."
         action={
           <div className="flex items-center gap-1">
-            <button
+            <Button
+              size="sm"
+              variant={showHistory ? 'link' : 'ghost'}
+              aria-pressed={showHistory}
               onClick={() => {
                 setShowHistory((h) => !h)
                 setShowSettings(false)
               }}
-              title={showHistory ? 'Back to chat' : 'Chat history'}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
-                showHistory
-                  ? 'border-accent text-accent bg-accent-subtle'
-                  : 'border-border text-fg-muted hover:text-fg hover:bg-canvas-subtle'
-              }`}
             >
               <History size={14} /> History
-            </button>
-            <button
+            </Button>
+            <Button
+              size="sm"
+              variant={showSettings ? 'link' : 'ghost'}
+              aria-pressed={showSettings}
               onClick={() => {
                 setShowSettings((s) => !s)
                 setShowHistory(false)
               }}
-              title={showSettings ? 'Back to chat' : 'AI settings'}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
-                showSettings
-                  ? 'border-accent text-accent bg-accent-subtle'
-                  : 'border-border text-fg-muted hover:text-fg hover:bg-canvas-subtle'
-              }`}
             >
               <Settings size={14} /> Settings
-            </button>
+            </Button>
           </div>
         }
       >

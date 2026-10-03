@@ -139,21 +139,24 @@ function SchemaPeek({
         </h3>
         <div className="flex gap-2">
           {total > 0 && (
-            <Link to={listHref({ schema: schema.name, within: recordId })}>
-              <Button size="sm">View all</Button>
-            </Link>
+            <Button
+              size="sm"
+              to={listHref({ schema: schema.name, within: recordId })}
+            >
+              View all
+            </Button>
           )}
           {direct && (
-            <Link
+            <Button
+              size="sm"
+              variant="primary"
               to={`/collections/${collectionId}/new?${new URLSearchParams({
                 schema: schema.name,
                 parent: recordId,
               })}`}
             >
-              <Button size="sm" variant="primary">
-                <Plus size={14} /> Add
-              </Button>
-            </Link>
+              <Plus size={14} /> Add
+            </Button>
           )}
         </div>
       </div>

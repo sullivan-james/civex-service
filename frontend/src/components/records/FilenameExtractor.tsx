@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { Field as SchemaField } from '../../api/schemas'
 import type { FileRef } from './DynamicField'
-import { Field, Input, Select } from '../ui'
+import { Button, Field, Input, Select } from '../ui'
 import { ArrowRight } from '../ui/icons'
 import { datetimeLocalToUTC } from '../../utils/dates'
 import { displayLabel } from '../../utils/naming'
@@ -193,12 +193,9 @@ export function FilenameExtractor({
             className="w-full font-mono"
           />
         </Field>
-        <button
-          onClick={run}
-          className="px-3 py-2 text-xs rounded-md border border-border bg-canvas hover:bg-canvas-subtle shrink-0"
-        >
+        <Button size="sm" onClick={run} className="shrink-0">
           Test
-        </button>
+        </Button>
       </div>
 
       {/* Date format (date / datetime only) */}
@@ -253,19 +250,17 @@ export function FilenameExtractor({
 
       {/* Actions */}
       <div className="flex gap-2">
-        <button
+        <Button
+          size="sm"
+          variant="primary"
           onClick={apply}
           disabled={converted === undefined}
-          className="px-3 py-2 text-xs font-medium rounded-md border border-accent bg-accent text-fg-on-emphasis hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Apply
-        </button>
-        <button
-          onClick={onClose}
-          className="px-3 py-2 text-xs font-medium rounded-md border border-border bg-canvas hover:bg-canvas-subtle"
-        >
+        </Button>
+        <Button size="sm" onClick={onClose}>
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   )

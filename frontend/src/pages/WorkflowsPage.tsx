@@ -18,11 +18,14 @@ export default function WorkflowsPage() {
       title="Workflows"
       description="Automations that run when records are created or updated. Plugins live under Advanced."
       action={
-        <Link to="/workflows/new" target="_blank" rel="opener">
-          <Button variant="primary" size="sm">
-            + New workflow
-          </Button>
-        </Link>
+        <Button
+          to="/workflows/new"
+          target="_blank"
+          rel="opener"
+          variant="primary"
+        >
+          + New workflow
+        </Button>
       }
     >
       <WorkflowsPanel

@@ -83,9 +83,9 @@ export function DoneStep({
       )}
 
       <div className="flex gap-2">
-        <Link to={doneHref}>
-          <Button variant="primary">Done</Button>
-        </Link>
+        <Button to={doneHref} variant="primary">
+          Done
+        </Button>
         <Button onClick={onImportMore}>Import more</Button>
       </div>
     </div>

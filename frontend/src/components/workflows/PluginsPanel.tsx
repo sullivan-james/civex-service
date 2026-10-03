@@ -245,11 +245,15 @@ export function PluginsPanel() {
           >
             {uploadPlugin.isPending ? 'Uploading…' : 'Upload plugin'}
           </Button>
-          <Link to="/plugins/new" target="_blank" rel="opener">
-            <Button size="sm" variant="primary">
-              + New plugin
-            </Button>
-          </Link>
+          <Button
+            to="/plugins/new"
+            target="_blank"
+            rel="opener"
+            size="sm"
+            variant="primary"
+          >
+            + New plugin
+          </Button>
         </div>
       </div>
       <input

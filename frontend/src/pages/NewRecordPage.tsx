@@ -211,9 +211,7 @@ export default function NewRecordPage() {
           >
             {createRecord.isPending ? 'Adding…' : `Add ${label.toLowerCase()}`}
           </Button>
-          <Link to={listHref}>
-            <Button>Cancel</Button>
-          </Link>
+          <Button to={listHref}>Cancel</Button>
         </div>
       </RecordPageFrame>
     </CollectionTimeZone>
