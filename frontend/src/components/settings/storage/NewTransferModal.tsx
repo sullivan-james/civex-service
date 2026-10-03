@@ -117,7 +117,7 @@ export function NewTransferModal({
             >
               <option value="">Choose a volume…</option>
               {volumes
-                .filter((v) => v.name !== source)
+                .filter((v) => kind !== 'drain' || v.name !== source)
                 .map((v) => (
                   <option key={v.name} value={v.name} disabled={!v.available}>
                     {v.name}

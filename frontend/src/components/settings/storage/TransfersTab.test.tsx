@@ -188,4 +188,15 @@ describe('TransfersTab', () => {
       ).toMatchObject({ kind: 'drain', sources: ['a'], targets: ['b'] }),
     )
   })
+
+  it('offers every volume as a target when gathering a collection', async () => {
+    renderTab({ source: 'a' })
+    await userEvent.click(await screen.findByLabelText('Gather a collection'))
+    const target = await screen.findByLabelText(/Put the files on/)
+    await waitFor(() =>
+      expect(
+        Array.from((target as HTMLSelectElement).options).map((o) => o.value),
+      ).toEqual(['', 'a', 'b']),
+    )
+  })
 })
