@@ -21,6 +21,7 @@ export {
   Paperclip,
   AlertTriangle,
   Check,
+  Monitor,
   ExternalLink,
   Sparkles,
   ArrowRight,

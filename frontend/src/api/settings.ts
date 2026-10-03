@@ -13,7 +13,15 @@ export interface MapSettings {
   attribution: string | null
 }
 
+export interface ShortcutState {
+  exists: boolean
+  /** Where the shortcut is (or would go); null when there is no Desktop. */
+  path: string | null
+}
+
 export const settingsApi = {
+  getShortcut: () => api.get<ShortcutState>('/settings/shortcut'),
+  createShortcut: () => api.post<ShortcutState>('/settings/shortcut', {}),
   getMap: () => api.get<MapSettings>('/settings/map'),
   updateMap: (body: MapSettings) =>
     api.patch<MapSettings>('/settings/map', body),

@@ -1,6 +1,7 @@
 import { useId } from 'react'
 import { useUISettings, useSetShowAdvanced } from '../../hooks/useUISettings'
 import { Button, Checkbox, Skeleton } from '../ui'
+import { DesktopShortcut } from './DesktopShortcut'
 
 export default function AdvancedSection() {
   const { data: settings, isLoading } = useUISettings()
@@ -25,6 +26,8 @@ export default function AdvancedSection() {
           Show Advanced section in navigation
         </label>
       )}
+
+      <DesktopShortcut />
 
       <div className="flex gap-2">
         <Button size="sm" to="/plugins">

@@ -1270,6 +1270,15 @@ class PolicyResponse(BaseModel):
 # --- UI settings ---
 
 
+class ShortcutResponse(BaseModel):
+    exists: bool = Field(
+        description="Whether the Desktop shortcut for this project is there."
+    )
+    path: str | None = Field(
+        default=None, description="Where it is (or would be), when there is a Desktop."
+    )
+
+
 class UISettingsResponse(BaseModel):
     show_advanced: bool
 

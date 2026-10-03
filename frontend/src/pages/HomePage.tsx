@@ -10,6 +10,7 @@ import {
 } from '../components/ui'
 import { ArrowRight } from '../components/ui/icons'
 import { HomeShortcuts } from '../components/home/HomeShortcuts'
+import { DesktopShortcut } from '../components/settings/DesktopShortcut'
 
 const ONBOARDING_STEPS = [
   { to: '/collections', title: 'Import data' },
@@ -30,6 +31,7 @@ export default function HomePage() {
   return (
     <Page title="Get started">
       <HomeShortcuts />
+      <DesktopShortcut prompt />
 
       <ol className="grid gap-3 sm:grid-cols-3">
         {ONBOARDING_STEPS.map((s, i) => (

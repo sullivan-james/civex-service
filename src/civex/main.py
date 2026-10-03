@@ -139,6 +139,12 @@ def serve(
         "--log-level",
         help="Log level: DEBUG | INFO | WARNING | ERROR. Overrides [logging] in config.toml.",
     ),
+    open_browser: bool = typer.Option(
+        False,
+        "--open",
+        help="Open the browser once the server is up. If civex is already "
+        "running on this port, just open the browser.",
+    ),
 ) -> None:
     """Start the civex HTTP API server."""
     try:
@@ -178,6 +184,17 @@ def serve(
     if allow_remote:
         os.environ["CIVEX_ALLOW_REMOTE"] = "1"
 
+    if open_browser:
+        from civex.launcher import is_serving, open_when_ready
+        import webbrowser
+
+        url = f"http://{host}:{port}"
+        if is_serving(host, port):
+            typer.echo(f"Civex is already running at {url}; opening it.")
+            webbrowser.open(url)
+            raise typer.Exit(0)
+        open_when_ready(url)
+
     typer.echo(f"Starting civex server at http://{host}:{port}")
     typer.echo(f"API docs: http://{host}:{port}/docs")
     if reload:
@@ -204,6 +221,27 @@ def serve(
         reload_dirs=reload_dirs,
         log_config=None,
     )
+
+
+@app.command("shortcut", rich_help_panel=_START)
+def shortcut() -> None:
+    """Put a Desktop shortcut that starts civex for this project and opens it."""
+    from civex.config import find_project_root
+    from civex.domain.exceptions import ConfigError
+    from civex.launcher import create_shortcut
+
+    root = find_project_root()
+    if root is None:
+        typer.secho(
+            "No civex project here. Run `civex init` first.", fg=typer.colors.RED
+        )
+        raise typer.Exit(1)
+    try:
+        path = create_shortcut(root)
+    except ConfigError as e:
+        typer.secho(str(e), fg=typer.colors.RED)
+        raise typer.Exit(1)
+    typer.echo(f"Created {path}")
 
 
 @app.command("shell")
