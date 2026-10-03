@@ -278,8 +278,8 @@ export default function CollectionDetailPage() {
           <TabPanel id="activity" value={shownTab}>
             <AuditTrail
               queryKey={['collections', collection.name, 'audit']}
-              fetchPage={(offset, limit) =>
-                collectionsApi.getAudit(collection.name, offset, limit)
+              fetchPage={(offset, limit, table) =>
+                collectionsApi.getAudit(collection.name, offset, limit, table)
               }
               describeEntry={describeCollectionAuditEntry}
               emptyMessage="Changes to this collection will appear here."

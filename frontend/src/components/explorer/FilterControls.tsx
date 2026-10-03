@@ -38,10 +38,12 @@ function editableRoot(wire: FilterTreeWire | null): FilterGroupNode {
 function FilterEditor({
   wire,
   fields,
+  help,
   onChange,
 }: {
   wire: FilterTreeWire | null
   fields: FilterableField[]
+  help?: string
   onChange: (wire: FilterTreeWire | null) => void
 }) {
   const [root, setRoot] = useState<FilterGroupNode>(() => editableRoot(wire))
@@ -60,10 +62,7 @@ function FilterEditor({
     <div className="space-y-2">
       <p className="flex items-center gap-1 text-sm font-medium text-fg">
         Filters
-        <InfoTip>
-          Match on this level, on a parent record, or on any child record — for
-          example selections in a recording whose selection_table is empty.
-        </InfoTip>
+        {help && <InfoTip>{help}</InfoTip>}
       </p>
       <FilterBuilder
         root={root}
@@ -86,11 +85,14 @@ export function FilterControls({
   wire,
   fields,
   listedSchema,
+  help,
   onChange,
 }: {
   wire: FilterTreeWire | null
   fields: FilterableField[]
   listedSchema: string
+  /** Explains what a condition may reach, where that is not obvious. */
+  help?: string
   onChange: (wire: FilterTreeWire | null) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -139,7 +141,12 @@ export function FilterControls({
           aria-label="Edit filters"
           className="rounded-md border border-border bg-canvas-subtle p-3"
         >
-          <FilterEditor wire={wire} fields={fields} onChange={onChange} />
+          <FilterEditor
+            wire={wire}
+            fields={fields}
+            help={help}
+            onChange={onChange}
+          />
         </section>
       )}
     </div>

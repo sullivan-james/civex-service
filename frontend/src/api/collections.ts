@@ -1,5 +1,6 @@
 import { api } from './client'
-import type { PaginatedAuditLog } from './audit'
+import { auditUrl, type PaginatedAuditLog } from './audit'
+import type { TableQueryParams } from './query'
 
 export interface Collection {
   id: string
@@ -22,9 +23,9 @@ export type CollectionScope = 'local' | 'global'
 export const collectionsApi = {
   list: () => api.get<Collection[]>('/collections'),
   get: (name: string) => api.get<Collection>(`/collections/${name}`),
-  getAudit: (name: string, offset = 0, limit = 50) =>
+  getAudit: (name: string, offset = 0, limit = 50, table?: TableQueryParams) =>
     api.get<PaginatedAuditLog>(
-      `/collections/${name}/audit?offset=${offset}&limit=${limit}`,
+      auditUrl(`/collections/${name}`, offset, limit, table),
     ),
   create: (body: {
     name: string

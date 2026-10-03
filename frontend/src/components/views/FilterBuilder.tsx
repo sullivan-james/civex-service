@@ -211,18 +211,25 @@ function ConditionEditor({
         className="w-56"
       >
         <option value="">Select field…</option>
-        {groupFields(fields).map(({ schemaName, relation, items }) => (
-          <optgroup
-            key={schemaName}
-            label={`${schemaName} (${RELATION_HINT[relation]})`}
-          >
-            {items.map((f) => (
+        {fields.every((f) => !f.sourceSchemaName)
+          ? // A flat table (runs, history): no schemas to group by.
+            fields.map((f) => (
               <option key={fieldKey(f)} value={fieldKey(f)}>
                 {displayLabel(f.name, f.label)}
               </option>
+            ))
+          : groupFields(fields).map(({ schemaName, relation, items }) => (
+              <optgroup
+                key={schemaName}
+                label={`${schemaName} (${RELATION_HINT[relation]})`}
+              >
+                {items.map((f) => (
+                  <option key={fieldKey(f)} value={fieldKey(f)}>
+                    {displayLabel(f.name, f.label)}
+                  </option>
+                ))}
+              </optgroup>
             ))}
-          </optgroup>
-        ))}
       </Select>
       <Select
         aria-label="Operator"

@@ -1,6 +1,10 @@
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import type { AuditLogEntry, PaginatedAuditLog } from '../../api/audit'
+import type { TableQueryParams } from '../../api/query'
+import { useTableState } from '../../hooks/useTableState'
+import { TableControls } from '../table/TableControls'
+import { tableFields } from '../../utils/tableFields'
+import { nextSort } from '../../utils/tableState'
 import type { AuditSummary } from '../../utils/schemaAudit'
 import { DataTable, Badge, Pagination } from '../ui'
 import { errorMessage } from '../../lib/errors'
@@ -16,37 +20,65 @@ const ACTION_VARIANT: Record<
   purge: 'danger',
 }
 
+const AUDIT_FIELDS = tableFields([
+  { name: 'timestamp', label: 'When', type: 'datetime' },
+  {
+    name: 'action',
+    label: 'Action',
+    type: 'enum',
+    choices: Object.keys(ACTION_VARIANT),
+  },
+])
+
 /**
  * The audit trail for a single entity (record, schema or collection):
- * a "when / action / change" table. Mount it in a History tab.
+ * a "when / action / change" table, filterable and sortable like any list.
+ * Mount it in a History tab.
  */
 export function AuditTrail({
   queryKey,
   fetchPage,
   describeEntry,
   emptyMessage,
+  ns = 'history.',
 }: {
   /** Base react-query key for this entity's audit log; page/pageSize are appended. */
   queryKey: readonly unknown[]
-  fetchPage: (offset: number, limit: number) => Promise<PaginatedAuditLog>
+  fetchPage: (
+    offset: number,
+    limit: number,
+    table: TableQueryParams,
+  ) => Promise<PaginatedAuditLog>
   describeEntry: (entry: AuditLogEntry) => AuditSummary
   emptyMessage: string
+  /** Prefix for this table's address parameters. */
+  ns?: string
 }) {
-  const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(25)
+  const { state, patch } = useTableState(ns, 25)
+  const table: TableQueryParams = { filter: state.filter, sort: state.sort }
   const { data, isLoading, error } = useQuery({
-    queryKey: [...queryKey, page, pageSize],
-    queryFn: () => fetchPage(page * pageSize, pageSize),
+    queryKey: [...queryKey, state.page, state.pageSize, table],
+    queryFn: () =>
+      fetchPage(state.page * state.pageSize, state.pageSize, table),
+    placeholderData: keepPreviousData,
   })
 
   return (
-    <>
+    <div className="space-y-3">
+      <TableControls state={state} patch={patch} fields={AUDIT_FIELDS} />
       <DataTable
+        sort={
+          state.sort[0]
+            ? { key: state.sort[0].field, direction: state.sort[0].direction }
+            : undefined
+        }
+        onSortChange={(key) => patch({ sort: nextSort(state.sort, key) })}
         layout="auto"
         columns={[
           {
-            key: 'when',
+            key: 'timestamp',
             header: 'When',
+            sortable: true,
             width: '12rem',
             className: 'text-fg-muted whitespace-nowrap',
             render: (e: AuditLogEntry) =>
@@ -55,6 +87,7 @@ export function AuditTrail({
           {
             key: 'action',
             header: 'Action',
+            sortable: true,
             width: '7rem',
             render: (e) => (
               <Badge variant={ACTION_VARIANT[e.action] ?? 'default'}>
@@ -82,21 +115,18 @@ export function AuditTrail({
         getRowId={(e) => String(e.id)}
         isLoading={isLoading}
         error={error ? errorMessage(error) : undefined}
-        emptyTitle="No history yet"
-        emptyMessage={emptyMessage}
+        emptyTitle={state.filter ? 'No entries match' : 'No history yet'}
+        emptyMessage={state.filter ? undefined : emptyMessage}
       />
       {data && data.items.length > 0 && (
         <Pagination
-          page={page}
-          pageSize={pageSize}
+          page={state.page}
+          pageSize={state.pageSize}
           total={data.total}
-          onPage={setPage}
-          onPageSize={(size) => {
-            setPageSize(size)
-            setPage(0)
-          }}
+          onPage={(page) => patch({ page })}
+          onPageSize={(pageSize) => patch({ pageSize })}
         />
       )}
-    </>
+    </div>
   )
 }

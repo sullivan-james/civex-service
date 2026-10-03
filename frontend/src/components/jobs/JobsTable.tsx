@@ -1,5 +1,9 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
+import { useTableState } from '../../hooks/useTableState'
+import { TableControls } from '../table/TableControls'
+import { tableFields } from '../../utils/tableFields'
+import { nextSort } from '../../utils/tableState'
 import { useJobsPaged, useRerunJob } from '../../hooks/useWorkflows'
 import { type WorkflowJob } from '../../api/workflows'
 import {
@@ -39,30 +43,44 @@ function WhatHappened({ job }: { job: WorkflowJob }) {
   return <span>{summary.join(', ')}</span>
 }
 
+/** What a run can be filtered and sorted by: the columns the API names. */
+const RUN_FIELDS = tableFields([
+  { name: 'workflow_name', label: 'Workflow', type: 'string' },
+  {
+    name: 'status',
+    label: 'Status',
+    type: 'enum',
+    choices: ['pending', 'running', 'completed', 'failed'],
+  },
+  {
+    name: 'trigger',
+    label: 'Trigger',
+    type: 'enum',
+    choices: ['record_created', 'record_updated', 'manual'],
+  },
+  { name: 'schema_name', label: 'Schema', type: 'string' },
+  { name: 'created_at', label: 'Created', type: 'datetime' },
+  { name: 'started_at', label: 'Started', type: 'datetime' },
+  { name: 'finished_at', label: 'Finished', type: 'datetime' },
+  { name: 'error', label: 'Error', type: 'string' },
+])
+
 interface Props {
+  /** Only runs triggered by this record (the record page's Runs tab). */
   recordId?: string
-  statusFilter?: string
+  /** Prefix for this table's address parameters, so two tables on a page
+   * stay apart. */
+  ns?: string
 }
 
-export default function JobsTable({ recordId, statusFilter }: Props) {
-  const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(25)
-
-  // Reset to first page whenever filters change. Adjusted during render
-  // (see https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)
-  // rather than in an effect -- avoids an extra render pass and the
-  // react-hooks/set-state-in-effect lint rule.
-  const [prevFilters, setPrevFilters] = useState([statusFilter, recordId])
-  if (prevFilters[0] !== statusFilter || prevFilters[1] !== recordId) {
-    setPrevFilters([statusFilter, recordId])
-    setPage(0)
-  }
-
+export default function JobsTable({ recordId, ns = '' }: Props) {
+  const { state, patch } = useTableState(ns, 25)
   const { jobs, total, isLoading, isFetching, error } = useJobsPaged(
-    page,
-    pageSize,
-    statusFilter,
+    state.page,
+    state.pageSize,
+    undefined,
     recordId,
+    { search: state.q, filter: state.filter, sort: state.sort },
   )
   const rerun = useRerunJob()
 
@@ -133,6 +151,7 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
     {
       key: 'workflow_name',
       header: 'Workflow',
+      sortable: true,
       render: (job) => (
         <span className="font-medium text-fg">{job.workflow_name}</span>
       ),
@@ -161,16 +180,19 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
     {
       key: 'schema_name',
       header: 'Schema',
+      sortable: true,
       render: (job) => <span className="text-fg-muted">{job.schema_name}</span>,
     },
     {
       key: 'trigger',
       header: 'Trigger',
+      sortable: true,
       render: (job) => <Badge variant="default">{job.trigger}</Badge>,
     },
     {
       key: 'status',
       header: 'Status',
+      sortable: true,
       render: (job) => <JobStatusBadge status={job.status} />,
     },
     {
@@ -183,6 +205,7 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
     {
       key: 'created_at',
       header: 'Created',
+      sortable: true,
       render: (job) => (
         <span className="text-fg-muted text-xs">
           {new Date(job.created_at).toLocaleString()}
@@ -192,16 +215,27 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
   ]
 
   return (
-    <div aria-busy={isFetching}>
+    <div aria-busy={isFetching} className="space-y-3">
       {liveRegion}
+      <TableControls
+        state={state}
+        patch={patch}
+        fields={RUN_FIELDS}
+        searchLabel="Search runs"
+      />
       <DataTable
+        sort={
+          state.sort[0]
+            ? { key: state.sort[0].field, direction: state.sort[0].direction }
+            : undefined
+        }
+        onSortChange={(key) => patch({ sort: nextSort(state.sort, key) })}
         columns={columns}
         rows={jobs.data ?? []}
         getRowId={(job) => job.id}
         isLoading={isLoading}
         error={error?.message}
-        emptyTitle="No runs yet"
-        emptyMessage="Workflow runs appear here when a workflow is triggered. Trigger a workflow manually from the Workflows tab."
+        emptyTitle={state.q || state.filter ? 'No runs match' : 'No runs yet'}
         actions={(job) => (
           <Button
             size="sm"
@@ -217,11 +251,11 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
         actionsWidth="64px"
       />
       <Pagination
-        page={page}
-        pageSize={pageSize}
+        page={state.page}
+        pageSize={state.pageSize}
         total={total}
-        onPage={setPage}
-        onPageSize={setPageSize}
+        onPage={(page) => patch({ page })}
+        onPageSize={(pageSize) => patch({ pageSize })}
       />
     </div>
   )

@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 
 from civex.domain.dtos import ErrorEnvelope, RecordDTO, WorkflowJobDTO
+from civex.domain.query import TableQuery
 from civex.repositories.protocols import WorkflowJobRepository
 from civex.workflows.definition import WorkflowDef, load_workflow
 
@@ -161,9 +162,11 @@ class WorkflowJobService:
         offset: int = 0,
         limit: int | None = None,
         affected_schema: str | None = None,
+        table: TableQuery | None = None,
     ) -> list[WorkflowJobDTO]:
         return self._repo.list_all(
             affected_schema=affected_schema,
+            table=table,
             status=status,
             record_id=record_id,
             affected_record_id=affected_record_id,
@@ -177,8 +180,10 @@ class WorkflowJobService:
         record_id: str | None = None,
         affected_record_id: str | None = None,
         affected_schema: str | None = None,
+        table: TableQuery | None = None,
     ) -> int:
         return self._repo.count(
+            table=table,
             status=status,
             record_id=record_id,
             affected_record_id=affected_record_id,

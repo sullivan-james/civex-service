@@ -1,4 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
+import type { TableQueryParams } from '../api/query'
 import { jobsApi, workflowsApi, type WorkflowJob } from '../api/workflows'
 import { useToast } from '../components/ui/ToastProvider'
 
@@ -85,11 +91,14 @@ export function useJobsPaged(
   pageSize: number,
   status?: string,
   recordId?: string,
+  table?: TableQueryParams,
 ) {
   const offset = page * pageSize
   const jobs = useQuery({
-    queryKey: ['jobs', 'paged', page, pageSize, status, recordId],
-    queryFn: () => jobsApi.list(status, recordId, offset, pageSize),
+    queryKey: ['jobs', 'paged', page, pageSize, status, recordId, table],
+    queryFn: () =>
+      jobsApi.list(status, recordId, offset, pageSize, undefined, table),
+    placeholderData: keepPreviousData,
     refetchInterval: (query) => {
       const data = query.state.data as WorkflowJob[] | undefined
       return data?.some((j) => j.status === 'pending' || j.status === 'running')
@@ -98,8 +107,9 @@ export function useJobsPaged(
     },
   })
   const total = useQuery({
-    queryKey: ['jobs', 'count', status, recordId],
-    queryFn: () => jobsApi.count(status, recordId),
+    queryKey: ['jobs', 'count', status, recordId, table],
+    queryFn: () => jobsApi.count(status, recordId, undefined, table),
+    placeholderData: keepPreviousData,
     refetchInterval: 5000,
   })
   return {

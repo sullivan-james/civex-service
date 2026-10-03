@@ -253,7 +253,7 @@ export default function RecordDetailPage() {
 
         <TabPanel id="runs" value={shownTab}>
           <div className="space-y-6">
-            <JobsTable recordId={record.id} />
+            <JobsTable recordId={record.id} ns="runs." />
             <RecordProvenance recordId={record.id} />
           </div>
         </TabPanel>
@@ -261,8 +261,8 @@ export default function RecordDetailPage() {
         <TabPanel id="history" value={shownTab}>
           <AuditTrail
             queryKey={['records', record.id, 'audit']}
-            fetchPage={(offset, limit) =>
-              recordsApi.audit(record.id, offset, limit)
+            fetchPage={(offset, limit, table) =>
+              recordsApi.audit(record.id, offset, limit, table)
             }
             describeEntry={(entry) => describeRecordAuditEntry(entry, schema)}
             emptyMessage="Changes to this record will appear here."

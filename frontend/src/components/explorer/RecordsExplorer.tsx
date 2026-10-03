@@ -34,6 +34,8 @@ import {
 } from '../records/RecordsTable'
 import { ColumnPicker, columnLabel } from '../views/ColumnPicker'
 import { FilterControls } from './FilterControls'
+import { useDebouncedSearch } from '../../hooks/useDebouncedSearch'
+import { nextSort } from '../../utils/tableState'
 import { DrillLinks } from './DrillLinks'
 import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
@@ -76,17 +78,9 @@ export function RecordsExplorer({
   const location = useLocation()
 
   // --- search box: local text, pushed to the URL after a pause
-  const [searchInput, setSearchInput] = useState(state.q)
-  const [seenQ, setSeenQ] = useState(state.q)
-  if (state.q !== seenQ) {
-    setSeenQ(state.q)
-    setSearchInput(state.q)
-  }
-  useEffect(() => {
-    if (searchInput === state.q) return
-    const t = setTimeout(() => patch({ q: searchInput }), 300)
-    return () => clearTimeout(t)
-  }, [searchInput, state.q, patch])
+  const [searchInput, setSearchInput] = useDebouncedSearch(state.q, (q) =>
+    patch({ q }),
+  )
 
   // --- `?view=name` in a shared link: apply it once, when nothing else was
   // chosen. Only ever on arrival -- afterwards the URL is the truth, so
@@ -134,14 +128,7 @@ export function RecordsExplorer({
     ? { key: x.sort[0].field, direction: x.sort[0].direction }
     : undefined
 
-  function toggleSort(key: string) {
-    const cur = x.sort[0]
-    if (!cur || cur.field !== key)
-      patch({ sort: [{ field: key, direction: 'asc' }] })
-    else if (cur.direction === 'asc')
-      patch({ sort: [{ field: key, direction: 'desc' }] })
-    else patch({ sort: [] })
-  }
+  const toggleSort = (key: string) => patch({ sort: nextSort(x.sort, key) })
 
   // --- moving through the hierarchy
   const scopeRootId = scope.root?.id ?? null
@@ -470,6 +457,7 @@ export function RecordsExplorer({
             wire={x.filter}
             fields={x.filterFields}
             listedSchema={listed.name}
+            help="Match on this level, on a parent record, or on any child record — for example selections in a recording whose selection_table is empty."
             onChange={(filter) => patch({ filter })}
           />
         )}

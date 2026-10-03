@@ -5,70 +5,45 @@
  * bookmarked default stays a default.
  */
 
-import { decodeSort, encodeSort, type SortEntry } from '../api/query'
 import type { View } from '../api/views'
-import type { FilterTreeWire } from './filterTree'
+import {
+  DEFAULT_PAGE_SIZE,
+  EMPTY_TABLE_STATE,
+  TABLE_RESETS_PAGE,
+  parseTableState,
+  sameFilter,
+  writeTableState,
+  type TableState,
+} from './tableState'
 
-export interface ExplorerState {
+export { DEFAULT_PAGE_SIZE, sameFilter }
+
+export interface ExplorerState extends TableState {
   /** Schema whose records are listed; null = the first level with records. */
   schema: string | null
   /** Record whose descendants are listed; null = the explorer's own scope. */
   within: string | null
-  q: string
-  filter: FilterTreeWire | null
-  sort: SortEntry[]
   /** Chosen columns; null = the schema's default columns. */
   cols: string[] | null
   /** Saved view the selection started from (or was saved as). */
   view: string | null
-  /** 0-based. */
-  page: number
-  pageSize: number
 }
-
-export const DEFAULT_PAGE_SIZE = 50
 
 export const EMPTY_EXPLORER_STATE: ExplorerState = {
   schema: null,
   within: null,
-  q: '',
-  filter: null,
-  sort: [],
   cols: null,
   view: null,
-  page: 0,
-  pageSize: DEFAULT_PAGE_SIZE,
-}
-
-function parseFilter(raw: string | null): FilterTreeWire | null {
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? parsed : null
-  } catch {
-    return null
-  }
-}
-
-function positiveInt(raw: string | null): number | null {
-  const n = raw == null ? NaN : Number(raw)
-  return Number.isInteger(n) && n > 0 ? n : null
+  ...EMPTY_TABLE_STATE,
 }
 
 export function parseExplorerState(sp: URLSearchParams): ExplorerState {
   return {
+    ...parseTableState(sp),
     schema: sp.get('schema') || null,
     within: sp.get('within') || null,
-    q: sp.get('q') ?? '',
-    filter: parseFilter(sp.get('filter')),
-    sort: sp
-      .getAll('sort')
-      .map(decodeSort)
-      .filter((s): s is SortEntry => s !== null),
     cols: sp.get('cols') ? sp.get('cols')!.split(',').filter(Boolean) : null,
     view: sp.get('view') || null,
-    page: (positiveInt(sp.get('page')) ?? 1) - 1,
-    pageSize: positiveInt(sp.get('size')) ?? DEFAULT_PAGE_SIZE,
   }
 }
 
@@ -76,11 +51,8 @@ export function parseExplorerState(sp: URLSearchParams): ExplorerState {
 const RESETS_PAGE: (keyof ExplorerState)[] = [
   'schema',
   'within',
-  'q',
-  'filter',
-  'sort',
   'view',
-  'pageSize',
+  ...TABLE_RESETS_PAGE,
 ]
 
 /** The querystring after applying `patch` to `prev`, leaving unrelated
@@ -93,47 +65,13 @@ export function applyExplorerPatch(
   if (!('page' in patch) && RESETS_PAGE.some((k) => k in patch)) next.page = 0
 
   const out = new URLSearchParams(prev)
-  for (const key of [
-    'schema',
-    'within',
-    'q',
-    'filter',
-    'sort',
-    'cols',
-    'view',
-    'page',
-    'size',
-  ])
-    out.delete(key)
+  for (const key of ['schema', 'within', 'cols', 'view']) out.delete(key)
   if (next.schema) out.set('schema', next.schema)
   if (next.within) out.set('within', next.within)
-  if (next.q) out.set('q', next.q)
-  if (next.filter) out.set('filter', JSON.stringify(next.filter))
-  next.sort.forEach((s) => out.append('sort', encodeSort(s)))
   if (next.cols) out.set('cols', next.cols.join(','))
   if (next.view) out.set('view', next.view)
-  if (next.page > 0) out.set('page', String(next.page + 1))
-  if (next.pageSize !== DEFAULT_PAGE_SIZE)
-    out.set('size', String(next.pageSize))
+  writeTableState(out, next)
   return out
-}
-
-/** Whether two filter trees are the same selection, ignoring key order. */
-export function sameFilter(
-  a: FilterTreeWire | null,
-  b: FilterTreeWire | null,
-): boolean {
-  const canon = (v: unknown): unknown =>
-    Array.isArray(v)
-      ? v.map(canon)
-      : v && typeof v === 'object'
-        ? Object.fromEntries(
-            Object.entries(v as Record<string, unknown>)
-              .sort(([x], [y]) => x.localeCompare(y))
-              .map(([k, val]) => [k, canon(val)]),
-          )
-        : v
-  return JSON.stringify(canon(a)) === JSON.stringify(canon(b))
 }
 
 /** The state a saved view stands for: its filter, sort and columns (none

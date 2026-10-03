@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from fastapi import HTTPException, Query
 
-from civex.domain.query import RecordQuery
+from civex.domain.query import RecordQuery, TableQuery
 
 
 def _parse_sort(terms: list[str]) -> list[dict[str, Any]] | None:
@@ -26,6 +26,38 @@ def _parse_sort(terms: list[str]) -> list[dict[str, Any]] | None:
             entry["schema"] = schema_name
         entries.append(entry)
     return entries or None
+
+
+def _load_filter(raw: str | None) -> dict[str, Any] | None:
+    try:
+        return json.loads(raw) if raw else None
+    except json.JSONDecodeError as e:
+        raise HTTPException(422, detail=f"Invalid 'filter' JSON: {e}")
+
+
+def table_query(
+    filter_: Optional[str] = Query(
+        default=None,
+        alias="filter",
+        description="JSON-encoded filter tree over the table's columns: the "
+        "same AND/OR shape as the record 'filter', but a condition names only "
+        "a column (no 'schema'). Which columns: the table's own listing.",
+    ),
+    sort: list[str] = Query(
+        default=[],
+        description="Repeatable 'column[:asc|desc]'. Nulls sort last.",
+    ),
+    search: Optional[str] = Query(
+        default=None, description="Case-insensitive text match, where supported."
+    ),
+) -> TableQuery:
+    """The query-string contract for tables of runs and audit entries. The same
+    `filter` and `sort` spelling as the record lists, so one builder drives both."""
+    return TableQuery(
+        filter_tree=_load_filter(filter_),
+        sort=_parse_sort(sort),
+        search=search or None,
+    )
 
 
 def record_query(
@@ -76,10 +108,7 @@ def record_query(
         "to sort by.",
     ),
 ) -> RecordQuery:
-    try:
-        tree = json.loads(filter_) if filter_ else None
-    except json.JSONDecodeError as e:
-        raise HTTPException(422, detail=f"Invalid 'filter' JSON: {e}")
+    tree = _load_filter(filter_)
     return RecordQuery(
         schema=schema or None,
         within=within or None,

@@ -35,7 +35,7 @@ from civex.domain.dtos import (
     VolumeStatus,
     WorkflowJobDTO,
 )
-from civex.domain.query import ResolvedQuery
+from civex.domain.query import ResolvedQuery, TableQuery
 from civex.domain.transfers import CopyResult, TransferRecord
 
 # (day, dataset_name, schema_name, count) -- see LocalRecordRepository.growth_by_period
@@ -326,6 +326,7 @@ class WorkflowJobRepository(Protocol):
         offset: int = 0,
         limit: int | None = None,
         affected_schema: str | None = None,
+        table: TableQuery | None = None,
     ) -> list[WorkflowJobDTO]: ...
     def count(
         self,
@@ -333,6 +334,7 @@ class WorkflowJobRepository(Protocol):
         record_id: str | None = None,
         affected_record_id: str | None = None,
         affected_schema: str | None = None,
+        table: TableQuery | None = None,
     ) -> int: ...
     def get_by_id(self, job_id: uuid.UUID) -> WorkflowJobDTO | None: ...
     def count_active_for_workflow(self, workflow_name: str) -> int: ...

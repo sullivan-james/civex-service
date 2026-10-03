@@ -81,3 +81,36 @@ def test_list_audit_filters_by_entity_type(client: TestClient) -> None:
     body = response.json()
     assert body["total"] == 1
     assert body["items"][0]["entity_type"] == "record"
+
+
+def test_audit_filter_and_sort_use_the_shared_table_query(
+    client: TestClient,
+) -> None:
+    import json
+
+    client.post("/api/schemas", json={"name": "trial"})
+    client.post("/api/collections", json={"name": "study-2024", "description": None})
+    record_id = client.post(
+        "/api/collections/study-2024/records",
+        json={"schema_name": "trial", "data": {}},
+    ).json()["id"]
+    client.patch(f"/api/records/{record_id}", json={"data": {}})
+
+    updates = client.get(
+        f"/api/records/{record_id}/audit",
+        params={"filter": json.dumps({"field": "action", "op": "eq", "value": "update"})},
+    ).json()
+    assert updates["total"] == len(updates["items"])
+    assert {i["action"] for i in updates["items"]} <= {"update"}
+
+    oldest_first = client.get(
+        f"/api/records/{record_id}/audit", params={"sort": "timestamp:asc"}
+    ).json()["items"]
+    stamps = [i["timestamp"] for i in oldest_first]
+    assert stamps == sorted(stamps)
+
+    bad = client.get(
+        f"/api/records/{record_id}/audit",
+        params={"filter": json.dumps({"field": "secret", "op": "eq", "value": 1})},
+    )
+    assert bad.status_code in (400, 422)

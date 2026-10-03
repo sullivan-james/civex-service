@@ -1,8 +1,10 @@
 import { api } from './client'
+import { auditUrl } from './audit'
 import {
   recordQueryString,
   type PageParams,
   type RecordQueryParams,
+  type TableQueryParams,
 } from './query'
 
 export interface CivexRecord {
@@ -167,8 +169,8 @@ export const recordsApi = {
 
   purge: (id: string) => api.delete<void>(`/records/${id}/purge`),
 
-  audit: (id: string, offset = 0, limit = 50) =>
+  audit: (id: string, offset = 0, limit = 50, table?: TableQueryParams) =>
     api.get<PaginatedAuditLog>(
-      `/records/${id}/audit?offset=${offset}&limit=${limit}`,
+      auditUrl(`/records/${id}`, offset, limit, table),
     ),
 }

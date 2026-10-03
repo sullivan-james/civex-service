@@ -44,6 +44,22 @@ export interface RecordQueryParams {
   child_counts?: boolean
 }
 
+/** What a filterable table (runs, audit entries) sends: the same filter and
+ * sort spelling as a record list, plus free-text search. */
+export interface TableQueryParams {
+  search?: string
+  filter?: FilterTreeWire | null
+  sort?: SortEntry[]
+}
+
+/** Puts a table query into `qs` -- the one place `filter` and `sort` are
+ * serialised, for records and tables alike. */
+export function setTableQuery(qs: URLSearchParams, t: TableQueryParams): void {
+  if (t.search) qs.set('search', t.search)
+  if (t.filter) qs.set('filter', JSON.stringify(t.filter))
+  t.sort?.forEach((s) => qs.append('sort', encodeSort(s)))
+}
+
 export interface PageParams {
   limit?: number
   offset?: number
@@ -59,10 +75,8 @@ export function recordQueryString(
   if (params.within) qs.set('within', params.within)
   if (params.parent_record_id)
     qs.set('parent_record_id', params.parent_record_id)
-  if (params.search) qs.set('search', params.search)
+  setTableQuery(qs, params)
   params.where?.forEach((w) => qs.append('where', w))
-  if (params.filter) qs.set('filter', JSON.stringify(params.filter))
-  params.sort?.forEach((s) => qs.append('sort', encodeSort(s)))
   params.columns?.forEach((c) => qs.append('columns', c))
   if (params.child_counts) qs.set('child_counts', 'true')
   if (params.limit != null) qs.set('limit', String(params.limit))

@@ -1,35 +1,37 @@
-import { useState } from 'react'
+import { useEffect } from 'react'
 import { useSearchParams } from 'react-router'
 import { useActiveJobCount, useDrainJobs } from '../hooks/useWorkflows'
-import { Page, Button, Chip } from '../components/ui'
+import { Page, Button } from '../components/ui'
 import { RefreshCw } from '../components/ui/icons'
 import JobsTable from '../components/jobs/JobsTable'
 
-const STATUS_OPTIONS = [
-  '',
-  'pending',
-  'running',
-  'completed',
-  'failed',
-] as const
-
 export default function JobsPage() {
-  // Seeds from `?status=` so an analytics widget's "View runs" link lands
-  // pre-filtered -- read once on mount, same as any other uncontrolled
-  // initial state (the buttons below are the source of truth afterwards).
-  const [searchParams] = useSearchParams()
-  const [statusFilter, setStatusFilter] = useState<string | undefined>(
-    () => searchParams.get('status') || undefined,
-  )
+  // `?status=failed` (the analytics widgets' "View runs" links) becomes the
+  // same filter the table's own editor builds, so there is one way to say it.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const legacyStatus = searchParams.get('status')
+  useEffect(() => {
+    if (!legacyStatus) return
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('status')
+        if (!next.has('filter'))
+          next.set(
+            'filter',
+            JSON.stringify({ field: 'status', op: 'eq', value: legacyStatus }),
+          )
+        return next
+      },
+      { replace: true },
+    )
+  }, [legacyStatus, setSearchParams])
+
   const { data: activeJobs } = useActiveJobCount()
   const drain = useDrainJobs()
 
   const hasActive = (activeJobs?.running ?? 0) + (activeJobs?.pending ?? 0) > 0
   const hasPending = (activeJobs?.pending ?? 0) > 0
-
-  function handleStatusFilter(s: string) {
-    setStatusFilter(s || undefined)
-  }
 
   return (
     <Page
@@ -53,19 +55,7 @@ export default function JobsPage() {
         </Button>
       }
     >
-      <div className="flex items-center gap-2">
-        {STATUS_OPTIONS.map((s) => (
-          <Chip
-            key={s || 'all'}
-            selected={(statusFilter ?? '') === s}
-            onClick={() => handleStatusFilter(s)}
-          >
-            {s || 'All'}
-          </Chip>
-        ))}
-      </div>
-
-      <JobsTable statusFilter={statusFilter} />
+      <JobsTable />
     </Page>
   )
 }
