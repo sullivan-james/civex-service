@@ -50,6 +50,21 @@ Civex uses a network drive your operating system has already mounted: an NFS or 
 
 A network drive can be slow, and it can stop answering. Civex never waits on one for more than a few seconds: a volume that doesn't respond is reported as offline ("not responding"), uploads go to the next volume, and reading files on your other volumes carries on as normal. It returns to normal by itself when the connection does.
 
+### Seeing where a file is stored
+
+A record shows where each of its files lives, without getting in the way:
+
+- A file on a volume that can't be reached right now (an unplugged drive, a network share that stopped answering) is **always** marked, with the volume's name and state. Its download link is replaced by "Unavailable" instead of a link that would fail, and opening it directly says which volume it is on and why it isn't available, not just "not found".
+- Once you have more than one volume, each file shows a small chip with the **volume** it is stored on.
+- A record whose files are split across volumes, or that has files that can't be opened, gets a one-line summary above its fields ("3 files stored on archive (2), default (1) · Split across 2 volumes").
+- With one volume and nothing wrong, nothing extra is shown.
+
+Turn on **Settings → Advanced → Show advanced options** to always see the chips and to click one for the details: every place the content is stored, **the file's path on disk** (with a copy button), whether the volume is a network drive, the content hash and size, and **everything that uses the same file**. A file used by several records is stored once, so this is how to see what shares it.
+
+From the command line, `civex store where <record id>` lists a record's files and the volume each is on, and `--details` adds the path on disk and what else uses each file.
+
+The same information is available from the API: `location` on every file value in a record response, and `GET /files/{sha256}/info` for the details. The location is worked out when the record is read and is never saved with the record.
+
 ### Choosing where a collection's files go
 
 By default new files go to the first usable volume in the write queue. To keep a collection's files together — on an archive drive, say — give it a **home volume**: on the collection's page under **Storage**; in **Settings → Storage → Collections**, which lists every collection with its home, changes it as soon as you pick another, and can set the same home for several selected collections at once; or

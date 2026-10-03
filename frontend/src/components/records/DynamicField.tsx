@@ -36,12 +36,10 @@ import {
   MultiRecordSearchPicker,
 } from './RecordSearchPicker'
 
-export interface FileRef {
-  sha256: string
-  filename: string
-  size: number
-  resolved_filename?: string
-}
+import type { FileRef } from '../../api/files'
+import { FileLink, FileLocationChip } from './FileLocation'
+
+export type { FileRef }
 
 interface Props {
   field: Field
@@ -143,13 +141,16 @@ function FileField({
             <Paperclip size={12} /> {ref.resolved_filename ?? ref.filename}
           </span>
           <span>({(ref.size / 1024).toFixed(1)} KB)</span>
-          <a
-            href={`/api/files/${ref.sha256}`}
-            download={ref.resolved_filename ?? ref.filename}
+          <FileLink
+            file={ref}
             className="text-accent hover:underline"
+            whenUnavailable={
+              <span className="text-fg-subtle">Unavailable</span>
+            }
           >
             Download
-          </a>
+          </FileLink>
+          <FileLocationChip file={ref} />
         </div>
       )}
       <input
@@ -247,6 +248,7 @@ function FileListField({
             {ref.resolved_filename ?? ref.filename} (
             {(ref.size / 1024).toFixed(1)} KB)
           </span>
+          <FileLocationChip file={ref} />
           <button
             type="button"
             onClick={() => remove(ref.sha256)}

@@ -9,6 +9,7 @@ import {
 import { recordsApi } from '../api/records'
 import { useCollection } from '../hooks/useCollections'
 import { UploadCollectionContext } from '../hooks/uploadCollection'
+import { RecordStorageSummary } from '../components/records/RecordStorageSummary'
 import { useSchemas } from '../hooks/useSchemas'
 import { useWorkflows, useJobs } from '../hooks/useWorkflows'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
@@ -167,6 +168,9 @@ export default function RecordDetailPage() {
         {/* Own fields */}
         <Section title="Fields">
           <UploadCollectionContext.Provider value={record.dataset_id}>
+            <div className="mb-3">
+              <RecordStorageSummary data={record.data} />
+            </div>
             <RecordFieldGrid
               fields={
                 schema?.fields ??

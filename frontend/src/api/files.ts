@@ -1,10 +1,42 @@
 import { api } from './client'
 
+/** Where a file is stored, stamped on file values in record responses. */
+export interface FileLocation {
+  /** The volume holding it; null when it isn't on any volume Civex knows. */
+  volume: string | null
+  state:
+    'online' | 'offline' | 'wrong_drive' | 'readonly' | 'retired' | 'unknown'
+  /** Can be opened right now; null when unknown. */
+  available: boolean | null
+}
+
 export interface FileRef {
   sha256: string
   filename: string
   size: number
   volume: string
+  resolved_filename?: string
+  location?: FileLocation | null
+}
+
+export interface FileCopy {
+  volume: string
+  /** Where the object is, or would be, on that volume. */
+  path: string
+  /** null: recorded there, but the volume can't be checked now. */
+  present: boolean | null
+  state: string
+  network: boolean
+}
+
+/** Where a file's content is stored and what uses it. */
+export interface FileInfo {
+  sha256: string
+  size: number | null
+  copies: FileCopy[]
+  records: number
+  jobs: number
+  collections: { id: string; name: string | null; records: number }[]
 }
 
 /** `?collection=` for an upload: the collection the file is for. */
@@ -14,6 +46,8 @@ const collectionQuery = (collectionId?: string, first = false) =>
     : ''
 
 export const filesApi = {
+  info: (sha256: string) => api.get<FileInfo>(`/files/${sha256}/info`),
+
   upload: (file: File, collectionId?: string) => {
     const form = new FormData()
     form.append('file', file)

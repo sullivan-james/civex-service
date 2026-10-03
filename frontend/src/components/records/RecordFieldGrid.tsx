@@ -15,6 +15,7 @@ import { acceptProblem, sizeProblem } from '../../utils/fileChecks'
 import { ReferenceChips } from './ReferenceChips'
 import type { FieldSaveError } from './saveErrors'
 import { FieldValue } from './FieldValue'
+import { FileLink, FileLocationChip } from './FileLocation'
 
 const isEmpty = (v: unknown) =>
   v === null ||
@@ -148,17 +149,17 @@ function FileControl({
           className="flex items-center gap-2 text-sm text-fg"
         >
           <Paperclip size={14} className="shrink-0 text-fg-muted" />
-          <a
-            href={`/api/files/${ref.sha256}?filename=${encodeURIComponent(ref.resolved_filename ?? ref.filename)}`}
-            download={ref.resolved_filename ?? ref.filename}
+          <FileLink
+            file={ref}
             className="truncate text-accent hover:underline"
             title={`Download · ${(ref.size / 1024).toFixed(1)} KB`}
           >
             {ref.resolved_filename ?? ref.filename}
-          </a>
+          </FileLink>
           <span className="shrink-0 text-xs text-fg-muted">
             {(ref.size / 1024).toFixed(1)} KB
           </span>
+          <FileLocationChip file={ref} />
           <button
             type="button"
             onClick={() => remove(ref.sha256)}
