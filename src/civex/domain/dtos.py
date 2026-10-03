@@ -292,6 +292,9 @@ VOLUME_WRONG_DRIVE = "wrong_drive"  # something is there, but it isn't this volu
 VOLUME_READONLY = "readonly"  # reachable; marked read-only
 VOLUME_RETIRED = "retired"  # reachable; no longer written to
 
+# What a volume's configured `state` may be (the others above are worked out).
+VOLUME_CONFIG_STATES = ("active", "readonly", "retired")
+
 
 @dataclass(frozen=True)
 class VolumeStatus:

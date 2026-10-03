@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import errno
 import hashlib
+import threading
 import json
 import logging
 import os
@@ -34,7 +35,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterable, Iterable, Iterator, cast
+from typing import TYPE_CHECKING, Any, AsyncIterable, Callable, Iterable, Iterator, cast
 
 from civex import fs_locations
 from civex.config import StoreConfig, VolumeConfig
@@ -50,6 +51,13 @@ from civex.domain.dtos import (
     VolumeStatus,
 )
 from civex.domain.placement import PLACEMENT_FAIL
+from civex.domain.transfers import (
+    CopyResult,
+    ItemFailed,
+    TargetFull,
+    TransferStopped,
+    VolumeNotResponding,
+)
 from civex.domain.exceptions import (
     AllVolumesFull,
     GCAlreadyRunningError,
@@ -65,12 +73,17 @@ _HEX2_RE = re.compile(r"^[0-9a-f]{2}$")
 _HEX62_RE = re.compile(r"^[0-9a-f]{62}$")
 _COPY_CHUNK = 1024 * 1024
 _RECONCILE_BATCH = 5000
+_MANIFEST_READ_LIMIT = 256 * 1024 * 1024  # larger manifests aren't read for names
 _LOCATE_CHUNK = 500  # inventory lookups per query
 _LOCATE_DISK_FALLBACK = 25  # blobs the inventory doesn't know, looked up on disk
 
 _SCRATCH_DIRNAME = ".tmp"
 _MARKER_FILENAME = ".civex-volume"
 _GC_LOCK_FILENAME = ".gc.lock"
+_TRANSFER_LOCK_FILENAME = ".transfer.lock"
+# A copy that moves no bytes at all for this long is treated as its volume having
+# stopped answering (a stuck network write can't be interrupted from outside).
+STALL_SECONDS = 60.0
 # Long enough that no real GC pass should ever take this long; a lock file
 # older than this is assumed to be left behind by a process that crashed
 # mid-run rather than one still working, and is reclaimed rather than
@@ -93,6 +106,33 @@ def _probe_root(root: Path) -> tuple[str | None, str | None]:
     except OSError as e:  # e.g. a stale mount
         return f"cannot reach {root}: {e}", None
     return None, _read_marker(root)
+
+
+class _CopyJob:
+    """Shared between a copy and whoever is watching it."""
+
+    def __init__(self) -> None:
+        self.size = 0
+        self.bytes = 0
+        self.reused = False
+        self.last_progress = time.monotonic()
+        self.abort = threading.Event()
+        self.error: BaseException | None = None
+
+    def touch(self) -> None:
+        self.last_progress = time.monotonic()
+
+
+def _hash_file(path: Path, job: _CopyJob | None = None) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as f:
+        while chunk := f.read(_COPY_CHUNK):
+            if job is not None:
+                if job.abort.is_set():
+                    raise TransferStopped()
+                job.touch()
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 def _read_marker(root: Path) -> str | None:
@@ -521,13 +561,21 @@ class VolumeAwareFileObjectStore:
         """Materialised `iter_objects()`, for callers that want a list."""
         return list(self.iter_objects())
 
-    def _walk_volume(self, name: str) -> Iterator[StoredObjectInfo]:
+    def _walk_volume(
+        self, name: str, *, strict: bool = False
+    ) -> Iterator[StoredObjectInfo]:
         """Lazily scan `<root>/<2 hex>/<62 hex>` entries of one volume. Only
         the two-level object layout is visited -- scratch files, the
         manifest and anything foreign are skipped without being stat'd. One
-        bad directory or unavailable volume costs only its own objects."""
+        bad directory or unavailable volume costs only its own objects.
+
+        `strict` is for callers that act on "that's everything" (a transfer
+        emptying a volume): a volume or folder that can't be read then raises
+        VolumeNotResponding instead of quietly yielding less."""
         status = self.volume_status(name)
         if not status.reachable:
+            if strict:
+                raise VolumeNotResponding(name, status.reason)
             log.warning(
                 "Skipping volume '%s' while listing objects: %s", name, status.reason
             )
@@ -536,8 +584,12 @@ class VolumeAwareFileObjectStore:
         try:
             top = list(os.scandir(root))
         except FileNotFoundError:
+            if strict:
+                raise VolumeNotResponding(name, f"{root} is missing") from None
             return
         except OSError as e:
+            if strict:
+                raise VolumeNotResponding(name, str(e)) from e
             log.warning("Skipping volume '%s' while listing objects: %s", name, e)
             return
         for shard in top:
@@ -565,6 +617,10 @@ class VolumeAwareFileObjectStore:
                             mtime=stat.st_mtime,
                         )
             except OSError as e:
+                if strict:
+                    raise VolumeNotResponding(
+                        name, f"can't read folder {shard.name}: {e}"
+                    ) from e
                 log.warning(
                     "Skipping shard '%s' of volume '%s': %s", shard.name, name, e
                 )
@@ -640,6 +696,11 @@ class VolumeAwareFileObjectStore:
         """
         lock_path = self._root / "_civex" / _GC_LOCK_FILENAME
         lock_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._lock_is_live(_TRANSFER_LOCK_FILENAME):
+            raise GCAlreadyRunningError(
+                "A storage transfer is running. Garbage collection waits until "
+                "it has finished, so the two never work on the same files."
+            )
 
         def _acquire() -> None:
             fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -669,6 +730,376 @@ class VolumeAwareFileObjectStore:
             yield
         finally:
             lock_path.unlink(missing_ok=True)
+
+    # ------------------------------------------------------------------
+    # Transfers: the primitives the transfer engine is built from
+    # ------------------------------------------------------------------
+    #
+    # See civex.services.transfer_engine for the order they are used in, and why
+    # that order loses nothing if it is interrupted anywhere.
+
+    def iter_volume_objects(self, name: str) -> Iterator[StoredObjectInfo]:
+        """Every object physically on one volume, lazily. Strict: a volume (or a
+        folder in it) that can't be read raises VolumeNotResponding rather than
+        looking emptier than it is."""
+        return self._walk_volume(name, strict=True)
+
+    def volume_path(self, name: str) -> Path:
+        """Where a volume's folder is on disk (a relative path resolved against
+        the project root)."""
+        return self._resolve_path(self._cfg.volumes[name])
+
+    def can_accept(self, volume: str, size: int) -> tuple[bool, str]:
+        """Whether `volume` can take `size` more bytes right now: online and
+        writable, within its allocation, with disk headroom. (The same gate a
+        new upload passes.)"""
+        return self._can_write(volume, size)
+
+    def object_size(self, sha256: str, volume: str) -> int:
+        """Size of the object on `volume`, from the disk."""
+        path = self._object_path(sha256, volume)
+        try:
+            return self._stat(volume, path).st_size
+        except FileNotFoundError:
+            raise ItemFailed(f"it is no longer on '{volume}'") from None
+        except OSError as e:
+            raise ItemFailed(
+                f"it can't be read on '{volume}': {e}", retryable=True
+            ) from e
+
+    def _stat(self, volume: str, path: Path) -> os.stat_result:
+        vc = self._cfg.volumes[volume]
+        if self._inside_project(vc):
+            return os.stat(path)
+        try:
+            return fs_locations.guarded(f"{path}#stat", os.stat, path)
+        except fs_locations.Unresponsive as e:
+            raise VolumeNotResponding(volume, str(e)) from None
+
+    def transfer_object(
+        self,
+        sha256: str,
+        source: str,
+        target: str,
+        *,
+        verify: str = "copy",
+        on_chunk: Callable[[int], None] | None = None,
+    ) -> CopyResult:
+        """Copy one object from `source` to `target` and leave it in place there,
+        checked. The original is NOT touched: removing it is a separate step the
+        caller takes only once the catalog says the object lives on `target`.
+
+        The copy goes to a scratch file on the target, is hashed as it is
+        written (and must equal `sha256`), is read back and hashed again when
+        `verify` is "full", and is then renamed into place -- atomic, since the
+        scratch file is on the same drive, whatever kind of drive that is. If
+        the object is already complete on the target (an earlier run got that
+        far) there is nothing to copy, and the result says so (`reused`).
+
+        `on_chunk(n)` is told of each chunk and may raise TransferStopped to
+        abandon the copy (its scratch file is discarded). Raises ItemFailed,
+        TargetFull or VolumeNotResponding as appropriate."""
+        job = _CopyJob()
+        external = not (
+            self._inside_project(self._cfg.volumes[source])
+            and self._inside_project(self._cfg.volumes[target])
+        )
+        if not external:
+            self._copy_classified(sha256, source, target, verify, job, on_chunk)
+            return CopyResult(job.size, job.reused)
+
+        # A drive outside the project may be a network share that stops
+        # answering in the middle of a write, and a blocked write can't be
+        # interrupted from outside. So the copy runs on a helper thread and this
+        # one watches it: it can stop it (the helper checks between chunks),
+        # and it gives up on it if no bytes move for STALL_SECONDS.
+        worker = threading.Thread(
+            target=self._copy_in_thread,
+            args=(sha256, source, target, verify, job),
+            daemon=True,
+            name="civex-transfer-copy",
+        )
+        worker.start()
+        reported = 0
+        try:
+            while worker.is_alive():
+                worker.join(0.2)
+                if on_chunk is not None and job.bytes > reported:
+                    delta, reported = job.bytes - reported, job.bytes
+                    on_chunk(delta)
+                if time.monotonic() - job.last_progress > STALL_SECONDS:
+                    job.abort.set()
+                    raise self._stalled(source, target)
+        except TransferStopped:
+            job.abort.set()
+            worker.join(2.0)
+            raise
+        if job.error is not None:
+            raise job.error
+        if on_chunk is not None and job.bytes > reported:
+            try:
+                on_chunk(job.bytes - reported)
+            except TransferStopped:
+                # The copy finished before the stop was noticed. Keep it (it is
+                # complete and checked); the caller sees the stop request before
+                # it starts the next file.
+                pass
+        return CopyResult(job.size, job.reused)
+
+    def _copy_in_thread(
+        self, sha256: str, source: str, target: str, verify: str, job: _CopyJob
+    ) -> None:
+        try:
+            self._copy_classified(sha256, source, target, verify, job, None)
+        except BaseException as e:  # noqa: BLE001 - handed to the thread that waits
+            job.error = e
+
+    def _stalled(self, source: str, target: str) -> VolumeNotResponding:
+        for name in (source, target):
+            if not self._inside_project(self._cfg.volumes[name]):
+                status = self.volume_status(name)
+                if not status.reachable:
+                    return VolumeNotResponding(name, status.reason)
+        name = target if not self._inside_project(self._cfg.volumes[target]) else source
+        return VolumeNotResponding(name, f"no data moved for {STALL_SECONDS:g} seconds")
+
+    def _copy_classified(
+        self,
+        sha256: str,
+        source: str,
+        target: str,
+        verify: str,
+        job: _CopyJob,
+        on_chunk: Callable[[int], None] | None,
+    ) -> None:
+        """`_copy_blocking`, with what goes wrong named for the engine: a full
+        target pauses the transfer, a quiet volume pauses it until it answers,
+        and anything else is that one file's problem."""
+        try:
+            self._copy_blocking(sha256, source, target, verify, job, on_chunk)
+        except VolumeUnavailableError as e:
+            raise VolumeNotResponding(target, str(e)) from e
+        except OSError as e:
+            if e.errno == errno.ENOSPC:
+                raise TargetFull(f"'{target}' has no space left") from e
+            for name in (source, target):
+                if not self.volume_status(name).reachable:
+                    raise VolumeNotResponding(name, str(e)) from e
+            if (
+                isinstance(e, FileNotFoundError)
+                and not self._object_path(sha256, source).exists()
+            ):
+                raise ItemFailed(f"it is no longer on '{source}'") from e
+            raise ItemFailed(f"input/output error: {e}", retryable=True) from e
+
+    def _copy_blocking(
+        self,
+        sha256: str,
+        source: str,
+        target: str,
+        verify: str,
+        job: _CopyJob,
+        on_chunk: Callable[[int], None] | None,
+    ) -> None:
+        src = self._object_path(sha256, source)
+        dst = self._object_path(sha256, target)
+        src_stat = src.stat()
+        job.size = src_stat.st_size
+        job.touch()
+        if dst.exists() and dst.stat().st_size == src_stat.st_size:
+            # An earlier run copied it and stopped before finishing the move.
+            if verify != "full" or _hash_file(dst) == sha256:
+                job.reused = True
+                return
+        scratch = self._scratch_path(target)
+        try:
+            hasher = hashlib.sha256()
+            with src.open("rb") as reader, scratch.open("wb") as writer:
+                while chunk := reader.read(_COPY_CHUNK):
+                    if job.abort.is_set():
+                        raise TransferStopped()
+                    hasher.update(chunk)
+                    writer.write(chunk)
+                    job.bytes += len(chunk)
+                    job.touch()
+                    if on_chunk is not None:
+                        on_chunk(len(chunk))
+                writer.flush()
+                os.fsync(writer.fileno())
+            if job.bytes != src_stat.st_size:
+                raise ItemFailed("it changed while it was being copied", retryable=True)
+            if hasher.hexdigest() != sha256:
+                raise ItemFailed(
+                    f"the copy on '{source}' doesn't match its hash: the file is "
+                    "corrupt or has been altered",
+                    retryable=True,
+                )
+            if verify == "full" and _hash_file(scratch, job) != sha256:
+                raise ItemFailed(
+                    f"the copy on '{target}' didn't read back correctly", retryable=True
+                )
+            if job.abort.is_set():
+                raise TransferStopped()
+            dst.parent.mkdir(exist_ok=True)
+            try:  # keep its age, so a recent upload stays inside GC's grace period
+                os.utime(scratch, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
+            except OSError:
+                pass
+            os.replace(scratch, dst)
+        except BaseException:
+            scratch.unlink(missing_ok=True)
+            raise
+
+    def inventory_totals(self, volumes: Iterable[str]) -> dict[str, tuple[int, int]]:
+        """(files, bytes) the catalog holds on each volume, for sizing a
+        transfer before it starts. Close, not exact: the catalog can lag the
+        disk, and a transfer counts what it actually finds."""
+        wanted = list(volumes)
+        totals = {v: (0, 0) for v in wanted}
+        if self._session is None:
+            for v in wanted:
+                objs = list(self._walk_volume(v))
+                totals[v] = (len(objs), sum(o.size for o in objs))
+            return totals
+        from sqlalchemy import func, select
+
+        from civex.db.models import StoredObject
+
+        rows = self._session.execute(
+            select(
+                StoredObject.volume,
+                func.count(),
+                func.coalesce(func.sum(StoredObject.size), 0),
+            )
+            .where(StoredObject.volume.in_(wanted))
+            .group_by(StoredObject.volume)
+        )
+        for volume, files, size in rows:
+            totals[volume] = (int(files), int(size))
+        return totals
+
+    def inventory_rows(self, shas: Iterable[str]) -> dict[str, tuple[str, int]]:
+        """sha256 -> (volume, size) for the blobs the catalog knows."""
+        wanted = list(dict.fromkeys(shas))
+        found: dict[str, tuple[str, int]] = {}
+        if self._session is None or not wanted:
+            return found
+        from sqlalchemy import select
+
+        from civex.db.models import StoredObject
+
+        for i in range(0, len(wanted), _LOCATE_CHUNK):
+            rows = self._session.execute(
+                select(
+                    StoredObject.sha256, StoredObject.volume, StoredObject.size
+                ).where(StoredObject.sha256.in_(wanted[i : i + _LOCATE_CHUNK]))
+            )
+            for sha, volume, size in rows:
+                found[sha] = (volume, int(size))
+        return found
+
+    def room_on(self, volume: str) -> int | None:
+        """How many more bytes `volume` would take: what its allocation leaves,
+        or the disk's free space less the headroom Civex keeps -- whichever is
+        smaller. None if that can't be read right now (the volume is offline)."""
+        vc = self._cfg.volumes[volume]
+        if not self.volume_status(volume).reachable:
+            return None
+        room: int | None = None
+        if vc.allocated_gb is not None:
+            room = max(0, int(vc.allocated_gb * 1024**3) - self._civex_used(volume))
+        try:
+            disk = self._disk_usage(vc, self._resolve_path(vc))
+        except (OSError, fs_locations.Unresponsive):
+            return None
+        headroom = max(0, disk.free - int(self._cfg.full_below_gb * 1024**3))
+        return headroom if room is None else min(room, headroom)
+
+    def record_moves(self, moves: list[tuple[str, str, int]]) -> None:
+        """Say in the catalog that each (sha256, volume, size) now lives on that
+        volume. The caller commits, and only then removes the originals."""
+        self._used_cache.clear()
+        if self._session is not None and moves:
+            self._upsert_inventory(moves)
+
+    def remove_from_volume(self, sha256: str, volume: str) -> bool:
+        """Remove the object from exactly that volume (never searching others,
+        which `delete()` falls back to). False if it was already gone."""
+        path = self._object_path(sha256, volume)
+        self._used_cache.pop(volume, None)
+        vc = self._cfg.volumes[volume]
+        try:
+            if self._inside_project(vc):
+                path.unlink()
+            else:
+                fs_locations.guarded(f"{path}#unlink", path.unlink)
+        except FileNotFoundError:
+            return False
+        except fs_locations.Unresponsive as e:
+            raise OSError(f"volume '{volume}' isn't responding") from e
+        return True
+
+    def read_manifest_names(self, volume: str) -> dict[str, str]:
+        """sha256 -> original filename, from the volume's manifest, so a moved
+        file keeps its name in its new home's manifest. Empty if the manifest is
+        missing or too large to be worth reading."""
+        path = self._resolve_path(self._cfg.volumes[volume]) / "manifest.jsonl"
+        names: dict[str, str] = {}
+        try:
+            if path.stat().st_size > _MANIFEST_READ_LIMIT:
+                return names
+            with path.open(encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                        names[entry["sha256"]] = entry["filename"]
+                    except (ValueError, KeyError, TypeError):
+                        continue
+        except OSError:
+            pass
+        return names
+
+    def append_manifest(
+        self, volume: str, sha256: str, filename: str | None, size: int
+    ) -> None:
+        self._append_manifest_best_effort(volume, sha256, filename or "", size)
+
+    # -- one transfer at a time, and never alongside GC -----------------------
+
+    def _lock_is_live(self, filename: str) -> bool:
+        path = self._root / "_civex" / filename
+        try:
+            return time.time() - path.stat().st_mtime < _GC_LOCK_STALE_SECONDS
+        except OSError:
+            return False
+
+    @contextlib.contextmanager
+    def transfer_lock(self) -> Iterator[None]:
+        """Held for as long as a transfer is moving files. Refuses to start while
+        another transfer or a garbage-collection pass holds its lock, and makes
+        GC refuse in turn, so the two never work on the same files at once.
+        `touch_transfer_lock` keeps it fresh; one not touched for an hour is
+        taken to belong to a process that died."""
+        if self._lock_is_live(_GC_LOCK_FILENAME):
+            raise GCAlreadyRunningError(
+                "A garbage-collection pass is running. Wait for it to finish, "
+                "then start the transfer."
+            )
+        lock_path = self._root / "_civex" / _TRANSFER_LOCK_FILENAME
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._lock_is_live(_TRANSFER_LOCK_FILENAME):
+            raise GCAlreadyRunningError("A storage transfer is already running.")
+        lock_path.write_text(str(os.getpid()))
+        try:
+            yield
+        finally:
+            lock_path.unlink(missing_ok=True)
+
+    def touch_transfer_lock(self) -> None:
+        try:
+            os.utime(self._root / "_civex" / _TRANSFER_LOCK_FILENAME)
+        except OSError:
+            pass
 
     # ------------------------------------------------------------------
     # Stats (for CLI / UI)

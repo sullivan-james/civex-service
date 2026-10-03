@@ -98,8 +98,53 @@ def populated(ctx: AppContext, make_schema, make_collection) -> Engine:
     ctx._session.add(
         AiUsageEvent(provider="anthropic", model="m", input_tokens=1, output_tokens=2)
     )
+    _add_storage_transfer(ctx)
     ctx.commit()
     return ctx._session.get_bind()  # type: ignore[return-value]
+
+
+def _add_storage_transfer(ctx: AppContext) -> None:
+    """A finished transfer with everything a real one carries (its plan, a
+    failure, a frozen source), so each JSON column is compared after a move."""
+    import uuid
+    from datetime import datetime, timezone
+
+    from civex.domain.transfers import (
+        TargetShare,
+        TransferFailure,
+        TransferPlan,
+        TransferProgress,
+        TransferRecord,
+        TransferSpec,
+    )
+    from civex.repositories.local.transfer_repo import LocalTransferRepository
+
+    now = datetime.now(timezone.utc)
+    LocalTransferRepository(ctx._session).create(
+        TransferRecord(
+            id=str(uuid.uuid4()),
+            kind="drain",
+            status="completed",
+            spec=TransferSpec(kind="drain", sources=["default"], targets=["archive"]),
+            plan=TransferPlan(
+                files=3,
+                bytes=3000,
+                targets=[TargetShare("archive", 3, 3000, 10**9)],
+                warnings=["a warning"],
+            ),
+            progress=TransferProgress(
+                files_total=3, files_done=2, files_failed=1, bytes_total=3000,
+                bytes_done=2000, message="Finished",
+            ),
+            failures=[TransferFailure("ab" * 32, "default", "it is corrupt")],
+            failures_total=1,
+            control="pause",
+            frozen={"default": "active"},
+            created_at=now,
+            started_at=now,
+            finished_at=now,
+        )
+    )
 
 
 def _table_dump(engine: Engine, table) -> list[str]:

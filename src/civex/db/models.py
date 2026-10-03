@@ -546,6 +546,41 @@ class JobAffectedRecord(Base):
     record_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
 
 
+class StorageTransfer(Base):
+    """A move of stored files between volumes, as a durable account: what was
+    asked for, how far it got, what couldn't be moved, and how it ended. The
+    thread doing the work is momentary; this is what survives a restart, and
+    what a progress bar reads."""
+
+    __tablename__ = "storage_transfers"
+    __table_args__ = (
+        Index("ix_storage_transfers_created", "created_at"),
+        Index("ix_storage_transfers_status", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    # running | paused | completed | failed | cancelled | interrupted
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    spec: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False)
+    plan: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    progress: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False)
+    failures: Mapped[list[Any]] = mapped_column(_JSON, nullable=False, default=list)
+    failures_total: Mapped[int] = mapped_column(nullable=False, default=0)
+    pause_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    auto_resume: Mapped[bool] = mapped_column(nullable=False, default=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A pause or cancel someone has asked for. The process running the transfer
+    # notices it as it saves progress, so it works from any other process.
+    control: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Sources made read-only for the duration, and what each was before.
+    frozen: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    started_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+
+
 class StoredObject(Base):
     """Inventory of blobs in the object store: one row per sha256, written
     when the blob lands on disk and removed when it is deleted. Exists so

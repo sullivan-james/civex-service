@@ -8,6 +8,7 @@ from pathlib import Path
 
 from civex.config import Config, PlacementConfig, VolumeConfig, save_config
 from civex.domain.dtos import (
+    VOLUME_CONFIG_STATES,
     VOLUME_WRONG_DRIVE,
     DirectoryEntry,
     DirectoryListing,
@@ -95,6 +96,29 @@ class StoreService:
         status = self._store.adopt_volume(name)
         save_config(self._config)
         return status
+
+    def set_volume_state(self, name: str, state: str) -> None:
+        """Mark a volume active, read-only (readable, never written) or retired.
+
+        Re-reads config.toml before writing it: this is also done by transfers
+        that run for hours, and must never write back a stale copy over edits
+        made in the meantime. The in-memory view is updated too, so it takes
+        effect at once."""
+        if state not in VOLUME_CONFIG_STATES:
+            raise ValidationError(
+                f"A volume's state must be one of: {', '.join(VOLUME_CONFIG_STATES)}"
+            )
+        sc = self._config.store_config
+        if name not in sc.volumes:
+            raise NotFoundError(f"Volume '{name}' not found")
+        from civex.config import load_config
+
+        fresh = load_config()
+        if name not in fresh.store_config.volumes:
+            raise NotFoundError(f"Volume '{name}' not found")
+        fresh.store_config.volumes[name].state = state
+        save_config(fresh)
+        sc.volumes[name].state = state
 
     def update_volume(
         self, name: str, *, path: str | None = None, allocated_gb=_UNSET

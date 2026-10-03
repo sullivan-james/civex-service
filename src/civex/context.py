@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from civex.services.file_service import FileService
     from civex.services.gc_service import GCService
     from civex.services.file_info_service import FileInfoService
+    from civex.services.transfer_service import TransferService
     from civex.services.plugin_service import PluginService
     from civex.services.policy_service import PolicyService
     from civex.services.record_service import RecordService
@@ -75,6 +76,7 @@ class AppContext:
     store_svc: StoreService
     gc_svc: GCService
     file_info_svc: FileInfoService
+    transfer_svc: TransferService
     audit_svc: LocalAuditRepository
     ai_svc: AiService
     ai_usage_svc: AiUsageService
@@ -132,6 +134,8 @@ def build_local_context(
     from civex.services.file_service import FileService
     from civex.services.gc_service import GCService
     from civex.services.file_info_service import FileInfoService
+    from civex.repositories.local.transfer_repo import LocalTransferRepository
+    from civex.services.transfer_service import TransferService
     from civex.services.plugin_service import PluginService
     from civex.services.policy_service import PolicyService
     from civex.services.record_service import RecordService
@@ -183,6 +187,15 @@ def build_local_context(
     file_info_svc = FileInfoService(
         file_store, LocalFileReferenceRepository(session), dataset_repo
     )
+    transfer_svc = TransferService(
+        config,
+        file_store,
+        LocalFileReferenceRepository(session),
+        LocalTransferRepository(session),
+        dataset_repo,
+        store_svc,
+        session.commit,
+    )
     ai_svc = AiService(schema_svc, dataset_svc, record_svc, job_svc)
     ai_usage_svc = AiUsageService(engine)
     analytics_svc = AnalyticsService(
@@ -209,6 +222,7 @@ def build_local_context(
         store_svc=store_svc,
         gc_svc=gc_svc,
         file_info_svc=file_info_svc,
+        transfer_svc=transfer_svc,
         audit_svc=audit_repo,
         ai_svc=ai_svc,
         ai_usage_svc=ai_usage_svc,
