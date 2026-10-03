@@ -68,3 +68,27 @@ def test_set_state(project_dir: Path, tmp_path: Path) -> None:
     _two_volumes(tmp_path)
     assert runner.invoke(app, ["store", "set-state", "a", "readonly"]).exit_code == 0
     assert "read-only" in _plain(runner.invoke(app, ["store", "list"]))
+
+
+def test_collections_shows_where_each_collections_files_are(
+    project_dir: Path, tmp_path: Path
+) -> None:
+    _two_volumes(tmp_path, files=0)
+    ctx = build_local_context(load_config())
+    ctx.schema_svc.create("doc")
+    ctx.schema_svc.add_field("doc", "scan", "file")
+    ctx.dataset_svc.create("study")
+    store = ctx.file_svc._store
+    for vol, data in (("a", b"x" * 100), ("b", b"y" * 300)):
+        ctx.store_svc.set_queue([vol])
+        ref = store.put(data, f"{vol}.bin")
+        ctx.record_svc.add("study", "doc", {"scan": ref.to_dict()})
+    ctx.commit()
+    ctx.close()
+
+    out = _plain(runner.invoke(app, ["store", "collections"]))
+
+    assert "study 2 files" in out
+    assert "a: 1 files" in out and "b: 1 files" in out
+    assert _plain(runner.invoke(app, ["store", "collections", "study"])) == out
+    assert "No collection has files" not in out

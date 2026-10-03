@@ -32,28 +32,44 @@ class FileInfoService:
         (largest first), read from the catalog. A volume that isn't reachable
         is still listed, with its state, since its files are still the
         collection's."""
-        total, rows = self._refs.volume_breakdown(collection_id)
-        shares = []
-        for volume, files, size, shared in sorted(rows, key=lambda r: -r[2]):
-            status = self._store.volume_status(volume)
-            shares.append(
+        return self.all_collection_storage([collection_id])[collection_id]
+
+    def all_collection_storage(
+        self, collection_ids: list[str] | None = None
+    ) -> dict[str, CollectionStorage]:
+        """The same for several collections (all, if none are named), in a few
+        queries. A collection with no files is still answered, with none."""
+        found = self._refs.volume_breakdowns(collection_ids)
+        status: dict[str, tuple[str, bool]] = {}  # a volume's state, asked once
+
+        def state(volume: str) -> tuple[str, bool]:
+            if volume not in status:
+                s = self._store.volume_status(volume)
+                status[volume] = (s.state, s.reachable)
+            return status[volume]
+
+        out = {}
+        for cid in collection_ids if collection_ids is not None else list(found):
+            total, rows = found.get(cid, (0, []))
+            shares = [
                 CollectionVolumeShare(
                     volume=volume,
                     files=files,
                     bytes=size,
                     shared_files=shared,
-                    state=status.state,
-                    available=status.reachable,
+                    state=state(volume)[0],
+                    available=state(volume)[1],
                 )
+                for volume, files, size, shared in sorted(rows, key=lambda r: -r[2])
+            ]
+            out[cid] = CollectionStorage(
+                collection_id=cid,
+                files=total,
+                bytes=sum(s.bytes for s in shares),
+                volumes=shares,
+                unlocated_files=max(total - sum(s.files for s in shares), 0),
             )
-        located = sum(s.files for s in shares)
-        return CollectionStorage(
-            collection_id=collection_id,
-            files=total,
-            bytes=sum(s.bytes for s in shares),
-            volumes=shares,
-            unlocated_files=max(total - located, 0),
-        )
+        return out
 
     def info(self, sha256: str) -> FileInfo:
         """Every place the content is, its size, and the records, collections

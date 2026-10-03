@@ -141,6 +141,21 @@ def _placement_response(
     )
 
 
+@router.get("/collections", response_model=list[CollectionStorageResponse])
+def all_collection_storage(ctx: AppContext = Depends(get_ctx)):
+    """Where every collection's files are stored, in one call.
+
+    The same answer as `GET /store/collections/{id}` for each collection that
+    has files, for pages that show them side by side. Collections with no files
+    are left out.
+    """
+    return [
+        asdict(s)
+        for s in ctx.file_info_svc.all_collection_storage().values()
+        if s.files
+    ]
+
+
 @router.get("/collections/{collection_id}", response_model=CollectionStorageResponse)
 def collection_storage(collection_id: str, ctx: AppContext = Depends(get_ctx)):
     """Where a collection's files are stored.

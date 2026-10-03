@@ -87,3 +87,30 @@ def test_an_unplugged_volume_is_still_listed_with_its_state(
 
 def test_an_unknown_collection_is_404(client: TestClient) -> None:
     assert client.get(f"/api/store/collections/{uuid.uuid4()}").status_code == 404
+
+
+def test_every_collection_is_answered_in_one_call_and_matches_the_single_view(
+    client: TestClient, tmp_path: Path
+) -> None:
+    _api_setup(client)
+    ctx = _setup(tmp_path)
+    _file_record(ctx, "one", b"x" * 100, "p.bin", "a")
+    _file_record(ctx, "one", b"y" * 300, "q.bin", "b")
+    _file_record(ctx, "two", b"y" * 300, "q.bin", "b")  # shared with "one"
+    ids = {c: str(ctx.dataset_svc.get(c).id) for c in ("one", "two")}
+    ctx.close()
+
+    everything = {
+        r["collection_id"]: r for r in client.get("/api/store/collections").json()
+    }
+
+    assert set(everything) == set(ids.values())
+    for cid in ids.values():  # one rule: the bulk view is the single view, repeated
+        assert everything[cid] == client.get(f"/api/store/collections/{cid}").json()
+    two = everything[ids["two"]]
+    assert two["files"] == 1 and two["volumes"][0]["shared_files"] == 1
+
+
+def test_collections_without_files_are_left_out_of_the_list(client: TestClient) -> None:
+    _api_setup(client)
+    assert client.get("/api/store/collections").json() == []

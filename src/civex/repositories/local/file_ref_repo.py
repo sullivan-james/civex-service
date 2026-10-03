@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Iterable
 
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import case, delete, func, insert, select
 from sqlalchemy.orm import Session
 
 from civex.db.models import FileReference, Record, WorkflowJob
@@ -74,51 +74,63 @@ class LocalFileReferenceRepository:
             query = query.where(FileReference.sha256 > after)
         return [sha for (sha,) in self._s.execute(query)]
 
-    def volume_breakdown(
-        self, collection_id: str
-    ) -> tuple[int, list[tuple[str, int, int, int]]]:
-        """Where a collection's files are, from the catalog in three queries (no
-        file is read): the number of distinct files its records use, and per
+    def volume_breakdowns(
+        self, collection_ids: list[str] | None
+    ) -> dict[str, tuple[int, list[tuple[str, int, int, int]]]]:
+        """Where collections' files are, from the catalog in a few grouped
+        queries (no file is read), for the given collections or all of them.
+        Per collection id: the number of distinct files its records use, and per
         volume (volume, files, bytes, files another collection also uses)."""
         from civex.db.models import StoredObject
 
-        cid = uuid.UUID(collection_id)
-        mine = (
-            select(FileReference.sha256)
+        wanted = (
+            None if collection_ids is None else [uuid.UUID(c) for c in collection_ids]
+        )
+
+        def scoped(query):
+            return (
+                query if wanted is None else query.where(Record.dataset_id.in_(wanted))
+            )
+
+        # one row per (collection, file)
+        mine = scoped(
+            select(Record.dataset_id.label("cid"), FileReference.sha256.label("sha"))
             .join(Record, Record.id == FileReference.record_id)
-            .where(Record.dataset_id == cid)
             .distinct()
+        ).subquery()
+
+        out: dict[str, tuple[int, list[tuple[str, int, int, int]]]] = {}
+        for cid, n in self._s.execute(
+            select(mine.c.cid, func.count()).group_by(mine.c.cid)
+        ):
+            out[str(cid)] = (int(n), [])
+
+        # how many collections use each of those files, to spot shared ones
+        users = (
+            select(
+                FileReference.sha256.label("sha"),
+                func.count(func.distinct(Record.dataset_id)).label("n"),
+            )
+            .join(Record, Record.id == FileReference.record_id)
+            .where(FileReference.sha256.in_(select(mine.c.sha)))
+            .group_by(FileReference.sha256)
             .subquery()
         )
-        total = self._s.execute(select(func.count()).select_from(mine)).scalar_one()
         rows = self._s.execute(
             select(
+                mine.c.cid,
                 StoredObject.volume,
                 func.count(),
                 func.coalesce(func.sum(StoredObject.size), 0),
+                func.coalesce(func.sum(case((users.c.n > 1, 1), else_=0)), 0),
             )
-            .where(StoredObject.sha256.in_(select(mine.c.sha256)))
-            .group_by(StoredObject.volume)
-        ).all()
-        others = (
-            select(FileReference.sha256)
-            .join(Record, Record.id == FileReference.record_id)
-            .where(Record.dataset_id != cid)
-            .where(FileReference.sha256.in_(select(mine.c.sha256)))
-            .distinct()
-            .subquery()
+            .join(StoredObject, StoredObject.sha256 == mine.c.sha)
+            .join(users, users.c.sha == mine.c.sha)
+            .group_by(mine.c.cid, StoredObject.volume)
         )
-        shared: dict[str, int] = {
-            vol: int(n)
-            for vol, n in self._s.execute(
-                select(StoredObject.volume, func.count())
-                .where(StoredObject.sha256.in_(select(others.c.sha256)))
-                .group_by(StoredObject.volume)
-            )
-        }
-        return total, [
-            (vol, int(n), int(size), int(shared.get(vol, 0))) for vol, n, size in rows
-        ]
+        for cid, volume, files, size, shared in rows:
+            out[str(cid)][1].append((volume, int(files), int(size), int(shared)))
+        return out
 
     def collections_using(self, shas: Iterable[str]) -> dict[str, set[str]]:
         """For each file, the ids of the collections whose records use it."""

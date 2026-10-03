@@ -505,3 +505,60 @@ def store_set_state(
         raise typer.Exit(1)
     finally:
         ctx.close()
+
+
+@app.command("collections")
+def store_collections(
+    name: Optional[str] = typer.Argument(
+        None, help="Show just this collection (default: every collection with files)."
+    ),
+) -> None:
+    """Show which volumes hold each collection's files.
+
+    Lists, for each collection, the volumes that hold some of its files with how
+    many files and how much space, and flags files that another collection also
+    uses and volumes that can't be reached right now. Read from the catalog, so
+    it is quick. To gather a split collection onto one volume, use
+    `civex store move --collection`.
+    """
+    ctx = get_ctx()
+    try:
+        names = {str(d.id): d.name for d in ctx.dataset_svc.list_all(with_count=False)}
+        if name is not None:
+            ids = [str(ctx.dataset_svc.get(name).id)]
+        else:
+            ids = None
+        reports = ctx.file_info_svc.all_collection_storage(ids)
+        shown = [r for r in reports.values() if r.files]
+        if not shown:
+            console.print("[dim]No collection has files yet.[/dim]")
+            return
+        for r in sorted(shown, key=lambda r: names.get(r.collection_id, "")):
+            console.print(
+                f"[bold]{names.get(r.collection_id, r.collection_id)}[/bold]  "
+                f"{r.files} files, {format_bytes(r.bytes)}"
+            )
+            for v in r.volumes:
+                extra = (
+                    f"  ({v.shared_files} also used by other collections)"
+                    if v.shared_files
+                    else ""
+                )
+                flag = (
+                    ""
+                    if v.available
+                    else f"  [yellow]{v.state}: can't be opened now[/yellow]"
+                )
+                console.print(
+                    f"  {v.volume}: {v.files} files, {format_bytes(v.bytes)}{extra}{flag}"
+                )
+            if r.unlocated_files:
+                console.print(
+                    f"  [yellow]{r.unlocated_files} files aren't in the catalog; "
+                    "a storage scan will find them.[/yellow]"
+                )
+    except CivexError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
