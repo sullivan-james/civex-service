@@ -224,9 +224,12 @@ describe('moving the database', () => {
     expect(
       within(dialog).getByText(/337,976 records · 843\.0 MB/),
     ).toBeInTheDocument()
-    expect(
-      within(dialog).getByText(/original is left exactly as it is/),
-    ).toBeInTheDocument()
+    await user.click(
+      within(dialog).getByRole('button', { name: 'More information' }),
+    )
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      /original is left as it is/,
+    )
     expect(within(dialog).getByText(/about 40 seconds/)).toBeInTheDocument()
     await user.click(
       within(dialog).getByRole('button', { name: 'Move my data' }),
@@ -250,9 +253,12 @@ describe('moving the database', () => {
     expect(
       within(dialog).getByText(/checked against the original/),
     ).toBeInTheDocument()
-    expect(
-      within(dialog).getByText(/The original is untouched at/),
-    ).toBeInTheDocument()
+    await user.click(
+      within(dialog).getByRole('button', { name: 'More information' }),
+    )
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      /The original is untouched at/,
+    )
     expect(
       calls.find((c) => c.path === '/api/db/move' && c.method === 'POST')?.body,
     ).toEqual({

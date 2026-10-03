@@ -160,7 +160,7 @@ export default function CollectionDetailPage() {
               </Badge>
             </span>
           }
-          description={collection.description ?? undefined}
+          meta={collection.description ?? undefined}
           action={
             <>
               <PinButton

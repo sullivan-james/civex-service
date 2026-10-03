@@ -42,10 +42,7 @@ export function CollectionPicker({
       </Select>
       {isNew && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 pt-2">
-          <Field
-            label="Name"
-            hint="A collection is a named container for records — e.g. one per field season or per site."
-          >
+          <Field label="Name">
             <Input
               autoFocus
               value={newCollection.name}

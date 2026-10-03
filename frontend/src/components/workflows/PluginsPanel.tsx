@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react'
-import { Link } from 'react-router'
 import {
   useDeletePlugin,
   usePlugins,
@@ -188,7 +187,9 @@ export function PluginsPanel() {
         <Button
           size="sm"
           variant="default"
-          title={expandedPlugin === p.id ? 'Hide contract' : 'Show contract'}
+          aria-label={
+            expandedPlugin === p.id ? 'Hide contract' : 'Show contract'
+          }
           onClick={() =>
             setExpandedPlugin(expandedPlugin === p.id ? null : p.id)
           }
@@ -225,14 +226,8 @@ export function PluginsPanel() {
   const expandedPluginInfo = pluginList?.find((p) => p.id === expandedPlugin)
 
   return (
-    <div className="mt-8">
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h2 className="text-base font-semibold text-fg">Plugins</h2>
-          <p className="text-xs text-fg-muted mt-1">
-            Step implementations available to workflows
-          </p>
-        </div>
+    <div>
+      <div className="mb-3 flex items-center justify-end">
         <div className="flex items-center gap-2">
           {uploadError && (
             <span className="text-xs text-danger">{uploadError}</span>
@@ -273,16 +268,15 @@ export function PluginsPanel() {
           emptyTitle="No plugins loaded yet"
           actions={(p) =>
             p.filename ? (
-              <div className="flex justify-end gap-2">
-                <Link
+              <>
+                <Button
+                  size="sm"
                   to={`/plugins/${encodeURIComponent(p.filename.replace(/\.py$/, ''))}/edit`}
                   target="_blank"
                   rel="opener"
                 >
-                  <Button size="sm" variant="default">
-                    Edit
-                  </Button>
-                </Link>
+                  Edit
+                </Button>
                 <Button
                   size="sm"
                   variant="danger"
@@ -291,7 +285,7 @@ export function PluginsPanel() {
                 >
                   Delete
                 </Button>
-              </div>
+              </>
             ) : null
           }
           actionsLabel="Actions"
@@ -328,16 +322,15 @@ export function PluginsPanel() {
             getRowId={(e) => e.filename}
             emptyTitle="No errors"
             actions={(e) => (
-              <div className="flex justify-end gap-2">
-                <Link
+              <>
+                <Button
+                  size="sm"
                   to={`/plugins/${encodeURIComponent(e.filename.replace(/\.py$/, ''))}/edit`}
                   target="_blank"
                   rel="opener"
                 >
-                  <Button size="sm" variant="default">
-                    Edit
-                  </Button>
-                </Link>
+                  Edit
+                </Button>
                 <Button
                   size="sm"
                   variant="danger"
@@ -346,7 +339,7 @@ export function PluginsPanel() {
                 >
                   Delete
                 </Button>
-              </div>
+              </>
             )}
             actionsLabel="Actions"
             actionsWidth="160px"

@@ -167,11 +167,7 @@ export function NewTransferModal({
             aria-live="polite"
             className="rounded-md bg-canvas-inset p-3"
           >
-            {!spec && (
-              <p className="text-fg-muted">
-                Choose what to move and where to see what it would do.
-              </p>
-            )}
+            {!spec && <p className="text-fg-muted">Choose what and where.</p>}
             {spec && preview.isError && (
               <p className="text-danger">{errorMessage(preview.error)}</p>
             )}

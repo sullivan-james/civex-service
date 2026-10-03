@@ -1,4 +1,4 @@
-import { Badge, Button, Checkbox, Field, Select } from '../ui'
+import { Badge, Button, Checkbox, Field, InfoTip, Select } from '../ui'
 import { ArrowLeft, ArrowRight } from '../ui/icons'
 import { RecordSearchPicker } from '../records/RecordSearchPicker'
 import { displayLabel } from '../../utils/naming'
@@ -117,19 +117,19 @@ export function MapStep({
 
       {mode === 'csv' && parsedCsv && (
         <div className="space-y-1">
-          <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
+          <span className="flex items-center gap-1 text-sm font-medium text-fg">
             Column mapping
+            {hasDatetimeColumn && (
+              <InfoTip>
+                {collectionTimeZone
+                  ? `Times without a UTC offset are read as ${collectionTimeZone}.`
+                  : collectionTimeZone === null
+                    ? 'This collection has no timezone, so times without a UTC offset are read as UTC. Set one on the collection to change that.'
+                    : "Times without a UTC offset are read in the chosen collection's timezone (UTC if it has none)."}{' '}
+                A field can override this in its settings.
+              </InfoTip>
+            )}
           </span>
-          {hasDatetimeColumn && (
-            <p className="text-xs text-fg-muted">
-              {collectionTimeZone
-                ? `Times without a UTC offset are read as ${collectionTimeZone}.`
-                : collectionTimeZone === null
-                  ? 'This collection has no timezone, so times without a UTC offset are read as UTC. Set one on the collection to change that.'
-                  : "Times without a UTC offset are read in the chosen collection's timezone (UTC if it has none)."}{' '}
-              A field can override this in its settings.
-            </p>
-          )}
           <div className="border border-border rounded-md divide-y divide-border-muted">
             {parsedCsv.columns.map((col) => (
               <div key={col} className="px-3 py-2">

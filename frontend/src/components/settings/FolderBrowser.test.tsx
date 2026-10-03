@@ -243,19 +243,23 @@ describe('FolderBrowser', () => {
     hint = 'On WSL, a Windows drive appears here once it is mounted.'
     renderIt()
 
-    expect(
-      await screen.findByText(
-        'On WSL, a Windows drive appears here once it is mounted.',
-      ),
-    ).toBeInTheDocument()
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'More information' }),
+    )
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      'On WSL, a Windows drive appears here once it is mounted.',
+    )
   })
 
   it('has a general hint when the platform has none', async () => {
     renderIt()
 
-    expect(
-      await screen.findByText(/listed once your computer has mounted it/),
-    ).toBeInTheDocument()
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'More information' }),
+    )
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      /listed once your computer has mounted it/,
+    )
   })
 
   it('cancels', async () => {

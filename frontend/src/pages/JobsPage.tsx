@@ -34,14 +34,12 @@ export default function JobsPage() {
   return (
     <Page
       title="Runs"
-      description={
+      meta={
         hasActive ? (
-          <span className="text-xs text-accent flex items-center gap-1">
+          <span className="flex items-center gap-1 text-accent">
             <RefreshCw size={12} className="animate-spin" /> live
           </span>
-        ) : (
-          'Workflow run history'
-        )
+        ) : undefined
       }
       action={
         <Button

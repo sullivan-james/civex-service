@@ -48,7 +48,7 @@ export default function SchemaRecordsPage() {
     <Page
       breadcrumbs={[...breadcrumbs, { label: 'Records' }]}
       title={`${displayLabel(schema.name, schema.label)} records`}
-      description="Across every collection. Filter, sort and choose columns, then save the selection as a view."
+      info="Across every collection. Filter, sort and choose columns, then save the selection as a view."
     >
       <RecordsExplorer lockedSchema={schema.name} />
     </Page>

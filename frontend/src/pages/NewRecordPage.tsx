@@ -151,7 +151,7 @@ export default function NewRecordPage() {
             <Badge variant="accent">{schema.name}</Badge>
           </span>
         }
-        description="Fill in what you have — click a value to edit it. Nothing is saved until you add the record."
+        info="Click a value to edit it. Nothing is saved until you add the record."
       >
         <UploadCollectionContext.Provider value={collection.id}>
           <Section title="Fields">

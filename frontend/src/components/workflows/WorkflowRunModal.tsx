@@ -82,11 +82,6 @@ export function WorkflowRunModal({
 
       <ModalBody>
         <form id="wf-run-form" onSubmit={handleSubmit} className="space-y-4">
-          {workflow.description && (
-            <p className="text-xs text-fg-muted -mt-1">
-              {workflow.description}
-            </p>
-          )}
           <Field
             label={
               <>
@@ -119,9 +114,6 @@ export function WorkflowRunModal({
                 <span className="text-xs font-medium text-fg-muted">
                   {dropzoneLabel}
                 </span>
-                {decl.description && (
-                  <p className="text-xs text-fg-subtle">{decl.description}</p>
-                )}
                 <input
                   ref={(el) => {
                     fileRefs.current[inputName] = el

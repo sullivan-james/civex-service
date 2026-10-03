@@ -281,7 +281,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
       {/* Provider */}
       <Field
         label="Provider"
-        hint={
+        info={
           presetObj.docs && !isOllama ? (
             <>
               Get a free API key at{' '}
@@ -334,7 +334,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
       {(isCustom || isOllama) && (
         <Field
           label="Base URL"
-          hint={
+          info={
             isOllama
               ? 'Change if Ollama runs on a different host/port.'
               : undefined
@@ -404,15 +404,8 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                 <span>Free tier</span>
                 <span>{orLimits.data.is_free_tier ? 'Yes' : 'No'}</span>
               </div>
-              <p className="text-xs text-fg-subtle pt-1">
-                Refreshes every 30 s. Limit resets daily.
-              </p>
             </div>
           )}
-
-          <p className="text-xs text-fg-subtle">
-            Or paste a key manually below.
-          </p>
         </div>
       )}
 
@@ -420,7 +413,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
       {!isOllama && (
         <Field
           label="API key"
-          hint={
+          info={
             <>
               {cfg?.configured
                 ? 'Leave blank to keep existing key.'
@@ -498,9 +491,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
             <Field
               label="Model"
               hideLabel
-              hint={`${ollamaModels.length} model${
-                ollamaModels.length !== 1 ? 's' : ''
-              } installed. Tool calling requires qwen2.5, llama3.1, or mistral.`}
+              info="Tool calling requires qwen2.5, llama3.1, or mistral."
             >
               <Select
                 value={customModel}

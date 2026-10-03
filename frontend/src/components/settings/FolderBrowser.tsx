@@ -5,6 +5,7 @@ import {
   Button,
   Checkbox,
   IconButton,
+  InfoTip,
   Input,
   ListButton,
   Skeleton,
@@ -152,7 +153,7 @@ export function FolderBrowser({
           className="w-52 shrink-0 border-r border-border overflow-y-auto p-2 space-y-3 bg-canvas-subtle"
         >
           <div>
-            <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-fg-muted">
+            <p className="px-2 pb-1 text-sm font-medium text-fg-muted">
               Places
             </p>
             <ul className="space-y-0.5">
@@ -170,8 +171,12 @@ export function FolderBrowser({
           </div>
           <div>
             <div className="flex items-center justify-between px-2 pb-1">
-              <p className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
+              <p className="flex items-center gap-1 text-sm font-medium text-fg-muted">
                 Drives
+                <InfoTip>
+                  {listing?.hint ??
+                    'A drive is listed once your computer has mounted it. Plugged one in just now? Rescan.'}
+                </InfoTip>
               </p>
               <IconButton
                 icon={RefreshCw}
@@ -199,10 +204,6 @@ export function FolderBrowser({
                 ))}
               </ul>
             )}
-            <p className="mt-2 px-2 text-xs text-fg-muted">
-              {listing?.hint ??
-                'A drive is listed once your computer has mounted it. Plugged one in just now? Rescan.'}
-            </p>
           </div>
         </nav>
 
@@ -320,10 +321,7 @@ export function FolderBrowser({
                   </p>
                 )}
                 {listing.entries.length === 0 ? (
-                  <p className="p-4 text-sm text-fg-muted">
-                    No folders here. You can still choose this folder, or make a
-                    new one.
-                  </p>
+                  <p className="p-4 text-sm text-fg-muted">No folders here</p>
                 ) : (
                   <ul className="divide-y divide-border">
                     {listing.entries.map((entry) => (
@@ -348,8 +346,7 @@ export function FolderBrowser({
                 )}
                 {listing.truncated && (
                   <p className="px-3 py-2 text-xs text-fg-muted">
-                    Only the first folders are shown. Type a more specific path
-                    to reach the rest.
+                    Showing the first folders only
                   </p>
                 )}
               </>

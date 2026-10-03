@@ -199,7 +199,7 @@ export default function RecordDetailPage() {
             ]}
           />
         }
-        description={
+        meta={
           <>
             Added {formatDate(record.created_at)}
             {record.created_at !== record.updated_at &&

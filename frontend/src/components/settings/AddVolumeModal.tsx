@@ -5,6 +5,7 @@ import {
   Button,
   Checkbox,
   Field,
+  InfoTip,
   Input,
   Modal,
   ModalBody,
@@ -22,12 +23,12 @@ const NAME_RE = /^[A-Za-z0-9_-]+$/
 function Step({
   n,
   title,
-  hint,
+  info,
   children,
 }: {
   n: number
   title: string
-  hint?: string
+  info?: string
   children: ReactNode
 }) {
   return (
@@ -39,10 +40,10 @@ function Step({
         {n}
       </div>
       <div className="min-w-0 flex-1 space-y-3">
-        <div>
-          <h3 className="text-sm font-semibold text-fg">{title}</h3>
-          {hint && <p className="mt-0.5 text-xs text-fg-muted">{hint}</p>}
-        </div>
+        <h3 className="flex items-center gap-1 text-sm font-semibold text-fg">
+          {title}
+          {info && <InfoTip>{info}</InfoTip>}
+        </h3>
         {children}
       </div>
     </section>
@@ -138,19 +139,14 @@ export function AddVolumeModal({
     <Modal onClose={onClose} size="lg" dismissible={!addVolume.isPending}>
       <ModalHeader onClose={onClose}>Add a volume</ModalHeader>
       <ModalBody>
-        <p className="mb-5 text-sm text-fg-muted">
-          A volume is a folder — usually on its own drive, or a network share —
-          where Civex keeps files.
-        </p>
-
         <Step
           n={1}
           title="Name"
-          hint="How you refer to it in commands and settings."
+          info="How you refer to it in commands and settings."
         >
           <Field
             label="Volume name"
-            hint="Letters, digits, hyphens and underscores."
+            info="Letters, digits, hyphens and underscores."
             error={nameError}
             required
           >
@@ -166,7 +162,7 @@ export function AddVolumeModal({
         <Step
           n={2}
           title="Location"
-          hint="A drive that is plugged in, or a network share that is already mounted on this computer."
+          info="A drive that is plugged in, or a network share that is already mounted on this computer."
         >
           <div className="flex items-end gap-2">
             <Field label="Folder" className="flex-1" required>

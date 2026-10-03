@@ -7,8 +7,6 @@ export interface FieldProps {
   label: ReactNode
   /** Explanation shown in a tooltip beside the label (preferred). */
   info?: ReactNode
-  /** @deprecated Standing help text; use `info`. */
-  hint?: ReactNode
   error?: ReactNode
   required?: boolean
   /** 'stack' (default) puts the label above the control; 'inline' puts the
@@ -28,7 +26,6 @@ export interface FieldProps {
 export function Field({
   label,
   info,
-  hint,
   error,
   required = false,
   layout = 'stack',
@@ -42,9 +39,8 @@ export function Field({
     ? (children.props as Record<string, unknown>)
     : {}
   const controlId = (childProps.id as string | undefined) ?? generatedId
-  const hintId = hint ? `${generatedId}-hint` : undefined
   const errorId = error ? `${generatedId}-error` : undefined
-  const describedBy = [hintId, errorId].filter(Boolean).join(' ') || undefined
+  const describedBy = [errorId].filter(Boolean).join(' ') || undefined
 
   const controlOverrides: Record<string, unknown> = { id: controlId }
   if (describedBy) {
@@ -109,11 +105,6 @@ export function Field({
         labelNode
       )}
       {layout === 'stack' && control}
-      {hint && (
-        <p id={hintId} className="text-xs text-fg-subtle">
-          {hint}
-        </p>
-      )}
       {error && (
         <p id={errorId} role="alert" className="text-xs text-danger">
           {error}

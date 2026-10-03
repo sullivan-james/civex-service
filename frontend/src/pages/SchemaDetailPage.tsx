@@ -194,7 +194,7 @@ export default function SchemaDetailPage() {
         { label: displayLabel(schema.name, schema.label) },
       ]}
       title={displayLabel(schema.name, schema.label)}
-      description={
+      meta={
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span
             className="font-mono text-xs text-fg-subtle"

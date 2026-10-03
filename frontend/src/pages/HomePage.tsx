@@ -40,10 +40,7 @@ export default function HomePage() {
   const recentJobs = jobs.data ?? []
 
   return (
-    <Page
-      title="Get started"
-      description="Import data, define record types, and let automations handle the rest."
-    >
+    <Page title="Get started">
       <HomeShortcuts />
 
       <ol className="flex flex-col gap-3 sm:flex-row sm:gap-0">

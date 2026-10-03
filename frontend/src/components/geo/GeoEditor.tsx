@@ -1,5 +1,13 @@
 import { lazy, Suspense, useMemo, useRef, useState } from 'react'
-import { Button, Input, ListButton, Select, Skeleton, TabNav } from '../ui'
+import {
+  Button,
+  InfoTip,
+  Input,
+  ListButton,
+  Select,
+  Skeleton,
+  TabNav,
+} from '../ui'
 import { locationProblem, toWkt, type Geometry } from '../../utils/geo'
 import {
   COORD_FORMATS,
@@ -230,23 +238,21 @@ export function GeoEditor({
               tileAttribution={map?.attribution}
             />
           </Suspense>
-          <p
-            className="min-h-4 font-mono text-xs text-fg-muted"
-            aria-live="off"
-          >
-            {hover
-              ? `${formatCoordinate(hover[1], 'lat', format)}, ${formatCoordinate(hover[0], 'lon', format)}`
-              : draft.shape === 'Point'
+          <div className="flex min-h-6 items-center gap-1 font-mono text-xs text-fg-muted">
+            <span aria-live="off">
+              {hover
+                ? `${formatCoordinate(hover[1], 'lat', format)}, ${formatCoordinate(hover[0], 'lon', format)}`
+                : ''}
+            </span>
+            <InfoTip label="How to use the map">
+              {draft.shape === 'Point'
                 ? 'Click the map to place the point; drag it to move.'
                 : drawing
                   ? 'Click to add each point; double-click to finish.'
                   : 'Drag a point to move it; drag the midpoint of a segment to add one.'}
-          </p>
-          {box && (
-            <p className="text-xs text-fg-subtle">
-              The dashed box is the area this field allows.
-            </p>
-          )}
+              {box && ' The dashed box is the area this field allows.'}
+            </InfoTip>
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -388,15 +394,15 @@ export function GeoEditor({
             </>
           )}
 
-          <details className="rounded-md border border-border px-3 py-2">
-            <summary className="cursor-pointer select-none text-sm font-medium text-fg">
+          <div className="space-y-2">
+            <div className="flex items-center gap-1 text-sm font-medium text-fg">
               Import from a file
-            </summary>
-            <div className="mt-2 space-y-2">
-              <p className="text-xs text-fg-muted">
+              <InfoTip>
                 GeoJSON, GPX (a GPS track or waypoint), KML (Google Earth) or
                 WKT. It fills the editor; nothing is saved until you apply.
-              </p>
+              </InfoTip>
+            </div>
+            <div className="space-y-2">
               <input
                 ref={fileInput}
                 type="file"
@@ -425,7 +431,7 @@ export function GeoEditor({
                 </p>
               )}
             </div>
-          </details>
+          </div>
 
           {geometry && (
             <div className="flex flex-wrap items-center gap-2 text-xs text-fg-muted">

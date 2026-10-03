@@ -68,7 +68,7 @@ export function NameLabelFields({
         label={`${kind} name`}
         span={4}
         error={error}
-        hint="Used by workflows and CSV headers."
+        info="Used by workflows and CSV headers."
       >
         <Input
           size="sm"

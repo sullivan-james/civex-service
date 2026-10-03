@@ -161,7 +161,7 @@ export function ConfirmStep({
             <Field
               label="Automation name"
               span={6}
-              hint={
+              info={
                 mode === 'csv'
                   ? `Creates a "${targetSchemaName || 'record'}_import" record type — attach a new CSV to it to repeat this import.`
                   : 'Re-run it later from the Workflows page with a new folder of files.'

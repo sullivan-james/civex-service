@@ -64,7 +64,7 @@ export function CollectionScopeFields({
     <>
       <Field
         label="Scope"
-        hint="Local: only records in this collection can reference its records. Global: records in any collection can — use it for shared reference data such as species or sites."
+        info="Local: only records in this collection can reference its records. Global: records in any collection can — use it for shared reference data such as species or sites."
       >
         <Select
           value={scope}
@@ -77,7 +77,7 @@ export function CollectionScopeFields({
       </Field>
       <Field
         label="Schemas"
-        hint="The schemas this collection is for. Its records can only be of these. A child schema needs its parent schema too."
+        info="The schemas this collection is for. Its records can only be of these. A child schema needs its parent schema too."
       >
         {live.length === 0 ? (
           <p className="text-sm text-fg-muted">

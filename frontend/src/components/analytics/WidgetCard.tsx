@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react'
-import { Link } from 'react-router'
 import { ArrowRight } from '../ui/icons'
+import { Button, Card, InfoTip } from '../ui'
 
 export interface WidgetCardProps {
   title: string
@@ -24,25 +24,23 @@ export function WidgetCard({
   children,
 }: WidgetCardProps) {
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-canvas p-4">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold text-fg">{title}</h3>
-          {description && (
-            <p className="mt-0.5 text-xs text-fg-muted">{description}</p>
-          )}
-        </div>
-        {viewRunsTo && (
-          <Link
-            to={viewRunsTo}
-            className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-accent hover:underline"
-          >
+    <Card
+      title={
+        <>
+          {title}
+          {description && <InfoTip>{description}</InfoTip>}
+        </>
+      }
+      action={
+        viewRunsTo && (
+          <Button size="sm" variant="link" to={viewRunsTo}>
             {viewRunsLabel}
-            <ArrowRight size={12} aria-hidden="true" />
-          </Link>
-        )}
-      </div>
-      {children}
-    </div>
+            <ArrowRight size={14} aria-hidden="true" />
+          </Button>
+        )
+      }
+    >
+      <div className="flex flex-col gap-3">{children}</div>
+    </Card>
   )
 }

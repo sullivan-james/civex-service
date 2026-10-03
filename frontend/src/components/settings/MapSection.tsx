@@ -33,7 +33,7 @@ function MapForm({ url, credit }: { url: string; credit: string }) {
     <div className="max-w-xl space-y-3">
       <Field
         label="Map tile URL"
-        hint={`An XYZ tile server with {z}, {x} and {y}, for example ${SAMPLE}. Leave empty to use only the built-in coastlines.`}
+        info={`An XYZ tile server with {z}, {x} and {y}, for example ${SAMPLE}. Leave empty to use only the built-in coastlines.`}
       >
         <Input
           value={tileUrl}
@@ -45,7 +45,7 @@ function MapForm({ url, credit }: { url: string; credit: string }) {
       {tileUrl.trim() && (
         <Field
           label="Credit shown on the map"
-          hint="Plain text, as the tile provider asks for it."
+          info="Plain text, as the tile provider asks for it."
         >
           <Input
             value={attribution}

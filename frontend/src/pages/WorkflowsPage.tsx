@@ -15,7 +15,7 @@ export default function WorkflowsPage() {
   return (
     <Page
       title="Workflows"
-      description="Automations that run when records are created or updated. Plugins live under Advanced."
+      info="Automations that run when records are created or updated."
       action={
         <Button
           to="/workflows/new"

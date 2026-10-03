@@ -97,8 +97,9 @@ export interface PageProps {
   title?: ReactNode
   /** Explanation of the page, shown as a tooltip beside the title. */
   info?: ReactNode
-  /** @deprecated Standing subtitle text; use `info`. */
-  description?: ReactNode
+  /** Facts about the thing the page shows (ids, dates, status), under the
+   * title. Not for explaining the page: that is `info`. */
+  meta?: ReactNode
   action?: ReactNode
   secondaryActions?: PageMenuAction[]
   tabs?: ReactNode
@@ -118,7 +119,7 @@ export function Page({
   breadcrumbs,
   title,
   info,
-  description,
+  meta,
   action,
   secondaryActions,
   tabs,
@@ -126,12 +127,7 @@ export function Page({
   error,
   children,
 }: PageProps) {
-  const hasTitleRow = !!(
-    title ||
-    description ||
-    action ||
-    secondaryActions?.length
-  )
+  const hasTitleRow = !!(title || meta || action || secondaryActions?.length)
 
   return (
     <div>
@@ -151,10 +147,8 @@ export function Page({
                     {info && <InfoTip side="bottom">{info}</InfoTip>}
                   </h1>
                 )}
-                {description && (
-                  <div className="mt-1 text-sm text-fg-muted">
-                    {description}
-                  </div>
+                {meta && (
+                  <div className="mt-1 text-sm text-fg-muted">{meta}</div>
                 )}
               </div>
               {(action || secondaryActions?.length) && (

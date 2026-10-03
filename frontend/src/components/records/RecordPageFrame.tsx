@@ -15,7 +15,8 @@ export function RecordPageFrame({
   current,
   currentSchema,
   title,
-  description,
+  meta,
+  info,
   action,
   secondaryActions,
   tabs,
@@ -37,7 +38,8 @@ export function RecordPageFrame({
   /** Schema name of the page's own record, shown beside the last crumb. */
   currentSchema?: string
   title: ReactNode
-  description?: ReactNode
+  meta?: ReactNode
+  info?: ReactNode
   action?: ReactNode
   secondaryActions?: PageMenuAction[]
   tabs?: ReactNode
@@ -67,7 +69,8 @@ export function RecordPageFrame({
           },
         ]}
         title={title}
-        description={description}
+        meta={meta}
+        info={info}
         action={action}
         secondaryActions={secondaryActions}
         tabs={tabs}

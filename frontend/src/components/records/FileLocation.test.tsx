@@ -166,9 +166,6 @@ describe('FileLocationChip', () => {
       '/collections/c1',
     )
     expect(
-      within(panel).getByText('Stored once, however many records use it.'),
-    ).toBeInTheDocument()
-    expect(
       within(panel).getByRole('button', { name: 'Copy path on archive' }),
     ).toBeInTheDocument()
   })

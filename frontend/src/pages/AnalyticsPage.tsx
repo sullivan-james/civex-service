@@ -61,10 +61,7 @@ export default function AnalyticsPage() {
   const { data: schemas } = useSchemas()
 
   return (
-    <Page
-      title="Analytics"
-      description="Data growth, schema health, workflow reliability, and activity over the selected range"
-    >
+    <Page title="Analytics">
       <AnalyticsFilterBar
         filters={filters}
         onChange={setFilters}

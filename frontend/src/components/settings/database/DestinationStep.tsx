@@ -76,12 +76,10 @@ export function DestinationStep({
       {value.kind === 'postgres' && (
         <div className="rounded-md border border-border bg-canvas p-3 space-y-3">
           {value.useUrl ? (
-            <Field
-              label="Connection URL"
-              hint="For example postgresql+psycopg2://user:password@host:5432/dbname"
-            >
+            <Field label="Connection URL">
               <Input
                 className="w-full font-mono"
+                placeholder="postgresql+psycopg2://user:password@host:5432/dbname"
                 value={value.url}
                 onChange={(e) => set({ url: e.target.value })}
               />
@@ -114,7 +112,7 @@ export function DestinationStep({
               <div className="sm:col-span-6">
                 <Field
                   label="Database"
-                  hint="It must already exist on the server, and be empty."
+                  info="It must already exist on the server, and be empty."
                 >
                   <Input
                     className="w-full"

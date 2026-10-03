@@ -15,7 +15,6 @@ export interface CreateResourceModalProps {
   namePlaceholder?: string
   /** One-line plain-language explanation shown under the name field — for
    * resources a first-time user hasn't met yet. */
-  nameHint?: string
   /**
    * Resources whose `name` is a machine key referenced elsewhere (schemas,
    * fields) collect a display label first and derive the name from it. Pass
@@ -41,7 +40,6 @@ export function CreateResourceModal({
   resourceLabel,
   nameLabel = 'Name',
   namePlaceholder,
-  nameHint,
   slugKind,
   onClose,
   onSubmit,
@@ -78,7 +76,7 @@ export function CreateResourceModal({
               autoFocus
             />
           ) : (
-            <Field label={nameLabel} required hint={nameHint}>
+            <Field label={nameLabel} required>
               <Input
                 autoFocus
                 required

@@ -8,6 +8,7 @@ import {
   Button,
   Checkbox,
   Chip,
+  InfoTip,
   Input,
   Select,
   TimeZoneSelect,
@@ -70,9 +71,11 @@ function Shell({
 }) {
   return (
     <fieldset className="space-y-1.5 min-w-0">
-      <legend className="text-xs font-medium text-fg-muted">{label}</legend>
+      <legend className="flex items-center gap-1 text-sm font-medium text-fg-muted">
+        {label}
+        {help && <InfoTip>{help}</InfoTip>}
+      </legend>
       {children}
-      {help && !error && <p className="text-xs text-fg-subtle">{help}</p>}
       {error && (
         <p role="alert" className="text-xs text-danger">
           {error}

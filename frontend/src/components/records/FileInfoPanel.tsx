@@ -140,11 +140,6 @@ export function FileInfoPanel({ sha256 }: { sha256: string }) {
             ))}
           </ul>
         )}
-        {data.records > 1 && (
-          <p className="mt-1 text-fg-muted">
-            Stored once, however many records use it.
-          </p>
-        )}
       </section>
 
       <Link

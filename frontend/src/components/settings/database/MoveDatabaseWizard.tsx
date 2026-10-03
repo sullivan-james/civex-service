@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   Button,
+  InfoTip,
   Modal,
   ModalBody,
   ModalFooter,
@@ -130,23 +131,16 @@ export function MoveDatabaseWizard({ onClose }: { onClose: () => void }) {
               </p>
             ))}
             {check.can_proceed && (
-              <ul className="text-sm text-fg space-y-1 list-disc pl-5">
-                <li>
-                  Your data is copied, then checked against the original (
-                  {formatEstimate(check.estimate_seconds)}).
-                </li>
-                <li>
-                  Only if the check passes does this project switch to the new
-                  database.
-                </li>
-                <li>
-                  The original is left exactly as it is, so you can switch back.
-                </li>
-                <li>
-                  Uploaded files are stored separately and aren&rsquo;t
+              <p className="flex items-center gap-1 text-sm text-fg">
+                Takes {formatEstimate(check.estimate_seconds)}
+                <InfoTip>
+                  Your data is copied, then checked against the original. Only
+                  if the check passes does this project switch to the new
+                  database. The original is left as it is, so you can switch
+                  back. Uploaded files are stored separately and aren&rsquo;t
                   affected.
-                </li>
-              </ul>
+                </InfoTip>
+              </p>
             )}
             {start.error && (
               <p role="alert" className="text-sm text-danger">
@@ -188,10 +182,6 @@ export function MoveDatabaseWizard({ onClose }: { onClose: () => void }) {
                     {(p?.rows_total ?? 0).toLocaleString()} rows ·{' '}
                     {p?.tables_done ?? 0} of {p?.tables_total ?? 0} tables
                   </p>
-                  <p className="text-xs text-fg-muted">
-                    Keep this window open. Nothing changes until the copy has
-                    been checked, and you can cancel at any time.
-                  </p>
                   {job.error && (
                     <p role="alert" className="text-sm text-danger">
                       Lost contact with the server. Check{' '}
@@ -219,23 +209,13 @@ export function MoveDatabaseWizard({ onClose }: { onClose: () => void }) {
                   rows moved in {formatDuration(state.record.seconds)}, and
                   checked against the original.
                 </p>
-                <p className="text-xs text-fg-muted break-all">
-                  Now using: {state.record.target_location}
+                <p className="flex items-center gap-1 break-all text-xs text-fg-muted">
+                  {state.record.target_location}
+                  <InfoTip>
+                    The original is untouched at {state.record.source_location}.
+                    You can switch back from the History tab.
+                  </InfoTip>
                 </p>
-                <p className="text-xs text-fg-muted break-all">
-                  The original is untouched at {state.record.source_location}.
-                  You can switch back from Move history.
-                </p>
-                <details className="text-xs text-fg-muted">
-                  <summary className="cursor-pointer">Rows per table</summary>
-                  <ul className="mt-1 space-y-0.5 font-mono">
-                    {Object.entries(state.record.counts).map(([t, n]) => (
-                      <li key={t}>
-                        {t}: {n.toLocaleString()}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
               </>
             ) : (
               <>

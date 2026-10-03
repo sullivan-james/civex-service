@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useRunGC } from '../../hooks/useStore'
 import type { GCReport } from '../../api/store'
-import { Button, Field, Input, ConfirmDialog } from '../ui'
+import { Button, ConfirmDialog, Field, InfoTip, Input } from '../ui'
 import { errorMessage } from '../../lib/errors'
 import { formatSize } from '../../utils/storage'
 
@@ -32,22 +32,19 @@ export default function GCPanel() {
 
   return (
     <div className="space-y-3">
-      <div>
-        <h3 className="text-base font-semibold text-fg">
-          Clean up unused files
-        </h3>
-        <p className="text-sm text-fg-muted mt-1">
-          Garbage collection: reclaims stored files no longer referenced by any
-          record or workflow run. Files only referenced by old audit history are
-          not protected — an old audit diff may point at a file GC has since
-          removed.
-        </p>
-      </div>
+      <h3 className="flex items-center gap-1 text-base font-semibold text-fg">
+        Clean up unused files
+        <InfoTip>
+          Reclaims stored files no longer referenced by any record or workflow
+          run. Files only referenced by old audit history are not protected: an
+          old audit diff may point at a file that has since been removed.
+        </InfoTip>
+      </h3>
 
       <div className="flex items-end gap-3">
         <Field
           label="Grace period (days)"
-          hint="Unreferenced files newer than this are left alone"
+          info="Unreferenced files newer than this are left alone"
         >
           <Input
             type="number"
