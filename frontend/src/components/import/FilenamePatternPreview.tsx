@@ -1,5 +1,4 @@
 import { DataTable, Field, Input } from '../ui'
-import { ArrowRight } from '../ui/icons'
 import {
   FILENAME_FORMAT_TOKENS_HELP,
   extractCaptureGroup,

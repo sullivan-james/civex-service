@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { ResolvedEntry, ToolCallEntry } from '../../types/ai'
 import { applyProposal, isSaveToolName, parseResult } from './proposals'
-import { Field, Input } from '../ui'
+import { Button, Field, Input } from '../ui'
 import { AlertTriangle } from '../ui/icons'
 
 // Pinned above the input while a proposal awaits the user.
@@ -86,20 +86,19 @@ export default function ApprovalBar({
         </div>
       )}
       <div className="flex gap-2">
-        <button
+        <Button
+          variant={destructive ? 'danger' : 'primary'}
           onClick={approve}
           disabled={busy || (isSaveTool && !stem.trim())}
-          className={`px-3 py-2 rounded-md text-fg-on-emphasis text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${destructive ? 'bg-danger hover:bg-danger-emphasis' : 'bg-accent hover:bg-accent-emphasis'}`}
         >
           {busy ? 'Working…' : approveLabel}
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={() => onResolve([{ id: entry.id, outcome: 'cancelled' }])}
           disabled={busy}
-          className="px-3 py-2 rounded-md border border-border text-fg-muted text-sm hover:bg-border-muted disabled:opacity-40 transition-colors"
         >
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   )

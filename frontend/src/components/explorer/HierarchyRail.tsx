@@ -1,3 +1,4 @@
+import { ListButton } from '../ui'
 import type { Schema } from '../../api/schemas'
 import { displayLabel } from '../../utils/naming'
 
@@ -34,16 +35,14 @@ export function HierarchyRail({
       {levels.map(({ schema, depth, count }) => {
         const active = schema.name === current
         return (
-          <button
+          <ListButton
             key={schema.id}
-            type="button"
             onClick={() => onPick(schema)}
+            active={active}
             aria-current={active ? 'true' : undefined}
-            style={{ paddingLeft: `${0.5 + depth}rem` }}
-            className={`flex items-center justify-between gap-2 whitespace-nowrap rounded-md py-2 pr-2 text-sm cursor-pointer transition-colors ${
-              active
-                ? 'bg-accent-subtle text-accent-emphasis font-semibold'
-                : 'text-fg hover:bg-canvas-inset'
+            style={{ paddingLeft: `${0.75 + depth}rem` }}
+            className={`flex items-center justify-between gap-2 whitespace-nowrap rounded-md ${
+              active ? 'font-semibold text-accent-emphasis' : 'text-fg'
             }`}
           >
             <span>{displayLabel(schema.name, schema.label)}</span>
@@ -58,7 +57,7 @@ export function HierarchyRail({
                 {count.toLocaleString()}
               </span>
             )}
-          </button>
+          </ListButton>
         )
       })}
     </nav>

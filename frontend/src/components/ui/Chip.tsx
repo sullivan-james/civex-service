@@ -10,6 +10,7 @@ export function Chip({
   onRemove,
   removeLabel = 'Remove',
   dashed = false,
+  warning = false,
   className = '',
   ...buttonProps
 }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onClick' | 'children'> & {
@@ -21,15 +22,19 @@ export function Chip({
   removeLabel?: string
   /** An "add" affordance rather than a value. */
   dashed?: boolean
+  /** Something needs attention (an unreachable volume). */
+  warning?: boolean
   className?: string
 }) {
-  const tone = dashed
-    ? 'border-dashed border-border-strong text-fg-muted hover:border-accent hover:text-accent'
-    : selected
-      ? 'border-accent bg-accent text-fg-on-emphasis'
-      : onClick
-        ? 'border-border bg-canvas text-fg hover:bg-canvas-inset'
-        : 'border-accent-muted bg-accent-subtle text-accent'
+  const tone = warning
+    ? 'border-attention-muted bg-attention-subtle text-attention'
+    : dashed
+      ? 'border-dashed border-border-strong text-fg-muted hover:border-accent hover:text-accent'
+      : selected
+        ? 'border-accent bg-accent text-fg-on-emphasis'
+        : onClick
+          ? 'border-border bg-canvas text-fg hover:bg-canvas-inset'
+          : 'border-accent-muted bg-accent-subtle text-accent'
   const base = `inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm ${tone} ${className}`
 
   if (onClick)

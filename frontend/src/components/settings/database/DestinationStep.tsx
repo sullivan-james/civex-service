@@ -155,15 +155,13 @@ export function DestinationStep({
             >
               {check.isPending ? 'Checking…' : 'Check connection'}
             </Button>
-            <button
-              type="button"
-              className="text-xs text-accent underline cursor-pointer"
+            <Button
+              size="sm"
+              variant="link"
               onClick={() => set({ useUrl: !value.useUrl })}
             >
-              {value.useUrl
-                ? 'Enter the details separately instead'
-                : 'Paste a connection URL instead'}
-            </button>
+              {value.useUrl ? 'Use separate fields' : 'Paste a URL'}
+            </Button>
           </div>
           {check.data && (
             <p

@@ -198,13 +198,9 @@ export function FieldForm(props: FieldFormProps) {
             </span>
           </span>
           {props.mode === 'create' && props.onChangeKind && (
-            <button
-              type="button"
-              onClick={props.onChangeKind}
-              className="text-xs text-accent hover:underline cursor-pointer"
-            >
+            <Button size="sm" variant="link" onClick={props.onChangeKind}>
               Change
-            </button>
+            </Button>
           )}
         </p>
       )}

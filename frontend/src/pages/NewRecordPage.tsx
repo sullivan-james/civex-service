@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import type { Field as SchemaField } from '../api/schemas'
 import { useCollection } from '../hooks/useCollections'
 import { UploadCollectionContext } from '../hooks/uploadCollection'
@@ -178,13 +178,14 @@ export default function NewRecordPage() {
                 const open = extracting === field.name
                 return (
                   <>
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="mt-1"
                       onClick={() => setExtracting(open ? null : field.name)}
-                      className="mt-1 inline-flex items-center gap-1 text-xs text-fg-muted hover:text-accent cursor-pointer"
                     >
-                      <ScanText size={11} /> fill from filename
-                    </button>
+                      <ScanText size={14} /> Fill from filename
+                    </Button>
                     {open && (
                       <FilenameExtractor
                         sources={fileSources}

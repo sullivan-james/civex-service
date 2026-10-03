@@ -1,5 +1,5 @@
 import { lazy, Suspense, useMemo, useRef, useState } from 'react'
-import { Button, Input, Select, Skeleton, TabNav } from '../ui'
+import { Button, Input, ListButton, Select, Skeleton, TabNav } from '../ui'
 import { locationProblem, toWkt, type Geometry } from '../../utils/geo'
 import {
   COORD_FORMATS,
@@ -412,13 +412,9 @@ export function GeoEditor({
                 <ul className="space-y-1" aria-label="Locations in the file">
                   {candidates.map((c, i) => (
                     <li key={i}>
-                      <button
-                        type="button"
-                        onClick={() => applyCandidate(c)}
-                        className="w-full rounded border border-border px-2 py-1 text-left text-sm hover:bg-canvas-subtle cursor-pointer"
-                      >
+                      <ListButton onClick={() => applyCandidate(c)}>
                         {c.label}
-                      </button>
+                      </ListButton>
                     </li>
                   ))}
                 </ul>

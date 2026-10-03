@@ -105,7 +105,6 @@ describe('ReferencedBy', () => {
   })
 
   it('says so when nothing references the record', async () => {
-    const user = userEvent.setup()
     renderIt('none')
     expect(
       await screen.findByText('Nothing references this record.'),

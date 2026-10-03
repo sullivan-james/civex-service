@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { useNavigate, useParams } from 'react-router'
 import { useCollections } from '../../../hooks/useCollections'
 import {
   useAllCollectionStorage,

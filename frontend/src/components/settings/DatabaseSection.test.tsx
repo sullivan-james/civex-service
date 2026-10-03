@@ -333,7 +333,7 @@ describe('moving the database', () => {
       within(dialog).getByRole('radio', { name: /PostgreSQL server/ }),
     )
     await user.click(
-      within(dialog).getByRole('button', { name: /Paste a connection URL/ }),
+      within(dialog).getByRole('button', { name: /Paste a URL/ }),
     )
     await user.type(
       within(dialog).getByLabelText('Connection URL'),

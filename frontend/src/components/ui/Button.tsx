@@ -1,6 +1,7 @@
 import { Link, type LinkProps } from 'react-router'
 
-type Variant = 'primary' | 'default' | 'danger' | 'ghost' | 'link'
+type Variant =
+  'primary' | 'default' | 'danger' | 'ghost' | 'link' | 'nav' | 'navActive'
 type Size = 'sm' | 'md'
 
 interface CommonProps {
@@ -37,6 +38,9 @@ const variants: Record<Variant, string> = {
     'bg-transparent hover:bg-canvas-inset border-transparent text-fg-muted hover:text-fg',
   // Reads as a link but keeps the full button hit area.
   link: 'bg-transparent hover:bg-accent-subtle border-transparent text-accent',
+  // On the always-dark top bar.
+  nav: 'bg-nav-surface hover:bg-nav-surface-hover border-nav-border text-nav-fg-muted hover:text-nav-fg',
+  navActive: 'bg-accent border-accent text-fg-on-emphasis',
 }
 
 // Heights match the shared control heights (`--control-height-sm|md`) so a

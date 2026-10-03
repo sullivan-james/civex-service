@@ -7,7 +7,7 @@ import {
   type PresetProviderId,
   aiApi,
 } from '../../api/ai'
-import { Field, Input, Select } from '../ui'
+import { Button, Field, Input, Select } from '../ui'
 import { Check, RotateCcw, ArrowRight } from '../ui/icons'
 
 function detectPreset(cfg: AiConfig | null): PresetProviderId {
@@ -352,10 +352,10 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
       {/* OpenRouter OAuth + limits */}
       {isOpenRouter && (
         <div className="space-y-2">
-          <button
+          <Button
+            className="w-full"
             onClick={handleOpenRouterLogin}
             disabled={orPolling}
-            className="w-full py-2 rounded-md border border-border bg-canvas text-sm font-medium text-fg hover:bg-canvas-subtle disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
           >
             {orPolling ? (
               <>
@@ -382,7 +382,7 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
                 <ArrowRight size={14} /> Login with OpenRouter
               </>
             )}
-          </button>
+          </Button>
 
           {/* Live limits widget */}
           {orLimits && (
@@ -573,13 +573,14 @@ export default function SettingsPane({ onSaved }: { onSaved: () => void }) {
         </p>
       )}
 
-      <button
+      <Button
+        variant="primary"
+        className="w-full"
         onClick={handleSave}
         disabled={saving}
-        className="w-full py-2 rounded-md bg-accent text-fg-on-emphasis text-sm font-medium hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
       >
         {saving ? 'Saving…' : 'Save'}
-      </button>
+      </Button>
     </div>
   )
 }

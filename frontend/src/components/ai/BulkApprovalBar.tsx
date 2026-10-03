@@ -1,3 +1,4 @@
+import { Button } from '../ui'
 import { useState } from 'react'
 import type { ResolvedEntry, ToolCallEntry } from '../../types/ai'
 import { applyProposal, isBulkable, parseResult } from './proposals'
@@ -49,13 +50,9 @@ export default function BulkApprovalBar({
       </span>
       <div className="flex items-center gap-2">
         {error && <span className="text-danger">{error}</span>}
-        <button
-          onClick={approveAll}
-          disabled={busy}
-          className="flex-shrink-0 px-3 py-2 rounded-md bg-accent text-fg-on-emphasis font-medium hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
+        <Button variant="primary" onClick={approveAll} disabled={busy}>
           {busy ? 'Approving…' : `Approve all ${bulkable.length}`}
-        </button>
+        </Button>
       </div>
     </div>
   )

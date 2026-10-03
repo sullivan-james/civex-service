@@ -15,7 +15,6 @@ import { useWorkflows, useJobs } from '../hooks/useWorkflows'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import {
   Badge,
-  Button,
   DetailSkeleton,
   ErrorState,
   Page,

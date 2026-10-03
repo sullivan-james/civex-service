@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { Modal, ModalBody, ModalFooter, ModalHeader } from '../ui'
+import { Button, Modal, ModalBody, ModalFooter, ModalHeader } from '../ui'
 import { Sparkles } from '../ui/icons'
 
 // Bump this if the attestation's substance changes materially (e.g. a new
@@ -75,21 +75,16 @@ export default function AiAttestationGate({
         </p>
       </ModalBody>
       <ModalFooter>
-        <button
-          onClick={onClose}
-          className="px-3 py-1.5 rounded border border-border text-sm text-fg-muted hover:bg-canvas-subtle"
-        >
-          Not now
-        </button>
-        <button
+        <Button onClick={onClose}>Not now</Button>
+        <Button
+          variant="primary"
           onClick={() => {
             acknowledge()
             setAcked(true)
           }}
-          className="px-3 py-1.5 rounded bg-accent text-fg-on-emphasis text-sm font-medium hover:bg-accent-emphasis"
         >
           I understand, continue
-        </button>
+        </Button>
       </ModalFooter>
     </Modal>
   )

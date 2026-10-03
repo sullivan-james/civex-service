@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { useActiveJobCount, useDrainJobs } from '../hooks/useWorkflows'
-import { Page, Button } from '../components/ui'
+import { Page, Button, Chip } from '../components/ui'
 import { RefreshCw } from '../components/ui/icons'
 import JobsTable from '../components/jobs/JobsTable'
 
@@ -57,17 +57,13 @@ export default function JobsPage() {
     >
       <div className="flex items-center gap-2">
         {STATUS_OPTIONS.map((s) => (
-          <button
+          <Chip
             key={s || 'all'}
+            selected={(statusFilter ?? '') === s}
             onClick={() => handleStatusFilter(s)}
-            className={`px-3 py-2 text-xs rounded-full border transition-colors ${
-              (statusFilter ?? '') === s
-                ? 'bg-accent text-fg-on-emphasis border-accent'
-                : 'bg-canvas text-fg-muted border-border hover:bg-canvas-subtle'
-            }`}
           >
             {s || 'All'}
-          </button>
+          </Chip>
         ))}
       </div>
 

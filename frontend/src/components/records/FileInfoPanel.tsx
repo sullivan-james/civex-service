@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { useFileInfo } from '../../hooks/useFiles'
-import { Badge, Skeleton } from '../ui'
+import { Badge, Button, Skeleton } from '../ui'
 import { Network } from '../ui/icons'
 import { errorMessage } from '../../lib/errors'
 import { formatSize } from '../../utils/storage'
@@ -9,10 +9,10 @@ import { formatSize } from '../../utils/storage'
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false)
   return (
-    <button
-      type="button"
+    <Button
+      size="sm"
+      variant="link"
       aria-label={label}
-      className="shrink-0 text-xs text-accent hover:underline cursor-pointer"
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text)
@@ -24,7 +24,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       }}
     >
       {copied ? 'Copied' : 'Copy'}
-    </button>
+    </Button>
   )
 }
 

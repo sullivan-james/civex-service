@@ -331,13 +331,14 @@ export default function WorkflowEditorPage({
               ({ step, messages }) => (
                 <div key={step ?? '__general__'}>
                   {step ? (
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="font-mono font-semibold text-danger"
                       onClick={() => jumpToStep(step)}
-                      className="font-mono font-semibold text-danger hover:underline"
                     >
                       Step '{step}'
-                    </button>
+                    </Button>
                   ) : (
                     <span className="font-semibold text-danger">General</span>
                   )}

@@ -2,6 +2,7 @@ import {
   useStorageAttention,
   type StorageTab,
 } from '../../../hooks/useStorageAttention'
+import { Button } from '../../ui'
 import { AlertTriangle } from '../../ui/icons'
 
 const TONE = {
@@ -42,13 +43,9 @@ export function StorageAttention({
             )}
             {item.text}
           </span>
-          <button
-            type="button"
-            onClick={() => onGo(item.tab)}
-            className="shrink-0 cursor-pointer text-accent hover:underline"
-          >
+          <Button size="sm" variant="link" onClick={() => onGo(item.tab)}>
             Open {TAB_LABEL[item.tab]}
-          </button>
+          </Button>
         </li>
       ))}
     </ul>

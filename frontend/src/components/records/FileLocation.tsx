@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import type { FileRef } from '../../api/files'
 import { useFileLocationDisplay } from '../../hooks/useFileLocationDisplay'
-import { TriggerPopover } from '../ui'
+import { Chip, TriggerPopover } from '../ui'
 import { AlertTriangle, HardDrive } from '../ui/icons'
 import { FileInfoPanel } from './FileInfoPanel'
 
@@ -113,16 +113,16 @@ function LocationChip({ file }: { file: FileLike }) {
       label="Where this file is stored"
       panelClassName="bg-canvas border border-border rounded-md shadow-lg"
       trigger={({ open, toggle }) => (
-        <button
-          type="button"
+        <Chip
           onClick={toggle}
           aria-expanded={open}
           aria-haspopup="dialog"
           aria-label={`Where ${file.resolved_filename ?? file.filename} is stored: ${chipText(file)}`}
-          className={`${base} cursor-pointer hover:border-border-strong`}
+          warning={unavailable}
+          className="shrink-0"
         >
           {content}
-        </button>
+        </Chip>
       )}
     >
       <FileInfoPanel sha256={file.sha256} />

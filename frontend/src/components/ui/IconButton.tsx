@@ -1,7 +1,7 @@
 import type { ComponentType } from 'react'
 import { Tooltip, type TooltipSide } from './Tooltip'
 
-type Variant = 'default' | 'danger' | 'subtle'
+type Variant = 'default' | 'danger' | 'subtle' | 'nav'
 type Size = 'xs' | 'sm' | 'md'
 
 interface IconButtonProps extends Omit<
@@ -23,6 +23,7 @@ const variants: Record<Variant, string> = {
   default: 'text-fg-muted hover:text-fg hover:bg-canvas-inset',
   danger: 'text-fg-muted hover:text-danger hover:bg-danger-subtle',
   subtle: 'text-fg-subtle hover:text-fg-muted hover:bg-canvas-inset',
+  nav: 'border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg',
 }
 
 // Never below the 32px control height; the icon stays 16px and the extra

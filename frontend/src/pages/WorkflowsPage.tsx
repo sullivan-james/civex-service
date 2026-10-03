@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link } from 'react-router'
 import { usePlugins } from '../hooks/usePlugins'
 import { Page, Button } from '../components/ui'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'

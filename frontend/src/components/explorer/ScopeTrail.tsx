@@ -1,3 +1,4 @@
+import { Button } from '../ui'
 import { ChevronRight } from '../ui/icons'
 
 export interface TrailItem {
@@ -26,13 +27,9 @@ export function ScopeTrail({
       {items.map((item) => (
         <span key={item.key} className="inline-flex items-center gap-1">
           {item.onClick ? (
-            <button
-              type="button"
-              onClick={item.onClick}
-              className="rounded-md border border-accent-muted bg-accent-subtle px-2 py-1 font-medium text-accent hover:bg-accent-subtle-border cursor-pointer"
-            >
+            <Button size="sm" variant="link" onClick={item.onClick}>
               {item.label}
-            </button>
+            </Button>
           ) : (
             <span className="px-1 font-medium text-fg">{item.label}</span>
           )}

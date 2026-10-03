@@ -5,7 +5,7 @@ import type { Field } from '../../api/schemas'
 import { utcToZonedLocal, datetimeInputToWire } from '../../utils/dates'
 import { useFieldTimeZone } from './timeZoneContext'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
-import { Button, Input, Select, Checkbox } from '../ui'
+import { Button, Checkbox, IconButton, Input, Select } from '../ui'
 import { displayLabel } from '../../utils/naming'
 import {
   exampleWithUnit,
@@ -249,13 +249,12 @@ function FileListField({
             {(ref.size / 1024).toFixed(1)} KB)
           </span>
           <FileLocationChip file={ref} />
-          <button
-            type="button"
+          <IconButton
+            icon={X}
+            variant="danger"
             onClick={() => remove(ref.sha256)}
-            className="text-danger hover:underline shrink-0"
-          >
-            <X size={12} />
-          </button>
+            aria-label={`Remove ${ref.filename}`}
+          />
         </div>
       ))}
       <input

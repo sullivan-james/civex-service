@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- diagram nodes are absolutely positioned, not controls */
 import { useMemo, useState } from 'react'
 import { type StepExecution } from '../../api/workflows'
 import { type PluginInfo } from '../../api/plugins'

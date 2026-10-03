@@ -1,14 +1,7 @@
-import { useState } from 'react'
 import { type StepExecution } from '../../api/workflows'
 import { type PluginInfo } from '../../api/plugins'
-import { Badge } from '../ui'
-import {
-  Check,
-  XCircle,
-  SkipForward,
-  ChevronUp,
-  ChevronDown,
-} from '../ui/icons'
+import { Badge, Disclosure } from '../ui'
+import { Check, XCircle, SkipForward } from '../ui/icons'
 import { pluginDisplayName, stepStory } from '../../utils/runNarrative'
 import StepValueDisplay from './StepValueDisplay'
 
@@ -65,65 +58,59 @@ export default function StepExecutionCard({
   step: StepExecution
   plugins?: PluginInfo[]
 }) {
-  const [open, setOpen] = useState(step.status === 'failed')
   const hasInputs = step.inputs && Object.keys(step.inputs).length > 0
   const hasOutputs = step.outputs && Object.keys(step.outputs).length > 0
 
   return (
-    <div className="rounded-md border border-border bg-canvas overflow-hidden">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex flex-col gap-1 px-4 py-3 text-left hover:bg-canvas-subtle transition-colors"
-      >
-        <span className="flex items-center gap-3">
-          <span className="text-sm font-medium text-fg">
-            {pluginDisplayName(step.plugin, plugins)}
-          </span>
-          <span className="ml-auto flex items-center gap-3">
-            <span className="text-xs text-fg-muted">
-              {duration(step.duration_seconds)}
+    <Disclosure
+      defaultOpen={step.status === 'failed'}
+      summary={
+        <span className="flex flex-col gap-1">
+          <span className="flex items-center gap-3">
+            <span className="font-medium text-fg">
+              {pluginDisplayName(step.plugin, plugins)}
             </span>
-            <StatusBadge status={step.status} />
-            <span className="text-fg-subtle">
-              {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            <span className="ml-auto flex items-center gap-3">
+              <span className="text-xs text-fg-muted">
+                {duration(step.duration_seconds)}
+              </span>
+              <StatusBadge status={step.status} />
             </span>
           </span>
+          <span className="text-xs text-fg-muted">{stepStory(step)}</span>
         </span>
-        <span className="text-xs text-fg-muted">{stepStory(step)}</span>
-      </button>
-
-      {open && (
-        <div className="border-t border-border px-4 py-3 space-y-3 text-xs">
-          {step.error && (
-            <div className="rounded-md px-2 py-2 bg-danger-subtle text-danger font-mono whitespace-pre-wrap">
-              {step.error}
-            </div>
-          )}
-          <div className="flex items-center gap-2 text-fg-subtle">
-            <span className="font-mono">{step.step_id}</span>
-            <span aria-hidden>·</span>
-            <span className="font-mono">{step.plugin}</span>
+      }
+    >
+      <div className="px-4 py-3 space-y-3 text-xs">
+        {step.error && (
+          <div className="rounded-md px-2 py-2 bg-danger-subtle text-danger font-mono whitespace-pre-wrap">
+            {step.error}
           </div>
-          <div>
-            <h3 className="font-medium text-fg-muted mb-1">Inputs</h3>
-            {hasInputs ? (
-              <ValueList values={step.inputs} />
-            ) : (
-              <p className="text-fg-muted">None</p>
-            )}
-          </div>
-          <div>
-            <h3 className="font-medium text-fg-muted mb-1">Outputs</h3>
-            {hasOutputs ? (
-              <ValueList values={step.outputs!} />
-            ) : (
-              <p className="text-fg-muted">
-                {step.status === 'skipped' ? "Didn't run" : 'None'}
-              </p>
-            )}
-          </div>
+        )}
+        <div className="flex items-center gap-2 text-fg-subtle">
+          <span className="font-mono">{step.step_id}</span>
+          <span aria-hidden>·</span>
+          <span className="font-mono">{step.plugin}</span>
         </div>
-      )}
-    </div>
+        <div>
+          <h3 className="font-medium text-fg-muted mb-1">Inputs</h3>
+          {hasInputs ? (
+            <ValueList values={step.inputs} />
+          ) : (
+            <p className="text-fg-muted">None</p>
+          )}
+        </div>
+        <div>
+          <h3 className="font-medium text-fg-muted mb-1">Outputs</h3>
+          {hasOutputs ? (
+            <ValueList values={step.outputs!} />
+          ) : (
+            <p className="text-fg-muted">
+              {step.status === 'skipped' ? "Didn't run" : 'None'}
+            </p>
+          )}
+        </div>
+      </div>
+    </Disclosure>
   )
 }

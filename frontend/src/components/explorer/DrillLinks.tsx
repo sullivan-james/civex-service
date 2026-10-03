@@ -1,3 +1,4 @@
+import { Button } from '../ui'
 import type { CivexRecord } from '../../api/records'
 import { pluralise } from '../../lib/utils'
 import { displayLabel } from '../../utils/naming'
@@ -21,14 +22,14 @@ export function DrillLinks({
       {entries.map(([name, n]) => {
         const s = byName.get(name)
         return (
-          <button
+          <Button
             key={name}
-            type="button"
+            size="sm"
+            variant="link"
             onClick={() => onDrill(name)}
-            className="rounded-md border border-accent-muted bg-accent-subtle px-2 py-1 text-xs font-medium text-accent cursor-pointer hover:bg-accent-subtle-border"
           >
             {pluralise(n, displayLabel(name, s?.label).toLowerCase())} →
-          </button>
+          </Button>
         )
       })}
     </span>

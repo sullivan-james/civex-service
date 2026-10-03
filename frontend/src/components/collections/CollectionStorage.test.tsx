@@ -174,7 +174,6 @@ describe('CollectionStorage', () => {
   })
 
   it('links to the page that manages every collection home', async () => {
-    const user = userEvent.setup()
     renderIt()
 
     expect(

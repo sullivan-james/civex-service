@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { schemasApi } from '../../api/schemas'
-import { Input, Select } from '../ui'
+import { Chip, Input, Select, Tooltip } from '../ui'
 import {
   NON_NAMEABLE,
   formatsFor,
@@ -42,9 +42,6 @@ function useDebounced<T>(value: T, ms: number): T {
   }, [value, ms])
   return debounced
 }
-
-const chip =
-  'rounded border border-border bg-canvas px-1.5 py-0.5 text-xs hover:bg-canvas-subtle cursor-pointer focus-visible:outline-2 focus-visible:outline-accent'
 
 /**
  * Edits a name template: text with `{variable}` or `{variable:format}` in it.
@@ -217,15 +214,14 @@ export function TemplateBuilder({
               {g.title}
             </span>
             {g.items.map((item) => (
-              <button
-                key={item.insert}
-                type="button"
-                className={`${chip} ${item.mono ? 'font-mono text-fg-muted' : ''}`}
-                title={item.title}
-                onClick={() => insert(item.insert)}
-              >
-                {item.label}
-              </button>
+              <Tooltip key={item.insert} content={item.title ?? item.label}>
+                <Chip
+                  className={item.mono ? 'font-mono text-fg-muted' : ''}
+                  onClick={() => insert(item.insert)}
+                >
+                  {item.label}
+                </Chip>
+              </Tooltip>
             ))}
           </div>
         ))}

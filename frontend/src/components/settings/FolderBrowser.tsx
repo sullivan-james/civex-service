@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useBrowse, useCreateFolder } from '../../hooks/useStore'
 import type { StorageLocation } from '../../api/store'
-import { Button, Checkbox, Input, Skeleton } from '../ui'
+import {
+  Button,
+  Checkbox,
+  IconButton,
+  Input,
+  ListButton,
+  Skeleton,
+} from '../ui'
 import {
   ArrowUp,
   ChevronRight,
@@ -59,13 +66,11 @@ function PlaceButton({
       : null
   return (
     <li>
-      <button
-        type="button"
+      <ListButton
         onClick={onOpen}
+        active={active}
         aria-current={active ? 'true' : undefined}
-        className={`w-full flex items-start gap-2 rounded-md px-2 py-1.5 text-left cursor-pointer ${
-          active ? 'bg-accent-subtle' : 'hover:bg-canvas-subtle'
-        }`}
+        className="flex items-start gap-2 rounded-md"
       >
         <span className="mt-0.5">
           <PlaceIcon place={place} />
@@ -78,7 +83,7 @@ function PlaceButton({
             </span>
           )}
         </span>
-      </button>
+      </ListButton>
     </li>
   )
 }
@@ -168,19 +173,15 @@ export function FolderBrowser({
               <p className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
                 Drives
               </p>
-              <button
-                type="button"
+              <IconButton
+                icon={RefreshCw}
                 aria-label="Rescan drives"
-                title="Rescan drives"
                 disabled={isFetching}
                 onClick={() => refetch()}
-                className="rounded p-1 text-fg-muted cursor-pointer hover:bg-border hover:text-fg disabled:opacity-50"
-              >
-                <RefreshCw
-                  size={13}
-                  className={isFetching ? 'animate-spin' : undefined}
-                />
-              </button>
+                iconProps={{
+                  className: isFetching ? 'animate-spin' : undefined,
+                }}
+              />
             </div>
             {drives.length === 0 ? (
               <p className="px-2 text-xs text-fg-muted">
@@ -225,20 +226,17 @@ export function FolderBrowser({
                     {i > 0 && (
                       <ChevronRight size={12} className="text-fg-muted" />
                     )}
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
+                      variant="ghost"
                       onClick={() => setPath(c.path)}
                       aria-current={
                         i === all.length - 1 ? 'location' : undefined
                       }
-                      className={`rounded px-1 py-0.5 cursor-pointer hover:bg-canvas-subtle ${
-                        i === all.length - 1
-                          ? 'font-semibold text-fg'
-                          : 'text-fg-muted'
-                      }`}
+                      className={i === all.length - 1 ? 'font-semibold' : ''}
                     >
                       {c.label}
-                    </button>
+                    </Button>
                   </li>
                 ))}
             </ol>
@@ -330,10 +328,9 @@ export function FolderBrowser({
                   <ul className="divide-y divide-border">
                     {listing.entries.map((entry) => (
                       <li key={entry.path}>
-                        <button
-                          type="button"
+                        <ListButton
                           onClick={() => setPath(entry.path)}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer hover:bg-canvas-subtle"
+                          className="flex items-center gap-2"
                         >
                           <Folder
                             size={16}
@@ -344,7 +341,7 @@ export function FolderBrowser({
                             size={14}
                             className="ml-auto shrink-0 text-fg-muted"
                           />
-                        </button>
+                        </ListButton>
                       </li>
                     ))}
                   </ul>

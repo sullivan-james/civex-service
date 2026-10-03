@@ -4,17 +4,17 @@ import { errorMessage } from '../../lib/errors'
 import type { Field, FieldKind, Schema } from '../../api/schemas'
 import { useDeleteField, useReorderFields } from '../../hooks/useSchemas'
 import { useFieldTypes } from '../../hooks/useFieldTypes'
-import { Button, IconButton, ConfirmDialog } from '../ui'
+import {
+  Button,
+  ConfirmDialog,
+  IconButton,
+  ListButton,
+  SortableList,
+} from '../ui'
 import { displayLabel } from '../../utils/naming'
 import { summarise } from '../../utils/restrictions'
 import { fieldsWithInherited } from '../../utils/schemaFields'
-import {
-  X,
-  ChevronUp,
-  ChevronDown,
-  GripVertical,
-  ArrowRight,
-} from '../ui/icons'
+import { X, ArrowRight } from '../ui/icons'
 import { FieldForm } from './FieldForm'
 import { FieldKindPicker } from './FieldKindPicker'
 
@@ -49,9 +49,6 @@ export function SchemaFieldsSection({
   const [confirmDeleteField, setConfirmDeleteField] = useState<string | null>(
     null,
   )
-  const [dragSrcIndex, setDragSrcIndex] = useState<number | null>(null)
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
-  const [announcement, setAnnouncement] = useState('')
   const deleteField = useDeleteField(schema.name)
   const reorderFields = useReorderFields(schema.name)
   const descriptors = useFieldTypes()
@@ -79,40 +76,6 @@ export function SchemaFieldsSection({
       setDirty(false)
     })
   const onDirtyChange = useCallback((d: boolean) => setDirty(d), [])
-
-  function reorder(from: number, to: number) {
-    const next = [...schema.fields]
-    const [moved] = next.splice(from, 1)
-    next.splice(to, 0, moved)
-    reorderFields.mutate(next.map((f) => f.id))
-    setAnnouncement(
-      `${displayLabel(moved.name, moved.label)} moved to position ${to + 1} of ${next.length}.`,
-    )
-  }
-
-  function moveField(index: number, direction: 'up' | 'down') {
-    const target = direction === 'up' ? index - 1 : index + 1
-    if (target < 0 || target >= schema.fields.length) return
-    reorder(index, target)
-  }
-
-  function handleRowKeyDown(e: React.KeyboardEvent, index: number) {
-    if (!(e.altKey || e.metaKey)) return
-    if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      moveField(index, 'up')
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      moveField(index, 'down')
-    }
-  }
-
-  function handleDrop(index: number) {
-    if (dragSrcIndex !== null && dragSrcIndex !== index)
-      reorder(dragSrcIndex, index)
-    setDragSrcIndex(null)
-    setDragOverIndex(null)
-  }
 
   const sectionsFor = (f: Field): InspectorSection[] => [
     {
@@ -245,111 +208,61 @@ export function SchemaFieldsSection({
             </Button>
           )}
         </div>
-        <div role="status" aria-live="polite" className="sr-only">
-          {announcement}
-        </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(15rem,20rem)_minmax(0,1fr)]">
-          <nav
-            aria-label="Fields"
-            className="self-start overflow-hidden rounded-md border border-border bg-canvas"
-          >
+          <div className="self-start overflow-hidden rounded-md border border-border bg-canvas">
             {schema.fields.length === 0 ? (
-              <p className="px-3 py-4 text-sm italic text-fg-muted">
-                No fields yet.
-              </p>
+              <p className="px-3 py-4 text-sm text-fg-muted">No fields yet</p>
             ) : (
-              <ul className="divide-y divide-border-muted">
-                {schema.fields.map((f, index) => {
+              <SortableList
+                label="Fields"
+                items={schema.fields}
+                getKey={(f) => f.id}
+                getLabel={(f) => displayLabel(f.name, f.label)}
+                disabled={reorderFields.isPending}
+                moveButtons={(f) => f.name === selected && !adding}
+                onReorder={(next) =>
+                  reorderFields.mutate(next.map((f) => f.id))
+                }
+                rowClassName={(f) =>
+                  f.name === selected && !adding ? 'bg-accent-subtle' : ''
+                }
+                renderItem={(f) => {
                   const active = f.name === selected && !adding
                   const summary = summarise(f.restrictions, f.type)
                   return (
-                    <li
-                      key={f.id}
-                      onKeyDown={(e) => handleRowKeyDown(e, index)}
-                      onDragOver={(e) => {
-                        e.preventDefault()
-                        setDragOverIndex(index)
-                      }}
-                      onDrop={() => handleDrop(index)}
-                      className={`flex items-stretch ${
-                        dragOverIndex === index && dragSrcIndex !== index
-                          ? 'bg-accent-subtle'
-                          : dragSrcIndex === index
-                            ? 'opacity-50'
-                            : ''
-                      }`}
+                    <ListButton
+                      aria-current={active ? 'true' : undefined}
+                      active={active}
+                      onClick={() => select(f.name)}
+                      className="px-1"
                     >
-                      <span
-                        draggable
-                        onDragStart={() => setDragSrcIndex(index)}
-                        onDragEnd={() => {
-                          setDragSrcIndex(null)
-                          setDragOverIndex(null)
-                        }}
-                        title="Drag to reorder, or focus the row and press Alt/Cmd+Arrow"
-                        aria-hidden="true"
-                        className="flex shrink-0 cursor-grab items-center px-1.5 text-border hover:text-fg-muted active:cursor-grabbing"
-                      >
-                        <GripVertical size={12} />
-                      </span>
-                      <button
-                        type="button"
-                        aria-current={active ? 'true' : undefined}
-                        onClick={() => select(f.name)}
-                        className={`min-w-0 flex-1 px-1 py-2 text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent ${
-                          active ? 'bg-accent-subtle' : 'hover:bg-canvas-subtle'
-                        }`}
-                      >
-                        <span className="flex items-baseline gap-1.5">
-                          <span className="truncate text-sm font-medium text-fg">
-                            {displayLabel(f.name, f.label)}
-                          </span>
-                          {f.required && (
-                            <span
-                              className="text-attention"
-                              title="Required"
-                              aria-label="required"
-                            >
-                              *
-                            </span>
-                          )}
+                      <span className="flex items-baseline gap-1.5">
+                        <span className="truncate font-medium text-fg">
+                          {displayLabel(f.name, f.label)}
                         </span>
-                        <span className="block truncate font-mono text-xs text-fg-subtle">
-                          {f.name} · {typeLabel(f.type)}
-                        </span>
-                        {summary && (
-                          <span className="block truncate text-xs text-fg-muted">
-                            {summary}
+                        {f.required && (
+                          <span
+                            className="text-attention"
+                            aria-label="required"
+                          >
+                            *
                           </span>
                         )}
-                      </button>
-                      {active && (
-                        <span className="flex shrink-0 flex-col justify-center pr-1">
-                          <IconButton
-                            icon={ChevronUp}
-                            aria-label={`Move ${displayLabel(f.name, f.label)} up`}
-                            variant="subtle"
-                            disabled={index === 0 || reorderFields.isPending}
-                            onClick={() => moveField(index, 'up')}
-                          />
-                          <IconButton
-                            icon={ChevronDown}
-                            aria-label={`Move ${displayLabel(f.name, f.label)} down`}
-                            variant="subtle"
-                            disabled={
-                              index === schema.fields.length - 1 ||
-                              reorderFields.isPending
-                            }
-                            onClick={() => moveField(index, 'down')}
-                          />
+                      </span>
+                      <span className="block truncate font-mono text-xs text-fg-subtle">
+                        {f.name} · {typeLabel(f.type)}
+                      </span>
+                      {summary && (
+                        <span className="block truncate text-xs text-fg-muted">
+                          {summary}
                         </span>
                       )}
-                    </li>
+                    </ListButton>
                   )
-                })}
-              </ul>
+                }}
+              />
             )}
-          </nav>
+          </div>
           <div className="min-w-0 rounded-md border border-border bg-canvas p-4">
             {inspector()}
           </div>
