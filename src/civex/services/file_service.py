@@ -43,6 +43,12 @@ class FileService:
         memory first. See VolumeAwareFileObjectStore.put_stream."""
         return await self._store.put_stream(chunks, filename, size_hint, collection_id)
 
+    def offline_location(self, sha256: str):
+        """(volume, status) if the content is recorded on a volume that can't be
+        reached right now -- so a missing file can be told apart from one on a
+        drive that isn't plugged in."""
+        return self._store.offline_location(sha256)
+
     def local_path(self, sha256: str) -> Path:
         """Path of the object's bytes on local disk, for streaming it out
         without loading it into memory. An object that only exists on the

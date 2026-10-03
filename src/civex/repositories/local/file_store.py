@@ -34,7 +34,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterable, Iterator, cast
+from typing import TYPE_CHECKING, Any, AsyncIterable, Iterable, Iterator, cast
 
 from civex import fs_locations
 from civex.config import StoreConfig, VolumeConfig
@@ -44,6 +44,7 @@ from civex.domain.dtos import (
     VOLUME_READONLY,
     VOLUME_RETIRED,
     VOLUME_WRONG_DRIVE,
+    FileCopy,
     FileRef,
     StoredObjectInfo,
     VolumeStatus,
@@ -64,6 +65,8 @@ _HEX2_RE = re.compile(r"^[0-9a-f]{2}$")
 _HEX62_RE = re.compile(r"^[0-9a-f]{62}$")
 _COPY_CHUNK = 1024 * 1024
 _RECONCILE_BATCH = 5000
+_LOCATE_CHUNK = 500  # inventory lookups per query
+_LOCATE_DISK_FALLBACK = 25  # blobs the inventory doesn't know, looked up on disk
 
 _SCRATCH_DIRNAME = ".tmp"
 _MARKER_FILENAME = ".civex-volume"
@@ -408,6 +411,93 @@ class VolumeAwareFileObjectStore:
 
     def exists(self, sha256: str) -> bool:
         return self._find_object(sha256) is not None
+
+    # -- where is it? -------------------------------------------------------
+
+    def locate_volumes(self, shas: Iterable[str]) -> dict[str, str | None]:
+        """The volume each blob is on, for a whole batch at once. Reads the
+        inventory in a few queries, and only looks on disk for blobs it doesn't
+        know (an older blob, a request that was rolled back), and for a bounded
+        number of those, so listing many records never means a stat per file."""
+        wanted = list(dict.fromkeys(shas))
+        found: dict[str, str | None] = {}
+        if self._session is not None and wanted:
+            from sqlalchemy import select
+
+            from civex.db.models import StoredObject
+
+            for i in range(0, len(wanted), _LOCATE_CHUNK):
+                rows = self._session.execute(
+                    select(StoredObject.sha256, StoredObject.volume).where(
+                        StoredObject.sha256.in_(wanted[i : i + _LOCATE_CHUNK])
+                    )
+                )
+                for sha, volume in rows:
+                    if volume in self._cfg.volumes:
+                        found[sha] = volume
+        for sha in [s for s in wanted if s not in found][:_LOCATE_DISK_FALLBACK]:
+            located = self._locate(sha)
+            if located is not None:
+                found[sha] = located[0]
+        return {sha: found.get(sha) for sha in wanted}
+
+    def copies_of(self, sha256: str) -> list[FileCopy]:
+        """Every place this content is: each reachable volume that holds it,
+        plus the volume the inventory records it on if that one can't be
+        reached now (so a file on an unplugged drive is still accounted for)."""
+        recorded = self._recorded_volume(sha256)
+        mounts = fs_locations.all_mounts()
+        copies: list[FileCopy] = []
+        for name in self._cfg.volumes:
+            path = self._object_path(sha256, name)
+            status = self.volume_status(name)
+            network = fs_locations.is_network_path(
+                fs_locations.normalise(str(path)), mounts
+            )
+            if status.reachable:
+                try:
+                    present = path.exists()
+                except OSError:
+                    present = None
+                if present is not False:
+                    copies.append(
+                        FileCopy(name, str(path), present, status.state, network)
+                    )
+            elif name == recorded:
+                copies.append(FileCopy(name, str(path), None, status.state, network))
+        return copies
+
+    def size_of(self, sha256: str) -> int | None:
+        """The blob's size: from the inventory, else from a copy on disk."""
+        if self._session is not None:
+            from civex.db.models import StoredObject
+
+            row = self._session.get(StoredObject, sha256)
+            if row is not None:
+                return int(row.size)
+        located = self._locate(sha256)
+        if located is None:
+            return None
+        try:
+            return located[1].stat().st_size
+        except OSError:
+            return None
+
+    def offline_location(self, sha256: str) -> tuple[str, VolumeStatus] | None:
+        """(volume, its status) if this content is recorded on a volume that
+        can't be reached right now, so "gone" can be told from "not plugged in"."""
+        copy = self._offline_copy(sha256)
+        if copy is None:
+            return None
+        return copy[0], self.volume_status(copy[0])
+
+    def _recorded_volume(self, sha256: str) -> str | None:
+        if self._session is None:
+            return None
+        from civex.db.models import StoredObject
+
+        row = self._session.get(StoredObject, sha256)
+        return row.volume if row is not None else None
 
     def object_path(self, sha256: str) -> Path:
         path = self._find_object(sha256)

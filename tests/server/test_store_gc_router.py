@@ -246,3 +246,46 @@ def test_adding_a_volume_over_http_can_join_the_queue(
         )
         assert resp.status_code == 201
         assert resp.json()["in_queue"] is queued
+
+
+def test_downloading_a_file_on_an_unplugged_volume_says_so(
+    client: TestClient, tmp_path
+) -> None:
+    drive = tmp_path / "usb"
+    drive.mkdir()
+    client.post("/api/store/volumes", json={"name": "usb", "path": str(drive)})
+    cid = client.post(
+        "/api/collections", json={"name": "study", "description": None}
+    ).json()["id"]
+    client.put(f"/api/store/placement/{cid}", json={"volume": "usb"})
+    up = client.put(
+        f"/api/files/stream?filename=a.txt&collection={cid}", content=b"on usb"
+    )
+    sha = up.json()["sha256"]
+    assert client.get(f"/api/files/{sha}").status_code == 200
+
+    drive.rename(tmp_path / "usb-unplugged")
+
+    gone = client.get(f"/api/files/{sha}")
+    assert gone.status_code == 503
+    assert (
+        "volume 'usb'" in gone.json()["detail"]
+        and "isn't available" in gone.json()["detail"]
+    )
+    assert client.get(f"/api/files/{'00' * 32}").status_code == 404
+
+
+def test_file_info_endpoint(client: TestClient, tmp_path) -> None:
+    up = client.put("/api/files/stream?filename=a.txt", content=b"hello info")
+    sha = up.json()["sha256"]
+
+    info = client.get(f"/api/files/{sha}/info")
+
+    assert info.status_code == 200
+    body = info.json()
+    assert body["size"] == len(b"hello info")
+    assert [(c["volume"], c["state"], c["present"]) for c in body["copies"]] == [
+        ("default", "online", True)
+    ]
+    assert body["records"] == 0 and body["collections"] == []
+    assert client.get(f"/api/files/{'00' * 32}/info").status_code == 404

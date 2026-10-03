@@ -605,6 +605,37 @@ class DirectoryEntryResponse(BaseModel):
     path: str = Field(description="Absolute path of the folder.")
 
 
+class FileCopyResponse(BaseModel):
+    volume: str
+    path: str = Field(description="Where the object is, or would be, on that volume.")
+    present: bool | None = Field(
+        description="True if it is there; null if it is recorded there but the volume can't be checked now."
+    )
+    state: str = Field(
+        description="The volume's state: online, offline, wrong_drive, readonly or retired."
+    )
+    network: bool = Field(description="The volume is on a network drive.")
+
+
+class CollectionUseResponse(BaseModel):
+    id: str
+    name: str | None = Field(description="Null if the collection no longer exists.")
+    records: int = Field(description="Records in that collection that use the file.")
+
+
+class FileInfoResponse(BaseModel):
+    sha256: str
+    size: int | None = Field(description="Size in bytes, if known.")
+    copies: list[FileCopyResponse] = Field(
+        description="Every place the content is, or is recorded to be."
+    )
+    records: int = Field(
+        description="Records that use this file, across all collections."
+    )
+    jobs: int = Field(description="Workflow runs that took it as an input.")
+    collections: list[CollectionUseResponse]
+
+
 class StorageLocationResponse(BaseModel):
     label: str
     path: str

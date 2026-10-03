@@ -411,3 +411,83 @@ def place_list() -> None:
             place.on_unavailable,
         )
     console.print(table)
+
+
+@app.command("where")
+def store_where(
+    record_id: str = typer.Argument(..., help="Record id (a unique prefix is enough)"),
+    details: bool = typer.Option(
+        False,
+        "--details",
+        help="Also show each file's path on disk and what else uses it.",
+    ),
+) -> None:
+    """Show which volume each of a record's files is stored on.
+
+    A file is stored once however many records use it, so this is where its
+    content is, not a copy per record. A file on a drive that isn't plugged in
+    is listed with the volume's state.
+    """
+    from rich.markup import escape
+    from rich.table import Table
+
+    ctx = get_ctx()
+    try:
+        record = ctx.record_svc.get(record_id)
+        files = [
+            (field, ref)
+            for field, value in record.data.items()
+            for ref in (value if isinstance(value, list) else [value])
+            if isinstance(ref, dict) and "sha256" in ref
+        ]
+        infos = (
+            {ref["sha256"]: ctx.file_info_svc.info(ref["sha256"]) for _, ref in files}
+            if details
+            else {}
+        )
+    except NotFoundError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+
+    if not files:
+        console.print("[dim]This record has no files.[/dim]")
+        return
+
+    table = Table(show_header=True, header_style="bold", box=None, pad_edge=False)
+    for column in ("Field", "File", "Stored on", "State"):
+        table.add_column(column)
+    for field, ref in files:
+        loc = ref.get("location") or {}
+        state = loc.get("state", "unknown")
+        table.add_row(
+            escape(field),
+            escape(ref.get("resolved_filename") or ref.get("filename", "")),
+            escape(loc.get("volume") or "—"),
+            state
+            if state == "online"
+            else f"[yellow]{state.replace('_', ' ')}[/yellow]",
+        )
+    console.print(table)
+
+    for sha, info in infos.items():
+        console.print(
+            f"\n[bold]{sha[:12]}…[/bold]  {info.size if info.size is not None else '?'} bytes"
+        )
+        for copy in info.copies:
+            where = f"{copy.volume}  {escape(copy.path)}"
+            if copy.network:
+                where += "  [dim](network)[/dim]"
+            if copy.present is None:
+                where += f"  [yellow]can't be checked: volume {copy.state.replace('_', ' ')}[/yellow]"
+            console.print(f"  {where}")
+        used = ", ".join(
+            f"{escape(c.name or '(deleted collection)')} ({c.records})"
+            for c in info.collections
+        )
+        console.print(
+            f"  used by {info.records} record(s)"
+            + (f": {used}" if used else "")
+            + (f"; {info.jobs} workflow run(s)" if info.jobs else "")
+        )

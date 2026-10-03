@@ -92,3 +92,37 @@ def test_add_explains_a_network_address(project_dir: Path) -> None:
 
     assert result.exit_code == 1
     assert "mount it first" in _plain(result)
+
+
+def test_where_shows_which_volume_each_file_is_on(
+    project_dir: Path, tmp_path: Path
+) -> None:
+    from civex.config import load_config
+    from civex.context import build_local_context
+
+    assert runner.invoke(app, ["schema", "create", "doc"]).exit_code == 0
+    assert (
+        runner.invoke(
+            app, ["schema", "add-field", "doc", "scan", "--type", "file"]
+        ).exit_code
+        == 0
+    )
+    assert runner.invoke(app, ["collection", "create", "study"]).exit_code == 0
+    ctx = build_local_context(load_config())
+    ref = ctx.file_svc.store_bytes(b"scan bytes", "scan.png")
+    record = ctx.record_svc.add("study", "doc", {"scan": ref.to_dict()})
+    ctx.commit()
+    ctx.close()
+
+    plain = runner.invoke(app, ["store", "where", str(record.id)])
+    detailed = runner.invoke(app, ["store", "where", str(record.id), "--details"])
+
+    assert plain.exit_code == 0, plain.output
+    assert (
+        "scan.png" in plain.output
+        and "default" in plain.output
+        and "online" in plain.output
+    )
+    assert detailed.exit_code == 0
+    assert ref.sha256[:12] in detailed.output and "used by 1 record" in detailed.output
+    assert runner.invoke(app, ["store", "where", "zzzzzzzz"]).exit_code == 1

@@ -264,6 +264,42 @@ def resolve_filename(
     return resolved or ref.filename
 
 
+# Keys the server adds to a file value in responses. They describe the moment
+# of the read, so a client that echoes them back must not get them stored.
+DERIVED_FILE_KEYS = ("resolved_filename", "location")
+
+
+def _file_dicts(value: Any) -> list[dict[str, Any]]:
+    """The file reference dicts in a `file` or `file_list` value."""
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _strip_derived_file_keys(
+    data: dict[str, Any], fields: list[ResolvedField]
+) -> dict[str, Any]:
+    """`data` without the response-only keys on its file values."""
+
+    def clean(item: Any) -> Any:
+        if isinstance(item, dict):
+            return {k: v for k, v in item.items() if k not in DERIVED_FILE_KEYS}
+        return item
+
+    result = dict(data)
+    for rf in fields:
+        if rf.field.dtype not in ("file", "file_list"):
+            continue
+        value = result.get(rf.field.name)
+        if isinstance(value, list):
+            result[rf.field.name] = [clean(item) for item in value]
+        elif isinstance(value, dict):
+            result[rf.field.name] = clean(value)
+    return result
+
+
 def _with_resolved_filename(
     ref_dict: dict[str, Any], template: str | None, field_values: dict[str, Any]
 ) -> dict[str, Any]:
@@ -415,6 +451,84 @@ class RecordService:
         return [self._with_names(r, shapes) for r in dtos]
 
     def _attach_reference_labels(
+        self, records: list[RecordDTO], shapes: SchemaResolver | None = None
+    ) -> list[RecordDTO]:
+        """The response-only extras every API read gets: reference labels and
+        collection names (`_label_references`), and where each file is stored
+        (`_attach_file_locations`). Audit snapshots use `_with_names` alone, so
+        none of this -- all of it momentary -- is ever frozen into the log."""
+        return self._attach_file_locations(
+            self._label_references(records, shapes), shapes
+        )
+
+    def _attach_file_locations(
+        self, records: list[RecordDTO], shapes: SchemaResolver | None = None
+    ) -> list[RecordDTO]:
+        """Stamp every file/file_list value with `location`: the volume it is
+        stored on, that volume's state, and whether it can be opened now. One
+        inventory lookup and one status check per volume for the whole batch,
+        so a table of records with file columns doesn't fan out per file.
+        Response-only: stripped again if a client echoes it back."""
+        shapes = shapes or self._schema_svc.resolver()
+        file_fields: list[list[str]] = []
+        wanted: set[str] = set()
+        for r in records:
+            shape = shapes(r.schema_id)
+            names = (
+                [
+                    rf.field.name
+                    for rf in shape.fields
+                    if rf.field.dtype in ("file", "file_list")
+                ]
+                if shape
+                else []
+            )
+            file_fields.append(names)
+            for name in names:
+                wanted.update(
+                    ref["sha256"]
+                    for ref in _file_dicts(r.data.get(name))
+                    if ref.get("sha256")
+                )
+        if not wanted:
+            return records
+
+        volume_of = self._files.locate_volumes(wanted)
+        status = {
+            name: self._files.volume_status(name)
+            for name in {v for v in volume_of.values() if v}
+        }
+
+        def location(sha: str | None) -> dict[str, Any]:
+            volume = volume_of.get(sha or "")
+            if volume is None:
+                # Not on any volume we know of (yet): don't claim it is gone --
+                # it may only be on a remote that hasn't been fetched.
+                return {"volume": None, "state": "unknown", "available": None}
+            st = status[volume]
+            return {"volume": volume, "state": st.state, "available": st.reachable}
+
+        def decorate(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {**value, "location": location(value.get("sha256"))}
+            if isinstance(value, list):
+                return [decorate(item) for item in value]
+            return value
+
+        return [
+            dataclasses.replace(
+                r,
+                data={
+                    **r.data,
+                    **{n: decorate(r.data.get(n)) for n in names if n in r.data},
+                },
+            )
+            if names
+            else r
+            for r, names in zip(records, file_fields)
+        ]
+
+    def _label_references(
         self, records: list[RecordDTO], shapes: SchemaResolver | None = None
     ) -> list[RecordDTO]:
         """Batch-resolve reference/reference_list values to their target's
@@ -863,6 +977,8 @@ class RecordService:
         # Apply field defaults before validation
         shape = self._schema_svc.resolve(schema)
         data = self._apply_defaults(data, shape)
+        if shape is not None:
+            data = _strip_derived_file_keys(data, shape.fields)
         data = self._normalise_datetimes(data, shape, dataset.timezone)
 
         resolved_parent_id = None
@@ -1029,6 +1145,8 @@ class RecordService:
             if raw.dataset_id
             else None
         )
+        if shape is not None:
+            data = _strip_derived_file_keys(data, shape.fields)
         data = self._normalise_datetimes(
             data,
             shape,

@@ -366,6 +366,36 @@ class PathInspection:
 
 
 @dataclass
+class FileCopy:
+    """One place a file's content is (or is recorded to be)."""
+
+    volume: str
+    path: str  # where the object is, or would be, on that volume
+    present: bool | None  # None: recorded there, but the volume can't be checked now
+    state: str  # the volume's state (VOLUME_*)
+    network: bool = False
+
+
+@dataclass
+class CollectionUse:
+    id: str
+    name: str | None  # None if the collection no longer exists
+    records: int
+
+
+@dataclass
+class FileInfo:
+    """Where a file's content is stored and what uses it."""
+
+    sha256: str
+    size: int | None
+    copies: list[FileCopy]
+    records: int  # records that reference it
+    jobs: int  # workflow runs that took it as an input
+    collections: list[CollectionUse]
+
+
+@dataclass
 class StoredObjectInfo:
     """One object on disk in the content-addressed store, as seen by GC --
     not what a FileRef claims to point at, but what's actually there."""

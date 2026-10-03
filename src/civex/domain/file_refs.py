@@ -28,3 +28,20 @@ def collect_sha256_refs(value: Any, out: set[str] | None = None) -> set[str]:
         for v in value:
             collect_sha256_refs(v, out)
     return out
+
+
+def without_file_locations(value: Any) -> Any:
+    """`value` with the response-only `location` removed from every file
+    reference in it (a `file` value, a `file_list`, or any structure holding
+    them). `location` says where a file is *right now*: useful in a response,
+    but not something a workflow should see, carry into its outputs, or have
+    saved in a job's log."""
+    if isinstance(value, dict):
+        return {
+            k: without_file_locations(v)
+            for k, v in value.items()
+            if not (k == "location" and "sha256" in value)
+        }
+    if isinstance(value, list):
+        return [without_file_locations(v) for v in value]
+    return value

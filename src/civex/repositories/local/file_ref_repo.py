@@ -33,6 +33,28 @@ class LocalFileReferenceRepository:
         )
         return {sha for (sha,) in rows}
 
+    def usage(self, sha256: str) -> tuple[dict[uuid.UUID | None, int], int]:
+        """What uses a blob: the number of records that reference it in each
+        collection, and the number of workflow runs that took it as input."""
+        by_collection = {
+            dataset_id: n
+            for dataset_id, n in self._s.execute(
+                select(
+                    Record.dataset_id,
+                    func.count(func.distinct(FileReference.record_id)),
+                )
+                .join(Record, Record.id == FileReference.record_id)
+                .where(FileReference.sha256 == sha256)
+                .group_by(Record.dataset_id)
+            )
+        }
+        jobs = self._s.execute(
+            select(func.count(func.distinct(FileReference.job_id))).where(
+                FileReference.sha256 == sha256, FileReference.job_id.is_not(None)
+            )
+        ).scalar_one()
+        return by_collection, int(jobs)
+
     def count_referenced(self) -> int:
         return self._s.execute(
             select(func.count(func.distinct(FileReference.sha256)))
