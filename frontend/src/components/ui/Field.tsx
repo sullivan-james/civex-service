@@ -1,9 +1,13 @@
 import { cloneElement, isValidElement, useId } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { spanClassName, type FieldSpan } from './FormGrid'
+import { InfoTip } from './Tooltip'
 
 export interface FieldProps {
   label: ReactNode
+  /** Explanation shown in a tooltip beside the label (preferred). */
+  info?: ReactNode
+  /** @deprecated Standing help text; use `info`. */
   hint?: ReactNode
   error?: ReactNode
   required?: boolean
@@ -23,6 +27,7 @@ export interface FieldProps {
 
 export function Field({
   label,
+  info,
   hint,
   error,
   required = false,
@@ -89,11 +94,20 @@ export function Field({
       </label>
     )
 
+  const infoNode = info && !hideLabel && <InfoTip>{info}</InfoTip>
+
   return (
     <div
       className={`flex flex-col gap-1 ${span ? spanClassName(span) : ''} ${className}`}
     >
-      {labelNode}
+      {infoNode ? (
+        <div className="flex items-center gap-1">
+          {labelNode}
+          {infoNode}
+        </div>
+      ) : (
+        labelNode
+      )}
       {layout === 'stack' && control}
       {hint && (
         <p id={hintId} className="text-xs text-fg-subtle">
