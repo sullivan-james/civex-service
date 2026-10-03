@@ -165,7 +165,7 @@ export function ReferenceChips({
           />
           <div
             role="listbox"
-            className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-border bg-canvas text-sm shadow-sm"
+            className="absolute z-30 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-border bg-canvas text-sm shadow-sm"
           >
             {loading && <div className="px-3 py-2 text-fg-muted">Loading…</div>}
             {!loading && options.length === 0 && (

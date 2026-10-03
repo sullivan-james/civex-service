@@ -61,7 +61,7 @@ function ResultsDropdown({
   onSelect: (record: CivexRecord) => void
 }) {
   return (
-    <div className="absolute z-10 mt-1 w-full bg-canvas border border-border rounded-md shadow-sm max-h-48 overflow-y-auto text-sm">
+    <div className="absolute z-30 mt-1 w-full bg-canvas border border-border rounded-md shadow-sm max-h-48 overflow-y-auto text-sm">
       {loading && <div className="px-3 py-2 text-fg-muted">Loading…</div>}
       {!loading && results.length === 0 && (
         <div className="px-3 py-2 text-fg-muted italic">{emptyMessage}</div>
