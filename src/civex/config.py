@@ -15,6 +15,8 @@ With a remote (added by `civex remote set <url>`):
 
 from __future__ import annotations
 
+import os
+import threading
 import tomllib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -442,13 +444,20 @@ def save_config(config: Config) -> None:
             f"Generated config is invalid TOML: {e}\n\nContent:\n{content}"
         ) from e
 
-    # Atomic-ish write: backup → write → verify read-back → restore on failure.
-    backup = config_path.read_text(encoding="utf-8") if config_path.exists() else None
+    # Write a temporary file beside it, check that parses, then swap it in with
+    # one atomic rename. Every request reads this file, and a transfer rewrites
+    # it while freezing a volume, so a reader must see the old file or the new
+    # one, never half of either; and if anything fails the original is untouched.
+    tmp = config_path.with_name(
+        f"{config_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
     try:
-        config_path.write_text(content, encoding="utf-8")
-        with open(config_path, "rb") as f:
+        tmp.write_text(content, encoding="utf-8")
+        with open(tmp, "rb") as f:
             tomllib.load(f)
+        os.replace(tmp, config_path)
     except Exception as e:
-        if backup is not None:
-            config_path.write_text(backup, encoding="utf-8")
-        raise ConfigError(f"Failed to write config (original restored): {e}") from e
+        tmp.unlink(missing_ok=True)
+        raise ConfigError(
+            f"Failed to write config (the original is untouched): {e}"
+        ) from e

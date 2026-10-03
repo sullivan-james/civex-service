@@ -331,3 +331,58 @@ def test_volume_stats_flags_network_volumes(
 
     assert stats["nas"]["network"] is True
     assert stats["default"]["network"] is False
+
+
+# -- config.toml is written atomically ---------------------------------------
+
+
+def test_a_reader_never_sees_the_config_half_written(ctx: AppContext) -> None:
+    """Every request reads config.toml, and a transfer rewrites it while it
+    freezes a volume: a reader must get the old file or the new one."""
+    from civex.config import load_config, save_config
+
+    config = load_config()
+    stop = threading.Event()
+    failures: list[BaseException] = []
+
+    def write() -> None:
+        flip = False
+        while not stop.is_set():
+            config.store_config.warn_below_pct = 11.0 if flip else 12.0
+            flip = not flip
+            try:
+                save_config(config)
+            except BaseException as e:  # noqa: BLE001
+                failures.append(e)
+                return
+
+    writer = threading.Thread(target=write)
+    writer.start()
+    try:
+        for _ in range(400):
+            load_config()  # raised KeyError('db') on a half-written file before
+    finally:
+        stop.set()
+        writer.join()
+
+    assert not failures
+
+
+def test_a_failed_config_write_leaves_the_original_untouched(
+    ctx: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from civex.config import load_config, save_config
+    from civex.domain.exceptions import ConfigError
+
+    config = load_config()
+    path = config.civex_dir / "config.toml"
+    before = path.read_text()
+    monkeypatch.setattr(
+        os, "replace", lambda *a, **k: (_ for _ in ()).throw(OSError("disk full"))
+    )
+
+    with pytest.raises(ConfigError, match="original is untouched"):
+        save_config(config)
+
+    assert path.read_text() == before
+    assert not list(path.parent.glob("config.toml.*.tmp"))  # no litter left behind
