@@ -69,6 +69,11 @@ class DatabaseUnavailableError(CivexError):
     retryable = True
 
 
+class DatabaseTooNewError(CivexError):
+    """The project's database was migrated by a newer civex than this one, so
+    it holds a schema revision this civex has never heard of."""
+
+
 class JobCancelled(CivexError):
     """A workflow run was stopped by a person (or by Stop automation) while it
     was running. Raised between steps; the steps that already ran are attached

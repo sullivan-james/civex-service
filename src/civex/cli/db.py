@@ -386,6 +386,16 @@ def current() -> None:
         console.print(f"[error]Could not connect: {info.error}[/error]")
         raise typer.Exit(1)
 
+    if info.too_new:
+        from civex import __version__
+
+        console.print(
+            f"[error]The database is at revision {info.current_revision}, from "
+            f"a newer civex than this one ({__version__}).[/error] "
+            "Run `civex update`."
+        )
+        raise typer.Exit(1)
+
     if info.current_revision is None:
         console.print(
             "[warning]Not yet migrated[/warning] — will be created/stamped on next connect."

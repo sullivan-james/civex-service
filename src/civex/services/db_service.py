@@ -74,6 +74,7 @@ class MigrationStatus:
     head_revision: str | None
     up_to_date: bool
     error: str | None = None  # set when the database itself couldn't be reached
+    too_new: bool = False  # at a revision this civex doesn't have (a newer civex)
 
 
 @dataclass
@@ -150,7 +151,18 @@ def migration_status(url: str) -> MigrationStatus:
     finally:
         if engine is not None:
             engine.dispose()
+    if current is not None and not _known_revision(script, current):
+        return MigrationStatus(current, head, up_to_date=False, too_new=True)
     return MigrationStatus(current, head, up_to_date=current == head)
+
+
+def _known_revision(script, revision: str) -> bool:
+    from alembic.util.exc import CommandError
+
+    try:
+        return script.get_revision(revision) is not None
+    except (CommandError, KeyError):
+        return False
 
 
 def apply_migrations(url: str) -> None:

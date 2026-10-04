@@ -69,6 +69,39 @@ def ensure_schema_current(engine: Engine) -> None:
         _migrated_engines.add(engine)
 
 
+def _refuse_newer_database(connection: Connection, cfg: Config) -> None:
+    """Say so plainly when the database is from a newer civex.
+
+    Alembic's own error for this ("Can't locate revision identified by ...")
+    reads as if the database were corrupt. The usual cause is a project last
+    opened by a newer civex than the one running now, e.g. a second install
+    that was updated and this one wasn't.
+    """
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+    from alembic.util.exc import CommandError
+
+    from civex import __version__
+    from civex.domain.exceptions import DatabaseTooNewError
+
+    script = ScriptDirectory.from_config(cfg)
+    unknown: list[str] = []
+    for revision in MigrationContext.configure(connection).get_current_heads():
+        try:
+            script.get_revision(revision)
+        except (CommandError, KeyError):
+            unknown.append(revision)
+    if not unknown:
+        return
+    where = connection.engine.url.render_as_string(hide_password=True)
+    raise DatabaseTooNewError(
+        f"This project's database ({where}) was last used by a newer version "
+        f"of civex: it is at revision {', '.join(unknown)}, which civex "
+        f"{__version__} doesn't know. Update civex with `civex update`, then "
+        "try again. Your data hasn't been changed."
+    )
+
+
 def _migrate_connection(connection: Connection) -> None:
     cfg = _alembic_config()
     cfg.attributes["connection"] = connection
@@ -80,6 +113,7 @@ def _migrate_connection(connection: Connection) -> None:
     if "alembic_version" not in tables and _LEGACY_MARKER_TABLE in tables:
         command.stamp(cfg, "head")
     else:
+        _refuse_newer_database(connection, cfg)
         command.upgrade(cfg, "head")
     connection.commit()
 

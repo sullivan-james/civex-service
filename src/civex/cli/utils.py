@@ -75,8 +75,14 @@ def cli_load_config() -> Config:
 
 def get_ctx() -> AppContext:
     from civex.context import build_local_context
+    from civex.domain.exceptions import DatabaseTooNewError
 
-    return build_local_context(cli_load_config())
+    config = cli_load_config()
+    try:
+        return build_local_context(config)
+    except DatabaseTooNewError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
 
 
 def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[list[dict], str, list[dict]]:
