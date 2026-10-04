@@ -7,7 +7,6 @@ import os
 import sys
 import shutil
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -96,10 +95,9 @@ def test_browsing_a_location_that_stops_answering_reports_it(
         fs_locations, "list_subdirectories", lambda *a, **k: release.wait(30)
     )
     try:
-        started = time.monotonic()
+        # (Waiting for the hung call would block here until it is released.)
         with pytest.raises(ValidationError, match="isn't responding"):
             ctx.store_svc.browse_directory(str(tmp_path))
-        assert time.monotonic() - started < 3
     finally:
         release.set()
 
@@ -289,8 +287,11 @@ def hung_drive(tmp_path: Path, short_timeout: None, monkeypatch: pytest.MonkeyPa
     dead = _drive(tmp_path, "dead")
     real_probe = file_store_module._probe_root
 
+    dead_probes = [0]
+
     def probe(root: Path):
         if root == dead:
+            dead_probes[0] += 1
             release.wait(30)
         return real_probe(root)
 
@@ -303,17 +304,16 @@ def hung_drive(tmp_path: Path, short_timeout: None, monkeypatch: pytest.MonkeyPa
         volume_queue=["dead", "local"],
     )
     store = VolumeAwareFileObjectStore(config, tmp_path)
+    store.dead_probes = dead_probes  # type: ignore[attr-defined]
     yield store
     release.set()
 
 
 def test_a_volume_that_stops_answering_is_offline_with_a_reason(hung_drive) -> None:
-    started = time.monotonic()
     status = hung_drive.volume_status("dead")
 
     assert status.state == "offline" and "not responding" in status.reason
     assert "network connection" in status.fix
-    assert time.monotonic() - started < 3
 
 
 def test_writes_go_to_the_next_volume_when_one_stops_answering(hung_drive) -> None:
@@ -323,14 +323,13 @@ def test_writes_go_to_the_next_volume_when_one_stops_answering(hung_drive) -> No
 def test_reads_of_other_volumes_are_not_stalled_by_a_dead_one(hung_drive) -> None:
     ref = hung_drive.put(b"findable", "a.txt")
 
-    started = time.monotonic()
     assert hung_drive.get(ref.sha256) == b"findable"
     assert hung_drive.exists(ref.sha256)
-    assert time.monotonic() - started < 2
-    # The second look doesn't wait again: the stuck probe is remembered.
-    started = time.monotonic()
+    # The second look doesn't probe the dead drive again: the stuck probe is
+    # remembered. (Counted, not timed.)
+    probes = hung_drive.dead_probes[0]
     hung_drive.get(ref.sha256)
-    assert time.monotonic() - started < 0.5
+    assert hung_drive.dead_probes[0] == probes
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX mount table")

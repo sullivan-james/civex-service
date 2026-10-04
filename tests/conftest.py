@@ -68,6 +68,25 @@ OS_SENSITIVE = {
 }
 
 
+@pytest.fixture()
+def wait_until():
+    """`wait_until(check, "what")`: for something another thread will make true
+    with no event to wait on. A generous bound that only matters when something
+    is stuck (pytest-timeout also ends a hung test). Never assert how *fast*
+    something happens: wait for it, then assert what happened."""
+    import time
+
+    def wait(check, what: str, timeout: float = 60.0) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if check():
+                return
+            time.sleep(0.01)
+        pytest.fail(f"timed out waiting for {what}")
+
+    return wait
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
         if item.path.name in OS_SENSITIVE:

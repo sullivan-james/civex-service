@@ -61,3 +61,30 @@ jobs:
 
       - name: Run OS-sensitive tests
         run: uv run pytest -m os_sensitive -q -n auto -p no:cacheprovider --durations=15
+
+  # Nightly only: run the OS-sensitive tests many times on Linux (cheap) to
+  # catch a test that passes or fails depending on timing or worker order.
+  # A test that fails here even once is a flaky test and gets fixed, not retried.
+  flake-check:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install with dev extras
+        run: uv sync --extra server --extra workflows --extra dev
+
+      - name: Run the OS-sensitive tests 10 times
+        run: |
+          for i in $(seq 1 10); do
+            echo "::group::run $i"
+            uv run pytest -m os_sensitive -q -n auto -p no:cacheprovider || exit 1
+            echo "::endgroup::"
+          done

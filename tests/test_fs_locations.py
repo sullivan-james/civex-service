@@ -5,9 +5,9 @@ freezing a request."""
 from __future__ import annotations
 
 import threading
-import time
 from pathlib import Path
 
+import concurrent.futures
 import sys
 
 import pytest
@@ -156,24 +156,22 @@ def test_a_call_that_never_returns_is_reported_not_waited_on(
 ) -> None:
     release = threading.Event()
     try:
-        started = time.monotonic()
+        # If this waited for the call it would block for 30s (until released).
         with pytest.raises(fs.Unresponsive, match="no answer"):
             fs.guarded("t-hang", release.wait, 30)
-        assert time.monotonic() - started < 2
 
         # While that call is still stuck, the next one fails at once rather
         # than queueing another blocked thread behind the dead mount.
-        started = time.monotonic()
         with pytest.raises(fs.Unresponsive, match="still waiting"):
             fs.guarded("t-hang", lambda: "never runs")
-        assert time.monotonic() - started < 0.1
 
         # Other locations are unaffected.
         assert fs.guarded("t-other", lambda: "fine") == "fine"
     finally:
         release.set()
 
-    time.sleep(0.2)  # the stuck call has now returned: the location works again
+    # Once the stuck call has returned, the location works again.
+    concurrent.futures.wait([fs._pending["t-hang"]], timeout=60)
     assert fs.guarded("t-hang", lambda: "recovered") == "recovered"
 
 

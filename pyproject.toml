@@ -81,7 +81,7 @@ workflows = []
 server    = []
 ai        = []
 telemetry = []
-dev       = ["pytest>=8", "pytest-cov>=5", "pytest-xdist>=3", "httpx2>=0.28", "pre-commit>=3.7", "ruff>=0.15", "mypy>=2.0", "pip-audit>=2.7"]
+dev       = ["pytest>=8", "pytest-cov>=5", "pytest-xdist>=3", "pytest-timeout>=2.3", "httpx2>=0.28", "pre-commit>=3.7", "ruff>=0.15", "mypy>=2.0", "pip-audit>=2.7"]
 docs = [
   "mkdocs>=1.6",
   "mkdocs-material>=9.5",
@@ -113,6 +113,10 @@ civex = ["server/static/**", "db/migrations/script.py.mako"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# A hung test fails with the stack of every thread instead of stalling CI. Tests
+# must never rely on speed (see "Tests" in CLAUDE.md); this is only a backstop.
+timeout = 180
+timeout_method = "thread"
 markers = [
     "os_sensitive: touches the real OS (files, paths, processes, mounts, the launcher); the only tests run on Windows and macOS in CI. Applied by file name in tests/conftest.py.",
     "posix_only: needs POSIX permissions, signals or process groups",

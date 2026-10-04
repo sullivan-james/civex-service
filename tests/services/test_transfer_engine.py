@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
 import sys
 import shutil
 from pathlib import Path
@@ -295,7 +296,7 @@ def test_stopping_in_the_middle_of_a_file_leaves_no_trace_of_it(
 
 
 def test_stopping_a_copy_on_the_helper_thread_leaves_no_trace_either(
-    ctx: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ctx: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, wait_until
 ) -> None:
     """A volume outside the project is copied on a watched helper thread; a stop
     must reach it mid-file and have it clean up after itself."""
@@ -322,7 +323,8 @@ def test_stopping_a_copy_on_the_helper_thread_leaves_no_trace_either(
     with pytest.raises(TransferStopped):
         ctx.file_svc._store.transfer_object(ref.sha256, "a", "b", on_chunk=stop)
 
-    time.sleep(0.2)  # the helper thread notices and tidies up
+    # The helper thread notices the stop and tidies up after itself.
+    wait_until(lambda: not _scratch_files(drives["b"]), "the scratch file to go")
     assert not _scratch_files(drives["b"])
     assert not (drives["b"] / ref.sha256[:2] / ref.sha256[2:]).exists()
     assert ctx.file_svc._store.get(ref.sha256) == big
@@ -597,20 +599,21 @@ def test_a_copy_that_moves_no_bytes_is_treated_as_a_quiet_volume(
 ) -> None:
     """A write to a dead network share can block forever and can't be
     interrupted from outside, so a copy that stalls is abandoned."""
-    import time
-
     _volumes(ctx, tmp_path, "a", "b")
     files = _put_on(ctx, "a", 1)
     sha = next(iter(files))
     store = ctx.file_svc._store
     monkeypatch.setattr(file_store_module, "STALL_SECONDS", 0.3)
-    monkeypatch.setattr(store, "_copy_blocking", lambda *a, **k: time.sleep(3))
+    stuck = threading.Event()  # a write that never returns, until released
+    monkeypatch.setattr(store, "_copy_blocking", lambda *a, **k: stuck.wait(60))
 
-    started = time.monotonic()
-    with pytest.raises(VolumeNotResponding):
-        store.transfer_object(sha, "a", "b")
+    try:
+        # (If the stall were not noticed, this would block until released.)
+        with pytest.raises(VolumeNotResponding):
+            store.transfer_object(sha, "a", "b")
+    finally:
+        stuck.set()
 
-    assert time.monotonic() - started < 2
     assert store.get(sha) == files[sha]
 
 

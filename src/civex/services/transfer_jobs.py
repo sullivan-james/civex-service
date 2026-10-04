@@ -112,6 +112,18 @@ class TransferJobs:
             return True
         return asked
 
+    def wait(self, transfer_id: str, timeout: float | None = None) -> bool:
+        """Block until the transfer's thread has finished (or `timeout`
+        passes). True when it has: there is nothing left running for it. Used
+        when the server shuts down, and by tests, which need an exact moment to
+        look at the saved record rather than polling for it."""
+        with self._lock:
+            live = self._live.get(transfer_id)
+        if live is None:
+            return True
+        live.thread.join(timeout)
+        return not live.thread.is_alive()
+
     def is_live(self, transfer_id: str) -> bool:
         with self._lock:
             live = self._live.get(transfer_id)

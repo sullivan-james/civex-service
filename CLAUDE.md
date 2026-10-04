@@ -46,6 +46,16 @@ npm run build                     # tsc + Vite production build (outputs to fron
 
 The server serves the built frontend from `frontend/dist/` via the `ui` router. During development run `civex serve --reload` and `npm run dev` in parallel — Vite proxies API calls.
 
+### Tests must not depend on speed
+
+A test that passes on a fast machine and fails on a slow one (a Windows CI runner is several times slower than a laptop, and varies run to run) is a bug in the test. Rules:
+
+- Never assert that something happened *within N seconds* (`elapsed < 2`), and never `time.sleep(...)` to wait for another thread. Wait for the thing itself: join the thread (`TransferJobs.wait`), wait on an `Event`, or use the `wait_until` fixture for a condition with nothing to wait on. Then assert what happened.
+- To stop a background job *in the middle*, don't slow it down and race it: hold it with an event (`Gate` in `tests/services/test_transfer_jobs.py`) so the test knows exactly where it is. Make timers deterministic by patching them (`transfer_engine.FLUSH_FILES = 1`) rather than waiting on them.
+- A hung call is proved by the test returning at all (the call blocks on an `Event` the test releases afterwards), not by timing it.
+- `pytest-timeout` (180s, thread method) ends a hung test with every thread's stack; it is a backstop, not something to tune per test.
+- A nightly job (`cross-platform.yml`, `flake-check`) runs the OS-sensitive tests ten times. A test that fails there once is fixed, not retried or skipped.
+
 ## Architecture
 
 ```
