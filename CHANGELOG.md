@@ -20,6 +20,34 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## v1.1.4 — Windows plugin fix, install checks (2026-10-04)
+
+### Fixes
+
+- Custom plugins failed on Windows with `did not find executable at
+  ...\Temp\civex-plugin-...\Python\...\python.exe` when Python came from the
+  Python install manager. Plugins run with a restricted environment that left
+  out `LOCALAPPDATA`, so `uv` looked for interpreters under the plugin's
+  scratch folder. That variable (and `APPDATA`, `PROGRAMDATA`, `PROGRAMFILES`,
+  `WINDIR`, `COMSPEC`, `PATHEXT`, `HOMEDRIVE`/`HOMEPATH`) is now passed
+  through, as are `UV_PYTHON`, `UV_PYTHON_PREFERENCE`, `UV_NATIVE_TLS`, the
+  proxy variables and `SSL_CERT_FILE`. Secrets such as the database URL and
+  API keys are still withheld.
+
+### Features
+
+- `civex doctor` now checks the installation, and works outside a project:
+  - another `civex` earlier on PATH that shadows this one (it names the file
+    and how to remove it),
+  - required packages that are missing or at the wrong version,
+  - whether `uv` is found, and whether a custom plugin's Python can start.
+
+  Inside a project it still checks data integrity. It exits 1 only when a
+  check fails outright; a shadowed copy or missing `uv` is a warning.
+- `civex update` now verifies that every package civex needs is installed
+  (also when already up to date) and reinstalls any that are missing, and
+  warns after an upgrade if typing `civex` still runs an older copy.
+
 ## v1.1.3 — storage moves, run triage, record naming (2026-10-04)
 
 ### Breaking
