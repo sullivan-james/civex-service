@@ -169,4 +169,5 @@ export const NON_NAMEABLE = new Set([
   'reference',
   'reference_list',
   'tags',
+  'longtext',
 ])

@@ -109,6 +109,24 @@ describe('DynamicField', () => {
   })
 })
 
+describe('DynamicField longtext', () => {
+  it('renders a multi-line textarea and reports edits', async () => {
+    const onChange = vi.fn()
+    render(
+      <DynamicField
+        field={makeField({ type: 'longtext' })}
+        value={'one\ntwo'}
+        onChange={onChange}
+      />,
+    )
+    const box = screen.getByRole('textbox')
+    expect(box.tagName).toBe('TEXTAREA')
+    expect(box).toHaveValue('one\ntwo')
+    fireEvent.change(box, { target: { value: 'one\ntwo\nthree' } })
+    expect(onChange).toHaveBeenLastCalledWith('one\ntwo\nthree')
+  })
+})
+
 describe('DynamicField datetime and timezones', () => {
   const dt = (extra: Partial<Field> = {}) =>
     makeField({ type: 'datetime', ...extra })

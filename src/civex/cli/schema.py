@@ -279,9 +279,16 @@ def schema_add_field(
             ]
         if max_length is not None:
             restrictions["max_length"] = max_length
+    elif dtype == "longtext":
+        if choices:
+            console.print("[error]--choices is only valid for --type string.[/error]")
+            raise typer.Exit(1)
+        if max_length is not None:
+            restrictions["max_length"] = max_length
     elif choices or max_length is not None:
         console.print(
-            "[error]--choices/--max-length are only valid for --type string.[/error]"
+            "[error]--choices/--max-length are only valid for --type string"
+            " (--max-length also for longtext).[/error]"
         )
         raise typer.Exit(1)
 
@@ -536,6 +543,8 @@ def schema_update_field(
                     ]
                 if max_length is not None:
                     new_restrictions["max_length"] = max_length
+            if dtype == "longtext" and max_length is not None:
+                new_restrictions["max_length"] = max_length
             if dtype in ("file", "file_list"):
                 if accept:
                     new_restrictions["accept"] = accept

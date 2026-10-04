@@ -26,7 +26,7 @@ class FieldDTO:
     id: uuid.UUID
     schema_id: uuid.UUID
     name: str
-    dtype: str  # "integer" | "float" | "string" | "boolean" | "file" | "reference" | "enum" | "url" | "reference_list" | "tags"
+    dtype: str  # "integer" | "float" | "string" | "boolean" | "file" | "reference" | "enum" | "url" | "reference_list" | "tags" | "longtext"
     required: bool
     restrictions: dict[str, Any]
     created_at: datetime

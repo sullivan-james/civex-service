@@ -43,6 +43,7 @@ VALID_DTYPES = frozenset(
         "reference_list",
         "tags",
         "geo",
+        "longtext",
     ]
 )
 

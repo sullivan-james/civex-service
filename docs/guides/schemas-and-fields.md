@@ -58,7 +58,7 @@ A template is literal text with variables in braces. A variable is a field name,
 | `{site.code}` | a field of the record that the reference field `site` points at (see below) |
 | `{schema}`, `{id}` | the schema's name and the record's short id |
 
-A value a record doesn't have is left out together with the separator beside it, so `{site} - {sample_no}` on a record with no site is just the sample number. The first field you add that can go in a name (not a reference, file, tags or location) is used as the schema's template to begin with, so a new schema's records are named from the start; change it any time. A schema with no template uses the first value on the record, and the Naming tab says which field that is. Renaming or deleting a field updates every template that uses it.
+A value a record doesn't have is left out together with the separator beside it, so `{site} - {sample_no}` on a record with no site is just the sample number. The first field you add that can go in a name (not a reference, file, tags, text box or location) is used as the schema's template to begin with, so a new schema's records are named from the start; change it any time. A schema with no template uses the first value on the record, and the Naming tab says which field that is. Renaming or deleting a field updates every template that uses it.
 
 Fields a schema inherits from its parent can be used like its own; the builder lists them under "From <parent>" so you can tell them apart.
 
@@ -83,6 +83,7 @@ The same builder names **downloads**: a `file` field's *Download file name* rule
 | Type | Stores | CLI prompt accepts |
 |---|---|---|
 | `string` | Text | Any text |
+| `longtext` | Several lines of text (shown as a **Text box**), with an optional `--max-length` | Any text; newlines kept |
 | `integer` | Whole number | `42` |
 | `float` | Decimal number, optionally in a fixed unit | `3.14`, or `1024 ft` when the field has a unit |
 | `boolean` | True/false | `true`, `yes`, `1` / `false`, `no`, `0` |

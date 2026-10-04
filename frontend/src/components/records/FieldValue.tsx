@@ -30,6 +30,8 @@ export function FieldValue({
     ) : (
       <span className="text-fg-subtle">—</span>
     )
+  if (field?.type === 'longtext' && typeof value === 'string')
+    return <span className="whitespace-pre-wrap">{value}</span>
   if (field?.type === 'datetime' && typeof value === 'string' && value)
     // Shown as wall time in the field's zone; the stored UTC value is on hover.
     return <span title={value}>{formatDateTime(value, timeZone)}</span>

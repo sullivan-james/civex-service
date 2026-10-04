@@ -81,6 +81,7 @@ _COERCE: dict[str, Any] = {
     "datetime": _parse_datetime,
     "enum": str,
     "url": str,
+    "longtext": str,
     "tags": lambda v: (
         [t.strip() for t in v.split(",")] if isinstance(v, str) else [str(t) for t in v]
     ),
@@ -148,6 +149,13 @@ def _check_restrictions(
             raise ValidationError(
                 f"Field '{field_name}': '{value}' must be one of: {', '.join(str(c) for c in choices)}"
             )
+        if max_length is not None and len(value) > int(max_length):
+            raise ValidationError(
+                f"Field '{field_name}': value length {len(value)} exceeds max_length {max_length}"
+            )
+
+    elif dtype == "longtext":
+        max_length = restrictions.get("max_length")
         if max_length is not None and len(value) > int(max_length):
             raise ValidationError(
                 f"Field '{field_name}': value length {len(value)} exceeds max_length {max_length}"
