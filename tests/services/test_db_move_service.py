@@ -13,6 +13,7 @@ from sqlalchemy import create_engine
 from civex.config import load_config
 from civex.context import AppContext
 from civex.db import move as engine_move
+from civex.db.sqlite_url import sqlite_url
 from civex.domain.exceptions import ValidationError
 from civex.services import db_move_service as svc
 from civex.services import db_service
@@ -42,7 +43,7 @@ def test_a_move_copies_switches_and_records_itself(project: Path, tmp_path: Path
 
     assert record.status == "done", record.error
     assert record.counts["records"] == 12
-    assert load_config().db.url == f"sqlite:///{tmp_path / 'moved.db'}"
+    assert load_config().db.url == sqlite_url(tmp_path / "moved.db")
     assert (tmp_path / "moved.db").exists()
     assert old_file.stat().st_size == old_size  # the original is never touched
     assert [m.id for m in svc.list_moves(load_config())] == [record.id]
@@ -80,7 +81,7 @@ def test_a_target_that_already_has_data_is_refused(project: Path, tmp_path: Path
     assert "isn't empty" in check.problems[0]
     with pytest.raises(ValidationError, match="isn't empty"):
         svc.run_move(config, svc.TargetSpec(kind="postgres", url=f"sqlite:///{old}"))
-    assert load_config().db.url == f"sqlite:///{tmp_path / 'first.db'}"
+    assert load_config().db.url == sqlite_url(tmp_path / "first.db")
 
 
 def test_moving_to_the_database_in_use_is_refused(project: Path):

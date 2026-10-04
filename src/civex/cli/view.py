@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -55,7 +56,9 @@ def view_export(
         # Write the data file straight to its final destination when there
         # are no files to bundle; otherwise to a scratch file that gets
         # zipped. Either way rows are paged, never all held in memory.
-        data_path = Path(tempfile.mkstemp(prefix="civex-view-", suffix=f".{format}")[1])
+        fd, scratch = tempfile.mkstemp(prefix="civex-view-", suffix=f".{format}")
+        os.close(fd)  # an open handle would keep Windows from moving the file
+        data_path = Path(scratch)
         try:
             with data_path.open("w", encoding="utf-8", newline="") as out:
                 if format == "csv":

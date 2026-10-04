@@ -4,9 +4,9 @@ is added, network drives, and a dead mount not freezing everything."""
 from __future__ import annotations
 
 import os
+import sys
 import shutil
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -52,8 +52,8 @@ def test_browse_lists_folders_with_a_parent_and_places_to_start(
 
     listing = ctx.store_svc.browse_directory(str(tmp_path))
 
-    assert listing.path == str(tmp_path)
-    assert listing.parent == str(tmp_path.parent)
+    assert listing.path == tmp_path.as_posix()
+    assert listing.parent == tmp_path.parent.as_posix()
     assert [e.name for e in listing.entries] == ["a", "b"]
     kinds = {loc.label: loc for loc in listing.locations}
     assert {"Project", "Home", "usb", "nas"} <= set(kinds)
@@ -64,6 +64,14 @@ def test_browse_lists_folders_with_a_parent_and_places_to_start(
 
 def test_browse_at_the_top_has_no_parent(ctx: AppContext) -> None:
     assert ctx.store_svc.browse_directory("/").parent is None
+
+
+def test_browsing_the_drive_root_you_are_on_has_no_parent(
+    ctx: AppContext, tmp_path: Path
+) -> None:
+    # `/` on POSIX, `C:/` on Windows: going "up" from a root must not offer a
+    # bare drive letter (which means "the current folder of that drive").
+    assert ctx.store_svc.browse_directory(tmp_path.anchor).parent is None
 
 
 def test_browse_errors_are_clear(ctx: AppContext, tmp_path: Path) -> None:
@@ -87,17 +95,16 @@ def test_browsing_a_location_that_stops_answering_reports_it(
         fs_locations, "list_subdirectories", lambda *a, **k: release.wait(30)
     )
     try:
-        started = time.monotonic()
+        # (Waiting for the hung call would block here until it is released.)
         with pytest.raises(ValidationError, match="isn't responding"):
             ctx.store_svc.browse_directory(str(tmp_path))
-        assert time.monotonic() - started < 3
     finally:
         release.set()
 
 
 def test_create_folder(ctx: AppContext, tmp_path: Path) -> None:
     made = ctx.store_svc.create_folder(str(tmp_path), "civex-data")
-    assert Path(made).is_dir() and made == str(tmp_path / "civex-data")
+    assert Path(made).is_dir() and made == (tmp_path / "civex-data").as_posix()
     with pytest.raises(AlreadyExistsError):
         ctx.store_svc.create_folder(str(tmp_path), "civex-data")
     with pytest.raises(NotFoundError):
@@ -140,7 +147,11 @@ def test_a_file_is_not_a_folder(ctx: AppContext, tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root can write anywhere")
+@pytest.mark.posix_only
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="needs POSIX permissions, and root can write anywhere",
+)
 def test_a_folder_civex_cannot_write_to_is_a_problem(
     ctx: AppContext, tmp_path: Path
 ) -> None:
@@ -221,7 +232,11 @@ def test_a_network_location_is_flagged_with_what_that_means(
 
 
 def test_a_network_address_must_be_mounted_first(ctx: AppContext) -> None:
-    for address in ("smb://nas/share", "//nas/share", "nfs://nas/export"):
+    # `//host/share` is a valid local UNC path on Windows, so it is not refused there.
+    addresses = ["smb://nas/share", "nfs://nas/export"]
+    if sys.platform != "win32":
+        addresses.append("//nas/share")
+    for address in addresses:
         inspection = ctx.store_svc.inspect_path(address)
         assert "mount it first" in inspection.problems[0], address
         with pytest.raises(ValidationError, match="mount it first"):
@@ -272,8 +287,11 @@ def hung_drive(tmp_path: Path, short_timeout: None, monkeypatch: pytest.MonkeyPa
     dead = _drive(tmp_path, "dead")
     real_probe = file_store_module._probe_root
 
+    dead_probes = [0]
+
     def probe(root: Path):
         if root == dead:
+            dead_probes[0] += 1
             release.wait(30)
         return real_probe(root)
 
@@ -286,17 +304,16 @@ def hung_drive(tmp_path: Path, short_timeout: None, monkeypatch: pytest.MonkeyPa
         volume_queue=["dead", "local"],
     )
     store = VolumeAwareFileObjectStore(config, tmp_path)
+    store.dead_probes = dead_probes  # type: ignore[attr-defined]
     yield store
     release.set()
 
 
 def test_a_volume_that_stops_answering_is_offline_with_a_reason(hung_drive) -> None:
-    started = time.monotonic()
     status = hung_drive.volume_status("dead")
 
     assert status.state == "offline" and "not responding" in status.reason
     assert "network connection" in status.fix
-    assert time.monotonic() - started < 3
 
 
 def test_writes_go_to_the_next_volume_when_one_stops_answering(hung_drive) -> None:
@@ -306,16 +323,16 @@ def test_writes_go_to_the_next_volume_when_one_stops_answering(hung_drive) -> No
 def test_reads_of_other_volumes_are_not_stalled_by_a_dead_one(hung_drive) -> None:
     ref = hung_drive.put(b"findable", "a.txt")
 
-    started = time.monotonic()
     assert hung_drive.get(ref.sha256) == b"findable"
     assert hung_drive.exists(ref.sha256)
-    assert time.monotonic() - started < 2
-    # The second look doesn't wait again: the stuck probe is remembered.
-    started = time.monotonic()
+    # The second look doesn't probe the dead drive again: the stuck probe is
+    # remembered. (Counted, not timed.)
+    probes = hung_drive.dead_probes[0]
     hung_drive.get(ref.sha256)
-    assert time.monotonic() - started < 0.5
+    assert hung_drive.dead_probes[0] == probes
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX mount table")
 def test_volume_stats_flags_network_volumes(
     ctx: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

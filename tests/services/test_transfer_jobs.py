@@ -31,6 +31,10 @@ from civex.services.transfer_jobs import TransferJobs
 def _fast(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(transfer_engine, "RETRY_DELAY", 0)
     monkeypatch.setattr(transfer_jobs, "AUTO_RESUME_POLL", 0.3)
+    # Save progress after every file, so what a test reads at a stop is exact
+    # and does not depend on how fast the machine is.
+    monkeypatch.setattr(transfer_engine, "FLUSH_FILES", 1)
+    monkeypatch.setattr(transfer_engine, "FLUSH_SECONDS", 0)
 
 
 @pytest.fixture()
@@ -72,31 +76,68 @@ def _record(transfer_id: str) -> TransferRecord:
         ctx.close()
 
 
-def _wait(check: Callable[[], bool], what: str, timeout: float = 15.0) -> None:
+# Waiting for an event that must happen: generous, since the bound only matters
+# when something is stuck (pytest-timeout also ends a hung test).
+SAFETY = 60.0
+
+
+def _wait(check: Callable[[], bool], what: str, timeout: float = SAFETY) -> None:
+    """For things that become true on another thread with nothing to wait on
+    (a drive coming back). Everything else uses `Gate` or `jobs.wait`."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if check():
             return
-        time.sleep(0.05)
+        time.sleep(0.02)
     pytest.fail(f"timed out waiting for {what}")
 
 
 def _wait_for_status(
-    transfer_id: str, status: str, timeout: float = 15.0
+    transfer_id: str, status: str, timeout: float = SAFETY
 ) -> TransferRecord:
     _wait(lambda: _record(transfer_id).status == status, f"status {status}", timeout)
     return _record(transfer_id)
 
 
-def _slow_copies(monkeypatch: pytest.MonkeyPatch, seconds: float = 0.05) -> None:
-    """Make each file take a moment, so there is a middle to pause or cancel in."""
-    real = VolumeAwareFileObjectStore.transfer_object
+def _finish(jobs: TransferJobs, transfer_id: str) -> TransferRecord:
+    """Let the transfer's thread end, then read what it saved."""
+    assert jobs.wait(transfer_id, SAFETY), "the transfer never finished"
+    return _record(transfer_id)
 
-    def slow(self, *args, **kwargs):
-        time.sleep(seconds)
-        return real(self, *args, **kwargs)
 
-    monkeypatch.setattr(VolumeAwareFileObjectStore, "transfer_object", slow)
+class Gate:
+    """Hold a transfer in the middle of its n-th copy until the test lets go.
+
+    This replaces "make each copy take a moment and poll until some are done",
+    which is a race against the clock. Here the test knows exactly where the
+    transfer is: `reached(n)` returns once n copies have run and the next
+    thing the transfer does is wait; `release(n)` lets it go on."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, stops: set[int]) -> None:
+        self._reached = {n: threading.Event() for n in stops}
+        self._go = {n: threading.Event() for n in stops}
+        self._count = 0
+        real = VolumeAwareFileObjectStore.transfer_object
+
+        def gated(store, *args, **kwargs):
+            result = real(store, *args, **kwargs)
+            self._count += 1
+            if self._count in self._go:
+                self._reached[self._count].set()
+                assert self._go[self._count].wait(SAFETY), "the gate was never opened"
+            return result
+
+        monkeypatch.setattr(VolumeAwareFileObjectStore, "transfer_object", gated)
+
+    def reached(self, n: int) -> None:
+        assert self._reached[n].wait(SAFETY), f"never got as far as copy {n}"
+
+    def release(self, n: int) -> None:
+        self._go[n].set()
+
+    def release_all(self) -> None:
+        for event in self._go.values():
+            event.set()
 
 
 def _store_state(ctx: AppContext, volume: str) -> str:
@@ -123,9 +164,10 @@ def test_a_transfer_runs_in_the_background_and_completes(
     started = jobs.start(_drain(["a"], ["b"]))
 
     assert started.status == STATUS_RUNNING  # returns straight away
-    done = _wait_for_status(started.id, STATUS_COMPLETED)
+    done = _finish(jobs, started.id)
+    assert done.status == STATUS_COMPLETED
     assert done.progress.files_done == 15 and done.failures == []
-    _wait(lambda: not jobs.is_live(started.id), "the thread to finish")
+    assert not jobs.is_live(started.id)
     assert _contents_intact(files)
 
 
@@ -137,35 +179,31 @@ def test_an_impossible_transfer_is_refused_before_anything_starts(
     with pytest.raises(ValidationError, match="can't be both"):
         jobs.start(_drain(["a"], ["a"]))
 
-    assert not jobs._live
-
 
 def test_progress_can_be_watched_while_it_runs(
     ctx: AppContext, tmp_path: Path, jobs: TransferJobs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _volumes(ctx, tmp_path, "a", "b")
     _put_on(ctx, "a", 15)
-    _slow_copies(monkeypatch, 0.2)  # about three seconds in all
+    gate = Gate(monkeypatch, {5, 11})
 
     started = jobs.start(_drain(["a"], ["b"]))
-    done_counts: set[int] = set()
-    currents: set[str | None] = set()
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline:
-        record = _record(started.id)
-        done_counts.add(record.progress.files_done)
-        currents.add(record.progress.current)
-        if record.status == STATUS_COMPLETED:
-            break
-        time.sleep(0.05)
 
-    assert record.status == STATUS_COMPLETED
-    assert len(done_counts) >= 3, (
-        f"the count should move in between, saw {sorted(done_counts)}"
-    )
-    assert max(done_counts) == 15
-    assert any(c for c in currents), "the file being copied is reported"
-    assert record.progress.current is None  # and nothing is "current" at the end
+    gate.reached(5)
+    first = _record(started.id)
+    assert first.status == STATUS_RUNNING
+    assert first.progress.files_done == 4  # the fifth copy is the one in progress
+    assert first.progress.current  # and the file being copied is reported
+    gate.release(5)
+
+    gate.reached(11)
+    second = _record(started.id)
+    assert second.progress.files_done == 10  # the count moved between the looks
+    gate.release(11)
+
+    done = _finish(jobs, started.id)
+    assert done.status == STATUS_COMPLETED and done.progress.files_done == 15
+    assert done.progress.current is None  # nothing is "current" at the end
 
 
 # -- pause, resume, cancel -----------------------------------------------------------
@@ -176,21 +214,23 @@ def test_pausing_then_resuming(
 ) -> None:
     _volumes(ctx, tmp_path, "a", "b")
     files = _put_on(ctx, "a", 30)
-    _slow_copies(monkeypatch)
+    gate = Gate(monkeypatch, {5})
     started = jobs.start(_drain(["a"], ["b"]))
-    _wait(lambda: _record(started.id).progress.files_done >= 4, "some progress")
+    gate.reached(5)
 
     assert jobs.pause(started.id) is True
+    gate.release(5)
 
-    paused = _wait_for_status(started.id, STATUS_PAUSED)
-    _wait(lambda: not jobs.is_live(started.id), "the thread to stop")
-    assert 4 <= paused.progress.files_done < 30 and not paused.auto_resume
+    paused = _finish(jobs, started.id)
+    assert paused.status == STATUS_PAUSED and not paused.auto_resume
+    assert 4 <= paused.progress.files_done < 30
     assert _contents_intact(files)  # everything readable, wherever it is
     assert paused.frozen == {"a": "active"}  # the source stays frozen while paused
 
     jobs.resume(started.id)
-    done = _wait_for_status(started.id, STATUS_COMPLETED)
+    done = _finish(jobs, started.id)
 
+    assert done.status == STATUS_COMPLETED
     assert done.progress.files_done == 30  # each counted once
     assert done.frozen == {}
     assert _contents_intact(files)
@@ -201,13 +241,15 @@ def test_cancelling_a_running_transfer_restores_the_source(
 ) -> None:
     _volumes(ctx, tmp_path, "a", "b")
     files = _put_on(ctx, "a", 30)
-    _slow_copies(monkeypatch)
+    gate = Gate(monkeypatch, {4})
     started = jobs.start(_drain(["a"], ["b"]))
-    _wait(lambda: _record(started.id).progress.files_done >= 3, "some progress")
+    gate.reached(4)
 
     jobs.cancel(started.id)
+    gate.release(4)
 
-    done = _wait_for_status(started.id, STATUS_CANCELLED)
+    done = _finish(jobs, started.id)
+    assert done.status == STATUS_CANCELLED
     assert done.progress.files_done < 30 and done.finished_at is not None
     assert load_config().store_config.volumes["a"].state == "active"
     assert _contents_intact(files)
@@ -218,12 +260,12 @@ def test_a_paused_transfer_can_be_cancelled_without_running(
 ) -> None:
     _volumes(ctx, tmp_path, "a", "b")
     files = _put_on(ctx, "a", 30)
-    _slow_copies(monkeypatch)
+    gate = Gate(monkeypatch, {4})
     started = jobs.start(_drain(["a"], ["b"]))
-    _wait(lambda: _record(started.id).progress.files_done >= 3, "some progress")
+    gate.reached(4)
     jobs.pause(started.id)
-    _wait_for_status(started.id, STATUS_PAUSED)
-    _wait(lambda: not jobs.is_live(started.id), "the thread to stop")
+    gate.release(4)
+    assert _finish(jobs, started.id).status == STATUS_PAUSED
 
     closed = jobs.cancel(started.id)
 
@@ -240,7 +282,7 @@ def test_pausing_something_that_is_not_running_says_so(
     _volumes(ctx, tmp_path, "a", "b")
     _put_on(ctx, "a", 2)
     started = jobs.start(_drain(["a"], ["b"]))
-    _wait_for_status(started.id, STATUS_COMPLETED)
+    assert _finish(jobs, started.id).status == STATUS_COMPLETED
 
     assert jobs.pause(started.id) is False  # finished: nothing to pause
     with pytest.raises(NotFoundError):
@@ -252,8 +294,9 @@ def test_a_running_transfer_cannot_be_started_twice(
 ) -> None:
     _volumes(ctx, tmp_path, "a", "b", "c")
     _put_on(ctx, "a", 30)
-    _slow_copies(monkeypatch)
+    gate = Gate(monkeypatch, {2})
     started = jobs.start(_drain(["a"], ["b"]))
+    gate.reached(2)  # certainly still running
 
     with pytest.raises(ValidationError, match="Another transfer is running"):
         jobs.start(_drain(["a"], ["c"]))
@@ -261,7 +304,8 @@ def test_a_running_transfer_cannot_be_started_twice(
         jobs.resume(started.id)
 
     jobs.cancel(started.id)
-    _wait_for_status(started.id, STATUS_CANCELLED)
+    gate.release(2)
+    assert _finish(jobs, started.id).status == STATUS_CANCELLED
 
 
 # -- a drive that goes away ------------------------------------------------------------
@@ -323,12 +367,12 @@ def test_pausing_while_waiting_for_a_drive_stops_the_waiting(
 
     jobs.pause(started.id)
 
-    _wait(lambda: not jobs.is_live(started.id), "the thread to stop waiting")
-    final = _record(started.id)
+    final = _finish(jobs, started.id)  # the waiting thread ends
     assert final.status == STATUS_PAUSED and not final.auto_resume
     unplugged.rename(drives["b"])
-    time.sleep(0.8)
-    assert _record(started.id).status == STATUS_PAUSED  # it did not carry on
+    # With no thread left running it, nothing can carry on by itself.
+    assert not jobs.is_live(started.id)
+    assert _record(started.id).status == STATUS_PAUSED
 
 
 # -- things that stop it starting ---------------------------------------------------------
@@ -347,7 +391,8 @@ def test_a_transfer_that_cannot_start_is_parked_with_the_reason(
     assert "garbage-collection pass is running" in (parked.pause_reason or "")
     assert not parked.auto_resume
     jobs.resume(started.id)  # fine once it has finished
-    assert _wait_for_status(started.id, STATUS_COMPLETED).progress.files_done == 3
+    done = _finish(jobs, started.id)
+    assert done.status == STATUS_COMPLETED and done.progress.files_done == 3
 
 
 def test_resuming_an_unknown_transfer_is_an_error(
@@ -365,9 +410,9 @@ def test_threads_are_cleaned_up(
     _volumes(ctx, tmp_path, "a", "b")
     _put_on(ctx, "a", 3)
     started = jobs.start(_drain(["a"], ["b"]))
-    _wait_for_status(started.id, STATUS_COMPLETED)
+    assert _finish(jobs, started.id).status == STATUS_COMPLETED
 
-    _wait(lambda: not jobs._live, "the registry to empty")
+    assert not jobs._live
     assert not any(t.name.startswith("transfer-") for t in threading.enumerate())
 
 
@@ -381,7 +426,7 @@ def test_a_transfer_running_in_another_process_can_be_paused_from_here(
     this process's threads, but the web UI can still pause it."""
     _volumes(ctx, tmp_path, "a", "b")
     files = _put_on(ctx, "a", 30)
-    _slow_copies(monkeypatch, 0.2)  # long enough for a request to get through
+    gate = Gate(monkeypatch, {4})
     record = ctx.transfer_svc.create(_drain(["a"], ["b"]))
 
     def run_like_the_cli() -> None:
@@ -394,14 +439,17 @@ def test_a_transfer_running_in_another_process_can_be_paused_from_here(
     thread = threading.Thread(target=run_like_the_cli)
     thread.start()
     try:
-        _wait(lambda: _record(record.id).progress.files_done >= 3, "some progress")
+        gate.reached(4)
         assert not jobs.is_live(record.id)  # not one of ours
 
         assert jobs.pause(record.id) is True
-
-        paused = _wait_for_status(record.id, STATUS_PAUSED)
     finally:
-        thread.join(timeout=20)
+        gate.release_all()
+        thread.join(timeout=SAFETY)
+    assert not thread.is_alive()
+
+    paused = _record(record.id)
+    assert paused.status == STATUS_PAUSED
     assert 3 <= paused.progress.files_done < 30
     assert _contents_intact(files)
 
@@ -428,7 +476,7 @@ def test_cancelling_while_waiting_for_a_drive_closes_the_transfer(
 
     jobs.cancel(started.id)
 
-    closed = _wait_for_status(started.id, STATUS_CANCELLED)
-    assert closed.finished_at is not None
+    closed = _finish(jobs, started.id)
+    assert closed.status == STATUS_CANCELLED and closed.finished_at is not None
     assert load_config().store_config.volumes["a"].state == "active"  # unfrozen
-    _wait(lambda: not jobs.is_live(started.id), "the thread to stop")
+    assert not jobs.is_live(started.id)

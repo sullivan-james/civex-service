@@ -31,6 +31,7 @@ from sqlalchemy.engine import Engine
 from civex.config import Config, DBConfig, save_config
 from civex.db import move as engine_move
 from civex.db.engine import enable_sqlite_foreign_keys
+from civex.db.sqlite_url import sqlite_file, sqlite_url
 from civex.domain.exceptions import ValidationError
 from civex.services import db_service
 
@@ -122,7 +123,7 @@ def resolve_target(
         path = _new_sqlite_path(config, spec)
         if path.exists():
             raise ValidationError(f"{path} already exists. Pick a new file name.")
-        return ResolvedTarget("sqlite", f"sqlite:///{path}", False, "SQLite file")
+        return ResolvedTarget("sqlite", sqlite_url(path), False, "SQLite file")
     if spec.kind == "docker":
         if provision:
             url = db_service.provision_docker_postgres(config.project_root.name)
@@ -190,7 +191,7 @@ def summarize(url: str, docker_managed: bool = False) -> DatabaseSummary:
     engine = None
     try:
         if dialect == "sqlite":
-            path = Path(urllib.parse.urlparse(url).path)
+            path = sqlite_file(url)
             if not path.exists():
                 # Connecting would create the file -- a preview mustn't.
                 return out
@@ -199,7 +200,7 @@ def summarize(url: str, docker_managed: bool = False) -> DatabaseSummary:
         out.rows = sum(out.tables.values())
         out.records = out.tables.get("records", 0)
         if dialect == "sqlite":
-            path = Path(urllib.parse.urlparse(url).path)
+            path = sqlite_file(url)
             out.size_bytes = path.stat().st_size if path.exists() else None
         else:
             with engine.connect() as conn:
@@ -434,9 +435,7 @@ def _run_move(
     if on_start:
         on_start(record)
 
-    created_sqlite = (
-        Path(urllib.parse.urlparse(target.url).path) if spec.kind == "sqlite" else None
-    )
+    created_sqlite = sqlite_file(target.url) if spec.kind == "sqlite" else None
     source = target_engine = None
     try:
         # Both ends at the same schema revision before a single row moves.

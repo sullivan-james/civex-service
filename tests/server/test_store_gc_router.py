@@ -177,7 +177,7 @@ def test_browse_lists_folders_and_places_to_start(client: TestClient, tmp_path) 
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["path"] == str(pick) and body["parent"] == str(tmp_path)
+    assert body["path"] == pick.as_posix() and body["parent"] == tmp_path.as_posix()
     assert [e["name"] for e in body["entries"]] == ["alpha", "beta"]
     assert body["truncated"] is False
     assert "hint" in body  # None except where the platform has a known reason
@@ -200,7 +200,9 @@ def test_create_folder_endpoint(client: TestClient, tmp_path) -> None:
     made = client.post(
         "/api/store/browse/folder", json={"parent": str(tmp_path), "name": "new"}
     )
-    assert made.status_code == 201 and made.json() == {"path": str(tmp_path / "new")}
+    assert made.status_code == 201 and made.json() == {
+        "path": (tmp_path / "new").as_posix()
+    }
     assert (tmp_path / "new").is_dir()
     assert (
         client.post(

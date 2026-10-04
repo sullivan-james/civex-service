@@ -5,8 +5,10 @@ freezing a request."""
 from __future__ import annotations
 
 import threading
-import time
 from pathlib import Path
+
+import concurrent.futures
+import sys
 
 import pytest
 
@@ -15,8 +17,8 @@ from civex.fs_locations import Mount
 
 
 def test_normalise_expands_home_and_dots_and_backslashes(tmp_path: Path) -> None:
-    assert fs.normalise("~").startswith("/")
-    assert fs.normalise(str(tmp_path / "a" / ".." / "b")) == str(tmp_path / "b")
+    assert fs.normalise("~") == Path.home().as_posix()
+    assert fs.normalise(str(tmp_path / "a" / ".." / "b")) == (tmp_path / "b").as_posix()
     assert "\\" not in fs.normalise("a\\b")  # forward slashes only
 
 
@@ -32,7 +34,7 @@ def test_list_subdirectories_returns_only_folders_sorted_and_skips_hidden(
     assert truncated is False
     shown, _ = fs.list_subdirectories(str(tmp_path), show_hidden=True)
     assert ".hidden" in [n for n, _ in shown]
-    assert entries[0][1] == str(tmp_path / "Alpha")
+    assert entries[0][1] == (tmp_path / "Alpha").as_posix()
 
 
 def test_list_subdirectories_truncates(tmp_path: Path) -> None:
@@ -59,14 +61,10 @@ def test_disk_usage_of_a_folder_that_does_not_exist_yet(tmp_path: Path) -> None:
 
 
 def test_network_addresses_are_recognised() -> None:
-    for addr in (
-        "smb://nas/share",
-        "NFS://nas/x",
-        "//nas/share",
-        "sftp://h/p",
-        "https://x/y",
-    ):
+    for addr in ("smb://nas/share", "NFS://nas/x", "sftp://h/p", "https://x/y"):
         assert fs.looks_like_network_address(addr), addr
+    # `//host/share` is a UNC path, a valid local path, on Windows.
+    assert fs.looks_like_network_address("//nas/share") == (sys.platform != "win32")
     for path in ("/mnt/nas", "relative/dir", "/home/me", "C:/data"):
         assert not fs.looks_like_network_address(path), path
 
@@ -82,6 +80,9 @@ MOUNTS = [
 ]
 
 
+# POSIX mount tables are only consulted on POSIX; Windows asks the drive type.
+@pytest.mark.posix_only
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX mount table")
 def test_is_network_path_uses_the_innermost_mount() -> None:
     assert fs.is_network_path("/mnt/nas/backups/2026", MOUNTS)
     assert fs.is_network_path("/mnt/media", MOUNTS)
@@ -155,24 +156,22 @@ def test_a_call_that_never_returns_is_reported_not_waited_on(
 ) -> None:
     release = threading.Event()
     try:
-        started = time.monotonic()
+        # If this waited for the call it would block for 30s (until released).
         with pytest.raises(fs.Unresponsive, match="no answer"):
             fs.guarded("t-hang", release.wait, 30)
-        assert time.monotonic() - started < 2
 
         # While that call is still stuck, the next one fails at once rather
         # than queueing another blocked thread behind the dead mount.
-        started = time.monotonic()
         with pytest.raises(fs.Unresponsive, match="still waiting"):
             fs.guarded("t-hang", lambda: "never runs")
-        assert time.monotonic() - started < 0.1
 
         # Other locations are unaffected.
         assert fs.guarded("t-other", lambda: "fine") == "fine"
     finally:
         release.set()
 
-    time.sleep(0.2)  # the stuck call has now returned: the location works again
+    # Once the stuck call has returned, the location works again.
+    concurrent.futures.wait([fs._pending["t-hang"]], timeout=60)
     assert fs.guarded("t-hang", lambda: "recovered") == "recovered"
 
 

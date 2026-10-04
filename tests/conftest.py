@@ -22,6 +22,76 @@ from civex.main import app as cli_app
 
 runner = CliRunner()
 
+# The tests whose result can differ by operating system: they touch real files,
+# paths, processes, mounts or the launcher. CI runs only these on Windows and
+# macOS (`pytest -m os_sensitive`); the full suite runs on Linux. Add a test
+# file here when it exercises something OS-specific; pure logic does not belong.
+OS_SENSITIVE = {
+    "test_smoke.py",
+    "test_fs_locations.py",
+    "test_launcher.py",
+    "test_processes.py",
+    "test_sqlite_url.py",
+    # storage: volumes, the object store, moving and collecting files
+    "test_volume_picker.py",
+    "test_volume_identity.py",
+    "test_file_store_offline.py",
+    "test_file_service.py",
+    "test_file_service_stream.py",
+    "test_file_locations.py",
+    "test_gc_service.py",
+    "test_transfer_engine.py",
+    "test_transfer_jobs.py",
+    "test_transfer_service.py",
+    "test_placement.py",
+    "test_store_placement_service.py",
+    "test_store_volumes.py",
+    "test_store_move.py",
+    "test_store_gc.py",
+    "test_store_place.py",
+    "test_collection_storage_router.py",
+    "test_store_gc_router.py",
+    "test_files_stream_router.py",
+    "test_records_files_zip_router.py",
+    "test_record_files_zip.py",
+    # the database file and project folder
+    "test_migrate.py",
+    "test_db_move_service.py",
+    "test_init.py",
+    "test_dump.py",
+    "test_dump_service.py",
+    "test_view.py",
+    # plugin subprocesses and the plugin folder
+    "test_subprocess_runtime.py",
+    "test_subprocess_runtime_uv_e2e.py",
+    "test_registry.py",
+}
+
+
+@pytest.fixture()
+def wait_until():
+    """`wait_until(check, "what")`: for something another thread will make true
+    with no event to wait on. A generous bound that only matters when something
+    is stuck (pytest-timeout also ends a hung test). Never assert how *fast*
+    something happens: wait for it, then assert what happened."""
+    import time
+
+    def wait(check, what: str, timeout: float = 60.0) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if check():
+                return
+            time.sleep(0.01)
+        pytest.fail(f"timed out waiting for {what}")
+
+    return wait
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    for item in items:
+        if item.path.name in OS_SENSITIVE:
+            item.add_marker(pytest.mark.os_sensitive)
+
 
 @pytest.fixture()
 def strict_schema_lists() -> None:

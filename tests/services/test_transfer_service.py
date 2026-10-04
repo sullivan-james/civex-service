@@ -576,21 +576,6 @@ def test_setting_a_state_does_not_overwrite_edits_made_meanwhile(
 # -- asking a running transfer to stop, from anywhere ---------------------------------------
 
 
-def _slow(
-    monkeypatch: pytest.MonkeyPatch, ctx: AppContext, seconds: float = 0.05
-) -> None:
-    import time
-
-    store = ctx.file_svc._store
-    real = store.transfer_object
-
-    def slow(*a, **k):
-        time.sleep(seconds)
-        return real(*a, **k)
-
-    monkeypatch.setattr(store, "transfer_object", slow)
-
-
 def _ask_from_another_process(transfer_id: str, action: str) -> threading.Thread:
     """What the other process does: its own connection, asking once."""
 
@@ -620,16 +605,21 @@ def test_a_pause_or_cancel_asked_for_by_another_process_is_obeyed(
     round: the request is saved, and the runner notices it as it saves progress."""
     _volumes(ctx, tmp_path, "a", "b")
     files = _put_on(ctx, "a", 40)
-    _slow(monkeypatch, ctx)
+    monkeypatch.setattr(transfer_engine, "FLUSH_FILES", 1)  # a look after every file
+    monkeypatch.setattr(transfer_engine, "FLUSH_SECONDS", 0)
     record = ctx.transfer_svc.create(_drain(["a"], ["b"]))
     asked: list[threading.Thread] = []
 
     def from_elsewhere(p) -> None:
         if p.files_done >= 3 and not asked:
-            asked.append(_ask_from_another_process(record.id, action))
+            thread = _ask_from_another_process(record.id, action)
+            asked.append(thread)
+            # The other process has made its request before the next file is
+            # looked at, however slow it is: no race against the copying.
+            thread.join(timeout=60)
 
     done = ctx.transfer_svc.execute(record.id, on_progress=from_elsewhere)
-    asked[0].join(timeout=10)
+    assert not asked[0].is_alive()
 
     assert done.status == outcome and 3 <= done.progress.files_done < 40
     assert _state(ctx, "a") == ("online" if action == "cancel" else "readonly")
