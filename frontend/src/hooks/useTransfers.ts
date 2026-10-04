@@ -9,10 +9,9 @@ import {
   type Transfer,
   type TransferSpec,
 } from '../api/transfers'
+import { isBusy } from '../utils/transfers'
 
 const KEY = ['store', 'transfers']
-
-const isBusy = (t: Transfer) => t.status === 'running' || t.auto_resume
 
 /** Recent transfers. Polls quickly while one is running and slowly otherwise. */
 export function useTransfers() {

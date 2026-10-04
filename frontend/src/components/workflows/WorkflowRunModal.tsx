@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import {
   useRunWorkflow,
@@ -7,6 +7,7 @@ import {
 import {
   Button,
   Field,
+  FileDropZone,
   Input,
   Modal,
   ModalBody,
@@ -17,21 +18,25 @@ import type { Workflow } from '../../api/workflows'
 
 interface Props {
   workflow: Workflow
-  /** Pre-fill the record ID field and lock it. */
+  /** The record to run it for, when started from that record's page. The
+   * person is already on the record, so it is not asked for or shown. Without
+   * it, a record ID is asked for. */
   recordId?: string
+  /** Called once the run has been queued, before the dialog closes. */
+  onStarted?: () => void
   onClose: () => void
 }
 
 export function WorkflowRunModal({
   workflow,
   recordId: prefilled,
+  onStarted,
   onClose,
 }: Props) {
   const navigate = useNavigate()
   const [recordId, setRecordId] = useState(prefilled ?? '')
   const [fileInputs, setFileInputs] = useState<Record<string, File[]>>({})
   const [error, setError] = useState<string | null>(null)
-  const fileRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const runPlain = useRunWorkflow()
   const runFiles = useRunWorkflowWithFiles()
@@ -42,11 +47,8 @@ export function WorkflowRunModal({
   const hasFileInputs = filesInputs.length > 0
   const isPending = runPlain.isPending || runFiles.isPending
 
-  function handleFileChange(inputName: string, files: FileList | null) {
-    setFileInputs((prev) => ({
-      ...prev,
-      [inputName]: files ? Array.from(files) : [],
-    }))
+  function handleFiles(inputName: string, files: File[]) {
+    setFileInputs((prev) => ({ ...prev, [inputName]: files }))
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -65,6 +67,7 @@ export function WorkflowRunModal({
           recordId: recordId.trim(),
         })
       }
+      onStarted?.()
       onClose()
       if (!prefilled) navigate('/jobs')
     } catch (err) {
@@ -82,29 +85,30 @@ export function WorkflowRunModal({
 
       <ModalBody>
         <form id="wf-run-form" onSubmit={handleSubmit} className="space-y-4">
-          <Field
-            label={
-              <>
-                Record ID
-                {workflow.record_schema && (
-                  <span className="ml-2 text-xs text-fg-muted font-normal">
-                    ({workflow.record_schema})
-                  </span>
-                )}
-              </>
-            }
-            required
-          >
-            <Input
-              autoFocus={!prefilled}
-              type="text"
-              value={recordId}
-              onChange={(e) => setRecordId(e.target.value)}
-              placeholder="Short ID or full UUID"
-              readOnly={!!prefilled}
-              className={`w-full font-mono ${prefilled ? 'bg-canvas-subtle text-fg-muted' : ''}`}
-            />
-          </Field>
+          {!prefilled && (
+            <Field
+              label={
+                <>
+                  Record ID
+                  {workflow.record_schema && (
+                    <span className="ml-2 text-xs text-fg-muted font-normal">
+                      ({workflow.record_schema})
+                    </span>
+                  )}
+                </>
+              }
+              required
+            >
+              <Input
+                autoFocus
+                type="text"
+                value={recordId}
+                onChange={(e) => setRecordId(e.target.value)}
+                placeholder="Short ID or full UUID"
+                className="w-full font-mono"
+              />
+            </Field>
+          )}
 
           {filesInputs.map(([inputName, decl]) => {
             const chosen = fileInputs[inputName] ?? []
@@ -114,62 +118,30 @@ export function WorkflowRunModal({
                 <span className="text-xs font-medium text-fg-muted">
                   {dropzoneLabel}
                 </span>
-                <input
-                  ref={(el) => {
-                    fileRefs.current[inputName] = el
-                  }}
-                  type="file"
+                <FileDropZone
                   multiple
-                  tabIndex={-1}
-                  aria-hidden="true"
-                  className="hidden"
-                  onChange={(e) => handleFileChange(inputName, e.target.files)}
-                />
-                <div
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`${dropzoneLabel} — drop files here or browse`}
-                  className="border-2 border-dashed border-border rounded-md px-4 py-6 text-center cursor-pointer hover:border-accent hover:bg-canvas-subtle transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                  onClick={() => fileRefs.current[inputName]?.click()}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      fileRefs.current[inputName]?.click()
-                    }
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault()
-                    e.dataTransfer.dropEffect = 'copy'
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault()
-                    handleFileChange(inputName, e.dataTransfer.files)
-                  }}
+                  inputLabel={`${dropzoneLabel}: choose files`}
+                  onFiles={(files) => handleFiles(inputName, files)}
                 >
-                  {chosen.length === 0 ? (
-                    <p className="text-sm text-fg-muted">
-                      Drop files here or{' '}
-                      <span className="text-accent">browse</span>
-                    </p>
-                  ) : (
-                    <div className="text-left">
-                      <div className="max-h-32 overflow-y-auto space-y-1 mb-1">
+                  {chosen.length === 0 ? undefined : (
+                    <span className="block text-left">
+                      <span className="mb-1 block max-h-32 space-y-1 overflow-y-auto">
                         {chosen.map((f, i) => (
-                          <p
+                          <span
                             key={i}
-                            className="text-xs font-mono text-fg truncate"
+                            className="block truncate font-mono text-xs text-fg"
                           >
                             {f.name}
-                          </p>
+                          </span>
                         ))}
-                      </div>
-                      <p className="text-xs text-fg-muted">
+                      </span>
+                      <span className="block text-xs text-fg-muted">
                         {chosen.length} file{chosen.length !== 1 ? 's' : ''}{' '}
                         selected · click or drop to replace
-                      </p>
-                    </div>
+                      </span>
+                    </span>
                   )}
-                </div>
+                </FileDropZone>
               </div>
             )
           })}

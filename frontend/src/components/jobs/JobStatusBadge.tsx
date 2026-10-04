@@ -1,14 +1,25 @@
 import { type WorkflowJob } from '../../api/workflows'
 import { Badge } from '../ui'
 import { Check, XCircle, RefreshCw, Clock } from '../ui/icons'
+import { runProblems } from '../../utils/runNarrative'
 
 export default function JobStatusBadge({
   status,
+  problems = 0,
 }: {
   status: WorkflowJob['status']
+  /** Things a completed run still got wrong (see `runProblems`). */
+  problems?: number
 }) {
   switch (status) {
     case 'completed':
+      if (problems > 0)
+        return (
+          <Badge variant="attention" className="gap-1">
+            <XCircle size={12} /> completed with {problems}{' '}
+            {problems === 1 ? 'problem' : 'problems'}
+          </Badge>
+        )
       return (
         <Badge variant="success" className="gap-1">
           <Check size={12} /> completed
@@ -18,6 +29,12 @@ export default function JobStatusBadge({
       return (
         <Badge variant="danger" className="gap-1">
           <XCircle size={12} /> failed
+        </Badge>
+      )
+    case 'cancelled':
+      return (
+        <Badge variant="default" className="gap-1">
+          <XCircle size={12} /> cancelled
         </Badge>
       )
     case 'running':

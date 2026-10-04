@@ -275,7 +275,7 @@ def test_extracted_datetime_is_read_in_the_collection_timezone_when_saved(
     assert updated.data["recorded_at"] == "2021-02-18T13:50:00+00:00"  # CST, UTC-6
 
 
-def test_load_csv_parses_bytes_into_dataframe(
+def test_parse_table_parses_bytes_into_dataframe(
     ctx, make_collection, make_schema, make_record
 ):
     dataset = make_collection("study")
@@ -283,7 +283,7 @@ def test_load_csv_parses_bytes_into_dataframe(
     record = make_record("study", "trigger", {})
     wf_ctx = _wf_ctx(ctx, record, dataset)
 
-    registration = get_plugin("civex.load_csv")
+    registration = get_plugin("civex.parse_table")
     csv_bytes = b"name,age\nAlice,30\nBob,25\n"
     result = registration.invoke(
         {"bytes": csv_bytes}, registration.config_model(), wf_ctx, 60.0
@@ -411,15 +411,30 @@ def test_match_files_to_records_creates_then_updates_by_key(
 
     ref1 = ctx.file_svc.store_bytes(b"x", "sel_01.txt")
     result1 = registration.invoke({"files": [ref1.to_dict()]}, config, wf_ctx, 60.0)
-    assert result1.outputs == {"created": 1, "updated": 0, "unmatched": []}
+    assert result1.outputs == {
+        "created": 1,
+        "updated": 0,
+        "unmatched": [],
+        "ambiguous": [],
+    }
 
     ref2 = ctx.file_svc.store_bytes(b"y", "sel_01_v2.txt")
     result2 = registration.invoke({"files": [ref2.to_dict()]}, config, wf_ctx, 60.0)
-    assert result2.outputs == {"created": 0, "updated": 1, "unmatched": []}
+    assert result2.outputs == {
+        "created": 0,
+        "updated": 1,
+        "unmatched": [],
+        "ambiguous": [],
+    }
 
     ref3 = ctx.file_svc.store_bytes(b"z", "nope.txt")
     result3 = registration.invoke({"files": [ref3.to_dict()]}, config, wf_ctx, 60.0)
-    assert result3.outputs == {"created": 0, "updated": 0, "unmatched": ["nope.txt"]}
+    assert result3.outputs == {
+        "created": 0,
+        "updated": 0,
+        "unmatched": ["nope.txt"],
+        "ambiguous": [],
+    }
 
 
 def test_upsert_records_creates_then_updates_by_key(

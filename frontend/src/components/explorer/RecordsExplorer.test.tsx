@@ -105,6 +105,7 @@ function page(items: CivexRecord[]) {
 
 function handle(method: string, path: string, p: URLSearchParams) {
   if (path === '/api/schemas') return json(SCHEMAS)
+  if (path === '/api/workflows') return json([])
   if (path.endsWith('/views'))
     return json(
       path.includes('/selection/') ? [{ ...EMPTY_TABLES, name: viewName }] : [],
@@ -304,6 +305,78 @@ describe('RecordsExplorer', () => {
       expect(item(/New recording/)).toBeInTheDocument()
       expect(item(/New species/)).toBeNull()
     })
+
+    describe('inside a record', () => {
+      const annotation = schema('annotation', recording, ['note'])
+      // r2 has no selections yet, so the explorer has nothing to list for it.
+      const inside = (url: URL) => {
+        if (url.pathname === '/api/records/r2')
+          return json({
+            ...R2,
+            ancestors: [
+              { id: 'e1', schema_name: 'encounter', natural_name: 'E1' },
+            ],
+          })
+        if (
+          url.pathname.endsWith('/record-counts') &&
+          url.searchParams.get('within') === 'r2'
+        )
+          return json({})
+        if (url.pathname === '/api/schemas')
+          return json([...SCHEMAS, species, annotation])
+        return withEnabled([
+          'encounter',
+          'recording',
+          'selection',
+          'species',
+          'annotation',
+        ])(url)
+      }
+
+      it('offers to add what goes in a record that has none yet, under that record', async () => {
+        const user = userEvent.setup()
+        override = inside
+        renderExplorer({ root: { id: 'r2' }, scopeLabel: 'R2' }, '/records/r2')
+
+        await openNew()
+        expect(item(/New selection/)).toBeInTheDocument()
+        expect(item(/New annotation/)).toBeInTheDocument()
+        // not a sibling or a top-level schema, which belong elsewhere
+        expect(item(/New recording/)).toBeNull()
+        expect(item(/New species/)).toBeNull()
+        expect(item(/New encounter/)).toBeNull()
+
+        await user.click(item(/New selection/)!)
+
+        expect(search().get('schema')).toBe('selection')
+        expect(search().get('parent')).toBe('r2')
+      })
+
+      it('offers every kind of child, not only the kind already listed', async () => {
+        override = inside
+        renderExplorer({ root: { id: 'r1' }, scopeLabel: 'R1' }, '/records/r1')
+        await screen.findByText('a.txt')
+
+        await openNew()
+        // the listed kind once (not twice), and the other kind as well
+        expect(
+          screen.getAllByRole('menuitem', { name: /New selection/ }),
+        ).toHaveLength(1)
+        expect(item(/New annotation/)).toBeInTheDocument()
+      })
+
+      it('does not offer a child schema the collection is not for', async () => {
+        override = (url) =>
+          url.pathname === '/api/collections/hb'
+            ? withEnabled(['encounter', 'recording', 'selection'])(url)
+            : inside(url)
+        renderExplorer({ root: { id: 'r2' }, scopeLabel: 'R2' }, '/records/r2')
+
+        await openNew()
+        expect(item(/New selection/)).toBeInTheDocument()
+        expect(item(/New annotation/)).toBeNull()
+      })
+    })
   })
 
   it('starts at the top of the hierarchy, not at "all records"', async () => {
@@ -494,6 +567,154 @@ describe('RecordsExplorer', () => {
     expect(del.params.get('filter')).toBe(filter)
   })
 
+  describe('running a workflow on the selected records', () => {
+    const WORKFLOWS = [
+      {
+        name: 'contour-stats',
+        stem: 'contour-stats',
+        record_schema: 'selection',
+        inputs: null,
+      },
+      {
+        name: 'any-record',
+        stem: 'any-record',
+        record_schema: null,
+        inputs: null,
+      },
+      {
+        name: 'other-schema',
+        stem: 'other-schema',
+        record_schema: 'recording',
+        inputs: null,
+      },
+      {
+        name: 'import-files',
+        stem: 'import-files',
+        record_schema: 'selection',
+        inputs: { files: { type: 'files' } },
+      },
+    ]
+    let runManyBodies: { name: string; ids: string[] }[]
+    beforeEach(() => {
+      runManyBodies = []
+      override = (url, method) => {
+        if (url.pathname === '/api/workflows') return json(WORKFLOWS)
+        if (method === 'POST' && url.pathname.endsWith('/run-many')) {
+          const name = decodeURIComponent(url.pathname.split('/')[3])
+          const body = JSON.parse(
+            String(
+              (
+                fetch as unknown as {
+                  mock: { calls: [unknown, RequestInit][] }
+                }
+              ).mock.calls.slice(-1)[0][1].body,
+            ),
+          ) as { record_ids: string[] }
+          runManyBodies.push({ name, ids: body.record_ids })
+          return json({
+            started: body.record_ids.map((id) => ({ id: `run-${id}` })),
+            skipped: [],
+          })
+        }
+        return undefined
+      }
+    })
+
+    it('offers only the workflows that fit these records and need nothing per run, and queues one run per ticked record in one request', async () => {
+      const user = userEvent.setup()
+      renderExplorer({}, '/collections/hb?schema=selection&within=r1')
+      await screen.findByText('a.txt')
+
+      // Nothing ticked: no such action.
+      expect(
+        screen.queryByRole('button', { name: /Run workflow on/ }),
+      ).toBeNull()
+
+      await user.click(screen.getAllByRole('checkbox', { name: /^Select / })[1])
+      await user.click(screen.getAllByRole('checkbox', { name: /^Select / })[2])
+      await user.click(
+        screen.getByRole('button', { name: 'Run workflow on 2' }),
+      )
+
+      const items = (await screen.findAllByRole('menuitem')).map(
+        (i) => i.textContent,
+      )
+      // for selections or for anything; not another schema's, not one that asks for files
+      expect(items).toEqual(['contour-stats', 'any-record'])
+
+      await user.click(screen.getByRole('menuitem', { name: 'contour-stats' }))
+
+      await waitFor(() => expect(runManyBodies).toHaveLength(1)) // one request
+      expect(runManyBodies[0].name).toBe('contour-stats')
+      expect(runManyBodies[0].ids.sort()).toEqual(['s1', 's2'])
+      expect(
+        await screen.findByText(/Started contour-stats on 2 records/),
+      ).toBeInTheDocument()
+      // and the selection is cleared
+      expect(
+        screen.queryByRole('button', { name: /Run workflow on/ }),
+      ).toBeNull()
+    })
+
+    it('says plainly which records it could not run on', async () => {
+      const user = userEvent.setup()
+      const base = override!
+      override = (url, method) =>
+        method === 'POST' && url.pathname.endsWith('/run-many')
+          ? json({
+              started: [],
+              skipped: [
+                { id: 's1', reason: 'No such record.' },
+                { id: 's2', reason: 'No such record.' },
+              ],
+            })
+          : base(url, method)
+      renderExplorer({}, '/collections/hb?schema=selection&within=r1')
+      await screen.findByText('a.txt')
+      await user.click(
+        screen.getByRole('checkbox', { name: 'Select all records' }),
+      )
+      await user.click(
+        screen.getByRole('button', { name: /Run workflow on 2/ }),
+      )
+      await user.click(
+        await screen.findByRole('menuitem', { name: 'contour-stats' }),
+      )
+
+      expect(
+        await screen.findByText(
+          /Couldn't run contour-stats on 2: No such record\. \(and 1 more\)/,
+        ),
+      ).toBeInTheDocument()
+    })
+
+    it('is not offered when every matching record is selected, only for the ones ticked', async () => {
+      const user = userEvent.setup()
+      const big = { items: [S1, S2], total: 120, offset: 0, limit: 50 }
+      const base = override!
+      override = (url, method) =>
+        method === 'GET' && url.pathname.endsWith('/records')
+          ? json(big)
+          : base(url, method)
+      renderExplorer({}, '/collections/hb?schema=selection&within=r1')
+      await screen.findByText('a.txt')
+      await user.click(
+        screen.getByRole('checkbox', { name: 'Select all records' }),
+      )
+      expect(
+        screen.getByRole('button', { name: 'Run workflow on 2' }),
+      ).toBeInTheDocument()
+
+      await user.click(
+        await screen.findByRole('button', { name: 'Select all 120 matching' }),
+      )
+
+      expect(
+        screen.queryByRole('button', { name: /Run workflow on/ }),
+      ).toBeNull()
+    })
+  })
+
   it('embedded under a record, lists what is below it; the sidebar keeps the whole tree', async () => {
     renderExplorer({ root: { id: 'e1' }, scopeLabel: 'E1' }, '/records/e1')
     await screen.findByText('96')
@@ -588,5 +809,72 @@ describe('RecordsExplorer', () => {
     expect(calls.some((c) => c.path === '/api/schemas/selection/records')).toBe(
       true,
     )
+  })
+
+  describe('choosing columns', () => {
+    // A schema with enough fields to have a range of them. Every field starts
+    // ticked, so a click on one unticks it.
+    const wide = schema('encounter', null, ['site', 'area', 'depth', 'vessel'])
+
+    beforeEach(() => {
+      override = (url) =>
+        url.pathname === '/api/schemas'
+          ? json([wide, recording, selection])
+          : undefined
+    })
+
+    async function openColumns() {
+      const user = userEvent.setup()
+      renderExplorer()
+      await screen.findByText('Stellwagen')
+      await user.click(screen.getByRole('button', { name: /Columns/ }))
+      return { user, picker: await screen.findByRole('dialog') }
+    }
+
+    const name = (label: string) =>
+      within(screen.getByRole('dialog')).getByText(label, { selector: 'label' })
+    const cols = () => search().get('cols')
+
+    it('unticks one column with a plain click', async () => {
+      const { user } = await openColumns()
+
+      await user.click(name('Vessel'))
+
+      await waitFor(() => expect(cols()).toBe('site,area,depth'))
+    })
+
+    it('unticks every column between two with a shift-click, though each click changes the address', async () => {
+      const { user } = await openColumns()
+
+      await user.click(name('Area'))
+      await waitFor(() => expect(cols()).toBe('site,depth,vessel'))
+      await user.keyboard('{Shift>}')
+      await user.click(name('Vessel'))
+      await user.keyboard('{/Shift}')
+
+      // Area to Vessel, the whole run, not just the last box.
+      await waitFor(() => expect(cols()).toBe('site'))
+    })
+
+    it('ticks every column between two with a shift-click', async () => {
+      const { user } = await openColumns()
+      await user.click(name('Area'))
+      await waitFor(() => expect(cols()).toBe('site,depth,vessel'))
+      await user.click(name('Depth'))
+      await waitFor(() => expect(cols()).toBe('site,vessel'))
+
+      await user.click(name('Area')) // ticks area again: the start of a range
+      await waitFor(() => expect(cols()).toContain('area'))
+      await user.keyboard('{Shift>}')
+      await user.click(name('Depth'))
+      await user.keyboard('{/Shift}')
+
+      await waitFor(() => {
+        const chosen = (cols() ?? '').split(',')
+        expect(chosen).toEqual(
+          expect.arrayContaining(['site', 'area', 'depth', 'vessel']),
+        )
+      })
+    })
   })
 })

@@ -36,13 +36,14 @@ class Plugin(Tier0Plugin):
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
     ) -> dict[str, Any]:
         updates: dict[str, Any] = inputs["updates"]
-        data = dict(ctx.record.data)
-        data.update({k: v for k, v in updates.items() if v is not None})
+        # Null values are skipped, and the record's other fields are read as they
+        # are now, not as they were when the workflow started.
+        changes = {k: v for k, v in updates.items() if v is not None}
         log.info(
             "Saving %d field(s) to record %s: %s",
             len(updates),
             str(ctx.record.id)[:8],
             list(updates.keys()),
         )
-        ctx.update_record(str(ctx.record.id), data)
+        ctx.patch_record(str(ctx.record.id), changes)
         return {}

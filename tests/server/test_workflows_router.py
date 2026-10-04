@@ -240,3 +240,92 @@ def test_delete_blocked_by_pending_job_returns_422(client: TestClient) -> None:
 
     force_resp = client.delete("/api/workflows/parse-audio-dates?force=true")
     assert force_resp.status_code == 204
+
+
+_PER_RECORD = """\
+name: stamp
+record_schema: doc
+steps:
+  - id: read
+    plugin: civex.get_field
+    config:
+      field: title
+"""
+
+
+def _doc_records(client: TestClient, n: int) -> list[str]:
+    client.post("/api/schemas", json={"name": "doc", "description": None})
+    client.post(
+        "/api/schemas/doc/fields",
+        json={"name": "title", "type": "string", "required": False},
+    )
+    client.post("/api/schemas", json={"name": "note", "description": None})
+    client.post("/api/collections", json={"name": "study", "description": None})
+    return [
+        client.post(
+            "/api/collections/study/records",
+            json={"schema_name": "doc", "data": {"title": f"t{i}"}},
+        ).json()["id"]
+        for i in range(n)
+    ]
+
+
+def test_run_many_queues_one_run_per_record_in_one_request(client: TestClient) -> None:
+    client.put("/api/workflows/stamp", json={"content": _PER_RECORD})
+    ids = _doc_records(client, 3)
+
+    resp = client.post("/api/workflows/stamp/run-many", json={"record_ids": ids})
+
+    assert resp.status_code == 202
+    body = resp.json()
+    assert [j["record_id"] for j in body["started"]] == ids
+    assert body["skipped"] == []
+    runs = client.get("/api/jobs").json()
+    assert sorted(j["record_id"] for j in runs) == sorted(ids)
+    assert {j["status"] for j in runs} == {"completed"}
+
+
+def test_run_many_says_which_records_it_could_not_run_on_and_why(
+    client: TestClient,
+) -> None:
+    client.put("/api/workflows/stamp", json={"content": _PER_RECORD})
+    ids = _doc_records(client, 1)
+    note = client.post(
+        "/api/collections/study/records", json={"schema_name": "note", "data": {}}
+    )
+    # (a collection may refuse a schema it doesn't list; only what was made counts)
+    wrong = [note.json()["id"]] if note.status_code < 300 else []
+
+    resp = client.post(
+        "/api/workflows/stamp/run-many",
+        json={"record_ids": [*ids, *wrong, "not-a-record", ids[0]]},
+    )
+
+    body = resp.json()
+    assert [j["record_id"] for j in body["started"]] == ids  # the repeat is dropped
+    reasons = {s["id"]: s["reason"] for s in body["skipped"]}
+    assert reasons["not-a-record"] == "No such record."
+    for w in wrong:
+        assert "Not a doc record" in reasons[w]
+
+
+def test_run_many_refuses_a_workflow_that_needs_files(client: TestClient) -> None:
+    client.put(
+        "/api/workflows/needs-files",
+        json={
+            "content": "name: needs-files\ninputs:\n  files:\n    type: files\n"
+            "steps:\n  - id: a\n    plugin: civex.get_field\n    config:\n      field: x\n"
+        },
+    )
+    ids = _doc_records(client, 1)
+
+    resp = client.post("/api/workflows/needs-files/run-many", json={"record_ids": ids})
+
+    assert resp.status_code == 422
+    assert "files" in resp.json()["detail"]
+    assert client.get("/api/jobs").json() == []
+
+
+def test_run_many_unknown_workflow_is_404(client: TestClient) -> None:
+    resp = client.post("/api/workflows/ghost/run-many", json={"record_ids": ["x"]})
+    assert resp.status_code == 404

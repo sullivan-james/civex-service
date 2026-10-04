@@ -35,14 +35,17 @@ const json = (body: unknown) =>
   })
 
 let posted: unknown
+let posts: unknown[]
 beforeEach(() => {
   posted = null
+  posts = []
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), 'http://x')
       if (init?.method === 'POST' && url.pathname.endsWith('/records')) {
         posted = JSON.parse(String(init.body))
+        posts.push(posted)
         return json({ id: 'new1', natural_name: 'N', data: {} })
       }
       if (url.pathname === '/api/records/p1')
@@ -128,5 +131,101 @@ describe('NewRecordPage', () => {
     renderAt(['/collections/hb/new?schema=encounter&parent=p1'])
     await user.click(await screen.findByRole('button', { name: 'Cancel' }))
     expect(await screen.findByText('record page')).toBeInTheDocument()
+  })
+
+  describe('Add and add another', () => {
+    async function fill(
+      user: ReturnType<typeof userEvent.setup>,
+      text: string,
+    ) {
+      await user.click(screen.getAllByTitle('Click to edit')[0])
+      await user.type(screen.getByRole('textbox'), `${text}{Enter}`)
+    }
+
+    it('saves, stays on a blank form for the next one, and says what was added', async () => {
+      const user = userEvent.setup()
+      renderAt(['/collections/hb/new?schema=encounter'])
+      await screen.findByText('0 – 10')
+
+      await fill(user, 'Stellwagen')
+      await user.click(
+        screen.getByRole('button', { name: 'Add and add another' }),
+      )
+
+      await waitFor(() => expect(posts).toHaveLength(1))
+      expect(posts[0]).toMatchObject({ data: { site: 'Stellwagen' } })
+      // still on the form (not the record page), with a confirmation
+      expect(screen.queryByText('record page')).toBeNull()
+      expect(await screen.findByText('Added N.')).toBeInTheDocument()
+      // blank again: the last record's value is not carried over
+      expect(screen.queryByText('Stellwagen')).toBeNull()
+
+      await fill(user, 'Georges')
+      await user.click(screen.getByRole('button', { name: 'Add encounter' }))
+
+      await waitFor(() => expect(posts).toHaveLength(2))
+      expect(posts[1]).toEqual(
+        expect.objectContaining({ data: { site: 'Georges' } }),
+      )
+      expect(await screen.findByText('record page')).toBeInTheDocument()
+    })
+
+    it('keeps the parent the list fixed, so a run of records goes under the same one', async () => {
+      const user = userEvent.setup()
+      renderAt(['/collections/hb/new?schema=encounter&parent=p1'])
+      await screen.findByText('0 – 10')
+
+      await fill(user, 'A')
+      await user.click(
+        screen.getByRole('button', { name: 'Add and add another' }),
+      )
+      await waitFor(() => expect(posts).toHaveLength(1))
+      await screen.findByText('Added N.')
+      await fill(user, 'B')
+      await user.click(
+        screen.getByRole('button', { name: 'Add and add another' }),
+      )
+
+      await waitFor(() => expect(posts).toHaveLength(2))
+      expect(
+        posts.map((p) => (p as { parent_record_id: string }).parent_record_id),
+      ).toEqual(['p1', 'p1'])
+    })
+
+    it('does not stay on the form when it could not save', async () => {
+      const user = userEvent.setup()
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = new URL(String(input), 'http://x')
+          if (init?.method === 'POST' && url.pathname.endsWith('/records'))
+            return new Response(
+              JSON.stringify({ detail: 'site is required' }),
+              {
+                status: 422,
+                headers: { 'Content-Type': 'application/json' },
+              },
+            )
+          if (url.pathname === '/api/schemas') return json(SCHEMAS)
+          if (url.pathname === '/api/collections/hb')
+            return json({
+              id: 'c',
+              name: 'hb',
+              description: null,
+              record_count: 0,
+            })
+          return json({})
+        }),
+      )
+      renderAt(['/collections/hb/new?schema=encounter'])
+      await screen.findByText('0 – 10')
+
+      await user.click(
+        screen.getByRole('button', { name: 'Add and add another' }),
+      )
+
+      expect(await screen.findByText(/site is required/)).toBeInTheDocument()
+      expect(screen.queryByText(/^Added/)).toBeNull()
+    })
   })
 })

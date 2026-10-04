@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-query'
 import { schemasApi, type Schema, type Field } from '../api/schemas'
 import { useToast } from '../components/ui/ToastProvider'
+import { invalidateRecordNames } from './useRecordName'
 import { errorMessage } from '../lib/errors'
 
 /**
@@ -122,6 +123,8 @@ export function useUpdateSchema(name: string) {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['schemas'] })
+      // A new name template or schema name renames every record of it.
+      invalidateRecordNames(qc)
     },
   })
 }

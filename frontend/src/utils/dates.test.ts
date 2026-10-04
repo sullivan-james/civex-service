@@ -70,6 +70,19 @@ describe('utcToZonedLocal', () => {
     )
     expect(utcToZonedLocal('2024-03-01T15:30:00', CHI)).toBe('2024-03-01T09:30')
   })
+  it('keeps seconds, so they survive being shown and edited', () => {
+    expect(utcToZonedLocal('2024-03-01T21:30:45+00:00', CHI)).toBe(
+      '2024-03-01T15:30:45',
+    )
+    expect(utcToZonedLocal('2024-03-01T21:30:05Z', 'UTC')).toBe(
+      '2024-03-01T21:30:05',
+    )
+  })
+  it('round-trips seconds through the input and back to the stored instant', () => {
+    const shown = utcToZonedLocal('2024-07-01T20:30:45.000Z', CHI)
+    expect(shown).toBe('2024-07-01T15:30:45')
+    expect(zonedLocalToUTC(shown, CHI)).toBe('2024-07-01T20:30:45.000Z')
+  })
   it('handles the day rolling over', () => {
     expect(utcToZonedLocal('2024-03-01T02:00:00Z', CHI)).toBe(
       '2024-02-29T20:00',
@@ -134,6 +147,26 @@ describe('zonedLocalToUTC', () => {
   })
 })
 
+describe('zonedLocalToUTC with seconds', () => {
+  it('reads seconds as typed', () => {
+    expect(zonedLocalToUTC('2024-07-01T15:30:42', CHI)).toBe(
+      '2024-07-01T20:30:42.000Z',
+    )
+    expect(zonedLocalToUTC('2024-07-01T15:30:42', null)).not.toBeNull()
+  })
+  it('accepts a fraction of a second, as an input with a sub-minute step can report', () => {
+    expect(zonedLocalToUTC('2024-07-01T15:30:42.000', CHI)).toBe(
+      '2024-07-01T20:30:42.000Z',
+    )
+    expect(zonedLocalToUTC('2024-07-01T15:30:42.5', CHI)).toBe(
+      '2024-07-01T20:30:42.500Z',
+    )
+  })
+  it('still refuses a wall time that does not exist', () => {
+    expect(zonedLocalToUTC('2024-03-10T02:30:15', CHI)).toBeNull() // DST gap
+  })
+})
+
 describe('formatDateTime', () => {
   it('shows wall time with the zone abbreviation', () => {
     expect(formatDateTime('2024-03-01T21:30:00+00:00', CHI, 'en-US')).toBe(
@@ -141,6 +174,14 @@ describe('formatDateTime', () => {
     )
     expect(formatDateTime('2024-07-01T20:30:00+00:00', CHI, 'en-US')).toBe(
       'Jul 1, 2024, 3:30 PM CDT',
+    )
+  })
+  it('shows seconds when the value has them, and only then', () => {
+    expect(formatDateTime('2024-03-01T21:30:45+00:00', CHI, 'en-US')).toBe(
+      'Mar 1, 2024, 3:30:45 PM CST',
+    )
+    expect(formatDateTime('2024-03-01T21:30:00+00:00', CHI, 'en-US')).toBe(
+      'Mar 1, 2024, 3:30 PM CST',
     )
   })
   it('falls back to the raw value when unparseable', () => {

@@ -199,7 +199,7 @@ Notes not captured in the table above:
   civex.extract_from_filename: output_type is "string"|"date"|"datetime"|"integer"|"float".
     date_format tokens: YYYY MM DD HH mm SS (NOT strftime — do not use %Y etc.).
     pattern is a Python regex; non-token chars are literal so [-_] matches separator alternatives.
-  civex.load_csv / civex.upsert_records / civex.rows_to_records: `table` is a pandas DataFrame.
+  civex.parse_table / civex.upsert_records / civex.rows_to_records: `table` is a pandas DataFrame.
 
 ## Custom plugin format
 File: _civex/plugins/{name}.py — a real OS-process script (Tier 1, uv-managed subprocess),
@@ -257,7 +257,7 @@ project data through the declared `ctx.*` capability calls, nothing else.
 3. record_updated fires on record creation too, but only for fields explicitly set to a non-null value.
    A trigger with fields: [my_field] will NOT fire on create if my_field was left null.
 4. date_format in extract_from_filename uses YYYY MM DD tokens — NOT strftime (%Y %m %d).
-5. Typical CSV pipeline: load_file → load_csv → (optional transform) → upsert_records or rows_to_records.
+5. Typical table pipeline (CSV, TSV, ...): load_file → parse_table → (optional transform) → upsert_records or rows_to_records.
 6. match_files_to_records config.pattern is a Python regex applied to the filename to extract the key.
 7. dataset="" in plugin config means "use the trigger record's collection" — leave empty unless targeting a different one.
 8. Custom plugins are auto-discovered on workflow run — no registration needed after saving.

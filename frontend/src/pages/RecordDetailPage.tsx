@@ -12,7 +12,7 @@ import { UploadCollectionContext } from '../hooks/uploadCollection'
 import { RecordStorageSummary } from '../components/records/RecordStorageSummary'
 import { useSchemas } from '../hooks/useSchemas'
 import { useWorkflows, useJobs } from '../hooks/useWorkflows'
-import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
+import { RunWorkflowButton } from '../components/workflows/RunWorkflowButton'
 import {
   Badge,
   DetailSkeleton,
@@ -53,7 +53,6 @@ const RECORD_TABS = [
 export default function RecordDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const [runWorkflow, setRunWorkflow] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [tab, setTab] = useTabParam(RECORD_TABS, 'fields')
 
@@ -118,9 +117,6 @@ export default function RecordDetailPage() {
   )
   const showContains = (hasChildSchemas || descendantTotal > 0) && !!collection
   const shownTab = tab === 'contains' && !showContains ? 'fields' : tab
-  const runWorkflowDef = runWorkflow
-    ? (applicableWorkflows.find((wf) => wf.name === runWorkflow) ?? null)
-    : null
   // A failed save is shown under the field it was for.
   const saveErrors = fieldSaveErrors(
     updateRecord.error,
@@ -165,13 +161,16 @@ export default function RecordDetailPage() {
           </span>
         }
         action={
-          <PinButton target={recordTarget(record)} noun="record" size="md" />
+          <>
+            <RunWorkflowButton
+              workflows={applicableWorkflows}
+              recordId={record.id}
+              onStarted={() => setTab('runs')}
+            />
+            <PinButton target={recordTarget(record)} noun="record" size="md" />
+          </>
         }
         secondaryActions={[
-          ...applicableWorkflows.map((wf) => ({
-            label: `Run ${wf.name}…`,
-            onClick: () => setRunWorkflow(wf.name),
-          })),
           {
             label: 'Delete record…',
             variant: 'danger' as const,
@@ -267,14 +266,6 @@ export default function RecordDetailPage() {
             emptyMessage="Changes to this record will appear here."
           />
         </TabPanel>
-
-        {runWorkflowDef && (
-          <WorkflowRunModal
-            workflow={runWorkflowDef}
-            recordId={record.id}
-            onClose={() => setRunWorkflow(null)}
-          />
-        )}
 
         {confirmDelete && (
           <ConfirmDialog

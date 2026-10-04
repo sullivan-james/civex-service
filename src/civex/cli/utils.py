@@ -7,7 +7,7 @@ import typer
 from civex.config import Config, load_config
 from civex.console import console
 from civex.domain.dtos import ErrorEnvelope, WorkflowJobDTO
-from civex.domain.exceptions import ConfigError
+from civex.domain.exceptions import ConfigError, JobCancelled
 
 if TYPE_CHECKING:
     from civex.context import AppContext
@@ -143,7 +143,16 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[list[dict], str, list
             # vanishing into the process's own stderr (CIVEX-112).
             plugin_registry.discover_user_plugins(config.civex_dir / "plugins")
             plugins = plugin_registry.all_plugins()
-            wf_ctx = WorkflowContext(record=record, dataset=dataset, _app_ctx=ctx)
+            # job_depth is what ends a chain of workflows that keep triggering
+            # each other; without it every hop here would start again at 0.
+            wf_ctx = WorkflowContext(
+                record=record,
+                dataset=dataset,
+                _app_ctx=ctx,
+                job_depth=job.depth,
+                job_id=str(job.id),
+                workflow_name=job.workflow_name,
+            )
             try:
                 step_executions = executor.run(
                     wf_def,
@@ -151,6 +160,7 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[list[dict], str, list
                     plugins,
                     initial_outputs=job.input_data or None,
                     default_timeout_seconds=config.plugins.default_timeout_seconds,
+                    should_stop=lambda: ctx.job_svc.should_stop(job.id),
                 )
             except Exception as e:
                 # Mirrors executor.run()'s own .step_executions attachment --
@@ -182,6 +192,22 @@ def drain_jobs(ctx: AppContext) -> None:
             step_executions, log, affected_records = run_job(job, ctx)
         except Exception as e:
             failure = e
+
+        if isinstance(failure, JobCancelled):
+            # Stopped on purpose: keep what it got done, and carry on with
+            # whatever is still queued (which is nothing after a Stop).
+            try:
+                ctx.job_svc.mark_cancelled(
+                    job.id,
+                    step_executions=getattr(failure, "step_executions", None),
+                    affected_records=getattr(failure, "affected_records", None),
+                )
+                ctx.commit()
+                console.print(f"    [warning]■ stopped: {failure}[/warning]")
+            except Exception as e:
+                console.print(f"    [error]✗ failed to record the stop: {e}[/error]")
+                break
+            continue
 
         # Persisting the outcome is deliberately outside the try/except
         # above: a DB error here must not be mistaken for this job's own

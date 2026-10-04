@@ -1,3 +1,4 @@
+import { useRangeSelect } from '../../hooks/useRangeSelect'
 import { Checkbox, IconButton, Subheading } from '../ui'
 import { ChevronUp, ChevronDown, X } from '../ui/icons'
 import { displayLabel } from '../../utils/naming'
@@ -38,11 +39,26 @@ export function ColumnPicker({
     joinsByRef.set(key, [...(joinsByRef.get(key) ?? []), join])
   }
 
+  // Every box in the order drawn: the fields, then each reference's columns.
+  const shown = [
+    ...baseFields.map((f) => f.name),
+    ...[...joinsByRef.values()].flatMap((joins) => joins.map((j) => j.value)),
+  ]
+  const range = useRangeSelect(shown)
+
   function toggle(col: string) {
+    // Shift-click: everything from the last box clicked to this one takes the
+    // state this one is going to.
+    const ids = range.rangeFor(col)
+    const on = !columns.includes(col)
+    if (!ids) {
+      onChange(on ? [...columns, col] : columns.filter((c) => c !== col))
+      return
+    }
     onChange(
-      columns.includes(col)
-        ? columns.filter((c) => c !== col)
-        : [...columns, col],
+      on
+        ? [...columns, ...ids.filter((c) => !columns.includes(c))]
+        : columns.filter((c) => !ids.includes(c)),
     )
   }
 
@@ -62,10 +78,12 @@ export function ColumnPicker({
           {baseFields.map((field) => (
             <label
               key={field.name}
-              className="flex items-center gap-2 text-sm text-fg cursor-pointer py-0.5"
+              onClick={range.onClick}
+              className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none py-0.5"
             >
               <Checkbox
                 checked={columns.includes(field.name)}
+                onClick={range.onClick}
                 onChange={() => toggle(field.name)}
               />
               {displayLabel(field.name, field.label)}
@@ -84,10 +102,12 @@ export function ColumnPicker({
                   {joins.map((join) => (
                     <label
                       key={join.value}
-                      className="flex items-center gap-2 text-sm text-fg cursor-pointer py-0.5"
+                      onClick={range.onClick}
+                      className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none py-0.5"
                     >
                       <Checkbox
                         checked={columns.includes(join.value)}
+                        onClick={range.onClick}
                         onChange={() => toggle(join.value)}
                       />
                       {displayLabel(

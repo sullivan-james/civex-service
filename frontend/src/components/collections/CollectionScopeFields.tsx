@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { useRangeSelect } from '../../hooks/useRangeSelect'
 import { useSchemas } from '../../hooks/useSchemas'
 import { Checkbox, Field, Select } from '../ui'
 import { displayLabel } from '../../utils/naming'
@@ -59,6 +60,18 @@ export function CollectionScopeFields({
     [allSchemas],
   )
   const selected = useMemo(() => new Set(schemas), [schemas])
+  const range = useRangeSelect(live.map((s) => s.name))
+
+  /** One box, or -- with shift -- every schema from the last one clicked to this
+   * one, each going through the same parent/child rule as a single click. */
+  function setSchema(schema: Schema, on: boolean) {
+    const ids = range.rangeFor(schema.name)
+    if (!ids) return onSchemasChange(toggled(live, selected, schema, on))
+    let next = selected
+    for (const s of live.filter((x) => ids.includes(x.name)))
+      next = new Set(toggled(live, next, s, on))
+    onSchemasChange([...next].sort())
+  }
 
   return (
     <>
@@ -87,14 +100,14 @@ export function CollectionScopeFields({
           <ul className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border p-2">
             {live.map((s) => (
               <li key={s.id}>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <label
+                  onClick={range.onClick}
+                  className="flex cursor-pointer select-none items-center gap-2 text-sm"
+                >
                   <Checkbox
                     checked={selected.has(s.name)}
-                    onChange={(e) =>
-                      onSchemasChange(
-                        toggled(live, selected, s, e.target.checked),
-                      )
-                    }
+                    onClick={range.onClick}
+                    onChange={(e) => setSchema(s, e.target.checked)}
                   />
                   <span className={s.parent_id ? 'pl-4' : ''}>
                     {displayLabel(s.name, s.label)}

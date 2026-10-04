@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { FilterTreeWire } from '../utils/filterTree'
 
 export interface WorkflowInput {
   type: string
@@ -49,7 +50,9 @@ export interface StepExecution {
 export interface AffectedRecord {
   record_id: string
   schema_name: string
-  natural_name: string | null
+  /** Only on runs made before names stopped being stored (names are worked out
+   * when looked at: `POST /records/labels`). */
+  natural_name?: string | null
   action: 'created' | 'updated'
 }
 
@@ -60,13 +63,30 @@ export interface ErrorDetails {
   step: string | null
 }
 
+/** One field that changed to start a run. */
+export interface TriggerChange {
+  field: string
+  /** Short forms: a file shows its name, a list its length; null for nothing. */
+  before: string | null
+  after: string | null
+  /** Whether the workflow's trigger was watching this field. */
+  watched: boolean
+}
+
+/** What started a run, beyond the event name. */
+export interface TriggerDetail {
+  changes: TriggerChange[]
+  /** The run whose own save started this one, when there is one. */
+  caused_by: { job_id: string; workflow: string | null } | null
+}
+
 export interface WorkflowJob {
   id: string
   workflow_name: string
   record_id: string
   schema_name: string
   trigger: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
   error: string | null
   error_details: ErrorDetails | null
   log: string | null
@@ -75,6 +95,11 @@ export interface WorkflowJob {
   created_at: string
   started_at: string | null
   finished_at: string | null
+  /** 0 for a run started by a person or an edit; 1 for one started by another
+   * run's save; and so on. */
+  depth: number
+  /** Null for a run started by hand, or one from before this was recorded. */
+  trigger_detail: TriggerDetail | null
 }
 
 export const workflowsApi = {
@@ -89,6 +114,11 @@ export const workflowsApi = {
     api.delete<void>(
       `/workflows/${encodeURIComponent(stem)}${force ? '?force=true' : ''}`,
     ),
+  /** One run of a workflow per record, in one request. */
+  runMany: (name: string, record_ids: string[]) =>
+    api.post<RerunResult>(`/workflows/${encodeURIComponent(name)}/run-many`, {
+      record_ids,
+    }),
   run: (name: string, record_id: string) =>
     api.post<WorkflowJob>(`/workflows/${encodeURIComponent(name)}/run`, {
       record_id,
@@ -120,16 +150,29 @@ export const workflowsApi = {
 
 /** The narrowing a run list can ask for beyond status and record. */
 export interface RunQuery {
+  /** Only runs of the workflow with exactly this name. */
+  workflow?: string
   trigger?: string
   search?: string
   /** `column:asc|desc` */
   sort?: string
+  /** The same filter tree the records explorer uses, over run fields. */
+  filter?: FilterTreeWire | null
 }
 
 function setRunQuery(p: URLSearchParams, q?: RunQuery) {
+  if (q?.workflow) p.set('workflow', q.workflow)
   if (q?.trigger) p.set('trigger', q.trigger)
   if (q?.search) p.set('search', q.search)
   if (q?.sort) p.set('sort', q.sort)
+  if (q?.filter) p.set('filter', JSON.stringify(q.filter))
+}
+
+/** What repeating several runs came to: the new runs, and any that couldn't be
+ * repeated, with why. */
+export interface RerunResult {
+  started: WorkflowJob[]
+  skipped: { id: string; reason: string }[]
 }
 
 export const jobsApi = {
@@ -167,5 +210,61 @@ export const jobsApi = {
   },
   get: (id: string) => api.get<WorkflowJob>(`/jobs/${id}`),
   rerun: (id: string) => api.post<WorkflowJob>(`/jobs/${id}/rerun`, {}),
+  cancel: (id: string) => api.post<WorkflowJob>(`/jobs/${id}/cancel`, {}),
+  /** Repeat several runs in one request. */
+  rerunMany: (which: { ids: string[] } | { filter: FilterTreeWire }) =>
+    api.post<RerunResult>('/jobs/rerun', which),
+  filterFields: () => api.get<RunFilterField[]>('/jobs/filter-fields'),
+  failureGroups: (filter?: FilterTreeWire | null) =>
+    api.get<FailureGroup[]>(
+      `/jobs/failure-groups${filter ? `?filter=${encodeURIComponent(JSON.stringify(filter))}` : ''}`,
+    ),
   drain: () => api.post<{ status: string }>('/jobs/drain', {}),
+}
+
+export interface AutomationStatus {
+  /** While true nothing new starts: triggers fire nothing and manual runs are
+   * refused. */
+  paused: boolean
+  pending: number
+  running: number
+  /** How many runs a stop just cancelled. */
+  cancelled: number
+  /** The current stretch of work, counted by the server; null when idle. */
+  batch: AutomationBatch | null
+}
+
+export interface AutomationBatch {
+  total: number
+  active: number
+  completed: number
+  failed: number
+  cancelled: number
+  started_at: string
+}
+
+/** A field a run filter may test (`GET /jobs/filter-fields`). */
+export interface RunFilterField {
+  name: string
+  label: string
+  type: string
+  description: string
+  choices: string[] | null
+  operators: string[]
+}
+
+/** Failed runs that failed the same way. */
+export interface FailureGroup {
+  workflow: string
+  kind: string | null
+  step: string | null
+  message: string | null
+  count: number
+  last_at: string
+}
+
+export const automationApi = {
+  status: () => api.get<AutomationStatus>('/automation'),
+  stop: () => api.post<AutomationStatus>('/automation/stop', {}),
+  resume: () => api.post<AutomationStatus>('/automation/resume', {}),
 }

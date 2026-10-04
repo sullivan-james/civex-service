@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { withRange } from '../../../hooks/useRangeSelect'
 import type { Collection } from '../../../api/collections'
 import type {
   CollectionStorageReport,
@@ -183,10 +184,14 @@ function PolicyCell({
 /** Every collection and where its new files go. This is where a volume is
  * assigned to a collection, one at a time or for several at once. */
 export function CollectionsTab({
+  focusId,
   volumeFilter,
   onClearVolumeFilter,
   onGoToVolumes,
 }: {
+  /** A collection to land on (from a link on its own page): the list opens
+   * filtered to it, and one click on the filter shows them all. */
+  focusId?: string | null
   volumeFilter: string | null
   onClearVolumeFilter: () => void
   onGoToVolumes: () => void
@@ -197,6 +202,7 @@ export function CollectionsTab({
   const { data: spreads = [] } = useAllCollectionStorage()
   const bulk = useBulkPlacement()
   const [query, setQuery] = useState('')
+  const focused = useRef(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkVolume, setBulkVolume] = useState(NONE)
 
@@ -208,6 +214,16 @@ export function CollectionsTab({
     () => new Map(placements.map((p) => [p.collection_id, p])),
     [placements],
   )
+
+  const focusName = focusId
+    ? collections?.find((c) => c.id === focusId)?.name
+    : undefined
+  useEffect(() => {
+    if (focusName && !focused.current) {
+      focused.current = true
+      setQuery(focusName)
+    }
+  }, [focusName])
 
   if (isLoading)
     return (
@@ -396,6 +412,8 @@ export function CollectionsTab({
         selection={{
           selected,
           onToggle: (id) => toggle(id, !selected.has(id)),
+          onSetMany: (ids, on) =>
+            setSelected((prev) => withRange(prev, ids, on)),
           onToggleAll: () =>
             setSelected(
               allShownSelected ? new Set() : new Set(shown.map((c) => c.id)),

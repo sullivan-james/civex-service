@@ -4,6 +4,14 @@ Match each file to an existing child record by extracting a key value from the f
 
 <!-- civex:tables -->
 
+!!! warning "Make the pattern read the whole number"
+    A pattern like `sel_([0-9]{2})` reads exactly two digits, so selections 14, 142
+    and 149 all give the key `14`. Use `sel_([0-9]+)` (any number of digits). When
+    two or more files in one run give the same key, none of them is attached,
+    because a record holds one file and there is no telling which is meant. They
+    are listed in the `ambiguous` output, each with the files it clashes with, and
+    the run says how many there were.
+
 !!! note
     Numeric captures are normalised (e.g. `"042"` → `"42"`) before matching so that integer fields match correctly.
 

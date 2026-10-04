@@ -1,6 +1,11 @@
-import type { TransferProgress, TransferStatus } from '../api/transfers'
+import type {
+  Transfer,
+  TransferProgress,
+  TransferStatus,
+} from '../api/transfers'
 
 export const STATUS_LABEL: Record<TransferStatus, string> = {
+  queued: 'Waiting',
   running: 'Running',
   paused: 'Paused',
   completed: 'Finished',
@@ -14,6 +19,7 @@ export const STATUS_VARIANT: Record<
   TransferStatus,
   'default' | 'accent' | 'success' | 'danger'
 > = {
+  queued: 'default',
   running: 'accent',
   paused: 'default',
   completed: 'success',
@@ -32,4 +38,20 @@ export function percentDone(p: TransferProgress): number {
     100,
     Math.round(((p.bytes_done + p.current_bytes) / p.bytes_total) * 100),
   )
+}
+
+/** Whether a transfer is doing something or about to: running, waiting its
+ * turn, or paused only until a drive comes back. These are the ones worth
+ * polling quickly and showing wherever the person is. */
+export const isBusy = (t: Transfer) =>
+  t.status === 'running' || t.status === 'queued' || t.auto_resume
+
+/** How many moves are ahead of each waiting one: the running one, plus those
+ * that have been waiting longer. Keyed by transfer id; only queued ones appear. */
+export function queueAhead(transfers: Transfer[]): Map<string, number> {
+  const running = transfers.filter((t) => t.status === 'running').length
+  const waiting = transfers
+    .filter((t) => t.status === 'queued')
+    .sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''))
+  return new Map(waiting.map((t, i) => [t.id, running + i]))
 }

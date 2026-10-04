@@ -33,7 +33,7 @@ steps:
     plugin: civex.load_file
     config: {field: attachment}
   - id: parse
-    plugin: civex.load_csv
+    plugin: civex.parse_table
     inputs: {bytes: load.bytes}
   - id: store
     plugin: civex.upsert_records

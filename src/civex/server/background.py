@@ -49,6 +49,7 @@ def run_pending_jobs() -> None:
     from civex.config import ConfigError, load_config
     from civex.context import build_local_context
     from civex.domain.dtos import ErrorEnvelope
+    from civex.domain.exceptions import JobCancelled
     from civex.plugins import registry as plugin_registry
     from civex.plugins.base import WorkflowContext
     from civex.workflows import executor
@@ -89,6 +90,8 @@ def run_pending_jobs() -> None:
                         dataset=dataset,
                         _app_ctx=ctx,
                         job_depth=job.depth,
+                        job_id=str(job.id),
+                        workflow_name=job.workflow_name,
                     )
                     initial_outputs = job.input_data or None
                     step_executions = executor.run(
@@ -97,6 +100,7 @@ def run_pending_jobs() -> None:
                         plugins,
                         initial_outputs=initial_outputs,
                         default_timeout_seconds=config.plugins.default_timeout_seconds,
+                        should_stop=lambda: ctx.job_svc.should_stop(job.id),
                     )
             except Exception as e:
                 # executor.run() attaches the envelope (with the failing step
@@ -117,7 +121,15 @@ def run_pending_jobs() -> None:
             # pending after it left unprocessed until the next manual
             # drain (CIVEX-296 stability review).
             try:
-                if failure is None:
+                if isinstance(failure, JobCancelled):
+                    # Stopped on purpose: keep what it got done.
+                    ctx.job_svc.mark_cancelled(
+                        job.id,
+                        log=log_buf.getvalue() or None,
+                        step_executions=getattr(failure, "step_executions", None),
+                        affected_records=wf_ctx.affected_records if wf_ctx else None,
+                    )
+                elif failure is None:
                     ctx.job_svc.mark_completed(
                         job.id,
                         log=log_buf.getvalue() or None,

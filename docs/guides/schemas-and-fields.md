@@ -113,7 +113,7 @@ civex collection update my-study --timezone Asia/Kolkata
 civex collection update my-study --timezone ""   # back to unset
 ```
 
-A `datetime` field can override the collection's zone with its own **Timezone** setting (in the web UI's field form, or as a `timezone` restriction through the API). For any value, the zone is the field's own, else the collection's, else unset.
+A `datetime` is stored to the second, and the web form's datetime box has a seconds part (a value typed or imported with seconds keeps them, and they are shown wherever the value is shown; a value with no seconds reads as before). A `datetime` field can override the collection's zone with its own **Timezone** setting (in the web UI's field form, or as a `timezone` restriction through the API). For any value, the zone is the field's own, else the collection's, else unset.
 
 - **Unset** behaves as it always has: a value with no offset is read as UTC, and the web UI shows times in the viewer's own timezone.
 - A value **with an offset** (`2024-03-15T09:30:00-05:00`) is always converted exactly; the zone is ignored.

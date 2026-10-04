@@ -9,6 +9,10 @@ interface PaginationProps {
   pageSize: number
   total: number
   onPage: (page: number) => void
+  /** Changing the size also returns to the first page, so this must do both in
+   * ONE update. Calling `onPage(0)` as well would be a second update in the same
+   * event, and with the address as state the second overwrites the first (the
+   * router's functional setter is not queued): the size would be lost. */
   onPageSize: (pageSize: number) => void
   pageSizes?: number[]
 }
@@ -36,10 +40,7 @@ export function Pagination({
           <Select
             size="sm"
             value={pageSize}
-            onChange={(e) => {
-              onPageSize(Number(e.target.value))
-              onPage(0)
-            }}
+            onChange={(e) => onPageSize(Number(e.target.value))}
           >
             {pageSizes.map((s) => (
               <option key={s} value={s}>

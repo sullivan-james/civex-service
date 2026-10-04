@@ -69,6 +69,12 @@ class DatabaseUnavailableError(CivexError):
     retryable = True
 
 
+class JobCancelled(CivexError):
+    """A workflow run was stopped by a person (or by Stop automation) while it
+    was running. Raised between steps; the steps that already ran are attached
+    as `.step_executions`, as for a failure."""
+
+
 class GCAlreadyRunningError(CivexError):
     """Raised when a garbage-collection pass is requested while another is
     already in progress. Two concurrent sweeps over the same object store

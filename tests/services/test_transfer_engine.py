@@ -787,3 +787,13 @@ def test_a_transfer_is_never_confused_by_the_hash_of_what_it_moves(
     store = ctx.file_svc._store
     for sha in files:
         assert hashlib.sha256(store.get(sha)).hexdigest() == sha
+
+
+def test_a_copy_flushing_a_large_file_gets_longer_before_it_counts_as_stalled() -> None:
+    job = file_store_module._CopyJob()
+    job.size = 10 * 1024**3  # 10 GiB
+    assert job.stall_limit() == file_store_module.STALL_SECONDS
+    job.syncing = True
+    assert job.stall_limit() > file_store_module.STALL_SECONDS
+    job.size = 1024
+    assert job.stall_limit() == file_store_module.STALL_SECONDS

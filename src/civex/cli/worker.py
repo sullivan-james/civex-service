@@ -9,9 +9,26 @@ from rich.table import Table
 from civex.cli.utils import drain_jobs, get_ctx, run_job
 from civex.console import console
 from civex.domain.dtos import ErrorEnvelope
-from civex.domain.exceptions import NotFoundError
+from civex.domain.exceptions import JobCancelled, NotFoundError, ValidationError
 
 app = typer.Typer(help="Manage automated workflow processing")
+
+
+def _what_changed(job) -> list[str]:
+    """One line per field that changed to start this run, saying which ones
+    the workflow was watching."""
+    lines = []
+    for c in (job.trigger_detail or {}).get("changes", []):
+        mark = "" if c.get("watched", True) else " (not watched)"
+        lines.append(f"{c['field']}: {c.get('before')!s} → {c.get('after')!s}{mark}")
+    return lines
+
+
+def _caused_by(job) -> str | None:
+    cause = (job.trigger_detail or {}).get("caused_by")
+    if not cause:
+        return None
+    return f"run {str(cause['job_id'])[:8]}… of '{cause.get('workflow')}'"
 
 
 @app.command("run")
@@ -64,7 +81,15 @@ def worker_run(
         # above: a DB error here must not be mistaken for this job's own
         # failure, and must not crash the daemon.
         try:
-            if failure is None:
+            if isinstance(failure, JobCancelled):
+                ctx.job_svc.mark_cancelled(
+                    job.id,
+                    step_executions=getattr(failure, "step_executions", None),
+                    affected_records=getattr(failure, "affected_records", None),
+                )
+                ctx.commit()
+                console.print(f"    [warning]■ stopped: {failure}[/warning]")
+            elif failure is None:
                 ctx.job_svc.mark_completed(
                     job.id,
                     step_executions=step_executions,
@@ -98,10 +123,13 @@ def worker_run(
 @app.command("jobs")
 def worker_jobs(
     status: Optional[str] = typer.Option(
-        None, "--status", "-s", help="Filter: pending, running, completed, failed"
+        None,
+        "--status",
+        "-s",
+        help="Filter: pending, running, completed, failed, cancelled",
     ),
 ) -> None:
-    """List workflow jobs."""
+    """List workflow jobs, with the fields that started each one."""
     ctx = get_ctx()
     jobs = ctx.job_svc.list_jobs(status=status)
 
@@ -110,14 +138,20 @@ def worker_jobs(
         console.print(f"[info]{msg}[/info]")
         return
 
-    table = Table("ID", "Workflow", "Schema", "Record", "Trigger", "Status", "Created")
+    table = Table(
+        "ID", "Workflow", "Schema", "Record", "Trigger", "Changed", "Status", "Created"
+    )
     for j in jobs:
+        changed = ", ".join(
+            c["field"] for c in (j.trigger_detail or {}).get("changes", [])
+        )
         table.add_row(
             str(j.id)[:8] + "…",
             j.workflow_name,
             j.schema_name,
             str(j.record_id)[:8] + "…",
             j.trigger,
+            changed or "—",
             j.status,
             j.created_at.strftime("%Y-%m-%d %H:%M"),
         )
@@ -144,6 +178,11 @@ def worker_logs(
     )
     console.print(f"  Record   {str(job.record_id)[:8]}…  Schema: {job.schema_name}")
     console.print(f"  Trigger  {job.trigger}")
+    for line in _what_changed(job):
+        console.print(f"  Changed  {line}")
+    caused = _caused_by(job)
+    if caused:
+        console.print(f"  Caused by  {caused}  (chain depth {job.depth})")
     if job.started_at:
         console.print(f"  Started  {job.started_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
     if job.finished_at:
@@ -193,4 +232,89 @@ def worker_enqueue(
     ctx.commit()
     console.print(
         f"[success]Enqueued '{workflow}' for record {str(record.id)[:8]}… (job {str(job.id)[:8]}…)[/success]"
+    )
+
+
+@app.command("stop")
+def worker_stop(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask first."),
+) -> None:
+    """Stop all automation, for example a workflow that keeps triggering itself.
+
+    Pauses automation (nothing new is triggered or started, and manual runs are
+    refused), cancels every waiting run, and stops every running one before its
+    next step. A step already in progress finishes or times out first. Start
+    again with `civex automation resume`.
+    """
+    if not yes and not typer.confirm(
+        "Pause automation and cancel every waiting and running workflow?"
+    ):
+        raise typer.Exit(1)
+    ctx = get_ctx()
+    try:
+        cancelled = ctx.job_svc.stop_all()
+        ctx.commit()
+    finally:
+        ctx.close()
+    console.print(
+        f"[warning]Automation is paused.[/warning] Cancelled {cancelled} run"
+        f"{'' if cancelled == 1 else 's'}. `civex automation resume` starts it again."
+    )
+
+
+@app.command("resume")
+def worker_resume() -> None:
+    """Lift a pause: triggers fire and waiting runs are picked up again."""
+    ctx = get_ctx()
+    try:
+        ctx.job_svc.resume()
+    finally:
+        ctx.close()
+    console.print("[success]Automation is running.[/success]")
+
+
+@app.command("status")
+def worker_status() -> None:
+    """Say whether automation is paused, and how many runs are waiting or running."""
+    ctx = get_ctx()
+    try:
+        state = ctx.job_svc.automation_state()
+    finally:
+        ctx.close()
+    if state["paused"]:
+        console.print("[warning]Automation is paused.[/warning]")
+    else:
+        console.print("Automation is running.")
+    console.print(f"  {state['pending']} waiting, {state['running']} running")
+
+
+@app.command("cancel")
+def worker_cancel(
+    job_id: str = typer.Argument(..., help="Job ID or short prefix"),
+) -> None:
+    """Cancel one run.
+
+    A waiting run never starts; a running one stops before its next step.
+    """
+    ctx = get_ctx()
+    try:
+        job = next(
+            (j for j in ctx.job_svc.list_jobs() if str(j.id).startswith(job_id)),
+            None,
+        )
+        if job is None:
+            console.print(f"[error]Job '{job_id}' not found.[/error]")
+            raise typer.Exit(1)
+        if job.status not in ("pending", "running"):
+            console.print(f"Job {str(job.id)[:8]}… is already {job.status}.")
+            return
+        ctx.job_svc.cancel_job(job.id)
+        ctx.commit()
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    console.print(
+        f"[warning]Cancelled {job.workflow_name} ({str(job.id)[:8]}…).[/warning]"
     )

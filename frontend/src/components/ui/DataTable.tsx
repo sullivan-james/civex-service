@@ -7,6 +7,7 @@ import {
 import { Link } from 'react-router'
 import { ChevronUp, ChevronDown } from './icons'
 import { Checkbox } from './Checkbox'
+import { useRangeSelect } from '../../hooks/useRangeSelect'
 import { ErrorState, EmptyState } from './States'
 import { Skeleton } from './Skeleton'
 
@@ -35,6 +36,10 @@ export interface DataTableSort {
 export interface DataTableSelection {
   selected: Set<string>
   onToggle: (id: string) => void
+  /** Set several rows at once: what a shift-click on a row does, from the last
+   * row clicked to this one. Optional; without it the table toggles each row
+   * that needs changing, one by one. */
+  onSetMany?: (ids: string[], on: boolean) => void
   onToggleAll: () => void
   /** Accessible name of a row's checkbox. */
   rowLabel?: (rowId: string) => string
@@ -70,6 +75,9 @@ interface DataTableProps<T> {
    * ellipsis. `auto`: columns size to content and text wraps; the table
    * scrolls sideways if it must. */
   layout?: 'fixed' | 'auto'
+  /** Tighter rows and header, for a list that is scanned more than read (the
+   * runs). Every cell keeps the same minimum target size for a click. */
+  dense?: boolean
   /** Extra rows after the data, e.g. a draft row for adding a record. */
   footer?: ReactNode
   className?: string
@@ -119,10 +127,15 @@ export function DataTable<T>({
   onSortChange,
   maxHeight,
   layout = 'fixed',
+  dense = false,
   footer,
   className = '',
 }: DataTableProps<T>) {
   const tableId = useId()
+  const range = useRangeSelect(rows.map(getRowId))
+  // One place for the padding every cell and header uses.
+  const cellPad = dense ? 'px-3 py-1.5' : 'px-4 py-3'
+  const headPad = dense ? 'px-3 py-2' : thPad
   const colCount = columns.length + (actions ? 1 : 0) + (selection ? 1 : 0)
   // Loading is handled separately: it renders skeleton rows inside this table's
   // own <tbody>, so the real header and column widths stay put. TableSkeleton
@@ -213,7 +226,7 @@ export function DataTable<T>({
                       <button
                         type="button"
                         onClick={() => onSortChange?.(column.key)}
-                        className={`group flex w-full items-center gap-1 ${thPad} cursor-pointer hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent ${
+                        className={`group flex w-full items-center gap-1 ${headPad} cursor-pointer hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent ${
                           align === 'right' ? 'flex-row-reverse' : ''
                         } ${align === 'center' ? 'justify-center' : ''}`}
                       >
@@ -230,7 +243,9 @@ export function DataTable<T>({
                         )}
                       </button>
                     ) : (
-                      <span className={`block ${thPad}`}>{column.header}</span>
+                      <span className={`block ${headPad}`}>
+                        {column.header}
+                      </span>
                     )}
                   </th>
                 )
@@ -246,17 +261,17 @@ export function DataTable<T>({
             {isLoading ? (
               Array.from({ length: SKELETON_ROWS }).map((_, rowIndex) => (
                 <tr key={`skeleton-${rowIndex}`} aria-hidden="true">
-                  {selection && <td className="px-4 py-3" />}
+                  {selection && <td className={cellPad} />}
                   {columns.map((column) => (
                     <td
                       key={column.key}
-                      className={`px-4 py-3 ${alignClass[column.align ?? 'left']}`}
+                      className={`${cellPad} ${alignClass[column.align ?? 'left']}`}
                     >
                       <Skeleton className="h-4 w-full max-w-32" />
                     </td>
                   ))}
                   {actions && (
-                    <td className="px-4 py-3">
+                    <td className={cellPad}>
                       <Skeleton className="h-4 w-16" />
                     </td>
                   )}
@@ -266,7 +281,7 @@ export function DataTable<T>({
               <tr>
                 <td colSpan={colCount} className="p-0">
                   {error ? (
-                    <div className="px-4 py-3">
+                    <div className={cellPad}>
                       <ErrorState message={error} />
                     </div>
                   ) : (
@@ -320,7 +335,19 @@ export function DataTable<T>({
                                 selection.rowLabel?.(id) ?? `Select ${id}`
                               }
                               checked={selection.selected.has(id)}
-                              onChange={() => selection.onToggle(id)}
+                              onClick={range.onClick}
+                              onChange={() => {
+                                const ids = range.rangeFor(id)
+                                if (!ids) return selection.onToggle(id)
+                                // Shift-click: the rows between this and the last
+                                // one clicked all take this box's new state.
+                                const on = !selection.selected.has(id)
+                                if (selection.onSetMany)
+                                  return selection.onSetMany(ids, on)
+                                for (const other of ids)
+                                  if (selection.selected.has(other) !== on)
+                                    selection.onToggle(other)
+                              }}
                             />
                           </span>
                         </td>
@@ -337,7 +364,7 @@ export function DataTable<T>({
                         return (
                           <td
                             key={column.key}
-                            className={`${index === 0 && href ? 'relative ' : ''}px-4 py-3 text-fg ${alignClass[align]} ${column.className ?? ''}`}
+                            className={`${index === 0 && href ? 'relative ' : ''}${cellPad} text-fg ${alignClass[align]} ${column.className ?? ''}`}
                           >
                             {index === 0 && href ? (
                               // A real link for keyboard, middle-click and

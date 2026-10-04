@@ -187,4 +187,33 @@ describe('EditableCell datetimes', () => {
     await userEvent.keyboard('{Enter}')
     expect(onCommit).toHaveBeenCalledWith('2024-03-01T22:45:00.000Z')
   })
+
+  it('keeps the seconds that were typed', async () => {
+    const onCommit = vi.fn()
+    render(
+      <CollectionTimeZone timeZone="America/Chicago">
+        <table>
+          <tbody>
+            <tr>
+              <EditableCell
+                field={field('datetime', { name: 'taken_at' })}
+                value="2024-03-01T21:30:45+00:00"
+                onCommit={onCommit}
+                rowLabel="r1"
+              />
+            </tr>
+          </tbody>
+        </table>
+      </CollectionTimeZone>,
+    )
+    expect(screen.getByText(/3:30:45 PM CST/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('cell'))
+    const input = document.querySelector(
+      'input[type="datetime-local"]',
+    ) as HTMLInputElement
+    expect(input.value).toMatch(/^2024-03-01T15:30:45/)
+    fireEvent.change(input, { target: { value: '2024-03-01T16:45:09' } })
+    await userEvent.keyboard('{Enter}')
+    expect(onCommit).toHaveBeenCalledWith('2024-03-01T22:45:09.000Z')
+  })
 })

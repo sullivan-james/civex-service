@@ -19,13 +19,28 @@ export interface PluginInfo {
   inputs: PluginIOSpec[] | null
   outputs: PluginIOSpec[] | null
   config_schema: {
-    properties?: Record<
-      string,
-      { type?: string; default?: unknown; description?: string }
-    >
+    properties?: Record<string, ConfigProperty>
     required?: string[]
   }
   filename: string | null
+}
+
+/** One config key in a plugin's JSON schema. An optional list or number is
+ * `anyOf` its type and null, with no `type` of its own. */
+export interface ConfigProperty {
+  type?: string
+  anyOf?: { type?: string }[]
+  default?: unknown
+  description?: string
+}
+
+/** The type to show for a config key: its own, or the non-null one it may be. */
+export function configType(prop: ConfigProperty): string {
+  if (prop.type) return prop.type
+  const real = (prop.anyOf ?? [])
+    .map((a) => a.type)
+    .filter((t) => t && t !== 'null')
+  return real.length > 0 ? real.join(' | ') : 'any'
 }
 
 export interface PluginSource {

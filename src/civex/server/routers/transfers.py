@@ -23,6 +23,9 @@ def _spec(body: TransferRequest) -> TransferSpec:
 def _response(record: TransferRecord) -> TransferResponse:
     data = record.to_dict()
     data["live"] = jobs.is_live(record.id)
+    live = jobs.live_progress(record.id)
+    if live is not None:  # newer than the saved copy
+        data["progress"] = asdict(live)
     if data.get("plan") is not None:
         data["plan"]["can_proceed"] = record.plan.can_proceed  # type: ignore[union-attr]
     return TransferResponse(**data)
@@ -34,7 +37,7 @@ def preview_transfer(body: TransferRequest, ctx: AppContext = Depends(get_ctx)):
 
     Reports how many files and bytes would move and where each target would put
     them, and lists `problems` that would stop it (a volume that is offline or
-    read-only, not enough room, another transfer running) and `warnings` that
+    read-only, not enough room) and `warnings` that
     are worth knowing. The sizes come from the catalog, so they are close, not
     exact.
     """
@@ -44,7 +47,9 @@ def preview_transfer(body: TransferRequest, ctx: AppContext = Depends(get_ctx)):
 
 @router.post("", response_model=TransferResponse, status_code=202)
 def start_transfer(body: TransferRequest):
-    """Start moving files between volumes, in the background.
+    """Queue a move of files between volumes. Moves run one at a time, in the
+    order they were queued, so asking for a second while one is running is fine:
+    it waits its turn (`status` is `queued`).
 
     Poll `GET /store/transfers/{id}` for progress. A file is only removed from
     its source after the copy has been checked and recorded, so a transfer can
@@ -71,18 +76,20 @@ def get_transfer(transfer_id: str, ctx: AppContext = Depends(get_ctx)):
 
 @router.post("/{transfer_id}/pause", response_model=TransferResponse)
 def pause_transfer(transfer_id: str, ctx: AppContext = Depends(get_ctx)):
-    """Ask a running transfer to pause. It stops within a moment, discarding any
-    half-copied file, and keeps everything already moved. Works for a transfer
-    started from the command line as well as one running here."""
+    """Ask a transfer to pause. A running one stops within a moment, discarding
+    any half-copied file, and keeps everything already moved; a queued one is
+    taken out of the queue. Works for a transfer started from the command line
+    as well as one running here."""
     if not jobs.pause(transfer_id):
-        raise HTTPException(409, detail="It isn't running.")
+        raise HTTPException(409, detail="It isn't running or queued.")
     return _response(ctx.transfer_svc.get(transfer_id))
 
 
 @router.post("/{transfer_id}/resume", response_model=TransferResponse, status_code=202)
 def resume_transfer(transfer_id: str):
-    """Carry on a paused, failed or interrupted transfer where it left off. What
-    is already moved is not moved again."""
+    """Put a paused, failed or interrupted transfer back in the queue; it carries
+    on where it left off when its turn comes. What is already moved is not moved
+    again."""
     return _response(jobs.resume(transfer_id))
 
 

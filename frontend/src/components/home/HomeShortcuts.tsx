@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import { usePins, useRecents } from '../../hooks/usePins'
+import { TargetLabel } from '../TargetLabel'
 import { PinCount } from '../PinnedNav'
 import { PIN_ICONS } from '../pinIcons'
 import { IconButton } from '../ui'
@@ -77,7 +78,7 @@ export function HomeShortcuts() {
                     to={r.to}
                     className="min-w-0 truncate font-medium text-accent hover:underline"
                   >
-                    {r.label}
+                    <TargetLabel target={r} />
                   </Link>
                   {r.context && (
                     <span className="truncate text-xs text-fg-subtle">

@@ -139,7 +139,7 @@ steps:
     ```
 
 === "Web UI"
-    Navigate to a record's detail page. The **Workflows** panel lists all workflows compatible with that record's schema. Click **Run** to execute immediately, or supply file inputs when prompted.
+    Navigate to a record's detail page. The **Run** button in the header runs a workflow compatible with that record's schema: with one it is **Run &lt;name&gt;**, with several it is **Run workflow** and a list. It starts immediately and a message offers **View run**; a workflow that takes file inputs asks for them first.
 
 ## Monitoring jobs
 

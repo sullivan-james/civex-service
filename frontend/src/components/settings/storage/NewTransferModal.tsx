@@ -3,12 +3,14 @@ import type { TransferSpec } from '../../../api/transfers'
 import { useCollections } from '../../../hooks/useCollections'
 import {
   useStartTransfer,
+  useTransfers,
   useTransferPreview,
 } from '../../../hooks/useTransfers'
 import { useVolumes } from '../../../hooks/useStore'
 import { useUISettings } from '../../../hooks/useUISettings'
 import { errorMessage } from '../../../lib/errors'
 import { formatSize } from '../../../utils/storage'
+import { isBusy } from '../../../utils/transfers'
 import { Button, Modal, ModalBody, ModalFooter, ModalHeader } from '../../ui'
 
 export interface TransferPreset {
@@ -32,6 +34,7 @@ export function NewTransferModal({
   const { data: collections = [] } = useCollections()
   const advanced = useUISettings().data?.show_advanced ?? false
   const start = useStartTransfer()
+  const waiting = (useTransfers().data ?? []).some(isBusy)
   const [kind, setKind] = useState<'drain' | 'consolidate'>(
     preset.collectionId ? 'consolidate' : 'drain',
   )
@@ -213,7 +216,7 @@ export function NewTransferModal({
           disabled={!spec || !plan?.can_proceed || start.isPending}
           onClick={() => spec && start.mutate(spec, { onSuccess: onClose })}
         >
-          Start moving
+          {waiting ? 'Add to queue' : 'Start moving'}
         </Button>
       </ModalFooter>
     </Modal>

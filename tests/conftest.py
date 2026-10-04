@@ -8,6 +8,7 @@ parsing Rich console output.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +79,17 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 def strict_schema_lists() -> None:
     """Request this to run a test with the real "a collection only holds
     records of its enabled schemas" check (see the autouse fixture below)."""
+
+
+@pytest.fixture(autouse=True)
+def _stop_the_transfer_worker() -> Iterator[None]:
+    """The server's transfer worker is a process-wide singleton that starts the
+    first time a move is queued. Left running, it would carry on polling
+    whichever project a later test is using, so stop it after each test."""
+    yield
+    from civex.services.transfer_jobs import jobs
+
+    jobs.shutdown()
 
 
 @pytest.fixture(autouse=True)

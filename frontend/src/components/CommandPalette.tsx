@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { recordsApi, type CivexRecord } from '../api/records'
 import { useCollections } from '../hooks/useCollections'
 import { usePins, useRecents } from '../hooks/usePins'
+import { TargetLabel } from './TargetLabel'
 import { useSchemas } from '../hooks/useSchemas'
 import { useAllViews } from '../hooks/useViews'
 import { buildGroups } from '../utils/paletteSearch'
@@ -195,7 +196,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                       aria-hidden="true"
                     />
                     <span className="min-w-0 truncate font-medium text-fg">
-                      {item.label}
+                      <TargetLabel target={item} />
                     </span>
                     {item.context && (
                       <span className="truncate text-xs text-fg-subtle">

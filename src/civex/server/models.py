@@ -460,6 +460,27 @@ class RecordRef(BaseModel):
     natural_name: str | None
 
 
+class RecordLabelsRequest(BaseModel):
+    ids: list[str] = Field(
+        max_length=200,
+        description="Record ids to look up. Anything that isn't a record is skipped.",
+    )
+
+
+class RecordLabelResponse(BaseModel):
+    id: str
+    schema_name: str = Field(description="The record's schema.")
+    natural_name: str | None = Field(
+        description=(
+            "The record's name as it is now: its schema's display template "
+            "applied to its current values. Null when nothing in it can name it."
+        )
+    )
+    deleted: bool = Field(
+        description="True for a record in Recently Deleted (it can still be restored)."
+    )
+
+
 class ReferrerGroupResponse(BaseModel):
     dataset_id: str = Field(description="Id of the collection the referrers live in.")
     collection: str = Field(description="Name of that collection.")
@@ -934,6 +955,10 @@ class GCRequest(BaseModel):
         ge=0,
         description="Skip unreferenced objects written more recently than this many days.",
     )
+    volume: str | None = Field(
+        default=None,
+        description="Only collect objects stored on this volume. Omit to clean up every volume.",
+    )
     rebuild_refs: bool = Field(
         default=False,
         description="Recompute the file-reference table from every record and job before collecting. Normally unnecessary; use if the table may have drifted.",
@@ -962,6 +987,10 @@ class GCReportResponse(BaseModel):
     )
     deleted_bytes: int
     deleted: list[StoredObjectResponse]
+    volume: str | None = Field(
+        default=None,
+        description="The volume this pass was limited to, or null for every volume.",
+    )
     stale_scratch_removed: int = Field(
         description="Abandoned upload scratch files (from an interrupted "
         "streamed upload) removed, or if dry_run, collectible."
@@ -1045,6 +1074,23 @@ class WorkflowJobResponse(BaseModel):
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+    depth: int = Field(
+        default=0,
+        description=(
+            "How many workflow-triggered-by-workflow hops deep this run is: 0 for "
+            "a run started by a person or an ordinary edit, 1 for a run started "
+            "by another run's save, and so on."
+        ),
+    )
+    trigger_detail: dict | None = Field(
+        default=None,
+        description=(
+            "What caused the run. `changes` lists each field that changed, with a "
+            "short `before` and `after` and whether the workflow was `watched` "
+            "for it. `caused_by` is {job_id, workflow} when another run's own "
+            "save started this one, else null. Null for a run started by hand."
+        ),
+    )
 
     @classmethod
     def from_dto(cls, dto: WorkflowJobDTO) -> WorkflowJobResponse:
@@ -1063,7 +1109,110 @@ class WorkflowJobResponse(BaseModel):
             created_at=dto.created_at,
             started_at=dto.started_at,
             finished_at=dto.finished_at,
+            depth=dto.depth,
+            trigger_detail=dto.trigger_detail,
         )
+
+
+class RerunJobsRequest(BaseModel):
+    ids: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description="Ids of the runs to repeat. Each is queued as a new run.",
+    )
+    filter: dict[str, Any] | None = Field(
+        default=None,
+        description="Instead of ids: repeat every run this filter matches (the "
+        "same filter tree as GET /jobs, at most 1000 runs).",
+    )
+
+
+class SkippedJob(BaseModel):
+    id: str
+    reason: str = Field(description="Why this run could not be repeated.")
+
+
+class RerunJobsResponse(BaseModel):
+    started: list[WorkflowJobResponse] = Field(
+        description="The new runs that were queued, in the order asked."
+    )
+    skipped: list[SkippedJob] = Field(
+        description="Runs that could not be repeated, such as one whose record "
+        "has since been deleted."
+    )
+
+
+class RunManyRequest(BaseModel):
+    record_ids: list[str] = Field(
+        min_length=1,
+        max_length=500,
+        description="Ids of the records to run the workflow on, one run each.",
+    )
+
+
+class RunManyResponse(BaseModel):
+    started: list[WorkflowJobResponse] = Field(
+        description="The runs that were queued, in the order asked."
+    )
+    skipped: list[SkippedJob] = Field(
+        description="Records the workflow was not run on, each with why: not "
+        "found, or not the schema the workflow is for."
+    )
+
+
+class BatchResponse(BaseModel):
+    total: int = Field(
+        description="Every run in the current stretch of work: those finished "
+        "since the queue was last empty, plus those still waiting or running."
+    )
+    active: int = Field(description="Of those, waiting or running.")
+    completed: int = Field(description="Of those, finished successfully.")
+    failed: int = Field(description="Of those, failed.")
+    cancelled: int = Field(description="Of those, cancelled.")
+    started_at: datetime = Field(
+        description="When the earliest run in this stretch was queued."
+    )
+
+
+class RunFieldResponse(BaseModel):
+    name: str
+    label: str
+    type: str = Field(description="string, enum, integer or datetime.")
+    description: str
+    choices: list[str] | None = Field(
+        default=None, description="Fixed choices, when there are any."
+    )
+    operators: list[str] = Field(description="Operators a condition on it accepts.")
+
+
+class FailureGroupResponse(BaseModel):
+    workflow: str
+    kind: str | None = Field(description="The failure type, such as timeout.")
+    step: str | None = Field(description="The step that failed.")
+    message: str | None = Field(description="The failure's own message.")
+    count: int = Field(description="How many runs failed this way.")
+    last_at: datetime = Field(description="When one last did.")
+
+
+class AutomationStatusResponse(BaseModel):
+    paused: bool = Field(
+        description=(
+            "True while automation is paused: triggers start nothing, waiting "
+            "runs are not picked up, and manual runs are refused."
+        )
+    )
+    pending: int = Field(description="Runs waiting to start.")
+    running: int = Field(description="Runs in progress.")
+    cancelled: int = Field(
+        default=0,
+        description="How many runs the call just cancelled (stop only).",
+    )
+    batch: BatchResponse | None = Field(
+        default=None,
+        description="The current stretch of work with how many have succeeded and "
+        "failed so far; null when nothing is waiting or running.",
+    )
 
 
 # --- Audit ---

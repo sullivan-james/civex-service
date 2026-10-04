@@ -1,11 +1,12 @@
 import { type ReactNode } from 'react'
 
-type Variant = 'default' | 'accent' | 'success' | 'danger'
+type Variant = 'default' | 'accent' | 'success' | 'danger' | 'attention'
 
 const variants: Record<Variant, string> = {
   default: 'bg-neutral-subtle text-fg-muted border-neutral-subtle',
   accent: 'bg-accent-subtle text-accent border-accent-muted',
   success: 'bg-success-subtle text-success border-success-muted',
+  attention: 'bg-attention-subtle text-attention border-attention-muted',
   danger: 'bg-danger-subtle text-danger border-danger-subtle-border',
 }
 

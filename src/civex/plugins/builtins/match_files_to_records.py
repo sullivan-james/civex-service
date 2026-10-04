@@ -13,6 +13,15 @@ from civex.plugins.base import Tier0Plugin, WorkflowContext
 log = logging.getLogger(__name__)
 
 
+def _normalise(key: str) -> str:
+    """A captured key as the record's field is compared: "01" → "1", so an
+    integer field matches; anything else is left as it is."""
+    try:
+        return str(int(key))
+    except ValueError:
+        return key
+
+
 class Plugin(Tier0Plugin):
     id = "civex.match_files_to_records"
     name = "Match Files to Records"
@@ -36,6 +45,13 @@ class Plugin(Tier0Plugin):
             name="unmatched",
             type="list",
             description="Filenames the pattern missed, or whose record could not be created.",
+        ),
+        IOSpec(
+            name="ambiguous",
+            type="list",
+            description="Files left alone because another file in the same run "
+            "has the same key (one record holds one file), each with the files "
+            "it clashes with.",
         ),
     ]
 
@@ -98,6 +114,19 @@ class Plugin(Tier0Plugin):
 
         created = updated = 0
         unmatched: list[str] = []
+        ambiguous: list[str] = []
+
+        # Two files whose keys come out the same would each be attached to the
+        # same record, the later one replacing the earlier, silently. That is
+        # almost always a pattern that reads too little of the name (`sel_(\d{2})`
+        # takes "14" from selection 149 and from selection 14), so none of them
+        # is attached: they are listed, and nothing wrong is written.
+        by_key: dict[str, list[str]] = {}
+        for ref in files:
+            name = ref.get("filename", "")
+            found = pat.search(name)
+            if found:
+                by_key.setdefault(_normalise(found.group(1)), []).append(name)
 
         for ref in files:
             filename = ref.get("filename", "")
@@ -107,12 +136,20 @@ class Plugin(Tier0Plugin):
                 unmatched.append(filename)
                 continue
 
-            key_value = m.group(1)
-            # Normalise numeric captures: "01" → "1" so integer fields match.
-            try:
-                key_value = str(int(key_value))
-            except ValueError:
-                pass
+            key_value = _normalise(m.group(1))
+            clashing = by_key.get(key_value, [])
+            if len(clashing) > 1:
+                others = [n for n in clashing if n != filename]
+                log.warning(
+                    "Skipped '%s': key %s is also the key of %d other file(s)",
+                    filename,
+                    key_value,
+                    len(others),
+                )
+                ambiguous.append(
+                    f"{filename} (key {key_value} is also in: {', '.join(others)})"
+                )
+                continue
 
             existing = ctx.find_records(
                 dataset_name,
@@ -179,12 +216,18 @@ class Plugin(Tier0Plugin):
                     unmatched.append(f"{filename} (missing required fields: {e})")
 
         log.info(
-            "Done: %d created, %d updated, %d unmatched",
+            "Done: %d created, %d updated, %d unmatched, %d ambiguous",
             created,
             updated,
             len(unmatched),
+            len(ambiguous),
         )
         if unmatched:
             log.warning("Unmatched files: %s", unmatched)
 
-        return {"created": created, "updated": updated, "unmatched": unmatched}
+        return {
+            "created": created,
+            "updated": updated,
+            "unmatched": unmatched,
+            "ambiguous": ambiguous,
+        }

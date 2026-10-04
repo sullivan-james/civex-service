@@ -4,10 +4,10 @@ import json
 import logging
 import time
 from collections import deque
-from typing import Any
+from typing import Any, Callable
 
 from civex.domain.dtos import ErrorEnvelope, StepExecution
-from civex.domain.exceptions import PluginContractError
+from civex.domain.exceptions import JobCancelled, PluginContractError
 from civex.plugins.base import WorkflowContext
 from civex.plugins.registry import PluginRegistration
 from civex.workflows.conditions import (
@@ -117,7 +117,7 @@ def _json_safe(value: Any) -> Any:
     store, for the per-step execution record (CIVEX-117).
 
     Plugin inputs/outputs aren't guaranteed JSON-safe -- `civex.load_file`
-    hands back raw `bytes`, `civex.load_csv` a pandas DataFrame -- so this
+    hands back raw `bytes`, `civex.parse_table` a pandas DataFrame -- so this
     summarizes what it can't represent instead of failing the whole job
     write over a value nobody needed byte-for-byte in a job record.
     """
@@ -190,6 +190,7 @@ def run(
     plugins: dict[str, PluginRegistration],
     initial_outputs: dict[str, dict[str, Any]] | None = None,
     default_timeout_seconds: float = 60.0,
+    should_stop: Callable[[], bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Runs `wf` to completion and returns its per-step execution records
     (CIVEX-117), in execution order, for the caller to persist on the job.
@@ -198,6 +199,10 @@ def run(
     one) are attached to the raised exception as `.step_executions` --
     mirroring how `.envelope` is attached -- since the caller still wants
     that partial history for a job that didn't finish.
+
+    `should_stop` is asked before each step; if it says yes the run ends with
+    `JobCancelled` (carrying the steps that already ran). A step that is already
+    running is not interrupted: it finishes, or hits its own timeout.
     """
     log.info(wf)
     _validate_contracts(wf, plugins)
@@ -218,6 +223,10 @@ def run(
     step_executions: list[dict[str, Any]] = []
 
     for step in order:
+        if should_stop is not None and should_stop():
+            cancelled = JobCancelled(f"Stopped before step '{step.id}'.")
+            cancelled.step_executions = step_executions  # type: ignore[attr-defined]
+            raise cancelled
         registration = plugins.get(step.plugin)
         if registration is None:
             raise ValueError(f"Unknown plugin '{step.plugin}'")

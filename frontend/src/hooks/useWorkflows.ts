@@ -1,16 +1,28 @@
 import {
   keepPreviousData,
+  type QueryClient,
   useMutation,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
 import {
+  automationApi,
   jobsApi,
   workflowsApi,
+  type AutomationStatus,
   type RunQuery,
   type WorkflowJob,
 } from '../api/workflows'
 import { useToast } from '../components/ui/ToastProvider'
+import type { FilterTreeWire } from '../utils/filterTree'
+
+/** After anything that queues, finishes or stops runs: the lists, and the status
+ * bar's tracker at once, instead of whenever it next polls (idle, that is every
+ * 15 seconds, long enough for a bulk start to go unseen). */
+function refreshRuns(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ['jobs'] })
+  qc.invalidateQueries({ queryKey: ['automation'] })
+}
 
 export function useWorkflows() {
   return useQuery({ queryKey: ['workflows'], queryFn: workflowsApi.list })
@@ -55,7 +67,17 @@ export function useRunWorkflow() {
   return useMutation({
     mutationFn: ({ name, recordId }: { name: string; recordId: string }) =>
       workflowsApi.run(name, recordId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['jobs'] }),
+    onSuccess: () => refreshRuns(qc),
+  })
+}
+
+/** Run one workflow on several records at once. */
+export function useRunWorkflowOnMany() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, recordIds }: { name: string; recordIds: string[] }) =>
+      workflowsApi.runMany(name, recordIds),
+    onSuccess: () => refreshRuns(qc),
   })
 }
 
@@ -71,7 +93,7 @@ export function useRunWorkflowWithFiles() {
       recordId: string
       fileInputs: Record<string, File[]>
     }) => workflowsApi.runWithFiles(name, recordId, fileInputs),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['jobs'] }),
+    onSuccess: () => refreshRuns(qc),
   })
 }
 
@@ -156,7 +178,7 @@ export function useRerunJob() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => jobsApi.rerun(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['jobs'] }),
+    onSuccess: () => refreshRuns(qc),
   })
 }
 
@@ -164,7 +186,7 @@ export function useDrainJobs() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: jobsApi.drain,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['jobs'] }),
+    onSuccess: () => refreshRuns(qc),
   })
 }
 
@@ -181,3 +203,78 @@ export function useJob(id: string) {
     },
   })
 }
+
+/** Repeat several runs at once (one request). */
+export function useRerunJobs() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (which: { ids: string[] } | { filter: FilterTreeWire }) =>
+      jobsApi.rerunMany(which),
+    onSuccess: () => refreshRuns(qc),
+  })
+}
+
+export function useCancelJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => jobsApi.cancel(id),
+    onSuccess: () => {
+      refreshRuns(qc)
+      qc.invalidateQueries({ queryKey: ['job'] })
+      qc.invalidateQueries({ queryKey: ['automation'] })
+    },
+  })
+}
+
+/** Whether automation is paused, and how many runs wait or run. Runs in the
+ * app shell, so it backs off when nothing is going on. */
+/** The fields a run filter may test, from the server. */
+export function useRunFilterFields() {
+  return useQuery({
+    queryKey: ['jobs', 'filter-fields'],
+    queryFn: jobsApi.filterFields,
+    staleTime: Infinity,
+  })
+}
+
+/** Failed runs grouped by what went wrong, for the runs a filter covers. */
+export function useFailureGroups(
+  filter: FilterTreeWire | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['jobs', 'failure-groups', filter],
+    queryFn: () => jobsApi.failureGroups(filter),
+    enabled,
+    placeholderData: keepPreviousData,
+    refetchInterval: 10_000,
+  })
+}
+
+export function useAutomation() {
+  return useQuery({
+    queryKey: ['automation'],
+    queryFn: automationApi.status,
+    refetchInterval: (query) => {
+      const s = query.state.data
+      // While runs are going: often, so the tracker follows them closely.
+      return s && (s.paused || s.pending + s.running > 0) ? 1500 : 15_000
+    },
+  })
+}
+
+function useAutomationAction(fn: () => Promise<AutomationStatus>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['automation'] })
+      refreshRuns(qc)
+      qc.invalidateQueries({ queryKey: ['job'] })
+    },
+  })
+}
+
+export const useStopAutomation = () => useAutomationAction(automationApi.stop)
+export const useResumeAutomation = () =>
+  useAutomationAction(automationApi.resume)

@@ -85,6 +85,10 @@ _TRANSFER_LOCK_FILENAME = ".transfer.lock"
 # A copy that moves no bytes at all for this long is treated as its volume having
 # stopped answering (a stuck network write can't be interrupted from outside).
 STALL_SECONDS = 60.0
+# While a finished write is being flushed to disk (one call that can't report
+# progress) a copy may go quiet for size / this rate, if that is longer than
+# STALL_SECONDS: a big file on a slow drive can take minutes to flush.
+_MIN_SYNC_BYTES_PER_SECOND = 2 * 1024 * 1024
 # Long enough that no real GC pass should ever take this long; a lock file
 # older than this is assumed to be left behind by a process that crashed
 # mid-run rather than one still working, and is reclaimed rather than
@@ -117,11 +121,18 @@ class _CopyJob:
         self.bytes = 0
         self.reused = False
         self.last_progress = time.monotonic()
+        self.syncing = False
         self.abort = threading.Event()
         self.error: BaseException | None = None
 
     def touch(self) -> None:
         self.last_progress = time.monotonic()
+
+    def stall_limit(self) -> float:
+        """Seconds without progress before the copy counts as stalled."""
+        if self.syncing:
+            return max(STALL_SECONDS, self.size / _MIN_SYNC_BYTES_PER_SECOND)
+        return STALL_SECONDS
 
 
 def _hash_file(path: Path, job: _CopyJob | None = None) -> str:
@@ -558,6 +569,10 @@ class VolumeAwareFileObjectStore:
         for name in self._cfg.volumes:
             yield from self._walk_volume(name)
 
+    def volume_names(self) -> list[str]:
+        """Every configured volume, in the queue or not."""
+        return list(self._cfg.volumes)
+
     def list_objects(self) -> list[StoredObjectInfo]:
         """Materialised `iter_objects()`, for callers that want a list."""
         return list(self.iter_objects())
@@ -705,23 +720,22 @@ class VolumeAwareFileObjectStore:
 
         def _acquire() -> None:
             fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.close(fd)
+            try:
+                os.write(fd, str(os.getpid()).encode())
+            finally:
+                os.close(fd)
 
         try:
             _acquire()
         except FileExistsError:
-            try:
-                age = time.time() - lock_path.stat().st_mtime
-            except OSError:
-                age = _GC_LOCK_STALE_SECONDS  # already gone -- treat as stale
-            if age < _GC_LOCK_STALE_SECONDS:
+            if self._gc_lock_is_live():
                 raise GCAlreadyRunningError(
                     "A garbage-collection pass is already running against "
                     "this object store. Wait for it to finish and retry."
                 )
             log.warning(
-                "Reclaiming GC lock file older than %ds -- assuming the "
-                "process that held it crashed.",
+                "Reclaiming a GC lock whose process has gone or that is older "
+                "than %ds -- assuming the process that held it crashed.",
                 _GC_LOCK_STALE_SECONDS,
             )
             lock_path.unlink(missing_ok=True)
@@ -828,7 +842,7 @@ class VolumeAwareFileObjectStore:
                 if on_chunk is not None and job.bytes > reported:
                     delta, reported = job.bytes - reported, job.bytes
                     on_chunk(delta)
-                if time.monotonic() - job.last_progress > STALL_SECONDS:
+                if time.monotonic() - job.last_progress > job.stall_limit():
                     job.abort.set()
                     raise self._stalled(source, target)
         except TransferStopped:
@@ -926,7 +940,12 @@ class VolumeAwareFileObjectStore:
                     if on_chunk is not None:
                         on_chunk(len(chunk))
                 writer.flush()
-                os.fsync(writer.fileno())
+                job.syncing = True
+                try:
+                    os.fsync(writer.fileno())
+                finally:
+                    job.syncing = False
+                    job.touch()
             if job.bytes != src_stat.st_size:
                 raise ItemFailed("it changed while it was being copied", retryable=True)
             if hasher.hexdigest() != sha256:
@@ -1074,21 +1093,29 @@ class VolumeAwareFileObjectStore:
         except OSError:
             return False
 
-    def _transfer_lock_is_live(self) -> bool:
-        """Whether a transfer is really holding its lock. The lock records the
-        id of the process that took it, and a lock whose process has gone (the
-        server restarted, the terminal was closed, the machine lost power) is
-        free at once, not an hour later. One with no readable id falls back to
-        how recently it was touched."""
-        if not self._lock_is_live(_TRANSFER_LOCK_FILENAME):
-            return False
+    def _lock_owner(self, filename: str) -> int | None:
+        """The id of the process that took a lock, or None if it can't be read."""
         try:
-            owner = int(
-                (self._root / "_civex" / _TRANSFER_LOCK_FILENAME).read_text().strip()
-            )
+            return int((self._root / "_civex" / filename).read_text().strip())
         except (OSError, ValueError):
-            return True
-        return pid_alive(owner)
+            return None
+
+    def _owner_alive(self, filename: str) -> bool:
+        """A lock whose process has gone (the server restarted, the terminal was
+        closed, the machine lost power) is free at once, not an hour later. One
+        with no readable id falls back to how recently it was touched."""
+        if not self._lock_is_live(filename):
+            return False
+        owner = self._lock_owner(filename)
+        return True if owner is None else pid_alive(owner)
+
+    def _transfer_lock_is_live(self) -> bool:
+        """Whether a transfer is really holding its lock."""
+        return self._owner_alive(_TRANSFER_LOCK_FILENAME)
+
+    def _gc_lock_is_live(self) -> bool:
+        """Whether a garbage-collection pass is really holding its lock."""
+        return self._owner_alive(_GC_LOCK_FILENAME)
 
     @contextlib.contextmanager
     def transfer_lock(self) -> Iterator[None]:
@@ -1097,20 +1124,40 @@ class VolumeAwareFileObjectStore:
         GC refuse in turn, so the two never work on the same files at once.
         `touch_transfer_lock` keeps it fresh; one not touched for an hour is
         taken to belong to a process that died."""
-        if self._lock_is_live(_GC_LOCK_FILENAME):
+        if self._gc_lock_is_live():
             raise GCAlreadyRunningError(
                 "A garbage-collection pass is running. Wait for it to finish, "
                 "then start the transfer."
             )
         lock_path = self._root / "_civex" / _TRANSFER_LOCK_FILENAME
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        if self._transfer_lock_is_live():
+        # O_EXCL, so two processes (the server's worker and a terminal) that
+        # reach for the lock at the same moment can't both get it.
+        for _ in range(2):
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                if self._transfer_lock_is_live():
+                    raise GCAlreadyRunningError(
+                        "A storage transfer is already running."
+                    ) from None
+                lock_path.unlink(missing_ok=True)  # its process is gone
+                continue
+            try:
+                os.write(fd, str(os.getpid()).encode())
+            finally:
+                os.close(fd)
+            break
+        else:
             raise GCAlreadyRunningError("A storage transfer is already running.")
-        lock_path.write_text(str(os.getpid()))
         try:
             yield
         finally:
             lock_path.unlink(missing_ok=True)
+
+    def transfer_lock_held(self) -> bool:
+        """Whether a live process is holding the transfer lock right now."""
+        return self._transfer_lock_is_live()
 
     def touch_transfer_lock(self) -> None:
         try:

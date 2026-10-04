@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from civex.domain.dtos import GCReport, StoredObjectInfo
-from civex.domain.exceptions import ValidationError
+from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.repositories.protocols import FileObjectStore, FileReferenceRepository
 
 log = logging.getLogger(__name__)
@@ -48,7 +48,10 @@ class GCService:
         run it if the table may have drifted, before a GC pass."""
         return self._refs.rebuild()
 
-    def run(self, dry_run: bool = True, grace_days: int = 14) -> GCReport:
+    def run(
+        self, dry_run: bool = True, grace_days: int = 14, volume: str | None = None
+    ) -> GCReport:
+        """Collect unreferenced objects, from every volume or just `volume`."""
         if grace_days < 0:
             # A negative value would erase the grace period's whole purpose
             # (protecting a freshly-uploaded-but-not-yet-attached object
@@ -56,6 +59,8 @@ class GCService:
             # it -- validated here, the one place both the CLI and the API
             # route through, so neither caller can bypass it independently.
             raise ValidationError("grace_days must be >= 0")
+        if volume is not None and volume not in self._store.volume_names():
+            raise NotFoundError(f"Volume '{volume}' not found")
 
         with self._store.gc_lock():
             cutoff = time.time() - grace_days * _DAY_SECONDS
@@ -88,6 +93,8 @@ class GCService:
 
             batch: list[StoredObjectInfo] = []
             for obj in self._store.iter_objects():
+                if volume is not None and obj.volume != volume:
+                    continue
                 counts["scanned"] += 1
                 batch.append(obj)
                 if len(batch) >= _BATCH:
@@ -101,8 +108,14 @@ class GCService:
             if not dry_run and not errors:
                 self._store.reconcile_inventory()
 
-            stale_scratch_removed = self._store.sweep_stale_scratch(
-                _STALE_SCRATCH_SECONDS, dry_run=dry_run or bool(errors)
+            # Abandoned uploads aren't on any one volume; a clean-up of a single
+            # volume leaves them for a store-wide pass.
+            stale_scratch_removed = (
+                0
+                if volume is not None
+                else self._store.sweep_stale_scratch(
+                    _STALE_SCRATCH_SECONDS, dry_run=dry_run or bool(errors)
+                )
             )
 
             return GCReport(
@@ -114,4 +127,5 @@ class GCService:
                 deleted=collectible,
                 stale_scratch_removed=stale_scratch_removed,
                 errors=errors,
+                volume=volume,
             )

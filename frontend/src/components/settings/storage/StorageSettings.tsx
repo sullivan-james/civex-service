@@ -32,7 +32,10 @@ export default function StorageSettings() {
         const next = new URLSearchParams(prev)
         if (id === 'volumes') next.delete('tab')
         else next.set('tab', id)
-        if (id !== 'collections') next.delete('volume')
+        if (id !== 'collections') {
+          next.delete('volume')
+          next.delete('focus')
+        }
         return next
       },
       { replace: true },
@@ -50,6 +53,7 @@ export default function StorageSettings() {
       </TabPanel>
       <TabPanel id="collections" value={tab}>
         <CollectionsTab
+          focusId={params.get('focus')}
           volumeFilter={volumeFilter}
           onClearVolumeFilter={() =>
             setParams(

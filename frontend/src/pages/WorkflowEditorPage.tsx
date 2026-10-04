@@ -41,7 +41,7 @@ steps:
       field: my_file_field
 
   - id: parse_csv
-    plugin: civex.load_csv
+    plugin: civex.parse_table
     config:
       delimiter: ","
     inputs:

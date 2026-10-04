@@ -15,6 +15,8 @@ from civex.server.downloads import new_temp_path, serve, temp_paths
 from civex.server.models import (
     CreateRecordRequest,
     PaginatedRecordResponse,
+    RecordLabelResponse,
+    RecordLabelsRequest,
     RecordRef,
     RecordResponse,
     ReferrerGroupResponse,
@@ -200,6 +202,28 @@ def list_deleted_records(
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     return [RecordResponse.from_dto(r) for r in items]
+
+
+@router.post("/records/labels", response_model=list[RecordLabelResponse])
+def record_labels(body: RecordLabelsRequest, ctx: AppContext = Depends(get_ctx)):
+    """Names for a batch of record ids, as they are now.
+
+    Anywhere that kept only a record's id (a workflow run's records, a pinned
+    record, a link) asks here for its name instead of keeping a copy that would
+    go stale when the record or its schema's name template changes. One call
+    resolves any number of ids (up to 200); ids that aren't records, or whose
+    record no longer exists, are omitted. Read-only: it is a POST only so the
+    ids travel in the body rather than a long address.
+    """
+    return [
+        RecordLabelResponse(
+            id=str(r.id),
+            schema_name=r.schema_name,
+            natural_name=r.natural_name,
+            deleted=r.deleted_at is not None,
+        )
+        for r in ctx.record_svc.labels(body.ids)
+    ]
 
 
 @router.get("/records/{record_id}", response_model=RecordResponse)

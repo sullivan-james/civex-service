@@ -291,3 +291,38 @@ def test_file_info_endpoint(client: TestClient, tmp_path) -> None:
     ]
     assert body["records"] == 0 and body["collections"] == []
     assert client.get(f"/api/files/{'00' * 32}/info").status_code == 404
+
+
+def test_gc_can_be_limited_to_one_volume(client: TestClient, tmp_path) -> None:
+    from civex.config import load_config
+    from civex.context import build_local_context
+
+    ctx = build_local_context(load_config())
+    for name in ("a", "b"):
+        path = tmp_path / "mnt" / name
+        path.mkdir(parents=True)
+        ctx.store_svc.add_volume(name, str(path))
+    ctx.store_svc.set_queue(["a"])
+    on_a = ctx.file_svc._store.put(b"orphan on a", "a.txt")
+    ctx.store_svc.set_queue(["b"])
+    on_b = ctx.file_svc._store.put(b"orphan on b", "b.txt")
+    ctx.commit()
+    ctx.close()
+
+    resp = client.post(
+        "/api/store/gc", json={"apply": True, "grace_days": 0, "volume": "a"}
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["volume"] == "a"
+    assert [o["sha256"] for o in body["deleted"]] == [on_a.sha256]
+    ctx2 = build_local_context(load_config())
+    assert not ctx2.file_svc._store.exists(on_a.sha256)
+    assert ctx2.file_svc._store.exists(on_b.sha256)
+    ctx2.close()
+
+
+def test_gc_of_an_unknown_volume_is_404(client: TestClient) -> None:
+    resp = client.post("/api/store/gc", json={"volume": "nowhere"})
+    assert resp.status_code == 404

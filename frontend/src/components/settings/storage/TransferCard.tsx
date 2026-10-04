@@ -22,7 +22,14 @@ export function describeTransfer(t: Transfer): string {
     : `Gather ${t.spec.collection_ids.length} collection(s) onto ${t.spec.targets.join(', ')}`
 }
 
-export function TransferCard({ t }: { t: Transfer }) {
+/** `ahead` is how many moves must finish before a waiting one starts. */
+export function TransferCard({
+  t,
+  ahead = 0,
+}: {
+  t: Transfer
+  ahead?: number
+}) {
   const pause = usePauseTransfer()
   const resume = useResumeTransfer()
   const cancel = useCancelTransfer()
@@ -30,6 +37,7 @@ export function TransferCard({ t }: { t: Transfer }) {
   const p = t.progress
   const pct = percentDone(p)
   const active = t.status === 'running'
+  const queued = t.status === 'queued'
   const error = [pause, resume, cancel].find((m) => m.isError)?.error
 
   return (
@@ -38,8 +46,12 @@ export function TransferCard({ t }: { t: Transfer }) {
         <div>
           <p className="font-medium text-fg">{describeTransfer(t)}</p>
           <p className="text-xs text-fg-muted">
-            {p.files_done} of {p.files_total} files · {formatSize(p.bytes_done)}{' '}
-            of {formatSize(p.bytes_total)}
+            {queued
+              ? `${p.files_total} files · ${formatSize(p.bytes_total)} · ` +
+                (ahead > 0
+                  ? `starts after ${ahead} other move${ahead === 1 ? '' : 's'}`
+                  : 'starts next')
+              : `${p.files_done} of ${p.files_total} files · ${formatSize(p.bytes_done)} of ${formatSize(p.bytes_total)}`}
           </p>
         </div>
         <Badge variant={STATUS_VARIANT[t.status]}>
@@ -111,7 +123,7 @@ export function TransferCard({ t }: { t: Transfer }) {
       )}
 
       <div className="mt-3 flex gap-2">
-        {active && (
+        {(active || queued) && (
           <Button
             size="sm"
             disabled={pause.isPending || !!t.control}
@@ -130,7 +142,7 @@ export function TransferCard({ t }: { t: Transfer }) {
             Resume
           </Button>
         )}
-        {(active || RESUMABLE.includes(t.status)) && (
+        {(active || queued || RESUMABLE.includes(t.status)) && (
           <Button
             size="sm"
             variant="danger"

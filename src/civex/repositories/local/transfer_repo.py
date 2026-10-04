@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from civex.db.models import StorageTransfer
 from civex.domain.transfers import (
+    STATUS_PAUSED,
+    STATUS_QUEUED,
     STATUS_RUNNING,
     TargetShare,
     TransferFailure,
@@ -125,6 +127,27 @@ class LocalTransferRepository:
     def running(self) -> list[TransferRecord]:
         rows = self._s.execute(
             select(StorageTransfer).where(StorageTransfer.status == STATUS_RUNNING)
+        ).scalars()
+        return [_to_record(r) for r in rows]
+
+    def queued(self) -> list[TransferRecord]:
+        """Transfers waiting their turn, longest-waiting first."""
+        rows = self._s.execute(
+            select(StorageTransfer)
+            .where(StorageTransfer.status == STATUS_QUEUED)
+            .order_by(StorageTransfer.created_at, StorageTransfer.id)
+        ).scalars()
+        return [_to_record(r) for r in rows]
+
+    def waiting_for_volumes(self) -> list[TransferRecord]:
+        """Paused transfers that carry on by themselves once their drives answer."""
+        rows = self._s.execute(
+            select(StorageTransfer)
+            .where(
+                StorageTransfer.status == STATUS_PAUSED,
+                StorageTransfer.auto_resume.is_(True),
+            )
+            .order_by(StorageTransfer.created_at, StorageTransfer.id)
         ).scalars()
         return [_to_record(r) for r in rows]
 

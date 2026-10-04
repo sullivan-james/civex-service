@@ -58,6 +58,17 @@ class PluginsConfig:
 
 
 @dataclass
+class AutomationConfig:
+    # The kill switch for workflows. While true nothing new starts: triggers
+    # enqueue nothing, queued runs aren't picked up, and manual runs are
+    # refused. Set by `civex automation stop` / the Stop button (which also
+    # cancels what is waiting or running) and cleared by Resume. Kept here, in
+    # config.toml, so it survives a restart and every process (the server, a
+    # terminal) sees the same answer.
+    paused: bool = False
+
+
+@dataclass
 class RetentionConfig:
     # Soft-deleted schemas/collections/records are eligible for permanent
     # purge once this many days have passed since deletion. Purging itself
@@ -161,6 +172,7 @@ class Config:
     ui: UIConfig = field(default_factory=UIConfig)
     map: MapConfig = field(default_factory=MapConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
+    automation: AutomationConfig = field(default_factory=AutomationConfig)
 
     @property
     def civex_dir(self) -> Path:
@@ -320,6 +332,10 @@ def load_config() -> Config:
         purge_after_days=int(retention_data.get("purge_after_days", 30)),
     )
 
+    automation_cfg = AutomationConfig(
+        paused=bool(data.get("automation", {}).get("paused", False)),
+    )
+
     return Config(
         project_root=root,
         db=DBConfig(
@@ -335,6 +351,7 @@ def load_config() -> Config:
         ui=ui_cfg,
         map=map_cfg,
         retention=retention_cfg,
+        automation=automation_cfg,
     )
 
 
@@ -357,6 +374,17 @@ def _tk(s: str) -> str:
     if re.fullmatch(r"[A-Za-z0-9_-]+", s):
         return s
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def read_automation_paused(civex_dir: Path) -> bool:
+    """Whether automation is paused, read straight from `config.toml`. Cheap
+    and cwd-independent, because every trigger, queue claim and workflow step
+    asks, and a worker in another process must see a Stop at once."""
+    try:
+        data = tomllib.loads((civex_dir / "config.toml").read_text("utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    return bool(data.get("automation", {}).get("paused", False))
 
 
 def save_config(config: Config) -> None:
@@ -442,6 +470,9 @@ def save_config(config: Config) -> None:
             lines.append(f"tile_url = {_tv(config.map.tile_url)}\n")
         if config.map.attribution:
             lines.append(f"attribution = {_tv(config.map.attribution)}\n")
+
+    if config.automation.paused:
+        lines += ["\n[automation]\n", "paused = true\n"]
 
     if config.retention.purge_after_days != 30:
         lines += [

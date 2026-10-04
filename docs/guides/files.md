@@ -22,7 +22,7 @@ Files live on one or more **volumes** — directories, usually on different driv
 | `wrong drive` | Something is at the path, but it isn't this volume — a different drive, or an empty mount point. |
 | `read-only` / `retired` | Readable, but never written to. |
 
-**Settings → Storage** has three tabs. **Volumes** lists each volume on one row: its state and, when it isn't usable, why and what to do; free space; its place in the write queue; and how many collections use it. A row's menu edits it, adds or removes it from the write queue, or removes it, and the volume's name opens **its own page**, which has everything about that drive in one place: its state (and, if it isn't usable, why and what to do), its space, its part in the write queue, **which collections are on it** with their files, size and share of the drive (and a **Move…** for each), the files on it that nothing uses or that only workflow run history keeps (with a link to the clean-up), and any moves involving it. The page is at `/settings/storage/volumes/<name>`. **Collections** shows, for each collection, which volumes hold its files (a bar split by volume, with a **Gather** shortcut when they are split) and lets you assign it a home volume (see below). **Tasks** is where Civex does things to stored files: moving them between volumes, and cleaning up files nothing uses (garbage collection). Each tab has its own address (for example `/settings/storage?tab=collections`), so it can be linked to. Above the tabs, a short list appears only when something needs a look (an unplugged volume that holds files, a volume low on space, a move that is running, paused or was interrupted), each with a link to where it is dealt with.
+**Settings → Storage** has three tabs. **Volumes** lists each volume on one row: its state and, when it isn't usable, why and what to do; free space; its place in the write queue; and how many collections use it. A row's menu edits it, adds or removes it from the write queue, or removes it, and the volume's name opens **its own page**, which has everything about that drive in one place: its state (and, if it isn't usable, why and what to do), its space, its part in the write queue, **which collections are on it** with their files, size and share of the drive (and a **Move…** for each), the files on it that nothing uses or that only workflow run history keeps (with a **Clean up…** that clears the unused ones off that drive), and any moves involving it. The page is at `/settings/storage/volumes/<name>`. **Collections** shows, for each collection, which volumes hold its files (a bar split by volume, with a **Gather** shortcut when they are split) and lets you assign it a home volume (see below). **Tasks** is where Civex does things to stored files: two buttons, **Move files…** and **Clean up…** (clearing out files nothing uses, also called garbage collection), above the list of moves with their progress. Each tab has its own address (for example `/settings/storage?tab=collections`), so it can be linked to. Above the tabs, a short list appears only when something needs a look (an unplugged volume that holds files, a volume low on space, a move that is running, paused or was interrupted), each with a link to where it is dealt with.
 
 A volume is recognised by an identity, not by its path. `civex store add` writes a small `.civex-volume` marker (a random id) into the volume and records the same id beside the volume's path in `_civex/config.toml`. A drive is therefore recognised wherever it is mounted, and a different drive mounted at the same path is reported as the wrong drive instead of being written to. Nothing is written to a volume that fails this check, and Civex never creates a missing volume directory on its own — an unmounted drive's path would otherwise be recreated on the wrong disk. (Volumes inside the project, such as the default `_civex/objects`, are always trusted.)
 
@@ -56,10 +56,16 @@ A record shows where each of its files lives, without getting in the way:
 
 - A file on a volume that can't be reached right now (an unplugged drive, a network share that stopped answering) is **always** marked, with the volume's name and state. Its download link is replaced by "Unavailable" instead of a link that would fail, and opening it directly says which volume it is on and why it isn't available, not just "not found".
 - Once you have more than one volume, each file shows a small chip with the **volume** it is stored on.
+- **Click the chip** (or focus it and press Enter) to see, in plain words, where the file is and whether it can be opened. If its drive isn't there, it says why and what to do, such as which drive to plug in, with a link to that volume in Settings. **More details** adds the technical information described below.
+- If a drive is unplugged *after* you opened the page, clicking **Download** says so right beside the file, naming the drive, instead of the browser's generic "failed" message. Otherwise the browser downloads the file as usual and a short note says it has started.
 - A record whose files are split across volumes, or that has files that can't be opened, gets a one-line summary above its fields ("3 files stored on archive (2), default (1) · Split across 2 volumes").
 - With one volume and nothing wrong, nothing extra is shown.
 
-Turn on **Settings → Advanced → Show advanced options** to always see the chips and to click one for the details: every place the content is stored, **the file's path on disk** (with a copy button), whether the volume is a network drive, the content hash and size, and **everything that uses the same file**. A file used by several records is stored once, so this is how to see what shares it.
+Turn on **Settings → Advanced → Show advanced options** to always see the chips, with the details already open: every place the content is stored, **the file's path on disk** (with a copy button), whether the volume is a network drive, the content hash and size, and **everything that uses the same file**. A file used by several records is stored once, so this is how to see what shares it. Without advanced options, **More details** in the chip's panel shows the same thing.
+
+### Uploading
+
+While a file uploads, the record shows which file, how far it is, how fast, and how long is left, with a **Cancel upload** button. When every byte has arrived it says "Saving to storage…" while the server checks and writes the file, which takes a moment for a large file. Cancelling a batch keeps the files that had already finished.
 
 From the command line, `civex store where <record id>` lists a record's files and the volume each is on, and `--details` adds the path on disk and what else uses each file.
 
@@ -67,7 +73,7 @@ The same information is available from the API: `location` on every file value i
 
 ### Choosing where a collection's files go
 
-By default new files go to the first usable volume in the write queue. To keep a collection's files together — on an archive drive, say — give it a **home volume**: on the collection's page under **Storage**; in **Settings → Storage → Collections**, which lists every collection with its home, changes it as soon as you pick another, and can set the same home for several selected collections at once; or
+By default new files go to the first usable volume in the write queue. To keep a collection's files together — on an archive drive, say — give it a **home volume**: in **Settings → Storage → Collections**, which lists every collection with its home, changes it as soon as you pick another, and can set the same home for several selected collections at once. (A collection's own **Storage** tab shows where its files are and where new ones go, and links straight to that row.) Or from a terminal:
 
 ```bash
 civex store place set study archive
@@ -93,18 +99,31 @@ them. There are two kinds of move:
   you ask for them, because moving one would only split that collection instead.
 
 In the app this is **Settings → Storage → Tasks** (or **Move files off this
-volume…** on a volume's menu, or **Gather** on a collection); from a terminal:
+volume…** on a volume's menu; a collection's **Storage** tab links to **Gather**
+there). From a terminal:
 
 ```bash
 civex store move --off old-drive --to archive --dry-run   # what would happen
 civex store move --off old-drive --to archive             # do it
 civex store move --collection field-notes --to archive
 civex store transfers list                                # and show, pause, resume, cancel
+civex store transfers run                                 # run any waiting moves in this terminal
 civex store collections                                   # which volumes hold each collection's files
 ```
 
 You always see a preview first: how many files and bytes, where they would go,
 and anything that would stop it (a drive that is unplugged or too full).
+
+**Moves run one at a time, in the order you ask for them.** Start a second while
+one is running and it waits its turn (it says "Waiting", and how many are ahead);
+you can pause or cancel it before it starts. While a move is running, the bar
+at the bottom of the app shows it live wherever you are (the same bar that shows
+workflow runs): how far it is, how fast, how long is left, with a **Pause** button,
+and how many more are waiting.
+The terminal shows the same as a progress bar, and Ctrl+C pauses it. If the
+server is running when you queue a move from the terminal, whichever of them is
+free runs it; if one is already moving files, the other leaves the queue to it
+and says so.
 
 **A move can't lose your files.** Each file is copied and checked against its
 recorded hash (optionally read back and checked again), recorded in Civex, and
@@ -118,8 +137,34 @@ place, its new place, or both. Resuming picks up where it left off.
   the move pauses. If a drive stops responding it pauses, and a move started in
   the app carries on by itself when the drive is back.
 - While a volume is being emptied it is made read-only so new files don't keep
-  arriving, and it is put back as it was afterwards.
+  arriving. It is put back as it was as soon as the move stops, whether it
+  finished, was paused, was cancelled or failed, so a paused move never leaves a
+  drive locked; resuming makes it read-only again.
 - Press **Ctrl+C** in the terminal to pause rather than quit.
+
+### Cleaning up unused files
+
+A file stays in storage even after nothing uses it any more (its record was
+purged, or the file was replaced). Clean-up deletes those files to free the
+space. In the app, **Clean up…** is on **Settings → Storage → Tasks** (every
+volume) and on a volume's own page next to its *Unused* row (that volume only).
+It looks first, by itself, and says what it found, for example "12 files
+(3.4 GB) on 'archive' are not used by any record or workflow run". One button
+then deletes exactly those, and it tells you how much space that freed.
+
+- A file used by a record (including one in *Recently deleted*) or by a
+  workflow run is never touched.
+- Files added in the last 14 days are kept, because a file just uploaded may
+  not be attached to its record yet. **Options** changes the number of days.
+- A file that only old history (the audit log, an old workflow log) refers to
+  counts as unused, so that history may later point at a file that is gone.
+- It can't run while a move is in progress; it says so and you try again after.
+
+```bash
+civex store gc                       # what would be deleted, from every volume
+civex store gc --volume archive      # only what is on 'archive'
+civex store gc --volume archive --apply
+```
 
 ## File field types
 
@@ -146,7 +191,7 @@ place, its new place, or both. Resuming picks up where it left off.
     ```
 
 === "Web UI"
-    On a new record's form, file fields show a file picker, and the files are attached when you save the form. On an existing record's detail page, a picked file is uploaded and then **waits for approval** beside the field: it shows its name, size and whether it passes the field's `accept` and `max_size` rules, and nothing on the record changes until you click **Approve** (or **Discard**). Workflows that watch the field run on approval, not on upload. Pending files live in the page, so leaving it discards them; the uploaded bytes stay in the object store until garbage collection removes them. Multiple files can be attached to a `file_list` field, and a batch is approved together.
+    On a new record's form, file fields show a file picker, and the files are attached when you save the form. On an existing record's detail page, a field has a drop zone: choose a file or drop one on it and it is uploaded and attached at once, with progress, like any other edit. There is nothing to approve. A file the field won't take (the wrong type, or over its size limit) is refused before anything is uploaded, with the reason. The only time you are asked first is when a file would go: **removing** one, or **replacing** the one in a single-file field (which removes the current file). Adding to a `file_list` field asks nothing. Because attaching saves the record, workflows that watch the field run when the file is attached. A removed file stays in the object store until garbage collection removes it. Multiple files can be attached to a `file_list` field at once.
 
 ## Downloading files
 

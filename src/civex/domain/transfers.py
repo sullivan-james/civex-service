@@ -33,6 +33,7 @@ VERIFY_MODES = (VERIFY_COPY, VERIFY_FULL)
 
 # -- how it is going ---------------------------------------------------------
 
+STATUS_QUEUED = "queued"  # waiting its turn: one transfer runs at a time
 STATUS_RUNNING = "running"
 STATUS_PAUSED = "paused"  # stopped cleanly; resumable
 STATUS_COMPLETED = "completed"  # every file handled (some may have failed)
@@ -40,6 +41,7 @@ STATUS_FAILED = "failed"  # stopped by an unexpected error; resumable
 STATUS_CANCELLED = "cancelled"  # stopped for good by the user
 STATUS_INTERRUPTED = "interrupted"  # the process died mid-run; resumable
 STATUSES = (
+    STATUS_QUEUED,
     STATUS_RUNNING,
     STATUS_PAUSED,
     STATUS_COMPLETED,
@@ -48,6 +50,8 @@ STATUSES = (
     STATUS_INTERRUPTED,
 )
 RESUMABLE = (STATUS_PAUSED, STATUS_FAILED, STATUS_INTERRUPTED)
+# Everything a runner may be handed: a queued transfer, or one coming back.
+STARTABLE = (STATUS_QUEUED, *RESUMABLE)
 FINISHED = (STATUS_COMPLETED, STATUS_CANCELLED)
 
 # What can be asked of a running transfer.

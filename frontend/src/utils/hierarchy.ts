@@ -70,6 +70,11 @@ export type FieldRelation = 'self' | 'ancestor' | 'descendant'
 export interface FilterableField extends ResolvedField {
   /** Where the record that owns this field sits relative to the one listed. */
   relation: FieldRelation
+  /** Operators this field accepts, when fewer than its type's usual. */
+  operators?: string[]
+  /** The field belongs to no schema (a run's, say): conditions on it carry no
+   * `schema`, and the picker shows no schema heading. */
+  ownerless?: boolean
 }
 
 /** The field a filter condition names. A condition without a schema (saved

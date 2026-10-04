@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router'
 import { useViewCount } from '../hooks/useViewCount'
 import { usePins } from '../hooks/usePins'
+import { useTargetLabel } from '../hooks/useTargetLabel'
 import type { NavTarget } from '../utils/pins'
 import { PIN_ICONS } from './pinIcons'
 import { IconButton } from './ui/IconButton'
@@ -32,13 +33,14 @@ function PinnedItem({
   onUnpin: () => void
 }) {
   const Icon = PIN_ICONS[pin.kind]
+  const label = useTargetLabel(pin)
   return (
     <div className="group relative flex items-center">
       <NavLink
         to={pin.to}
         onClick={onNavigate}
-        title={collapsed ? pin.label : undefined}
-        aria-label={collapsed ? pin.label : undefined}
+        title={collapsed ? label : undefined}
+        aria-label={collapsed ? label : undefined}
         className={({ isActive }) =>
           `flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
             collapsed ? 'justify-center px-0' : ''
@@ -52,7 +54,7 @@ function PinnedItem({
         <Icon size={18} className="shrink-0" aria-hidden="true" />
         {!collapsed && (
           <>
-            <span className="truncate">{pin.label}</span>
+            <span className="truncate">{label}</span>
             <PinCount target={pin} />
           </>
         )}
@@ -60,7 +62,7 @@ function PinnedItem({
       {!collapsed && (
         <IconButton
           icon={Star}
-          aria-label={`Unpin ${pin.label}`}
+          aria-label={`Unpin ${label}`}
           iconProps={{ fill: 'currentColor' }}
           onClick={onUnpin}
           className="absolute right-1 !bg-canvas-inset !text-accent opacity-0 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"

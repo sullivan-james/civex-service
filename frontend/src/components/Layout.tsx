@@ -21,6 +21,7 @@ import { useFrequentCollections } from '../hooks/useFrequentCollections'
 import { useDialogA11y } from '../hooks/useDialogA11y'
 import { PinnedNav } from './PinnedNav'
 import { CommandPalette } from './CommandPalette'
+import { TaskStatusBar } from './status/TaskStatusBar'
 import AiAttestationGate from './ai/AiAttestationGate'
 import AiPanel from './ai/AiPanel'
 import { useToast } from './ui/ToastProvider'
@@ -622,6 +623,10 @@ export default function Layout({ children }: { children: ReactNode }) {
           </main>
         )}
       </div>
+
+      {/* Anything going on in the background (file moves, workflow runs, a
+          pause), live, with a way to act on it. Renders nothing when idle. */}
+      <TaskStatusBar />
 
       {/* Footer */}
       {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}

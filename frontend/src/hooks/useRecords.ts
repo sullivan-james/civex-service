@@ -16,6 +16,7 @@ import type { RecordQueryParams } from '../api/query'
 import { ApiError } from '../api/client'
 import { useToast } from '../components/ui/ToastProvider'
 import { errorMessage } from '../lib/errors'
+import { invalidateRecordNames } from './useRecordName'
 
 /**
  * Applies `updater` to every cached record matching `recordId` — the single
@@ -199,6 +200,7 @@ export function useUpdateRecord({ quiet = false }: { quiet?: boolean } = {}) {
       qc.invalidateQueries({ queryKey: ['records'] })
       qc.invalidateQueries({ queryKey: ['record-audit', vars.id] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
+      invalidateRecordNames(qc)
     },
   })
 }
@@ -214,6 +216,7 @@ export function useDeleteRecord(datasetName: string) {
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
       qc.invalidateQueries({ queryKey: ['collections'] })
       qc.invalidateQueries({ queryKey: ['records-deleted'] })
+      invalidateRecordNames(qc)
       qc.invalidateQueries({ queryKey: ['record-audit', vars.id] })
       toast.success('Record moved to Recently Deleted', {
         action: vars.undo
@@ -228,6 +231,7 @@ export function useDeleteRecord(datasetName: string) {
                     })
                     qc.invalidateQueries({ queryKey: ['collections'] })
                     qc.invalidateQueries({ queryKey: ['records-deleted'] })
+                    invalidateRecordNames(qc)
                     toast.success('Record restored')
                   },
                   (err) => toast.error(errorMessage(err)),
@@ -258,6 +262,7 @@ export function useRestoreRecord() {
       qc.invalidateQueries({ queryKey: ['record-counts'] })
       qc.invalidateQueries({ queryKey: ['collections'] })
       qc.invalidateQueries({ queryKey: ['records-deleted'] })
+      invalidateRecordNames(qc)
       qc.invalidateQueries({ queryKey: ['record-audit', id] })
       toast.success('Record restored')
     },
@@ -272,6 +277,7 @@ export function usePurgeRecord() {
     mutationFn: recordsApi.purge,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['records-deleted'] })
+      invalidateRecordNames(qc)
       toast.success('Record permanently deleted')
     },
     onError: (err) => toast.error(errorMessage(err)),

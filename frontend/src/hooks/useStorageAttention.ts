@@ -38,6 +38,15 @@ export function useStorageAttention(): AttentionItem[] {
       })
   }
 
+  const waiting = transfers.filter((t) => t.status === 'queued').length
+  if (waiting > 0)
+    items.push({
+      key: 'moves-waiting',
+      tone: 'info',
+      text: `${waiting} move${waiting === 1 ? ' is' : 's are'} waiting for the current one to finish.`,
+      tab: 'tasks',
+    })
+
   for (const t of transfers) {
     const p = t.progress
     if (t.status === 'running')

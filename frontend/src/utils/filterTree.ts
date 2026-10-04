@@ -34,7 +34,10 @@ const REFERENCE_LIST_OPS: FilterOp[] = ['contains', 'is_null']
  * `is_null` do. A `reference` is one id: no ordering, no substring. */
 export function operatorsFor(
   type: string | undefined,
+  /** The operators this particular field accepts, when it limits them. */
+  only?: readonly string[],
 ): { value: FilterOp; label: string }[] {
+  if (only) return FILTER_OPERATORS.filter((o) => only.includes(o.value))
   const allowed =
     type === 'reference'
       ? REFERENCE_OPS

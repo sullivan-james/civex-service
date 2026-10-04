@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Collection
 
 from civex import fs_locations
 from civex.config import Config
@@ -26,11 +26,13 @@ from civex.domain.transfers import (
     KIND_DRAIN,
     KINDS,
     RESUMABLE,
+    STARTABLE,
     STATUS_CANCELLED,
     STATUS_COMPLETED,
     STATUS_FAILED,
     STATUS_INTERRUPTED,
     STATUS_PAUSED,
+    STATUS_QUEUED,
     STATUS_RUNNING,
     VERIFY_FULL,
     VERIFY_MODES,
@@ -59,9 +61,22 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# A running transfer saves its progress about twice a second. One that hasn't
-# for this long belongs to a process that has died.
-STALE_SECONDS = 90.0
+# A running transfer saves its progress about twice a second, but can go quiet
+# for a long time (a read-back, a slow drive) while alive, so silence alone
+# never marks one dead -- see `_reap`.
+# A record marked running with nobody holding the transfer lock is a few
+# moments from starting (the lock is taken just after it is marked) or its
+# process is gone. Past this, it is gone.
+ORPHAN_GRACE_SECONDS = 15.0
+
+# A transfer paused for a drive that never comes back stops waiting after this.
+AUTO_RESUME_GIVE_UP = 24 * 60 * 60.0
+
+
+class TransferBusy(ValidationError):
+    """Another process holds the store's transfer lock (a transfer is running, or
+    a garbage-collection pass). Not a fault of this transfer: it stays queued."""
+
 
 INTERRUPTED_REASON = (
     "The program stopped while this was running. Nothing was lost; "
@@ -91,7 +106,9 @@ class TransferService:
         datasets: DatasetRepository,
         store_svc: StoreService,
         commit: Callable[[], None],
+        rollback: Callable[[], None] | None = None,
     ) -> None:
+        self._rollback = rollback
         self._config = config
         self._store = store
         self._refs = refs
@@ -112,13 +129,20 @@ class TransferService:
         return [self._reap(r) for r in self._transfers.recent(limit)]
 
     def _reap(self, record: TransferRecord) -> TransferRecord:
-        """A record still marked running whose progress stopped being saved
-        belongs to a process that died: say so, so it can be resumed."""
-        if (
-            record.status == STATUS_RUNNING
-            and record.updated_at is not None
-            and (_now() - record.updated_at).total_seconds() > STALE_SECONDS
-        ):
+        """A record still marked running whose process has died: say so, so it
+        can be resumed.
+
+        Saved progress alone isn't proof of death -- a long read-back or a slow
+        drive can go quiet for a minute or two while the transfer is
+        perfectly alive -- so a held transfer lock counts as proof of life, and
+        a free one lets a dead run be noticed after a short grace period instead
+        of the full silence window."""
+        if record.status != STATUS_RUNNING or record.updated_at is None:
+            return record
+        silent = (_now() - record.updated_at).total_seconds()
+        if self._store.transfer_lock_held():
+            return record
+        if silent > ORPHAN_GRACE_SECONDS:
             record.status = STATUS_INTERRUPTED
             record.pause_reason = INTERRUPTED_REASON
             self._transfers.save(record)
@@ -187,11 +211,6 @@ class TransferService:
             if not status.writable:
                 why = status.reason or status.state.replace("_", " ")
                 plan.problems.append(f"'{name}' can't be written to: {why}.")
-        running = self.active()
-        if running is not None:
-            plan.problems.append(
-                "Another transfer is running. Wait for it to finish, or pause it."
-            )
         if plan.problems:
             return plan
 
@@ -210,6 +229,12 @@ class TransferService:
 
         self._fit(spec, plan)
         self._warn(spec, plan)
+        ahead = self.queue_length()
+        if ahead:
+            plan.warnings.append(
+                f"{ahead} other transfer(s) are running or waiting; this one is "
+                "queued and starts when they have finished."
+            )
         return plan
 
     def _check_collections(self, spec: TransferSpec) -> list[str]:
@@ -329,8 +354,9 @@ class TransferService:
     # -- starting, resuming, stopping ---------------------------------------------
 
     def create(self, spec: TransferSpec) -> TransferRecord:
-        """Check `spec` and save it as a running transfer. Raises
-        ValidationError, saying why, if it can't be done."""
+        """Check `spec` and save it as a queued transfer: whoever is running the
+        queue (the server's worker, or the CLI that made it) starts it when its
+        turn comes. Raises ValidationError, saying why, if it can't be done."""
         spec.collection_ids = [str(uuid.UUID(c)) for c in spec.collection_ids]
         plan = self.plan(spec)
         if not plan.can_proceed:
@@ -339,16 +365,15 @@ class TransferService:
         record = TransferRecord(
             id=str(uuid.uuid4()),
             kind=spec.kind,
-            status=STATUS_RUNNING,
+            status=STATUS_QUEUED,
             spec=spec,
             plan=plan,
             progress=TransferProgress(
                 files_total=plan.files,
                 bytes_total=plan.bytes,
-                message="Starting",
+                message="Waiting its turn",
             ),
             created_at=now,
-            started_at=now,
         )
         self._transfers.create(record)
         self._commit()
@@ -362,6 +387,25 @@ class TransferService:
         if action not in (CONTROL_PAUSE, CONTROL_CANCEL):
             raise ValidationError("A transfer can be asked to pause or cancel.")
         record = self.get(transfer_id)
+        if record.status == STATUS_QUEUED:
+            # Not started: nothing is running to ask, so settle it here.
+            if action == CONTROL_CANCEL:
+                return self.cancel_idle(transfer_id)
+            record.status = STATUS_PAUSED
+            record.pause_reason = "Paused before it started."
+            record.auto_resume = False
+            record.progress.message = "Paused"
+            self._transfers.save(record)
+            self._commit()
+            return record
+        if (
+            record.status == STATUS_PAUSED
+            and record.auto_resume
+            and action == CONTROL_PAUSE
+        ):
+            # Waiting for a drive: pausing means stop waiting for it.
+            self.stop_waiting(transfer_id)
+            return self.get(transfer_id)
         if record.status != STATUS_RUNNING:
             raise ValidationError(f"It isn't running (it is {record.status}).")
         self._transfers.set_control(transfer_id, action)
@@ -373,20 +417,17 @@ class TransferService:
         return self._transfers.control(transfer_id)
 
     def begin_resume(self, transfer_id: str) -> TransferRecord:
-        """Mark a paused, failed or interrupted transfer as running again, ready
-        for the job runner to pick it up."""
+        """Put a paused, failed or interrupted transfer back in the queue, ready
+        for whoever runs the queue to pick up."""
         record = self.get(transfer_id)
         if record.status not in RESUMABLE:
             raise ValidationError(f"A {record.status} transfer can't be resumed.")
-        running = self.active()
-        if running is not None and running.id != record.id:
-            raise ValidationError("Another transfer is running. Wait for it to finish.")
-        record.status = STATUS_RUNNING
+        record.status = STATUS_QUEUED
         record.pause_reason = None
         record.error = None
         record.auto_resume = False
         record.control = None
-        record.progress.message = "Resuming"
+        record.progress.message = "Waiting its turn"
         self._transfers.save(record)
         self._transfers.set_control(record.id, None)
         self._commit()
@@ -438,6 +479,28 @@ class TransferService:
         self._commit()
         return record
 
+    def queue_length(self) -> int:
+        """Transfers running or waiting their turn."""
+        running = self.active()
+        return len(self._transfers.queued()) + (1 if running is not None else 0)
+
+    def next_runnable(self, exclude: Collection[str] = ()) -> TransferRecord | None:
+        """The transfer a runner should start next: the one that has waited
+        longest, whether queued or paused only until a drive answers again.
+        `exclude` skips ones the caller has already dealt with. None when there
+        is nothing to do."""
+        candidates = [r for r in self._transfers.queued() if r.id not in exclude]
+        for record in self._transfers.waiting_for_volumes():
+            age = _now() - (record.updated_at or record.created_at or _now())
+            if age.total_seconds() > AUTO_RESUME_GIVE_UP:
+                self.stop_waiting(record.id)  # it stays paused until someone resumes it
+            elif record.id not in exclude and self.volumes_ready(record):
+                candidates.append(record)
+        if not candidates:
+            return None
+        candidates.sort(key=lambda r: r.created_at or _now())
+        return candidates[0]
+
     def volumes_ready(self, record: TransferRecord) -> bool:
         """Whether every volume the transfer touches answers (and the targets
         can be written), i.e. whether a transfer paused for one can carry on."""
@@ -456,12 +519,13 @@ class TransferService:
     ) -> TransferRecord:
         """Run the transfer until it finishes, pauses, is cancelled or fails, in
         the calling thread, saving its progress as it goes. The record says how
-        it ended. Raises ValidationError if it can't start (another transfer, or
-        a garbage-collection pass, holds the store)."""
+        it ended. Raises ValidationError if it can't start; TransferBusy (a
+        ValidationError) if another transfer, or a garbage-collection pass, holds
+        the store."""
         from civex.domain.exceptions import GCAlreadyRunningError
 
         record = self.get(transfer_id)
-        if record.status not in (STATUS_RUNNING, *RESUMABLE):
+        if record.status not in (STATUS_RUNNING, *STARTABLE):
             raise ValidationError(f"A {record.status} transfer can't be run.")
         try:
             with self._store.transfer_lock():
@@ -469,7 +533,7 @@ class TransferService:
                     record, control or TransferControl(), on_progress
                 )
         except GCAlreadyRunningError as exc:
-            raise ValidationError(str(exc)) from exc
+            raise TransferBusy(str(exc)) from exc
 
     def _execute_locked(
         self,
@@ -514,7 +578,13 @@ class TransferService:
         record.error = outcome.error
         if outcome.status in (STATUS_COMPLETED, STATUS_CANCELLED):
             record.finished_at = _now()
-            self._unfreeze(record)  # the sources go back to how they were
+        if outcome.status in (STATUS_COMPLETED, STATUS_CANCELLED) or (
+            outcome.status in (STATUS_PAUSED, STATUS_FAILED) and not outcome.auto_resume
+        ):
+            # The sources go back to how they were. A stopped transfer must not
+            # leave a drive read-only while others run; resuming freezes it again.
+            # One only waiting for a drive to return keeps them: it is coming back.
+            self._unfreeze(record)
         self._save(record)
         return record
 
@@ -540,6 +610,15 @@ class TransferService:
             if not quiet:
                 raise
             log.warning("Could not save transfer progress", exc_info=True)
+            # A failed commit leaves the session unusable until it is rolled
+            # back; without this every later progress save would fail too.
+            if self._rollback is not None:
+                try:
+                    self._rollback()
+                except Exception:
+                    log.warning(
+                        "Could not roll back after a failed save", exc_info=True
+                    )
 
     # -- freezing the sources ------------------------------------------------------
 
@@ -560,9 +639,6 @@ class TransferService:
                 self._store_svc.set_volume_state(name, "readonly")
 
     def _unfreeze(self, record: TransferRecord) -> None:
-        volumes = self._config.store_config.volumes
         for name, before in list(record.frozen.items()):
-            # Only undo our own change: someone may have set it since.
-            if name in volumes and volumes[name].state == "readonly":
-                self._store_svc.set_volume_state(name, before)
+            self._store_svc.restore_volume_state(name, before)
             del record.frozen[name]

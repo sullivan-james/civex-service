@@ -112,4 +112,79 @@ describe('DataTable', () => {
       within(status).getByRole('button', { name: 'Make one' }),
     ).toBeInTheDocument()
   })
+
+  describe('shift-click selection', () => {
+    const MANY: Row[] = ['a', 'b', 'c', 'd', 'e'].map((id) => ({
+      id,
+      name: id.toUpperCase(),
+    }))
+
+    function setup(withSetMany: boolean) {
+      const toggled: string[] = []
+      const setMany = vi.fn()
+      const selected = new Set<string>()
+      const selection = {
+        selected,
+        onToggle: (id: string) => {
+          toggled.push(id)
+          if (selected.has(id)) selected.delete(id)
+          else selected.add(id)
+        },
+        ...(withSetMany ? { onSetMany: setMany } : {}),
+        onToggleAll: () => {},
+        rowLabel: (id: string) => `Select ${id}`,
+      }
+      render(
+        <MemoryRouter>
+          <DataTable
+            columns={[{ key: 'name', header: 'Name' }]}
+            rows={MANY}
+            getRowId={(r) => r.id}
+            selection={selection}
+          />
+        </MemoryRouter>,
+      )
+      return { toggled, setMany }
+    }
+
+    const box = (id: string) =>
+      screen.getByRole('checkbox', { name: `Select ${id}` })
+
+    it('selects every row between the last one clicked and the shift-clicked one', async () => {
+      const { setMany } = setup(true)
+      const user = userEvent.setup()
+
+      await user.click(box('b'))
+      await user.keyboard('{Shift>}')
+      await user.click(box('d'))
+      await user.keyboard('{/Shift}')
+
+      expect(setMany).toHaveBeenCalledExactlyOnceWith(['b', 'c', 'd'], true)
+    })
+
+    it('works without a bulk setter, by toggling each row that needs it', async () => {
+      const { toggled } = setup(false)
+      const user = userEvent.setup()
+
+      await user.click(box('a')) // selects a (toggle 1)
+      // The consumer's state is re-read on render; in this plain test the set is
+      // mutated in place, so the range sees a as already selected.
+      await user.keyboard('{Shift>}')
+      await user.click(box('c'))
+      await user.keyboard('{/Shift}')
+
+      expect(toggled).toEqual(['a', 'b', 'c'])
+    })
+
+    it('leaves ordinary clicks as single toggles', async () => {
+      const { toggled, setMany } = setup(true)
+      const user = userEvent.setup()
+
+      await user.click(box('b'))
+      await user.click(box('d'))
+
+      expect(toggled).toEqual(['b', 'd'])
+      expect(setMany).not.toHaveBeenCalled()
+    })
+  })
 })

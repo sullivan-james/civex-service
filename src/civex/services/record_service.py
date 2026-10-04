@@ -449,6 +449,27 @@ class RecordService:
         named_data = _apply_filename_templates(named_data, shape.fields, builtins)
         return dataclasses.replace(dto, data=named_data, natural_name=natural_name)
 
+    def labels(self, record_ids: list[str]) -> list[RecordDTO]:
+        """Each of these records with its name as it is now, for showing a record
+        wherever only its id was kept (a run's records, a pin, a link).
+
+        The one place a name is worked out for an id: the same rendering as every
+        list and table (the schema's template, `{ref.field}` included), so a
+        rename or a template change shows everywhere at once and no name needs to
+        be copied into history. Ids that aren't records, and records that no
+        longer exist, are left out; a deleted-but-restorable record is returned
+        with `deleted_at` set. A fixed number of queries however many ids.
+        """
+        ids: list[uuid.UUID] = []
+        for raw in dict.fromkeys(record_ids):
+            try:
+                ids.append(uuid.UUID(raw))
+            except (ValueError, AttributeError, TypeError):
+                continue
+        shapes = self._schema_svc.resolver()
+        named = [self._with_names(r, shapes) for r in self._records.list_by_ids(ids)]
+        return self._label_references(named, shapes)
+
     def _with_names_many(self, dtos: list[RecordDTO]) -> list[RecordDTO]:
         shapes = self._schema_svc.resolver()
         return [self._with_names(r, shapes) for r in dtos]
@@ -468,7 +489,8 @@ class RecordService:
         self, records: list[RecordDTO], shapes: SchemaResolver | None = None
     ) -> list[RecordDTO]:
         """Stamp every file/file_list value with `location`: the volume it is
-        stored on, that volume's state, and whether it can be opened now. One
+        stored on, that volume's state, whether it can be opened now, and when it
+        can't, why (`reason`) and what to do about it (`fix`). One
         inventory lookup and one status check per volume for the whole batch,
         so a table of records with file columns doesn't fan out per file.
         Response-only: stripped again if a client echoes it back."""
@@ -507,9 +529,23 @@ class RecordService:
             if volume is None:
                 # Not on any volume we know of (yet): don't claim it is gone --
                 # it may only be on a remote that hasn't been fetched.
-                return {"volume": None, "state": "unknown", "available": None}
+                return {
+                    "volume": None,
+                    "state": "unknown",
+                    "available": None,
+                    "reason": "",
+                    "fix": "",
+                }
             st = status[volume]
-            return {"volume": volume, "state": st.state, "available": st.reachable}
+            return {
+                "volume": volume,
+                "state": st.state,
+                "available": st.reachable,
+                # Why it can't be opened and what to do (blank when it can), so
+                # a person is told which drive to plug in where the file is.
+                "reason": st.reason,
+                "fix": st.fix,
+            }
 
         def decorate(value: Any) -> Any:
             if isinstance(value, dict):
@@ -1010,6 +1046,7 @@ class RecordService:
         data: dict[str, Any],
         parent_record_id: str | None = None,
         _job_depth: int = 0,
+        _cause: dict[str, Any] | None = None,
         with_labels: bool = True,
     ) -> RecordDTO:
         """Create a record. `with_labels=False` skips resolving its reference
@@ -1074,7 +1111,9 @@ class RecordService:
         if self._audit:
             self._audit.log_change("create", "record", dto.id, None, named.to_dict())
         if self._job_svc:
-            self._job_svc.trigger_for_record(named, "record_created", depth=_job_depth)
+            self._job_svc.trigger_for_record(
+                named, "record_created", depth=_job_depth, cause=_cause
+            )
             if named.data:
                 # Also fire record_updated so field-specific triggers (e.g. triggered on
                 # a particular field being set) fire even when the record is first created.
@@ -1085,6 +1124,8 @@ class RecordService:
                         "record_updated",
                         changed_fields=set_fields,
                         depth=_job_depth,
+                        changes={k: (None, named.data[k]) for k in set_fields},
+                        cause=_cause,
                     )
         return (
             self._attach_reference_labels([named], shapes)[0] if with_labels else named
@@ -1173,7 +1214,11 @@ class RecordService:
         return entries
 
     def update(
-        self, record_id: str, data: dict[str, Any], _job_depth: int = 0
+        self,
+        record_id: str,
+        data: dict[str, Any],
+        _job_depth: int = 0,
+        _cause: dict[str, Any] | None = None,
     ) -> RecordDTO:
         raw = self._records.get_by_prefix(record_id)
         if not raw:
@@ -1207,21 +1252,34 @@ class RecordService:
         id_data = self._names_to_ids(data, shape)
         dto = self._records.update(id=raw.id, data=id_data)
         named = self._with_names(dto, shapes)
+        # What was stored, by field name, with nothing the server adds on a read
+        # (`resolved_filename`): that is what "before" is, so it is what "after"
+        # must be, or every file field would look edited on every save.
+        new_data = self._ids_to_names(dto.data, shape)
         if self._audit:
             old_named = dataclasses.replace(
                 raw, data=old_data, schema_name=named.schema_name
             )
+            new_named = dataclasses.replace(named, data=new_data)
             self._audit.log_change(
-                "update", "record", raw.id, old_named.to_dict(), named.to_dict()
+                "update", "record", raw.id, old_named.to_dict(), new_named.to_dict()
             )
         if self._job_svc:
+            # Which fields changed decides which triggers fire. A workflow that
+            # watches a file field and saves other fields on the same record
+            # would otherwise re-trigger itself forever.
             changed = {
                 k
-                for k in set(old_data) | set(named.data)
-                if old_data.get(k) != named.data.get(k)
+                for k in set(old_data) | set(new_data)
+                if old_data.get(k) != new_data.get(k)
             }
             self._job_svc.trigger_for_record(
-                named, "record_updated", changed_fields=changed, depth=_job_depth
+                named,
+                "record_updated",
+                changed_fields=changed,
+                depth=_job_depth,
+                changes={k: (old_data.get(k), new_data.get(k)) for k in changed},
+                cause=_cause,
             )
         return self._attach_reference_labels([named], shapes)[0]
 

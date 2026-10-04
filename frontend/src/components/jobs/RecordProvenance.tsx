@@ -27,7 +27,7 @@ export default function RecordProvenance({ recordId }: { recordId: string }) {
                 </Badge>
               )}
               <Link
-                to={`/runs/${job.id}`}
+                to={`/runs/${job.id}?from=${encodeURIComponent(recordId)}`}
                 className="text-accent hover:underline"
               >
                 {job.workflow_name}

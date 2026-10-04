@@ -115,6 +115,45 @@ def test_workflow_job_input_data_protects_its_file(
     assert ctx.file_svc._store.exists(ref.sha256)
 
 
+def _two_volumes(ctx: AppContext, tmp_path):
+    for name in ("a", "b"):
+        path = tmp_path / "mnt" / name
+        path.mkdir(parents=True)
+        ctx.store_svc.add_volume(name, str(path))
+
+
+def test_clean_up_can_be_limited_to_one_volume(
+    ctx: AppContext, tmp_path, make_schema, make_collection
+) -> None:
+    make_schema("doc")
+    make_collection("study")
+    _two_volumes(ctx, tmp_path)
+    store = ctx.file_svc._store
+    ctx.store_svc.set_queue(["a"])
+    on_a = _store(ctx, b"orphan on a", "a.txt")
+    ctx.store_svc.set_queue(["b"])
+    on_b = _store(ctx, b"orphan on b", "b.txt")
+
+    dry = ctx.gc_svc.run(dry_run=True, grace_days=0, volume="a")
+    assert [o.sha256 for o in dry.deleted] == [on_a.sha256]
+    assert dry.volume == "a" and dry.scanned == 1  # only that volume was looked at
+
+    ctx.gc_svc.run(dry_run=False, grace_days=0, volume="a")
+    assert not store.exists(on_a.sha256)
+    assert store.exists(on_b.sha256), "the other volume is left alone"
+
+    everything = ctx.gc_svc.run(dry_run=True, grace_days=0)
+    assert [o.sha256 for o in everything.deleted] == [on_b.sha256]
+    assert everything.volume is None
+
+
+def test_clean_up_of_an_unknown_volume_is_not_found(ctx: AppContext) -> None:
+    from civex.domain.exceptions import NotFoundError
+
+    with pytest.raises(NotFoundError, match="nowhere"):
+        ctx.gc_svc.run(dry_run=True, grace_days=0, volume="nowhere")
+
+
 def test_gc_on_an_empty_store_reports_cleanly(ctx: AppContext) -> None:
     report = ctx.gc_svc.run(dry_run=True, grace_days=0)
     assert report.scanned == 0
@@ -197,6 +236,34 @@ def test_stale_gc_lock_is_reclaimed(ctx: AppContext) -> None:
 
     # Doesn't raise -- the stale lock is reclaimed rather than blocking forever.
     ctx.gc_svc.run(dry_run=True, grace_days=0)
+
+
+def _dead_pid() -> int:
+    import subprocess
+    import sys
+
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    return proc.pid
+
+
+def test_gc_lock_of_a_dead_process_is_reclaimed_at_once(ctx: AppContext) -> None:
+    lock_path = ctx.file_svc._store._root / "_civex" / ".gc.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(str(_dead_pid()))  # fresh, so only the dead owner frees it
+
+    ctx.gc_svc.run(dry_run=True, grace_days=0)  # doesn't raise
+
+
+def test_gc_lock_of_a_live_process_still_blocks(ctx: AppContext) -> None:
+    from civex.domain.exceptions import GCAlreadyRunningError
+
+    lock_path = ctx.file_svc._store._root / "_civex" / ".gc.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(str(os.getpid()))
+
+    with pytest.raises(GCAlreadyRunningError):
+        ctx.gc_svc.run(dry_run=True, grace_days=0)
 
 
 def test_negative_grace_days_is_rejected(ctx: AppContext) -> None:

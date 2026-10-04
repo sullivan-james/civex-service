@@ -23,6 +23,9 @@ from civex.domain.exceptions import (
 from civex.server.background import run_pending_jobs
 from civex.server.deps import get_ctx
 from civex.server.models import (
+    RunManyRequest,
+    RunManyResponse,
+    SkippedJob,
     WorkflowDetailResponse,
     WorkflowInputResponse,
     WorkflowJobResponse,
@@ -141,6 +144,54 @@ def delete_workflow(stem: str, force: bool = False, ctx: AppContext = Depends(ge
         ctx.workflow_svc.delete(stem, force=force)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+
+
+@router.post("/{name}/run-many", response_model=RunManyResponse, status_code=202)
+def run_workflow_on_many(
+    name: str,
+    body: RunManyRequest,
+    background_tasks: BackgroundTasks,
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Run one workflow on several records: one queued run per record, in one
+    request, one commit and one pass of the worker. A record that is missing, or
+    is not the schema the workflow is for, is listed under `skipped` with the
+    reason and the rest are still queued. A workflow that asks for files cannot
+    be run this way (422): the files differ per run. Refused (422) while
+    automation is paused."""
+    wf_def = ctx.workflow_svc.find_by_name(name)
+    if wf_def is None:
+        raise HTTPException(404, detail=f"Workflow '{name}' not found")
+    if any(i.type == "files" for i in (wf_def.inputs or {}).values()):
+        raise HTTPException(
+            422,
+            detail=f"Workflow '{name}' needs files for each run, so it can't be "
+            "run on several records at once.",
+        )
+    started = []
+    skipped = []
+    for raw in dict.fromkeys(body.record_ids):
+        try:
+            record = ctx.record_svc.get(raw)
+        except (NotFoundError, ValueError):
+            skipped.append(SkippedJob(id=raw, reason="No such record."))
+            continue
+        if wf_def.record_schema and record.schema_name != wf_def.record_schema:
+            skipped.append(
+                SkippedJob(
+                    id=raw,
+                    reason=f"Not a {wf_def.record_schema} record "
+                    f"(it is a {record.schema_name}).",
+                )
+            )
+            continue
+        started.append(ctx.job_svc.enqueue_manual(name, record))
+    ctx.commit()
+    if started:
+        background_tasks.add_task(run_pending_jobs)
+    return RunManyResponse(
+        started=[WorkflowJobResponse.from_dto(j) for j in started], skipped=skipped
+    )
 
 
 @router.post("/{name}/run", response_model=WorkflowJobResponse, status_code=202)

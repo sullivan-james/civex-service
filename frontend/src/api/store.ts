@@ -114,6 +114,8 @@ export interface GCReport {
   deleted_bytes: number
   deleted: StoredObject[]
   stale_scratch_removed: number
+  /** The volume the pass was limited to; null when it covered every volume. */
+  volume?: string | null
 }
 
 export const storeApi = {
@@ -160,6 +162,6 @@ export const storeApi = {
   ) => api.put<Placement>(`/store/placement/${collectionId}`, body),
   clearPlacement: (collectionId: string) =>
     api.delete<void>(`/store/placement/${collectionId}`),
-  runGC: (body: { apply?: boolean; grace_days?: number }) =>
+  runGC: (body: { apply?: boolean; grace_days?: number; volume?: string }) =>
     api.post<GCReport>('/store/gc', body),
 }

@@ -473,6 +473,8 @@ class GCReport:
     # incomplete, so run() refuses to delete anything this pass regardless
     # of the dry_run flag it was called with -- see GCService.run().
     errors: list[str] = field(default_factory=list)
+    # The one volume this pass was limited to, or None for the whole store.
+    volume: str | None = None
 
     @property
     def deleted_count(self) -> int:
@@ -494,6 +496,7 @@ class GCReport:
             "deleted": [o.to_dict() for o in self.deleted],
             "stale_scratch_removed": self.stale_scratch_removed,
             "errors": self.errors,
+            "volume": self.volume,
         }
 
 
@@ -783,6 +786,10 @@ class WorkflowJobDTO:
     # natural_name, action}, ...] in touch order. None for jobs still
     # pending/running, or that predate this field.
     affected_records: list[dict[str, Any]] | None = None
+    # What caused the run: {"changes": [{field, before, after, watched}],
+    # "caused_by": {job_id, workflow} | None}. None for a run started by hand,
+    # or one that predates this field.
+    trigger_detail: dict[str, Any] | None = None
 
 
 @dataclass

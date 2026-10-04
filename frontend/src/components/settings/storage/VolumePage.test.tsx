@@ -113,6 +113,18 @@ beforeEach(() => {
           })),
         )
       if (p === '/api/settings/ui') return json({ show_advanced: false })
+      if (p === '/api/store/gc')
+        return json({
+          dry_run: true,
+          grace_days: 14,
+          scanned: 0,
+          referenced: 0,
+          protected_by_grace: 0,
+          deleted_count: 0,
+          deleted_bytes: 0,
+          deleted: [],
+          stale_scratch_removed: 0,
+        })
       return json({})
     }),
   )
@@ -161,11 +173,33 @@ describe('a volume’s page', () => {
     renderAt('default')
     const unused = (await screen.findByText('Unused')).closest('tr')!
     expect(unused).toHaveTextContent('439 MB')
+    // It cleans up right here, on this volume, rather than sending you off to
+    // find a panel on another page.
     expect(
-      within(unused).getByRole('link', { name: 'Clean up' }),
-    ).toHaveAttribute('href', '/settings/storage?tab=tasks')
+      within(unused).getByRole('button', { name: 'Clean up…' }),
+    ).toBeInTheDocument()
+    expect(within(unused).queryByRole('link', { name: /Clean up/ })).toBeNull()
     const history = screen.getByText('Workflow run history').closest('tr')!
     expect(history).toHaveTextContent('3.0 MB')
+  })
+
+  it('cleans up from the volume page itself, limited to that volume', async () => {
+    const user = userEvent.setup()
+    renderAt('default')
+    const unused = (await screen.findByText('Unused')).closest('tr')!
+
+    await user.click(within(unused).getByRole('button', { name: 'Clean up…' }))
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Clean up unused files on default',
+      }),
+    ).toBeInTheDocument()
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === '/api/store/gc')?.body).toMatchObject(
+        { volume: 'default', apply: false },
+      ),
+    )
   })
 
   it('shows a collection homed here that has no files yet', async () => {

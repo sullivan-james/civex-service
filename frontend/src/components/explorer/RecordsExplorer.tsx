@@ -38,7 +38,10 @@ import { DrillLinks } from './DrillLinks'
 import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
 import { SelectionBar } from './SelectionBar'
+import { BulkRunWorkflow, bulkRunnable } from '../workflows/BulkRunWorkflow'
+import { useWorkflows } from '../../hooks/useWorkflows'
 import { useExplorer, type ExplorerScope } from './useExplorer'
+import { withRange } from '../../hooks/useRangeSelect'
 import { useCollection } from '../../hooks/useCollections'
 import { recordRecent } from '../../hooks/usePins'
 import { placeTarget, viewTarget } from '../../utils/navTargets'
@@ -206,6 +209,8 @@ export function RecordsExplorer({
     ...(parentIsRoot && x.rootId ? { parent: x.rootId } : {}),
   })}`
   const bulkCount = allMatching ? total : selected.size
+  const { data: allWorkflows } = useWorkflows()
+  const runnable = listed ? bulkRunnable(allWorkflows, listed.name) : []
   const listedLabel = listed ? displayLabel(listed.name, listed.label) : ''
 
   // What the star pins: the saved filter when one is applied as saved,
@@ -272,6 +277,19 @@ export function RecordsExplorer({
   const otherStarters = x.rootId
     ? []
     : starters.filter((s) => s.name !== listed?.name)
+  // Inside a record, what can be made under it: the schemas that are children
+  // of its own, whether or not it has any yet (levels come from record counts,
+  // so a recording with no selections lists nothing, and without these there
+  // would be no way to add its first one).
+  const childStarters =
+    dataset && x.rootId && x.scopeSchema
+      ? (x.schemas ?? []).filter(
+          (s) =>
+            s.parent_id === x.scopeSchema!.id &&
+            enabledSchemas.has(s.name) &&
+            s.name !== listed?.name,
+        )
+      : []
 
   // One way to create anything: a single New menu. What is being listed comes
   // first (under the record being browsed when that is its parent), then the
@@ -287,6 +305,14 @@ export function RecordsExplorer({
               },
             ]
           : []),
+        ...childStarters.map((s) => ({
+          label: `New ${displayLabel(s.name, s.label).toLowerCase()}`,
+          icon: Plus,
+          onClick: () =>
+            navigate(
+              `/collections/${dataset}/new?${new URLSearchParams({ schema: s.name, parent: x.rootId! })}`,
+            ),
+        })),
         ...otherStarters.map((s) => ({
           label: `New ${displayLabel(s.name, s.label).toLowerCase()}`,
           icon: Plus,
@@ -335,7 +361,7 @@ export function RecordsExplorer({
               : (emptyHint ?? 'Add a record to get started.')
           }
         />
-        {starters.length > 0 && (
+        {(x.rootId ? childStarters : starters).length > 0 && (
           <div className="flex justify-center">{newMenu}</div>
         )}
       </div>
@@ -504,6 +530,17 @@ export function RecordsExplorer({
             }}
             onDelete={() => setConfirmDelete(true)}
             deleting={deleteMany.isPending || deleteMatching.isPending}
+            // Runs are queued for the records ticked, not for "all matching":
+            // that would be every record the filters match, on every page.
+            actions={
+              !allMatching && (
+                <BulkRunWorkflow
+                  workflows={runnable}
+                  recordIds={[...selected]}
+                  onStarted={() => setSelected(new Set())}
+                />
+              )
+            }
           />
         )}
 
@@ -565,6 +602,15 @@ export function RecordsExplorer({
                           if (!next.delete(id)) next.add(id)
                           return next
                         })
+                      },
+                      onSetMany: (ids, on) => {
+                        // A shift-click range, from what is shown now (with "all
+                        // matching" the whole page is ticked).
+                        const shown = allMatching
+                          ? new Set(rows.map((r) => r.id))
+                          : selected
+                        setAllMatching(false)
+                        setSelected(withRange(shown, ids, on))
                       },
                       onToggleAll: () => {
                         setAllMatching(false)

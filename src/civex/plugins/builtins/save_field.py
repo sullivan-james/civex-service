@@ -25,8 +25,7 @@ class Plugin(Tier0Plugin):
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
     ) -> dict[str, Any]:
-        value = inputs["value"]
-        updated = dict(ctx.record.data)
-        updated[config.field] = value
-        ctx.update_record(str(ctx.record.id), updated)
+        # Only this field changes; the others are read as they are now, not as
+        # they were when the workflow started.
+        ctx.patch_record(str(ctx.record.id), {config.field: inputs["value"]})
         return {}
