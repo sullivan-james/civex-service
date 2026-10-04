@@ -6,8 +6,9 @@ name: Cross-platform
 # tests/conftest.py): the ones that touch real files, paths, processes, mounts
 # or the launcher.
 #
-#   Windows: PRs that touch OS-sensitive code or tests, nightly, tags, on demand.
-#   macOS:   nightly, tags, on demand (never on a PR).
+#   Both: PRs that touch OS-sensitive code or tests, nightly, tags, on demand.
+#   (macOS is the costliest runner. To save minutes later, restrict it to the
+#   schedule/tags/dispatch by making the matrix below depend on the event.)
 
 on:
   pull_request:
@@ -43,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(github.event_name == 'pull_request' && '["windows-latest"]' || '["windows-latest", "macos-latest"]') }}
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     # Not blocking yet: the first runs list what needs fixing. Remove this once

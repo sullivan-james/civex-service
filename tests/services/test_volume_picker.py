@@ -4,6 +4,7 @@ is added, network drives, and a dead mount not freezing everything."""
 from __future__ import annotations
 
 import os
+import sys
 import shutil
 import threading
 import time
@@ -140,7 +141,11 @@ def test_a_file_is_not_a_folder(ctx: AppContext, tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root can write anywhere")
+@pytest.mark.posix_only
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="needs POSIX permissions, and root can write anywhere",
+)
 def test_a_folder_civex_cannot_write_to_is_a_problem(
     ctx: AppContext, tmp_path: Path
 ) -> None:

@@ -29,7 +29,8 @@ def test_shortcut_runs_serve_open_in_the_project(tmp_path, desktop, monkeypatch)
     assert path.parent == desktop and path.name == "Civex - my study.desktop"
     text = path.read_text()
     assert f"Path={project.resolve()}" in text
-    assert "serve" in text and "--open" in text and sys.executable in text
+    assert "serve" in text and "--open" in text
+    assert launcher._quoted([sys.executable], "linux") in text
     assert "Terminal=true" in text
     assert path.stat().st_mode & 0o111  # executable
     assert launcher.shortcut_exists(project)

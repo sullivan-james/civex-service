@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -57,6 +56,7 @@ from civex.domain.exceptions import (
     PluginTimeoutError,
 )
 from civex.plugins.base import StepResult, WorkflowContext
+from civex.processes import new_group_kwargs, terminate_tree
 
 # -- uv / SDK resolution ------------------------------------------------------
 
@@ -205,32 +205,12 @@ def _spawn(argv: list[str], scratch_dir: Path) -> subprocess.Popen:
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
-        start_new_session=True,
+        **new_group_kwargs(),
     )
 
 
 def _kill_process_group(proc: subprocess.Popen, grace_seconds: float = 2.0) -> None:
-    try:
-        pgid = os.getpgid(proc.pid)
-    except ProcessLookupError:
-        return
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    try:
-        proc.wait(timeout=grace_seconds)
-        return
-    except subprocess.TimeoutExpired:
-        pass
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    try:
-        proc.wait(timeout=grace_seconds)
-    except subprocess.TimeoutExpired:
-        pass
+    terminate_tree(proc, grace_seconds)
 
 
 def _ensure_terminated(proc: subprocess.Popen, grace_seconds: float = 2.0) -> None:

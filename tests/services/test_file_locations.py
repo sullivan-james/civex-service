@@ -177,7 +177,7 @@ def test_file_info_lists_copies_size_and_everything_using_it(
     assert [(c.volume, c.present, c.state) for c in info.copies] == [
         ("default", True, "online")
     ]
-    assert info.copies[0].path.endswith(f"{ref.sha256[:2]}/{ref.sha256[2:]}")
+    assert Path(info.copies[0].path).parts[-2:] == (ref.sha256[:2], ref.sha256[2:])
     assert info.records == 3
     assert [(c.name, c.records) for c in info.collections] == [("a", 2), ("b", 1)]
 

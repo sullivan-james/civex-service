@@ -30,6 +30,8 @@ OS_SENSITIVE = {
     "test_smoke.py",
     "test_fs_locations.py",
     "test_launcher.py",
+    "test_processes.py",
+    "test_sqlite_url.py",
     # storage: volumes, the object store, moving and collecting files
     "test_volume_picker.py",
     "test_volume_identity.py",
