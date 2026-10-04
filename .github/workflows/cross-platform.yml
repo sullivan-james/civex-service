@@ -47,9 +47,6 @@ jobs:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
-    # Not blocking yet: the first runs list what needs fixing. Remove this once
-    # the baseline is green (see the cross-platform plan).
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
         with:
