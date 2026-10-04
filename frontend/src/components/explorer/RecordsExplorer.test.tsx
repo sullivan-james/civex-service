@@ -305,6 +305,78 @@ describe('RecordsExplorer', () => {
       expect(item(/New recording/)).toBeInTheDocument()
       expect(item(/New species/)).toBeNull()
     })
+
+    describe('inside a record', () => {
+      const annotation = schema('annotation', recording, ['note'])
+      // r2 has no selections yet, so the explorer has nothing to list for it.
+      const inside = (url: URL) => {
+        if (url.pathname === '/api/records/r2')
+          return json({
+            ...R2,
+            ancestors: [
+              { id: 'e1', schema_name: 'encounter', natural_name: 'E1' },
+            ],
+          })
+        if (
+          url.pathname.endsWith('/record-counts') &&
+          url.searchParams.get('within') === 'r2'
+        )
+          return json({})
+        if (url.pathname === '/api/schemas')
+          return json([...SCHEMAS, species, annotation])
+        return withEnabled([
+          'encounter',
+          'recording',
+          'selection',
+          'species',
+          'annotation',
+        ])(url)
+      }
+
+      it('offers to add what goes in a record that has none yet, under that record', async () => {
+        const user = userEvent.setup()
+        override = inside
+        renderExplorer({ root: { id: 'r2' }, scopeLabel: 'R2' }, '/records/r2')
+
+        await openNew()
+        expect(item(/New selection/)).toBeInTheDocument()
+        expect(item(/New annotation/)).toBeInTheDocument()
+        // not a sibling or a top-level schema, which belong elsewhere
+        expect(item(/New recording/)).toBeNull()
+        expect(item(/New species/)).toBeNull()
+        expect(item(/New encounter/)).toBeNull()
+
+        await user.click(item(/New selection/)!)
+
+        expect(search().get('schema')).toBe('selection')
+        expect(search().get('parent')).toBe('r2')
+      })
+
+      it('offers every kind of child, not only the kind already listed', async () => {
+        override = inside
+        renderExplorer({ root: { id: 'r1' }, scopeLabel: 'R1' }, '/records/r1')
+        await screen.findByText('a.txt')
+
+        await openNew()
+        // the listed kind once (not twice), and the other kind as well
+        expect(
+          screen.getAllByRole('menuitem', { name: /New selection/ }),
+        ).toHaveLength(1)
+        expect(item(/New annotation/)).toBeInTheDocument()
+      })
+
+      it('does not offer a child schema the collection is not for', async () => {
+        override = (url) =>
+          url.pathname === '/api/collections/hb'
+            ? withEnabled(['encounter', 'recording', 'selection'])(url)
+            : inside(url)
+        renderExplorer({ root: { id: 'r2' }, scopeLabel: 'R2' }, '/records/r2')
+
+        await openNew()
+        expect(item(/New selection/)).toBeInTheDocument()
+        expect(item(/New annotation/)).toBeNull()
+      })
+    })
   })
 
   it('starts at the top of the hierarchy, not at "all records"', async () => {

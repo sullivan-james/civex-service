@@ -277,6 +277,19 @@ export function RecordsExplorer({
   const otherStarters = x.rootId
     ? []
     : starters.filter((s) => s.name !== listed?.name)
+  // Inside a record, what can be made under it: the schemas that are children
+  // of its own, whether or not it has any yet (levels come from record counts,
+  // so a recording with no selections lists nothing, and without these there
+  // would be no way to add its first one).
+  const childStarters =
+    dataset && x.rootId && x.scopeSchema
+      ? (x.schemas ?? []).filter(
+          (s) =>
+            s.parent_id === x.scopeSchema!.id &&
+            enabledSchemas.has(s.name) &&
+            s.name !== listed?.name,
+        )
+      : []
 
   // One way to create anything: a single New menu. What is being listed comes
   // first (under the record being browsed when that is its parent), then the
@@ -292,6 +305,14 @@ export function RecordsExplorer({
               },
             ]
           : []),
+        ...childStarters.map((s) => ({
+          label: `New ${displayLabel(s.name, s.label).toLowerCase()}`,
+          icon: Plus,
+          onClick: () =>
+            navigate(
+              `/collections/${dataset}/new?${new URLSearchParams({ schema: s.name, parent: x.rootId! })}`,
+            ),
+        })),
         ...otherStarters.map((s) => ({
           label: `New ${displayLabel(s.name, s.label).toLowerCase()}`,
           icon: Plus,
@@ -340,7 +361,7 @@ export function RecordsExplorer({
               : (emptyHint ?? 'Add a record to get started.')
           }
         />
-        {starters.length > 0 && (
+        {(x.rootId ? childStarters : starters).length > 0 && (
           <div className="flex justify-center">{newMenu}</div>
         )}
       </div>

@@ -12,6 +12,7 @@ import {
   DetailSkeleton,
   ErrorState,
   Page,
+  useToast,
 } from '../components/ui'
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { RecordPageFrame } from '../components/records/RecordPageFrame'
@@ -42,6 +43,9 @@ export default function NewRecordPage() {
   const parentParam = params.get('parent')
   const [values, setValues] = useState<Record<string, unknown>>({})
   const [extracting, setExtracting] = useState<string | null>(null)
+  // Bumped after "Add and add another", so every field starts again blank.
+  const [round, setRound] = useState(0)
+  const toast = useToast()
 
   const { data: collection, isLoading, error } = useCollection(id!)
   const { data: schemas } = useSchemas()
@@ -124,7 +128,7 @@ export default function NewRecordPage() {
     fields[0]?.name ?? PARENT,
   )
 
-  function submit() {
+  function submit(another = false) {
     const data: Record<string, unknown> = {}
     for (const f of schema!.fields)
       if (values[f.name] !== undefined) data[f.name] = values[f.name]
@@ -136,9 +140,29 @@ export default function NewRecordPage() {
           parentParam ?? (values[PARENT] as string | undefined) ?? undefined,
       },
       {
-        // The form is done with: Back from the new record skips it.
-        onSuccess: (created) =>
-          navigate(`/records/${created.id}`, { replace: true }),
+        onSuccess: (created) => {
+          if (another) {
+            // Stay for the next one: blank form, but the parent chosen stays,
+            // since a run of records usually goes under the same one.
+            setValues(
+              values[PARENT] !== undefined ? { [PARENT]: values[PARENT] } : {},
+            )
+            setExtracting(null)
+            setRound((r) => r + 1)
+            toast.success(
+              `Added ${created.natural_name ?? label.toLowerCase()}.`,
+              {
+                action: {
+                  label: 'View',
+                  onClick: () => navigate(`/records/${created.id}`),
+                },
+              },
+            )
+            return
+          }
+          // The form is done with: Back from the new record skips it.
+          navigate(`/records/${created.id}`, { replace: true })
+        },
       },
     )
   }
@@ -162,7 +186,7 @@ export default function NewRecordPage() {
         info="Click a value to edit it. Nothing is saved until you add the record."
       >
         <UploadCollectionContext.Provider value={collection.id}>
-          <Card title="Fields">
+          <Card key={round} title="Fields">
             <RecordFieldGrid
               fields={fields}
               data={values}
@@ -213,12 +237,20 @@ export default function NewRecordPage() {
         <div className="flex gap-2">
           <Button
             variant="primary"
-            onClick={submit}
+            onClick={() => submit()}
             disabled={
               createRecord.isPending || (!!parentField && !values[PARENT])
             }
           >
             {createRecord.isPending ? 'Adding…' : `Add ${label.toLowerCase()}`}
+          </Button>
+          <Button
+            onClick={() => submit(true)}
+            disabled={
+              createRecord.isPending || (!!parentField && !values[PARENT])
+            }
+          >
+            Add and add another
           </Button>
           <Button onClick={goBack}>Cancel</Button>
         </div>
