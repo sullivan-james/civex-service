@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from civex.cli.utils import drain_jobs
+from civex.console import console
 from civex.context import AppContext
 from civex.main import app
 
@@ -68,14 +69,16 @@ def test_the_record_history_endpoint_answers_for_a_deleted_or_gone_record(
 
 
 def test_the_runs_listing_says_when_a_runs_record_is_deleted(
-    ctx: AppContext, make_collection, make_schema, make_record
+    ctx: AppContext, make_collection, make_schema, make_record, monkeypatch
 ) -> None:
+    # The shared console reads COLUMNS once, at import, so the width is set on it.
+    monkeypatch.setattr(console, "width", 240)
     record = _doc(ctx, make_collection, make_schema, make_record)
     job = ctx.job_svc.enqueue_manual("noop", record)
-    live = runner.invoke(app, ["automation", "jobs"], env={"COLUMNS": "240"})
+    live = runner.invoke(app, ["automation", "jobs"])
     ctx.record_svc.delete(str(record.id))
     ctx.commit()
-    gone = runner.invoke(app, ["automation", "jobs"], env={"COLUMNS": "240"})
+    gone = runner.invoke(app, ["automation", "jobs"])
     assert live.exit_code == 0 and gone.exit_code == 0, gone.output
     assert str(job.id)[:8] in gone.output
     assert "(deleted)" in gone.output and "(deleted)" not in live.output
