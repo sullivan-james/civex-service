@@ -4,6 +4,7 @@ import time
 from typing import Optional
 
 import typer
+from rich.markup import escape
 from rich.table import Table
 
 from civex.cli.utils import drain_jobs, get_ctx, run_job
@@ -138,6 +139,21 @@ def worker_jobs(
         console.print(f"[info]{msg}[/info]")
         return
 
+    named = {
+        str(r.id): r
+        for r in ctx.record_svc.labels(list({str(j.record_id) for j in jobs}))
+    }
+
+    def record_cell(record_id) -> str:
+        """The record's name and short id, or that it is deleted or gone."""
+        short = str(record_id)[:8] + "…"
+        record = named.get(str(record_id))
+        if record is None:
+            return f"{short} [warning](no longer exists)[/warning]"
+        label = f"{escape(record.natural_name)} " if record.natural_name else ""
+        note = " [warning](deleted)[/warning]" if record.deleted_at else ""
+        return f"{label}{short}{note}"
+
     table = Table(
         "ID", "Workflow", "Schema", "Record", "Trigger", "Changed", "Status", "Created"
     )
@@ -149,7 +165,7 @@ def worker_jobs(
             str(j.id)[:8] + "…",
             j.workflow_name,
             j.schema_name,
-            str(j.record_id)[:8] + "…",
+            record_cell(j.record_id),
             j.trigger,
             changed or "—",
             j.status,

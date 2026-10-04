@@ -59,3 +59,25 @@ def test_purge_expired_reports_when_nothing_eligible(project_dir: Path) -> None:
     result = runner.invoke(app, ["trash", "purge-expired", "--yes"])
     assert result.exit_code == 0
     assert "Nothing is past the retention window" in result.output
+
+
+def test_trash_list_shows_a_bulk_delete_as_one_line_and_filters(
+    project_dir: Path,
+) -> None:
+    runner.invoke(app, ["schema", "create", "animal"])
+    runner.invoke(app, ["collection", "create", "zoo"])
+    for _ in range(3):
+        runner.invoke(
+            app, ["record", "add", "--to", "zoo", "--schema", "animal"], input=""
+        )
+    runner.invoke(app, ["record", "delete-all", "zoo", "--yes"])
+
+    listing = runner.invoke(app, ["trash", "list"])
+    assert listing.exit_code == 0
+    assert "batch" in listing.output  # the three, deleted together, are one line
+    assert "3 record(s)" in listing.output
+
+    by_kind = runner.invoke(app, ["trash", "list", "--kind", "schema"])
+    assert "No matches" in by_kind.output
+    bad = runner.invoke(app, ["trash", "list", "--kind", "nonsense"])
+    assert bad.exit_code == 1

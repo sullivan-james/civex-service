@@ -130,21 +130,31 @@ class LocalSchemaRepository:
         self._s.flush()
 
     def restore(self, id: uuid.UUID) -> SchemaDTO:
-        """Undo delete(): clears the schema's deleted_at and restores every
-        record that was cascade-deleted with it. If any of those records had
-        already been deleted independently *before* the schema was deleted,
-        this restores them too -- a documented simplification (see
-        docs/guide/soft-delete.md) rather than tracking each cascade as a
-        distinct, separately-undoable batch."""
+        """Undo delete(): clears the schema's deleted_at and restores the
+        records deleted *with* it -- those stamped with the same moment. A
+        record deleted on its own beforehand stays in Recently Deleted."""
         row = self._s.query(Schema).filter_by(id=id).first()
         if row is None:
             raise NotFoundError(f"Schema '{id}' not found")
+        cascade = self._cascade_query(id, row.deleted_at)
         row.deleted_at = None
-        self._s.query(Record).filter(
-            Record.schema_id == id, Record.deleted_at.is_not(None)
-        ).update({"deleted_at": None}, synchronize_session=False)
+        if cascade is not None:
+            cascade.update({"deleted_at": None}, synchronize_session=False)
         self._s.flush()
         return _schema_to_dto(row)
+
+    def cascade_count(self, id: uuid.UUID) -> int:
+        """How many records restoring this deleted schema would bring back."""
+        row = self._s.query(Schema).filter_by(id=id).first()
+        cascade = self._cascade_query(id, row.deleted_at) if row else None
+        return cascade.count() if cascade is not None else 0
+
+    def _cascade_query(self, id: uuid.UUID, deleted_at: datetime | None):
+        if deleted_at is None:
+            return None
+        return self._s.query(Record).filter(
+            Record.schema_id == id, Record.deleted_at == deleted_at
+        )
 
     def purge(self, id: uuid.UUID) -> None:
         """Permanently remove a soft-deleted schema: its fields (ORM

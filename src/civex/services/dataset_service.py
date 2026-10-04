@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Callable
 
-from civex.domain.dtos import DatasetDTO
+from civex.domain.dtos import DatasetDTO, RestorePlanDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.domain.scopes import GLOBAL, LOCAL, validate_scope
 from civex.domain.timezones import validate_timezone
@@ -102,6 +102,35 @@ class DatasetService:
             raise NotFoundError(f"Dataset '{dataset_id}' not found")
         return dto
 
+    def id_of(self, ref: str) -> uuid.UUID:
+        """A collection's id from its name or id, deleted or not (its history
+        outlives it). Raises NotFoundError."""
+        try:
+            dto = self._datasets.get_by_id(
+                uuid.UUID(ref),
+                include_deleted=True,
+                with_count=False,
+                with_schemas=False,
+            )
+        except ValueError:
+            dto = self._datasets.get_by_name(
+                ref, include_deleted=True, with_count=False, with_schemas=False
+            )
+        if dto is None:
+            raise NotFoundError(f"Dataset '{ref}' not found")
+        return dto.id
+
+    def find(self, ids: set[uuid.UUID]) -> dict[uuid.UUID, DatasetDTO]:
+        """Collections by id, deleted ones included; ids that are gone are left out."""
+        found: dict[uuid.UUID, DatasetDTO] = {}
+        for dataset_id in ids:
+            dto = self._datasets.get_by_id(
+                dataset_id, include_deleted=True, with_count=False, with_schemas=False
+            )
+            if dto:
+                found[dataset_id] = dto
+        return found
+
     def list_all(self, with_count: bool = True) -> list[DatasetDTO]:
         """Every live collection. `with_count=False` skips the record counts
         (left at 0) for callers that only need names, ids or scopes."""
@@ -187,6 +216,25 @@ class DatasetService:
     def list_deleted(self) -> list[DatasetDTO]:
         return self._datasets.list_deleted()
 
+    def restore_plan(self, name: str) -> RestorePlanDTO:
+        """What restoring this deleted collection would bring back: it and the
+        records deleted with it, not those deleted on their own earlier."""
+        dataset = self._deleted(name)
+        return RestorePlanDTO(
+            kind="collection",
+            id=dataset.id,
+            name=dataset.name,
+            records=self._datasets.cascade_count(dataset.id),
+        )
+
+    def _deleted(self, name: str) -> DatasetDTO:
+        dataset = self._datasets.get_by_name(name, include_deleted=True)
+        if dataset is None:
+            raise NotFoundError(f"Dataset '{name}' not found")
+        if dataset.deleted_at is None:
+            raise ValidationError(f"Dataset '{name}' is not deleted")
+        return dataset
+
     def restore(self, name: str) -> DatasetDTO:
         """Undo delete(): the collection and the records cascade-deleted
         with it become live again (see DatasetRepository.restore)."""
@@ -220,6 +268,8 @@ class DatasetService:
             self._audit.log_change(
                 "purge", "dataset", dataset.id, dataset.to_dict(), None
             )
+            # Its records go with it, and so does their history.
+            self._audit.forget_records_matching(f'"dataset_id": "{dataset.id}"')
         self._datasets.purge(dataset.id)
         if self._on_purge:
             self._on_purge(dataset.id)

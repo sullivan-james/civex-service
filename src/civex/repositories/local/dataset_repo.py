@@ -149,19 +149,31 @@ class LocalDatasetRepository:
         self._s.flush()
 
     def restore(self, id: uuid.UUID) -> DatasetDTO:
-        """Undo delete(): clears the dataset's deleted_at and restores every
-        record cascade-deleted with it (see SchemaRepository.restore for the
-        same documented simplification around records deleted independently
-        beforehand)."""
+        """Undo delete(): clears the dataset's deleted_at and restores the
+        records deleted *with* it -- those stamped with the same moment. A
+        record deleted on its own beforehand stays in Recently Deleted."""
         row = self._s.query(Dataset).filter_by(id=id).first()
         if row is None:
             raise NotFoundError(f"Dataset '{id}' not found")
+        cascade = self._cascade_query(id, row.deleted_at)
         row.deleted_at = None
-        self._s.query(Record).filter(
-            Record.dataset_id == id, Record.deleted_at.is_not(None)
-        ).update({"deleted_at": None}, synchronize_session=False)
+        if cascade is not None:
+            cascade.update({"deleted_at": None}, synchronize_session=False)
         self._s.flush()
         return _to_dto(self._s, row)
+
+    def cascade_count(self, id: uuid.UUID) -> int:
+        """How many records restoring this deleted dataset would bring back."""
+        row = self._s.query(Dataset).filter_by(id=id).first()
+        cascade = self._cascade_query(id, row.deleted_at) if row else None
+        return cascade.count() if cascade is not None else 0
+
+    def _cascade_query(self, id: uuid.UUID, deleted_at: datetime | None):
+        if deleted_at is None:
+            return None
+        return self._s.query(Record).filter(
+            Record.dataset_id == id, Record.deleted_at == deleted_at
+        )
 
     def purge(self, id: uuid.UUID) -> None:
         """Permanently remove a soft-deleted dataset and everything in it."""

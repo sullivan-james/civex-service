@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import type {
   AuditLogEntry,
@@ -8,6 +9,7 @@ import { useListParams } from '../../hooks/useListParams'
 import type { AuditSummary } from '../../utils/schemaAudit'
 import { DataTable, Badge, ListToolbar, Pagination } from '../ui'
 import { errorMessage } from '../../lib/errors'
+import { AuditEntryDialog } from './AuditEntryDialog'
 
 const ACTION_VARIANT: Record<
   string,
@@ -22,7 +24,8 @@ const ACTION_VARIANT: Record<
 
 /**
  * The audit trail for a single entity (record, schema or collection):
- * a "when / action / change" table. Mount it in a History tab.
+ * a "when / action / change" table. Mount it in a History tab. A row opens
+ * the entry in full, and for a change to a record offers to undo it.
  */
 export function AuditTrail({
   queryKey,
@@ -44,6 +47,7 @@ export function AuditTrail({
   ns?: string
 }) {
   const list = useListParams(ns, ['action'])
+  const [open, setOpen] = useState<AuditLogEntry | null>(null)
   const view: AuditView = {
     action: list.picks.action || undefined,
     sort: list.sortParam,
@@ -62,7 +66,7 @@ export function AuditTrail({
             label: 'Any action',
             value: list.picks.action,
             options: [
-              { value: '', label: '' },
+              { value: '', label: 'Any action' },
               ...Object.keys(ACTION_VARIANT).map((a) => ({
                 value: a,
                 label: a,
@@ -101,6 +105,7 @@ export function AuditTrail({
               </Badge>
             ),
           },
+
           {
             key: 'change',
             header: 'Change',
@@ -119,6 +124,7 @@ export function AuditTrail({
         ]}
         rows={data?.items ?? []}
         getRowId={(e) => String(e.id)}
+        onRowClick={setOpen}
         isLoading={isLoading}
         error={error ? errorMessage(error) : undefined}
         emptyTitle={list.picks.action ? 'No entries match' : 'No history yet'}
@@ -131,6 +137,13 @@ export function AuditTrail({
           total={data.total}
           onPage={(page) => list.set({ page })}
           onPageSize={(size) => list.set({ size })}
+        />
+      )}
+      {open && (
+        <AuditEntryDialog
+          entry={open}
+          title={describeEntry(open).title}
+          onClose={() => setOpen(null)}
         />
       )}
     </div>

@@ -101,18 +101,37 @@ def update_map_settings(body: UpdateMapSettingsRequest):
     )
 
 
+def _retention_response(config) -> RetentionSettingsResponse:
+    r = config.retention
+    return RetentionSettingsResponse(
+        purge_after_days=r.purge_after_days,
+        auto_purge_deleted=r.auto_purge_deleted,
+        audit_days=r.audit_days,
+        run_days=r.run_days,
+    )
+
+
 @router.get("/retention", response_model=RetentionSettingsResponse)
 def get_retention_settings():
-    """Return this project's soft-delete retention policy."""
-    config = _load_config()
-    return RetentionSettingsResponse(purge_after_days=config.retention.purge_after_days)
+    """Return how long this project keeps deleted items, change history and
+    workflow runs. Nothing is removed by itself: a clean-up applies these."""
+    return _retention_response(_load_config())
 
 
 @router.patch("/retention", response_model=RetentionSettingsResponse)
 def update_retention_settings(body: UpdateRetentionSettingsRequest):
-    """Update how many days a soft-deleted item stays in Recently Deleted
-    before it's eligible for permanent deletion."""
+    """Change the retention settings. Only the fields sent change; a null
+    `audit_days` or `run_days` means keep that kind forever."""
     config = _load_config()
-    config.retention.purge_after_days = body.purge_after_days
+    sent = body.model_fields_set
+    r = config.retention
+    if "purge_after_days" in sent and body.purge_after_days is not None:
+        r.purge_after_days = body.purge_after_days
+    if "auto_purge_deleted" in sent and body.auto_purge_deleted is not None:
+        r.auto_purge_deleted = body.auto_purge_deleted
+    if "audit_days" in sent:
+        r.audit_days = body.audit_days
+    if "run_days" in sent:
+        r.run_days = body.run_days
     save_config(config)
-    return RetentionSettingsResponse(purge_after_days=config.retention.purge_after_days)
+    return _retention_response(config)

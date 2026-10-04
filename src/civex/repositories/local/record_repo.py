@@ -5,7 +5,18 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, cast, delete, func, literal, or_, select, String, update
+from sqlalchemy import (
+    and_,
+    cast,
+    delete,
+    func,
+    literal,
+    not_,
+    or_,
+    select,
+    String,
+    update,
+)
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlalchemy.orm import Session, aliased
 
@@ -14,6 +25,7 @@ from civex.domain.dtos import RecordDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode, SortKey
 from civex.domain.query import ResolvedQuery
+from civex.repositories.local._ids import prefix_span
 from civex.repositories.local._bucketing import day_bucket
 from civex.repositories.local._jobs import bulk_delete_jobs
 from civex.repositories.protocols import RecordGrowthRow
@@ -132,7 +144,7 @@ class LocalRecordRepository:
             uid = uuid.UUID(prefix)
             q = self._s.query(Record).filter(Record.id == uid)
         except ValueError:
-            span = _prefix_span(prefix)
+            span = prefix_span(prefix)
             if span is None:
                 return None
             # A range over the id itself, so the primary-key index serves it;
@@ -165,6 +177,44 @@ class LocalRecordRepository:
         if limit is not None:
             q = q.limit(limit)
         return [_to_dto(r) for r in q.all()]
+
+    def purgeable_deleted(
+        self, cutoff: datetime
+    ) -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]:
+        """(id, collection id, schema id) of the records deleted before `cutoff`
+        that can be removed without leaving anything pointing at them: one with a
+        child that is staying (live, or deleted since) stays too, and so does
+        everything above it."""
+        old = and_(Record.deleted_at.is_not(None), Record.deleted_at < cutoff)
+        rows = (
+            self._s.query(
+                Record.id, Record.parent_record_id, Record.dataset_id, Record.schema_id
+            )
+            .filter(old)
+            .all()
+        )
+        parent_of = {r[0]: r[1] for r in rows}
+        # Parents, among these, of a child that is not going.
+        staying = {
+            pid
+            for (pid,) in self._s.query(Record.parent_record_id)
+            .filter(
+                Record.parent_record_id.in_(select(Record.id).where(old)),
+                not_(old),
+            )
+            .distinct()
+        }
+        keep: set[uuid.UUID] = set()
+        stack = [i for i in staying if i in parent_of]
+        while stack:
+            rid = stack.pop()
+            if rid in keep:
+                continue
+            keep.add(rid)
+            above = parent_of.get(rid)
+            if above in parent_of:
+                stack.append(above)
+        return [(r[0], r[2], r[3]) for r in rows if r[0] not in keep]
 
     def list_by_dataset(self, dataset_id: uuid.UUID) -> list[RecordDTO]:
         rows = (
@@ -735,20 +785,6 @@ def _typed_comparison(col, op: str, value: Any):
     if op == "lte":
         return typed_col <= typed_value
     raise ValidationError(f"Unsupported filter operator '{op}'")
-
-
-def _prefix_span(prefix: str) -> tuple[uuid.UUID, uuid.UUID] | None:
-    """The lowest and highest ids that start with `prefix` (hex, dashes
-    optional), or None when nothing can: not hex, or longer than an id."""
-    digits = prefix.lower().replace("-", "")
-    if (
-        not digits
-        or len(digits) > 32
-        or any(c not in "0123456789abcdef" for c in digits)
-    ):
-        return None
-    pad = 32 - len(digits)
-    return uuid.UUID(digits + "0" * pad), uuid.UUID(digits + "f" * pad)
 
 
 def _to_dto(row: Record) -> RecordDTO:

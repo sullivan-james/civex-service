@@ -70,11 +70,20 @@ class AutomationConfig:
 
 @dataclass
 class RetentionConfig:
-    # Soft-deleted schemas/collections/records are eligible for permanent
-    # purge once this many days have passed since deletion. Purging itself
-    # is a separate, explicit action (`civex trash purge` / the API) --
-    # this only controls what counts as "eligible".
+    """How long things are kept, for the clean-up pass (`RetentionService`) to
+    work through. Nothing here runs by itself: a person or a schedule starts the
+    clean-up, and every default keeps everything, as before."""
+
+    # Soft-deleted schemas/collections/records can be restored for this many
+    # days. Only when `auto_purge_deleted` is on does a clean-up permanently
+    # delete them after that; otherwise purging stays an explicit action.
     purge_after_days: int = 30
+    auto_purge_deleted: bool = False
+    # Keep change history (the audit log) this many days; None = forever.
+    audit_days: int | None = None
+    # Keep finished workflow runs, with their step logs, this many days;
+    # None = forever.
+    run_days: int | None = None
 
 
 @dataclass
@@ -211,6 +220,15 @@ def _retry_sharing_violation(action, attempts: int = 40, delay: float = 0.005):
             time.sleep(delay)
 
 
+def _optional_days(value: object) -> int | None:
+    """A retention period in days from the file: a positive whole number, or
+    nothing (0 or absent) for keep-forever."""
+    if value is None:
+        return None
+    days = int(value)  # type: ignore[call-overload]
+    return days if days > 0 else None
+
+
 def load_config() -> Config:
     root = find_project_root()
     if root is None:
@@ -330,6 +348,9 @@ def load_config() -> Config:
     retention_data = data.get("retention", {})
     retention_cfg = RetentionConfig(
         purge_after_days=int(retention_data.get("purge_after_days", 30)),
+        auto_purge_deleted=bool(retention_data.get("auto_purge_deleted", False)),
+        audit_days=_optional_days(retention_data.get("audit_days")),
+        run_days=_optional_days(retention_data.get("run_days")),
     )
 
     automation_cfg = AutomationConfig(
@@ -474,11 +495,18 @@ def save_config(config: Config) -> None:
     if config.automation.paused:
         lines += ["\n[automation]\n", "paused = true\n"]
 
-    if config.retention.purge_after_days != 30:
-        lines += [
-            "\n[retention]\n",
-            f"purge_after_days = {config.retention.purge_after_days}\n",
-        ]
+    retention = config.retention
+    retention_lines = []
+    if retention.purge_after_days != 30:
+        retention_lines.append(f"purge_after_days = {retention.purge_after_days}\n")
+    if retention.auto_purge_deleted:
+        retention_lines.append("auto_purge_deleted = true\n")
+    if retention.audit_days is not None:
+        retention_lines.append(f"audit_days = {retention.audit_days}\n")
+    if retention.run_days is not None:
+        retention_lines.append(f"run_days = {retention.run_days}\n")
+    if retention_lines:
+        lines += ["\n[retention]\n", *retention_lines]
 
     config_path = config.civex_dir / "config.toml"
     content = "".join(lines)

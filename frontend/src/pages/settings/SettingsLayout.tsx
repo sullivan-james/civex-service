@@ -22,9 +22,9 @@ const settingsSections = [
     info: 'Where Civex keeps your files, and which collections use which volume.',
   },
   {
-    to: 'recently-deleted',
-    label: 'Recently Deleted',
-    info: 'Deleted schemas, collections and records can be restored until they are permanently purged.',
+    to: 'retention',
+    label: 'Retention',
+    info: 'How long deleted items, change history and workflow runs are kept. Nothing is removed by itself: a clean-up applies these, or deletes everything before a date you choose.',
   },
   {
     to: 'map',

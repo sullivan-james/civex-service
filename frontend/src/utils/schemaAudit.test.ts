@@ -11,6 +11,8 @@ function makeEntry(overrides: Partial<AuditLogEntry> = {}): AuditLogEntry {
     entity_id: 'schema-1',
     old_data: null,
     new_data: null,
+    changes: [],
+    now: null,
     timestamp: '2026-01-01T00:00:00Z',
     ...overrides,
   }

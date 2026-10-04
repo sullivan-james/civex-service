@@ -4,8 +4,15 @@ export interface UISettings {
   show_advanced: boolean
 }
 
+/** How long this project keeps things. Nothing is removed by itself: a clean-up
+ * applies these. Null keeps that kind forever. */
 export interface RetentionSettings {
+  /** Deleted items can be restored for this many days. */
   purge_after_days: number
+  /** Whether a clean-up permanently deletes them after that. */
+  auto_purge_deleted: boolean
+  audit_days: number | null
+  run_days: number | null
 }
 
 export interface MapSettings {
@@ -29,6 +36,6 @@ export const settingsApi = {
   updateUi: (show_advanced: boolean) =>
     api.patch<UISettings>('/settings/ui', { show_advanced }),
   getRetention: () => api.get<RetentionSettings>('/settings/retention'),
-  updateRetention: (purge_after_days: number) =>
-    api.patch<RetentionSettings>('/settings/retention', { purge_after_days }),
+  updateRetention: (settings: Partial<RetentionSettings>) =>
+    api.patch<RetentionSettings>('/settings/retention', settings),
 }

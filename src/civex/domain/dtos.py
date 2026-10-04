@@ -292,6 +292,11 @@ class FileRef:
         )
 
 
+# Keys the server adds to a file value in responses. They describe the moment
+# of the read, so a client that echoes them back must not get them stored, and
+# a history diff must not count them as an edit.
+DERIVED_FILE_KEYS = ("resolved_filename", "location")
+
 # Volume states. "online" is the only one that accepts writes.
 VOLUME_ONLINE = "online"
 VOLUME_OFFLINE = "offline"  # the path isn't there (drive not plugged in)
@@ -619,12 +624,20 @@ class CommitDTO:
 class AuditLogDTO:
     id: uuid.UUID
     commit_id: uuid.UUID | None
-    action: str  # "create" | "update" | "delete"
-    entity_type: str  # "record" | "schema" | "field" | "dataset"
+    action: str  # "create" | "update" | "delete" | "restore" | "purge"
+    entity_type: str  # "record" | "schema" | "field" | "dataset" | "view"
     entity_id: uuid.UUID
     old_data: dict[str, Any] | None
     new_data: dict[str, Any] | None
     timestamp: datetime
+    # Response-only, like RecordDTO.reference_labels: what the entry changed, as
+    # `audit_diff.Change.to_dict()` rows, worked out by AuditService on a read.
+    # Never stored, never in a sync bundle.
+    changes: list[dict[str, Any]] = field(default_factory=list)
+    # Response-only, like `changes`: where the thing this entry is about is now
+    # -- {kind, status: live|deleted|gone, name, collection, deleted_at} -- so a
+    # lost record can be told from one that was edited, deleted or purged.
+    now: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -650,6 +663,291 @@ class AuditLogDTO:
             new_data=d.get("new_data"),
             timestamp=datetime.fromisoformat(d["timestamp"]),
         )
+
+
+@dataclass
+class BlockerDTO:
+    """The deleted thing standing between a record and being restored: its
+    collection, its schema, or the nearest-to-the-top deleted record above it.
+    Restoring this one first is what unblocks the other."""
+
+    kind: str  # "collection" | "schema" | "record"
+    id: uuid.UUID
+    name: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"kind": self.kind, "id": str(self.id), "name": self.name}
+
+
+@dataclass
+class RestorePlanDTO:
+    """What restoring something from Recently Deleted would do, worked out
+    without doing it: whether it can be done, what is in the way, and what
+    comes back. `records` counts the records restored, the record itself
+    included when it is one; only what was deleted *with* it comes back, never
+    something deleted on its own earlier."""
+
+    kind: str  # "record" | "collection" | "schema"
+    id: uuid.UUID
+    name: str
+    records: int
+    blocked_by: BlockerDTO | None = None
+    # Where a restored record will be (its collection), for saying so.
+    collection: str | None = None
+    collection_id: uuid.UUID | None = None
+
+    @property
+    def can_restore(self) -> bool:
+        return self.blocked_by is None
+
+    @property
+    def blocked_message(self) -> str | None:
+        """Why it can't be restored, in plain words; None when it can."""
+        b = self.blocked_by
+        if b is None:
+            return None
+        where = {
+            "collection": "is in the collection",
+            "schema": "is typed by the schema",
+            "record": "is under the record",
+        }[b.kind]
+        return (
+            f"'{self.name}' {where} '{b.name}', which is deleted. Restore that first."
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "id": str(self.id),
+            "name": self.name,
+            "records": self.records,
+            "blocked_by": self.blocked_by.to_dict() if self.blocked_by else None,
+            "collection": self.collection,
+            "collection_id": str(self.collection_id) if self.collection_id else None,
+            "blocked": self.blocked_message,
+            "can_restore": self.can_restore,
+        }
+
+
+@dataclass
+class RetentionCutoffs:
+    """Delete what is older than these instants; None leaves that kind alone."""
+
+    deleted_before: datetime | None = None  # things deleted before this, for good
+    audit_before: datetime | None = None  # change history before this
+    runs_before: datetime | None = None  # finished workflow runs before this
+
+
+@dataclass
+class RetentionReportDTO:
+    """What a retention clean-up removed, or with `dry_run` would remove."""
+
+    dry_run: bool
+    deleted_records: int = 0
+    deleted_collections: int = 0
+    deleted_schemas: int = 0
+    # Things that could not be deleted for good, with why.
+    skipped: list[str] = field(default_factory=list)
+    audit_entries: int = 0
+    audit_batches: int = 0
+    # Older history kept anyway: about something that can still be restored, or
+    # not yet pushed to the remote.
+    audit_kept_restorable: int = 0
+    audit_kept_unsynced: int = 0
+    runs: int = 0
+    run_steps: int = 0
+
+    @property
+    def anything(self) -> bool:
+        return bool(
+            self.deleted_records
+            or self.deleted_collections
+            or self.deleted_schemas
+            or self.audit_entries
+            or self.runs
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "dry_run": self.dry_run,
+            "deleted_records": self.deleted_records,
+            "deleted_collections": self.deleted_collections,
+            "deleted_schemas": self.deleted_schemas,
+            "skipped": self.skipped,
+            "audit_entries": self.audit_entries,
+            "audit_batches": self.audit_batches,
+            "audit_kept_restorable": self.audit_kept_restorable,
+            "audit_kept_unsynced": self.audit_kept_unsynced,
+            "runs": self.runs,
+            "run_steps": self.run_steps,
+            "anything": self.anything,
+        }
+
+
+@dataclass
+class RestoreAllPlanDTO:
+    """What restoring every deleted thing a history filter matches would do,
+    worked out without doing it."""
+
+    collections: int  # deleted collections matched
+    schemas: int  # deleted schemas matched
+    records: int  # deleted records matched, each deleted in its own right
+    restores: int  # records that would come back in all, with what went with them
+    blocked: int  # matched, but something above is deleted and not in the set
+    truncated: bool = False  # more matched than were looked at
+
+    @property
+    def things(self) -> int:
+        return self.collections + self.schemas + self.records
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "collections": self.collections,
+            "schemas": self.schemas,
+            "records": self.records,
+            "restores": self.restores,
+            "blocked": self.blocked,
+            "truncated": self.truncated,
+            "things": self.things,
+        }
+
+
+@dataclass
+class RestoreAllResultDTO:
+    restored: int  # things brought back
+    records: int  # records that came back in all
+    blocked: int  # left deleted: something above them is deleted and not in the set
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "restored": self.restored,
+            "records": self.records,
+            "blocked": self.blocked,
+        }
+
+
+# What reverting one field of an entry would do. See AuditService.plan_revert.
+REVERT_APPLY = "apply"  # the field still holds what the entry left; safe to put back
+REVERT_CONFLICT = "conflict"  # edited since the entry; put back only when forced
+REVERT_SAME = "same"  # already holds the older value; nothing to do
+REVERT_SKIPPED = "skipped"  # can't be put back (`reason` says why)
+
+
+@dataclass
+class RevertFieldDTO:
+    field: str
+    label: str | None
+    dtype: str | None
+    current: Any  # what the record holds now
+    target: Any  # what reverting would put back
+    status: str  # REVERT_*
+    reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "field": self.field,
+            "label": self.label,
+            "dtype": self.dtype,
+            "current": self.current,
+            "target": self.target,
+            "status": self.status,
+            "reason": self.reason,
+        }
+
+
+@dataclass
+class RevertPlanDTO:
+    """What undoing an audit entry would do, worked out without doing it.
+
+    `kind`: "update" puts fields back, "restore" brings a deleted record back
+    (undoing a delete), "delete" removes a record (undoing a create).
+    `blocked` is why nothing can be undone at all, else None."""
+
+    audit_id: uuid.UUID
+    entity_type: str
+    entity_id: uuid.UUID
+    kind: str | None
+    fields: list[RevertFieldDTO] = field(default_factory=list)
+    blocked: str | None = None
+    # What to restore first, when that is why `blocked` is set.
+    blocker: BlockerDTO | None = None
+
+    @property
+    def can_apply(self) -> bool:
+        if self.blocked:
+            return False
+        if self.kind != "update":
+            return True
+        return any(f.status in (REVERT_APPLY, REVERT_CONFLICT) for f in self.fields)
+
+    @property
+    def has_conflicts(self) -> bool:
+        return any(f.status == REVERT_CONFLICT for f in self.fields)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "audit_id": str(self.audit_id),
+            "entity_type": self.entity_type,
+            "entity_id": str(self.entity_id),
+            "kind": self.kind,
+            "fields": [f.to_dict() for f in self.fields],
+            "blocked": self.blocked,
+            "blocker": self.blocker.to_dict() if self.blocker else None,
+            "can_apply": self.can_apply,
+            "has_conflicts": self.has_conflicts,
+        }
+
+
+@dataclass
+class RevertResultDTO:
+    audit_id: uuid.UUID
+    entity_id: uuid.UUID
+    kind: str
+    applied: list[str] = field(default_factory=list)  # field names put back
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "audit_id": str(self.audit_id),
+            "entity_id": str(self.entity_id),
+            "kind": self.kind,
+            "applied": self.applied,
+        }
+
+
+@dataclass
+class AuditBatchDTO:
+    """What a bulk operation was, for the one event it shows as in history."""
+
+    id: uuid.UUID
+    kind: str  # "import" | "delete" | "restore" | "purge" | "workflow"
+    label: str | None  # a workflow's name, an import's file; else None
+    ref: str | None  # what started it, to link to (a workflow run's id)
+    created_at: datetime
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": str(self.id),
+            "kind": self.kind,
+            "label": self.label,
+            "ref": self.ref,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
+@dataclass
+class AuditEventDTO:
+    """One line of history: a single change, or a whole batch of them. A batch
+    reports how many matching changes it holds and of what (`parts`), not the
+    changes themselves; those are paged separately."""
+
+    id: uuid.UUID  # the entry's id, or the batch's
+    timestamp: datetime  # the latest change in it
+    count: int  # changes in it that match the filters
+    entry: AuditLogDTO | None = None
+    batch: AuditBatchDTO | None = None
+    parts: list[dict[str, Any]] = field(
+        default_factory=list
+    )  # {entity_type, action, count}
 
 
 @dataclass

@@ -53,8 +53,8 @@ import {
   PanelLeftOpen,
   Menu,
   X,
-  Trash2,
   Search,
+  History,
 } from './ui/icons'
 
 declare global {
@@ -120,7 +120,7 @@ const navGroups: NavGroupDef[] = [
     heading: 'Data',
     items: [
       { to: '/collections', label: 'Collections', icon: LayoutGrid },
-      { to: '/trash', label: 'Recently Deleted', icon: Trash2 },
+      { to: '/activity', label: 'Activity', icon: History },
     ],
   },
   {

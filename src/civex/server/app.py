@@ -23,6 +23,7 @@ from civex.server.routers import (
     plugins,
     records,
     remote,
+    retention,
     schemas,
     settings,
     status,
@@ -142,6 +143,13 @@ _OPENAPI_TAGS = [
             "Read the change history recorded for records, schemas, fields, "
             "and datasets — every create/update/delete with a full before/"
             "after data snapshot and timestamp."
+        ),
+    },
+    {
+        "name": "retention",
+        "description": (
+            "Clean up by age: deleted items, change history and finished "
+            "workflow runs older than the retention settings or a given date."
         ),
     },
     {
@@ -330,6 +338,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router, prefix="/api")
     app.include_router(jobs.automation_router, prefix="/api")
     app.include_router(audit.router, prefix="/api")
+    app.include_router(retention.router, prefix="/api")
     app.include_router(remote.router, prefix="/api")
     app.include_router(store.router, prefix="/api")
     app.include_router(transfers.router, prefix="/api")

@@ -31,10 +31,10 @@ import { recordRecent } from '../hooks/usePins'
 import { collectionTarget } from '../utils/navTargets'
 import { RecordsExplorer } from '../components/explorer/RecordsExplorer'
 import { WithHierarchy } from '../components/explorer/HierarchySidebar'
-import { AuditTrail } from '../components/audit/AuditTrail'
+import { ActivityFeed } from '../components/audit/ActivityFeed'
 import { collectionsApi, type CollectionScope } from '../api/collections'
 import { CollectionScopeFields } from '../components/collections/CollectionScopeFields'
-import { describeAuditEntry as describeCollectionAuditEntry } from '../utils/collectionAudit'
+import { inCollection } from '../utils/auditFilter'
 import { errorMessage } from '../lib/errors'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
 
@@ -276,13 +276,10 @@ export default function CollectionDetailPage() {
           </TabPanel>
 
           <TabPanel id="activity" value={shownTab}>
-            <AuditTrail
-              queryKey={['collections', collection.name, 'audit']}
-              fetchPage={(offset, limit, view) =>
-                collectionsApi.getAudit(collection.name, offset, limit, view)
-              }
-              describeEntry={describeCollectionAuditEntry}
-              emptyMessage="Changes to this collection will appear here."
+            <ActivityFeed
+              scope={inCollection(collection.name)}
+              ns="history."
+              emptyMessage="Changes to this collection and its records will appear here."
             />
           </TabPanel>
 

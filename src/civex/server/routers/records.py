@@ -19,6 +19,7 @@ from civex.server.models import (
     RecordLabelsRequest,
     RecordRef,
     RecordResponse,
+    RestorePlanResponse,
     ReferrerGroupResponse,
     UpdateRecordRequest,
 )
@@ -318,6 +319,20 @@ def delete_record(
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     ctx.commit()
+
+
+@router.get("/records/{record_id}/restore-plan", response_model=RestorePlanResponse)
+def restore_record_plan(record_id: str, ctx: AppContext = Depends(get_ctx)):
+    """What restoring a deleted record would do, without doing it: how many
+    records come back with it (those deleted together with it), the collection
+    it will be in, and `blocked_by` when its collection, schema or a parent
+    record is still deleted and must be restored first."""
+    try:
+        return RestorePlanResponse.from_dto(ctx.record_svc.restore_plan(record_id))
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
 
 
 @router.post("/records/{record_id}/restore", response_model=RecordResponse)

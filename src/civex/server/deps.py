@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import Generator
 
+from fastapi import Request
 from sqlalchemy.exc import OperationalError
 
 from civex.config import Config, load_config
@@ -79,12 +81,29 @@ def _recover_after_query_failure(config: Config) -> None:
     raise DatabaseUnavailableError(_recovery_failure_message(result)) from None
 
 
-def get_ctx() -> Generator[AppContext, None, None]:
+BATCH_HEADER = "X-Civex-Batch"
+
+
+def _join_request_batch(ctx: AppContext, request: Request) -> None:
+    """Put a request's changes in the batch its client named, so work done over
+    many requests (an import) is one event in history. A missing or unknown
+    batch is ignored: the changes are then simply recorded on their own."""
+    raw = request.headers.get(BATCH_HEADER)
+    if not raw:
+        return
+    try:
+        ctx.audit_svc.join_batch(uuid.UUID(raw))
+    except ValueError:
+        pass
+
+
+def get_ctx(request: Request) -> Generator[AppContext, None, None]:
     # ConfigError propagates to the registered CivexError handler (400),
     # rather than being turned into a bare 500 here -- the same exception
     # type must map to the same status regardless of where it's raised.
     config = load_config()
     ctx = _build_context_with_recovery(config)
+    _join_request_batch(ctx, request)
     try:
         yield ctx
         ctx.commit()

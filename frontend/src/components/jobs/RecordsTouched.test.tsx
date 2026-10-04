@@ -131,7 +131,7 @@ describe('RecordsTouched', () => {
     expect(screen.getByText('updated')).toBeInTheDocument()
   })
 
-  it("keeps an older run's stored name for a record that no longer exists", async () => {
+  it("keeps an older run's stored name for a record that no longer exists, without linking to it", async () => {
     renderIt(
       job({
         affected_records: [
@@ -146,8 +146,14 @@ describe('RecordsTouched', () => {
     )
 
     await waitFor(() => expect(labelCalls).toHaveLength(1))
+    // Its name is kept, but there is no page to open: it says what became of
+    // it, and where to see what happened.
+    expect(await screen.findByText('Selection 9')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Selection 9' })).toBeNull()
     expect(
-      screen.getByRole('link', { name: 'Selection 9' }),
+      await screen.findByRole('link', {
+        name: /permanently deleted: see history/,
+      }),
     ).toBeInTheDocument()
   })
 

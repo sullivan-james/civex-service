@@ -355,6 +355,22 @@ class Commit(Base):
     entries: Mapped[list[AuditLog]] = relationship("AuditLog", back_populates="commit")
 
 
+class AuditBatch(Base):
+    """A set of audit entries that happened as one thing: an import, a delete
+    that took a whole tree with it, a workflow run. Gives a bulk operation a
+    single event in history instead of thousands of rows. Local only: it is not
+    part of a sync bundle."""
+
+    __tablename__ = "audit_batches"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(500))
+    # What started it, when that is something to link to (a workflow run's id).
+    ref: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+
+
 class AuditLog(Base):
     """One row per entity write — create, update, or delete — from any source."""
 
@@ -363,6 +379,7 @@ class AuditLog(Base):
         Index("ix_audit_log_entity", "entity_id", "timestamp"),
         Index("ix_audit_log_commit", "commit_id"),
         Index("ix_audit_log_timestamp", "timestamp"),
+        Index("ix_audit_log_batch", "batch_id"),
         # Staged (uncommitted) entries: a tiny, hot subset of a table that
         # otherwise grows forever.
         Index(
@@ -387,6 +404,9 @@ class AuditLog(Base):
     old_data: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     new_data: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     timestamp: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("audit_batches.id"), nullable=True
+    )
 
     commit: Mapped[Commit | None] = relationship("Commit", back_populates="entries")
 

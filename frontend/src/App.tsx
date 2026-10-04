@@ -15,11 +15,20 @@ const SchemaRecordsPage = lazy(() => import('./pages/SchemaRecordsPage'))
 const ViewRedirect = lazy(() => import('./pages/ViewRedirect'))
 const RecordDetailPage = lazy(() => import('./pages/RecordDetailPage'))
 const NewRecordPage = lazy(() => import('./pages/NewRecordPage'))
-const RecentlyDeletedPage = lazy(() => import('./pages/RecentlyDeletedPage'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 const WorkflowEditorPage = lazy(() => import('./pages/WorkflowEditorPage'))
 const JobsPage = lazy(() => import('./pages/JobsPage'))
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
+/** The old Recently Deleted address: history showing what is deleted. */
+const DELETED_VIEW = `/activity?activity.filter=${encodeURIComponent(
+  JSON.stringify({
+    and: [
+      { field: 'now', op: 'eq', value: 'deleted' },
+      { field: 'change', op: 'eq', value: 'delete' },
+    ],
+  }),
+)}`
+const ActivityPage = lazy(() => import('./pages/ActivityPage'))
 const JobDetailPage = lazy(() => import('./pages/JobDetailPage'))
 const TerminalPage = lazy(() => import('./pages/TerminalPage'))
 const AiPage = lazy(() => import('./pages/AiPage'))
@@ -77,7 +86,10 @@ export default function App() {
               element={<ViewRedirect />}
             />
             <Route path="/records/:id" element={<RecordDetailPage />} />
-            <Route path="/trash" element={<RecentlyDeletedPage />} />
+            <Route
+              path="/trash"
+              element={<Navigate to={DELETED_VIEW} replace />}
+            />
             <Route path="/workflows" element={<WorkflowsPage />} />
             <Route
               path="/workflows/new"
@@ -90,6 +102,7 @@ export default function App() {
             <Route path="/runs" element={<JobsPage />} />
             <Route path="/runs/:id" element={<JobDetailPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route path="/activity" element={<ActivityPage />} />
             {/* Legacy redirects */}
             <Route path="/jobs" element={<Navigate to="/runs" replace />} />
             <Route path="/jobs/:id" element={<Navigate to="/runs" replace />} />
@@ -111,7 +124,11 @@ export default function App() {
               <Route path="appearance" element={<ThemeSection />} />
               <Route path="database" element={<DatabaseSection />} />
               <Route path="storage" element={<StorageSettings />} />
-              <Route path="recently-deleted" element={<RetentionSection />} />
+              <Route path="retention" element={<RetentionSection />} />
+              <Route
+                path="recently-deleted"
+                element={<Navigate to="/settings/retention" replace />}
+              />
               <Route path="map" element={<MapSection />} />
               <Route path="advanced" element={<AdvancedSection />} />
             </Route>

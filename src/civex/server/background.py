@@ -49,7 +49,7 @@ def run_pending_jobs() -> None:
     from civex.config import ConfigError, load_config
     from civex.context import build_local_context
     from civex.domain.dtos import ErrorEnvelope
-    from civex.domain.exceptions import JobCancelled
+    from civex.domain.exceptions import JobCancelled, NotFoundError
     from civex.plugins import registry as plugin_registry
     from civex.plugins.base import WorkflowContext
     from civex.workflows import executor
@@ -81,7 +81,13 @@ def run_pending_jobs() -> None:
                     wf_def = ctx.job_svc.find_workflow(job.workflow_name)
                     if wf_def is None:
                         raise ValueError(f"Workflow '{job.workflow_name}' not found")
-                    record = ctx.record_svc.get(str(job.record_id))
+                    try:
+                        record = ctx.record_svc.get(str(job.record_id))
+                    except NotFoundError:
+                        raise ValueError(
+                            f"The record this run was for ({str(job.record_id)[:8]}…) "
+                            "is deleted or no longer exists, so the run can't start."
+                        ) from None
                     dataset = ctx.dataset_svc._datasets.get_by_id(record.dataset_id)
                     if dataset is None:
                         raise ValueError("Dataset for record not found")
@@ -94,14 +100,18 @@ def run_pending_jobs() -> None:
                         workflow_name=job.workflow_name,
                     )
                     initial_outputs = job.input_data or None
-                    step_executions = executor.run(
-                        wf_def,
-                        wf_ctx,
-                        plugins,
-                        initial_outputs=initial_outputs,
-                        default_timeout_seconds=config.plugins.default_timeout_seconds,
-                        should_stop=lambda: ctx.job_svc.should_stop(job.id),
-                    )
+                    # Whatever the run writes is one event in history.
+                    with ctx.history_svc.batch(
+                        "workflow", job.workflow_name, str(job.id)
+                    ):
+                        step_executions = executor.run(
+                            wf_def,
+                            wf_ctx,
+                            plugins,
+                            initial_outputs=initial_outputs,
+                            default_timeout_seconds=config.plugins.default_timeout_seconds,
+                            should_stop=lambda: ctx.job_svc.should_stop(job.id),
+                        )
             except Exception as e:
                 # executor.run() attaches the envelope (with the failing step
                 # id) to whatever it re-raises; anything raised before the

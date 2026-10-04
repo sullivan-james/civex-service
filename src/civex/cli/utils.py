@@ -7,7 +7,7 @@ import typer
 from civex.config import Config, load_config
 from civex.console import console
 from civex.domain.dtos import ErrorEnvelope, WorkflowJobDTO
-from civex.domain.exceptions import ConfigError, JobCancelled
+from civex.domain.exceptions import ConfigError, JobCancelled, NotFoundError
 
 if TYPE_CHECKING:
     from civex.context import AppContext
@@ -100,7 +100,13 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[list[dict], str, list
             f"Workflow '{job.workflow_name}' not found in _civex/workflows/"
         )
 
-    record = ctx.record_svc.get(str(job.record_id))
+    try:
+        record = ctx.record_svc.get(str(job.record_id))
+    except NotFoundError:
+        raise ValueError(
+            f"The record this run was for ({str(job.record_id)[:8]}…) is deleted "
+            "or no longer exists, so the run can't start."
+        ) from None
     dataset = ctx.dataset_svc._datasets.get_by_id(record.dataset_id)
     if dataset is None:
         raise ValueError(f"Dataset for record '{job.record_id}' not found")
@@ -154,14 +160,16 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[list[dict], str, list
                 workflow_name=job.workflow_name,
             )
             try:
-                step_executions = executor.run(
-                    wf_def,
-                    wf_ctx,
-                    plugins,
-                    initial_outputs=job.input_data or None,
-                    default_timeout_seconds=config.plugins.default_timeout_seconds,
-                    should_stop=lambda: ctx.job_svc.should_stop(job.id),
-                )
+                # Whatever the run writes is one event in history.
+                with ctx.history_svc.batch("workflow", job.workflow_name, str(job.id)):
+                    step_executions = executor.run(
+                        wf_def,
+                        wf_ctx,
+                        plugins,
+                        initial_outputs=job.input_data or None,
+                        default_timeout_seconds=config.plugins.default_timeout_seconds,
+                        should_stop=lambda: ctx.job_svc.should_stop(job.id),
+                    )
             except Exception as e:
                 # Mirrors executor.run()'s own .step_executions attachment --
                 # whatever records the run touched before the failing step

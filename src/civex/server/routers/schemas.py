@@ -16,6 +16,7 @@ from civex.server.models import (
     PreviewNameRequest,
     PreviewNameResponse,
     ReorderFieldsRequest,
+    RestorePlanResponse,
     SchemaDeleteImpactResponse,
     SchemaResponse,
     UpdateFieldRequest,
@@ -152,6 +153,18 @@ def delete_schema(name: str, ctx: AppContext = Depends(get_ctx)):
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     ctx.commit()
+
+
+@router.get("/{name}/restore-plan", response_model=RestorePlanResponse)
+def restore_schema_plan(name: str, ctx: AppContext = Depends(get_ctx)):
+    """What restoring a deleted schema would bring back: it and the records
+    deleted with it, not records deleted on their own earlier."""
+    try:
+        return RestorePlanResponse.from_dto(ctx.schema_svc.restore_plan(name))
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
 
 
 @router.post("/{name}/restore", response_model=SchemaResponse)
