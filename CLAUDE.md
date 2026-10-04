@@ -88,7 +88,7 @@ src/civex/
 
 ### Data model
 
-Record `data` is stored as a JSON/JSONB dict (no EAV), keyed by **field UUID** — `RecordService._names_to_ids()`/`_ids_to_names()` translate at the service boundary, so everything above that layer sees name-keyed data and renaming a field costs nothing in storage. Field types: `integer | float | string | boolean | date | datetime | geo | file | file_list | reference | reference_list | enum | url | tags` (`VALID_DTYPES` in `schema_service.py` is the authority).
+Record `data` is stored as a JSON/JSONB dict (no EAV), keyed by **field UUID** — `RecordService._names_to_ids()`/`_ids_to_names()` translate at the service boundary, so everything above that layer sees name-keyed data and renaming a field costs nothing in storage. Field types: `integer | float | string | boolean | date | datetime | geo | file | file_list | reference | reference_list | enum | url | tags | longtext` (`VALID_DTYPES` in `schema_service.py` is the authority).
 
 - `file` / `file_list`: record stores `FileRef` dict(s) `{sha256, filename, size}`; bytes live in `_civex/objects/<sha256[:2]>/<sha256[2:]>` (git object store layout).
 - `date`: stored as an ISO string at the precision it was written (`2019`, `2019-06` or `2019-06-14`; a `precision` restriction names the least precise form a field accepts, default `day`). Logic in `domain/partial_dates.py`, mirrored by `frontend/src/utils/partialDates.ts`. Min/max compare whole periods. `datetime`: always stored as a UTC ISO string. `RecordService.add`/`update` normalise every datetime via `_normalise_datetimes()` (and the CLI via `coerce_value`), reading a value with no UTC offset as wall time in the field's `timezone` restriction, else the collection's `timezone` (`datasets.timezone`), else UTC. DST gaps/overlaps and malformed values are rejected; `update` skips values merely echoed back, so a legacy offset-less value isn't shifted when a zone is set later. The logic lives in `domain/timezones.py`; `frontend/src/utils/dates.ts` mirrors its DST rules for display and entry, and works to the second: the datetime input must have `step={1}` (the default minute step hides the seconds field), `utcToZonedLocal` includes seconds when non-zero, `zonedLocalToUTC` accepts seconds and a fraction, and `formatDateTime` shows seconds when the value has them.
@@ -175,6 +175,7 @@ Each field carries a `restrictions: dict[str, Any]` validated at write time by `
 | `integer`, `float` | `min`, `max` |
 | `float` | also `unit` (symbol; canonicalised, e.g. `degC` → `°C`) |
 | `string` | `choices` (list), `max_length` |
+| `longtext` | `max_length` (multi-line text box; plain string, newlines kept; not nameable in name templates) |
 | `date`, `datetime` | `min`, `max` (ISO strings; compared as parsed objects, not strings; `date` bounds may be partial) |
 | `date` | also `precision` (`year` / `month` / `day`) |
 | `geo` | `geometry_types` (list), `bbox` (`[west, south, east, north]`) |

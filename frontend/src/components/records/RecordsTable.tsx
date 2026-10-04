@@ -98,6 +98,13 @@ function CellValue({
         ))}
       </span>
     )
+  if (col.type === 'longtext' && typeof value === 'string')
+    // One line in a table cell; the whole text is on hover.
+    return (
+      <span className="block max-w-xs truncate" title={value}>
+        {value.replace(/\s*\n\s*/g, ' ')}
+      </span>
+    )
   return <>{formatCellValue(value)}</>
 }
 

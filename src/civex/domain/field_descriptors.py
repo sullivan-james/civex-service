@@ -279,6 +279,16 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
             "https://example.org/data",
         ),
         FieldTypeDescriptor(
+            "longtext",
+            "Text box",
+            "Several lines of free text, such as notes or a description.",
+            "Text",
+            "Type text. Press Enter for a new line.",
+            "Observed two seals hauled out.\nWeather: overcast.",
+            (_R("max_length", "Longest allowed", "integer"),),
+            supports_default=False,
+        ),
+        FieldTypeDescriptor(
             "tags",
             "Tags",
             "A list of short labels.",
@@ -353,6 +363,7 @@ FIELD_KINDS: tuple[FieldKind, ...] = (
         "Points at several records.",
         focus="schema",
     ),
+    FieldKind("textbox", "Text box", "longtext", "Several lines of text."),
     FieldKind("tags", "Tags", "tags", "A list of short labels."),
     FieldKind("url", "Web address", "url", "A link."),
 )

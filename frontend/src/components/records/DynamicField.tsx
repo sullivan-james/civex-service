@@ -13,6 +13,7 @@ import {
   InfoTip,
   Input,
   Select,
+  Textarea,
 } from '../ui'
 import { displayLabel } from '../../utils/naming'
 import {
@@ -748,6 +749,22 @@ export function DynamicField({
         </Select>
       )
     }
+
+    case 'longtext':
+      return (
+        <Textarea
+          id={id}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={ariaInvalid}
+          required={field.required}
+          aria-required={field.required}
+          rows={4}
+          value={(value as string) ?? ''}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full resize-y"
+        />
+      )
 
     case 'url':
       return (

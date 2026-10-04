@@ -306,3 +306,21 @@ def test_float_unit_does_not_affect_bounds_checking() -> None:
     _check_restrictions(312.4, "float", {"unit": "m", "min": 0, "max": 2000}, "f")
     with pytest.raises(ValidationError, match="exceeds maximum"):
         _check_restrictions(3000.0, "float", {"unit": "m", "max": 2000}, "f")
+
+
+# ---------------------------------------------------------------------------
+# longtext: multi-line text, max_length only
+# ---------------------------------------------------------------------------
+
+
+def test_longtext_keeps_newlines_and_passes() -> None:
+    _check_restrictions("line one\nline two", "longtext", {"max_length": 100}, "f")
+
+
+def test_longtext_max_length_counts_newlines() -> None:
+    with pytest.raises(ValidationError, match="exceeds max_length"):
+        _check_restrictions("ab\ncd", "longtext", {"max_length": 4}, "f")
+
+
+def test_longtext_ignores_no_restrictions() -> None:
+    _check_restrictions("a\nb", "longtext", {}, "f")

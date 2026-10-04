@@ -119,3 +119,7 @@ def test_rename_and_remove_a_field_of_the_referenced_schema():
         "{site.title}-{name}"
     )
     assert t.remove_field("{site.name} - {name}", "name", via="site") == "{name}"
+
+
+def test_longtext_is_not_nameable() -> None:
+    assert "longtext" in t.UNNAMEABLE_DTYPES

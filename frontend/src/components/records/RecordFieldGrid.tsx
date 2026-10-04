@@ -388,6 +388,7 @@ export function restrictionHints(field: Field): string[] {
       break
     case 'string':
     case 'enum':
+    case 'longtext':
       if (Array.isArray(r.choices) && r.choices.length)
         hints.push(`one of ${(r.choices as string[]).join(', ')}`)
       if (r.max_length !== undefined) hints.push(`≤ ${r.max_length} chars`)

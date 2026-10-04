@@ -91,6 +91,7 @@ export const RESTRICTION_FREE_TYPES: readonly FieldType[] = [
   'url',
   'tags',
   'geo',
+  'longtext',
 ]
 
 export const NEW_SCHEMA = '__new__'
