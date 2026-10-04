@@ -150,7 +150,8 @@ def test_progress_can_be_watched_while_it_runs(
     started = jobs.start(_drain(["a"], ["b"]))
     done_counts: set[int] = set()
     currents: set[str | None] = set()
-    deadline = time.monotonic() + 20
+    # Generous: each copy is fsynced, which is slow on a Windows runner.
+    deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
         record = _record(started.id)
         done_counts.add(record.progress.files_done)

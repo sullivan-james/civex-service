@@ -63,4 +63,4 @@ jobs:
         run: uv sync --extra server --extra workflows --extra dev
 
       - name: Run OS-sensitive tests
-        run: uv run pytest -m os_sensitive -q -n auto -p no:cacheprovider
+        run: uv run pytest -m os_sensitive -q -n auto -p no:cacheprovider --durations=15
