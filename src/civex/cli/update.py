@@ -78,6 +78,57 @@ def upgrade_command(installer: str) -> list[str]:
     return [sys.executable, "-m", "pip", "install", "--upgrade", "civex"]
 
 
+def installed_missing_requirements() -> list[str]:
+    """What's missing for the civex installed *now*, from a fresh interpreter
+    (this process still has the old code and metadata loaded)."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import json; from civex.install_check import missing_requirements; "
+            "print(json.dumps(missing_requirements()))",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    try:
+        return json.loads(result.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return []
+
+
+def repair_command(installer: str, version: str) -> list[str]:
+    """Reinstall civex at `version`, which also installs any dependency that
+    is missing (an upgrade alone doesn't when the version is unchanged)."""
+    if installer == "uv" and shutil.which("uv"):
+        return ["uv", "tool", "install", "--force", f"civex=={version}"]
+    return [sys.executable, "-m", "pip", "install", f"civex=={version}"]
+
+
+def ensure_requirements(installer: str, version: str) -> bool:
+    """Make sure every package civex needs is installed, reinstalling if not.
+    Returns False if some are still missing afterwards."""
+    missing = installed_missing_requirements()
+    if not missing:
+        return True
+    console.print(
+        "[warning]Some packages civex needs are missing: "
+        f"{', '.join(missing)}. Reinstalling.[/warning]"
+    )
+    cmd = repair_command(installer, version)
+    console.print(f"[dim]{' '.join(cmd)}[/dim]")
+    subprocess.run(cmd)
+    still = installed_missing_requirements()
+    if still:
+        console.print(
+            f"[error]Still missing: {', '.join(still)}.[/error] "
+            "Try `pip install civex` directly to see why."
+        )
+        return False
+    console.print("[success]Required packages are installed.[/success]")
+    return True
+
+
 def update(
     check: bool = typer.Option(
         False, "--check", help="Only report whether a newer version exists."
@@ -113,6 +164,8 @@ def update(
 
     if not newer:
         console.print(f"[success]civex {__version__} is up to date.[/success]")
+        if not check and not ensure_requirements(installer, __version__):
+            raise typer.Exit(1)
         return
     if check:
         console.print(f"civex {latest} is available (you have {__version__}).")
@@ -142,3 +195,20 @@ def update(
         f"[success]Updated to {now or latest}.[/success] "
         "Restart `civex serve` if it's running."
     )
+    ok = ensure_requirements(installer, now or latest)
+    _warn_if_shadowed(now or latest)
+    if not ok:
+        raise typer.Exit(1)
+
+
+def _warn_if_shadowed(expected: str) -> None:
+    """After an upgrade, say so if typing `civex` still runs another copy."""
+    from civex.install_check import check_shadowing
+
+    try:
+        check = check_shadowing(expected)
+    except Exception:  # a diagnostic must never fail a successful update
+        return
+    if check.status != "ok":
+        console.print(f"[warning]{check.detail}[/warning]")
+        console.print(f"[dim]{check.fix}[/dim]")

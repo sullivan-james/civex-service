@@ -173,17 +173,50 @@ def _build_command(uv_bin: str, plugin_path: Path) -> list[str]:
 # -- sandboxed spawn (CIVEX-139) ----------------------------------------------
 
 
-def _sandboxed_env() -> dict[str, str]:
+def sandboxed_env() -> dict[str, str]:
     """Minimal environment for a plugin subprocess: PATH/HOME plus whatever a
     few uv/Python variables it needs, deliberately excluding the rest of
     civex-service's own process environment (DB URL, AI API keys, ...) so a
     plugin can't read ambient secrets it was never granted a capability
     for -- the same "no ambient access" principle as the sandboxed cwd
     below, just applied to env instead of the filesystem."""
-    allowed = ("PATH", "HOME", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "TMPDIR")
+    allowed = (
+        "PATH",
+        "HOME",
+        "UV_CACHE_DIR",
+        "UV_PYTHON",
+        "UV_PYTHON_INSTALL_DIR",
+        "UV_PYTHON_PREFERENCE",
+        "UV_NATIVE_TLS",
+        "TMPDIR",
+        # Corporate networks: without these uv can't reach the package index.
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "SSL_CERT_FILE",
+    )
     env = {k: os.environ[k] for k in allowed if k in os.environ}
     if sys.platform == "win32":
-        for k in ("SYSTEMROOT", "TEMP", "TMP", "USERPROFILE"):
+        # uv finds the interpreters the Python install manager put under
+        # %LOCALAPPDATA%\Python. Without LOCALAPPDATA it resolves that
+        # location relative to the scratch cwd and fails with "did not find
+        # executable at ...\Temp\civex-plugin-...\Python\...".
+        for k in (
+            "SYSTEMROOT",
+            "WINDIR",
+            "COMSPEC",
+            "PATHEXT",
+            "TEMP",
+            "TMP",
+            "USERPROFILE",
+            "HOMEDRIVE",
+            "HOMEPATH",
+            "LOCALAPPDATA",
+            "APPDATA",
+            "PROGRAMDATA",
+            "PROGRAMFILES",
+            "PROGRAMFILES(X86)",
+        ):
             if k in os.environ:
                 env[k] = os.environ[k]
     return env
@@ -199,7 +232,7 @@ def _spawn(argv: list[str], scratch_dir: Path) -> subprocess.Popen:
     return subprocess.Popen(
         argv,
         cwd=str(scratch_dir),
-        env=_sandboxed_env(),
+        env=sandboxed_env(),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

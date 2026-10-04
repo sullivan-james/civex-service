@@ -12,6 +12,8 @@ runner = CliRunner()
 @pytest.fixture(autouse=True)
 def _not_editable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(update_mod, "detect_installer", lambda: "pip")
+    monkeypatch.setattr(update_mod, "installed_missing_requirements", lambda: [])
+    monkeypatch.setattr(update_mod, "_warn_if_shadowed", lambda expected: None)
 
 
 def test_up_to_date(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,3 +79,40 @@ def test_pipx_command(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(update_mod.shutil, "which", lambda name: "/usr/bin/" + name)
     assert update_mod.upgrade_command("pipx") == ["pipx", "upgrade", "civex"]
     assert update_mod.upgrade_command("uv") == ["uv", "tool", "upgrade", "civex"]
+
+
+def test_update_reinstalls_when_requirements_are_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(update_mod, "__version__", "1.2.0")
+    monkeypatch.setattr(update_mod, "latest_version", lambda: "1.2.0")
+    states = iter([["pandas>=2"], []])
+    monkeypatch.setattr(
+        update_mod, "installed_missing_requirements", lambda: next(states)
+    )
+    ran: list[list[str]] = []
+    monkeypatch.setattr(update_mod.subprocess, "run", lambda cmd: ran.append(cmd))
+    result = runner.invoke(app, ["update"])
+    assert result.exit_code == 0, result.output
+    assert ran and ran[0][-1] == "civex==1.2.0"
+    assert "pandas" in result.output
+
+
+def test_update_fails_if_requirements_stay_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(update_mod, "__version__", "1.2.0")
+    monkeypatch.setattr(update_mod, "latest_version", lambda: "1.2.0")
+    monkeypatch.setattr(update_mod, "installed_missing_requirements", lambda: ["x"])
+    monkeypatch.setattr(update_mod.subprocess, "run", lambda cmd: None)
+    assert runner.invoke(app, ["update"]).exit_code == 1
+
+
+def test_check_does_not_install_anything(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(update_mod, "__version__", "1.2.0")
+    monkeypatch.setattr(update_mod, "latest_version", lambda: "1.2.0")
+    monkeypatch.setattr(update_mod, "installed_missing_requirements", lambda: ["x"])
+    ran: list[list[str]] = []
+    monkeypatch.setattr(update_mod.subprocess, "run", lambda cmd: ran.append(cmd))
+    assert runner.invoke(app, ["update", "--check"]).exit_code == 0
+    assert not ran

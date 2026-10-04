@@ -52,7 +52,20 @@ civex update --check   # only report whether one is available
 and runs the matching upgrade. Restart `civex serve` afterwards if it's
 running. Project databases migrate themselves the next time they're opened.
 `civex update` confirms the installed version actually changed, and says so if
-it didn't.
+it didn't. It also checks that every package civex needs is installed (even
+when you're already up to date) and reinstalls any that are missing, and warns
+if typing `civex` still runs an older copy found earlier on your PATH.
+
+## Troubleshooting
+
+```bash
+civex doctor
+```
+
+checks the install: whether another copy of civex shadows this one on PATH,
+whether the required packages are present, whether `uv` is found, and whether
+a custom plugin's Python can start. Each problem comes with what to do about it.
+Inside a project it also checks the data.
 
 ## Next step
 
