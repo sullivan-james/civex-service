@@ -64,7 +64,9 @@ civex doctor
 
 checks the install: whether another copy of civex shadows this one on PATH,
 whether the required packages are present, whether `uv` is found, and whether
-a custom plugin's Python can start. Each problem comes with what to do about it.
+a custom plugin's Python can start. It also finds cached plugin environments left pointing at a Python that no
+longer exists; `civex doctor --fix` removes them. Each problem comes with what
+to do about it.
 Inside a project it also checks the data.
 
 ## Next step

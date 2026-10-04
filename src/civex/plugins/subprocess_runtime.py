@@ -273,7 +273,18 @@ def _dead_process_message(proc: subprocess.Popen) -> str:
         except Exception:
             stderr = ""
     detail = f": {stderr.strip()}" if stderr.strip() else ""
-    return f"plugin process exited without a response (exit code {proc.poll()}){detail}"
+    message = (
+        f"plugin process exited without a response (exit code {proc.poll()}){detail}"
+    )
+    if "did not find executable at" in stderr:
+        # uv reuses a plugin's cached environment, and one built while its
+        # Python was somewhere that has since gone points at nothing.
+        message += (
+            "\nThis plugin's cached environment points at a Python that no longer "
+            "exists. Run `civex doctor --fix` to remove it; it is rebuilt on the "
+            "next run."
+        )
+    return message
 
 
 # -- wall-clock timeout (CIVEX-138) -------------------------------------------

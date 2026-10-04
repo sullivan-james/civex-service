@@ -210,10 +210,101 @@ def check_dependencies() -> Check:
     )
 
 
+_PYTHON_NAMES = ("python.exe", "python", "python3", "pypy3", "pypy")
+
+
+def uv_cache_dir() -> Path | None:
+    """Where uv keeps the environments it builds for plugins, asked of uv
+    itself and with the environment a plugin gets, so it is the same place."""
+    from civex.domain.exceptions import ConfigError
+    from civex.plugins.subprocess_runtime import find_uv_binary, sandboxed_env
+
+    try:
+        result = subprocess.run(
+            [find_uv_binary(), "cache", "dir"],
+            env=sandboxed_env(),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (ConfigError, OSError, subprocess.SubprocessError):
+        return None
+    out = result.stdout.strip()
+    return Path(out) if result.returncode == 0 and out else None
+
+
+def _venv_home(config: Path) -> Path | None:
+    try:
+        for line in config.read_text(encoding="utf-8", errors="replace").splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() == "home" and value.strip():
+                return Path(value.strip())
+    except OSError:
+        pass
+    return None
+
+
+def stale_environments(cache_dir: Path) -> list[Path]:
+    """Cached plugin environments whose Python is gone.
+
+    uv reuses the environment it built for a plugin's dependencies. One built
+    while its interpreter lived somewhere that has since disappeared (a
+    temporary folder, an uninstalled Python) fails on every later run with
+    "did not find executable at ...", and uv never rebuilds it on its own."""
+    envs = cache_dir / "environments-v2"
+    if not envs.is_dir():
+        return []
+    stale: list[Path] = []
+    for env in sorted(envs.iterdir()):
+        config = env / "pyvenv.cfg"
+        if not config.is_file():
+            continue
+        home = _venv_home(config)
+        if home is None:
+            continue
+        if not any((home / name).is_file() for name in _PYTHON_NAMES):
+            stale.append(env)
+    return stale
+
+
+def remove_stale_environments(cache_dir: Path | None = None) -> list[Path]:
+    """Delete the stale environments `stale_environments` finds; they are
+    rebuilt the next time their plugin runs. Returns what was removed."""
+    import shutil
+
+    cache_dir = cache_dir or uv_cache_dir()
+    if cache_dir is None:
+        return []
+    removed: list[Path] = []
+    for env in stale_environments(cache_dir):
+        shutil.rmtree(env, ignore_errors=True)
+        if not env.exists():
+            removed.append(env)
+    return removed
+
+
+def check_stale_environments() -> Check:
+    name = "cached plugin environments"
+    cache_dir = uv_cache_dir()
+    if cache_dir is None:
+        return Check(name, "warn", "Skipped: couldn't find uv's cache.")
+    stale = stale_environments(cache_dir)
+    if not stale:
+        return Check(name, "ok", "None are out of date.")
+    return Check(
+        name,
+        "warn",
+        f"{len(stale)} point at a Python that no longer exists, so the plugins "
+        'that use them fail with "did not find executable".',
+        "Run `civex doctor --fix` to remove them; they are rebuilt on next use.",
+    )
+
+
 def run_install_checks() -> list[Check]:
     from civex import __version__
 
     checks = [check_shadowing(__version__), check_dependencies(), check_uv()]
     if checks[-1].status == "ok":
         checks.append(check_plugin_sandbox())
+        checks.append(check_stale_environments())
     return checks

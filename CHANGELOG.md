@@ -20,6 +20,19 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## v1.1.5 — repair broken plugin environments (2026-10-05)
+
+### Fixes
+
+- A custom plugin could keep failing with `did not find executable at ...
+  \Temp\civex-plugin-...\python.exe` after the v1.1.4 fix, because `uv`
+  reuses the environment it built for the plugin and that environment still
+  pointed at a Python from the earlier failed run. `civex doctor` now finds
+  cached plugin environments whose Python no longer exists, and
+  `civex doctor --fix` removes them (`uv` rebuilds each on the plugin's next
+  run, so it only costs a slower first run). The plugin error itself now says
+  to run it.
+
 ## v1.1.4 — Windows plugin fix, install checks (2026-10-04)
 
 ### Fixes

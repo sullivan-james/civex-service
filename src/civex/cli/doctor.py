@@ -7,7 +7,7 @@ import typer
 from civex.cli.utils import get_ctx
 from civex.config import find_project_root
 from civex.console import console
-from civex.install_check import run_install_checks
+from civex.install_check import remove_stale_environments, run_install_checks
 
 _MARK = {
     "ok": "[success]ok[/success]",
@@ -16,14 +16,33 @@ _MARK = {
 }
 
 
-def doctor() -> None:
+def doctor(
+    fix: bool = typer.Option(
+        False,
+        "--fix",
+        help="Remove cached plugin environments whose Python is gone.",
+    ),
+) -> None:
     """Check this civex install and, inside a project, its data.
 
     The install checks look for another copy of civex shadowing this one on
     PATH, for uv, and for a working Python for custom plugins. The project
     checks look for integrity issues, such as dangling reference/
     reference_list values left over from before deletes checked for referrers.
+
+    With --fix, deletes cached plugin environments that point at a Python that
+    no longer exists (uv rebuilds them the next time the plugin runs).
     """
+    if fix:
+        removed = remove_stale_environments()
+        if removed:
+            console.print(
+                f"Removed {len(removed)} out-of-date plugin environment(s); "
+                "they are rebuilt the next time their plugin runs."
+            )
+        else:
+            console.print("[dim]No out-of-date plugin environments to remove.[/dim]")
+
     failed = False
     for check in run_install_checks():
         console.print(f"{_MARK[check.status]} {check.name}: {check.detail}")
