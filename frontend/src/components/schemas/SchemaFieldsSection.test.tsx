@@ -94,7 +94,7 @@ const SCHEMA: Schema = {
   label: null,
   description: null,
   parent_id: null,
-  display_fields: [],
+  display_template: null,
   deleted_at: null,
   fields: [
     field('f1', 'species', 'string'),
@@ -151,7 +151,7 @@ function renderSection() {
 describe('schema fields section', () => {
   it('lists fields on the left and shows the selected one on the right', async () => {
     renderSection()
-    const nav = screen.getByRole('navigation', { name: 'Fields' })
+    const nav = screen.getByRole('list', { name: 'Fields' })
     expect(within(nav).getByText('Species')).toBeInTheDocument()
     expect(within(nav).getByText('Depth')).toBeInTheDocument()
     // the first field is open, with its rules
@@ -184,9 +184,7 @@ describe('schema fields section', () => {
   it('saves a changed rule on an existing field', async () => {
     renderSection()
     await userEvent.click(
-      within(screen.getByRole('navigation', { name: 'Fields' })).getByText(
-        'Depth',
-      ),
+      within(screen.getByRole('list', { name: 'Fields' })).getByText('Depth'),
     )
     const save = screen.getByRole('button', { name: 'Save changes' })
     expect(save).toBeDisabled()
@@ -202,7 +200,7 @@ describe('schema fields section', () => {
 
   it('asks before throwing away unsaved edits', async () => {
     renderSection()
-    const nav = screen.getByRole('navigation', { name: 'Fields' })
+    const nav = screen.getByRole('list', { name: 'Fields' })
     await userEvent.type(screen.getByLabelText('Field label'), 'x')
     await userEvent.click(within(nav).getByText('Depth'))
     expect(screen.getByText('Discard unsaved changes?')).toBeInTheDocument()

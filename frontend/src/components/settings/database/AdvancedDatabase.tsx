@@ -1,11 +1,5 @@
 import { useState } from 'react'
-import {
-  Button,
-  CollapsibleSection,
-  ConfirmDialog,
-  Field,
-  Input,
-} from '../../ui'
+import { Button, ConfirmDialog, Field, Input, InfoTip } from '../../ui'
 import {
   useDbStatus,
   useMigrateDb,
@@ -40,7 +34,7 @@ export function AdvancedDatabase() {
     : null
 
   return (
-    <CollapsibleSection title="Advanced">
+    <>
       <div className="space-y-5 text-sm">
         <div className="space-y-1">
           <p className="font-medium text-fg">Connection</p>
@@ -101,11 +95,13 @@ export function AdvancedDatabase() {
         )}
 
         <div className="space-y-2">
-          <p className="font-medium text-fg">Use an existing database</p>
-          <p className="text-xs text-fg-muted">
-            Switches to a database that already holds your data, without copying
-            anything. To carry this project&rsquo;s data into a different
-            database, use <em>Move to another database</em> instead.
+          <p className="flex items-center gap-1 font-medium text-fg">
+            Use an existing database
+            <InfoTip>
+              Switches to a database that already holds your data, without
+              copying anything. To carry this project&rsquo;s data into a
+              different database, use Move to another database instead.
+            </InfoTip>
           </p>
           <Field label="Connection URL" hideLabel>
             <Input
@@ -157,6 +153,6 @@ export function AdvancedDatabase() {
           onClose={() => setConfirmTeardown(false)}
         />
       )}
-    </CollapsibleSection>
+    </>
   )
 }

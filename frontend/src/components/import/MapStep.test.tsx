@@ -94,25 +94,34 @@ describe('MapStep timezone hint', () => {
     state: mapped,
   }
 
-  it('says which zone times are read in when the collection has one', () => {
+  async function hint() {
+    await userEvent.click(
+      screen.getByRole('button', { name: 'More information' }),
+    )
+    return screen.getByRole('tooltip')
+  }
+
+  it('says which zone times are read in when the collection has one', async () => {
     renderCsvStep({ ...base, collectionTimeZone: 'America/Chicago' })
-    expect(screen.getByText(/read as America\/Chicago/)).toBeInTheDocument()
+    expect(await hint()).toHaveTextContent(/read as America\/Chicago/)
   })
 
-  it('warns that an unset collection reads times as UTC', () => {
+  it('warns that an unset collection reads times as UTC', async () => {
     renderCsvStep({ ...base, collectionTimeZone: null })
-    expect(
-      screen.getByText(/no timezone, so times .* read as UTC/),
-    ).toBeInTheDocument()
+    expect(await hint()).toHaveTextContent(
+      /no timezone, so times .* read as UTC/,
+    )
   })
 
-  it("defers to the chosen collection when it isn't picked yet", () => {
+  it("defers to the chosen collection when it isn't picked yet", async () => {
     renderCsvStep({ ...base, collectionTimeZone: undefined })
-    expect(screen.getByText(/chosen collection's timezone/)).toBeInTheDocument()
+    expect(await hint()).toHaveTextContent(/chosen collection's timezone/)
   })
 
-  it('stays quiet when no column maps to a datetime field', () => {
+  it('offers no hint when no column maps to a datetime field', () => {
     renderCsvStep({ collectionTimeZone: 'America/Chicago' })
-    expect(screen.queryByText(/UTC offset/)).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'More information' }),
+    ).toBeNull()
   })
 })

@@ -15,6 +15,8 @@ With a remote (added by `civex remote set <url>`):
 
 from __future__ import annotations
 
+import os
+import threading
 import tomllib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -106,6 +108,21 @@ class VolumeConfig:
         str  # raw string — may be relative (resolved against project root) or absolute
     )
     allocated_gb: float | None = None  # None = unlimited
+    # Identity: also written to a `.civex-volume` marker in the volume's root,
+    # so the drive is recognised wherever it is mounted and a different drive
+    # at the same path is not mistaken for it. Set by `store add` / `store
+    # adopt`; None for a volume that predates identities (checked by path only).
+    id: str | None = None
+    state: str = "active"  # active | readonly | retired
+
+
+@dataclass
+class PlacementConfig:
+    """A collection's home volume. Keyed in `StoreConfig.placement` by the
+    collection's id, so renaming a collection changes nothing here."""
+
+    volume: str  # a key of StoreConfig.volumes
+    on_unavailable: str = "spill"  # domain.placement: spill | fail
 
 
 @dataclass
@@ -118,6 +135,9 @@ class StoreConfig:
     full_below_gb: float = (
         1.0  # treat volume as full below this disk headroom (absolute)
     )
+    # collection id -> home volume. Per-machine like the volumes it names, so
+    # it lives here and not on the collection (which dump/sync carry elsewhere).
+    placement: dict[str, PlacementConfig] = field(default_factory=dict)
 
 
 def _default_store(project_root: Path) -> StoreConfig:
@@ -209,17 +229,27 @@ def load_config() -> Config:
                 name=name,
                 path=vcfg["path"],
                 allocated_gb=vcfg.get("allocated_gb"),
+                id=vcfg.get("id"),
+                state=vcfg.get("state", "active"),
             )
             for name, vcfg in raw_vols.items()
         }
         if not volumes:
             volumes = {"default": VolumeConfig(name="default", path="_civex/objects")}
         queue = sd.get("volume_queue", list(volumes.keys()))
+        placement = {
+            cid: PlacementConfig(
+                volume=pcfg["volume"],
+                on_unavailable=pcfg.get("on_unavailable", "spill"),
+            )
+            for cid, pcfg in sd.get("placement", {}).items()
+        }
         store = StoreConfig(
             volumes=volumes,
             volume_queue=queue,
             warn_below_pct=float(sd.get("warn_below_pct", 10.0)),
             full_below_gb=float(sd.get("full_below_gb", 1.0)),
+            placement=placement,
         )
 
     ai: AIConfig | None = None
@@ -348,9 +378,12 @@ def save_config(config: Config) -> None:
             list(sc.volumes.keys()) == ["default"]
             and sc.volumes["default"].path == "_civex/objects"
             and sc.volumes["default"].allocated_gb is None
+            and sc.volumes["default"].id is None
+            and sc.volumes["default"].state == "active"
             and sc.volume_queue == ["default"]
             and sc.warn_below_pct == 10.0
             and sc.full_below_gb == 1.0
+            and not sc.placement
         )
         if not is_default:
             queue_str = ", ".join(f'"{_ts(n)}"' for n in sc.volume_queue)
@@ -366,6 +399,15 @@ def save_config(config: Config) -> None:
                 lines.append(f'path = "{_ts(vol.path)}"\n')
                 if vol.allocated_gb is not None:
                     lines.append(f"allocated_gb = {vol.allocated_gb}\n")
+                if vol.id:
+                    lines.append(f'id = "{_ts(vol.id)}"\n')
+                if vol.state != "active":
+                    lines.append(f'state = "{_ts(vol.state)}"\n')
+            for cid, place in sc.placement.items():
+                lines.append(f"\n[store.placement.{_tk(cid)}]\n")
+                lines.append(f'volume = "{_ts(place.volume)}"\n')
+                if place.on_unavailable != "spill":
+                    lines.append(f'on_unavailable = "{_ts(place.on_unavailable)}"\n')
 
     if config.plugins.default_timeout_seconds != 60.0:
         lines += [
@@ -402,13 +444,20 @@ def save_config(config: Config) -> None:
             f"Generated config is invalid TOML: {e}\n\nContent:\n{content}"
         ) from e
 
-    # Atomic-ish write: backup → write → verify read-back → restore on failure.
-    backup = config_path.read_text(encoding="utf-8") if config_path.exists() else None
+    # Write a temporary file beside it, check that parses, then swap it in with
+    # one atomic rename. Every request reads this file, and a transfer rewrites
+    # it while freezing a volume, so a reader must see the old file or the new
+    # one, never half of either; and if anything fails the original is untouched.
+    tmp = config_path.with_name(
+        f"{config_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
     try:
-        config_path.write_text(content, encoding="utf-8")
-        with open(config_path, "rb") as f:
+        tmp.write_text(content, encoding="utf-8")
+        with open(tmp, "rb") as f:
             tomllib.load(f)
+        os.replace(tmp, config_path)
     except Exception as e:
-        if backup is not None:
-            config_path.write_text(backup, encoding="utf-8")
-        raise ConfigError(f"Failed to write config (original restored): {e}") from e
+        tmp.unlink(missing_ok=True)
+        raise ConfigError(
+            f"Failed to write config (the original is untouched): {e}"
+        ) from e

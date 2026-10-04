@@ -1,5 +1,5 @@
 import { Paperclip, X } from '../ui/icons'
-import { Button } from '../ui'
+import { Button, IconButton } from '../ui'
 import { formatBytes } from '../../utils/restrictions'
 import type { FileRef } from './DynamicField'
 
@@ -47,14 +47,12 @@ export function PendingFiles({
             <span className="shrink-0 text-xs text-fg-muted">
               {formatBytes(ref.size)}
             </span>
-            <button
-              type="button"
+            <IconButton
+              icon={X}
+              variant="danger"
               onClick={() => onDiscard(ref.sha256)}
               aria-label={`Discard ${ref.filename}`}
-              className="shrink-0 rounded p-1 text-fg-muted hover:bg-canvas-inset hover:text-danger cursor-pointer"
-            >
-              <X size={12} />
-            </button>
+            />
           </div>
           {problem && (
             <p role="alert" className="pl-6 text-xs text-danger">

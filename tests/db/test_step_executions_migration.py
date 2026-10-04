@@ -91,7 +91,9 @@ def test_step_executions_json_backfills_into_child_table(tmp_path: Path) -> None
         # string-match here even though the FK is correct. Only one job
         # exists in this DB, so ordering by position alone is enough.
         rows = conn.execute(
-            text("SELECT position, step_id, plugin, status, error FROM step_executions ORDER BY position")
+            text(
+                "SELECT position, step_id, plugin, status, error FROM step_executions ORDER BY position"
+            )
         ).fetchall()
 
     assert [tuple(r) for r in rows] == [

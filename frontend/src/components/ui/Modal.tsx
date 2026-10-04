@@ -88,7 +88,7 @@ export function Modal({
       className="fixed inset-0 m-0 h-full max-h-none w-full max-w-none border-0 bg-transparent p-4 flex items-center justify-center backdrop:bg-overlay-scrim"
     >
       <div
-        className={`bg-white rounded-lg border border-border shadow-lg w-full max-h-full flex flex-col ${sizeClasses[size]} ${className}`}
+        className={`bg-canvas rounded-lg border border-border shadow-lg w-full max-h-full flex flex-col ${sizeClasses[size]} ${className}`}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <ModalTitleContext.Provider value={titleId}>

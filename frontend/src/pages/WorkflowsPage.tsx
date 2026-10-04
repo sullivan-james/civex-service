@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link } from 'react-router'
 import { usePlugins } from '../hooks/usePlugins'
 import { Page, Button } from '../components/ui'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
@@ -16,13 +15,16 @@ export default function WorkflowsPage() {
   return (
     <Page
       title="Workflows"
-      description="Automations that run when records are created or updated. Plugins live under Advanced."
+      info="Automations that run when records are created or updated."
       action={
-        <Link to="/workflows/new" target="_blank" rel="opener">
-          <Button variant="primary" size="sm">
-            + New workflow
-          </Button>
-        </Link>
+        <Button
+          to="/workflows/new"
+          target="_blank"
+          rel="opener"
+          variant="primary"
+        >
+          + New workflow
+        </Button>
       }
     >
       <WorkflowsPanel

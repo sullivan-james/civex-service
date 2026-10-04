@@ -37,13 +37,18 @@ function Harness({ f, initial = '' }: { f: Field; initial?: unknown }) {
 const value = () => JSON.parse(screen.getByTestId('value').textContent!)
 
 describe('location input guidance', () => {
-  it('tells you what to type before you type anything', () => {
+  it('shows the format as a placeholder and the other ways in a tooltip', async () => {
     render(<Harness f={field('geo')} />)
-    expect(screen.getByText(/Latitude then longitude/)).toBeInTheDocument()
-    expect(screen.getByText(/South and west are negative/)).toBeInTheDocument()
-    expect(
-      screen.getByText('Other ways to enter a location'),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('textbox')).toHaveAttribute(
+      'placeholder',
+      expect.stringContaining('latitude, longitude'),
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Other ways to enter a location' }),
+    )
+    const tip = screen.getByRole('tooltip')
+    expect(tip).toHaveTextContent(/south and west are negative/)
+    expect(tip).toHaveTextContent(/POINT\(-3.41 56.12\)/)
   })
 
   it('says how it read what you typed', async () => {
@@ -93,11 +98,12 @@ describe('location input guidance', () => {
 describe('unit and partial date guidance', () => {
   it('explains that a unit can be typed and converts it', async () => {
     render(<Harness f={field('float', { unit: 'm' })} />)
-    expect(
-      screen.getByText(
-        /Stored in m\. You can also type a value with its unit, such as 1024 ft/,
-      ),
-    ).toBeInTheDocument()
+    await userEvent.click(
+      screen.getByRole('button', { name: 'More information' }),
+    )
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      /Stored in m\. You can also type a value with its unit, such as 1024 ft/,
+    )
     await userEvent.type(screen.getByRole('textbox'), '1024 ft')
     expect(screen.getByText('= 312.1152 m')).toBeInTheDocument()
     expect(value()).toBe('312.1152')
@@ -105,9 +111,12 @@ describe('unit and partial date guidance', () => {
 
   it('explains what a partial date accepts', () => {
     render(<Harness f={field('date', { precision: 'month' })} />)
-    expect(
-      screen.getByText(/A month or a full date works; a bare year does not/),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('textbox')).toHaveAttribute(
+      'title',
+      expect.stringMatching(
+        /A month or a full date works; a bare year does not/,
+      ),
+    )
   })
 })
 

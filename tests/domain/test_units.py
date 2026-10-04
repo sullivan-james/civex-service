@@ -30,7 +30,9 @@ def test_convert(value, src, dst, expected) -> None:
 
 
 def test_round_trip_is_stable() -> None:
-    assert units.convert(units.convert(312.4, "m", "ft"), "ft", "m") == pytest.approx(312.4)
+    assert units.convert(units.convert(312.4, "m", "ft"), "ft", "m") == pytest.approx(
+        312.4
+    )
 
 
 def test_aliases() -> None:
@@ -66,7 +68,12 @@ def test_dimension_of() -> None:
 
 @pytest.mark.parametrize(
     "text,expected",
-    [("1024", (1024.0, None)), ("1024 ft", (1024.0, "ft")), ("-3.5e2 m", (-350.0, "m")), ("12°C", (12.0, "°C"))],
+    [
+        ("1024", (1024.0, None)),
+        ("1024 ft", (1024.0, "ft")),
+        ("-3.5e2 m", (-350.0, "m")),
+        ("12°C", (12.0, "°C")),
+    ],
 )
 def test_parse_quantity(text, expected) -> None:
     assert units.parse_quantity(text) == expected
@@ -78,7 +85,9 @@ def test_parse_quantity_rejects_text() -> None:
 
 
 def test_to_field_unit() -> None:
-    assert units.to_field_unit("312.4", "m") == 312.4  # bare number is already in the unit
+    assert (
+        units.to_field_unit("312.4", "m") == 312.4
+    )  # bare number is already in the unit
     assert units.to_field_unit("1024 ft", "m") == pytest.approx(312.1152)
     assert units.to_field_unit("312.4 m", "m") == 312.4
     assert units.to_field_unit("5", None) == 5.0

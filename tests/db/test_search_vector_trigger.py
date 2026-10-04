@@ -37,7 +37,9 @@ def pg_engine():
     engine.dispose()
 
 
-def _insert_schema_and_dataset(conn, schema_id: uuid.UUID, dataset_id: uuid.UUID) -> None:
+def _insert_schema_and_dataset(
+    conn, schema_id: uuid.UUID, dataset_id: uuid.UUID
+) -> None:
     conn.execute(
         text("INSERT INTO schemas (id, name, created_at) VALUES (:id, :name, now())"),
         {"id": schema_id, "name": f"trial-{schema_id}"},

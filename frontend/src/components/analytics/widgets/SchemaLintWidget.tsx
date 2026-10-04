@@ -1,17 +1,7 @@
 import { useMemo } from 'react'
-import { Link } from 'react-router'
 import { useSchemaLint, useSchemas } from '../../../hooks/useSchemas'
 import { errorMessage } from '../../../lib/errors'
-import {
-  ErrorState,
-  EmptyState,
-  Table,
-  Thead,
-  Th,
-  Tbody,
-  Tr,
-  Td,
-} from '../../ui'
+import { ErrorState, EmptyState, DataTable } from '../../ui'
 import { StatTile } from '../StatTile'
 import { WidgetCard } from '../WidgetCard'
 
@@ -55,44 +45,31 @@ export function SchemaLintWidget() {
             value={issues.length}
             goodDirection="down"
           />
-          <Table>
-            <Thead>
-              <tr>
-                <Th>Kind</Th>
-                <Th>Schema</Th>
-                <Th>Name</Th>
-                <Th>Suggested</Th>
-              </tr>
-            </Thead>
-            <Tbody>
-              {issues.map((issue, i) => {
-                const schemaId = schemaIdByName.get(issue.schema_name)
-                return (
-                  <Tr
-                    key={`${issue.kind}-${issue.schema_name}-${issue.name}-${i}`}
-                  >
-                    <Td>{issue.kind}</Td>
-                    <Td>
-                      {schemaId ? (
-                        <Link
-                          to={`/schemas/${schemaId}`}
-                          className="text-accent hover:underline"
-                        >
-                          {issue.schema_name}
-                        </Link>
-                      ) : (
-                        issue.schema_name
-                      )}
-                    </Td>
-                    <Td className="font-mono text-xs">{issue.name}</Td>
-                    <Td className="font-mono text-xs text-fg-muted">
-                      {issue.suggestion ?? '—'}
-                    </Td>
-                  </Tr>
-                )
-              })}
-            </Tbody>
-          </Table>
+          <DataTable
+            layout="auto"
+            columns={[
+              { key: 'kind', header: 'Kind', render: (i) => i.kind },
+              { key: 'schema', header: 'Schema', render: (i) => i.schema_name },
+              {
+                key: 'name',
+                header: 'Name',
+                className: 'font-mono text-xs',
+                render: (i) => i.name,
+              },
+              {
+                key: 'suggestion',
+                header: 'Suggested',
+                className: 'font-mono text-xs text-fg-muted',
+                render: (i) => i.suggestion ?? '—',
+              },
+            ]}
+            rows={issues}
+            getRowId={(i) => `${i.kind}-${i.schema_name}-${i.name}`}
+            rowHref={(i) => {
+              const id = schemaIdByName.get(i.schema_name)
+              return id ? `/schemas/${id}` : undefined
+            }}
+          />
         </>
       )}
     </WidgetCard>

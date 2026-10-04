@@ -77,7 +77,13 @@ class SchemaResponse(BaseModel):
     )
     description: str | None
     parent_id: str | None
-    display_fields: list[str]
+    display_template: str | None = Field(
+        default=None,
+        description=(
+            "Template that names this schema's records; fields in braces, "
+            "formats after a colon. Null means the first plain value is used."
+        ),
+    )
     fields: list[FieldResponse]
     deleted_at: datetime | None = Field(
         default=None,
@@ -92,10 +98,36 @@ class SchemaResponse(BaseModel):
             label=dto.label,
             description=dto.description,
             parent_id=str(dto.parent_id) if dto.parent_id else None,
-            display_fields=dto.display_fields,
+            display_template=dto.display_template,
             fields=[FieldResponse.from_dto(f) for f in dto.fields],
             deleted_at=dto.deleted_at,
         )
+
+
+class PreviewNameRequest(BaseModel):
+    template: str = Field(
+        description="The template to try, e.g. '{site}-{taken_on:YYYY-MM}'."
+    )
+    values: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Field values (keyed by field name) of the sample record to render against.",
+    )
+    kind: Literal["record", "file"] = Field(
+        default="record",
+        description=(
+            "'record' renders a record's name; 'file' renders a download name, "
+            "where `{ext}` is available and a blank value makes the result null."
+        ),
+    )
+
+
+class PreviewNameResponse(BaseModel):
+    name: str | None = Field(
+        description="The rendered text, or null when the template renders to nothing."
+    )
+    error: str | None = Field(
+        default=None, description="Why the template is not valid, if it is not."
+    )
 
 
 class SchemaDeleteImpactResponse(BaseModel):
@@ -175,7 +207,13 @@ class UpdateSchemaRequest(BaseModel):
         ),
     )
     description: str | None = None
-    display_fields: list[str] | None = None
+    display_template: str | None = Field(
+        default=None,
+        description=(
+            "Template that names the schema's records. Send an empty string "
+            "to clear it; omit the key to leave it unchanged."
+        ),
+    )
 
 
 class UpdateFieldRequest(BaseModel):
@@ -551,27 +589,335 @@ class FileRefResponse(BaseModel):
 
 
 class VolumeStatsResponse(BaseModel):
+    unused_files: int = Field(
+        default=0,
+        description="Files on the volume that nothing uses; garbage collection can reclaim them.",
+    )
+    unused_bytes: int = 0
+    history_files: int = Field(
+        default=0,
+        description="Files kept only because a workflow run took them as an input.",
+    )
+    history_bytes: int = 0
     name: str
     path: str
     allocated_gb: float | None
     civex_used_bytes: int | None
     disk_free_bytes: int | None
     disk_total_bytes: int | None
-    available: bool
+    available: bool = Field(
+        description="True if the volume's files can be read right now (online, read-only or retired)."
+    )
+    state: str = Field(
+        description=(
+            "online, offline (path not there, e.g. drive unplugged), wrong_drive "
+            "(something else is mounted there), readonly or retired."
+        )
+    )
+    reason: str = Field(
+        description="What civex expected versus what it found; empty when online."
+    )
+    fix: str = Field(
+        description="A plain-language next step for an offline or wrong-drive volume; empty otherwise."
+    )
     warning: bool
     in_queue: bool
+    network: bool = Field(
+        default=False, description="The volume's folder is on a network drive."
+    )
+
+
+class PlacementResponse(BaseModel):
+    collection_id: str = Field(
+        description="Id of the collection this placement is for."
+    )
+    collection_name: str | None = Field(
+        description="The collection's name, or null if it no longer exists."
+    )
+    volume: str = Field(description="The collection's home volume.")
+    on_unavailable: str = Field(
+        description=(
+            "spill: use the general write queue when the home volume can't take a "
+            "file. fail: refuse the upload instead."
+        )
+    )
+
+
+class SetPlacementRequest(BaseModel):
+    volume: str = Field(description="Name of the volume that becomes the home.")
+    on_unavailable: str = Field(default="spill", description="spill (default) or fail.")
+
+
+class DirectoryEntryResponse(BaseModel):
+    name: str
+    path: str = Field(description="Absolute path of the folder.")
+
+
+class FileCopyResponse(BaseModel):
+    volume: str
+    path: str = Field(description="Where the object is, or would be, on that volume.")
+    present: bool | None = Field(
+        description="True if it is there; null if it is recorded there but the volume can't be checked now."
+    )
+    state: str = Field(
+        description="The volume's state: online, offline, wrong_drive, readonly or retired."
+    )
+    network: bool = Field(description="The volume is on a network drive.")
+
+
+class CollectionUseResponse(BaseModel):
+    id: str
+    name: str | None = Field(description="Null if the collection no longer exists.")
+    records: int = Field(description="Records in that collection that use the file.")
+
+
+class FileInfoResponse(BaseModel):
+    sha256: str
+    size: int | None = Field(description="Size in bytes, if known.")
+    copies: list[FileCopyResponse] = Field(
+        description="Every place the content is, or is recorded to be."
+    )
+    records: int = Field(
+        description="Records that use this file, across all collections."
+    )
+    jobs: int = Field(description="Workflow runs that took it as an input.")
+    collections: list[CollectionUseResponse]
+
+
+class StorageLocationResponse(BaseModel):
+    label: str
+    path: str
+    kind: str = Field(description="project, home or drive.")
+    free_bytes: int | None = Field(
+        description="Free space; null if unknown, and not read for network drives."
+    )
+    total_bytes: int | None
+    network: bool = Field(description="True for a drive that lives on another machine.")
+    source: str | None = Field(
+        description="Where a network drive really lives, e.g. nas:/export."
+    )
+
+
+class DirectoryListingResponse(BaseModel):
+    path: str = Field(description="The folder that was listed, as an absolute path.")
+    parent: str | None = Field(description="Its parent folder; null at the top.")
+    entries: list[DirectoryEntryResponse] = Field(
+        description="The folders directly inside it (never files)."
+    )
+    truncated: bool = Field(
+        description="True if there were more folders than are shown."
+    )
+    locations: list[StorageLocationResponse] = Field(
+        description="Places to start browsing from: the project, home and mounted drives."
+    )
+    hint: str | None = Field(
+        default=None,
+        description=(
+            "Why a drive might be missing from `locations`, where the platform has a "
+            "known reason (for example a Windows drive not yet mounted under WSL)."
+        ),
+    )
+
+
+class PathInspectionResponse(BaseModel):
+    path: str
+    exists: bool
+    is_dir: bool
+    writable: bool
+    will_create: bool = Field(
+        description="The folder doesn't exist and would be created."
+    )
+    inside_project: bool
+    same_disk_as_project: bool | None
+    free_bytes: int | None
+    total_bytes: int | None
+    existing_volume: str | None = Field(
+        description="The configured volume already at this path, if any."
+    )
+    marker_volume: str | None = Field(
+        description="The configured volume whose drive this is, if any."
+    )
+    has_civex_data: bool
+    is_network: bool = Field(description="The folder is on a network filesystem.")
+    problems: list[str] = Field(description="Reasons it can't be added as a volume.")
+    warnings: list[str] = Field(
+        description="Things to know; they don't block adding it."
+    )
+
+
+class CreateFolderRequest(BaseModel):
+    parent: str = Field(description="Absolute path of the folder to create it in.")
+    name: str = Field(description="Name of the new folder (no slashes).")
+
+
+class CreateFolderResponse(BaseModel):
+    path: str
+
+
+class CollectionVolumeShareResponse(BaseModel):
+    volume: str
+    files: int = Field(description="Files of the collection on this volume.")
+    bytes: int
+    shared_files: int = Field(
+        description="Of those, files another collection uses too (moving one affects both)."
+    )
+    state: str = Field(
+        description="The volume's state now: online, offline, wrong_drive, readonly or retired."
+    )
+    available: bool = Field(description="Whether the volume can be read right now.")
+
+
+class CollectionStorageResponse(BaseModel):
+    collection_id: str
+    files: int = Field(description="Distinct files the collection's records use.")
+    bytes: int = Field(description="Total size of the files the catalog knows.")
+    volumes: list[CollectionVolumeShareResponse] = Field(
+        description="Each volume that holds some of them, largest first."
+    )
+    unlocated_files: int = Field(
+        description="Files records use that the catalog doesn't place on any volume."
+    )
+
+
+class TransferRequest(BaseModel):
+    kind: str = Field(
+        description="drain: move everything off the `sources` volumes. consolidate: move the files of the `collection_ids` collections."
+    )
+    targets: list[str] = Field(
+        description="Volumes to put the files on, in order of preference: a file goes to the first that is usable and has room."
+    )
+    sources: list[str] = Field(
+        default_factory=list, description="drain: the volumes to empty."
+    )
+    collection_ids: list[str] = Field(
+        default_factory=list, description="consolidate: ids of the collections to move."
+    )
+    include_shared: bool = Field(
+        default=False,
+        description=(
+            "consolidate: also move files that collections kept on a different "
+            "volume use as well. They stay where they are by default, since moving "
+            "one would only split those collections instead."
+        ),
+    )
+    verify: str = Field(
+        default="copy",
+        description=(
+            "copy: each file is hashed as it is copied and must match its recorded "
+            "hash. full: the copy is also read back and hashed (about twice the reading)."
+        ),
+    )
+    freeze_sources: bool = Field(
+        default=True,
+        description=(
+            "drain: make the sources read-only while it runs, so new uploads don't "
+            "keep landing on them, and put them back afterwards."
+        ),
+    )
+
+
+class TargetShareResponse(BaseModel):
+    volume: str
+    files: int = Field(description="About how many files would go to this target.")
+    bytes: int
+    free_bytes: int | None = Field(
+        description="Room the target has; null if it can't be read now."
+    )
+
+
+class TransferPlanResponse(BaseModel):
+    files: int = Field(
+        description="Files that would be moved (from the catalog, so close, not exact)."
+    )
+    bytes: int
+    already_there: int = Field(description="Files already on a target, left alone.")
+    shared_left: int = Field(
+        description="consolidate: files left because collections kept elsewhere use them too."
+    )
+    shared_left_bytes: int
+    targets: list[TargetShareResponse]
+    problems: list[str] = Field(description="Reasons the transfer can't start.")
+    warnings: list[str] = Field(description="Things worth knowing; they don't stop it.")
+    can_proceed: bool
+
+
+class TransferProgressResponse(BaseModel):
+    files_total: int
+    files_done: int
+    files_skipped: int = Field(description="Already on a target.")
+    files_failed: int
+    bytes_total: int
+    bytes_done: int
+    current: str | None = Field(
+        description="The file being copied (a hash prefix), if any."
+    )
+    current_bytes: int = Field(
+        description="Bytes of the current file copied so far; add to bytes_done for a smooth bar."
+    )
+    current_total: int
+    rate_bytes_per_second: float
+    eta_seconds: float | None
+    message: str
+
+
+class TransferFailureResponse(BaseModel):
+    sha256: str
+    volume: str = Field(description="Where the file is (and stays).")
+    reason: str
+
+
+class TransferResponse(BaseModel):
+    id: str
+    kind: str
+    status: str = Field(
+        description="running, paused, completed, failed, cancelled or interrupted (the process died; resumable)."
+    )
+    spec: TransferRequest
+    plan: TransferPlanResponse | None
+    progress: TransferProgressResponse
+    failures: list[TransferFailureResponse] = Field(
+        description="Files that couldn't be moved (the first few hundred)."
+    )
+    failures_total: int
+    pause_reason: str | None
+    auto_resume: bool = Field(
+        description="Paused only because a volume stopped answering, and will carry on by itself when it does."
+    )
+    error: str | None
+    control: str | None = Field(
+        description="A pause or cancel asked for and not yet acted on."
+    )
+    frozen: dict[str, str] = Field(
+        description="Volumes made read-only for the duration, and what each was before."
+    )
+    live: bool = Field(description="Running on a thread of this server right now.")
+    created_at: str | None
+    started_at: str | None
+    finished_at: str | None
+    updated_at: str | None
 
 
 class AddVolumeRequest(BaseModel):
     name: str
     path: str
     allocated_gb: float | None = None
+    add_to_queue: bool = Field(
+        default=False,
+        description=(
+            "Also put the volume in the general write queue. Leave false for a "
+            "volume that only homes particular collections."
+        ),
+    )
 
 
 class UpdateVolumeRequest(BaseModel):
     path: str | None = None
     allocated_gb: float | None = None
     clear_allocation: bool = False
+    state: str | None = Field(
+        default=None,
+        description="active, readonly (readable, never written to) or retired.",
+    )
 
 
 class SetQueueRequest(BaseModel):
@@ -922,6 +1268,15 @@ class PolicyResponse(BaseModel):
 
 
 # --- UI settings ---
+
+
+class ShortcutResponse(BaseModel):
+    exists: bool = Field(
+        description="Whether the Desktop shortcut for this project is there."
+    )
+    path: str | None = Field(
+        default=None, description="Where it is (or would be), when there is a Desktop."
+    )
 
 
 class UISettingsResponse(BaseModel):

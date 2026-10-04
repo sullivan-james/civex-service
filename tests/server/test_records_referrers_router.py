@@ -1,4 +1,5 @@
 """GET /records/{id}/referrers -- the record page's "Referenced by" counts."""
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -13,7 +14,11 @@ def _post(client: TestClient, url: str, body: dict) -> dict:
 def test_referrers_grouped_per_collection_schema_and_field(client: TestClient) -> None:
     _post(client, "/api/schemas", {"name": "patient"})
     _post(client, "/api/schemas", {"name": "visit"})
-    _post(client, "/api/schemas/visit/fields", {"name": "patient_ref", "type": "reference"})
+    _post(
+        client,
+        "/api/schemas/visit/fields",
+        {"name": "patient_ref", "type": "reference"},
+    )
     _post(client, "/api/collections", {"name": "study"})
     patient = _post(
         client,

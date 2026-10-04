@@ -2,7 +2,7 @@
  * Slug names vs. human labels — the frontend half of `civex/domain/naming.py`.
  *
  * `name` is the machine key: what workflow YAML, CSV headers and
- * display_fields reference. `label` is free text for humans, and may be
+ * name templates refer to. `label` is free text for humans, and may be
  * null — always render it through `displayLabel`.
  *
  * Keep SLUG_RE in sync with SLUG_RE in civex/domain/naming.py; the server

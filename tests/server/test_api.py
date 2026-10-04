@@ -10,7 +10,9 @@ def test_api_schemas_empty(client: TestClient) -> None:
 
 
 def test_api_create_schema(client: TestClient) -> None:
-    response = client.post("/api/schemas", json={"name": "trial", "description": "A trial schema"})
+    response = client.post(
+        "/api/schemas", json={"name": "trial", "description": "A trial schema"}
+    )
     assert response.status_code == 201
     assert response.json()["name"] == "trial"
 
@@ -30,7 +32,9 @@ def test_api_create_dataset(client: TestClient) -> None:
     assert response.json()["name"] == "study-2024"
 
 
-def test_api_update_record_restriction_violation_returns_422(client: TestClient) -> None:
+def test_api_update_record_restriction_violation_returns_422(
+    client: TestClient,
+) -> None:
     """A restriction violation on PATCH must surface as a 422 ValidationError,
     not an unhandled 500 — the frontend maps this detail to a field-level
     message, which only works if the API returns it at all."""
@@ -52,7 +56,9 @@ def test_api_update_record_restriction_violation_returns_422(client: TestClient)
     assert "age" in response.json()["detail"]
 
 
-def test_api_update_record_replaces_data_rather_than_merging(client: TestClient) -> None:
+def test_api_update_record_replaces_data_rather_than_merging(
+    client: TestClient,
+) -> None:
     """PATCH replaces a record's data wholesale. The frontend's inline cell
     editing depends on this: it sends the full data dict with one field
     changed (or removed, to clear it), so a change here must be made there too."""
@@ -67,7 +73,9 @@ def test_api_update_record_replaces_data_rather_than_merging(client: TestClient)
     record_id = create.json()["id"]
 
     # Full payload with one field changed keeps the rest.
-    full = client.patch(f"/api/records/{record_id}", json={"data": {"age": 31, "site": "north"}})
+    full = client.patch(
+        f"/api/records/{record_id}", json={"data": {"age": 31, "site": "north"}}
+    )
     assert full.status_code == 200
     assert full.json()["data"] == {"age": 31, "site": "north"}
 

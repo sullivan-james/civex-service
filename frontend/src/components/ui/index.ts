@@ -1,9 +1,10 @@
 export { Button } from './Button'
 export { IconButton } from './IconButton'
 export { Badge } from './Badge'
-export { Table, Thead, Th, Tbody, Tr, Td } from './Table'
 export {
   DataTable,
+  DataTableCell,
+  type DataTableSelection,
   type DataTableColumn,
   type DataTableSort,
   type DataTableAlign,
@@ -20,11 +21,9 @@ export { ErrorState, EmptyState } from './States'
 export { MonoId } from './MonoId'
 export { Skeleton } from './Skeleton'
 export { Spinner } from './Spinner'
-export { CollapsibleSection } from './CollapsibleSection'
 export { Menu, type MenuItem } from './Menu'
 export { Popover } from './Popover'
 export { TriggerPopover } from './TriggerPopover'
-export { Section } from './Section'
 export { Stepper, type StepperStep } from './Stepper'
 export { StepBadge, type StepState } from './StepBadge'
 export { TableSkeleton } from './TableSkeleton'
@@ -39,6 +38,10 @@ export { FormError } from './FormError'
 export { Input, type InputProps } from './Input'
 export { Textarea, type TextareaProps } from './Textarea'
 export { Select, type SelectProps } from './Select'
+export { TabNav, TabPanel, Tabs, type TabDef } from './TabNav'
+export { Tooltip, InfoTip, type TooltipSide } from './Tooltip'
+export { Card, type CardProps } from './Card'
+export { SortableList, type SortableListProps } from './SortableList'
 export { TimeZoneSelect } from './TimeZoneSelect'
 export { Checkbox, type CheckboxProps } from './Checkbox'
 export { Field, type FieldProps } from './Field'
@@ -61,3 +64,10 @@ export {
 export { ToastProvider, useToast, type ToastOptions } from './ToastProvider'
 export { type ToastVariant, type ToastAction } from './Toast'
 export { PinButton } from './PinButton'
+export { useTabParam } from '../../hooks/useTabParam'
+export { SegmentedControl, type SegmentOption } from './SegmentedControl'
+export { Chip } from './Chip'
+export { Disclosure } from './Disclosure'
+export { ListButton } from './ListButton'
+export { Subheading } from './Subheading'
+export { ListToolbar, type ListPick } from './ListToolbar'

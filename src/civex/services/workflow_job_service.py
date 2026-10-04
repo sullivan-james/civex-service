@@ -161,9 +161,15 @@ class WorkflowJobService:
         offset: int = 0,
         limit: int | None = None,
         affected_schema: str | None = None,
+        trigger: str | None = None,
+        search: str | None = None,
+        sort: str | None = None,
     ) -> list[WorkflowJobDTO]:
         return self._repo.list_all(
             affected_schema=affected_schema,
+            trigger=trigger,
+            search=search,
+            sort=sort,
             status=status,
             record_id=record_id,
             affected_record_id=affected_record_id,
@@ -177,8 +183,12 @@ class WorkflowJobService:
         record_id: str | None = None,
         affected_record_id: str | None = None,
         affected_schema: str | None = None,
+        trigger: str | None = None,
+        search: str | None = None,
     ) -> int:
         return self._repo.count(
+            trigger=trigger,
+            search=search,
             status=status,
             record_id=record_id,
             affected_record_id=affected_record_id,

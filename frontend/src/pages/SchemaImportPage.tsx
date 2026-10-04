@@ -44,7 +44,6 @@ export default function SchemaImportPage() {
     <Page
       breadcrumbs={[...breadcrumbs, { label: 'Import' }]}
       title="Import data"
-      description={`Bring files or a spreadsheet in as ${displayLabel(schema.name, schema.label)} records.`}
     >
       <ImportWizard schemaId={schema.id} />
     </Page>

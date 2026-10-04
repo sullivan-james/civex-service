@@ -10,7 +10,9 @@ from civex.main import app
 runner = CliRunner()
 
 
-def test_init_config_has_valid_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_init_config_has_valid_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import tomllib
 
     monkeypatch.chdir(tmp_path)
@@ -21,7 +23,9 @@ def test_init_config_has_valid_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert data["db"]["url"].startswith("sqlite:///")
 
 
-def test_init_twice_warns_without_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_init_twice_warns_without_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.chdir(tmp_path)
     runner.invoke(app, ["init", "--sqlite", str(tmp_path)])
     result = runner.invoke(app, ["init", "--sqlite", str(tmp_path)])

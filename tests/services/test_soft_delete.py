@@ -304,9 +304,15 @@ def test_purging_a_record_whose_jobs_have_step_executions(
         ErrorEnvelope(kind="plugin_error", message="boom"),
         step_executions=[
             {
-                "step_id": "s", "plugin": "p", "status": "failed",
-                "duration_seconds": 1.0, "error": "e", "error_details": None,
-                "inputs": {}, "outputs": {}, "depends_on": [],
+                "step_id": "s",
+                "plugin": "p",
+                "status": "failed",
+                "duration_seconds": 1.0,
+                "error": "e",
+                "error_details": None,
+                "inputs": {},
+                "outputs": {},
+                "depends_on": [],
             }
         ],
     )

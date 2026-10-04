@@ -107,6 +107,7 @@ def restore(
                     required=f.get("required", False),
                     label=f.get("label"),
                     allow_legacy_name=True,
+                    auto_name=False,  # restore the dump as it was
                 )
                 ctx.commit()
             except AlreadyExistsError:

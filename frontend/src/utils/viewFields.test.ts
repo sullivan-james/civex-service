@@ -22,7 +22,7 @@ function schema(overrides: Partial<Schema>): Schema {
     label: null,
     description: null,
     parent_id: null,
-    display_fields: [],
+    display_template: null,
     fields: [],
     deleted_at: null,
     ...overrides,

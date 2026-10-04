@@ -23,9 +23,7 @@ def test_record_audit_lists_create_entry(client: TestClient) -> None:
 
 def test_record_audit_reflects_update(client: TestClient) -> None:
     client.post("/api/schemas", json={"name": "trial"})
-    client.post(
-        "/api/schemas/trial/fields", json={"name": "age", "type": "integer"}
-    )
+    client.post("/api/schemas/trial/fields", json={"name": "age", "type": "integer"})
     client.post("/api/collections", json={"name": "study-2024"})
     create = client.post(
         "/api/collections/study-2024/records",
@@ -49,14 +47,14 @@ def test_record_audit_missing_record_returns_404(client: TestClient) -> None:
 
 def test_schema_audit_includes_field_changes(client: TestClient) -> None:
     client.post("/api/schemas", json={"name": "trial"})
-    client.post(
-        "/api/schemas/trial/fields", json={"name": "age", "type": "integer"}
-    )
+    client.post("/api/schemas/trial/fields", json={"name": "age", "type": "integer"})
 
     response = client.get("/api/schemas/trial/audit")
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 2
+    # schema created, field created, and the schema's name template set to the
+    # first field (see SchemaService.add_field)
+    assert body["total"] == 3
     entity_types = {item["entity_type"] for item in body["items"]}
     assert entity_types == {"schema", "field"}
 
@@ -79,3 +77,25 @@ def test_list_audit_filters_by_entity_type(client: TestClient) -> None:
     body = response.json()
     assert body["total"] == 1
     assert body["items"][0]["entity_type"] == "record"
+
+
+def test_audit_can_be_filtered_by_action_and_sorted(client: TestClient) -> None:
+    client.post("/api/schemas", json={"name": "trial"})
+    client.post("/api/collections", json={"name": "study-2024", "description": None})
+    record_id = client.post(
+        "/api/collections/study-2024/records",
+        json={"schema_name": "trial", "data": {}},
+    ).json()["id"]
+    client.patch(f"/api/records/{record_id}", json={"data": {}})
+
+    updates = client.get(
+        f"/api/records/{record_id}/audit", params={"action": "update"}
+    ).json()
+    assert updates["total"] == len(updates["items"]) >= 1
+    assert {i["action"] for i in updates["items"]} == {"update"}
+
+    oldest_first = client.get(
+        f"/api/records/{record_id}/audit", params={"sort": "timestamp:asc"}
+    ).json()["items"]
+    stamps = [i["timestamp"] for i in oldest_first]
+    assert stamps == sorted(stamps)

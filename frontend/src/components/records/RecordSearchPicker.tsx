@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { recordsApi, type CivexRecord } from '../../api/records'
-import { Input } from '../ui'
+import { Chip, IconButton, Input, ListButton } from '../ui'
 import { CollectionMarker } from './CollectionMarker'
 import { useCollectionName } from './timeZoneContext'
 import { X } from '../ui/icons'
@@ -61,18 +61,17 @@ function ResultsDropdown({
   onSelect: (record: CivexRecord) => void
 }) {
   return (
-    <div className="absolute z-10 mt-1 w-full bg-canvas border border-border rounded-md shadow-sm max-h-48 overflow-y-auto text-sm">
+    <div className="absolute z-30 mt-1 w-full bg-canvas border border-border rounded-md shadow-sm max-h-48 overflow-y-auto text-sm">
       {loading && <div className="px-3 py-2 text-fg-muted">Loading…</div>}
       {!loading && results.length === 0 && (
         <div className="px-3 py-2 text-fg-muted italic">{emptyMessage}</div>
       )}
       {results.map((record) => (
-        <button
+        <ListButton
           key={record.id}
-          type="button"
           onMouseDown={() => onSelect(record)}
           disabled={isSelected(record.id)}
-          className="w-full text-left px-3 py-2 hover:bg-canvas-subtle truncate disabled:opacity-40 disabled:cursor-default"
+          className="truncate"
         >
           <span className="font-mono text-xs text-fg-muted">
             {record.id.slice(0, 8)}
@@ -83,7 +82,7 @@ function ResultsDropdown({
           {record.collection && record.collection !== currentCollection && (
             <CollectionMarker name={record.collection} />
           )}
-        </button>
+        </ListButton>
       ))}
     </div>
   )
@@ -186,14 +185,12 @@ export function RecordSearchPicker({
         className={value ? 'w-full pr-8' : 'w-full'}
       />
       {value && (
-        <button
-          type="button"
+        <IconButton
+          icon={X}
           onMouseDown={handleClear}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-muted hover:text-fg"
+          className="absolute right-1 top-1/2 -translate-y-1/2"
           aria-label="Clear selection"
-        >
-          <X size={14} />
-        </button>
+        />
       )}
       {open && (
         <ResultsDropdown
@@ -288,20 +285,13 @@ export function MultiRecordSearchPicker({
       {value.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-1">
           {value.map((recordId) => (
-            <span
+            <Chip
               key={recordId}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-canvas-subtle border border-border text-xs text-fg"
+              onRemove={() => removeId(recordId)}
+              removeLabel="Remove"
             >
               {labels[recordId] ?? recordId.slice(0, 8)}
-              <button
-                type="button"
-                onClick={() => removeId(recordId)}
-                aria-label="Remove"
-                className="text-fg-muted hover:text-danger"
-              >
-                <X size={12} />
-              </button>
-            </span>
+            </Chip>
           ))}
         </div>
       )}

@@ -1,6 +1,6 @@
 import { Link } from 'react-router'
 import { type WorkflowJob } from '../../api/workflows'
-import { Badge } from '../ui'
+import { Badge, Subheading } from '../ui'
 import { describeTrigger, summarizeRun } from '../../utils/runNarrative'
 
 function ActionBadge({ action }: { action: 'created' | 'updated' }) {
@@ -24,9 +24,7 @@ export default function RunSummary({ job }: { job: WorkflowJob }) {
       <p className="text-sm text-fg">{describeTrigger(job)}</p>
 
       {isActive ? (
-        <p className="text-sm text-fg-muted">
-          Still running — the summary will fill in as it goes.
-        </p>
+        <p className="text-sm text-fg-muted">Running…</p>
       ) : summary.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {summary.map((phrase) => (
@@ -45,9 +43,7 @@ export default function RunSummary({ job }: { job: WorkflowJob }) {
 
       {records.length > 0 && (
         <div>
-          <h3 className="text-xs font-medium text-fg-muted uppercase tracking-wide mb-1">
-            Records touched
-          </h3>
+          <Subheading as="h3">Records touched</Subheading>
           <ul className="space-y-1">
             {records.map((rec) => (
               <li

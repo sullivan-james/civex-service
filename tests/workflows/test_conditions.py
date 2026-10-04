@@ -22,7 +22,9 @@ def test_bare_reference_is_truthy_checked():
 
 def test_equality_comparison():
     assert evaluate_condition("one.status == 'done'", {"one": {"status": "done"}})
-    assert not evaluate_condition("one.status == 'done'", {"one": {"status": "pending"}})
+    assert not evaluate_condition(
+        "one.status == 'done'", {"one": {"status": "pending"}}
+    )
 
 
 def test_numeric_comparison():

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router'
 import DatabaseSection from './DatabaseSection'
 
 const json = (body: unknown, status = 200) =>
@@ -112,7 +113,9 @@ afterEach(() => vi.unstubAllGlobals())
 function renderIt() {
   return render(
     <QueryClientProvider client={new QueryClient()}>
-      <DatabaseSection />
+      <MemoryRouter>
+        <DatabaseSection />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -168,7 +171,10 @@ describe('current database', () => {
 describe('moving the database', () => {
   it('walks through choosing, reviewing, moving and finishing', async () => {
     const user = userEvent.setup()
-    let polls = 0
+    // The move stays "running" until the test has seen the progress, then
+    // finishes. (Counting polls instead made the running frame last ~500ms, so
+    // on a slow machine the test could miss it entirely.)
+    let finished = false
     overrides.push((url, init) => {
       if (url.pathname === '/api/db/move' && init?.method === 'POST')
         return json(
@@ -182,9 +188,8 @@ describe('moving the database', () => {
           202,
         )
       if (url.pathname === '/api/db/move/j1') {
-        polls++
         return json(
-          polls < 2
+          !finished
             ? {
                 id: 'j1',
                 status: 'running',
@@ -219,9 +224,12 @@ describe('moving the database', () => {
     expect(
       within(dialog).getByText(/337,976 records · 843\.0 MB/),
     ).toBeInTheDocument()
-    expect(
-      within(dialog).getByText(/original is left exactly as it is/),
-    ).toBeInTheDocument()
+    await user.click(
+      within(dialog).getByRole('button', { name: 'More information' }),
+    )
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      /original is left as it is/,
+    )
     expect(within(dialog).getByText(/about 40 seconds/)).toBeInTheDocument()
     await user.click(
       within(dialog).getByRole('button', { name: 'Move my data' }),
@@ -232,6 +240,7 @@ describe('moving the database', () => {
     expect(
       await within(dialog).findByText(/400 of 1,000 rows/),
     ).toBeInTheDocument()
+    finished = true
 
     // Step 4: verified, and where everything is.
     expect(
@@ -244,9 +253,12 @@ describe('moving the database', () => {
     expect(
       within(dialog).getByText(/checked against the original/),
     ).toBeInTheDocument()
-    expect(
-      within(dialog).getByText(/The original is untouched at/),
-    ).toBeInTheDocument()
+    await user.click(
+      within(dialog).getByRole('button', { name: 'More information' }),
+    )
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      /The original is untouched at/,
+    )
     expect(
       calls.find((c) => c.path === '/api/db/move' && c.method === 'POST')?.body,
     ).toEqual({
@@ -327,7 +339,7 @@ describe('moving the database', () => {
       within(dialog).getByRole('radio', { name: /PostgreSQL server/ }),
     )
     await user.click(
-      within(dialog).getByRole('button', { name: /Paste a connection URL/ }),
+      within(dialog).getByRole('button', { name: /Paste a URL/ }),
     )
     await user.type(
       within(dialog).getByLabelText('Connection URL'),
@@ -444,9 +456,7 @@ describe('move history', () => {
       return undefined
     })
     renderIt()
-    await user.click(
-      await screen.findByRole('button', { name: /Move history/ }),
-    )
+    await user.click(await screen.findByRole('tab', { name: /History/ }))
 
     expect(screen.getAllByRole('button', { name: 'Switch back' })).toHaveLength(
       1,
@@ -475,7 +485,7 @@ describe('move history', () => {
     renderIt()
     await screen.findByText('SQLite file')
     expect(
-      screen.queryByRole('button', { name: /Move history/ }),
+      screen.queryByRole('tab', { name: /History/ }),
     ).not.toBeInTheDocument()
   })
 })
@@ -489,9 +499,10 @@ describe('advanced', () => {
       screen.queryByText('Use an existing database'),
     ).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /Advanced/ }))
+    await user.click(screen.getByRole('tab', { name: 'Advanced' }))
 
     expect(screen.getByText('Use an existing database')).toBeInTheDocument()
-    expect(screen.getByText(/without copying/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'More information' }))
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/without copying/)
   })
 })

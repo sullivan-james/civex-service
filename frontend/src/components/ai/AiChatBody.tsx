@@ -8,7 +8,7 @@ import HistoryPane from './HistoryPane'
 import SettingsPane from './SettingsPane'
 import ToolCallRow from './ToolCallRow'
 import { isPendingApproval } from './proposals'
-import { Field, Textarea } from '../ui'
+import { Card, Field, IconButton, Textarea } from '../ui'
 import { Sparkles, Send, Square } from '../ui/icons'
 
 const SUGGESTIONS = [
@@ -125,16 +125,16 @@ export default function AiChatBody({
               <div className="text-xs space-y-2 text-left max-w-[280px] mx-auto">
                 <p className="text-fg-muted">Try:</p>
                 {SUGGESTIONS.map((s) => (
-                  <button
+                  <Card
                     key={s}
                     onClick={() => {
                       setInput(s)
                       textareaRef.current?.focus()
                     }}
-                    className="block w-full text-left px-3 py-2 rounded-md border border-border bg-canvas hover:bg-canvas-subtle text-fg transition-colors"
+                    className="px-1 py-0.5"
                   >
-                    {s}
-                  </button>
+                    <span className="text-sm text-fg">{s}</span>
+                  </Card>
                 ))}
               </div>
             </div>
@@ -207,24 +207,17 @@ export default function AiChatBody({
                     className="resize-none"
                   />
                 </Field>
-                <button
+                <IconButton
+                  icon={busy ? Square : Send}
+                  variant="default"
+                  size="md"
+                  className="shrink-0 bg-accent text-fg-on-emphasis hover:bg-accent-emphasis hover:text-fg-on-emphasis"
+                  aria-label={busy ? 'Stop generating' : 'Send'}
                   onClick={busy ? cancel : handleSend}
                   disabled={!busy && !input.trim()}
-                  title={busy ? 'Stop generating' : 'Send'}
-                  className="flex-shrink-0 px-3 py-2 rounded-md bg-accent text-fg-on-emphasis text-sm font-medium hover:bg-accent-emphasis disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  {busy ? (
-                    <Square size={16} fill="currentColor" />
-                  ) : (
-                    <Send size={16} />
-                  )}
-                </button>
+                  iconProps={busy ? { fill: 'currentColor' } : undefined}
+                />
               </div>
-              <p className="mt-2 text-xs text-fg-subtle text-center">
-                {busy
-                  ? 'Generating… click stop to cancel'
-                  : 'Enter to send · Shift+Enter for new line'}
-              </p>
             </>
           )}
         </div>

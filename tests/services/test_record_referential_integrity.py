@@ -2,6 +2,7 @@
 JSON `data` blob, so no DB foreign key can protect them. RecordService must
 detect referrers itself before letting a delete go through.
 """
+
 from __future__ import annotations
 
 from civex.context import AppContext
@@ -230,8 +231,7 @@ def test_referrer_counts_group_by_collection_schema_and_field(
     groups = ctx.record_svc.referrer_counts(str(patient.id))
 
     assert [
-        (g.dataset_name, g.schema_name, g.field_name, g.dtype, g.count)
-        for g in groups
+        (g.dataset_name, g.schema_name, g.field_name, g.dtype, g.count) for g in groups
     ] == [
         ("study", "cohort", "members", "reference_list", 1),
         ("study", "visit", "patient_ref", "reference", 2),

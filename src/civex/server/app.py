@@ -28,6 +28,7 @@ from civex.server.routers import (
     status,
     store,
     terminal,
+    transfers,
     views,
     workflows,
 )
@@ -324,6 +325,7 @@ def create_app() -> FastAPI:
     app.include_router(audit.router, prefix="/api")
     app.include_router(remote.router, prefix="/api")
     app.include_router(store.router, prefix="/api")
+    app.include_router(transfers.router, prefix="/api")
     app.include_router(db.router, prefix="/api")
     app.include_router(legal.router, prefix="/api")
     app.include_router(status.router, prefix="/api")

@@ -9,8 +9,8 @@ from civex.domain.exceptions import AlreadyExistsError, NotFoundError, Validatio
 from civex.domain.query import RecordQuery
 from civex.server.deps import get_ctx
 from civex.server.query_params import record_query
+from civex.server.routers.audit import AuditView, audit_page
 from civex.server.models import (
-    AuditLogResponse,
     CreateDatasetRequest,
     DatasetResponse,
     PaginatedAuditLogResponse,
@@ -101,6 +101,7 @@ def list_dataset_audit(
     name_or_id: str,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, le=1000),
+    view: AuditView = Depends(),
     ctx: AppContext = Depends(get_ctx),
 ):
     """Audit entries for a collection — renames, description changes,
@@ -116,15 +117,8 @@ def list_dataset_audit(
             dataset = ctx.dataset_svc.get(name_or_id)
         except NotFoundError as e:
             raise HTTPException(404, detail=str(e))
-    items = ctx.audit_svc.list_audit(
-        entity_id=dataset.id, entity_type="dataset", offset=offset, limit=limit
-    )
-    total = ctx.audit_svc.count_audit(entity_id=dataset.id, entity_type="dataset")
-    return PaginatedAuditLogResponse(
-        items=[AuditLogResponse.from_dto(a) for a in items],
-        total=total,
-        offset=offset,
-        limit=limit,
+    return audit_page(
+        ctx, view, offset, limit, entity_id=dataset.id, entity_type="dataset"
     )
 
 

@@ -4,26 +4,26 @@ from typing import Optional
 
 import typer
 
-from civex.cli.utils import get_ctx
+from civex.cli.utils import format_bytes, get_ctx
 from civex.console import console
 from civex.domain.exceptions import (
     AlreadyExistsError,
     CivexError,
     NotFoundError,
     ValidationError,
+    VolumeUnavailableError,
 )
 
 app = typer.Typer(help="Manage file storage volumes", no_args_is_help=True)
+place_app = typer.Typer(
+    help="Choose which volume a collection's new files go to", no_args_is_help=True
+)
+app.add_typer(place_app, name="place")
 
+from civex.cli import transfers as _transfers  # noqa: E402
 
-def _fmt_bytes(b: int | None) -> str:
-    if b is None:
-        return "—"
-    if b >= 1_073_741_824:
-        return f"{b / 1_073_741_824:.1f} GB"
-    if b >= 1_048_576:
-        return f"{b / 1_048_576:.0f} MB"
-    return f"{b / 1024:.0f} KB"
+app.command("move")(_transfers.move)
+app.add_typer(_transfers.transfers_app, name="transfers")
 
 
 @app.command("list")
@@ -52,15 +52,19 @@ def store_list() -> None:
 
     for v in stats:
         in_queue = "✓" if v["in_queue"] else ""
-        used = _fmt_bytes(v["civex_used_bytes"])
+        used = format_bytes(v["civex_used_bytes"])
         alloc = (
-            _fmt_bytes(int(v["allocated_gb"] * 1_073_741_824))
+            format_bytes(int(v["allocated_gb"] * 1_073_741_824))
             if v["allocated_gb"]
             else "unlimited"
         )
-        free = _fmt_bytes(v["disk_free_bytes"])
-        if not v["available"]:
-            status = "[dim]unavailable[/dim]"
+        free = format_bytes(v["disk_free_bytes"])
+        if v["state"] == "offline":
+            status = "[dim]offline[/dim]"
+        elif v["state"] == "wrong_drive":
+            status = "[red]wrong drive[/red]"
+        elif v["state"] in ("readonly", "retired"):
+            status = f"[dim]{v['state'].replace('readonly', 'read-only')}[/dim]"
         elif v["warning"]:
             status = "[yellow]⚠ low space[/yellow]"
         else:
@@ -68,6 +72,24 @@ def store_list() -> None:
         table.add_row(v["name"], v["path"], in_queue, used, alloc, free, status)
 
     console.print(table)
+
+    from rich.markup import escape
+
+    for v in stats:
+        if v["state"] in ("offline", "wrong_drive"):
+            console.print(f"\n[bold]{escape(v['name'])}[/bold]: {escape(v['reason'])}")
+            if v["fix"]:
+                console.print(f"  {escape(v['fix'])}")
+            if v["state"] == "offline":
+                console.print(
+                    f"  Change the path: [bold]civex store update {escape(v['name'])}"
+                    " --path <new path>[/bold]"
+                )
+            else:
+                console.print(
+                    f"  Adopt the drive: [bold]civex store adopt {escape(v['name'])}"
+                    "[/bold]"
+                )
 
 
 @app.command("add")
@@ -79,18 +101,64 @@ def store_add(
     allocated_gb: Optional[float] = typer.Option(
         None, "--allocated-gb", help="Max GB civex may use (omit for unlimited)"
     ),
+    queue: bool = typer.Option(
+        False,
+        "--queue",
+        help="Also add the volume to the general write queue.",
+    ),
 ) -> None:
-    """Add a new storage volume."""
+    """Add a new storage volume.
+
+    The path can be on a removable drive or a network drive that is already
+    mounted on this computer. Civex doesn't mount network drives itself: mount
+    it first, then give the mounted folder.
+    """
     ctx = get_ctx()
     try:
-        ctx.store_svc.add_volume(name, path, allocated_gb)
+        ctx.store_svc.add_volume(name, path, allocated_gb, add_to_queue=queue)
         console.print(f"[green]Added volume '{name}' at {path}.[/green]")
         if allocated_gb:
             console.print(f"  Allocation: {allocated_gb:.1f} GB")
-        console.print(
-            "  Add it to the write queue with: [bold]civex store queue set[/bold]"
-        )
-    except AlreadyExistsError as e:
+        if queue:
+            console.print("  Added to the write queue.")
+        else:
+            console.print(
+                "  Add it to the write queue with: [bold]civex store queue[/bold], "
+                "or give a collection this volume as its home with "
+                "[bold]civex store place set[/bold]."
+            )
+    except (AlreadyExistsError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+
+
+@app.command("adopt")
+def store_adopt(
+    name: str = typer.Argument(..., help="Volume name"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation"),
+) -> None:
+    """Declare that the drive at a volume's path is that volume.
+
+    A volume is recognised by an identity marker in its root, so civex can tell
+    an unplugged drive from a different drive mounted at the same path. If a
+    volume is reported as the wrong drive but this is in fact the right one
+    (the marker was deleted, or the drive was re-formatted), this rewrites the
+    marker. Nothing else on the drive is changed.
+    """
+    ctx = get_ctx()
+    try:
+        if not yes:
+            status = ctx.store_svc.volume_stats()
+            current = next((v for v in status if v["name"] == name), None)
+            if current is not None and current["reason"]:
+                console.print(f"[warning]{current['reason']}[/warning]")
+            if not typer.confirm(f"Treat the drive at this path as volume '{name}'?"):
+                raise typer.Exit(1)
+        result = ctx.store_svc.adopt_volume(name)
+        console.print(f"[green]Volume '{name}' is now {result.state}.[/green]")
+    except (NotFoundError, VolumeUnavailableError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
     finally:
@@ -256,3 +324,253 @@ def store_gc(
         console.print(
             "\n[dim]Dry run -- re-run with --apply to actually delete these.[/dim]"
         )
+
+
+@place_app.command("set")
+def place_set(
+    collection: str = typer.Argument(..., help="Collection name"),
+    volume: str = typer.Argument(..., help="Volume that becomes its home"),
+    on_unavailable: str = typer.Option(
+        "spill",
+        "--on-unavailable",
+        help=(
+            "What to do when the home volume can't take a file: 'spill' uses "
+            "the general write queue (default); 'fail' refuses the upload."
+        ),
+    ),
+) -> None:
+    """Make a volume the home of a collection's new files.
+
+    A collection's home need not be in the write queue. It only decides where
+    content that is not stored yet is written: a file whose content already
+    exists on any volume is reused where it lives, never copied again.
+    """
+    ctx = get_ctx()
+    try:
+        dataset = ctx.dataset_svc.get(collection)
+        ctx.store_svc.set_placement(str(dataset.id), volume, on_unavailable)
+        console.print(
+            f"[green]New files for '{collection}' now go to '{volume}'"
+            f" ({on_unavailable} when it is unavailable).[/green]"
+        )
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+
+
+@place_app.command("clear")
+def place_clear(
+    collection: str = typer.Argument(..., help="Collection name"),
+) -> None:
+    """Send a collection's new files back to the general write queue."""
+    ctx = get_ctx()
+    try:
+        dataset = ctx.dataset_svc.get(collection)
+        if ctx.store_svc.clear_placement(str(dataset.id)):
+            console.print(f"[green]'{collection}' uses the write queue again.[/green]")
+        else:
+            console.print(f"[dim]'{collection}' has no placement.[/dim]")
+    except NotFoundError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+
+
+@place_app.command("list")
+def place_list() -> None:
+    """List collections that have a home volume."""
+    ctx = get_ctx()
+    try:
+        places = ctx.store_svc.placements()
+        names = {str(d.id): d.name for d in ctx.dataset_svc.list_all(with_count=False)}
+    finally:
+        ctx.close()
+
+    if not places:
+        console.print("[dim]No collection has a home volume.[/dim]")
+        return
+
+    from rich.table import Table
+
+    table = Table(show_header=True, header_style="bold", box=None, pad_edge=False)
+    table.add_column("Collection", style="bold")
+    table.add_column("Home volume")
+    table.add_column("When unavailable")
+    for cid, place in places.items():
+        table.add_row(
+            names.get(cid, "[dim](deleted collection)[/dim]"),
+            place.volume,
+            place.on_unavailable,
+        )
+    console.print(table)
+
+
+@app.command("where")
+def store_where(
+    record_id: str = typer.Argument(..., help="Record id (a unique prefix is enough)"),
+    details: bool = typer.Option(
+        False,
+        "--details",
+        help="Also show each file's path on disk and what else uses it.",
+    ),
+) -> None:
+    """Show which volume each of a record's files is stored on.
+
+    A file is stored once however many records use it, so this is where its
+    content is, not a copy per record. A file on a drive that isn't plugged in
+    is listed with the volume's state.
+    """
+    from rich.markup import escape
+    from rich.table import Table
+
+    ctx = get_ctx()
+    try:
+        record = ctx.record_svc.get(record_id)
+        files = [
+            (field, ref)
+            for field, value in record.data.items()
+            for ref in (value if isinstance(value, list) else [value])
+            if isinstance(ref, dict) and "sha256" in ref
+        ]
+        infos = (
+            {ref["sha256"]: ctx.file_info_svc.info(ref["sha256"]) for _, ref in files}
+            if details
+            else {}
+        )
+    except NotFoundError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+
+    if not files:
+        console.print("[dim]This record has no files.[/dim]")
+        return
+
+    table = Table(show_header=True, header_style="bold", box=None, pad_edge=False)
+    for column in ("Field", "File", "Stored on", "State"):
+        table.add_column(column)
+    for field, ref in files:
+        loc = ref.get("location") or {}
+        state = loc.get("state", "unknown")
+        table.add_row(
+            escape(field),
+            escape(ref.get("resolved_filename") or ref.get("filename", "")),
+            escape(loc.get("volume") or "—"),
+            state
+            if state == "online"
+            else f"[yellow]{state.replace('_', ' ')}[/yellow]",
+        )
+    console.print(table)
+
+    for sha, info in infos.items():
+        console.print(
+            f"\n[bold]{sha[:12]}…[/bold]  {info.size if info.size is not None else '?'} bytes"
+        )
+        for copy in info.copies:
+            where = f"{copy.volume}  {escape(copy.path)}"
+            if copy.network:
+                where += "  [dim](network)[/dim]"
+            if copy.present is None:
+                where += f"  [yellow]can't be checked: volume {copy.state.replace('_', ' ')}[/yellow]"
+            console.print(f"  {where}")
+        used = ", ".join(
+            f"{escape(c.name or '(deleted collection)')} ({c.records})"
+            for c in info.collections
+        )
+        console.print(
+            f"  used by {info.records} record(s)"
+            + (f": {used}" if used else "")
+            + (f"; {info.jobs} workflow run(s)" if info.jobs else "")
+        )
+
+
+@app.command("set-state")
+def store_set_state(
+    name: str = typer.Argument(..., help="Volume name."),
+    state: str = typer.Argument(
+        ..., help="active, readonly (readable, never written to) or retired."
+    ),
+) -> None:
+    """Change what a volume may be used for."""
+    ctx = get_ctx()
+    try:
+        ctx.store_svc.set_volume_state(name, state)
+        console.print(f"[green]{name} is now {state}.[/green]")
+    except CivexError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+
+
+@app.command("collections")
+def store_collections(
+    name: Optional[str] = typer.Argument(
+        None, help="Show just this collection (default: every collection with files)."
+    ),
+    volume: Optional[str] = typer.Option(
+        None,
+        "--volume",
+        help="Only collections that have files on this volume: what is on a drive.",
+    ),
+) -> None:
+    """Show which volumes hold each collection's files.
+
+    Lists, for each collection, the volumes that hold some of its files with how
+    many files and how much space, and flags files that another collection also
+    uses and volumes that can't be reached right now. Read from the catalog, so
+    it is quick. With --volume it answers the other way round: which collections
+    are on a given drive. To gather a split collection onto one volume, use
+    `civex store move --collection`.
+    """
+    ctx = get_ctx()
+    try:
+        names = {str(d.id): d.name for d in ctx.dataset_svc.list_all(with_count=False)}
+        if name is not None:
+            ids = [str(ctx.dataset_svc.get(name).id)]
+        else:
+            ids = None
+        reports = ctx.file_info_svc.all_collection_storage(ids)
+        shown = [r for r in reports.values() if r.files]
+        if volume is not None:
+            shown = [r for r in shown if any(v.volume == volume for v in r.volumes)]
+        if not shown:
+            console.print(
+                f"[dim]No collection has files on {volume}.[/dim]"
+                if volume
+                else "[dim]No collection has files yet.[/dim]"
+            )
+            return
+        for r in sorted(shown, key=lambda r: names.get(r.collection_id, "")):
+            console.print(
+                f"[bold]{names.get(r.collection_id, r.collection_id)}[/bold]  "
+                f"{r.files} files, {format_bytes(r.bytes)}"
+            )
+            for v in r.volumes:
+                extra = (
+                    f"  ({v.shared_files} also used by other collections)"
+                    if v.shared_files
+                    else ""
+                )
+                flag = (
+                    ""
+                    if v.available
+                    else f"  [yellow]{v.state}: can't be opened now[/yellow]"
+                )
+                console.print(
+                    f"  {v.volume}: {v.files} files, {format_bytes(v.bytes)}{extra}{flag}"
+                )
+            if r.unlocated_files and volume is None:
+                console.print(
+                    f"  [yellow]{r.unlocated_files} files aren't in the catalog; "
+                    "a storage scan will find them.[/yellow]"
+                )
+    except CivexError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()

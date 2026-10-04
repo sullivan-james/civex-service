@@ -16,7 +16,9 @@ def test_precision_of(text: str, kind: str) -> None:
     assert pd.precision_of(text) == kind
 
 
-@pytest.mark.parametrize("text", ["19", "2019-6", "2019-06-1", "June 2019", "", "2019-06-14T00:00"])
+@pytest.mark.parametrize(
+    "text", ["19", "2019-6", "2019-06-1", "June 2019", "", "2019-06-14T00:00"]
+)
 def test_precision_of_rejects_other_shapes(text: str) -> None:
     with pytest.raises(ValueError):
         pd.precision_of(text)

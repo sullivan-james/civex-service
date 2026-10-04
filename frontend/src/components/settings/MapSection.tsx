@@ -33,7 +33,7 @@ function MapForm({ url, credit }: { url: string; credit: string }) {
     <div className="max-w-xl space-y-3">
       <Field
         label="Map tile URL"
-        hint={`An XYZ tile server with {z}, {x} and {y}, for example ${SAMPLE}. Leave empty to use only the built-in coastlines.`}
+        info={`An XYZ tile server with {z}, {x} and {y}, for example ${SAMPLE}. Leave empty to use only the built-in coastlines.`}
       >
         <Input
           value={tileUrl}
@@ -45,7 +45,7 @@ function MapForm({ url, credit }: { url: string; credit: string }) {
       {tileUrl.trim() && (
         <Field
           label="Credit shown on the map"
-          hint="Plain text, as the tile provider asks for it."
+          info="Plain text, as the tile provider asks for it."
         >
           <Input
             value={attribution}
@@ -69,16 +69,7 @@ function MapForm({ url, credit }: { url: string; credit: string }) {
 export default function MapSection() {
   const settings = useMapSettings()
   return (
-    <div className="space-y-3">
-      <div>
-        <h2 className="text-lg font-semibold text-fg">Map</h2>
-        <p className="mt-0.5 text-sm text-fg-muted">
-          The location editor draws coastlines and a grid that are built in, so
-          it works offline and needs no account. For street-level detail, point
-          it at a tile server. You are responsible for that provider's terms of
-          use: the public OpenStreetMap servers, for one, don't allow heavy use.
-        </p>
-      </div>
+    <div>
       {!settings ? (
         <Skeleton className="h-9 w-80" />
       ) : (

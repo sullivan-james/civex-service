@@ -113,7 +113,12 @@ def test_jobs_are_filterable_by_affected_schema(
     untouched = ctx.job_svc.enqueue_manual("wf", record)
     failed = ctx.job_svc.enqueue_manual("wf", record)
     ctx.commit()
-    entry = {"record_id": "x", "schema_name": "other", "natural_name": "n", "action": "created"}
+    entry = {
+        "record_id": "x",
+        "schema_name": "other",
+        "natural_name": "n",
+        "action": "created",
+    }
     ctx.job_svc.mark_completed(touched.id, affected_records=[entry])
     ctx.job_svc.mark_completed(untouched.id, affected_records=[])
     ctx.job_svc.mark_failed(
@@ -148,7 +153,9 @@ def test_filtering_by_affected_record_reads_the_link_table_not_every_job(
 
     seen: list[str] = []
     engine = ctx._session.get_bind()
-    event.listen(engine, "before_cursor_execute", lambda c, cur, st, *a: seen.append(st))
+    event.listen(
+        engine, "before_cursor_execute", lambda c, cur, st, *a: seen.append(st)
+    )
     jobs = ctx.job_svc.list_jobs(affected_record_id=touched, limit=2)
 
     assert len(jobs) == 2

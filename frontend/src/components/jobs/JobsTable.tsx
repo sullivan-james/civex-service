@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
+import { useListParams } from '../../hooks/useListParams'
 import { useJobsPaged, useRerunJob } from '../../hooks/useWorkflows'
 import { type WorkflowJob } from '../../api/workflows'
 import {
@@ -7,6 +8,7 @@ import {
   type DataTableColumn,
   Badge,
   Button,
+  ListToolbar,
   Pagination,
 } from '../ui'
 import { RefreshCw } from '../ui/icons'
@@ -39,30 +41,33 @@ function WhatHappened({ job }: { job: WorkflowJob }) {
   return <span>{summary.join(', ')}</span>
 }
 
+const STATUSES = ['pending', 'running', 'completed', 'failed']
+const TRIGGERS = ['record_created', 'record_updated', 'manual']
+const anyOf = (values: string[]) => [
+  { value: '', label: '' },
+  ...values.map((v) => ({ value: v, label: v.replace('_', ' ') })),
+]
+
 interface Props {
+  /** Only runs triggered by this record (the record page's Runs tab). */
   recordId?: string
-  statusFilter?: string
+  /** Prefix for this table's address parameters, when a page has more than
+   * one list. */
+  ns?: string
 }
 
-export default function JobsTable({ recordId, statusFilter }: Props) {
-  const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(25)
-
-  // Reset to first page whenever filters change. Adjusted during render
-  // (see https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)
-  // rather than in an effect -- avoids an extra render pass and the
-  // react-hooks/set-state-in-effect lint rule.
-  const [prevFilters, setPrevFilters] = useState([statusFilter, recordId])
-  if (prevFilters[0] !== statusFilter || prevFilters[1] !== recordId) {
-    setPrevFilters([statusFilter, recordId])
-    setPage(0)
-  }
-
+export default function JobsTable({ recordId, ns = '' }: Props) {
+  const list = useListParams(ns, ['status', 'trigger'])
   const { jobs, total, isLoading, isFetching, error } = useJobsPaged(
-    page,
-    pageSize,
-    statusFilter,
+    list.page,
+    list.size,
+    list.picks.status || undefined,
     recordId,
+    {
+      trigger: list.picks.trigger || undefined,
+      search: list.q || undefined,
+      sort: list.sortParam,
+    },
   )
   const rerun = useRerunJob()
 
@@ -133,6 +138,7 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
     {
       key: 'workflow_name',
       header: 'Workflow',
+      sortable: true,
       render: (job) => (
         <span className="font-medium text-fg">{job.workflow_name}</span>
       ),
@@ -161,16 +167,19 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
     {
       key: 'schema_name',
       header: 'Schema',
+      sortable: true,
       render: (job) => <span className="text-fg-muted">{job.schema_name}</span>,
     },
     {
       key: 'trigger',
       header: 'Trigger',
+      sortable: true,
       render: (job) => <Badge variant="default">{job.trigger}</Badge>,
     },
     {
       key: 'status',
       header: 'Status',
+      sortable: true,
       render: (job) => <JobStatusBadge status={job.status} />,
     },
     {
@@ -183,6 +192,7 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
     {
       key: 'created_at',
       header: 'Created',
+      sortable: true,
       render: (job) => (
         <span className="text-fg-muted text-xs">
           {new Date(job.created_at).toLocaleString()}
@@ -192,16 +202,46 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
   ]
 
   return (
-    <div aria-busy={isFetching}>
+    <div aria-busy={isFetching} className="space-y-3">
       {liveRegion}
+      <ListToolbar
+        search={{
+          value: list.q,
+          label: 'Search runs',
+          onChange: (q) => list.set({ q }),
+        }}
+        picks={[
+          {
+            label: 'Any status',
+            value: list.picks.status,
+            options: anyOf(STATUSES),
+            onChange: (status) => list.set({ status }),
+          },
+          {
+            label: 'Any trigger',
+            value: list.picks.trigger,
+            options: anyOf(TRIGGERS),
+            onChange: (trigger) => list.set({ trigger }),
+          },
+        ]}
+      />
       <DataTable
+        sort={
+          list.sort
+            ? { key: list.sort.field, direction: list.sort.dir }
+            : undefined
+        }
+        onSortChange={list.toggleSort}
         columns={columns}
         rows={jobs.data ?? []}
         getRowId={(job) => job.id}
         isLoading={isLoading}
         error={error?.message}
-        emptyTitle="No runs yet"
-        emptyMessage="Workflow runs appear here when a workflow is triggered. Trigger a workflow manually from the Workflows tab."
+        emptyTitle={
+          list.q || list.picks.status || list.picks.trigger
+            ? 'No runs match'
+            : 'No runs yet'
+        }
         actions={(job) => (
           <Button
             size="sm"
@@ -217,11 +257,11 @@ export default function JobsTable({ recordId, statusFilter }: Props) {
         actionsWidth="64px"
       />
       <Pagination
-        page={page}
-        pageSize={pageSize}
+        page={list.page}
+        pageSize={list.size}
         total={total}
-        onPage={setPage}
-        onPageSize={setPageSize}
+        onPage={(page) => list.set({ page })}
+        onPageSize={(size) => list.set({ size })}
       />
     </div>
   )

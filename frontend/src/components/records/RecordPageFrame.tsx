@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { WithHierarchy } from '../explorer/HierarchySidebar'
 import { useSchemas } from '../../hooks/useSchemas'
 import { displayLabel } from '../../utils/naming'
-import { Page } from '../ui'
+import { Page, type PageMenuAction } from '../ui'
 import { recordTrail } from '../../utils/recordTrail'
 
 /** What a page about a record shares: the collection's hierarchy beside it,
@@ -15,8 +15,11 @@ export function RecordPageFrame({
   current,
   currentSchema,
   title,
-  description,
+  meta,
+  info,
   action,
+  secondaryActions,
+  tabs,
   children,
 }: {
   /** Collection name, once loaded. */
@@ -35,8 +38,11 @@ export function RecordPageFrame({
   /** Schema name of the page's own record, shown beside the last crumb. */
   currentSchema?: string
   title: ReactNode
-  description?: ReactNode
+  meta?: ReactNode
+  info?: ReactNode
   action?: ReactNode
+  secondaryActions?: PageMenuAction[]
+  tabs?: ReactNode
   children: ReactNode
 }) {
   const { data: schemas } = useSchemas()
@@ -63,8 +69,11 @@ export function RecordPageFrame({
           },
         ]}
         title={title}
-        description={description}
+        meta={meta}
+        info={info}
         action={action}
+        secondaryActions={secondaryActions}
+        tabs={tabs}
       >
         {children}
       </Page>

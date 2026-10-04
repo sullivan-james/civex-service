@@ -16,24 +16,38 @@ class FileService:
         self._store = store
         self._remote = remote_transport
 
-    def store(self, path: Path) -> FileRef:
+    # `collection_id` (here and below) is the id of the collection the file is
+    # for. It only steers where new content is written -- see
+    # VolumeAwareFileObjectStore._write_candidates -- and never causes content
+    # that already exists to be stored again.
+
+    def store(self, path: Path, collection_id: str | None = None) -> FileRef:
         """Copy a file from disk into the object store in fixed-size chunks
         (never reading the whole file into memory)."""
-        return self._store.put_path(path)
+        return self._store.put_path(path, collection_id=collection_id)
 
-    def store_bytes(self, data: bytes, filename: str) -> FileRef:
+    def store_bytes(
+        self, data: bytes, filename: str, collection_id: str | None = None
+    ) -> FileRef:
         """Store raw bytes (e.g. from an HTTP upload) in the object store."""
-        return self._store.put(data, filename)
+        return self._store.put(data, filename, collection_id)
 
     async def store_stream(
         self,
         chunks: AsyncIterable[bytes],
         filename: str,
         size_hint: int | None = None,
+        collection_id: str | None = None,
     ) -> FileRef:
         """Store a streamed upload without buffering the whole file in
         memory first. See VolumeAwareFileObjectStore.put_stream."""
-        return await self._store.put_stream(chunks, filename, size_hint)
+        return await self._store.put_stream(chunks, filename, size_hint, collection_id)
+
+    def offline_location(self, sha256: str):
+        """(volume, status) if the content is recorded on a volume that can't be
+        reached right now -- so a missing file can be told apart from one on a
+        drive that isn't plugged in."""
+        return self._store.offline_location(sha256)
 
     def local_path(self, sha256: str) -> Path:
         """Path of the object's bytes on local disk, for streaming it out

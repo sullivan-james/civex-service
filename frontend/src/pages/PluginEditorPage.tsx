@@ -139,7 +139,7 @@ export default function PluginEditorPage({
                 extensions={[python()]}
                 onChange={(value) => setCode(value)}
                 basicSetup={{ tabSize: 4 }}
-                style={{ fontSize: '0.75rem', height: '100%' }}
+                style={{ fontSize: '0.8125rem', height: '100%' }}
               />
             </div>
           </div>

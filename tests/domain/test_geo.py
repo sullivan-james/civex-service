@@ -15,7 +15,9 @@ SQUARE = {
 def test_valid_shapes_return_their_positions() -> None:
     assert geo.positions(POINT) == [(-3.41, 56.12)]
     assert len(geo.positions(SQUARE)) == 5
-    assert len(geo.positions({"type": "LineString", "coordinates": [[0, 0], [1, 1]]})) == 2
+    assert (
+        len(geo.positions({"type": "LineString", "coordinates": [[0, 0], [1, 1]]})) == 2
+    )
 
 
 def test_altitude_is_allowed() -> None:
@@ -70,7 +72,9 @@ def test_every_position_of_a_shape_must_be_inside() -> None:
         geo.check(line, {"bbox": [-1, -1, 10, 1]})
 
 
-@pytest.mark.parametrize("bad", [[1, 2, 3], "x", [0, 10, 5, 5], [0, -91, 1, 1], [-181, 0, 1, 1]])
+@pytest.mark.parametrize(
+    "bad", [[1, 2, 3], "x", [0, 10, 5, 5], [0, -91, 1, 1], [-181, 0, 1, 1]]
+)
 def test_validate_bbox_rejects_nonsense(bad) -> None:
     with pytest.raises(ValidationError):
         geo.validate_bbox(bad)

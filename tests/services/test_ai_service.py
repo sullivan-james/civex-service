@@ -75,9 +75,7 @@ def test_build_system_prompt_truncates_past_the_char_budget(ctx: AppContext) -> 
     "use list_schemas tool" breadcrumb instead of silently growing forever."""
     ctx.schema_svc.create("big", description="t")
     choices = [f"choice_{i}" for i in range(2000)]
-    ctx.schema_svc.add_field(
-        "big", "wide", "string", restrictions={"choices": choices}
-    )
+    ctx.schema_svc.add_field("big", "wide", "string", restrictions={"choices": choices})
     ctx.schema_svc.create("second", description="t")
     ctx.commit()
 
@@ -168,7 +166,9 @@ class _ScriptedProvider(ChatProvider):
             messages.append(("tool", tc.id, result_str))
 
 
-def _run_scripted_stream(ctx: AppContext, monkeypatch, rounds: list[dict]) -> list[dict]:
+def _run_scripted_stream(
+    ctx: AppContext, monkeypatch, rounds: list[dict]
+) -> list[dict]:
     provider = _ScriptedProvider(
         AIConfig(api_key="x", model="m", provider="anthropic"), rounds
     )
@@ -226,9 +226,7 @@ def test_run_stream_dispatches_a_real_non_mutating_tool_and_continues(
         "done",
     ]
     tool_result = next(e for e in events if e["type"] == "tool_result")
-    assert json.loads(tool_result["content"]) == [
-        {"name": "study", "record_count": 0}
-    ]
+    assert json.loads(tool_result["content"]) == [{"name": "study", "record_count": 0}]
 
 
 def test_run_stream_halts_immediately_after_a_proposed_tool(
@@ -265,7 +263,9 @@ def test_run_stream_short_circuits_a_repeated_identical_tool_call(
         {"text": ["ok"], "end": RoundEnd(tool_calls=[], is_final=True, raw=None)},
     ]
     events = _run_scripted_stream(ctx, monkeypatch, rounds)
-    tool_results = [json.loads(e["content"]) for e in events if e["type"] == "tool_result"]
+    tool_results = [
+        json.loads(e["content"]) for e in events if e["type"] == "tool_result"
+    ]
     assert len(tool_results) == 2
     assert tool_results[0] == []  # the real dispatch result
     assert tool_results[1]["status"] == "error"

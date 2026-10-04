@@ -3,9 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from civex.config import load_config, save_config
+from civex import launcher
 from civex.domain.exceptions import ConfigError
 from civex.server.models import (
     MapSettingsResponse,
+    ShortcutResponse,
     UpdateMapSettingsRequest,
     RetentionSettingsResponse,
     UISettingsResponse,
@@ -37,6 +39,34 @@ def update_ui_settings(body: UpdateUISettingsRequest):
     config.ui.show_advanced = body.show_advanced
     save_config(config)
     return UISettingsResponse(show_advanced=config.ui.show_advanced)
+
+
+def _shortcut_state(root) -> ShortcutResponse:
+    try:
+        path = launcher.shortcut_path(root)
+    except ConfigError:
+        return ShortcutResponse(exists=False, path=None)
+    return ShortcutResponse(exists=path.exists(), path=str(path))
+
+
+@router.get("/shortcut", response_model=ShortcutResponse)
+def get_shortcut():
+    """Whether this project has a Desktop shortcut that starts civex."""
+    return _shortcut_state(_load_config().project_root)
+
+
+@router.post("/shortcut", response_model=ShortcutResponse)
+def create_shortcut():
+    """Put a Desktop shortcut that starts civex for this project and opens it
+    in the browser. Runs on the machine civex runs on."""
+    root = _load_config().project_root
+    try:
+        launcher.create_shortcut(root)
+    except ConfigError as e:
+        raise HTTPException(409, detail=str(e))
+    except OSError as e:
+        raise HTTPException(500, detail=f"Could not write the shortcut: {e}")
+    return _shortcut_state(root)
 
 
 @router.get("/map", response_model=MapSettingsResponse)

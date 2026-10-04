@@ -1,21 +1,12 @@
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import type { AuditLogEntry, PaginatedAuditLog } from '../../api/audit'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import type {
+  AuditLogEntry,
+  AuditView,
+  PaginatedAuditLog,
+} from '../../api/audit'
+import { useListParams } from '../../hooks/useListParams'
 import type { AuditSummary } from '../../utils/schemaAudit'
-import {
-  CollapsibleSection,
-  Table,
-  Thead,
-  Th,
-  Tbody,
-  Tr,
-  Td,
-  Badge,
-  Pagination,
-  TableSkeleton,
-  ErrorState,
-  EmptyState,
-} from '../ui'
+import { DataTable, Badge, ListToolbar, Pagination } from '../ui'
 import { errorMessage } from '../../lib/errors'
 
 const ACTION_VARIANT: Record<
@@ -31,89 +22,117 @@ const ACTION_VARIANT: Record<
 
 /**
  * The audit trail for a single entity (record, schema or collection):
- * a "when / action / change" table, collapsed by default. It's a backup
- * feature for tracing what happened, not a primary surface, so it stays
- * out of the way until someone opens it.
+ * a "when / action / change" table. Mount it in a History tab.
  */
 export function AuditTrail({
   queryKey,
   fetchPage,
   describeEntry,
   emptyMessage,
+  ns = 'history.',
 }: {
   /** Base react-query key for this entity's audit log; page/pageSize are appended. */
   queryKey: readonly unknown[]
-  fetchPage: (offset: number, limit: number) => Promise<PaginatedAuditLog>
+  fetchPage: (
+    offset: number,
+    limit: number,
+    view: AuditView,
+  ) => Promise<PaginatedAuditLog>
   describeEntry: (entry: AuditLogEntry) => AuditSummary
   emptyMessage: string
+  /** Prefix for this table's address parameters. */
+  ns?: string
 }) {
-  const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(25)
+  const list = useListParams(ns, ['action'])
+  const view: AuditView = {
+    action: list.picks.action || undefined,
+    sort: list.sortParam,
+  }
   const { data, isLoading, error } = useQuery({
-    queryKey: [...queryKey, page, pageSize],
-    queryFn: () => fetchPage(page * pageSize, pageSize),
+    queryKey: [...queryKey, list.page, list.size, view],
+    queryFn: () => fetchPage(list.page * list.size, list.size, view),
+    placeholderData: keepPreviousData,
   })
 
   return (
-    <CollapsibleSection title="History" count={data?.total}>
-      {isLoading ? (
-        <TableSkeleton columns={['w-40', 'w-20', 'w-full']} rows={5} />
-      ) : error ? (
-        <ErrorState message={errorMessage(error)} />
-      ) : !data || data.items.length === 0 ? (
-        <EmptyState title="No history yet" message={emptyMessage} />
-      ) : (
-        <>
-          <Table>
-            <Thead>
-              <tr>
-                <Th className="w-44">When</Th>
-                <Th className="w-24">Action</Th>
-                <Th>Change</Th>
-              </tr>
-            </Thead>
-            <Tbody>
-              {data.items.map((entry) => {
-                const { title, detail } = describeEntry(entry)
-                return (
-                  <Tr key={entry.id}>
-                    <Td className="text-xs text-fg-muted whitespace-nowrap">
-                      {new Date(entry.timestamp).toLocaleString()}
-                    </Td>
-                    <Td>
-                      <Badge
-                        variant={ACTION_VARIANT[entry.action] ?? 'default'}
-                      >
-                        {entry.action}
-                      </Badge>
-                    </Td>
-                    <Td>
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-sm text-fg">{title}</span>
-                        {detail && (
-                          <span className="text-xs text-fg-muted">
-                            {detail}
-                          </span>
-                        )}
-                      </div>
-                    </Td>
-                  </Tr>
-                )
-              })}
-            </Tbody>
-          </Table>
-          <Pagination
-            page={page}
-            pageSize={pageSize}
-            total={data.total}
-            onPage={setPage}
-            onPageSize={(size) => {
-              setPageSize(size)
-              setPage(0)
-            }}
-          />
-        </>
+    <div className="space-y-3">
+      <ListToolbar
+        picks={[
+          {
+            label: 'Any action',
+            value: list.picks.action,
+            options: [
+              { value: '', label: '' },
+              ...Object.keys(ACTION_VARIANT).map((a) => ({
+                value: a,
+                label: a,
+              })),
+            ],
+            onChange: (action) => list.set({ action }),
+          },
+        ]}
+      />
+      <DataTable
+        sort={
+          list.sort
+            ? { key: list.sort.field, direction: list.sort.dir }
+            : undefined
+        }
+        onSortChange={list.toggleSort}
+        layout="auto"
+        columns={[
+          {
+            key: 'timestamp',
+            header: 'When',
+            sortable: true,
+            width: '12rem',
+            className: 'text-fg-muted whitespace-nowrap',
+            render: (e: AuditLogEntry) =>
+              new Date(e.timestamp).toLocaleString(),
+          },
+          {
+            key: 'action',
+            header: 'Action',
+            sortable: true,
+            width: '7rem',
+            render: (e) => (
+              <Badge variant={ACTION_VARIANT[e.action] ?? 'default'}>
+                {e.action}
+              </Badge>
+            ),
+          },
+          {
+            key: 'change',
+            header: 'Change',
+            render: (e) => {
+              const { title, detail } = describeEntry(e)
+              return (
+                <div className="flex flex-col gap-0.5">
+                  <span>{title}</span>
+                  {detail && (
+                    <span className="text-xs text-fg-muted">{detail}</span>
+                  )}
+                </div>
+              )
+            },
+          },
+        ]}
+        rows={data?.items ?? []}
+        getRowId={(e) => String(e.id)}
+        isLoading={isLoading}
+        error={error ? errorMessage(error) : undefined}
+        emptyTitle={list.picks.action ? 'No entries match' : 'No history yet'}
+        emptyMessage={list.picks.action ? undefined : emptyMessage}
+      />
+      {data && data.items.length > 0 && (
+        <Pagination
+          page={list.page}
+          pageSize={list.size}
+          total={data.total}
+          onPage={(page) => list.set({ page })}
+          onPageSize={(size) => list.set({ size })}
+        />
       )}
-    </CollapsibleSection>
+    </div>
   )
 }

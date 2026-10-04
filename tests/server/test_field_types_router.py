@@ -1,4 +1,5 @@
 """GET /schemas/field-types: the descriptors the web UI builds its editors from."""
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -31,7 +32,10 @@ def test_endpoint_serves_types_and_kinds(client: TestClient) -> None:
     assert [r["key"] for r in geo["restrictions"]] == ["geometry_types", "bbox"]
     assert "latitude" in geo["entry_hint"].lower()
     assert {"key": "unit", "control": "unit"}.items() <= {
-        k: v for r in types["float"]["restrictions"] if r["key"] == "unit" for k, v in r.items()
+        k: v
+        for r in types["float"]["restrictions"]
+        if r["key"] == "unit"
+        for k, v in r.items()
     }.items()
     assert [k["key"] for k in body["kinds"]][:2] == ["text", "choice"]
 

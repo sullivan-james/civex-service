@@ -76,6 +76,7 @@ def record_add(
                     rf.field.name,
                     rf.field.restrictions,
                     timezone=collection_timezone,
+                    collection_id=str(dataset.id),
                 )
                 break
             except CoercionError as e:
@@ -168,6 +169,7 @@ def record_update(
                     rf.field.name,
                     rf.field.restrictions,
                     timezone=collection_timezone,
+                    collection_id=str(record.dataset_id),
                 )
                 break
             except CoercionError as e:

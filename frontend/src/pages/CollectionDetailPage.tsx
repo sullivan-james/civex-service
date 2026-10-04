@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router'
-import { Upload } from '../components/ui/icons'
 import {
   useCollection,
   useUpdateCollection,
@@ -8,7 +7,6 @@ import {
 } from '../hooks/useCollections'
 import {
   Button,
-  CollapsibleSection,
   ConfirmDialog,
   DetailSkeleton,
   Badge,
@@ -19,8 +17,15 @@ import {
   PinButton,
   TimeZoneSelect,
   TableSkeleton,
+  TabNav,
+  TabPanel,
+  useTabParam,
 } from '../components/ui'
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
+import {
+  CollectionStorage,
+  useHasStorageChoice,
+} from '../components/collections/CollectionStorage'
 import { recordCollectionVisit } from '../hooks/useFrequentCollections'
 import { recordRecent } from '../hooks/usePins'
 import { collectionTarget } from '../utils/navTargets'
@@ -32,6 +37,12 @@ import { CollectionScopeFields } from '../components/collections/CollectionScope
 import { describeAuditEntry as describeCollectionAuditEntry } from '../utils/collectionAudit'
 import { errorMessage } from '../lib/errors'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
+
+const COLLECTION_TABS = [
+  { id: 'records' },
+  { id: 'storage' },
+  { id: 'activity' },
+] as const
 
 /** A collection is a workspace over its records: the explorer does all the
  * browsing (hierarchy, search, filters, bulk actions); this page adds the
@@ -46,9 +57,11 @@ export default function CollectionDetailPage() {
   const [scopeValue, setScopeValue] = useState<CollectionScope>('local')
   const [schemasValue, setSchemasValue] = useState<string[]>([])
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [tab, setTab] = useTabParam(COLLECTION_TABS, 'records')
 
   const { data: collection, isLoading, error } = useCollection(id!)
   const collectionName = collection?.name
+  const hasStorageTab = useHasStorageChoice(id!)
   useEffect(() => {
     if (collectionName) recordCollectionVisit(collectionName)
   }, [collectionName])
@@ -127,6 +140,7 @@ export default function CollectionDetailPage() {
   }
 
   const recordCount = collection.record_count
+  const shownTab = tab === 'storage' && !hasStorageTab ? 'records' : tab
 
   return (
     <CollectionTimeZone
@@ -145,7 +159,7 @@ export default function CollectionDetailPage() {
               </Badge>
             </span>
           }
-          description={collection.description ?? undefined}
+          meta={collection.description ?? undefined}
           action={
             <>
               <PinButton
@@ -153,12 +167,21 @@ export default function CollectionDetailPage() {
                 noun="collection"
                 size="md"
               />
-              <Link to={`/collections/${id}/import`}>
-                <Button size="sm" variant="primary">
-                  <Upload size={14} /> Guided import
-                </Button>
-              </Link>
             </>
+          }
+          tabs={
+            <TabNav
+              label="Collection"
+              value={shownTab}
+              onChange={setTab}
+              tabs={[
+                { id: 'records' as const, label: 'Records' },
+                ...(hasStorageTab
+                  ? [{ id: 'storage' as const, label: 'Storage' }]
+                  : []),
+                { id: 'activity' as const, label: 'Activity' },
+              ]}
+            />
           }
           secondaryActions={[
             { label: 'Edit details', onClick: startEditing },
@@ -194,12 +217,12 @@ export default function CollectionDetailPage() {
               </Field>
               <Field
                 label="Timezone"
-                hint="Datetimes without a UTC offset are read in this zone, and everyone sees them in it. Existing values are not changed, only how they are shown."
+                info="Datetimes without a UTC offset are read in this zone, and everyone sees them in it. Existing values are not changed, only how they are shown."
               >
                 <TimeZoneSelect
                   value={timezoneValue}
                   onChange={setTimezoneValue}
-                  unsetLabel="Not set — each viewer's own timezone"
+                  unsetLabel="Viewer's own"
                 />
               </Field>
               <CollectionScopeFields
@@ -229,33 +252,39 @@ export default function CollectionDetailPage() {
             </div>
           )}
 
-          <RecordsExplorer
-            dataset={collection.name}
-            scopeLabel={collection.name}
-            emptyHint={
-              <>
-                Add your first record with the button above, or use{' '}
-                <Link
-                  to={`/collections/${id}/import`}
-                  className="text-accent hover:underline"
-                >
-                  guided import
-                </Link>{' '}
-                to bring in a folder of files or a spreadsheet.
-              </>
-            }
-          />
+          <TabPanel id="records" value={shownTab}>
+            <RecordsExplorer
+              dataset={collection.name}
+              scopeLabel={collection.name}
+              emptyHint={
+                <>
+                  Add your first record with the button above, or use{' '}
+                  <Link
+                    to={`/collections/${id}/import`}
+                    className="text-accent hover:underline"
+                  >
+                    guided import
+                  </Link>{' '}
+                  to bring in a folder of files or a spreadsheet.
+                </>
+              }
+            />
+          </TabPanel>
 
-          <CollapsibleSection title="Activity">
+          <TabPanel id="storage" value={shownTab}>
+            <CollectionStorage collectionId={collection.id} />
+          </TabPanel>
+
+          <TabPanel id="activity" value={shownTab}>
             <AuditTrail
               queryKey={['collections', collection.name, 'audit']}
-              fetchPage={(offset, limit) =>
-                collectionsApi.getAudit(collection.name, offset, limit)
+              fetchPage={(offset, limit, view) =>
+                collectionsApi.getAudit(collection.name, offset, limit, view)
               }
               describeEntry={describeCollectionAuditEntry}
               emptyMessage="Changes to this collection will appear here."
             />
-          </CollapsibleSection>
+          </TabPanel>
 
           {confirmDelete && (
             <ConfirmDialog

@@ -18,7 +18,7 @@ from civex.domain.dtos import (
     SchemaDTO,
 )
 from civex.domain import geo as geo_domain
-from civex.domain import partial_dates, units
+from civex.domain import partial_dates, templating, units
 from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
 from civex.domain.filters import (
     SELF,
@@ -224,50 +224,83 @@ def _check_restrictions(
                 )
 
 
-# `{field_name}` placeholders in a `filename_template` restriction, plus the
-# reserved `{ext}` token — kept in sync with schema_service.TEMPLATE_TOKEN_RE,
-# which validates these references at field-save time.
-_TEMPLATE_TOKEN_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 # Path separators and characters invalid in filenames on common filesystems —
 # template values come from user-entered field data, so they're untrusted.
 _UNSAFE_FILENAME_CHARS_RE = re.compile(r'[\\/\x00-\x1f:*?"<>|]')
 
 
 def resolve_filename(
-    ref: FileRef, template: str | None, field_values: dict[str, Any]
+    ref: FileRef,
+    template: str | None,
+    field_values: dict[str, Any],
+    builtins: dict[str, Any] | None = None,
 ) -> str:
     """Resolve a `filename_template` restriction against a record's
     (name-keyed) field values. Falls back to the file's original name if no
     template is set, or if any referenced field is blank/unset — a
     partially-substituted name (e.g. "_.pdf") is worse than the original.
+    `builtins` supplies `schema` and `id`; `ext` comes from the file.
     """
     if not template:
         return ref.filename
     ext = Path(ref.filename).suffix.lstrip(".")
-    missing = False
-
-    def substitute(match: re.Match[str]) -> str:
-        nonlocal missing
-        token = match.group(1)
-        if token == "ext":
-            return ext
-        value = field_values.get(token)
-        if value is None or (isinstance(value, str) and not value.strip()):
-            missing = True
-            return ""
-        return str(value)
-
-    resolved = _TEMPLATE_TOKEN_RE.sub(substitute, template)
-    if missing:
+    try:
+        resolved = templating.render(
+            template, field_values, {**(builtins or {}), "ext": ext}, "fallback"
+        )
+    except ValidationError:
+        return ref.filename  # a template stored before the rules tightened
+    if resolved is None:
         return ref.filename
     resolved = _UNSAFE_FILENAME_CHARS_RE.sub("_", resolved).strip()
     return resolved or ref.filename
 
 
-def _with_resolved_filename(
-    ref_dict: dict[str, Any], template: str | None, field_values: dict[str, Any]
+# Keys the server adds to a file value in responses. They describe the moment
+# of the read, so a client that echoes them back must not get them stored.
+DERIVED_FILE_KEYS = ("resolved_filename", "location")
+
+
+def _file_dicts(value: Any) -> list[dict[str, Any]]:
+    """The file reference dicts in a `file` or `file_list` value."""
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _strip_derived_file_keys(
+    data: dict[str, Any], fields: list[ResolvedField]
 ) -> dict[str, Any]:
-    resolved = resolve_filename(FileRef.from_dict(ref_dict), template, field_values)
+    """`data` without the response-only keys on its file values."""
+
+    def clean(item: Any) -> Any:
+        if isinstance(item, dict):
+            return {k: v for k, v in item.items() if k not in DERIVED_FILE_KEYS}
+        return item
+
+    result = dict(data)
+    for rf in fields:
+        if rf.field.dtype not in ("file", "file_list"):
+            continue
+        value = result.get(rf.field.name)
+        if isinstance(value, list):
+            result[rf.field.name] = [clean(item) for item in value]
+        elif isinstance(value, dict):
+            result[rf.field.name] = clean(value)
+    return result
+
+
+def _with_resolved_filename(
+    ref_dict: dict[str, Any],
+    template: str | None,
+    field_values: dict[str, Any],
+    builtins: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved = resolve_filename(
+        FileRef.from_dict(ref_dict), template, field_values, builtins
+    )
     return {**ref_dict, "resolved_filename": resolved}
 
 
@@ -296,7 +329,9 @@ def _unique_zip_name(name: str, used: set[str]) -> str:
 
 
 def _apply_filename_templates(
-    data: dict[str, Any], fields: list[ResolvedField]
+    data: dict[str, Any],
+    fields: list[ResolvedField],
+    builtins: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Annotate every file/file_list value in `data` with `resolved_filename`,
     derived from that field's `filename_template` restriction (if any)."""
@@ -308,10 +343,10 @@ def _apply_filename_templates(
         template = (f.restrictions or {}).get("filename_template")
         value = result.get(f.name)
         if isinstance(value, dict):
-            result[f.name] = _with_resolved_filename(value, template, data)
+            result[f.name] = _with_resolved_filename(value, template, data, builtins)
         elif isinstance(value, list):
             result[f.name] = [
-                _with_resolved_filename(item, template, data)
+                _with_resolved_filename(item, template, data, builtins)
                 if isinstance(item, dict)
                 else item
                 for item in value
@@ -319,24 +354,27 @@ def _apply_filename_templates(
     return result
 
 
-# Types that skip the generic _COERCE path (handled explicitly in coerce_value)
-# and are also excluded from natural-name computation (they're collection/blob types).
-_SKIP_TYPES = {"reference", "reference_list", "file", "file_list", "tags", "geo"}
+def _name_builtins(schema_name: str, record_id: Any) -> dict[str, Any]:
+    """The `{schema}` and `{id}` variables templates can use."""
+    return {"schema": schema_name, "id": str(record_id)[:8]}
 
 
 def _natural_name(
-    data: dict[str, Any], fields: list, display_fields: list[str] | None = None
+    data: dict[str, Any],
+    fields: list,
+    display_template: str | None = None,
+    builtins: dict[str, Any] | None = None,
 ) -> str | None:
-    if display_fields:
-        parts = []
-        for name in display_fields:
-            val = data.get(name)
-            if val is not None and str(val).strip():
-                parts.append(str(val))
-        return " ".join(parts) if parts else None
+    """A record's name: its schema's template rendered over its values, else
+    the first plain value on the record."""
+    if display_template:
+        try:
+            return templating.render(display_template, data, builtins)
+        except ValidationError:
+            return None  # a template stored before the rules tightened
     for rf in fields:
         f = rf.field
-        if f.dtype in _SKIP_TYPES:
+        if f.dtype in templating.UNNAMEABLE_DTYPES:
             continue
         val = data.get(f.name)
         if val is not None and str(val).strip():
@@ -404,10 +442,11 @@ class RecordService:
         if shape is None:
             return dataclasses.replace(dto)
         named_data = {shape.id_to_name.get(k, k): v for k, v in dto.data.items()}
+        builtins = _name_builtins(shape.schema.name, dto.id)
         natural_name = _natural_name(
-            named_data, shape.fields, shape.schema.display_fields
+            named_data, shape.fields, shape.schema.display_template, builtins
         )
-        named_data = _apply_filename_templates(named_data, shape.fields)
+        named_data = _apply_filename_templates(named_data, shape.fields, builtins)
         return dataclasses.replace(dto, data=named_data, natural_name=natural_name)
 
     def _with_names_many(self, dtos: list[RecordDTO]) -> list[RecordDTO]:
@@ -415,6 +454,84 @@ class RecordService:
         return [self._with_names(r, shapes) for r in dtos]
 
     def _attach_reference_labels(
+        self, records: list[RecordDTO], shapes: SchemaResolver | None = None
+    ) -> list[RecordDTO]:
+        """The response-only extras every API read gets: reference labels and
+        collection names (`_label_references`), and where each file is stored
+        (`_attach_file_locations`). Audit snapshots use `_with_names` alone, so
+        none of this -- all of it momentary -- is ever frozen into the log."""
+        return self._attach_file_locations(
+            self._label_references(records, shapes), shapes
+        )
+
+    def _attach_file_locations(
+        self, records: list[RecordDTO], shapes: SchemaResolver | None = None
+    ) -> list[RecordDTO]:
+        """Stamp every file/file_list value with `location`: the volume it is
+        stored on, that volume's state, and whether it can be opened now. One
+        inventory lookup and one status check per volume for the whole batch,
+        so a table of records with file columns doesn't fan out per file.
+        Response-only: stripped again if a client echoes it back."""
+        shapes = shapes or self._schema_svc.resolver()
+        file_fields: list[list[str]] = []
+        wanted: set[str] = set()
+        for r in records:
+            shape = shapes(r.schema_id)
+            names = (
+                [
+                    rf.field.name
+                    for rf in shape.fields
+                    if rf.field.dtype in ("file", "file_list")
+                ]
+                if shape
+                else []
+            )
+            file_fields.append(names)
+            for name in names:
+                wanted.update(
+                    ref["sha256"]
+                    for ref in _file_dicts(r.data.get(name))
+                    if ref.get("sha256")
+                )
+        if not wanted:
+            return records
+
+        volume_of = self._files.locate_volumes(wanted)
+        status = {
+            name: self._files.volume_status(name)
+            for name in {v for v in volume_of.values() if v}
+        }
+
+        def location(sha: str | None) -> dict[str, Any]:
+            volume = volume_of.get(sha or "")
+            if volume is None:
+                # Not on any volume we know of (yet): don't claim it is gone --
+                # it may only be on a remote that hasn't been fetched.
+                return {"volume": None, "state": "unknown", "available": None}
+            st = status[volume]
+            return {"volume": volume, "state": st.state, "available": st.reachable}
+
+        def decorate(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {**value, "location": location(value.get("sha256"))}
+            if isinstance(value, list):
+                return [decorate(item) for item in value]
+            return value
+
+        return [
+            dataclasses.replace(
+                r,
+                data={
+                    **r.data,
+                    **{n: decorate(r.data.get(n)) for n in names if n in r.data},
+                },
+            )
+            if names
+            else r
+            for r, names in zip(records, file_fields)
+        ]
+
+    def _label_references(
         self, records: list[RecordDTO], shapes: SchemaResolver | None = None
     ) -> list[RecordDTO]:
         """Batch-resolve reference/reference_list values to their target's
@@ -489,13 +606,18 @@ class RecordService:
         targets = self._records.list_by_ids(list(all_ids))
         target_dataset = {t.id: t.dataset_id for t in targets}
         label_by_id: dict[uuid.UUID, str | None] = {}
+        target_data: dict[uuid.UUID, dict[str, Any]] = {}
         for t in targets:
             t_shape = shapes(t.schema_id)
             if t_shape is None:
                 continue
             named_data = {t_shape.id_to_name.get(k, k): v for k, v in t.data.items()}
+            target_data[t.id] = named_data
             label_by_id[t.id] = _natural_name(
-                named_data, t_shape.fields, t_shape.schema.display_fields
+                named_data,
+                t_shape.fields,
+                t_shape.schema.display_template,
+                _name_builtins(t_shape.schema.name, t.id),
             )
 
         def foreign_collections(
@@ -509,11 +631,51 @@ class RecordService:
             }
             return out or None
 
+        reach_paths: dict[uuid.UUID, list[str]] = {}
+
+        def reached_name(r: RecordDTO) -> str | None:
+            """`r`'s name when its template uses `{ref.field}`: the one place
+            another record's values are read. One hop only -- a target's own
+            name, built above, leaves its references out."""
+            shape = shapes(r.schema_id)
+            template = shape.schema.display_template if shape else None
+            if shape is None or not template:
+                return r.natural_name
+            if r.schema_id not in reach_paths:
+                try:
+                    names = templating.referenced_names(template)
+                except ValidationError:
+                    names = []
+                reach_paths[r.schema_id] = [n for n in names if "." in n]
+            paths = reach_paths[r.schema_id]
+            if not paths:
+                return r.natural_name
+            values = dict(r.data)
+            for path in paths:
+                base, _, sub = path.partition(".")
+                ref = r.data.get(base)
+                try:
+                    target_id = uuid.UUID(ref) if isinstance(ref, str) else None
+                except ValueError:
+                    target_id = None
+                values[path] = (
+                    target_data.get(target_id, {}).get(sub)
+                    if target_id is not None
+                    else None
+                )
+            return _natural_name(
+                values,
+                shape.fields,
+                template,
+                _name_builtins(shape.schema.name, r.id),
+            )
+
         return [
             dataclasses.replace(
                 r,
                 reference_labels={str(i): label_by_id.get(i) for i in ids},
                 reference_collections=foreign_collections(r, ids),
+                natural_name=reached_name(r),
             )
             if ids
             else r
@@ -540,8 +702,10 @@ class RecordService:
         field_name: str,
         restrictions: dict[str, Any] | None = None,
         timezone: str | None = None,
+        collection_id: str | None = None,
     ) -> Any:
-        """`timezone` is the collection's zone, used to read an offset-less
+        """`collection_id` steers where a new file is stored (placement).
+        `timezone` is the collection's zone, used to read an offset-less
         datetime; the field's own `timezone` restriction takes precedence."""
         if dtype == "datetime":
             try:
@@ -577,7 +741,7 @@ class RecordService:
             path = Path(raw)
             if not path.exists():
                 raise CoercionError(field_name, dtype, raw)
-            file_ref = self._files.put_path(path)
+            file_ref = self._files.put_path(path, collection_id=collection_id)
             value = file_ref.to_dict()
             _check_restrictions(value, dtype, restrictions or {}, field_name)
             return value
@@ -586,7 +750,7 @@ class RecordService:
             path = Path(raw)
             if not path.exists():
                 raise CoercionError(field_name, dtype, raw)
-            file_ref = self._files.put_path(path)
+            file_ref = self._files.put_path(path, collection_id=collection_id)
             file_list_value = [file_ref.to_dict()]
             _check_restrictions(file_list_value, dtype, restrictions or {}, field_name)
             return file_list_value
@@ -861,6 +1025,8 @@ class RecordService:
         # Apply field defaults before validation
         shape = self._schema_svc.resolve(schema)
         data = self._apply_defaults(data, shape)
+        if shape is not None:
+            data = _strip_derived_file_keys(data, shape.fields)
         data = self._normalise_datetimes(data, shape, dataset.timezone)
 
         resolved_parent_id = None
@@ -1027,6 +1193,8 @@ class RecordService:
             if raw.dataset_id
             else None
         )
+        if shape is not None:
+            data = _strip_derived_file_keys(data, shape.fields)
         data = self._normalise_datetimes(
             data,
             shape,

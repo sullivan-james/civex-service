@@ -36,7 +36,7 @@ export function Menu({
       {open && (
         <div
           role="menu"
-          className={`absolute top-full mt-1 z-10 min-w-[10rem] bg-canvas border border-border rounded-md shadow-lg py-1 ${
+          className={`absolute top-full mt-1 z-40 min-w-[10rem] bg-canvas border border-border rounded-md shadow-lg py-1 ${
             align === 'right' ? 'right-0' : 'left-0'
           }`}
         >

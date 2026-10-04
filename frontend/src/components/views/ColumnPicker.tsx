@@ -1,4 +1,4 @@
-import { Checkbox, IconButton } from '../ui'
+import { Checkbox, IconButton, Subheading } from '../ui'
 import { ChevronUp, ChevronDown, X } from '../ui/icons'
 import { displayLabel } from '../../utils/naming'
 import type { ResolvedField } from '../../utils/viewFields'
@@ -57,9 +57,7 @@ export function ColumnPicker({
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div className="border border-border rounded-md p-3 max-h-80 overflow-y-auto">
-        <h3 className="text-xs font-semibold text-fg-muted uppercase tracking-wider mb-2">
-          Available columns
-        </h3>
+        <Subheading className="mb-2">Available columns</Subheading>
         <div className="flex flex-col gap-1">
           {baseFields.map((field) => (
             <label
@@ -106,9 +104,7 @@ export function ColumnPicker({
       </div>
 
       <div className="border border-border rounded-md p-3 max-h-80 overflow-y-auto">
-        <h3 className="text-xs font-semibold text-fg-muted uppercase tracking-wider mb-2">
-          Selected columns
-        </h3>
+        <Subheading as="h3">Selected columns</Subheading>
         {columns.length === 0 ? (
           <p className="text-sm text-fg-subtle italic">
             No columns selected yet — pick some on the left.

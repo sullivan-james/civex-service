@@ -57,3 +57,48 @@ def test_rerun_carries_forward_the_original_run_s_input_data(
     assert new_job is not None
     assert new_job.input_data == seeded_input
     ctx2.close()
+
+
+def _seed_runs(client: TestClient) -> None:
+    from civex.config import load_config
+    from civex.context import build_local_context
+
+    client.put("/api/workflows/parse-audio-dates", json={"content": _VALID_YAML})
+    client.post("/api/schemas", json={"name": "doc", "description": None})
+    client.post("/api/collections", json={"name": "study", "description": None})
+    rec = client.post(
+        "/api/collections/study/records",
+        json={"schema_name": "doc", "data": {}},
+    ).json()
+    ctx = build_local_context(load_config())
+    try:
+        repo = ctx.job_svc._repo
+        repo.enqueue("parse-audio-dates", uuid.UUID(rec["id"]), "manual")
+        repo.enqueue("other-flow", uuid.UUID(rec["id"]), "record_created")
+        ctx.commit()
+    finally:
+        ctx.close()
+
+
+def test_runs_can_be_filtered_searched_and_sorted(client: TestClient) -> None:
+    _seed_runs(client)
+
+    manual = client.get("/api/jobs", params={"trigger": "manual"}).json()
+    assert {j["trigger"] for j in manual} == {"manual"}
+    assert client.get("/api/jobs/count", params={"trigger": "manual"}).json() == {
+        "total": len(manual)
+    }
+
+    found = client.get("/api/jobs", params={"search": "other"}).json()
+    assert {j["workflow_name"] for j in found} == {"other-flow"}
+
+    names = [
+        j["workflow_name"]
+        for j in client.get("/api/jobs", params={"sort": "workflow_name:asc"}).json()
+    ]
+    assert names == sorted(names)
+    newest_name_first = [
+        j["workflow_name"]
+        for j in client.get("/api/jobs", params={"sort": "workflow_name:desc"}).json()
+    ]
+    assert newest_name_first == sorted(names, reverse=True)

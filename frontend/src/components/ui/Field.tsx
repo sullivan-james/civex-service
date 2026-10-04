@@ -1,10 +1,12 @@
 import { cloneElement, isValidElement, useId } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { spanClassName, type FieldSpan } from './FormGrid'
+import { InfoTip } from './Tooltip'
 
 export interface FieldProps {
   label: ReactNode
-  hint?: ReactNode
+  /** Explanation shown in a tooltip beside the label (preferred). */
+  info?: ReactNode
   error?: ReactNode
   required?: boolean
   /** 'stack' (default) puts the label above the control; 'inline' puts the
@@ -23,7 +25,7 @@ export interface FieldProps {
 
 export function Field({
   label,
-  hint,
+  info,
   error,
   required = false,
   layout = 'stack',
@@ -37,9 +39,8 @@ export function Field({
     ? (children.props as Record<string, unknown>)
     : {}
   const controlId = (childProps.id as string | undefined) ?? generatedId
-  const hintId = hint ? `${generatedId}-hint` : undefined
   const errorId = error ? `${generatedId}-error` : undefined
-  const describedBy = [hintId, errorId].filter(Boolean).join(' ') || undefined
+  const describedBy = [errorId].filter(Boolean).join(' ') || undefined
 
   const controlOverrides: Record<string, unknown> = { id: controlId }
   if (describedBy) {
@@ -82,24 +83,28 @@ export function Field({
     ) : (
       <label
         htmlFor={controlId}
-        className={hideLabel ? 'sr-only' : 'text-xs font-medium text-fg-muted'}
+        className={hideLabel ? 'sr-only' : 'text-sm font-medium text-fg'}
       >
         {label}
         {requiredMark}
       </label>
     )
 
+  const infoNode = info && !hideLabel && <InfoTip>{info}</InfoTip>
+
   return (
     <div
       className={`flex flex-col gap-1 ${span ? spanClassName(span) : ''} ${className}`}
     >
-      {labelNode}
-      {layout === 'stack' && control}
-      {hint && (
-        <p id={hintId} className="text-xs text-fg-subtle">
-          {hint}
-        </p>
+      {infoNode ? (
+        <div className="flex items-center gap-1">
+          {labelNode}
+          {infoNode}
+        </div>
+      ) : (
+        labelNode
       )}
+      {layout === 'stack' && control}
       {error && (
         <p id={errorId} role="alert" className="text-xs text-danger">
           {error}

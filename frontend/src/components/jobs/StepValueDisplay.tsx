@@ -1,4 +1,4 @@
-import { Badge, Table, Thead, Th, Tbody, Tr, Td } from '../ui'
+import { Badge, DataTable } from '../ui'
 import { formatBytes } from '../../utils/format'
 
 // Renders one step input/output value, recognizing the shapes the backend's
@@ -102,33 +102,25 @@ function InlineTable({ table }: { table: TableEnvelope }) {
   return (
     <div className="space-y-1">
       <TableSummaryBadge rows={rowCount} columns={[]} />
-      <div className="max-h-64 overflow-auto">
-        <Table>
-          <Thead>
-            <tr>
-              {table.columns.map((c) => (
-                <Th key={c}>
-                  {c}
-                  <span className="ml-2 normal-case font-normal text-fg-subtle">
-                    {table.dtypes[c]}
-                  </span>
-                </Th>
-              ))}
-            </tr>
-          </Thead>
-          <Tbody>
-            {Array.from({ length: shown }, (_, i) => (
-              <Tr key={i}>
-                {table.columns.map((c) => (
-                  <Td key={c} className="font-mono text-xs whitespace-nowrap">
-                    {cellText(table.data[c]?.[i])}
-                  </Td>
-                ))}
-              </Tr>
-            ))}
-          </Tbody>
-        </Table>
-      </div>
+      <DataTable
+        layout="auto"
+        maxHeight="16rem"
+        columns={table.columns.map((c) => ({
+          key: c,
+          header: (
+            <>
+              {c}
+              <span className="ml-2 font-normal text-fg-subtle">
+                {table.dtypes[c]}
+              </span>
+            </>
+          ),
+          className: 'font-mono text-xs whitespace-nowrap',
+          render: (i: number) => cellText(table.data[c]?.[i]),
+        }))}
+        rows={Array.from({ length: shown }, (_, i) => i)}
+        getRowId={(i) => String(i)}
+      />
       {rowCount > shown && (
         <p className="text-fg-muted">
           showing {shown} of {rowCount} rows

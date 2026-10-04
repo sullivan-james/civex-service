@@ -33,26 +33,26 @@ export default function AiPanel({ onClose }: AiPanelProps) {
         <Sparkles size={14} className="text-accent" />
         <span className="text-sm font-semibold text-fg">civex AI</span>
         <div className="flex-1" />
-        <button
+        <IconButton
+          icon={History}
+          aria-label={showHistory ? 'Back to chat' : 'Chat history'}
+          aria-pressed={showHistory}
+          className={showHistory ? 'text-accent' : ''}
           onClick={() => {
             setShowHistory((h) => !h)
             setShowSettings(false)
           }}
-          title={showHistory ? 'Back to chat' : 'Chat history'}
-          className={`p-1 transition-colors ${showHistory ? 'text-accent' : 'text-fg-muted hover:text-fg'}`}
-        >
-          <History size={15} />
-        </button>
-        <button
+        />
+        <IconButton
+          icon={Settings}
+          aria-label={showSettings ? 'Back to chat' : 'AI settings'}
+          aria-pressed={showSettings}
+          className={showSettings ? 'text-accent' : ''}
           onClick={() => {
             setShowSettings((s) => !s)
             setShowHistory(false)
           }}
-          title={showSettings ? 'Back to chat' : 'AI settings'}
-          className={`p-1 transition-colors ${showSettings ? 'text-accent' : 'text-fg-muted hover:text-fg'}`}
-        >
-          <Settings size={15} />
-        </button>
+        />
         <IconButton
           icon={ExternalLink}
           aria-label="Open in new tab"

@@ -6,8 +6,9 @@ Schemas and fields carry two identifiers that do different jobs:
     The stable machine key. It is what workflow YAML references
     (``civex.get_field``'s ``field:``, a trigger's ``schema:``, a
     ``reference`` restriction's target), what CSV headers use, and what
-    ``display_fields`` stores. Constrained to a slug so it stays writable
-    by hand, diffable in git, and portable between projects.
+    name templates (``display_template``) refer to. Constrained to a slug
+    so it stays writable by hand, diffable in git, and portable between
+    projects.
 
 ``label``
     Free text shown to humans. Purely presentational, always safe to

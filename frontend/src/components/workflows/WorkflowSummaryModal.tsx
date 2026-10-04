@@ -1,4 +1,3 @@
-import { Link } from 'react-router'
 import {
   Badge,
   Button,
@@ -27,11 +26,7 @@ function TriggerSummary({
   > | null
 }) {
   if (!triggers || Object.keys(triggers).length === 0) {
-    return (
-      <p className="text-sm text-fg-muted">
-        No automatic trigger — this workflow only runs when started manually.
-      </p>
-    )
+    return <p className="text-sm text-fg-muted">Manual only</p>
   }
   return (
     <ul className="text-sm text-fg space-y-1">
@@ -227,16 +222,14 @@ export function WorkflowSummaryModal({
         <Button variant="default" onClick={onClose}>
           Close
         </Button>
-        <Link
+        <Button
           to={`/workflows/${workflow.stem}/edit`}
           target="_blank"
           rel="opener"
         >
-          <Button variant="default">
-            <FileCode size={14} />
-            Edit as YAML
-          </Button>
-        </Link>
+          <FileCode size={14} />
+          Edit as YAML
+        </Button>
       </ModalFooter>
     </Modal>
   )

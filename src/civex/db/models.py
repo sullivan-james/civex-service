@@ -93,16 +93,16 @@ class Schema(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     # Human-facing display name. name stays a slug because workflows, CSV
-    # headers and display_fields reference it as text; label absorbs the
+    # headers and display_template reference it as text; label absorbs the
     # cosmetic churn so renames stay rare. Null → derived from name.
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     description: Mapped[str | None] = mapped_column(String(1000))
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("schemas.id"), nullable=True
     )
-    display_fields: Mapped[list[str]] = mapped_column(
-        _JSON, nullable=False, default=list, server_default="[]"
-    )
+    # Template naming this schema's records (domain/templating.py); null means
+    # "use the first plain value on the record".
+    display_template: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
     # Soft-delete marker. NULL = live. Set instead of a hard DELETE so a
     # schema (and, via SchemaRepository's cascade, the records typed by it)
@@ -544,6 +544,41 @@ class JobAffectedRecord(Base):
         ForeignKey("workflow_jobs.id", ondelete="CASCADE"), primary_key=True
     )
     record_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+
+
+class StorageTransfer(Base):
+    """A move of stored files between volumes, as a durable account: what was
+    asked for, how far it got, what couldn't be moved, and how it ended. The
+    thread doing the work is momentary; this is what survives a restart, and
+    what a progress bar reads."""
+
+    __tablename__ = "storage_transfers"
+    __table_args__ = (
+        Index("ix_storage_transfers_created", "created_at"),
+        Index("ix_storage_transfers_status", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    # running | paused | completed | failed | cancelled | interrupted
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    spec: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False)
+    plan: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    progress: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False)
+    failures: Mapped[list[Any]] = mapped_column(_JSON, nullable=False, default=list)
+    failures_total: Mapped[int] = mapped_column(nullable=False, default=0)
+    pause_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    auto_resume: Mapped[bool] = mapped_column(nullable=False, default=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A pause or cancel someone has asked for. The process running the transfer
+    # notices it as it saves progress, so it works from any other process.
+    control: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Sources made read-only for the duration, and what each was before.
+    frozen: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    started_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
 
 class StoredObject(Base):

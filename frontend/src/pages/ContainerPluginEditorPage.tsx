@@ -5,7 +5,7 @@ import {
   useSaveContainerPluginFile,
 } from '../hooks/useContainerPlugins'
 import { useCloseOrBack } from '../hooks/useCloseOrBack'
-import { Button, Field, Page, Textarea } from '../components/ui'
+import { Button, Field, ListButton, Page, Textarea } from '../components/ui'
 import type { BuildResult } from '../api/containerPlugins'
 
 /** Multi-file editor for a Tier 2 (container) plugin: a Dockerfile + source
@@ -75,17 +75,14 @@ export default function ContainerPluginEditorPage() {
           {/* File tree */}
           <div className="w-56 border-r border-border overflow-y-auto py-2">
             {filePaths.map((path) => (
-              <button
+              <ListButton
                 key={path}
+                active={path === selectedPath}
                 onClick={() => setSelectedPath(path)}
-                className={`block w-full text-left px-3 py-2 text-xs font-mono truncate ${
-                  path === selectedPath
-                    ? 'bg-accent-subtle text-accent'
-                    : 'text-fg hover:bg-canvas-subtle'
-                }`}
+                className="truncate font-mono"
               >
                 {path}
-              </button>
+              </ListButton>
             ))}
           </div>
 

@@ -1,8 +1,8 @@
-import { useId, useState, type ComponentType } from 'react'
+import type { ComponentType } from 'react'
+import { Tooltip, type TooltipSide } from './Tooltip'
 
-type Variant = 'default' | 'danger' | 'subtle'
-type Size = 'sm' | 'md'
-type TooltipSide = 'top' | 'bottom'
+type Variant = 'default' | 'danger' | 'subtle' | 'nav'
+type Size = 'xs' | 'sm' | 'md'
 
 interface IconButtonProps extends Omit<
   React.ButtonHTMLAttributes<HTMLButtonElement>,
@@ -23,18 +23,16 @@ const variants: Record<Variant, string> = {
   default: 'text-fg-muted hover:text-fg hover:bg-canvas-inset',
   danger: 'text-fg-muted hover:text-danger hover:bg-danger-subtle',
   subtle: 'text-fg-subtle hover:text-fg-muted hover:bg-canvas-inset',
+  nav: 'border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg',
 }
 
-// 28px is the WCAG 2.5.8 minimum hit area; the icon itself stays 16px and
-// the extra space around it comes from padding, not a bigger glyph.
+// Never below the 32px control height; the icon stays 16px and the extra
+// space around it is padding, so the whole square is the click target.
 const sizes: Record<Size, string> = {
-  sm: 'h-7 w-7',
-  md: 'h-8 w-8',
-}
-
-const tooltipSides: Record<TooltipSide, string> = {
-  top: 'bottom-full left-1/2 -translate-x-1/2 mb-1.5',
-  bottom: 'top-full left-1/2 -translate-x-1/2 mt-1.5',
+  // Only inside something that is itself a 32px+ target (a chip's remove).
+  xs: 'h-6 w-6',
+  sm: 'h-8 w-8',
+  md: 'h-9 w-9',
 }
 
 export function IconButton({
@@ -48,41 +46,22 @@ export function IconButton({
   iconProps,
   ...props
 }: IconButtonProps) {
-  const [showTooltip, setShowTooltip] = useState(false)
-  const tooltipId = useId()
+  const button = (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      disabled={disabled}
+      className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}
+      {...props}
+    >
+      <Icon size={16} className="shrink-0" aria-hidden="true" {...iconProps} />
+    </button>
+  )
 
-  const hide = () => setShowTooltip(false)
-
+  if (disabled) return <span className="inline-flex">{button}</span>
   return (
-    <span className="relative inline-flex">
-      <button
-        type="button"
-        aria-label={ariaLabel}
-        aria-describedby={showTooltip ? tooltipId : undefined}
-        disabled={disabled}
-        onMouseEnter={() => setShowTooltip(true)}
-        onMouseLeave={hide}
-        onFocus={() => setShowTooltip(true)}
-        onBlur={hide}
-        className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}
-        {...props}
-      >
-        <Icon
-          size={16}
-          className="shrink-0"
-          aria-hidden="true"
-          {...iconProps}
-        />
-      </button>
-      {showTooltip && !disabled && (
-        <span
-          id={tooltipId}
-          role="tooltip"
-          className={`pointer-events-none absolute z-10 whitespace-nowrap rounded-md bg-fg px-2 py-1 text-xs font-medium text-canvas shadow-sm ${tooltipSides[tooltipSide]}`}
-        >
-          {ariaLabel}
-        </span>
-      )}
-    </span>
+    <Tooltip content={ariaLabel} side={tooltipSide}>
+      {button}
+    </Tooltip>
   )
 }

@@ -1,5 +1,6 @@
 """RecordService.files_for_zip -- the field-resolution/collision/guardrail
 logic behind GET /records/{id}/files.zip."""
+
 from __future__ import annotations
 
 import civex.services.record_service as record_service
@@ -67,7 +68,9 @@ def test_files_for_zip_uses_resolved_filename(
     )
     make_collection("study")
     record = ctx.record_svc.add(
-        "study", "invoice", {"invoice_number": "INV-1", "scan": _ref("a" * 64, "upload.pdf")}
+        "study",
+        "invoice",
+        {"invoice_number": "INV-1", "scan": _ref("a" * 64, "upload.pdf")},
     )
     ctx.commit()
 
@@ -104,7 +107,9 @@ def test_files_for_zip_unknown_field_raises_not_found(
 ) -> None:
     make_schema("invoice", fields=[("scan", "file")])
     make_collection("study")
-    record = ctx.record_svc.add("study", "invoice", {"scan": _ref("a" * 64, "scan.pdf")})
+    record = ctx.record_svc.add(
+        "study", "invoice", {"scan": _ref("a" * 64, "scan.pdf")}
+    )
     ctx.commit()
 
     with pytest.raises(NotFoundError):

@@ -18,23 +18,23 @@ import { useRetentionSettings } from '../hooks/useUISettings'
 import {
   Button,
   ConfirmDialog,
-  EmptyState,
-  ErrorState,
+  DataTable,
   MonoId,
   Page,
-  Table,
-  Tbody,
-  Td,
-  Th,
-  Thead,
-  Tr,
-  TableSkeleton,
+  TabNav,
+  TabPanel,
+  useTabParam,
 } from '../components/ui'
 import { formatDate } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 import { displayLabel } from '../utils/naming'
 
 type Kind = 'schema' | 'collection' | 'record'
+const KIND_TABS = [
+  { id: 'schema' },
+  { id: 'collection' },
+  { id: 'record' },
+] as const
 
 const KIND_LABELS: Record<Kind, string> = {
   schema: 'Schemas',
@@ -60,30 +60,26 @@ function RowActions({
   row: Row
   onConfirmPurge: () => void
 }) {
+  const busy = row.isRestoring || row.isPurging
   return (
-    <div className="flex items-center justify-end gap-2">
-      <Button
-        variant="default"
-        size="sm"
-        onClick={row.onRestore}
-        disabled={row.isRestoring || row.isPurging}
-      >
+    <>
+      <Button size="sm" onClick={row.onRestore} disabled={busy}>
         {row.isRestoring ? 'Restoring…' : 'Restore'}
       </Button>
       <Button
-        variant="danger"
         size="sm"
+        variant="danger"
         onClick={onConfirmPurge}
-        disabled={row.isRestoring || row.isPurging}
+        disabled={busy}
       >
-        Delete permanently
+        Delete
       </Button>
-    </div>
+    </>
   )
 }
 
 export default function RecentlyDeletedPage() {
-  const [kind, setKind] = useState<Kind>('schema')
+  const [kind, setKind] = useTabParam<Kind>(KIND_TABS, 'schema', 'kind')
   const [purgeTarget, setPurgeTarget] = useState<Row | null>(null)
 
   const { data: retention } = useRetentionSettings()
@@ -155,81 +151,66 @@ export default function RecentlyDeletedPage() {
   return (
     <Page
       title="Recently Deleted"
-      description={
+      info={
         retention
           ? `Restorable for ${retention.purge_after_days} day${
               retention.purge_after_days === 1 ? '' : 's'
-            } after deletion, then eligible for permanent deletion. Configurable in Settings.`
+            } after deletion, then eligible for permanent deletion.`
           : undefined
       }
-    >
-      <div className="flex items-center gap-2">
-        {(Object.keys(KIND_LABELS) as Kind[]).map((k) => (
-          <button
-            key={k}
-            onClick={() => setKind(k)}
-            className={`px-3 py-2 text-xs rounded-full border transition-colors ${
-              kind === k
-                ? 'bg-accent text-fg-on-emphasis border-accent'
-                : 'bg-canvas text-fg-muted border-border hover:bg-canvas-subtle'
-            }`}
-          >
-            {KIND_LABELS[k]} ({counts[k]})
-          </button>
-        ))}
-      </div>
-
-      {active.isLoading && (
-        <TableSkeleton columns={['w-48', 'w-32', 'w-24', 'w-40']} rows={6} />
-      )}
-      {active.error && <ErrorState message={errorMessage(active.error)} />}
-
-      {!active.isLoading && !active.error && rows.length === 0 && (
-        <EmptyState
-          title={`No deleted ${KIND_LABELS[kind].toLowerCase()}`}
-          message={`Items you delete show up here${
-            retention ? ` for ${retention.purge_after_days} days` : ''
-          }, with a Restore action.`}
+      tabs={
+        <TabNav
+          label="Kind of deleted item"
+          value={kind}
+          onChange={setKind}
+          tabs={(Object.keys(KIND_LABELS) as Kind[]).map((k) => ({
+            id: k,
+            label: `${KIND_LABELS[k]} (${counts[k]})`,
+          }))}
         />
-      )}
-
-      {rows.length > 0 && (
-        <Table>
-          <Thead>
-            <tr>
-              <Th>Name</Th>
-              <Th>
-                {kind === 'record'
+      }
+    >
+      <TabPanel id={kind} value={kind}>
+        <DataTable
+          layout="auto"
+          columns={[
+            {
+              key: 'name',
+              header: 'Name',
+              className: 'font-medium',
+              render: (row) =>
+                kind === 'record' ? <MonoId id={row.key} /> : row.label,
+            },
+            {
+              key: 'detail',
+              header:
+                kind === 'record'
                   ? 'Schema'
                   : kind === 'collection'
                     ? 'Records'
-                    : 'Name'}
-              </Th>
-              <Th>Deleted</Th>
-              <Th className="text-right">Actions</Th>
-            </tr>
-          </Thead>
-          <Tbody>
-            {rows.map((row) => (
-              <Tr key={row.key}>
-                <Td className="font-medium text-fg">
-                  {kind === 'record' ? <MonoId id={row.key} /> : row.label}
-                </Td>
-                <Td className="text-fg-muted">
-                  {kind === 'record' ? row.detail : (row.detail ?? row.label)}
-                </Td>
-                <Td className="text-fg-muted">{formatDate(row.deletedAt)}</Td>
-                <Td>
-                  <RowActions
-                    row={row}
-                    onConfirmPurge={() => setPurgeTarget(row)}
-                  />
-                </Td>
-              </Tr>
-            ))}
-          </Tbody>
-        </Table>
-      )}
+                    : 'Name',
+              className: 'text-fg-muted',
+              render: (row) =>
+                kind === 'record' ? row.detail : (row.detail ?? row.label),
+            },
+            {
+              key: 'deleted',
+              header: 'Deleted',
+              className: 'text-fg-muted',
+              render: (row) => formatDate(row.deletedAt),
+            },
+          ]}
+          rows={rows}
+          getRowId={(row) => row.key}
+          isLoading={active.isLoading}
+          error={active.error ? errorMessage(active.error) : undefined}
+          emptyTitle={`No deleted ${KIND_LABELS[kind].toLowerCase()}`}
+          actionsWidth="14rem"
+          actions={(row) => (
+            <RowActions row={row} onConfirmPurge={() => setPurgeTarget(row)} />
+          )}
+        />
+      </TabPanel>
 
       {purgeTarget && (
         <ConfirmDialog

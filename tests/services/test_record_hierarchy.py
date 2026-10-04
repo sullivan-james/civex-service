@@ -82,9 +82,7 @@ def test_within_requires_a_schema_and_a_descendant_schema(ctx: AppContext, tree)
     with pytest.raises(ValidationError, match="needs a schema"):
         ctx.record_svc.query_records(_q(within=str(tree["e1"].id)))
     with pytest.raises(ValidationError, match="can't descend"):
-        ctx.record_svc.query_records(
-            _q(schema="recording", within=str(tree["S1a"].id))
-        )
+        ctx.record_svc.query_records(_q(schema="recording", within=str(tree["S1a"].id)))
 
 
 def test_within_unknown_record(ctx: AppContext, tree):
@@ -197,8 +195,17 @@ def test_mixed_own_ancestor_and_descendant_conditions_in_one_tree(
             filter_tree={
                 "and": [
                     {"field": "sample_rate", "op": "eq", "value": 96},
-                    {"schema": "encounter", "field": "site", "op": "eq", "value": "Stellwagen"},
-                    {"schema": "selection", "field": "selection_table", "op": "is_null"},
+                    {
+                        "schema": "encounter",
+                        "field": "site",
+                        "op": "eq",
+                        "value": "Stellwagen",
+                    },
+                    {
+                        "schema": "selection",
+                        "field": "selection_table",
+                        "op": "is_null",
+                    },
                 ]
             },
         )
@@ -210,7 +217,10 @@ def test_sort_by_an_ancestors_field(ctx: AppContext, tree):
     found = ctx.record_svc.query_records(
         _q(
             schema="recording",
-            sort=[{"field": "site", "direction": "asc"}, {"field": "sample_rate", "direction": "desc"}],
+            sort=[
+                {"field": "site", "direction": "asc"},
+                {"field": "sample_rate", "direction": "desc"},
+            ],
         )
     )
     # Georges < Stellwagen; within Stellwagen, 96 before 48
@@ -243,7 +253,10 @@ def test_unresolvable_conditions_fail_loudly(ctx: AppContext, tree, tree_, messa
 def test_cannot_sort_by_a_descendants_field(ctx: AppContext, tree):
     with pytest.raises(ValidationError, match="many descendants"):
         ctx.record_svc.query_records(
-            _q(schema="encounter", sort=[{"field": "confidence", "schema": "selection"}])
+            _q(
+                schema="encounter",
+                sort=[{"field": "confidence", "schema": "selection"}],
+            )
         )
 
 
@@ -305,13 +318,9 @@ def test_delete_matching_deletes_exactly_what_the_query_selects(ctx: AppContext,
     assert ctx.record_svc.delete_matching(query) == 1
     ctx.commit()
     remaining = ctx.record_svc.query_records(_q(schema="selection"))
-    assert _ids(remaining) == _ids(
-        [tree["S1a"], tree["S2a"], tree["S3a"], tree["S3b"]]
-    )
+    assert _ids(remaining) == _ids([tree["S1a"], tree["S2a"], tree["S3a"], tree["S3b"]])
 
 
 def test_stream_pages_through_everything(ctx: AppContext, tree):
-    pages = list(
-        ctx.record_svc.stream_records(_q(schema="selection"), page_size=2)
-    )
+    pages = list(ctx.record_svc.stream_records(_q(schema="selection"), page_size=2))
     assert [len(p) for p in pages] == [2, 2, 1]

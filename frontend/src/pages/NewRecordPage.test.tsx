@@ -23,7 +23,7 @@ const SCHEMAS = [
     label: null,
     description: null,
     parent_id: null,
-    display_fields: [],
+    display_template: null,
     deleted_at: null,
     fields: [field('site', 'string', true), field('depth', 'integer')],
   },
@@ -45,6 +45,15 @@ beforeEach(() => {
         posted = JSON.parse(String(init.body))
         return json({ id: 'new1', natural_name: 'N', data: {} })
       }
+      if (url.pathname === '/api/records/p1')
+        return json({
+          id: 'p1',
+          dataset_id: 'c',
+          schema_name: 'encounter',
+          natural_name: 'Parent',
+          data: {},
+          ancestors: [],
+        })
       if (url.pathname === '/api/schemas') return json(SCHEMAS)
       if (url.pathname === '/api/collections/hb')
         return json({ id: 'c', name: 'hb', description: null, record_count: 0 })
@@ -83,5 +92,41 @@ describe('NewRecordPage', () => {
       data: { site: 'Stellwagen' },
     })
     expect(await screen.findByText('created')).toBeInTheDocument()
+  })
+
+  function renderAt(entries: string[]) {
+    return render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ToastProvider>
+          <MemoryRouter
+            initialEntries={entries}
+            initialIndex={entries.length - 1}
+          >
+            <Routes>
+              <Route path="/collections/:id/new" element={<NewRecordPage />} />
+              <Route path="/collections/:id" element={<p>collection list</p>} />
+              <Route path="/records/:id" element={<p>record page</p>} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    )
+  }
+
+  it('Cancel returns to where the person came from', async () => {
+    const user = userEvent.setup()
+    renderAt([
+      '/collections/hb?schema=encounter&q=whale',
+      '/collections/hb/new?schema=encounter',
+    ])
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByText('collection list')).toBeInTheDocument()
+  })
+
+  it('Cancel with nothing behind it goes to the parent record', async () => {
+    const user = userEvent.setup()
+    renderAt(['/collections/hb/new?schema=encounter&parent=p1'])
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByText('record page')).toBeInTheDocument()
   })
 })

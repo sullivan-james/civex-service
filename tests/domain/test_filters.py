@@ -41,7 +41,12 @@ def test_groups_nest_and_leaves_walks_them_all():
         {
             "and": [
                 {"field": "a", "op": "eq", "value": 1},
-                {"or": [{"field": "b", "op": "eq", "value": 2}, {"field": "c", "op": "is_null"}]},
+                {
+                    "or": [
+                        {"field": "b", "op": "eq", "value": 2},
+                        {"field": "c", "op": "is_null"},
+                    ]
+                },
             ]
         }
     )
@@ -51,9 +56,16 @@ def test_groups_nest_and_leaves_walks_them_all():
 
 def test_map_leaves_rewrites_every_condition_and_keeps_the_shape():
     node = parse_filter_tree(
-        {"or": [{"field": "a", "op": "eq", "value": 1}, {"field": "b", "op": "eq", "value": 2}]}
+        {
+            "or": [
+                {"field": "a", "op": "eq", "value": 1},
+                {"field": "b", "op": "eq", "value": 2},
+            ]
+        }
     )
-    mapped = map_leaves(node, lambda leaf: FilterCondition(leaf.field.upper(), leaf.op, leaf.value))
+    mapped = map_leaves(
+        node, lambda leaf: FilterCondition(leaf.field.upper(), leaf.op, leaf.value)
+    )
     assert isinstance(mapped, FilterGroup) and mapped.op == "or"
     assert [leaf.field for leaf in leaves(mapped)] == ["A", "B"]
 

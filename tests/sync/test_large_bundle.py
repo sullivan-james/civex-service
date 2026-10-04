@@ -30,7 +30,9 @@ def test_export_bundles_more_records_than_sqlite_can_bind(tmp_path: Path) -> Non
     ds, sch = Dataset(name="ds"), Schema(name="doc")
     s.add_all([ds, sch])
     s.flush()
-    commit = Commit(seq=1, message="push", record_count=N, schema_count=0, dataset_count=0)
+    commit = Commit(
+        seq=1, message="push", record_count=N, schema_count=0, dataset_count=0
+    )
     s.add(commit)
     s.flush()
     ids = [uuid.uuid4() for _ in range(N)]

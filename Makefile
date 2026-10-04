@@ -163,8 +163,16 @@ frontend-format: ## Prettier
 frontend-format-check: ## Prettier, check only
 	cd frontend && npm run format:check
 
+# Like pytest's `-n auto` above, vitest sizes its worker pool off the host's full
+# core count (22 here) with no regard for anything else running. `check-all` runs
+# this alongside the Python suite, and civex-agent can run several `make check`s
+# at once, so the machine ends up oversubscribed: a 14s run took 90s and a
+# different handful of tests starved and failed each time. Capped, like
+# PYTEST_JOBS -- override on a machine that only ever runs one check at a time.
+VITEST_JOBS ?= 4
+
 frontend-test: ## Vitest, run once (what CI runs)
-	cd frontend && npm run test
+	cd frontend && npm run test -- --maxWorkers=$(VITEST_JOBS)
 
 frontend-build: ## Type-check + build frontend (what CI runs)
 	cd frontend && npm run build

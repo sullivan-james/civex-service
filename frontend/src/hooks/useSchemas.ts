@@ -96,19 +96,18 @@ export function useUpdateSchema(name: string) {
       rename?: string
       label?: string
       description?: string
-      display_fields?: string[] | null
+      display_template?: string
     }) => schemasApi.update(name, body),
     onMutate: async (body) => {
       await qc.cancelQueries({ queryKey: ['schemas'] })
       const previous = optimisticUpdateSchema(qc, name, (s) => ({
         ...s,
         ...body,
-        // Matches the backend: an explicit null clears display fields
-        // rather than leaving them untouched.
-        display_fields:
-          body.display_fields === undefined
-            ? s.display_fields
-            : (body.display_fields ?? []),
+        // Matches the backend: an empty template clears it.
+        display_template:
+          body.display_template === undefined
+            ? s.display_template
+            : body.display_template || null,
       }))
       return { previous }
     },

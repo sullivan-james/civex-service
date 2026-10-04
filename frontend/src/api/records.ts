@@ -1,4 +1,5 @@
 import { api } from './client'
+import { auditUrl, type AuditView } from './audit'
 import {
   recordQueryString,
   type PageParams,
@@ -167,8 +168,6 @@ export const recordsApi = {
 
   purge: (id: string) => api.delete<void>(`/records/${id}/purge`),
 
-  audit: (id: string, offset = 0, limit = 50) =>
-    api.get<PaginatedAuditLog>(
-      `/records/${id}/audit?offset=${offset}&limit=${limit}`,
-    ),
+  audit: (id: string, offset = 0, limit = 50, view?: AuditView) =>
+    api.get<PaginatedAuditLog>(auditUrl(`/records/${id}`, offset, limit, view)),
 }

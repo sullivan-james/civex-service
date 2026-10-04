@@ -21,6 +21,7 @@ export {
   Paperclip,
   AlertTriangle,
   Check,
+  Monitor,
   ExternalLink,
   Sparkles,
   ArrowRight,
@@ -60,4 +61,7 @@ export {
   PanelRightClose,
   FileText,
   MapPin,
+  HardDrive,
+  Network,
+  House,
 } from 'lucide-react'

@@ -118,6 +118,20 @@ export const workflowsApi = {
   },
 }
 
+/** The narrowing a run list can ask for beyond status and record. */
+export interface RunQuery {
+  trigger?: string
+  search?: string
+  /** `column:asc|desc` */
+  sort?: string
+}
+
+function setRunQuery(p: URLSearchParams, q?: RunQuery) {
+  if (q?.trigger) p.set('trigger', q.trigger)
+  if (q?.search) p.set('search', q.search)
+  if (q?.sort) p.set('sort', q.sort)
+}
+
 export const jobsApi = {
   list: (
     status?: string,
@@ -125,21 +139,29 @@ export const jobsApi = {
     offset?: number,
     limit?: number,
     affectedRecordId?: string,
+    query?: RunQuery,
   ) => {
     const p = new URLSearchParams()
     if (status) p.set('status', status)
     if (recordId) p.set('record_id', recordId)
     if (affectedRecordId) p.set('affected_record_id', affectedRecordId)
+    setRunQuery(p, query)
     if (offset !== undefined) p.set('offset', String(offset))
     if (limit !== undefined) p.set('limit', String(limit))
     const qs = p.toString()
     return api.get<WorkflowJob[]>(`/jobs${qs ? `?${qs}` : ''}`)
   },
-  count: (status?: string, recordId?: string, affectedRecordId?: string) => {
+  count: (
+    status?: string,
+    recordId?: string,
+    affectedRecordId?: string,
+    query?: RunQuery,
+  ) => {
     const p = new URLSearchParams()
     if (status) p.set('status', status)
     if (recordId) p.set('record_id', recordId)
     if (affectedRecordId) p.set('affected_record_id', affectedRecordId)
+    setRunQuery(p, query)
     const qs = p.toString()
     return api.get<{ total: number }>(`/jobs/count${qs ? `?${qs}` : ''}`)
   },

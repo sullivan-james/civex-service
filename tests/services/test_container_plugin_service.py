@@ -20,7 +20,9 @@ def _make_container_plugin(ctx: AppContext, name: str = "my_plugin") -> None:
         'id = "example.my_plugin"\nname = "My Plugin"\n', encoding="utf-8"
     )
     (root / "src").mkdir()
-    (root / "src" / "plugin.c").write_text("int main() { return 0; }\n", encoding="utf-8")
+    (root / "src" / "plugin.c").write_text(
+        "int main() { return 0; }\n", encoding="utf-8"
+    )
 
 
 def test_list_container_plugins_empty_when_no_plugins_dir(ctx: AppContext) -> None:
@@ -119,7 +121,9 @@ def test_rebuild_reports_success(
     _make_container_plugin(ctx)
 
     def fake_run(cmd, capture_output, text, timeout):
-        return subprocess.CompletedProcess(cmd, returncode=0, stdout="built ok\n", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, returncode=0, stdout="built ok\n", stderr=""
+        )
 
     monkeypatch.setattr(
         "civex.services.container_plugin_service.subprocess.run", fake_run

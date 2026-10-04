@@ -9,9 +9,7 @@ from civex.main import app
 runner = CliRunner()
 
 
-def test_license_works_without_a_civex_project(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_license_works_without_a_civex_project(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["license"])
     assert result.exit_code == 0

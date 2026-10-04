@@ -65,7 +65,9 @@ def test_indexes_exist(session: Session) -> None:
         "ix_audit_log_staged",
     } <= names
     partial = session.execute(
-        text("SELECT indexdef FROM pg_indexes WHERE indexname='ix_records_live_dataset_created'")
+        text(
+            "SELECT indexdef FROM pg_indexes WHERE indexname='ix_records_live_dataset_created'"
+        )
     ).scalar_one()
     assert "deleted_at IS NULL" in partial
 
@@ -91,7 +93,10 @@ def test_file_references_follow_record_writes_and_cascade(session: Session) -> N
     ).first()
 
 
-def test_store_inventory_upsert_is_idempotent_and_sums(session: Session, tmp_path: Path) -> None:
+def test_store_inventory_upsert_is_idempotent_and_sums(
+    session: Session, tmp_path: Path
+) -> None:
+    (tmp_path / "v").mkdir()  # an absolute volume path must already exist
     vc = VolumeConfig(name="v", path=str(tmp_path / "v"))
     store = VolumeAwareFileObjectStore(
         StoreConfig(volumes={"v": vc}, volume_queue=["v"]), tmp_path, session=session

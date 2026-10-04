@@ -65,7 +65,7 @@ export default function JobDetailPage() {
         { label: `${job.id.slice(0, 8)}…` },
       ]}
       title={job.workflow_name}
-      description={<span className="font-mono">{job.id}</span>}
+      meta={<span className="font-mono">{job.id}</span>}
       action={
         <div className="flex items-center gap-2">
           {isActive && (

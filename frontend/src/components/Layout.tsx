@@ -24,7 +24,9 @@ import { CommandPalette } from './CommandPalette'
 import AiAttestationGate from './ai/AiAttestationGate'
 import AiPanel from './ai/AiPanel'
 import { useToast } from './ui/ToastProvider'
+import { Button } from './ui/Button'
 import { IconButton } from './ui/IconButton'
+import { Tooltip } from './ui/Tooltip'
 import { Spinner } from './ui/Spinner'
 import { Menu as Dropdown } from './ui/Menu'
 import {
@@ -79,9 +81,6 @@ function fileManagerLabel(): string {
 }
 
 const NAV_COLLAPSED_KEY = 'civex-nav-collapsed'
-
-const navButtonClass =
-  'inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors'
 
 // The breakpoint at which the persistent rail gives way to a drawer (not one
 // of Tailwind's default steps) is written out as the literal `min-[900px]:`
@@ -384,13 +383,13 @@ export default function Layout({ children }: { children: ReactNode }) {
           blending into it. Global actions only; section navigation lives
           in the left rail below. */}
       <header className="shrink-0 bg-nav-bg border-b border-nav-border px-4 py-2.5 flex items-center gap-3">
-        <button
+        <IconButton
+          icon={Menu}
+          variant="nav"
           onClick={() => setDrawerOpen(true)}
           aria-label="Open navigation"
-          className="min-[900px]:hidden inline-flex items-center justify-center h-8 w-8 rounded-md border border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg transition-colors"
-        >
-          <Menu size={16} aria-hidden="true" />
-        </button>
+          className="min-[900px]:hidden"
+        />
 
         <NavLink
           to="/"
@@ -399,39 +398,38 @@ export default function Layout({ children }: { children: ReactNode }) {
           civex
         </NavLink>
 
-        <button
+        <Button
+          variant="nav"
+          size="sm"
           onClick={() => setPaletteOpen(true)}
-          title="Jump to… (Ctrl+K)"
           aria-keyshortcuts="Control+K Meta+K"
-          className={navButtonClass}
         >
-          <Search size={12} />
+          <Search size={14} />
           Jump to
-          <kbd className="ml-1 hidden rounded border border-nav-border px-1 text-[10px] sm:inline">
+          <kbd className="ml-1 hidden rounded-md border border-nav-border px-1 text-xs sm:inline">
             Ctrl K
           </kbd>
-        </button>
+        </Button>
 
-        <button
-          onClick={() => queryClient.refetchQueries({ type: 'active' })}
-          title="Refresh all data"
-          className={navButtonClass}
-        >
-          <RefreshCw size={12} />
-          Refresh
-        </button>
+        <Tooltip content="Refresh all data" side="bottom">
+          <Button
+            variant="nav"
+            size="sm"
+            onClick={() => queryClient.refetchQueries({ type: 'active' })}
+          >
+            <RefreshCw size={14} />
+            Refresh
+          </Button>
+        </Tooltip>
 
-        <button
+        <Button
+          variant={aiOpen ? 'navActive' : 'nav'}
+          size="sm"
+          aria-pressed={aiOpen}
           onClick={() => setAiOpen((o) => !o)}
-          title="Open AI assistant"
-          className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md border transition-colors ${
-            aiOpen
-              ? 'border-accent bg-accent text-fg-on-emphasis'
-              : 'border-nav-border bg-nav-surface text-nav-fg-muted hover:bg-nav-surface-hover hover:text-nav-fg'
-          }`}
         >
-          <Sparkles size={12} /> Ask AI
-        </button>
+          <Sparkles size={14} /> Ask AI
+        </Button>
 
         {isDesktop && (
           <>
@@ -459,15 +457,11 @@ export default function Layout({ children }: { children: ReactNode }) {
                 },
               ]}
               trigger={({ toggle }) => (
-                <button
-                  onClick={toggle}
-                  title="Project"
-                  className={navButtonClass}
-                >
-                  <Folder size={12} />
+                <Button variant="nav" size="sm" onClick={toggle}>
+                  <Folder size={14} />
                   Project
-                  <ChevronDown size={12} />
-                </button>
+                  <ChevronDown size={14} />
+                </Button>
               )}
             />
           </>
@@ -496,20 +490,20 @@ export default function Layout({ children }: { children: ReactNode }) {
                 },
               ]}
               trigger={({ toggle }) => (
-                <button
+                <Button
+                  variant="nav"
+                  size="sm"
                   onClick={toggle}
                   disabled={syncing !== null}
-                  title={`Sync with ${remote.url}`}
-                  className={`${navButtonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                   {syncing !== null ? (
-                    <Spinner size={12} />
+                    <Spinner size={14} />
                   ) : (
-                    <ArrowRightLeft size={12} />
+                    <ArrowRightLeft size={14} />
                   )}
                   Sync
-                  <ChevronDown size={12} />
-                </button>
+                  <ChevronDown size={14} />
+                </Button>
               )}
             />
           </div>

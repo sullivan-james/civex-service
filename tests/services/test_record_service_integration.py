@@ -2,6 +2,7 @@
 reference-schema coercion check and the record_created/record_updated
 dual-trigger-on-create behavior documented in CLAUDE.md.
 """
+
 from __future__ import annotations
 
 from civex.context import AppContext
@@ -9,7 +10,9 @@ from civex.domain.exceptions import CoercionError
 import pytest
 
 
-def test_reference_coercion_enforces_target_schema(ctx: AppContext, make_schema, make_collection):
+def test_reference_coercion_enforces_target_schema(
+    ctx: AppContext, make_schema, make_collection
+):
     make_schema("patient")
     make_schema("visit", fields=[("patient_ref", "reference")])
     make_collection("study")
@@ -19,11 +22,16 @@ def test_reference_coercion_enforces_target_schema(ctx: AppContext, make_schema,
     ctx.commit()
     with pytest.raises(CoercionError, match="expected 'patient'"):
         ctx.record_svc.coerce_value(
-            str(visit.id), "reference", "patient_ref", restrictions={"schema": "patient"}
+            str(visit.id),
+            "reference",
+            "patient_ref",
+            restrictions={"schema": "patient"},
         )
 
 
-def test_reference_coercion_matching_schema_passes(ctx: AppContext, make_schema, make_collection):
+def test_reference_coercion_matching_schema_passes(
+    ctx: AppContext, make_schema, make_collection
+):
     make_schema("patient")
     make_collection("study")
     patient = ctx.record_svc.add("study", "patient", {})

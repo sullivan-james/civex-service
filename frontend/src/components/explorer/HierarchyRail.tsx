@@ -1,3 +1,4 @@
+import { ListButton } from '../ui'
 import type { Schema } from '../../api/schemas'
 import { displayLabel } from '../../utils/naming'
 
@@ -28,22 +29,20 @@ export function HierarchyRail({
       aria-label="Data hierarchy"
       className="md:w-60 shrink-0 md:sticky md:top-4 flex md:flex-col gap-1 overflow-x-auto rounded-md border border-border bg-canvas-subtle p-2"
     >
-      <h2 className="hidden md:block px-2 pt-1 pb-2 text-xs font-bold uppercase tracking-wider text-fg border-b border-border mb-1">
+      <h2 className="mb-1 hidden border-b border-border px-2 pb-2 pt-1 text-sm font-semibold text-fg md:block">
         Hierarchy
       </h2>
       {levels.map(({ schema, depth, count }) => {
         const active = schema.name === current
         return (
-          <button
+          <ListButton
             key={schema.id}
-            type="button"
             onClick={() => onPick(schema)}
+            active={active}
             aria-current={active ? 'true' : undefined}
-            style={{ paddingLeft: `${0.5 + depth}rem` }}
-            className={`flex items-center justify-between gap-2 whitespace-nowrap rounded-md py-2 pr-2 text-sm cursor-pointer transition-colors ${
-              active
-                ? 'bg-accent-subtle text-accent-emphasis font-semibold'
-                : 'text-fg hover:bg-canvas-inset'
+            style={{ paddingLeft: `${0.75 + depth}rem` }}
+            className={`flex items-center justify-between gap-2 whitespace-nowrap rounded-md ${
+              active ? 'font-semibold text-accent-emphasis' : 'text-fg'
             }`}
           >
             <span>{displayLabel(schema.name, schema.label)}</span>
@@ -58,7 +57,7 @@ export function HierarchyRail({
                 {count.toLocaleString()}
               </span>
             )}
-          </button>
+          </ListButton>
         )
       })}
     </nav>

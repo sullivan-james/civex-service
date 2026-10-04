@@ -1,6 +1,7 @@
 """Coverage for `_check_restrictions` in record_service.py — the single source
 of truth for field validation (see CLAUDE.md "Field restrictions" table).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -18,7 +19,10 @@ from civex.services.record_service import (
 # value is None: restrictions never apply, regardless of dtype
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("dtype", ["integer", "float", "string", "date", "datetime", "file", "url"])
+
+@pytest.mark.parametrize(
+    "dtype", ["integer", "float", "string", "date", "datetime", "file", "url"]
+)
 def test_none_value_always_passes(dtype: str) -> None:
     _check_restrictions(None, dtype, {"min": 10, "choices": ["a"]}, "f")
 
@@ -26,6 +30,7 @@ def test_none_value_always_passes(dtype: str) -> None:
 # ---------------------------------------------------------------------------
 # integer / float: min / max
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("dtype,value", [("integer", 5), ("float", 5.0)])
 def test_numeric_within_bounds_passes(dtype: str, value) -> None:
@@ -51,6 +56,7 @@ def test_numeric_above_max_raises() -> None:
 # string: choices / max_length
 # ---------------------------------------------------------------------------
 
+
 def test_string_choice_allowed_passes() -> None:
     _check_restrictions("left", "string", {"choices": ["left", "right"]}, "f")
 
@@ -73,6 +79,7 @@ def test_string_max_length_exceeded_raises() -> None:
 # enum: choices
 # ---------------------------------------------------------------------------
 
+
 def test_enum_choice_disallowed_raises() -> None:
     with pytest.raises(ValidationError, match="must be one of"):
         _check_restrictions("green", "enum", {"choices": ["red", "blue"]}, "f")
@@ -81,6 +88,7 @@ def test_enum_choice_disallowed_raises() -> None:
 # ---------------------------------------------------------------------------
 # url: always validated, independent of the `restrictions` dict
 # ---------------------------------------------------------------------------
+
 
 def test_url_missing_scheme_raises_even_with_no_restrictions() -> None:
     with pytest.raises(ValidationError, match="not a valid URL"):
@@ -95,6 +103,7 @@ def test_url_with_scheme_passes() -> None:
 # date / datetime: min / max compared as parsed objects, not raw strings
 # ---------------------------------------------------------------------------
 
+
 def test_date_before_min_raises() -> None:
     with pytest.raises(ValidationError, match="before minimum"):
         _check_restrictions("2024-01-01", "date", {"min": "2024-06-01"}, "f")
@@ -106,7 +115,9 @@ def test_date_after_max_raises() -> None:
 
 
 def test_date_within_bounds_passes() -> None:
-    _check_restrictions("2024-03-01", "date", {"min": "2024-01-01", "max": "2024-06-01"}, "f")
+    _check_restrictions(
+        "2024-03-01", "date", {"min": "2024-01-01", "max": "2024-06-01"}, "f"
+    )
 
 
 def test_datetime_comparison_uses_actual_instant_not_lexicographic_order() -> None:
@@ -128,12 +139,15 @@ def test_datetime_comparison_uses_actual_instant_not_lexicographic_order() -> No
 def test_datetime_malformed_restriction_is_ignored() -> None:
     # Malformed min/max shouldn't crash validation — the value was already
     # normalised, so a bad restriction is treated as "no restriction."
-    _check_restrictions("2024-06-01T00:00:00+00:00", "datetime", {"min": "not-a-date"}, "f")
+    _check_restrictions(
+        "2024-06-01T00:00:00+00:00", "datetime", {"min": "not-a-date"}, "f"
+    )
 
 
 # ---------------------------------------------------------------------------
 # file / file_list: accept (extension allowlist) / max_size
 # ---------------------------------------------------------------------------
+
 
 def test_file_disallowed_extension_raises() -> None:
     ref = {"sha256": "a" * 64, "filename": "notes.txt", "size": 10}
@@ -186,9 +200,7 @@ def test_resolve_filename_substitutes_field_and_ext() -> None:
 
 def test_resolve_filename_falls_back_when_field_blank() -> None:
     ref = _ref("upload.pdf")
-    result = resolve_filename(
-        ref, "{invoice_number}.{ext}", {"invoice_number": None}
-    )
+    result = resolve_filename(ref, "{invoice_number}.{ext}", {"invoice_number": None})
     assert result == "upload.pdf"
 
 
@@ -199,9 +211,7 @@ def test_resolve_filename_falls_back_when_field_missing() -> None:
 
 def test_resolve_filename_falls_back_when_field_blank_string() -> None:
     ref = _ref("upload.pdf")
-    result = resolve_filename(
-        ref, "{invoice_number}.{ext}", {"invoice_number": "   "}
-    )
+    result = resolve_filename(ref, "{invoice_number}.{ext}", {"invoice_number": "   "})
     assert result == "upload.pdf"
 
 
@@ -236,6 +246,7 @@ def test_datetime_local_input_missing_seconds_is_accepted() -> None:
 # ---------------------------------------------------------------------------
 # date: precision (partial dates) and period-aware min / max
 # ---------------------------------------------------------------------------
+
 
 def test_date_defaults_to_full_dates_only() -> None:
     _check_restrictions("2019-06-14", "date", {}, "f")
@@ -279,7 +290,9 @@ def test_geo_shape_is_checked_even_without_restrictions() -> None:
 
 
 def test_geo_restrictions() -> None:
-    _check_restrictions(_POINT, "geo", {"geometry_types": ["Point"], "bbox": [-12, 48, 4, 62]}, "f")
+    _check_restrictions(
+        _POINT, "geo", {"geometry_types": ["Point"], "bbox": [-12, 48, 4, 62]}, "f"
+    )
     with pytest.raises(ValidationError, match="outside the allowed area"):
         _check_restrictions(_POINT, "geo", {"bbox": [10, 0, 20, 10]}, "f")
 
@@ -287,6 +300,7 @@ def test_geo_restrictions() -> None:
 # ---------------------------------------------------------------------------
 # float: unit is a label here, so it never changes validation
 # ---------------------------------------------------------------------------
+
 
 def test_float_unit_does_not_affect_bounds_checking() -> None:
     _check_restrictions(312.4, "float", {"unit": "m", "min": 0, "max": 2000}, "f")

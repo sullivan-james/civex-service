@@ -1,15 +1,30 @@
-import { Page } from '../components/ui'
+import { Page, TabNav, TabPanel, useTabParam } from '../components/ui'
 import { PluginsPanel } from '../components/workflows/PluginsPanel'
 import { ContainerPluginsPanel } from '../components/workflows/ContainerPluginsPanel'
 
+const TABS = [
+  { id: 'python' as const, label: 'Python' },
+  {
+    id: 'container' as const,
+    label: 'Container',
+  },
+]
+
 export default function PluginsPage() {
+  const [tab, setTab] = useTabParam(TABS, 'python')
   return (
     <Page
       title="Plugins"
-      description="Step implementations available to workflows — Python (Tier 1) and container (Tier 2)"
+      tabs={
+        <TabNav label="Plugin kind" tabs={TABS} value={tab} onChange={setTab} />
+      }
     >
-      <PluginsPanel />
-      <ContainerPluginsPanel />
+      <TabPanel id="python" value={tab}>
+        <PluginsPanel />
+      </TabPanel>
+      <TabPanel id="container" value={tab}>
+        <ContainerPluginsPanel />
+      </TabPanel>
     </Page>
   )
 }

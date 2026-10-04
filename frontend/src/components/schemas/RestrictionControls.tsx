@@ -4,7 +4,16 @@ import type {
   RestrictionDescriptor,
   Schema,
 } from '../../api/schemas'
-import { Button, Checkbox, Input, Select, TimeZoneSelect } from '../ui'
+import {
+  Button,
+  Checkbox,
+  Chip,
+  InfoTip,
+  Input,
+  Select,
+  TimeZoneSelect,
+  Tooltip,
+} from '../ui'
 import { LocatorMap } from '../ui/LocatorMap'
 import {
   zonedLocalToUTC,
@@ -21,14 +30,18 @@ import {
 } from '../../utils/partialDates'
 import { UNIT_GROUPS, canonicalUnit } from '../../utils/units'
 import { displayLabel } from '../../utils/naming'
+import {
+  TemplateBuilder,
+  type TemplateField,
+} from '../templates/TemplateBuilder'
 
 export type Rules = Record<string, unknown>
 
 /** What a control may need to know about the field it is editing. */
 export interface ControlContext {
   schemaName: string
-  /** Names of the schema's fields, for the file-name template. */
-  fieldNames: string[]
+  /** The schema's fields, for the file-name template. */
+  fields: TemplateField[]
   schemas: Schema[]
   /** The field as saved, when editing (not creating). */
   existing?: SchemaField
@@ -58,9 +71,11 @@ function Shell({
 }) {
   return (
     <fieldset className="space-y-1.5 min-w-0">
-      <legend className="text-xs font-medium text-fg-muted">{label}</legend>
+      <legend className="flex items-center gap-1 text-sm font-medium text-fg-muted">
+        {label}
+        {help && <InfoTip>{help}</InfoTip>}
+      </legend>
       {children}
-      {help && !error && <p className="text-xs text-fg-subtle">{help}</p>}
       {error && (
         <p role="alert" className="text-xs text-danger">
           {error}
@@ -183,22 +198,16 @@ export function ChoicesControl({ desc, rules, set }: ControlProps) {
       {choices.length > 0 && (
         <ul className="flex flex-wrap gap-1.5">
           {choices.map((c) => (
-            <li
-              key={c}
-              className="inline-flex items-center gap-1 rounded-md border border-border bg-canvas-subtle py-0.5 pl-2 pr-1 text-sm"
-            >
-              {c}
-              <button
-                type="button"
-                aria-label={`Remove ${c}`}
-                className="rounded px-1 text-fg-muted hover:text-danger cursor-pointer"
-                onClick={() => {
+            <li key={c}>
+              <Chip
+                removeLabel={`Remove ${c}`}
+                onRemove={() => {
                   const rest = choices.filter((x) => x !== c)
                   set(desc.key, rest.length ? rest : undefined)
                 }}
               >
-                ×
-              </button>
+                {c}
+              </Chip>
             </li>
           ))}
         </ul>
@@ -239,27 +248,21 @@ export function AcceptControl({ desc, rules, set }: ControlProps) {
         {ACCEPT_PRESETS.map((p) => {
           const on = parsed.presets.includes(p.key)
           return (
-            <button
-              key={p.key}
-              type="button"
-              aria-pressed={on}
-              title={p.tokens.join(', ')}
-              onClick={() =>
-                apply(
-                  on
-                    ? parsed.presets.filter((k) => k !== p.key)
-                    : [...parsed.presets, p.key],
-                  custom,
-                )
-              }
-              className={`rounded-full border px-3 py-0.5 text-sm cursor-pointer ${
-                on
-                  ? 'border-accent bg-accent-subtle text-accent font-medium'
-                  : 'border-border bg-canvas hover:bg-canvas-subtle'
-              }`}
-            >
-              {p.label}
-            </button>
+            <Tooltip key={p.key} content={p.tokens.join(', ')}>
+              <Chip
+                selected={on}
+                onClick={() =>
+                  apply(
+                    on
+                      ? parsed.presets.filter((k) => k !== p.key)
+                      : [...parsed.presets, p.key],
+                    custom,
+                  )
+                }
+              >
+                {p.label}
+              </Chip>
+            </Tooltip>
           )
         })}
       </div>
@@ -286,32 +289,17 @@ export function FilenameTemplateControl({
 }: ControlProps) {
   const value =
     typeof rules[desc.key] === 'string' ? (rules[desc.key] as string) : ''
-  const names = [
-    ...ctx.fieldNames.filter((n) => n !== ctx.existing?.name),
-    'ext',
-  ]
   return (
     <Shell label={desc.label} help={desc.help}>
-      <Input
-        size="sm"
+      <TemplateBuilder
+        schemaName={ctx.schemaName}
+        kind="file"
         value={value}
+        onChange={(next) => set(desc.key, next || undefined)}
+        fields={ctx.fields.filter((f) => f.name !== ctx.existing?.name)}
+        label={desc.label}
         placeholder="Keep the original name"
-        aria-label={desc.label}
-        onChange={(e) => set(desc.key, e.target.value || undefined)}
-        className="max-w-md font-mono"
       />
-      <div className="flex flex-wrap gap-1">
-        {names.map((n) => (
-          <button
-            key={n}
-            type="button"
-            onClick={() => set(desc.key, `${value}{${n}}`)}
-            className="rounded border border-border bg-canvas px-1.5 py-0.5 font-mono text-xs hover:bg-canvas-subtle cursor-pointer"
-          >
-            {`{${n}}`}
-          </button>
-        ))}
-      </div>
     </Shell>
   )
 }

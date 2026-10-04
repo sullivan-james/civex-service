@@ -1,4 +1,12 @@
-import { Badge, Button, Checkbox, Field, Select } from '../ui'
+import {
+  Badge,
+  Button,
+  Checkbox,
+  Field,
+  InfoTip,
+  Select,
+  Subheading,
+} from '../ui'
 import { ArrowLeft, ArrowRight } from '../ui/icons'
 import { RecordSearchPicker } from '../records/RecordSearchPicker'
 import { displayLabel } from '../../utils/naming'
@@ -92,12 +100,12 @@ export function MapStep({
 
       {needsParent && parentSchema && (
         <div className="space-y-1">
-          <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide flex items-center gap-2">
+          <Subheading as="span">
             Parent record
             <Badge variant="accent">
               {displayLabel(parentSchema.name, parentSchema.label)}
             </Badge>
-          </span>
+          </Subheading>
           {!hasParentCandidates ? (
             <p className="text-xs text-danger">
               No {displayLabel(parentSchema.name, parentSchema.label)} records
@@ -117,19 +125,19 @@ export function MapStep({
 
       {mode === 'csv' && parsedCsv && (
         <div className="space-y-1">
-          <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
+          <Subheading as="span">
             Column mapping
-          </span>
-          {hasDatetimeColumn && (
-            <p className="text-xs text-fg-muted">
-              {collectionTimeZone
-                ? `Times without a UTC offset are read as ${collectionTimeZone}.`
-                : collectionTimeZone === null
-                  ? 'This collection has no timezone, so times without a UTC offset are read as UTC. Set one on the collection to change that.'
-                  : "Times without a UTC offset are read in the chosen collection's timezone (UTC if it has none)."}{' '}
-              A field can override this in its settings.
-            </p>
-          )}
+            {hasDatetimeColumn && (
+              <InfoTip>
+                {collectionTimeZone
+                  ? `Times without a UTC offset are read as ${collectionTimeZone}.`
+                  : collectionTimeZone === null
+                    ? 'This collection has no timezone, so times without a UTC offset are read as UTC. Set one on the collection to change that.'
+                    : "Times without a UTC offset are read in the chosen collection's timezone (UTC if it has none)."}{' '}
+                A field can override this in its settings.
+              </InfoTip>
+            )}
+          </Subheading>
           <div className="border border-border rounded-md divide-y divide-border-muted">
             {parsedCsv.columns.map((col) => (
               <div key={col} className="px-3 py-2">
@@ -229,9 +237,7 @@ export function MapStep({
       {mode === 'files' && (
         <div className="space-y-5">
           <div className="space-y-1">
-            <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
-              Store each file in
-            </span>
+            <Subheading as="span">Store each file in</Subheading>
             <Select
               value={state.fileFieldChoice}
               onChange={(e) => onChange({ fileFieldChoice: e.target.value })}
@@ -255,9 +261,7 @@ export function MapStep({
           </div>
 
           <div className="space-y-2">
-            <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
-              Strategy
-            </span>
+            <Subheading as="span">Strategy</Subheading>
             <div className="flex flex-col gap-2">
               <label className="flex items-start gap-2 text-sm text-fg cursor-pointer">
                 <input

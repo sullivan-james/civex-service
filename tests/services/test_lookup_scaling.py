@@ -110,9 +110,7 @@ def test_listing_records_costs_the_same_queries_for_a_page_of_any_size(
 
     def queries_for_page(limit: int) -> int:
         with count_statements(ctx) as seen:
-            ctx.record_svc.find(
-                "study", schema_name="patient", filters=[], limit=limit
-            )
+            ctx.record_svc.find("study", schema_name="patient", filters=[], limit=limit)
         return len(seen)
 
     for i in range(40):

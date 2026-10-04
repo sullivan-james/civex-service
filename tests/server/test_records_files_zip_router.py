@@ -1,4 +1,5 @@
 """HTTP contract for GET /records/{id}/files.zip."""
+
 from __future__ import annotations
 
 import io

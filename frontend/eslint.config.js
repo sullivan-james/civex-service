@@ -30,5 +30,30 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // One component per concept: use ui/ Button, IconButton, DataTable, TabNav
+    // and Card instead of raw elements. Warn while pages are migrated.
+    files: ['src/**/*.tsx'],
+    ignores: ['src/components/ui/**', '**/*.test.tsx'],
+    rules: {
+      'no-restricted-syntax': [
+        'warn',
+        {
+          selector: "JSXOpeningElement[name.name='button']",
+          message:
+            'Use <Button>, <IconButton> or <Card to=...> from components/ui.',
+        },
+        {
+          selector: "JSXOpeningElement[name.name='table']",
+          message: 'Use <DataTable> from components/ui.',
+        },
+        {
+          selector: "JSXOpeningElement[name.name='details']",
+          message:
+            'Split large pages into tabs (<TabNav>); explain with <InfoTip>.',
+        },
+      ],
+    },
+  },
   eslintConfigPrettier,
 )

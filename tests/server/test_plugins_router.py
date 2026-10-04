@@ -144,7 +144,9 @@ def _make_container_plugin(client: TestClient, name: str = "my_plugin") -> None:
     (root / "civex-plugin.toml").write_text(
         'id = "example.my_plugin"\nname = "My Plugin"\n', encoding="utf-8"
     )
-    (root / "src" / "plugin.c").write_text("int main() { return 0; }\n", encoding="utf-8")
+    (root / "src" / "plugin.c").write_text(
+        "int main() { return 0; }\n", encoding="utf-8"
+    )
 
 
 def test_list_container_plugins(client: TestClient) -> None:

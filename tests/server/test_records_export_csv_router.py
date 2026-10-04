@@ -1,4 +1,5 @@
 """HTTP contract for GET /collections/{name}/export.csv."""
+
 from __future__ import annotations
 
 import csv

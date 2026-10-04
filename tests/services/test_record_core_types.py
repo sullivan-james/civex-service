@@ -1,4 +1,5 @@
 """End to end through RecordService: `geo` fields, partial dates and units."""
+
 from __future__ import annotations
 
 import pytest
@@ -13,9 +14,17 @@ def deployment(ctx: AppContext, make_schema, make_collection):
     make_collection("study")
     sv = ctx.schema_svc
     sv.add_field(
-        "deployment", "deployed", "date", restrictions={"precision": "month", "min": "2020"}
+        "deployment",
+        "deployed",
+        "date",
+        restrictions={"precision": "month", "min": "2020"},
     )
-    sv.add_field("deployment", "depth", "float", restrictions={"unit": "m", "min": 0, "max": 2000})
+    sv.add_field(
+        "deployment",
+        "depth",
+        "float",
+        restrictions={"unit": "m", "min": 0, "max": 2000},
+    )
     sv.add_field(
         "deployment",
         "release_point",
@@ -55,7 +64,9 @@ def test_coerce_geo_from_text(deployment: AppContext) -> None:
     )
     assert value == {"type": "Point", "coordinates": [-3.41, 56.12]}
     with pytest.raises(CoercionError):
-        deployment.record_svc.coerce_value("near the harbour", "geo", "release_point", {})
+        deployment.record_svc.coerce_value(
+            "near the harbour", "geo", "release_point", {}
+        )
 
 
 def test_coerce_converts_into_the_fields_unit(deployment: AppContext) -> None:

@@ -47,11 +47,13 @@ function describeSchemaChange(entry: AuditLogEntry): AuditSummary {
       if (oldData?.description !== newData?.description) {
         changes.push('description changed')
       }
+      // Entries from before templates carried a `display_fields` list.
       if (
+        oldData?.display_template !== newData?.display_template ||
         JSON.stringify(oldData?.display_fields) !==
-        JSON.stringify(newData?.display_fields)
+          JSON.stringify(newData?.display_fields)
       ) {
-        changes.push('display fields changed')
+        changes.push('record name changed')
       }
       return {
         title: `Schema "${name}" updated`,

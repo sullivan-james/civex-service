@@ -2,23 +2,20 @@ import { useCallback, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { errorMessage } from '../../lib/errors'
 import type { Field, FieldKind, Schema } from '../../api/schemas'
-import {
-  useUpdateSchema,
-  useDeleteField,
-  useReorderFields,
-} from '../../hooks/useSchemas'
+import { useDeleteField, useReorderFields } from '../../hooks/useSchemas'
 import { useFieldTypes } from '../../hooks/useFieldTypes'
-import { Button, IconButton, ConfirmDialog, Section } from '../ui'
+import {
+  Button,
+  ConfirmDialog,
+  IconButton,
+  ListButton,
+  SortableList,
+  Subheading,
+} from '../ui'
 import { displayLabel } from '../../utils/naming'
 import { summarise } from '../../utils/restrictions'
-import {
-  Star,
-  X,
-  ChevronUp,
-  ChevronDown,
-  GripVertical,
-  ArrowRight,
-} from '../ui/icons'
+import { fieldsWithInherited } from '../../utils/schemaFields'
+import { X, ArrowRight } from '../ui/icons'
 import { FieldForm } from './FieldForm'
 import { FieldKindPicker } from './FieldKindPicker'
 
@@ -32,9 +29,9 @@ interface InspectorSection {
   render: () => ReactNode
 }
 
-/** The schema page's Fields section: a list of fields on the left, and for
- * the selected one an inspector on the right to change its rules. Also owns
- * reordering (drag and keyboard), display-field ordering, and removal. */
+/** The schema page's Fields tab: a list of fields on the left, and for the
+ * selected one an inspector on the right to change its rules. Also owns
+ * reordering (drag and keyboard) and removal. */
 export function SchemaFieldsSection({
   schema,
   allSchemas,
@@ -53,18 +50,14 @@ export function SchemaFieldsSection({
   const [confirmDeleteField, setConfirmDeleteField] = useState<string | null>(
     null,
   )
-  const [dragSrcIndex, setDragSrcIndex] = useState<number | null>(null)
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
-  const [announcement, setAnnouncement] = useState('')
   const deleteField = useDeleteField(schema.name)
-  const updateSchema = useUpdateSchema(schema.name)
   const reorderFields = useReorderFields(schema.name)
   const descriptors = useFieldTypes()
   const typeLabel = (t: string) =>
     descriptors?.types.find((d) => d.type === t)?.label ?? t
 
   const field = schema.fields.find((f) => f.name === selected) ?? null
-  const fieldNames = schema.fields.map((f) => f.name)
+  const fieldInfo = fieldsWithInherited(schema, allSchemas)
 
   /** Run a navigation, asking first if the open form has unsaved edits. */
   function navigate(action: () => void) {
@@ -85,64 +78,6 @@ export function SchemaFieldsSection({
     })
   const onDirtyChange = useCallback((d: boolean) => setDirty(d), [])
 
-  function toggleDisplayField(fieldName: string) {
-    const current = schema.display_fields
-    const next = current.includes(fieldName)
-      ? current.filter((n) => n !== fieldName)
-      : [...current, fieldName]
-    updateSchema.mutate({ display_fields: next })
-  }
-
-  function moveDisplayField(fieldName: string, direction: 'up' | 'down') {
-    const current = [...schema.display_fields]
-    const index = current.indexOf(fieldName)
-    const targetIndex = direction === 'up' ? index - 1 : index + 1
-    if (index === -1 || targetIndex < 0 || targetIndex >= current.length) return
-    ;[current[index], current[targetIndex]] = [
-      current[targetIndex],
-      current[index],
-    ]
-    updateSchema.mutate({ display_fields: current })
-    const f = schema.fields.find((x) => x.name === fieldName)
-    setAnnouncement(
-      `${f ? displayLabel(f.name, f.label) : fieldName} moved to position ${targetIndex + 1} of ${current.length} in display order.`,
-    )
-  }
-
-  function reorder(from: number, to: number) {
-    const next = [...schema.fields]
-    const [moved] = next.splice(from, 1)
-    next.splice(to, 0, moved)
-    reorderFields.mutate(next.map((f) => f.id))
-    setAnnouncement(
-      `${displayLabel(moved.name, moved.label)} moved to position ${to + 1} of ${next.length}.`,
-    )
-  }
-
-  function moveField(index: number, direction: 'up' | 'down') {
-    const target = direction === 'up' ? index - 1 : index + 1
-    if (target < 0 || target >= schema.fields.length) return
-    reorder(index, target)
-  }
-
-  function handleRowKeyDown(e: React.KeyboardEvent, index: number) {
-    if (!(e.altKey || e.metaKey)) return
-    if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      moveField(index, 'up')
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      moveField(index, 'down')
-    }
-  }
-
-  function handleDrop(index: number) {
-    if (dragSrcIndex !== null && dragSrcIndex !== index)
-      reorder(dragSrcIndex, index)
-    setDragSrcIndex(null)
-    setDragOverIndex(null)
-  }
-
   const sectionsFor = (f: Field): InspectorSection[] => [
     {
       id: 'rules',
@@ -154,7 +89,7 @@ export function SchemaFieldsSection({
           field={f}
           schemaName={schema.name}
           schemas={allSchemas}
-          fieldNames={fieldNames}
+          fields={fieldInfo}
           onDirtyChange={onDirtyChange}
           onDone={() => {
             setDirty(false)
@@ -164,8 +99,6 @@ export function SchemaFieldsSection({
       ),
     },
   ]
-
-  const isDisplay = (n: string) => schema.display_fields.includes(n)
 
   function inspector() {
     if (adding || schema.fields.length === 0) {
@@ -185,7 +118,7 @@ export function SchemaFieldsSection({
             kind={newKind}
             schemaName={schema.name}
             schemas={allSchemas}
-            fieldNames={fieldNames}
+            fields={fieldInfo}
             onChangeKind={() => setNewKind(null)}
             onDirtyChange={onDirtyChange}
             onDone={(savedName) => {
@@ -201,7 +134,7 @@ export function SchemaFieldsSection({
     if (!field)
       return (
         <p className="py-8 text-center text-sm text-fg-muted">
-          Select a field to see and change its rules, or add a new one.
+          Select a field to edit it.
         </p>
       )
     const sections = sectionsFor(field)
@@ -238,48 +171,6 @@ export function SchemaFieldsSection({
           </div>
           <div className="flex items-center gap-1">
             <IconButton
-              icon={Star}
-              aria-label={
-                isDisplay(field.name)
-                  ? 'Remove from display fields'
-                  : "Add to display fields — used to name this type's records"
-              }
-              variant="subtle"
-              className={
-                isDisplay(field.name)
-                  ? '!text-attention hover:!text-attention-emphasis'
-                  : ''
-              }
-              iconProps={{
-                fill: isDisplay(field.name) ? 'currentColor' : 'none',
-              }}
-              onClick={() => toggleDisplayField(field.name)}
-            />
-            {isDisplay(field.name) && schema.display_fields.length > 1 && (
-              <>
-                <IconButton
-                  icon={ChevronUp}
-                  aria-label={`Move ${displayLabel(field.name, field.label)} earlier in display order`}
-                  variant="subtle"
-                  disabled={
-                    schema.display_fields.indexOf(field.name) === 0 ||
-                    updateSchema.isPending
-                  }
-                  onClick={() => moveDisplayField(field.name, 'up')}
-                />
-                <IconButton
-                  icon={ChevronDown}
-                  aria-label={`Move ${displayLabel(field.name, field.label)} later in display order`}
-                  variant="subtle"
-                  disabled={
-                    schema.display_fields.indexOf(field.name) ===
-                      schema.display_fields.length - 1 || updateSchema.isPending
-                  }
-                  onClick={() => moveDisplayField(field.name, 'down')}
-                />
-              </>
-            )}
-            <IconButton
               icon={X}
               aria-label="Remove field"
               variant="danger"
@@ -287,21 +178,10 @@ export function SchemaFieldsSection({
             />
           </div>
         </div>
-        {isDisplay(field.name) && (
-          <p className="text-xs text-attention">
-            Display field
-            {schema.display_fields.length > 1
-              ? ` #${schema.display_fields.indexOf(field.name) + 1}`
-              : ''}
-            : part of the name shown for each record.
-          </p>
-        )}
         {sections.map((section) => (
           <div key={section.id}>
             {sections.length > 1 && (
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-muted">
-                {section.label}
-              </h4>
+              <Subheading as="h4">{section.label}</Subheading>
             )}
             {section.render()}
           </div>
@@ -315,135 +195,78 @@ export function SchemaFieldsSection({
 
   return (
     <>
-      <Section
-        title="Fields"
-        count={schema.fields.length}
-        action={
-          !adding && (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-fg-muted">
+            {schema.fields.length}{' '}
+            {schema.fields.length === 1 ? 'field' : 'fields'}
+          </p>
+          {!adding && (
             <Button size="sm" onClick={startAdding}>
               + Add field
             </Button>
-          )
-        }
-      >
-        <div role="status" aria-live="polite" className="sr-only">
-          {announcement}
+          )}
         </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(15rem,20rem)_minmax(0,1fr)]">
-          <nav
-            aria-label="Fields"
-            className="self-start overflow-hidden rounded-md border border-border bg-canvas"
-          >
+          <div className="self-start overflow-hidden rounded-md border border-border bg-canvas">
             {schema.fields.length === 0 ? (
-              <p className="px-3 py-4 text-sm italic text-fg-muted">
-                No fields yet.
-              </p>
+              <p className="px-3 py-4 text-sm text-fg-muted">No fields yet</p>
             ) : (
-              <ul className="divide-y divide-border-muted">
-                {schema.fields.map((f, index) => {
+              <SortableList
+                label="Fields"
+                items={schema.fields}
+                getKey={(f) => f.id}
+                getLabel={(f) => displayLabel(f.name, f.label)}
+                disabled={reorderFields.isPending}
+                moveButtons={(f) => f.name === selected && !adding}
+                onReorder={(next) =>
+                  reorderFields.mutate(next.map((f) => f.id))
+                }
+                rowClassName={(f) =>
+                  f.name === selected && !adding ? 'bg-accent-subtle' : ''
+                }
+                renderItem={(f) => {
                   const active = f.name === selected && !adding
                   const summary = summarise(f.restrictions, f.type)
                   return (
-                    <li
-                      key={f.id}
-                      onKeyDown={(e) => handleRowKeyDown(e, index)}
-                      onDragOver={(e) => {
-                        e.preventDefault()
-                        setDragOverIndex(index)
-                      }}
-                      onDrop={() => handleDrop(index)}
-                      className={`flex items-stretch ${
-                        dragOverIndex === index && dragSrcIndex !== index
-                          ? 'bg-accent-subtle'
-                          : dragSrcIndex === index
-                            ? 'opacity-50'
-                            : ''
-                      }`}
+                    <ListButton
+                      aria-current={active ? 'true' : undefined}
+                      active={active}
+                      onClick={() => select(f.name)}
+                      className="px-1"
                     >
-                      <span
-                        draggable
-                        onDragStart={() => setDragSrcIndex(index)}
-                        onDragEnd={() => {
-                          setDragSrcIndex(null)
-                          setDragOverIndex(null)
-                        }}
-                        title="Drag to reorder, or focus the row and press Alt/Cmd+Arrow"
-                        aria-hidden="true"
-                        className="flex shrink-0 cursor-grab items-center px-1.5 text-border hover:text-fg-muted active:cursor-grabbing"
-                      >
-                        <GripVertical size={12} />
-                      </span>
-                      <button
-                        type="button"
-                        aria-current={active ? 'true' : undefined}
-                        onClick={() => select(f.name)}
-                        className={`min-w-0 flex-1 px-1 py-2 text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent ${
-                          active ? 'bg-accent-subtle' : 'hover:bg-canvas-subtle'
-                        }`}
-                      >
-                        <span className="flex items-baseline gap-1.5">
-                          <span className="truncate text-sm font-medium text-fg">
-                            {displayLabel(f.name, f.label)}
-                          </span>
-                          {f.required && (
-                            <span
-                              className="text-attention"
-                              title="Required"
-                              aria-label="required"
-                            >
-                              *
-                            </span>
-                          )}
-                          {isDisplay(f.name) && (
-                            <Star
-                              size={11}
-                              fill="currentColor"
-                              className="shrink-0 text-attention"
-                              aria-label="display field"
-                            />
-                          )}
+                      <span className="flex items-baseline gap-1.5">
+                        <span className="truncate font-medium text-fg">
+                          {displayLabel(f.name, f.label)}
                         </span>
-                        <span className="block truncate font-mono text-xs text-fg-subtle">
-                          {f.name} · {typeLabel(f.type)}
-                        </span>
-                        {summary && (
-                          <span className="block truncate text-xs text-fg-muted">
-                            {summary}
+                        {f.required && (
+                          <span
+                            className="text-attention"
+                            aria-label="required"
+                          >
+                            *
                           </span>
                         )}
-                      </button>
-                      {active && (
-                        <span className="flex shrink-0 flex-col justify-center pr-1">
-                          <IconButton
-                            icon={ChevronUp}
-                            aria-label={`Move ${displayLabel(f.name, f.label)} up`}
-                            variant="subtle"
-                            disabled={index === 0 || reorderFields.isPending}
-                            onClick={() => moveField(index, 'up')}
-                          />
-                          <IconButton
-                            icon={ChevronDown}
-                            aria-label={`Move ${displayLabel(f.name, f.label)} down`}
-                            variant="subtle"
-                            disabled={
-                              index === schema.fields.length - 1 ||
-                              reorderFields.isPending
-                            }
-                            onClick={() => moveField(index, 'down')}
-                          />
+                      </span>
+                      <span className="block truncate font-mono text-xs text-fg-subtle">
+                        {f.name} · {typeLabel(f.type)}
+                      </span>
+                      {summary && (
+                        <span className="block truncate text-xs text-fg-muted">
+                          {summary}
                         </span>
                       )}
-                    </li>
+                    </ListButton>
                   )
-                })}
-              </ul>
+                }}
+              />
             )}
-          </nav>
+          </div>
           <div className="min-w-0 rounded-md border border-border bg-canvas p-4">
             {inspector()}
           </div>
         </div>
-      </Section>
+      </div>
 
       {pendingNav && (
         <ConfirmDialog

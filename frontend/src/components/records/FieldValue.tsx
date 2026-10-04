@@ -1,3 +1,5 @@
+import type { FileRef } from '../../api/files'
+import { FileLink, FileLocationChip } from './FileLocation'
 import { Badge } from '../ui'
 import { ReferenceLink } from './ReferenceLink'
 import { useFieldTimeZone } from './timeZoneContext'
@@ -83,7 +85,7 @@ export function FieldValue({
     typeof value[0] === 'object' &&
     'sha256' in value[0]
   ) {
-    const refs = value as { filename: string; size: number; sha256: string }[]
+    const refs = value as FileRef[]
     return (
       <span className="flex flex-col gap-1">
         {refs.map((ref) => (
@@ -94,32 +96,36 @@ export function FieldValue({
             <span>
               {ref.filename} ({(ref.size / 1024).toFixed(1)} KB)
             </span>
-            <a
-              href={`/api/files/${ref.sha256}?filename=${encodeURIComponent(ref.filename)}`}
-              download={ref.filename}
+            <FileLink
+              file={ref}
               className="text-accent hover:underline"
+              whenUnavailable={
+                <span className="text-fg-subtle">Unavailable</span>
+              }
             >
               Download
-            </a>
+            </FileLink>
+            <FileLocationChip file={ref} />
           </span>
         ))}
       </span>
     )
   }
   if (typeof value === 'object' && 'sha256' in (value as object)) {
-    const ref = value as { filename: string; size: number; sha256: string }
+    const ref = value as FileRef
     return (
       <span className="inline-flex items-center gap-2 text-sm text-fg-muted">
         <span>
           {ref.filename} ({(ref.size / 1024).toFixed(1)} KB)
         </span>
-        <a
-          href={`/api/files/${ref.sha256}?filename=${encodeURIComponent(ref.filename)}`}
-          download={ref.filename}
+        <FileLink
+          file={ref}
           className="text-accent hover:underline"
+          whenUnavailable={<span className="text-fg-subtle">Unavailable</span>}
         >
           Download
-        </a>
+        </FileLink>
+        <FileLocationChip file={ref} />
       </span>
     )
   }

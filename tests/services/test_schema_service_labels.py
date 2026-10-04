@@ -1,4 +1,5 @@
 """Slug-validated names and free-text labels on schemas and fields."""
+
 from __future__ import annotations
 
 import pytest

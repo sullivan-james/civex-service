@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, IconButton, Input } from '../ui'
+import { Button, DataTable, IconButton, Input } from '../ui'
 import { ChevronDown, ChevronUp, X } from '../ui/icons'
 import type { Position } from '../../utils/geoDraft'
 
@@ -39,84 +39,83 @@ export function VertexTable({
   }
   return (
     <div className="space-y-2">
-      <div className="max-h-64 overflow-auto rounded-md border border-border">
-        <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-canvas-subtle text-left text-xs text-fg-muted">
-            <tr>
-              <th className="px-2 py-1 font-medium">#</th>
-              <th className="px-2 py-1 font-medium">Latitude</th>
-              <th className="px-2 py-1 font-medium">Longitude</th>
-              <th className="px-2 py-1" />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(([lon, lat], i) => (
-              <tr key={i} className="border-t border-border-muted">
-                <td className="px-2 py-1 text-xs text-fg-subtle tabular-nums">
-                  {i + 1}
-                </td>
-                <td className="px-1 py-0.5">
-                  <Input
-                    size="sm"
-                    defaultValue={lat}
-                    key={`lat-${i}-${lat}`}
-                    aria-label={`${noun} ${i + 1} latitude`}
-                    inputMode="decimal"
-                    onBlur={(e) => set(i, 1, e.target.value)}
-                    className="w-36 font-mono"
-                  />
-                </td>
-                <td className="px-1 py-0.5">
-                  <Input
-                    size="sm"
-                    defaultValue={lon}
-                    key={`lon-${i}-${lon}`}
-                    aria-label={`${noun} ${i + 1} longitude`}
-                    inputMode="decimal"
-                    onBlur={(e) => set(i, 0, e.target.value)}
-                    className="w-36 font-mono"
-                  />
-                </td>
-                <td className="whitespace-nowrap px-1 text-right">
-                  <IconButton
-                    icon={ChevronUp}
-                    aria-label={`Move ${noun} ${i + 1} up`}
-                    variant="subtle"
-                    disabled={i === 0}
-                    onClick={() => move(i, -1)}
-                  />
-                  <IconButton
-                    icon={ChevronDown}
-                    aria-label={`Move ${noun} ${i + 1} down`}
-                    variant="subtle"
-                    disabled={i === positions.length - 1}
-                    onClick={() => move(i, 1)}
-                  />
-                  <IconButton
-                    icon={X}
-                    aria-label={`Remove ${noun} ${i + 1}`}
-                    variant="subtle"
-                    onClick={() =>
-                      onChange(positions.filter((_, j) => j !== i))
-                    }
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        layout="auto"
+        maxHeight="16rem"
+        columns={[
+          {
+            key: 'n',
+            header: '#',
+            width: '3rem',
+            className: 'text-fg-subtle tabular-nums',
+            render: (r: { i: number }) => r.i + 1,
+          },
+          {
+            key: 'lat',
+            header: 'Latitude',
+            render: ({ i }) => (
+              <Input
+                size="sm"
+                defaultValue={positions[i][1]}
+                key={`lat-${i}-${positions[i][1]}`}
+                aria-label={`${noun} ${i + 1} latitude`}
+                inputMode="decimal"
+                onBlur={(e) => set(i, 1, e.target.value)}
+                className="w-36 font-mono"
+              />
+            ),
+          },
+          {
+            key: 'lon',
+            header: 'Longitude',
+            render: ({ i }) => (
+              <Input
+                size="sm"
+                defaultValue={positions[i][0]}
+                key={`lon-${i}-${positions[i][0]}`}
+                aria-label={`${noun} ${i + 1} longitude`}
+                inputMode="decimal"
+                onBlur={(e) => set(i, 0, e.target.value)}
+                className="w-36 font-mono"
+              />
+            ),
+          },
+        ]}
+        rows={rows.map((_, i) => ({ i }))}
+        getRowId={({ i }) => String(i)}
+        actionsWidth="7.5rem"
+        actions={({ i }) => (
+          <>
+            <IconButton
+              icon={ChevronUp}
+              aria-label={`Move ${noun} ${i + 1} up`}
+              variant="subtle"
+              disabled={i === 0}
+              onClick={() => move(i, -1)}
+            />
+            <IconButton
+              icon={ChevronDown}
+              aria-label={`Move ${noun} ${i + 1} down`}
+              variant="subtle"
+              disabled={i === positions.length - 1}
+              onClick={() => move(i, 1)}
+            />
+            <IconButton
+              icon={X}
+              aria-label={`Remove ${noun} ${i + 1}`}
+              variant="subtle"
+              onClick={() => onChange(positions.filter((_, j) => j !== i))}
+            />
+          </>
+        )}
+      />
       {positions.length > SHOWN && !showAll && (
         <p className="text-xs text-fg-muted">
           Showing the first {SHOWN} of {positions.length.toLocaleString()}{' '}
           {noun}s.{' '}
-          <button
-            type="button"
-            className="text-accent hover:underline cursor-pointer"
-            onClick={() => setShowAll(true)}
-          >
+          <Button size="sm" variant="link" onClick={() => setShowAll(true)}>
             Show all
-          </button>
+          </Button>
         </p>
       )}
       <Button

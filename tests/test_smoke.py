@@ -2,6 +2,7 @@
 wires together. Granular CLI/service/HTTP behavior lives in tests/cli/,
 tests/services/, and tests/server/ — keep this file small.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,7 +16,9 @@ from civex.main import app
 runner = CliRunner()
 
 
-def test_init_creates_civex_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_init_creates_civex_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["init", "--sqlite", str(tmp_path)])
     assert result.exit_code == 0
@@ -33,9 +36,12 @@ def test_health_endpoint(client: TestClient) -> None:
 def test_full_flow_schema_collection_record(project_dir: Path) -> None:
     """Schema -> collection -> record, via the CLI, exercising the full stack."""
     assert runner.invoke(app, ["schema", "create", "trial"]).exit_code == 0
-    assert runner.invoke(
-        app, ["schema", "add-field", "trial", "subject", "--type", "string"]
-    ).exit_code == 0
+    assert (
+        runner.invoke(
+            app, ["schema", "add-field", "trial", "subject", "--type", "string"]
+        ).exit_code
+        == 0
+    )
     assert runner.invoke(app, ["collection", "create", "study"]).exit_code == 0
 
     result = runner.invoke(

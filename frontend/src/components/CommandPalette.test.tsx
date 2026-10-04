@@ -42,7 +42,7 @@ const SCHEMAS = [
     label: null,
     description: null,
     parent_id: null,
-    display_fields: [],
+    display_template: null,
     fields: [],
     deleted_at: null,
   },

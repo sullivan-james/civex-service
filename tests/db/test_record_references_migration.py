@@ -32,8 +32,18 @@ def test_backfill_reads_single_and_list_references(tmp_path: Path) -> None:
         cfg.attributes["connection"] = conn
         command.upgrade(cfg, _PRE)
         conn.commit()
-        conn.execute(text("INSERT INTO datasets (id, name, created_at) VALUES (:i,'ds','2024-01-01')"), {"i": ds})
-        conn.execute(text("INSERT INTO schemas (id, name, created_at) VALUES (:i,'doc','2024-01-01')"), {"i": sch})
+        conn.execute(
+            text(
+                "INSERT INTO datasets (id, name, created_at) VALUES (:i,'ds','2024-01-01')"
+            ),
+            {"i": ds},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO schemas (id, name, created_at) VALUES (:i,'doc','2024-01-01')"
+            ),
+            {"i": sch},
+        )
         for rid, data in [
             (one, {}),
             (two, {}),

@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { filesApi } from '../../api/files'
+import { useUploadCollection } from '../../hooks/uploadCollection'
 import type { Field } from '../../api/schemas'
 import { utcToZonedLocal, datetimeInputToWire } from '../../utils/dates'
 import { useFieldTimeZone } from './timeZoneContext'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
-import { Button, Input, Select, Checkbox } from '../ui'
+import { Button, Checkbox, IconButton, InfoTip, Input, Select } from '../ui'
 import { displayLabel } from '../../utils/naming'
 import {
   exampleWithUnit,
@@ -35,12 +36,10 @@ import {
   MultiRecordSearchPicker,
 } from './RecordSearchPicker'
 
-export interface FileRef {
-  sha256: string
-  filename: string
-  size: number
-  resolved_filename?: string
-}
+import type { FileRef } from '../../api/files'
+import { FileLink, FileLocationChip } from './FileLocation'
+
+export type { FileRef }
 
 interface Props {
   field: Field
@@ -98,6 +97,7 @@ function FileField({
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const collectionId = useUploadCollection()
   const ref = value as FileRef | null | undefined
   const { accept, maxSize } = toInputProps(field)
 
@@ -113,7 +113,11 @@ function FileField({
     setProgress(0)
     setError(null)
     try {
-      const result = await filesApi.uploadStreaming(file, setProgress)
+      const result = await filesApi.uploadStreaming(
+        file,
+        setProgress,
+        collectionId,
+      )
       onChange(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed')
@@ -137,13 +141,16 @@ function FileField({
             <Paperclip size={12} /> {ref.resolved_filename ?? ref.filename}
           </span>
           <span>({(ref.size / 1024).toFixed(1)} KB)</span>
-          <a
-            href={`/api/files/${ref.sha256}`}
-            download={ref.resolved_filename ?? ref.filename}
+          <FileLink
+            file={ref}
             className="text-accent hover:underline"
+            whenUnavailable={
+              <span className="text-fg-subtle">Unavailable</span>
+            }
           >
             Download
-          </a>
+          </FileLink>
+          <FileLocationChip file={ref} />
         </div>
       )}
       <input
@@ -183,6 +190,7 @@ function FileListField({
     fraction: number
   } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const collectionId = useUploadCollection()
   const existing = (value as FileRef[] | null | undefined) ?? []
   const { accept, maxSize } = toInputProps(field)
 
@@ -201,8 +209,11 @@ function FileListField({
     try {
       const newRefs: FileRef[] = []
       for (let i = 0; i < files.length; i++) {
-        const ref = await filesApi.uploadStreaming(files[i], (fraction) =>
-          setProgress({ index: i, total: files.length, fraction }),
+        const ref = await filesApi.uploadStreaming(
+          files[i],
+          (fraction) =>
+            setProgress({ index: i, total: files.length, fraction }),
+          collectionId,
         )
         newRefs.push(ref)
       }
@@ -237,13 +248,13 @@ function FileListField({
             {ref.resolved_filename ?? ref.filename} (
             {(ref.size / 1024).toFixed(1)} KB)
           </span>
-          <button
-            type="button"
+          <FileLocationChip file={ref} />
+          <IconButton
+            icon={X}
+            variant="danger"
             onClick={() => remove(ref.sha256)}
-            className="text-danger hover:underline shrink-0"
-          >
-            <X size={12} />
-          </button>
+            aria-label={`Remove ${ref.filename}`}
+          />
         </div>
       ))}
       <input
@@ -341,16 +352,22 @@ function UnitInput({
           data-min={min}
           data-max={max}
         />
-        <span className="text-sm text-fg-muted">{unit}</span>
+        <span className="flex items-center text-sm text-fg-muted">
+          {unit}
+          <InfoTip side="bottom">
+            Stored in {unit}. You can also type a value with its unit, such as{' '}
+            {exampleWithUnit(unit)}, and it is converted.
+          </InfoTip>
+        </span>
       </div>
-      <p
-        role={error ? 'alert' : undefined}
-        className={`mt-1 text-xs ${error ? 'text-danger' : 'text-fg-muted'}`}
-      >
-        {error ??
-          note ??
-          `Stored in ${unit}. You can also type a value with its unit, such as ${exampleWithUnit(unit)}, and it is converted.`}
-      </p>
+      {(error ?? note) && (
+        <p
+          role={error ? 'alert' : undefined}
+          className={`mt-1 text-xs ${error ? 'text-danger' : 'text-fg-muted'}`}
+        >
+          {error ?? note}
+        </p>
+      )}
     </div>
   )
 }
@@ -419,6 +436,28 @@ function GeoInput({
         <Button size="sm" onClick={() => setMapOpen(true)} className="shrink-0">
           Edit on map…
         </Button>
+        <InfoTip side="bottom" label="Other ways to enter a location">
+          Latitude then longitude, in degrees; south and west are negative.
+          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-left">
+            <li>
+              Copy the coordinates from a map app (right-click a point) and
+              paste them here.
+            </li>
+            <li>
+              Well-known text, longitude first:{' '}
+              <span className="font-mono">POINT(-3.41 56.12)</span>
+            </li>
+            <li>
+              GeoJSON, for lines and areas:{' '}
+              <span className="font-mono">
+                {'{"type":"Point","coordinates":[-3.41,56.12]}'}
+              </span>
+            </li>
+            <li>
+              A depth or height can be added as a third number in GeoJSON.
+            </li>
+          </ul>
+        </InfoTip>
       </div>
       {mapOpen && (
         <GeoEditorModal
@@ -442,13 +481,6 @@ function GeoInput({
         />
       )}
       <div id={helpId} className="space-y-1 text-xs text-fg-muted">
-        {!typed && (
-          <p>
-            Latitude then longitude, in degrees. South and west are negative:{' '}
-            <span className="font-mono">56.12, -3.41</span> is 56.12° N, 3.41°
-            W.
-          </p>
-        )}
         {parsed && !problem && spokenPoint(parsed) && (
           <p className="text-success">Reads as {spokenPoint(parsed)}.</p>
         )}
@@ -476,30 +508,6 @@ function GeoInput({
             .
           </p>
         )}
-        <details>
-          <summary className="cursor-pointer select-none hover:text-fg">
-            Other ways to enter a location
-          </summary>
-          <ul className="mt-1 list-disc space-y-0.5 pl-4">
-            <li>
-              Copy the coordinates from a map app (right-click a point) and
-              paste them here.
-            </li>
-            <li>
-              Well-known text, longitude first:{' '}
-              <span className="font-mono">POINT(-3.41 56.12)</span>
-            </li>
-            <li>
-              GeoJSON, for lines and areas:{' '}
-              <span className="font-mono">
-                {'{"type":"Point","coordinates":[-3.41,56.12]}'}
-              </span>
-            </li>
-            <li>
-              A depth or height can be added as a third number in GeoJSON.
-            </li>
-          </ul>
-        </details>
       </div>
       {(box || parsed) && (
         <LocatorMap bbox={box} location={parsed} className="max-w-sm" />
@@ -536,16 +544,14 @@ function PartialDateInput({
         value={text}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholderFor(precision)}
+        title={`${precisionHelp(precision)} Stored exactly as you write it.`}
         className="w-full"
       />
-      <p
-        role={bad ? 'alert' : undefined}
-        className={`mt-1 text-xs ${bad ? 'text-danger' : 'text-fg-muted'}`}
-      >
-        {bad
-          ? `Not a valid date. Use ${placeholderFor(precision)}.`
-          : `${precisionHelp(precision)} Stored exactly as you write it.`}
-      </p>
+      {bad && (
+        <p role="alert" className="mt-1 text-xs text-danger">
+          {`Not a valid date. Use ${placeholderFor(precision)}.`}
+        </p>
+      )}
     </div>
   )
 }

@@ -12,6 +12,8 @@ import {
   ModalFooter,
   ModalHeader,
   IconButton,
+  Chip,
+  Subheading,
 } from '../ui'
 import { MoreVertical, Save } from '../ui/icons'
 import { viewNameError } from '../../utils/naming'
@@ -113,25 +115,17 @@ export function SavedViewBar({
   if (views.length === 0 && !hasSelection) return null
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
-        Saved filters
-      </span>
+      <Subheading as="span">Saved filters</Subheading>
       {views.map((v) => {
         const active = activeView?.id === v.id
         return (
-          <button
+          <Chip
             key={v.id}
-            type="button"
-            aria-pressed={active}
+            selected={active}
             onClick={() => (active ? onClear() : onApply(v))}
-            className={`rounded-full border px-3 py-1 text-sm cursor-pointer transition-colors ${
-              active
-                ? 'border-accent bg-accent text-fg-on-emphasis'
-                : 'border-border bg-canvas text-fg hover:bg-canvas-inset'
-            }`}
           >
             {v.name}
-          </button>
+          </Chip>
         )
       })}
       {activeView && (
@@ -174,7 +168,6 @@ export function SavedViewBar({
       {dialog === 'save-as' && (
         <ViewNameDialog
           title="Save as view"
-          intro="Saves the current filters, sort and columns on this schema, so anyone can open them again with one click."
           confirmLabel="Save view"
           isPending={pending}
           error={error}

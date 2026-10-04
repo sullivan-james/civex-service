@@ -19,6 +19,8 @@ def count_jobs(
     record_id: str | None = None,
     affected_record_id: str | None = None,
     affected_schema: str | None = None,
+    trigger: str | None = None,
+    search: str | None = None,
     ctx: AppContext = Depends(get_ctx),
 ):
     return {
@@ -27,6 +29,8 @@ def count_jobs(
             record_id=record_id,
             affected_record_id=affected_record_id,
             affected_schema=affected_schema,
+            trigger=trigger,
+            search=search,
         )
     }
 
@@ -37,6 +41,15 @@ def list_jobs(
     record_id: str | None = None,
     affected_record_id: str | None = None,
     affected_schema: str | None = None,
+    trigger: str | None = None,
+    search: str | None = Query(
+        default=None, description="Match on workflow name or error text."
+    ),
+    sort: str | None = Query(
+        default=None,
+        description="'column[:asc|desc]' over workflow_name, status, trigger, "
+        "schema_name, created_at. Newest first otherwise.",
+    ),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=500),
     ctx: AppContext = Depends(get_ctx),
@@ -53,6 +66,9 @@ def list_jobs(
         affected_schema=affected_schema,
         offset=offset,
         limit=limit,
+        trigger=trigger,
+        search=search,
+        sort=sort,
     )
     return [WorkflowJobResponse.from_dto(j) for j in jobs]
 

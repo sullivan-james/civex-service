@@ -1,20 +1,30 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from civex.context import AppContext
 from civex.domain.exceptions import AllVolumesFull, VolumeUnavailableError
 from civex.server.deps import get_ctx
-from civex.server.models import FileRefResponse
+from civex.server.models import FileInfoResponse, FileRefResponse
 from civex.sync.transport import SyncError
 
 router = APIRouter(prefix="/files", tags=["files"])
 
 
 _UPLOAD_CHUNK = 1024 * 1024
+
+_COLLECTION_PARAM = Query(
+    default=None,
+    description=(
+        "Id of the collection the file is for. It only steers which volume receives "
+        "*new* content (the collection's home volume, if it has one); a file whose "
+        "content is already stored is reused where it lives, never copied again."
+    ),
+)
 
 
 async def _read_chunks(file: UploadFile) -> AsyncIterator[bytes]:
@@ -23,13 +33,17 @@ async def _read_chunks(file: UploadFile) -> AsyncIterator[bytes]:
 
 
 @router.post("", response_model=FileRefResponse, status_code=201)
-async def upload_file(file: UploadFile, ctx: AppContext = Depends(get_ctx)):
+async def upload_file(
+    file: UploadFile,
+    collection: str | None = _COLLECTION_PARAM,
+    ctx: AppContext = Depends(get_ctx),
+):
     """Upload a multipart file. Starlette has already spooled the body to a
     temp file by the time this runs; it is hashed and copied into the object
     store 1 MiB at a time, so memory use is independent of file size."""
     try:
         ref = await ctx.file_svc.store_stream(
-            _read_chunks(file), file.filename or "upload", file.size
+            _read_chunks(file), file.filename or "upload", file.size, collection
         )
     except (AllVolumesFull, VolumeUnavailableError) as e:
         raise HTTPException(507, detail=str(e))
@@ -40,7 +54,10 @@ async def upload_file(file: UploadFile, ctx: AppContext = Depends(get_ctx)):
 
 @router.put("/stream", response_model=FileRefResponse, status_code=201)
 async def upload_file_stream(
-    request: Request, filename: str = "upload", ctx: AppContext = Depends(get_ctx)
+    request: Request,
+    filename: str = "upload",
+    collection: str | None = _COLLECTION_PARAM,
+    ctx: AppContext = Depends(get_ctx),
 ):
     """Upload a raw (non-multipart) request body, streamed straight to the
     object store instead of buffered in memory first. A multipart body sent
@@ -60,7 +77,9 @@ async def upload_file_stream(
         except ValueError:
             size_hint = None
     try:
-        ref = await ctx.file_svc.store_stream(request.stream(), filename, size_hint)
+        ref = await ctx.file_svc.store_stream(
+            request.stream(), filename, size_hint, collection
+        )
     except (AllVolumesFull, VolumeUnavailableError) as e:
         raise HTTPException(507, detail=str(e))
     return FileRefResponse(
@@ -82,6 +101,18 @@ def download_file(sha256: str, filename: str = "", ctx: AppContext = Depends(get
     try:
         path = ctx.file_svc.local_path(sha256)
     except (FileNotFoundError, SyncError):
+        # "Not there" and "on a drive that isn't plugged in" are different
+        # problems with different fixes: say which.
+        offline = ctx.file_svc.offline_location(sha256)
+        if offline is not None:
+            volume, status = offline
+            raise HTTPException(
+                503,
+                detail=(
+                    f"This file is on volume '{volume}', which isn't available right "
+                    f"now ({status.reason}). {status.fix}"
+                ),
+            )
         raise HTTPException(
             404, detail=f"Object {sha256} not found locally or on remote"
         )
@@ -91,3 +122,16 @@ def download_file(sha256: str, filename: str = "", ctx: AppContext = Depends(get
     return FileResponse(
         path, media_type="application/octet-stream", filename=filename or None
     )
+
+
+@router.get("/{sha256}/info", response_model=FileInfoResponse)
+def file_info(sha256: str, ctx: AppContext = Depends(get_ctx)):
+    """Where a file's content is stored and what uses it.
+
+    Lists every place the content is, or is recorded to be (each volume, its
+    state, and the object's path on it, including a volume that is unplugged
+    right now), the size, and the records, collections and workflow runs that
+    use it. A file used by several records is stored once, so this is how to
+    see everything that shares it.
+    """
+    return asdict(ctx.file_info_svc.info(sha256))

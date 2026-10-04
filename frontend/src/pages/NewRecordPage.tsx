@@ -1,16 +1,17 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import type { Field as SchemaField } from '../api/schemas'
 import { useCollection } from '../hooks/useCollections'
+import { UploadCollectionContext } from '../hooks/uploadCollection'
 import { useCreateRecord, useRecord } from '../hooks/useRecords'
 import { useSchemas } from '../hooks/useSchemas'
 import {
   Badge,
   Button,
+  Card,
   DetailSkeleton,
   ErrorState,
   Page,
-  Section,
 } from '../components/ui'
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { RecordPageFrame } from '../components/records/RecordPageFrame'
@@ -25,6 +26,7 @@ import {
 import { ScanText } from '../components/ui/icons'
 import { displayLabel } from '../utils/naming'
 import { errorMessage } from '../lib/errors'
+import { useBack } from '../hooks/useBack'
 
 const PARENT = '__parent__'
 
@@ -70,14 +72,17 @@ export default function NewRecordPage() {
     [parentSchema, parentParam],
   )
 
-  const listHref = `/collections/${id}${
-    schemaName
-      ? `?${new URLSearchParams({
-          schema: schemaName,
-          ...(parentParam ? { within: parentParam } : {}),
-        })}`
-      : ''
-  }`
+  // Where Cancel goes when there is no history to return to: the parent's
+  // Contains tab for a child record, else the collection's list.
+  const fallbackHref = parentParam
+    ? `/records/${parentParam}?${new URLSearchParams({
+        tab: 'contains',
+        ...(schemaName ? { schema: schemaName } : {}),
+      })}`
+    : `/collections/${id}${
+        schemaName ? `?${new URLSearchParams({ schema: schemaName })}` : ''
+      }`
+  const goBack = useBack(fallbackHref)
   const parentPath = parentRecord
     ? [...(parentRecord.ancestors ?? []), parentRecord]
     : []
@@ -130,7 +135,11 @@ export default function NewRecordPage() {
         parent_record_id:
           parentParam ?? (values[PARENT] as string | undefined) ?? undefined,
       },
-      { onSuccess: (created) => navigate(`/records/${created.id}`) },
+      {
+        // The form is done with: Back from the new record skips it.
+        onSuccess: (created) =>
+          navigate(`/records/${created.id}`, { replace: true }),
+      },
     )
   }
 
@@ -150,54 +159,57 @@ export default function NewRecordPage() {
             <Badge variant="accent">{schema.name}</Badge>
           </span>
         }
-        description="Fill in what you have — click a value to edit it. Nothing is saved until you add the record."
+        info="Click a value to edit it. Nothing is saved until you add the record."
       >
-        <Section title="Fields">
-          <RecordFieldGrid
-            fields={fields}
-            data={values}
-            onSave={(name, value) =>
-              setValues((prev) => {
-                const next = { ...prev }
-                if (value === undefined) delete next[name]
-                else next[name] = value
-                return next
-              })
-            }
-            errors={errors}
-            onDismissError={() => createRecord.reset()}
-            extra={(field) => {
-              if (
-                field.name === PARENT ||
-                !EXTRACTABLE_TYPES.has(field.type) ||
-                fileSources.length === 0
-              )
-                return null
-              const open = extracting === field.name
-              return (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setExtracting(open ? null : field.name)}
-                    className="mt-1 inline-flex items-center gap-1 text-xs text-fg-muted hover:text-accent cursor-pointer"
-                  >
-                    <ScanText size={11} /> fill from filename
-                  </button>
-                  {open && (
-                    <FilenameExtractor
-                      sources={fileSources}
-                      fieldType={field.type}
-                      onApply={(v) =>
-                        setValues((prev) => ({ ...prev, [field.name]: v }))
-                      }
-                      onClose={() => setExtracting(null)}
-                    />
-                  )}
-                </>
-              )
-            }}
-          />
-        </Section>
+        <UploadCollectionContext.Provider value={collection.id}>
+          <Card title="Fields">
+            <RecordFieldGrid
+              fields={fields}
+              data={values}
+              onSave={(name, value) =>
+                setValues((prev) => {
+                  const next = { ...prev }
+                  if (value === undefined) delete next[name]
+                  else next[name] = value
+                  return next
+                })
+              }
+              errors={errors}
+              onDismissError={() => createRecord.reset()}
+              extra={(field) => {
+                if (
+                  field.name === PARENT ||
+                  !EXTRACTABLE_TYPES.has(field.type) ||
+                  fileSources.length === 0
+                )
+                  return null
+                const open = extracting === field.name
+                return (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="mt-1"
+                      onClick={() => setExtracting(open ? null : field.name)}
+                    >
+                      <ScanText size={14} /> Fill from filename
+                    </Button>
+                    {open && (
+                      <FilenameExtractor
+                        sources={fileSources}
+                        fieldType={field.type}
+                        onApply={(v) =>
+                          setValues((prev) => ({ ...prev, [field.name]: v }))
+                        }
+                        onClose={() => setExtracting(null)}
+                      />
+                    )}
+                  </>
+                )
+              }}
+            />
+          </Card>
+        </UploadCollectionContext.Provider>
         <div className="flex gap-2">
           <Button
             variant="primary"
@@ -208,9 +220,7 @@ export default function NewRecordPage() {
           >
             {createRecord.isPending ? 'Adding…' : `Add ${label.toLowerCase()}`}
           </Button>
-          <Link to={listHref}>
-            <Button>Cancel</Button>
-          </Link>
+          <Button onClick={goBack}>Cancel</Button>
         </div>
       </RecordPageFrame>
     </CollectionTimeZone>

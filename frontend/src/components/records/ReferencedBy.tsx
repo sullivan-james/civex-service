@@ -1,7 +1,6 @@
-import { Link } from 'react-router'
 import { useReferrers } from '../../hooks/useRecords'
 import { useSchemas } from '../../hooks/useSchemas'
-import { Button, CollapsibleSection } from '../ui'
+import { Button } from '../ui'
 import type { ReferrerGroup } from '../../api/records'
 import type { FilterTreeWire } from '../../utils/filterTree'
 import { applyExplorerPatch } from '../../utils/explorerState'
@@ -59,9 +58,9 @@ function Groups({ recordId }: { recordId: string }) {
                 <CollectionMarker name={g.collection} />
               )}
             </span>
-            <Link to={referrersHref(g, recordId)}>
-              <Button size="sm">View all</Button>
-            </Link>
+            <Button size="sm" to={referrersHref(g, recordId)}>
+              View all
+            </Button>
           </li>
         )
       })}
@@ -70,12 +69,8 @@ function Groups({ recordId }: { recordId: string }) {
 }
 
 /** Reverse references: which records point at this one, per collection,
- * schema and field. Collapsed by default -- finding them scans record data,
- * so nothing is fetched until the section is opened. */
+ * schema and field. Finding them scans record data, so it is only mounted
+ * (and fetched) while its tab is open. */
 export function ReferencedBy({ recordId }: { recordId: string }) {
-  return (
-    <CollapsibleSection title="Referenced by">
-      <Groups recordId={recordId} />
-    </CollapsibleSection>
-  )
+  return <Groups recordId={recordId} />
 }

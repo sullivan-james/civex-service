@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link } from 'react-router'
 import {
   useRetentionSettings,
   useSetRetention,
@@ -43,18 +42,7 @@ export default function RetentionSection() {
   const { data: settings, isLoading } = useRetentionSettings()
 
   return (
-    <div className="space-y-3">
-      <div>
-        <h2 className="text-lg font-semibold text-fg">Recently Deleted</h2>
-        <p className="text-sm text-fg-muted mt-0.5">
-          Deleted schemas, collections and records are kept in{' '}
-          <Link to="/trash" className="text-accent hover:underline">
-            Recently Deleted
-          </Link>{' '}
-          and can be restored until they're permanently purged.
-        </p>
-      </div>
-
+    <div>
       {isLoading || !settings ? (
         <Skeleton className="h-9 w-40" />
       ) : (

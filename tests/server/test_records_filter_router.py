@@ -1,6 +1,7 @@
 """HTTP contract for the multi-operator `filter` query param on
 GET /collections/{name}/records, alongside the pre-existing simple `where=`
 equality form."""
+
 from __future__ import annotations
 
 import json
@@ -11,9 +12,7 @@ from fastapi.testclient import TestClient
 def _seed(client: TestClient) -> None:
     client.post("/api/schemas", json={"name": "employee"})
     for name, dtype in [("name", "string"), ("age", "integer"), ("dept", "string")]:
-        client.post(
-            "/api/schemas/employee/fields", json={"name": name, "type": dtype}
-        )
+        client.post("/api/schemas/employee/fields", json={"name": name, "type": dtype})
     client.post("/api/collections", json={"name": "acme"})
     for data in [
         {"name": "Alice", "age": 30, "dept": "eng"},

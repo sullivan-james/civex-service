@@ -40,7 +40,6 @@ export function NameLabelFields({
 }: NameLabelFieldsProps) {
   const [derive, setDerive] = useState(deriveName)
   const error = value.name ? nameError(value.name) : null
-  const noun = kind.toLowerCase()
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && onEnter) onEnter()
@@ -48,11 +47,7 @@ export function NameLabelFields({
 
   return (
     <>
-      <Field
-        label={`${kind} label`}
-        span={4}
-        hint="Shown everywhere in the UI. Spaces and capitals are fine."
-      >
+      <Field label={`${kind} label`} span={4}>
         <Input
           size="sm"
           value={value.label}
@@ -73,7 +68,7 @@ export function NameLabelFields({
         label={`${kind} name`}
         span={4}
         error={error}
-        hint={`Referenced by workflows and CSV headers. Changing it later means updating any workflow that names this ${noun}.`}
+        info="Used by workflows and CSV headers."
       >
         <Input
           size="sm"

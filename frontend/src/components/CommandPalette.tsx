@@ -147,7 +147,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           onKeyDown={onKeyDown}
           className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-fg-subtle"
         />
-        <kbd className="rounded border border-border px-1.5 text-xs text-fg-muted">
+        <kbd className="rounded-md border border-border px-1.5 text-xs text-fg-muted">
           Esc
         </kbd>
       </div>

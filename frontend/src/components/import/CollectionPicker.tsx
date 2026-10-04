@@ -1,4 +1,4 @@
-import { Field, Input, Select } from '../ui'
+import { Field, Input, Select, Subheading } from '../ui'
 import { NEW_COLLECTION } from './importWizardTypes'
 import type { Collection } from '../../api/collections'
 
@@ -24,9 +24,7 @@ export function CollectionPicker({
 }) {
   return (
     <div className="space-y-2">
-      <span className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
-        Collection
-      </span>
+      <Subheading as="span">Collection</Subheading>
       <Select
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -42,10 +40,7 @@ export function CollectionPicker({
       </Select>
       {isNew && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 pt-2">
-          <Field
-            label="Name"
-            hint="A collection is a named container for records — e.g. one per field season or per site."
-          >
+          <Field label="Name">
             <Input
               autoFocus
               value={newCollection.name}

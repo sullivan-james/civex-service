@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import dataclasses
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from civex.domain.dtos import DatasetDTO, FileRef, RecordDTO, SchemaDTO
+from civex.domain.file_refs import without_file_locations
 from civex_plugin_sdk.plugin_base import PluginBase
 
 if TYPE_CHECKING:
@@ -110,6 +112,13 @@ class WorkflowContext:
     # later step) appears once, with its most recent action.
     affected_records: list[dict[str, Any]] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        # However the record was built, a workflow sees a file's identity, not
+        # where it happens to be stored this moment (see without_file_locations).
+        self.record = dataclasses.replace(
+            self.record, data=without_file_locations(self.record.data)
+        )
+
     def _note_affected(self, dto: RecordDTO, action: str) -> None:
         for entry in self.affected_records:
             if entry["record_id"] == str(dto.id):
@@ -135,7 +144,7 @@ class WorkflowContext:
         return self._app_ctx.file_svc.retrieve(sha256)
 
     def store_file(self, data: bytes, filename: str) -> FileRef:
-        return self._app_ctx.file_svc.store_bytes(data, filename)
+        return self._app_ctx.file_svc.store_bytes(data, filename, str(self.dataset.id))
 
     def update_record(self, record_id: str, data: dict[str, Any]) -> RecordDTO:
         dto = self._app_ctx.record_svc.update(

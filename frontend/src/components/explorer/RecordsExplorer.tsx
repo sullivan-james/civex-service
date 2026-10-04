@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link, useLocation } from 'react-router'
+import { Link, useLocation, useNavigate } from 'react-router'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import { viewsApi } from '../../api/views'
 import {
@@ -18,12 +18,14 @@ import {
   ErrorState,
   Input,
   Pagination,
+  Menu,
   PinButton,
+  type MenuItem,
   TriggerPopover,
   TableSkeleton,
   Field,
 } from '../ui'
-import { Columns3, Download, Plus } from '../ui/icons'
+import { ChevronDown, Columns3, Download, Plus, Upload } from '../ui/icons'
 import { toTableRows } from '../records/tableRows'
 import {
   RecordsTable,
@@ -256,15 +258,72 @@ export function RecordsExplorer({
     else deleteMany.mutate([...selected], done)
   }
 
+  // The collection's own top-level schemas: where a record can start. Levels
+  // come from record counts, so a schema with no records yet has none, and
+  // without these there would be no way to create the first of its kind.
+  const enabledSchemas = new Set(collection?.schemas ?? [])
+  const navigate = useNavigate()
+  const starters = dataset
+    ? (x.schemas ?? []).filter(
+        (s) => !s.parent_id && enabledSchemas.has(s.name),
+      )
+    : []
+  // At the top of a collection, the starters other than the one being listed.
+  const otherStarters = x.rootId
+    ? []
+    : starters.filter((s) => s.name !== listed?.name)
+
+  // One way to create anything: a single New menu. What is being listed comes
+  // first (under the record being browsed when that is its parent), then the
+  // other places a record can start, then import.
+  const newItems: MenuItem[] = dataset
+    ? [
+        ...(listed
+          ? [
+              {
+                label: `New ${listedLabel.toLowerCase()}`,
+                icon: Plus,
+                onClick: () => navigate(newRecordHref),
+              },
+            ]
+          : []),
+        ...otherStarters.map((s) => ({
+          label: `New ${displayLabel(s.name, s.label).toLowerCase()}`,
+          icon: Plus,
+          onClick: () =>
+            navigate(
+              `/collections/${dataset}/new?${new URLSearchParams({ schema: s.name })}`,
+            ),
+        })),
+        {
+          label: 'Import data…',
+          icon: Upload,
+          onClick: () => navigate(`/collections/${dataset}/import`),
+        },
+      ]
+    : []
+  const newMenu = newItems.length > 0 && (
+    <Menu
+      items={newItems}
+      trigger={({ open, toggle }) => (
+        <Button
+          variant="primary"
+          size="sm"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={toggle}
+        >
+          <Plus size={14} /> New <ChevronDown size={14} />
+        </Button>
+      )}
+    />
+  )
+
   if (!listed && !x.page.isLoading && x.levels.length === 0) {
     // Levels come from record counts, so an empty collection has none and the
     // list's own "Add" button never renders -- offer the collection's own
     // top-level schemas here instead, or there is no way to create the first
     // record (a child schema needs a parent record, so it can't start one).
-    const enabled = new Set(collection?.schemas ?? [])
-    const starters = dataset
-      ? (x.schemas ?? []).filter((s) => !s.parent_id && enabled.has(s.name))
-      : []
     const noSchemas = !!collection && collection.schemas.length === 0
     return (
       <div className="space-y-3">
@@ -277,19 +336,7 @@ export function RecordsExplorer({
           }
         />
         {starters.length > 0 && (
-          <div className="flex flex-wrap justify-center gap-2">
-            {starters.map((s) => (
-              <Link
-                key={s.id}
-                to={`/collections/${dataset}/new?${new URLSearchParams({ schema: s.name })}`}
-              >
-                <Button variant="primary" size="sm">
-                  <Plus size={14} /> Add{' '}
-                  {displayLabel(s.name, s.label).toLowerCase()}
-                </Button>
-              </Link>
-            ))}
-          </div>
+          <div className="flex justify-center">{newMenu}</div>
         )}
       </div>
     )
@@ -331,24 +378,20 @@ export function RecordsExplorer({
                 joinable={x.joinable}
               />
               {x.cols && (
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="mt-2"
                   onClick={() => patch({ cols: null })}
-                  className="mt-2 text-xs text-fg-muted underline cursor-pointer"
                 >
                   Reset to default columns
-                </button>
+                </Button>
               )}
             </TriggerPopover>
             {exportHref ? (
-              <a href={exportHref} download>
-                <Button
-                  size="sm"
-                  title="Downloads exactly the rows listed below"
-                >
-                  <Download size={14} /> Export
-                </Button>
-              </a>
+              <Button size="sm" href={exportHref} download>
+                <Download size={14} /> Export
+              </Button>
             ) : (
               <Button size="sm" disabled title="Save as a view to export">
                 <Download size={14} /> Export
@@ -361,13 +404,7 @@ export function RecordsExplorer({
                 size="md"
               />
             )}
-            {dataset && listed && (
-              <Link to={newRecordHref}>
-                <Button variant="primary" size="sm">
-                  <Plus size={14} /> Add {listedLabel.toLowerCase()}
-                </Button>
-              </Link>
-            )}
+            {newMenu}
           </div>
         </div>
 
@@ -476,25 +513,20 @@ export function RecordsExplorer({
           <div className="space-y-2">
             <ErrorState message={errorMessage(x.page.error)} />
             {(x.hasSelection || state.q) && (
-              <p className="text-sm text-fg-muted">
-                Change or remove the filters above, or{' '}
-                <button
-                  type="button"
-                  className="text-accent hover:underline cursor-pointer"
-                  onClick={() =>
-                    patch({
-                      filter: null,
-                      sort: [],
-                      cols: null,
-                      view: null,
-                      q: '',
-                    })
-                  }
-                >
-                  clear them all
-                </button>
-                .
-              </p>
+              <Button
+                size="sm"
+                onClick={() =>
+                  patch({
+                    filter: null,
+                    sort: [],
+                    cols: null,
+                    view: null,
+                    q: '',
+                  })
+                }
+              >
+                Clear filters
+              </Button>
             )}
           </div>
         ) : x.page.isLoading ? (

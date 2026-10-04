@@ -38,7 +38,6 @@ export default function ImportPage() {
     <Page
       breadcrumbs={[...breadcrumbs, { label: 'Import' }]}
       title="Guided import"
-      description={`Bring files or a spreadsheet into "${collection.name}" as records.`}
     >
       <ImportWizard datasetName={collection.name} />
     </Page>

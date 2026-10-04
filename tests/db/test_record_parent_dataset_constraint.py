@@ -87,7 +87,7 @@ def test_migration_repairs_pre_existing_cross_dataset_parent_links(tmp_path) -> 
     # (and its data repair) isn't -- then seed a violation only that older
     # schema would allow. Seeded via Core against that revision's own column
     # set (not the ORM models, which reflect *current* head and would include
-    # columns -- e.g. schemas.display_fields -- that don't exist yet at this
+    # columns -- e.g. schemas.display_template -- that don't exist yet at this
     # revision).
     engine = create_engine(f"sqlite:///{db_path}")
     with engine.connect() as c:
@@ -104,14 +104,18 @@ def test_migration_repairs_pre_existing_cross_dataset_parent_links(tmp_path) -> 
     parent_id, bad_child_id = uuid.uuid4(), uuid.uuid4()
     with engine.begin() as c:
         c.execute(
-            text("INSERT INTO datasets (id, name, created_at) VALUES (:id, :name, :created_at)"),
+            text(
+                "INSERT INTO datasets (id, name, created_at) VALUES (:id, :name, :created_at)"
+            ),
             [
                 {"id": ds1_id.hex, "name": "ds1", "created_at": now},
                 {"id": ds2_id.hex, "name": "ds2", "created_at": now},
             ],
         )
         c.execute(
-            text("INSERT INTO schemas (id, name, created_at) VALUES (:id, :name, :created_at)"),
+            text(
+                "INSERT INTO schemas (id, name, created_at) VALUES (:id, :name, :created_at)"
+            ),
             {"id": sch_id.hex, "name": "sch", "created_at": now},
         )
         c.execute(

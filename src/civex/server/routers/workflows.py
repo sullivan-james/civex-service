@@ -164,6 +164,14 @@ async def run_workflow(
     ):
         form = await request.form()
         record_id = str(form.get("record_id", ""))
+        # Files uploaded as run inputs belong to the triggering record's
+        # collection, whose home volume (if any) receives new content.
+        input_collection: str | None = None
+        if record_id:
+            try:
+                input_collection = str(ctx.record_svc.get(record_id).dataset_id)
+            except NotFoundError:
+                input_collection = None
         declared_inputs = wf_def.inputs or {}
         resolved: dict[str, Any] = {}
         for input_name, input_decl in declared_inputs.items():
@@ -175,7 +183,7 @@ async def run_workflow(
                         data = await upload.read()
                         try:
                             ref = ctx.file_svc.store_bytes(
-                                data, upload.filename or "upload"
+                                data, upload.filename or "upload", input_collection
                             )
                         except (AllVolumesFull, VolumeUnavailableError) as e:
                             raise HTTPException(507, detail=str(e))

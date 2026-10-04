@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router'
 import { errorMessage } from '../lib/errors'
-import { schemaRecordsPath } from '../utils/explorerState'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
 import { schemasApi } from '../api/schemas'
 import {
@@ -23,11 +22,14 @@ import {
   Page,
   FormGrid,
   NameLabelFields,
-  Section,
+  TabNav,
+  TabPanel,
+  useTabParam,
 } from '../components/ui'
 import { displayLabel, nameError } from '../utils/naming'
 import { Upload } from '../components/ui/icons'
 import { SchemaFieldsSection } from '../components/schemas/SchemaFieldsSection'
+import { NamingSection } from '../components/schemas/NamingSection'
 import { AuditTrail } from '../components/audit/AuditTrail'
 import { describeAuditEntry as describeSchemaAuditEntry } from '../utils/schemaAudit'
 import { WorkflowsPanel } from '../components/workflows/WorkflowsPanel'
@@ -126,10 +128,19 @@ function MetaEditor({
 
 // --- Main page ---
 
+const TABS = [
+  { id: 'fields', label: 'Fields' },
+  { id: 'naming', label: 'Naming' },
+  { id: 'automations', label: 'Automations' },
+  { id: 'history', label: 'History' },
+] as const
+type TabId = (typeof TABS)[number]['id']
+
 export default function SchemaDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [editing, setEditing] = useState(false)
+  const [tab, setTab] = useTabParam<TabId>(TABS, 'fields')
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   // Fetch by UUID — name changes don't affect the URL
@@ -183,43 +194,45 @@ export default function SchemaDetailPage() {
         { label: displayLabel(schema.name, schema.label) },
       ]}
       title={displayLabel(schema.name, schema.label)}
-      description={
-        <>
-          <p
+      meta={
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span
             className="font-mono text-xs text-fg-subtle"
             title="Schema name — what workflows and CSV headers reference"
           >
             {schema.name}
-          </p>
-          <p className="mt-1">
-            {schema.description ?? (
-              <span className="italic">No description</span>
-            )}
-          </p>
+          </span>
           {parentSchema && (
-            <p className="mt-1">
-              Inherits from{' '}
+            <span className="text-xs">
+              inherits{' '}
               <Link
                 to={`/schemas/${parentSchema.id}`}
                 className="text-accent hover:underline"
               >
                 {parentSchema.name}
               </Link>
-            </p>
+            </span>
           )}
-        </>
+          {schema.description && <span>{schema.description}</span>}
+        </p>
       }
+      secondaryActions={[
+        {
+          label: 'Delete schema…',
+          variant: 'danger',
+          onClick: () => setConfirmDelete(true),
+        },
+      ]}
       action={
         !editing && (
           <div className="flex items-center gap-2">
-            <Link to={`/schemas/${schema.id}/import`}>
-              <Button size="sm" variant="primary">
-                <Upload size={14} /> Import data
-              </Button>
-            </Link>
-            <Link to={schemaRecordsPath(schema.id)}>
-              <Button size="sm">Browse records</Button>
-            </Link>
+            <Button
+              size="sm"
+              variant="primary"
+              to={`/schemas/${schema.id}/import`}
+            >
+              <Upload size={14} /> Import data
+            </Button>
             <Button size="sm" onClick={() => setEditing(true)}>
               Edit
             </Button>
@@ -231,15 +244,33 @@ export default function SchemaDetailPage() {
         <MetaEditor schema={schema} onDone={() => setEditing(false)} />
       )}
 
-      <SchemaFieldsSection schema={schema} allSchemas={allSchemas} />
+      <TabNav label="Schema" tabs={[...TABS]} value={tab} onChange={setTab} />
+      <TabPanel id="fields" value={tab}>
+        <SchemaFieldsSection schema={schema} allSchemas={allSchemas} />
+      </TabPanel>
 
-      <Section title="Automations">
+      <TabPanel id="naming" value={tab}>
+        <NamingSection schema={schema} allSchemas={allSchemas} />
+      </TabPanel>
+
+      <TabPanel id="automations" value={tab}>
         <WorkflowsPanel
           schemaName={schema.name}
           onRun={(wf) => setRunTarget(wf)}
           onView={(wf) => setSummaryTarget(wf)}
         />
-      </Section>
+      </TabPanel>
+
+      <TabPanel id="history" value={tab}>
+        <AuditTrail
+          queryKey={['schemas', schema.name, 'audit']}
+          fetchPage={(offset, limit, view) =>
+            schemasApi.getAudit(schema.name, offset, limit, view)
+          }
+          describeEntry={describeSchemaAuditEntry}
+          emptyMessage="No changes yet."
+        />
+      </TabPanel>
 
       {summaryTarget && (
         <WorkflowSummaryModal
@@ -255,38 +286,6 @@ export default function SchemaDetailPage() {
           onClose={() => setRunTarget(null)}
         />
       )}
-
-      <AuditTrail
-        queryKey={['schemas', schema.name, 'audit']}
-        fetchPage={(offset, limit) =>
-          schemasApi.getAudit(schema.name, offset, limit)
-        }
-        describeEntry={describeSchemaAuditEntry}
-        emptyMessage="Changes to this schema and its fields will appear here."
-      />
-
-      {/* Danger zone */}
-      <div className="border border-danger-muted rounded-md">
-        <div className="px-4 py-3 border-b border-danger-muted bg-danger-subtle rounded-t-md">
-          <h2 className="text-sm font-semibold text-danger">Danger zone</h2>
-        </div>
-        <div className="px-4 py-3 flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-fg">Delete this schema</p>
-            <p className="text-xs text-fg-muted">
-              Moves this schema (and the records typed by it) to Recently
-              Deleted — restore it any time before it's permanently purged.
-            </p>
-          </div>
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => setConfirmDelete(true)}
-          >
-            Delete schema
-          </Button>
-        </div>
-      </div>
 
       {confirmDelete &&
         (() => {

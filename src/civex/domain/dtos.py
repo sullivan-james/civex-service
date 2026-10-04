@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any
 
 from civex.domain.naming import display_label
+from civex.domain.templating import from_field_list
 
 
 def _parse_dt(s: str | None) -> datetime | None:
@@ -77,9 +78,9 @@ class SchemaDTO:
     parent_id: uuid.UUID | None
     created_at: datetime
     fields: list[FieldDTO] = field(default_factory=list)
-    # Ordered field names joined (space-separated) to form the record's natural
-    # name; entries with no value on a given record are skipped at render time.
-    display_fields: list[str] = field(default_factory=list)
+    # Template (domain/templating.py) that builds a record's natural name from
+    # its field values; None means "use the first plain value".
+    display_template: str | None = None
     # Free-text display name; None means "derive one from name".
     label: str | None = None
     # Soft-delete marker; None means live. See SchemaRepository.delete/restore.
@@ -97,7 +98,7 @@ class SchemaDTO:
             "label": self.label,
             "description": self.description,
             "parent_id": str(self.parent_id) if self.parent_id else None,
-            "display_fields": self.display_fields,
+            "display_template": self.display_template,
             "created_at": self.created_at.isoformat(),
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
@@ -110,7 +111,13 @@ class SchemaDTO:
             label=d.get("label"),
             description=d.get("description"),
             parent_id=uuid.UUID(d["parent_id"]) if d.get("parent_id") else None,
-            display_fields=d.get("display_fields") or [],
+            # Dumps and audit rows older than templates carry a field list.
+            display_template=d.get("display_template")
+            or (
+                from_field_list(d["display_fields"])
+                if d.get("display_fields")
+                else None
+            ),
             created_at=datetime.fromisoformat(d["created_at"]),
             deleted_at=_parse_dt(d.get("deleted_at")),
         )
@@ -283,6 +290,152 @@ class FileRef:
             size=d["size"],
             volume=d.get("volume", "default"),
         )
+
+
+# Volume states. "online" is the only one that accepts writes.
+VOLUME_ONLINE = "online"
+VOLUME_OFFLINE = "offline"  # the path isn't there (drive not plugged in)
+VOLUME_WRONG_DRIVE = "wrong_drive"  # something is there, but it isn't this volume
+VOLUME_READONLY = "readonly"  # reachable; marked read-only
+VOLUME_RETIRED = "retired"  # reachable; no longer written to
+
+# What a volume's configured `state` may be (the others above are worked out).
+VOLUME_CONFIG_STATES = ("active", "readonly", "retired")
+
+
+@dataclass(frozen=True)
+class VolumeStatus:
+    """Whether a volume can be used right now, and if not, why and what to do
+    about it. Produced only by `VolumeAwareFileObjectStore.volume_status()`."""
+
+    state: str  # one of the VOLUME_* constants
+    reason: str = ""  # what civex expected vs found; empty when online
+    fix: str = ""  # plain-language next step; empty when online
+    volume_id: str | None = None  # the verified identity, once the volume has one
+
+    @property
+    def reachable(self) -> bool:
+        """Its objects can be read and listed."""
+        return self.state in (VOLUME_ONLINE, VOLUME_READONLY, VOLUME_RETIRED)
+
+    @property
+    def writable(self) -> bool:
+        return self.state == VOLUME_ONLINE
+
+
+@dataclass
+class DirectoryEntry:
+    name: str
+    path: str
+
+
+@dataclass
+class StorageLocation:
+    """A place to start browsing from: the project, home, or a mounted drive."""
+
+    label: str
+    path: str
+    kind: str  # "project" | "home" | "drive"
+    free_bytes: int | None = None
+    total_bytes: int | None = None
+    network: bool = False
+    source: str | None = None  # where a network drive really lives (host:/share)
+
+
+@dataclass
+class DirectoryListing:
+    path: str
+    parent: str | None  # None at the top of the filesystem
+    entries: list[DirectoryEntry]  # folders only
+    truncated: bool
+    locations: list[StorageLocation]
+    hint: str | None = None  # why a drive might be missing, where it's known
+
+
+@dataclass
+class PathInspection:
+    """What adding a folder as a volume would involve, decided in one place
+    (`StoreService.inspect_path`) so the preview in the UI and the real
+    `add_volume` can't disagree. `problems` block the add; `warnings` don't."""
+
+    path: str
+    exists: bool
+    is_dir: bool
+    writable: bool
+    will_create: bool
+    inside_project: bool
+    same_disk_as_project: bool | None
+    free_bytes: int | None
+    total_bytes: int | None
+    existing_volume: str | None  # a configured volume already at this path
+    marker_volume: str | None  # configured volume whose drive this is
+    has_civex_data: bool
+    problems: list[str]
+    warnings: list[str]
+    is_network: bool = False
+
+
+@dataclass
+class FileCopy:
+    """One place a file's content is (or is recorded to be)."""
+
+    volume: str
+    path: str  # where the object is, or would be, on that volume
+    present: bool | None  # None: recorded there, but the volume can't be checked now
+    state: str  # the volume's state (VOLUME_*)
+    network: bool = False
+
+
+@dataclass
+class CollectionUse:
+    id: str
+    name: str | None  # None if the collection no longer exists
+    records: int
+
+
+@dataclass
+class FileInfo:
+    """Where a file's content is stored and what uses it."""
+
+    sha256: str
+    size: int | None
+    copies: list[FileCopy]
+    records: int  # records that reference it
+    jobs: int  # workflow runs that took it as an input
+    collections: list[CollectionUse]
+
+
+@dataclass
+class CollectionVolumeShare:
+    """How much of a collection's data one volume holds."""
+
+    volume: str
+    files: int
+    bytes: int
+    shared_files: int  # of those, files another collection uses too
+    state: str = "online"  # the volume's state now (see VolumeStatus)
+    available: bool = True
+
+
+@dataclass
+class CollectionStorage:
+    """Where a collection's files are: one share per volume that holds any."""
+
+    collection_id: str
+    files: int  # distinct files the collection's records use
+    bytes: int  # of those the catalog has a size for
+    volumes: list[CollectionVolumeShare]
+    unlocated_files: int  # used by records but not in the catalog on any volume
+
+
+@dataclass
+class VolumeSurplus:
+    """Files on a volume that no collection uses."""
+
+    unused_files: int = 0  # nothing at all uses them (garbage collection can reclaim)
+    unused_bytes: int = 0
+    history_files: int = 0  # only workflow run history uses them
+    history_bytes: int = 0
 
 
 @dataclass

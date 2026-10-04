@@ -1,4 +1,4 @@
-import { Button, FormError } from '../ui'
+import { Button, Card, DataTable, FormError } from '../ui'
 import { ArrowRight, Upload, Database } from '../ui/icons'
 import type { ParsedCsv } from '../../utils/csv'
 import type { Mode } from './importWizardTypes'
@@ -28,40 +28,26 @@ export function SourceStep({
   return (
     <div className="space-y-4">
       <div className="flex gap-3">
-        <button
+        <Card
           onClick={() => onModeChange('files')}
-          className={`flex-1 flex items-center gap-3 px-4 py-4 rounded-md border text-left transition-colors cursor-pointer ${
-            mode === 'files'
-              ? 'border-accent bg-accent-subtle'
-              : 'border-border hover:border-accent'
-          }`}
+          selected={mode === 'files'}
+          className="flex-1"
         >
-          <Upload size={18} className="text-accent shrink-0" />
-          <span>
-            <span className="block text-sm font-medium text-fg">Files</span>
-            <span className="block text-xs text-fg-muted">
-              A folder of scans, images, recordings…
-            </span>
+          <span className="flex items-center gap-3">
+            <Upload size={18} className="text-accent shrink-0" />
+            <span className="text-sm font-medium text-fg">Files</span>
           </span>
-        </button>
-        <button
+        </Card>
+        <Card
           onClick={() => onModeChange('csv')}
-          className={`flex-1 flex items-center gap-3 px-4 py-4 rounded-md border text-left transition-colors cursor-pointer ${
-            mode === 'csv'
-              ? 'border-accent bg-accent-subtle'
-              : 'border-border hover:border-accent'
-          }`}
+          selected={mode === 'csv'}
+          className="flex-1"
         >
-          <Database size={18} className="text-accent shrink-0" />
-          <span>
-            <span className="block text-sm font-medium text-fg">
-              Spreadsheet
-            </span>
-            <span className="block text-xs text-fg-muted">
-              A CSV of rows to turn into records
-            </span>
+          <span className="flex items-center gap-3">
+            <Database size={18} className="text-accent shrink-0" />
+            <span className="text-sm font-medium text-fg">Spreadsheet</span>
           </span>
-        </button>
+        </Card>
       </div>
 
       {mode === 'files' && (
@@ -108,36 +94,19 @@ export function SourceStep({
                 {parsedCsv.rows.length} row
                 {parsedCsv.rows.length === 1 ? '' : 's'}
               </div>
-              <div className="overflow-x-auto max-h-64">
-                <table className="text-xs w-full">
-                  <thead>
-                    <tr>
-                      {parsedCsv.columns.map((c) => (
-                        <th
-                          key={c}
-                          className="text-left px-2 py-1.5 font-medium text-fg-muted whitespace-nowrap border-b border-border"
-                        >
-                          {c}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {parsedCsv.rows.slice(0, 5).map((row, i) => (
-                      <tr key={i} className="border-t border-border-muted">
-                        {parsedCsv.columns.map((c) => (
-                          <td
-                            key={c}
-                            className="px-2 py-1.5 text-fg whitespace-nowrap"
-                          >
-                            {row[c]}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                layout="auto"
+                maxHeight="16rem"
+                className="border-0 rounded-none"
+                columns={parsedCsv.columns.map((c) => ({
+                  key: c,
+                  header: c,
+                  className: 'whitespace-nowrap',
+                  render: (i: number) => parsedCsv.rows[i][c],
+                }))}
+                rows={parsedCsv.rows.slice(0, 5).map((_, i) => i)}
+                getRowId={(i) => String(i)}
+              />
             </div>
           )}
           {parsedCsv && parsedCsv.rows.length === 0 && (

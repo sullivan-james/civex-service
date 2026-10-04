@@ -6,6 +6,7 @@ dict containing keys RecordService._check_restrictions() doesn't recognize
 the restriction would silently have zero effect at record-write time,
 making the field look constrained in the UI while enforcing nothing.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -30,7 +31,9 @@ def test_add_field_accepts_correct_accept_key(ctx: AppContext, make_schema):
     assert field.restrictions == {"accept": ".wav"}
 
 
-def test_add_field_rejects_restriction_key_valid_for_a_different_dtype(ctx: AppContext, make_schema):
+def test_add_field_rejects_restriction_key_valid_for_a_different_dtype(
+    ctx: AppContext, make_schema
+):
     """'choices' is valid for string/enum, not integer -- must still be rejected."""
     make_schema("trial")
     with pytest.raises(ValidationError, match="choices"):
@@ -58,7 +61,9 @@ def test_update_field_accepts_correct_key(ctx: AppContext, make_schema):
 def test_boolean_field_rejects_any_restriction_key(ctx: AppContext, make_schema):
     make_schema("trial")
     with pytest.raises(ValidationError, match="min"):
-        ctx.schema_svc.add_field("trial", "is_enrolled", "boolean", restrictions={"min": 1})
+        ctx.schema_svc.add_field(
+            "trial", "is_enrolled", "boolean", restrictions={"min": 1}
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -116,9 +121,7 @@ def test_add_field_rejects_filename_template_on_file_list(ctx: AppContext, make_
 def test_update_field_rejects_filename_template_referencing_unknown_field(
     ctx: AppContext, make_schema
 ):
-    make_schema(
-        "invoice", fields=[("invoice_number", "string"), ("scan", "file")]
-    )
+    make_schema("invoice", fields=[("invoice_number", "string"), ("scan", "file")])
     with pytest.raises(ValidationError, match="nope"):
         ctx.schema_svc.update_field(
             "invoice", "scan", restrictions={"filename_template": "{nope}.{ext}"}
@@ -128,9 +131,7 @@ def test_update_field_rejects_filename_template_referencing_unknown_field(
 def test_update_field_accepts_filename_template_referencing_known_field(
     ctx: AppContext, make_schema
 ):
-    make_schema(
-        "invoice", fields=[("invoice_number", "string"), ("scan", "file")]
-    )
+    make_schema("invoice", fields=[("invoice_number", "string"), ("scan", "file")])
     field = ctx.schema_svc.update_field(
         "invoice",
         "scan",
@@ -140,6 +141,7 @@ def test_update_field_accepts_filename_template_referencing_known_field(
 
 
 # --- unit / precision / geo ------------------------------------------------
+
 
 def test_float_unit_is_accepted_and_canonicalised(ctx: AppContext, make_schema):
     make_schema("dive")
@@ -166,7 +168,10 @@ def test_unit_must_be_a_short_symbol(ctx: AppContext, make_schema):
 def test_date_precision_and_partial_bounds(ctx: AppContext, make_schema):
     make_schema("deployment")
     field = ctx.schema_svc.add_field(
-        "deployment", "deployed", "date", restrictions={"precision": "month", "min": "2020-01"}
+        "deployment",
+        "deployed",
+        "date",
+        restrictions={"precision": "month", "min": "2020-01"},
     )
     assert field.restrictions["precision"] == "month"
     with pytest.raises(ValidationError, match="precision"):
@@ -198,4 +203,6 @@ def test_geo_rejects_bad_geometry_types_and_bbox(ctx: AppContext, make_schema):
             "deployment", "p", "geo", restrictions={"geometry_types": ["Circle"]}
         )
     with pytest.raises(ValidationError, match="bbox"):
-        ctx.schema_svc.add_field("deployment", "q", "geo", restrictions={"bbox": [1, 2, 3]})
+        ctx.schema_svc.add_field(
+            "deployment", "q", "geo", restrictions={"bbox": [1, 2, 3]}
+        )

@@ -104,10 +104,7 @@ export default function TerminalPage() {
   }, [theme])
 
   return (
-    <Page
-      title="Terminal"
-      description="Shell running in the civex server process"
-    >
+    <Page title="Terminal" info="A shell running in the civex server process.">
       <div
         ref={containerRef}
         className="rounded-lg border border-border overflow-hidden"

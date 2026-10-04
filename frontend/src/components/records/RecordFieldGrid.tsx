@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { filesApi } from '../../api/files'
+import { useUploadCollection } from '../../hooks/uploadCollection'
 import type { Field } from '../../api/schemas'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
 import { displayLabel } from '../../utils/naming'
 import { isGeometry, parseLocation, type Geometry } from '../../utils/geo'
 import { LocatorMap } from '../ui/LocatorMap'
 import { tidy, toFieldUnit } from '../../utils/units'
-import { Button, Checkbox, FormError } from '../ui'
+import { Button, Checkbox, FormError, IconButton } from '../ui'
 import { Paperclip, X } from '../ui/icons'
 import { DynamicField, type FileRef } from './DynamicField'
 import { PendingFiles, type StagedFile } from './PendingFiles'
@@ -14,6 +15,7 @@ import { acceptProblem, sizeProblem } from '../../utils/fileChecks'
 import { ReferenceChips } from './ReferenceChips'
 import type { FieldSaveError } from './saveErrors'
 import { FieldValue } from './FieldValue'
+import { FileLink, FileLocationChip } from './FileLocation'
 
 const isEmpty = (v: unknown) =>
   v === null ||
@@ -86,6 +88,7 @@ function FileControl({
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [staged, setStaged] = useState<StagedFile[]>([])
+  const collectionId = useUploadCollection()
   const { accept, maxSize } = toInputProps(field)
 
   async function pick(e: React.ChangeEvent<HTMLInputElement>) {
@@ -106,7 +109,11 @@ function FileControl({
             ? `Uploading ${i + 1} of ${files.length}…`
             : 'Uploading…',
         )
-        const ref = await filesApi.uploadStreaming(files[i], () => {})
+        const ref = await filesApi.uploadStreaming(
+          files[i],
+          () => {},
+          collectionId,
+        )
         uploaded.push({
           ref,
           problem:
@@ -142,25 +149,23 @@ function FileControl({
           className="flex items-center gap-2 text-sm text-fg"
         >
           <Paperclip size={14} className="shrink-0 text-fg-muted" />
-          <a
-            href={`/api/files/${ref.sha256}?filename=${encodeURIComponent(ref.resolved_filename ?? ref.filename)}`}
-            download={ref.resolved_filename ?? ref.filename}
+          <FileLink
+            file={ref}
             className="truncate text-accent hover:underline"
             title={`Download · ${(ref.size / 1024).toFixed(1)} KB`}
           >
             {ref.resolved_filename ?? ref.filename}
-          </a>
+          </FileLink>
           <span className="shrink-0 text-xs text-fg-muted">
             {(ref.size / 1024).toFixed(1)} KB
           </span>
-          <button
-            type="button"
+          <FileLocationChip file={ref} />
+          <IconButton
+            icon={X}
+            variant="danger"
             onClick={() => remove(ref.sha256)}
             aria-label={`Remove ${ref.filename}`}
-            className="shrink-0 rounded p-1 text-fg-muted hover:bg-canvas-inset hover:text-danger cursor-pointer"
-          >
-            <X size={12} />
-          </button>
+          />
         </div>
       ))}
       <PendingFiles
@@ -470,14 +475,12 @@ export function RecordFieldGrid({
                     />
                   </div>
                   {onDismissError && (
-                    <button
-                      type="button"
+                    <IconButton
+                      icon={X}
+                      variant="danger"
                       onClick={onDismissError}
                       aria-label="Dismiss error"
-                      className="shrink-0 rounded p-1 text-danger hover:bg-canvas/50 cursor-pointer"
-                    >
-                      <X size={12} />
-                    </button>
+                    />
                   )}
                 </div>
               )}

@@ -371,12 +371,18 @@ export default function ImportWizard({
     setProgress(0)
     try {
       let finalDatasetName = datasetName ?? confirmState.collectionChoice
+      // The collection files are uploaded for (its home volume, if it has
+      // one, receives new content).
+      let finalCollectionId = collections?.find(
+        (c) => c.name === finalDatasetName,
+      )?.id
       if (!datasetName && collectionIsNew) {
         const created = await collectionsApi.create({
           name: confirmState.newCollection.name,
           description: confirmState.newCollection.description || undefined,
         })
         finalDatasetName = created.name
+        finalCollectionId = created.id
       }
       setRanDatasetName(finalDatasetName)
 
@@ -458,7 +464,7 @@ export default function ImportWizard({
             continue
           }
           try {
-            const ref = await filesApi.upload(filePlan.file)
+            const ref = await filesApi.upload(filePlan.file, finalCollectionId)
             if (filePlan.matchedRecord) {
               const rec = await recordsApi.update(filePlan.matchedRecord.id, {
                 data: { ...filePlan.matchedRecord.data, [fileFieldName]: ref },

@@ -13,14 +13,15 @@ import {
   Skeleton,
 } from '../ui'
 import { nameError } from '../../utils/naming'
+import type { TemplateField } from '../templates/TemplateBuilder'
 import { CONTROLS } from './controlRegistry'
 import type { ControlContext, Rules } from './RestrictionControls'
 
 type FieldFormProps = {
   schemaName: string
   schemas: Schema[] | undefined
-  /** Names of the schema's fields, offered when building a file name. */
-  fieldNames: string[]
+  /** The schema's fields, offered when building a file name. */
+  fields: TemplateField[]
   /** Called after a save (with the new field's name when created), or when
    * the person backs out. */
   onDone: (savedName?: string) => void
@@ -107,7 +108,7 @@ export function FieldForm(props: FieldFormProps) {
 
   const ctx: ControlContext = {
     schemaName,
-    fieldNames: props.fieldNames,
+    fields: props.fields,
     schemas: props.schemas ?? [],
     existing: editing,
   }
@@ -186,58 +187,26 @@ export function FieldForm(props: FieldFormProps) {
             </Field>
           )}
         </FormGrid>
-        {mode === 'edit' && (
-          <p className="text-xs text-fg-subtle">
-            The name is what workflows and CSV headers use. Changing it means
-            updating any workflow that mentions it.
-          </p>
-        )}
       </section>
 
-      <section aria-label="What it stores" className="space-y-1">
-        <h3 className="text-sm font-semibold text-fg">
-          {descriptor?.label ?? type}
-          {props.mode === 'create' && props.onChangeKind && (
-            <button
-              type="button"
-              onClick={props.onChangeKind}
-              className="ml-3 text-xs font-normal text-accent hover:underline cursor-pointer"
-            >
-              Change kind
-            </button>
-          )}
-        </h3>
-        {descriptor ? (
-          <p className="text-sm text-fg-muted">
-            {descriptor.description}{' '}
-            <span className="text-fg-subtle">
-              Stored as: {descriptor.stored_as}.
+      {mode === 'create' && (
+        <p className="flex items-baseline gap-3 text-sm text-fg-muted">
+          <span>
+            Kind:{' '}
+            <span className="font-medium text-fg">
+              {descriptor?.label ?? type}
             </span>
-          </p>
-        ) : (
-          <Skeleton className="h-4 w-64" />
-        )}
-        {mode === 'edit' && (
-          <p className="text-xs text-fg-subtle">
-            The type can't change once a field exists.
-          </p>
-        )}
-      </section>
+          </span>
+          {props.mode === 'create' && props.onChangeKind && (
+            <Button size="sm" variant="link" onClick={props.onChangeKind}>
+              Change
+            </Button>
+          )}
+        </p>
+      )}
 
       <section aria-label="Rules" className="space-y-4">
-        <div>
-          <h3 className="text-sm font-semibold text-fg">Rules</h3>
-          <p className="text-xs text-fg-subtle">
-            What this field accepts. Checked when a record is saved; records
-            saved earlier are left as they are.
-          </p>
-        </div>
         {!descriptor && <Skeleton className="h-16 w-full" />}
-        {descriptor && ordered.length === 0 && (
-          <p className="text-sm text-fg-muted">
-            This type has no rules to set.
-          </p>
-        )}
         {ordered.map((desc) => {
           const Control = CONTROLS[desc.control]
           return Control ? (

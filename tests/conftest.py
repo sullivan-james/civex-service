@@ -5,6 +5,7 @@ style). `ctx` + the `make_*` factories support service-level tests that talk
 to AppContext directly, skipping the CLI/HTTP layers for speed and to avoid
 parsing Rich console output.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -65,6 +66,7 @@ def ctx(project_dir: Path):
 @pytest.fixture()
 def client(project_dir: Path) -> TestClient:
     from civex.server.app import create_app
+
     return TestClient(create_app(), raise_server_exceptions=False)
 
 
@@ -72,7 +74,9 @@ def client(project_dir: Path) -> TestClient:
 def make_schema(ctx: AppContext):
     """make_schema("trial", fields=[("subject", "string")]) -> SchemaDTO"""
 
-    def _make(name: str, fields: list[tuple[str, str]] | None = None, **kwargs: Any) -> SchemaDTO:
+    def _make(
+        name: str, fields: list[tuple[str, str]] | None = None, **kwargs: Any
+    ) -> SchemaDTO:
         ctx.schema_svc.create(name, **kwargs)
         for field_name, dtype in fields or []:
             ctx.schema_svc.add_field(name, field_name, dtype)
@@ -99,7 +103,10 @@ def make_record(ctx: AppContext):
     """make_record("study", "trial", {"subject": "S01"}) -> RecordDTO"""
 
     def _make(
-        collection_name: str, schema_name: str, data: dict[str, Any] | None = None, **kwargs: Any
+        collection_name: str,
+        schema_name: str,
+        data: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> RecordDTO:
         record = ctx.record_svc.add(collection_name, schema_name, data or {}, **kwargs)
         ctx.commit()

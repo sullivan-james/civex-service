@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { Field } from '../../api/schemas'
-import { Button, Checkbox, Popover, Td } from '../ui'
+import { Button, Checkbox, Popover, DataTableCell as Td } from '../ui'
 import { DynamicField } from './DynamicField'
 import { FieldValue } from './FieldValue'
 import { coerceFieldValue, sameValue } from '../../utils/recordValues'
