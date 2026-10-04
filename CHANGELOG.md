@@ -20,6 +20,105 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## v1.1.3 — storage moves, run triage, record naming (2026-10-04)
+
+### Breaking
+
+- Five schema migrations run automatically on first connect, all additive:
+  - `b8d2f4a61c93` adds `storage_transfers` (file moves between volumes) and
+    `c5e1a8d37b42` adds its `control` column (pause/cancel).
+  - `c4a9e17d5b20` adds `schemas.display_template`. Each schema's old
+    `display_fields` list becomes the template joining the same fields with a
+    space, so every record keeps its name.
+  - `e1d5a39c7b84` adds `workflow_jobs.trigger_detail`. Runs that predate it
+    simply have no recorded cause.
+  - `f2a6c8d1e093` adds `audit_batches` and `audit_log.batch_id`, so a bulk
+    operation is one history event. Earlier entries are unbatched.
+- The `civex.load_csv` plugin is replaced by `civex.parse_table`, which reads
+  any delimiter (CSV, TSV, ...) and can read several kinds in one step.
+  Workflows that name `civex.load_csv` must be updated.
+- Records are now named from a schema's name template instead of its starred
+  `display_fields`. Old dumps still import.
+
+### Features
+
+- **Moving files between volumes.** Drain a volume or gather a collection's
+  files onto one drive, with pause, resume, cancel and progress. Transfers
+  queue and run one at a time, from the CLI (`civex store move`,
+  `civex transfers ...`) or the server. Every file is verified against its
+  hash before the original is removed. Settings → Storage has a Tasks tab.
+- **Per-collection storage homes.** A collection can name a home volume and
+  say whether to spill elsewhere or fail when it is unavailable. Content
+  already stored is never duplicated.
+- **Volumes are managed in Settings → Storage**: guided Add volume with a
+  folder browser, a checks-before-adding step, network-drive detection, a
+  page per volume, "where are my files" for every collection, and a
+  per-volume clean-up. A missing drive is reported as offline with the
+  reason and what to do, rather than as empty. Records show where each file
+  is stored (`civex store where`).
+- **Record name templates.** Name records with literal text and formatted
+  values, e.g. `{site}-{taken_on:YYYY-MM}`, including one hop through a
+  reference (`{ref.field}`). New schemas start with a visible template, and
+  renaming or deleting a field rewrites the templates that use it.
+- **Activity and retention.**
+  - History is one filterable list (`/activity`, `civex history`) with
+    field-level changes and where the item is now (live, deleted or gone). It
+    replaces the Recently Deleted page (`civex trash list` for the CLI).
+  - Bulk deletes, restores, workflow runs and browser imports each show as
+    one event. A group restores only what was deleted with it, and a record
+    can't be restored under a deleted collection, schema or parent.
+  - Revert a record edit or create from its history entry, with a preview.
+  - `[retention]` settings (Settings → Retention, `civex retention`,
+    `POST /retention/run`) for deleted items, change history and runs. All
+    keep forever by default, previews first, and never run by themselves.
+  - Permanently deleting a record removes its audit entries and leaves one
+    tombstone; `civex retention forget-purged` cleans up earlier purges.
+  - Runs and reference values pointing at a deleted or purged record link to
+    its history instead of a dead page.
+- **Text box field type** (`longtext`): multi-line text with an optional
+  `max_length`, available in the field picker, CLI and import wizard.
+- **Workflow runs.**
+  - An automation kill switch (stop and resume all) and per-run cancel.
+  - Each run records which field change started it and the run that caused
+    it.
+  - Filter, sort and search runs with the records' filter; failure groups;
+    re-run by filter; "completed with problems" status for runs that left
+    things undone.
+  - Bulk-run a workflow on selected records (`POST /workflows/{name}/run-many`).
+  - A run page with Summary, Steps and Records touched tabs.
+- **New menu and Add another.** Inside a record, New offers every allowed
+  child schema; the new-record form gains "Add and add another".
+- **Desktop shortcut.** `civex shortcut` (also in Settings → Advanced)
+  creates a launcher that runs `civex serve --open`; works from WSL.
+  `serve --open` opens the browser once the server answers.
+- **UI.** A bottom status bar shows file moves and workflow runs; shift-click
+  selects a range in every checkbox list; browser tabs are titled by
+  context; explanations moved into tooltips and big pages into tabs held in
+  the address; filter, sort and search for runs and history.
+
+### Fixes
+
+- Failure groups and bulk re-runs on a record's Runs tab are scoped to that
+  record; they used to show, and could re-run, the whole project's failures.
+- A workflow watching a file field no longer re-triggers itself on every save
+  (derived `resolved_filename` was counted as a change).
+- `civex.upsert_records`, `save_field` and `save_fields` no longer erase a
+  record's other fields; they merge only what they were given.
+- `civex.match_files_to_records` skips and reports files whose keys clash
+  rather than silently overwriting records.
+- A dead network mount no longer freezes requests; its volume shows as
+  offline. `config.toml` is written atomically.
+- The page-size menu now changes the size and returns to page one.
+- Windows: `civex view export` leaves no open temp file, moving a SQLite
+  database keeps `C:` paths intact, timed-out plugins are killed, and the
+  folder browser's Up from a drive root is correct.
+
+### Internal
+
+- The OS-sensitive tests (storage, paths, processes, mounts, config) now run
+  on Windows and macOS in a cross-platform workflow; LF line-ending rules
+  added. Fixed type errors only `tsc -b` sees, and several flaky tests.
+
 ## v1.1.2 - startup and scaling reliability, geographical data types (2026-10-02)
 
 ### Features
