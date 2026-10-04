@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import threading
 import time
+import types
 from pathlib import Path
 
 import sys
@@ -175,6 +176,30 @@ def test_a_call_that_never_returns_is_reported_not_waited_on(
 
     time.sleep(0.2)  # the stuck call has now returned: the location works again
     assert fs.guarded("t-hang", lambda: "recovered") == "recovered"
+
+
+def test_a_call_a_caller_gave_up_on_counts_as_stuck_whatever_the_clock_says(
+    short_timeout: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The caller that gives up on a call measures its time from before the call
+    # was submitted, so it can give up a hair before the call is FS_TIMEOUT old
+    # by the call's own clock -- on a coarse clock (Windows), by enough that the
+    # next caller used to judge the location merely busy and wait its own full
+    # timeout. A call someone has already given up on is stuck, by definition.
+    # The clock is frozen here to make that the case every time, not by chance.
+    frozen = types.SimpleNamespace(monotonic=lambda: 100.0)
+    monkeypatch.setattr(fs, "time", frozen)
+    release = threading.Event()
+    try:
+        with pytest.raises(fs.Unresponsive, match="no answer"):
+            fs.guarded("t-frozen", release.wait, 30)
+
+        started = time.monotonic()  # the real clock, for how long this takes
+        with pytest.raises(fs.Unresponsive, match="still waiting"):
+            fs.guarded("t-frozen", lambda: "never runs")
+        assert time.monotonic() - started < 0.1
+    finally:
+        release.set()
 
 
 def test_concurrent_callers_on_a_busy_but_healthy_location_all_succeed(

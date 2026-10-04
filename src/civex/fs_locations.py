@@ -88,6 +88,11 @@ class _Call:
     fn: Callable[..., Any]
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
+    # A caller has given up waiting for it. Kept as a fact of its own because
+    # the caller measures its wait from before the call was submitted, so on a
+    # coarse clock it can give up a hair before the call is FS_TIMEOUT old by
+    # `started`; the next caller must not conclude "merely busy" from that.
+    stuck: bool = False
 
 
 _pending: dict[str, _Call] = {}
@@ -106,8 +111,9 @@ def guarded(key: str, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     an earlier call younger than FS_TIMEOUT, which is normal while a copy is
     running or several requests probe the same drive at once -- shares that
     call's answer if it is the same call, and otherwise waits its turn. Only a
-    call that has already outlived FS_TIMEOUT is treated as stuck, and later
-    callers fail at once instead of queueing behind it."""
+    call that has already outlived FS_TIMEOUT -- or that a caller has already
+    given up on -- is treated as stuck, and later callers fail at once instead
+    of queueing behind it."""
     deadline = time.monotonic() + FS_TIMEOUT
     while True:
         with _pending_lock:
@@ -125,12 +131,13 @@ def guarded(key: str, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
                 )
                 _pending[key] = call
         assert call is not None
-        if not mine and time.monotonic() - call.started >= FS_TIMEOUT:
+        if not mine and (call.stuck or time.monotonic() - call.started >= FS_TIMEOUT):
             raise Unresponsive("an earlier request is still waiting for it")
 
         remaining = max(deadline - time.monotonic(), 0.0)
         done, _ = concurrent.futures.wait([call.future], timeout=remaining)
         if not done:
+            call.stuck = True
             raise Unresponsive(f"no answer after {FS_TIMEOUT:g}s")
         if mine or (call.fn == fn and call.args == args and call.kwargs == kwargs):
             return call.future.result()
