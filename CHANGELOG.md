@@ -34,6 +34,14 @@ from the next tag forward.
   proxy variables and `SSL_CERT_FILE`. Secrets such as the database URL and
   API keys are still withheld.
 
+- `civex dump` and `civex restore` lost field restrictions: a restored
+  reference field no longer pointed at its schema, so the record form had no
+  records to search. Dumps now include each field's restrictions (including
+  min/max, units, choices and file rules) and default value, each schema's
+  record name template, and each collection's timezone, and restore applies
+  them. Dumps made by earlier versions don't contain this information, so
+  restrictions on a project restored from one must be set again by hand.
+
 ### Features
 
 - `civex doctor` now checks the installation, and works outside a project:

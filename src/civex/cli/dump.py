@@ -99,12 +99,21 @@ def restore(
             continue
 
         for f in s.get("fields", []):
+            # A filename template may name a field added later in this loop,
+            # so it is applied once the schema's fields all exist (below).
+            restrictions = {
+                k: v
+                for k, v in (f.get("restrictions") or {}).items()
+                if k != "filename_template"
+            }
             try:
                 ctx.schema_svc.add_field(
                     s["name"],
                     f["name"],
                     f["type"],
                     required=f.get("required", False),
+                    restrictions=restrictions,
+                    default_value=f.get("default_value"),
                     label=f.get("label"),
                     allow_legacy_name=True,
                     auto_name=False,  # restore the dump as it was
@@ -112,6 +121,25 @@ def restore(
                 ctx.commit()
             except AlreadyExistsError:
                 pass
+
+        for f in s.get("fields", []):
+            template = (f.get("restrictions") or {}).get("filename_template")
+            if template:
+                ctx.schema_svc.update_field(
+                    s["name"],
+                    f["name"],
+                    restrictions={
+                        **(f.get("restrictions") or {}),
+                    },
+                )
+                ctx.commit()
+
+    # Name templates may reach through a reference (`{ref.field}`) into another
+    # schema, so they are set once every schema and field exists.
+    for s in doc.get("schemas", []):
+        if s.get("display_template"):
+            ctx.schema_svc.update(s["name"], display_template=s["display_template"])
+            ctx.commit()
 
     console.print("  Schemas restored.")
 
@@ -122,6 +150,7 @@ def restore(
                 d["name"],
                 description=d.get("description"),
                 scope=d.get("scope") or "local",
+                timezone=d.get("timezone"),
                 schemas=d.get("schemas") or [],
             )
             ctx.commit()

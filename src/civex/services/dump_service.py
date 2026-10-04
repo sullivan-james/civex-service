@@ -67,12 +67,15 @@ def export_schemas(schema_svc: SchemaService) -> list[dict]:
                 "label": s.label,
                 "description": s.description,
                 "parent": names.get(s.parent_id) if s.parent_id else None,
+                "display_template": s.display_template,
                 "fields": [
                     {
                         "name": f.name,
                         "label": f.label,
                         "type": f.dtype,
                         "required": f.required,
+                        "restrictions": f.restrictions,
+                        "default_value": f.default_value,
                     }
                     for f in s.fields
                 ],
@@ -115,6 +118,7 @@ def write_dump(
             "name": d.name,
             "description": d.description,
             "scope": d.scope,
+            "timezone": d.timezone,
             "schemas": d.schemas,
         }
         for d in datasets
