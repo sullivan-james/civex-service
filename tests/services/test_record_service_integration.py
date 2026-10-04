@@ -78,6 +78,106 @@ steps:
     assert ctx.job_svc.count_jobs() == 1
 
 
+def _watch_file_field(ctx: AppContext) -> None:
+    workflows_dir = ctx.job_svc._civex_dir / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "on_scan.yaml").write_text(
+        """
+name: on_scan
+triggers:
+  record_updated:
+    schema: invoice
+    fields: [scan]
+steps:
+  - id: read
+    plugin: civex.get_field
+    config:
+      field: scan
+"""
+    )
+
+
+def test_saving_another_field_does_not_trigger_a_workflow_watching_a_file_field(
+    ctx: AppContext, make_schema, make_collection
+):
+    """A file value is shown with a derived `resolved_filename`, which is not
+    stored. It must not make the file look edited: a workflow that watches the
+    file and saves other fields on the same record (computing statistics from
+    it, say) would otherwise trigger itself on every save, forever."""
+    make_schema(
+        "invoice",
+        fields=[("invoice_number", "string"), ("scan", "file"), ("total", "float")],
+    )
+    ctx.schema_svc.update_field(
+        "invoice", "scan", restrictions={"filename_template": "{invoice_number}.{ext}"}
+    )
+    make_collection("study")
+    ref = {"sha256": "a" * 64, "filename": "upload.pdf", "size": 10}
+    record = ctx.record_svc.add(
+        "study", "invoice", {"invoice_number": "INV-42", "scan": ref}
+    )
+    ctx.commit()
+    _watch_file_field(ctx)
+    before = ctx.job_svc.count_jobs()
+
+    # What a workflow does: read the record (derived key included), change an
+    # unrelated field, and write the whole thing back.
+    shown = ctx.record_svc.get(str(record.id)).data
+    assert shown["scan"]["resolved_filename"] == "INV-42.pdf"
+    ctx.record_svc.update(str(record.id), {**shown, "total": 12.5})
+    ctx.commit()
+
+    assert ctx.job_svc.count_jobs() == before  # the file didn't change: no run
+
+
+def test_changing_the_file_itself_still_triggers_the_workflow(
+    ctx: AppContext, make_schema, make_collection
+):
+    make_schema("invoice", fields=[("scan", "file"), ("total", "float")])
+    make_collection("study")
+    old = {"sha256": "a" * 64, "filename": "one.pdf", "size": 10}
+    record = ctx.record_svc.add("study", "invoice", {"scan": old})
+    ctx.commit()
+    _watch_file_field(ctx)
+    before = ctx.job_svc.count_jobs()
+
+    new = {"sha256": "b" * 64, "filename": "two.pdf", "size": 20}
+    ctx.record_svc.update(str(record.id), {"scan": new})
+    ctx.commit()
+
+    assert ctx.job_svc.count_jobs() == before + 1
+
+
+def test_the_audit_log_does_not_show_a_file_as_changed_when_it_was_not(
+    ctx: AppContext, make_schema, make_collection
+):
+    make_schema(
+        "invoice",
+        fields=[("invoice_number", "string"), ("scan", "file"), ("total", "float")],
+    )
+    ctx.schema_svc.update_field(
+        "invoice", "scan", restrictions={"filename_template": "{invoice_number}.{ext}"}
+    )
+    make_collection("study")
+    ref = {"sha256": "a" * 64, "filename": "upload.pdf", "size": 10}
+    record = ctx.record_svc.add(
+        "study", "invoice", {"invoice_number": "INV-42", "scan": ref}
+    )
+    ctx.commit()
+
+    shown = ctx.record_svc.get(str(record.id)).data
+    ctx.record_svc.update(str(record.id), {**shown, "total": 3.0})
+    ctx.commit()
+
+    update = next(
+        e for e in ctx.audit_svc.list_audit(entity_id=record.id) if e.action == "update"
+    )
+    old, new = update.old_data["data"], update.new_data["data"]
+    assert old["scan"] == new["scan"]  # same file, same stored value
+    assert "resolved_filename" not in new["scan"]
+    assert new["total"] == 3.0
+
+
 def test_record_data_carries_resolved_filename_for_file_field(
     ctx: AppContext, make_schema, make_collection
 ):

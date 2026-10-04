@@ -522,6 +522,36 @@ describe('Storage > Collections', () => {
     ).toBeInTheDocument()
   })
 
+  it('opens on the collection a link from its own page pointed at', async () => {
+    const user = userEvent.setup()
+    renderAt('/settings/storage?tab=collections&focus=c1')
+
+    // Only that collection's row, with a way to see them all.
+    expect(
+      await screen.findByLabelText('Home volume for study'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByLabelText('Home volume for zoo'),
+    ).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Filter collections')).toHaveValue('study')
+
+    await user.clear(screen.getByLabelText('Filter collections'))
+    expect(
+      await screen.findByLabelText('Home volume for zoo'),
+    ).toBeInTheDocument()
+  })
+
+  it('forgets the focused collection when leaving the Collections tab', async () => {
+    const user = userEvent.setup()
+    renderAt('/settings/storage?tab=collections&focus=c1')
+    await screen.findByLabelText('Home volume for study')
+
+    await user.click(screen.getByRole('tab', { name: 'Tasks' }))
+
+    expect(screen.getByTestId('where')).toHaveTextContent('?tab=tasks')
+    expect(screen.getByTestId('where')).not.toHaveTextContent('focus')
+  })
+
   it('marks a collection whose home is offline', async () => {
     placements = [
       {

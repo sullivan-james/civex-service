@@ -82,7 +82,22 @@ export interface PaginatedAuditLog {
 
 export type ListParams = RecordQueryParams & PageParams
 
+/** A record's name as it is now, with what is needed to say what it is. */
+export interface RecordLabel {
+  id: string
+  schema_name: string
+  /** Null when nothing in the record can name it. */
+  natural_name: string | null
+  /** In Recently Deleted: it still has a name, and can be restored. */
+  deleted: boolean
+}
+
 export const recordsApi = {
+  /** Names for any number of ids in one request. Ids that aren't records, or
+   * whose record is gone, are not in the answer. */
+  labels: (ids: string[]) =>
+    api.post<RecordLabel[]>('/records/labels', { ids }),
+
   list: (datasetName: string, params?: ListParams) =>
     api.get<PaginatedRecords>(
       `/collections/${encodeURIComponent(datasetName)}/records${recordQueryString(params)}`,

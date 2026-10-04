@@ -2,13 +2,13 @@
 
 Create one new record per table row. Every row produces a new record; use `civex.upsert_records` instead if you want existing records to be matched and updated rather than duplicated.
 
-> Uses pandas, which ships with civex — see `civex.load_csv`.
+> Uses pandas, which ships with civex — see `civex.parse_table`.
 
 <!-- civex:tables -->
 
 ```yaml
 - id: parse
-  plugin: civex.load_csv
+  plugin: civex.parse_table
   inputs:
     bytes: load.bytes
 

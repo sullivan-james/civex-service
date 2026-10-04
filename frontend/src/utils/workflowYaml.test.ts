@@ -55,7 +55,7 @@ describe('buildFilesImportWorkflowYaml', () => {
 })
 
 describe('buildCsvImportWorkflowYaml', () => {
-  it('emits a record_created-triggered load_file -> load_csv -> rows_to_records chain', () => {
+  it('emits a record_created-triggered load_file -> parse_table -> rows_to_records chain', () => {
     const yaml = buildCsvImportWorkflowYaml({
       name: 'Import subjects',
       triggerSchemaName: 'subject_import',
@@ -69,7 +69,7 @@ describe('buildCsvImportWorkflowYaml', () => {
     expect(yaml).toContain('schema: "subject_import"')
     expect(yaml).toContain('plugin: civex.load_file')
     expect(yaml).toContain('field: "csv_file"')
-    expect(yaml).toContain('plugin: civex.load_csv')
+    expect(yaml).toContain('plugin: civex.parse_table')
     expect(yaml).toContain('bytes: load.bytes')
     expect(yaml).toContain('plugin: civex.rows_to_records')
     expect(yaml).toContain('table: parse.table')

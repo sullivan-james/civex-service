@@ -25,6 +25,7 @@ from civex.domain.transfers import (
     STATUS_COMPLETED,
     STATUS_INTERRUPTED,
     STATUS_PAUSED,
+    STATUS_QUEUED,
     STATUS_RUNNING,
     TransferSpec,
 )
@@ -228,7 +229,7 @@ def test_consolidating_is_sized_and_says_what_stays(
 # -- the saved record -------------------------------------------------------------
 
 
-def test_creating_a_transfer_saves_it_as_running_with_its_plan(
+def test_creating_a_transfer_saves_it_as_queued_with_its_plan(
     ctx: AppContext, tmp_path: Path
 ) -> None:
     _volumes(ctx, tmp_path, "a", "b")
@@ -237,12 +238,12 @@ def test_creating_a_transfer_saves_it_as_running_with_its_plan(
     record = ctx.transfer_svc.create(_drain(["a"], ["b"]))
 
     saved = ctx.transfer_svc.get(record.id)
-    assert saved.status == STATUS_RUNNING and saved.kind == KIND_DRAIN
+    assert saved.status == STATUS_QUEUED and saved.kind == KIND_DRAIN
     assert saved.spec.sources == ["a"] and saved.spec.targets == ["b"]
     assert saved.progress.files_total == 5
     assert saved.progress.bytes_total == sum(len(d) for d in files.values())
     assert saved.plan is not None and saved.plan.files == 5
-    assert saved.started_at is not None and saved.created_at is not None
+    assert saved.started_at is None and saved.created_at is not None  # not started
 
 
 def test_creating_an_impossible_transfer_raises_with_every_reason(
@@ -262,13 +263,59 @@ def test_unknown_transfers_are_not_found(ctx: AppContext) -> None:
         ctx.transfer_svc.get("not-an-id")
 
 
-def test_only_one_transfer_runs_at_a_time(ctx: AppContext, tmp_path: Path) -> None:
+def test_a_second_transfer_waits_its_turn_instead_of_being_refused(
+    ctx: AppContext, tmp_path: Path
+) -> None:
     _volumes(ctx, tmp_path, "a", "b", "c")
     _put_on(ctx, "a", 2)
-    ctx.transfer_svc.create(_drain(["a"], ["b"]))
+    first = ctx.transfer_svc.create(_drain(["a"], ["b"]))
+    preview = ctx.transfer_svc.plan(_drain(["a"], ["c"]))
+    second = ctx.transfer_svc.create(_drain(["a"], ["c"]))
 
-    with pytest.raises(ValidationError, match="Another transfer is running"):
-        ctx.transfer_svc.create(_drain(["a"], ["c"]))
+    assert preview.can_proceed and any("queued" in w for w in preview.warnings)
+    assert ctx.transfer_svc.get(second.id).status == STATUS_QUEUED
+    assert ctx.transfer_svc.next_runnable().id == first.id  # longest-waiting first
+    assert ctx.transfer_svc.next_runnable(exclude={first.id}).id == second.id
+    assert ctx.transfer_svc.queue_length() == 2
+
+
+def test_queued_transfers_run_one_after_another_oldest_first(
+    ctx: AppContext, tmp_path: Path
+) -> None:
+    _volumes(ctx, tmp_path, "a", "b", "c")
+    files = _put_on(ctx, "a", 4)
+    first = ctx.transfer_svc.create(_drain(["a"], ["b"]))
+    second = ctx.transfer_svc.create(_drain(["b"], ["c"]))
+
+    ctx.transfer_svc.execute(first.id)
+    assert ctx.transfer_svc.next_runnable().id == second.id
+    ctx.transfer_svc.execute(second.id)
+
+    assert ctx.transfer_svc.next_runnable() is None
+    store = ctx.file_svc._store
+    assert all(store.get(sha) == data for sha, data in files.items())
+    rows = store.inventory_rows(list(files))
+    assert {sha: rows[sha][0] for sha in files} == {sha: "c" for sha in files}
+
+
+def test_a_queued_transfer_can_be_paused_and_cancelled_before_it_starts(
+    ctx: AppContext, tmp_path: Path
+) -> None:
+    _volumes(ctx, tmp_path, "a", "b", "c")
+    _put_on(ctx, "a", 2)
+    first = ctx.transfer_svc.create(_drain(["a"], ["b"]))
+    second = ctx.transfer_svc.create(_drain(["a"], ["c"]))
+
+    paused = ctx.transfer_svc.request_control(first.id, "pause")
+    assert paused.status == STATUS_PAUSED and not paused.auto_resume
+    assert ctx.transfer_svc.next_runnable().id == second.id  # taken out of the queue
+
+    ctx.transfer_svc.begin_resume(first.id)  # and back in, behind nothing it had
+    assert ctx.transfer_svc.get(first.id).status == STATUS_QUEUED
+
+    cancelled = ctx.transfer_svc.request_control(second.id, "cancel")
+    assert cancelled.status == STATUS_CANCELLED
+    assert ctx.transfer_svc.next_runnable().id == first.id
 
 
 # -- running it ----------------------------------------------------------------------
@@ -353,7 +400,7 @@ def test_freezing_can_be_turned_off(ctx: AppContext, tmp_path: Path) -> None:
     assert set(during) == {"online"}
 
 
-def test_a_paused_transfer_keeps_its_source_frozen_and_cancelling_restores_it(
+def test_a_paused_transfer_puts_its_source_back_so_others_can_use_the_drive(
     ctx: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _volumes(ctx, tmp_path, "a", "b")
@@ -375,7 +422,7 @@ def test_a_paused_transfer_keeps_its_source_frozen_and_cancelling_restores_it(
     monkeypatch.setattr(store, "transfer_object", real)
 
     assert paused.status == STATUS_PAUSED and paused.progress.files_done == 3
-    assert paused.frozen == {"a": "active"} and _state(ctx, "a") == "readonly"
+    assert paused.frozen == {} and _state(ctx, "a") == "online"
 
     cancelled = ctx.transfer_svc.cancel_idle(record.id)
 
@@ -438,12 +485,19 @@ def _age(ctx: AppContext, transfer_id: str, seconds: float) -> None:
     ctx.commit()
 
 
+def _as_running(ctx: AppContext, transfer_id: str) -> None:
+    """A transfer a runner has taken up (create only queues it)."""
+    ctx._session.execute(update(StorageTransfer).values(status=STATUS_RUNNING))
+    ctx.commit()
+
+
 def test_a_running_transfer_that_stopped_saving_is_reported_interrupted(
     ctx: AppContext, tmp_path: Path
 ) -> None:
     _volumes(ctx, tmp_path, "a", "b")
     _put_on(ctx, "a", 3)
     record = ctx.transfer_svc.create(_drain(["a"], ["b"]))
+    _as_running(ctx, record.id)
     assert (
         ctx.transfer_svc.get(record.id).status == STATUS_RUNNING
     )  # fresh: genuinely running
@@ -455,12 +509,62 @@ def test_a_running_transfer_that_stopped_saving_is_reported_interrupted(
     assert ctx.transfer_svc.active() is None
 
 
+def test_a_quiet_transfer_whose_lock_is_held_is_not_reported_interrupted(
+    ctx: AppContext, tmp_path: Path
+) -> None:
+    # A long read-back or a slow drive can go quiet for minutes while the
+    # transfer is alive: holding the lock is proof of life, however old the
+    # last saved progress is.
+    _volumes(ctx, tmp_path, "a", "b")
+    _put_on(ctx, "a", 3)
+    record = ctx.transfer_svc.create(_drain(["a"], ["b"]))
+    _as_running(ctx, record.id)
+    with ctx.file_svc._store.transfer_lock():
+        _age(ctx, record.id, 600)
+        assert ctx.transfer_svc.get(record.id).status == STATUS_RUNNING
+        assert ctx.transfer_svc.active() is not None
+
+
+def test_a_just_started_record_with_no_lock_yet_is_not_reported_interrupted(
+    ctx: AppContext, tmp_path: Path
+) -> None:
+    # A record is marked running a moment before its runner takes the lock.
+    _volumes(ctx, tmp_path, "a", "b")
+    _put_on(ctx, "a", 3)
+    record = ctx.transfer_svc.create(_drain(["a"], ["b"]))
+    _as_running(ctx, record.id)
+    _age(ctx, record.id, 2)
+    assert ctx.transfer_svc.get(record.id).status == STATUS_RUNNING
+
+
+def test_a_failed_progress_save_rolls_the_session_back_and_does_not_raise(
+    ctx: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _volumes(ctx, tmp_path, "a", "b")
+    _put_on(ctx, "a", 1)
+    record = ctx.transfer_svc.create(_drain(["a"], ["b"]))
+    rolled_back: list[bool] = []
+
+    def failing_commit() -> None:
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(ctx.transfer_svc, "_commit", failing_commit)
+    monkeypatch.setattr(ctx.transfer_svc, "_rollback", lambda: rolled_back.append(True))
+
+    ctx.transfer_svc._save(record, quiet=True)  # logs; the move carries on
+
+    assert rolled_back == [True]
+    with pytest.raises(RuntimeError):
+        ctx.transfer_svc._save(record)  # a save that matters still raises
+
+
 def test_an_interrupted_transfer_can_be_resumed_and_finishes(
     ctx: AppContext, tmp_path: Path
 ) -> None:
     _volumes(ctx, tmp_path, "a", "b")
     files = _put_on(ctx, "a", 6)
     record = ctx.transfer_svc.create(_drain(["a"], ["b"]))
+    _as_running(ctx, record.id)
     _age(ctx, record.id, 600)
     assert ctx.transfer_svc.get(record.id).status == STATUS_INTERRUPTED
 
@@ -479,7 +583,7 @@ def test_a_second_process_sees_the_same_record(ctx: AppContext, tmp_path: Path) 
     record = ctx.transfer_svc.create(_drain(["a"], ["b"]))
     other = build_local_context(load_config())
     try:
-        assert other.transfer_svc.get(record.id).status == STATUS_RUNNING
+        assert other.transfer_svc.get(record.id).status == STATUS_QUEUED
         ctx.transfer_svc.execute(record.id)
         assert other.transfer_svc.get(record.id).status == STATUS_COMPLETED
         assert [r.id for r in other.transfer_svc.recent()] == [record.id]
@@ -522,7 +626,7 @@ def test_a_transfer_will_not_start_while_garbage_collection_runs(
         with pytest.raises(ValidationError, match="garbage-collection pass is running"):
             ctx.transfer_svc.execute(record.id)
 
-    assert ctx.transfer_svc.get(record.id).status == STATUS_RUNNING  # untouched
+    assert ctx.transfer_svc.get(record.id).status == STATUS_QUEUED  # untouched
 
 
 def test_volumes_ready_says_whether_a_paused_transfer_can_carry_on(
@@ -632,7 +736,7 @@ def test_a_pause_or_cancel_asked_for_by_another_process_is_obeyed(
     asked[0].join(timeout=10)
 
     assert done.status == outcome and 3 <= done.progress.files_done < 40
-    assert _state(ctx, "a") == ("online" if action == "cancel" else "readonly")
+    assert _state(ctx, "a") == "online"  # a stopped transfer frees its source
     store = ctx.file_svc._store
     assert all(store.get(sha) == data for sha, data in files.items())
 

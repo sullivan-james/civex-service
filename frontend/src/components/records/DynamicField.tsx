@@ -1,11 +1,19 @@
 import { useState } from 'react'
-import { filesApi } from '../../api/files'
 import { useUploadCollection } from '../../hooks/uploadCollection'
+import { useFileUploads } from '../../hooks/useFileUploads'
 import type { Field } from '../../api/schemas'
 import { utcToZonedLocal, datetimeInputToWire } from '../../utils/dates'
 import { useFieldTimeZone } from './timeZoneContext'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
-import { Button, Checkbox, IconButton, InfoTip, Input, Select } from '../ui'
+import {
+  Button,
+  Checkbox,
+  FileDropZone,
+  IconButton,
+  InfoTip,
+  Input,
+  Select,
+} from '../ui'
 import { displayLabel } from '../../utils/naming'
 import {
   exampleWithUnit,
@@ -38,6 +46,8 @@ import {
 
 import type { FileRef } from '../../api/files'
 import { FileLink, FileLocationChip } from './FileLocation'
+import { acceptProblem } from '../../utils/fileChecks'
+import { UploadProgress } from './UploadProgress'
 
 export type { FileRef }
 
@@ -63,29 +73,6 @@ function validateFileSize(
   return null
 }
 
-/** `label` overrides the percentage text, e.g. "Uploading 2 of 3… 45%" for a
- * multi-file batch. */
-function UploadProgress({
-  fraction,
-  label,
-}: {
-  fraction: number
-  label?: string
-}) {
-  const pct = Math.round(fraction * 100)
-  return (
-    <div className="space-y-1">
-      <div className="h-1.5 w-full bg-border-muted rounded-full overflow-hidden">
-        <div
-          className="h-full bg-accent transition-all"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <p className="text-xs text-fg-muted">{label ?? `Uploading… ${pct}%`}</p>
-    </div>
-  )
-}
-
 function FileField({
   field,
   value,
@@ -94,35 +81,29 @@ function FileField({
   'aria-describedby': ariaDescribedby,
   'aria-invalid': ariaInvalid,
 }: Props) {
-  const [uploading, setUploading] = useState(false)
-  const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const collectionId = useUploadCollection()
+  const { current, uploading, run, cancel } = useFileUploads(collectionId)
   const ref = value as FileRef | null | undefined
   const { accept, maxSize } = toInputProps(field)
 
-  async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
+  async function handleFiles(files: File[]) {
+    const file = files[0]
     if (!file) return
-    const sizeErr = validateFileSize(file, maxSize)
-    if (sizeErr) {
-      setError(sizeErr)
+    const problem =
+      validateFileSize(file, maxSize) ??
+      acceptProblem(file.name, file.type, accept)
+    if (problem) {
+      setError(problem)
       return
     }
-    setUploading(true)
-    setProgress(0)
     setError(null)
     try {
-      const result = await filesApi.uploadStreaming(
-        file,
-        setProgress,
-        collectionId,
-      )
-      onChange(result)
+      // Cancelling just stops: there is nothing to say about what you chose.
+      const { refs } = await run([file])
+      if (refs[0]) onChange(refs[0])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed')
-    } finally {
-      setUploading(false)
     }
   }
 
@@ -153,19 +134,23 @@ function FileField({
           <FileLocationChip file={ref} />
         </div>
       )}
-      <input
+      <FileDropZone
         id={id}
         aria-describedby={ariaDescribedby}
         aria-invalid={ariaInvalid}
         required={field.required && !ref}
-        aria-required={field.required}
-        type="file"
         accept={accept}
-        onChange={handleChange}
         disabled={uploading}
-        className="block w-full text-sm text-fg file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer disabled:opacity-50"
-      />
-      {uploading && <UploadProgress fraction={progress} />}
+        onFiles={(files) => void handleFiles(files)}
+      >
+        {ref ? (
+          <span>
+            Drop a file here or <span className="text-accent">browse</span> to
+            replace it
+          </span>
+        ) : undefined}
+      </FileDropZone>
+      {current && <UploadProgress state={current} onCancel={cancel} />}
       {error && (
         <p role="alert" className="text-xs text-danger">
           {error}
@@ -183,46 +168,30 @@ function FileListField({
   'aria-describedby': ariaDescribedby,
   'aria-invalid': ariaInvalid,
 }: Props) {
-  const [uploading, setUploading] = useState(false)
-  const [progress, setProgress] = useState<{
-    index: number
-    total: number
-    fraction: number
-  } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const collectionId = useUploadCollection()
+  const { current, uploading, run, cancel } = useFileUploads(collectionId)
   const existing = (value as FileRef[] | null | undefined) ?? []
   const { accept, maxSize } = toInputProps(field)
 
-  async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? [])
+  async function handleFiles(files: File[]) {
     if (!files.length) return
     for (const file of files) {
-      const sizeErr = validateFileSize(file, maxSize)
-      if (sizeErr) {
-        setError(sizeErr)
+      const problem =
+        validateFileSize(file, maxSize) ??
+        acceptProblem(file.name, file.type, accept)
+      if (problem) {
+        setError(`${file.name}: ${problem}`)
         return
       }
     }
-    setUploading(true)
     setError(null)
     try {
-      const newRefs: FileRef[] = []
-      for (let i = 0; i < files.length; i++) {
-        const ref = await filesApi.uploadStreaming(
-          files[i],
-          (fraction) =>
-            setProgress({ index: i, total: files.length, fraction }),
-          collectionId,
-        )
-        newRefs.push(ref)
-      }
-      onChange([...existing, ...newRefs])
+      // Files that finished before a cancel are kept.
+      const { refs } = await run(files)
+      if (refs.length) onChange([...existing, ...refs])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed')
-    } finally {
-      setUploading(false)
-      setProgress(null)
     }
   }
 
@@ -257,29 +226,17 @@ function FileListField({
           />
         </div>
       ))}
-      <input
+      <FileDropZone
         id={id}
         aria-describedby={ariaDescribedby}
         aria-invalid={ariaInvalid}
         required={field.required && existing.length === 0}
-        aria-required={field.required}
-        type="file"
         multiple
         accept={accept}
-        onChange={handleChange}
         disabled={uploading}
-        className="block w-full text-sm text-fg file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-canvas-subtle file:text-fg hover:file:bg-border-muted cursor-pointer disabled:opacity-50"
+        onFiles={(files) => void handleFiles(files)}
       />
-      {uploading && progress && (
-        <UploadProgress
-          fraction={progress.fraction}
-          label={
-            progress.total > 1
-              ? `Uploading ${progress.index + 1} of ${progress.total}… ${Math.round(progress.fraction * 100)}%`
-              : undefined
-          }
-        />
-      )}
+      {current && <UploadProgress state={current} onCancel={cancel} />}
       {error && (
         <p role="alert" className="text-xs text-danger">
           {error}
@@ -726,6 +683,9 @@ export function DynamicField({
             required={field.required}
             aria-required={field.required}
             type="datetime-local"
+            // Whole seconds: the default step of a minute hides the seconds
+            // field and drops them from what is typed.
+            step={1}
             value={value ? utcToZonedLocal(value as string, timeZone) : ''}
             min={rMin}
             max={rMax}

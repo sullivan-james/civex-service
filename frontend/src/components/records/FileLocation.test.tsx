@@ -104,7 +104,9 @@ describe('FileLocationChip', () => {
     renderIt(<FileLocationChip file={file()} />)
 
     expect(
-      await screen.findByTitle("Stored on volume 'archive'"),
+      await screen.findByTitle(
+        "Stored on 'archive' (Online). Click for details.",
+      ),
     ).toHaveTextContent('archive')
   })
 
@@ -112,10 +114,78 @@ describe('FileLocationChip', () => {
     renderIt(<FileLocationChip file={file({ location: OFFLINE })} />)
 
     const chip = await screen.findByText('archive · offline')
-    expect(chip.closest('span')).toHaveAttribute(
+    expect(chip.closest('button')).toHaveAttribute(
       'title',
-      "This file is on volume 'archive', which isn't available right now.",
+      "On 'archive', which isn't available right now. Click to see what to do.",
     )
+  })
+
+  it('tells a person which drive to plug in, without leaving the record', async () => {
+    const user = userEvent.setup()
+    renderIt(
+      <FileLocationChip
+        file={file({
+          location: {
+            ...OFFLINE,
+            reason: "'archive' isn't connected.",
+            fix: "Plug in the drive for 'archive' and it will come back by itself.",
+          },
+        })}
+      />,
+    )
+
+    await user.click(
+      await screen.findByRole('button', { name: /archive · offline/ }),
+    )
+
+    const panel = await screen.findByRole('dialog', {
+      name: 'Where this file is stored',
+    })
+    expect(within(panel).getByRole('alert')).toHaveTextContent(
+      "It's on ‘archive’, which isn't available right now, so it can't be opened.",
+    )
+    expect(within(panel).getByText("'archive' isn't connected.")).toBeVisible()
+    expect(
+      within(panel).getByText(/Plug in the drive for 'archive'/),
+    ).toBeVisible()
+    expect(
+      within(panel).getByRole('link', { name: /Open ‘archive’ in Settings/ }),
+    ).toHaveAttribute('href', '/settings/storage/volumes/archive')
+    // The technical detail stays out of the way until asked for.
+    expect(calls).not.toContain(`/api/files/${SHA}/info`)
+  })
+
+  it('says in plain words where a healthy file is, and reveals details on request', async () => {
+    volumeCount = 2
+    const user = userEvent.setup()
+    renderIt(<FileLocationChip file={file()} />)
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Where scan.png is stored: archive',
+      }),
+    )
+
+    const panel = await screen.findByRole('dialog', {
+      name: 'Where this file is stored',
+    })
+    expect(within(panel).getByText('scan.png')).toBeInTheDocument()
+    expect(within(panel).getByText('2.0 KB')).toBeInTheDocument()
+    expect(panel).toHaveTextContent('Stored on archive · Online')
+    expect(panel).toHaveTextContent('Ready to open.')
+    expect(calls).not.toContain(`/api/files/${SHA}/info`) // nothing fetched yet
+
+    await user.click(
+      within(panel).getByRole('button', { name: 'More details' }),
+    )
+
+    expect(
+      await within(panel).findByText(`/media/archive/ab/${SHA.slice(2)}`),
+    ).toBeInTheDocument()
+    expect(calls).toContain(`/api/files/${SHA}/info`)
+    expect(
+      within(panel).queryByRole('button', { name: 'More details' }),
+    ).toBeNull()
   })
 
   it('has nothing to say, and fetches nothing, for a file with no location yet', async () => {
@@ -140,7 +210,7 @@ describe('FileLocationChip', () => {
     expect(await screen.findByText('location unknown')).toBeInTheDocument()
   })
 
-  it('opens the full details in advanced mode, fetching them only then', async () => {
+  it('opens with the full details already showing in advanced mode, fetching them only then', async () => {
     advanced = true
     const user = userEvent.setup()
     renderIt(<FileLocationChip file={file()} />)
@@ -150,6 +220,9 @@ describe('FileLocationChip', () => {
     })
     expect(calls).not.toContain(`/api/files/${SHA}/info`)
     await user.click(chip)
+    expect(
+      screen.queryByRole('button', { name: 'More details' }),
+    ).not.toBeInTheDocument()
 
     const panel = await screen.findByRole('dialog', {
       name: 'Where this file is stored',
@@ -207,6 +280,58 @@ describe('FileLink', () => {
   })
 })
 
+describe('FileLink download check', () => {
+  it('says which drive to plug in when it vanished after the page loaded', async () => {
+    const detail =
+      "This file is on volume 'archive', which isn't available right now (not connected). Plug it in."
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).startsWith(`/api/files/${SHA}?`)
+        ? json({ detail }, 503)
+        : json({}),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    renderIt(<FileLink file={file()}>Download</FileLink>)
+
+    await user.click(screen.getByRole('link', { name: 'Download' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(detail)
+  })
+
+  it('starts the browser download and says so when the file can be served', async () => {
+    const clicked = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {})
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('bytes', { status: 200 })),
+    )
+    const user = userEvent.setup()
+    renderIt(<FileLink file={file()}>Download</FileLink>)
+
+    await user.click(screen.getByRole('link', { name: 'Download' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      "Download started. It's in your browser's downloads.",
+    )
+    expect(clicked).toHaveBeenCalled()
+    clicked.mockRestore()
+  })
+
+  it('leaves a modified click (open in a new tab) to the browser', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    renderIt(<FileLink file={file()}>Download</FileLink>)
+
+    const user = userEvent.setup()
+    await user.keyboard('{Control>}')
+    await user.click(screen.getByRole('link', { name: 'Download' }))
+    await user.keyboard('{/Control}')
+
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
 describe('FieldValue with files', () => {
   it('shows an unavailable file as unavailable, with where it is', async () => {
     renderIt(<FieldValue value={file({ location: OFFLINE })} />)
@@ -231,9 +356,13 @@ describe('FieldValue with files', () => {
       await screen.findAllByRole('link', { name: 'Download' }),
     ).toHaveLength(2)
     expect(
-      await screen.findByTitle("Stored on volume 'default'"),
+      await screen.findByTitle(
+        "Stored on 'default' (Online). Click for details.",
+      ),
     ).toBeInTheDocument()
-    expect(screen.getByTitle("Stored on volume 'archive'")).toBeInTheDocument()
+    expect(
+      screen.getByTitle("Stored on 'archive' (Online). Click for details."),
+    ).toBeInTheDocument()
   })
 })
 

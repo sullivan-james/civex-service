@@ -177,6 +177,59 @@ def test_a_call_that_never_returns_is_reported_not_waited_on(
     assert fs.guarded("t-hang", lambda: "recovered") == "recovered"
 
 
+def test_concurrent_callers_on_a_busy_but_healthy_location_all_succeed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A slow-but-answering mount (a copy running, several requests probing at
+    # once) must not read as "not responding" to the callers that arrive while
+    # an earlier probe is still in flight.
+    monkeypatch.setattr(fs, "FS_TIMEOUT", 2.0)
+    runs: list[int] = []
+
+    def probe(x: int) -> int:
+        runs.append(x)
+        time.sleep(0.3)
+        return x
+
+    results: list[object] = []
+
+    def call(x: int) -> None:
+        try:
+            results.append(fs.guarded("t-busy", probe, x))
+        except Exception as exc:  # noqa: BLE001
+            results.append(exc)
+
+    threads = [threading.Thread(target=call, args=(1,)) for _ in range(4)]
+    threads += [threading.Thread(target=call, args=(2,)) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sorted(results) == [1, 1, 1, 1, 2, 2]  # type: ignore[type-var]
+    assert runs.count(1) == 1  # identical concurrent calls share one run
+
+
+def test_a_different_call_waits_its_turn_behind_a_young_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(fs, "FS_TIMEOUT", 2.0)
+    order: list[str] = []
+
+    def first() -> str:
+        time.sleep(0.3)
+        order.append("first")
+        return "a"
+
+    got: list[str] = []
+    t = threading.Thread(target=lambda: got.append(fs.guarded("t-turn", first)))
+    t.start()
+    time.sleep(0.05)
+    assert fs.guarded("t-turn", lambda: order.append("second") or "b") == "b"
+    t.join()
+    assert order == ["first", "second"]
+
+
 def test_platform_hint_explains_missing_drives_under_wsl(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

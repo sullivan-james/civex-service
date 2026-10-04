@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useRangeSelect } from '../../hooks/useRangeSelect'
 import type {
   Field as SchemaField,
   RestrictionDescriptor,
@@ -432,6 +433,7 @@ export function DatetimeBoundControl({
       <Input
         size="sm"
         type="datetime-local"
+        step={1}
         value={local}
         aria-label={desc.label}
         onChange={(e) => setLocal(e.target.value)}
@@ -509,17 +511,26 @@ export function GeometryTypesControl({ desc, rules, set }: ControlProps) {
   const chosen = Array.isArray(rules[desc.key])
     ? (rules[desc.key] as string[])
     : []
+  const range = useRangeSelect(GEOMETRY_TYPES)
   return (
     <Shell label={desc.label} help={desc.help}>
       <div className="flex flex-wrap gap-x-4 gap-y-1">
         {GEOMETRY_TYPES.map((g) => (
-          <label key={g} className="flex items-center gap-1.5 text-sm">
+          <label
+            key={g}
+            onClick={range.onClick}
+            className="flex select-none items-center gap-1.5 text-sm"
+          >
             <Checkbox
               checked={chosen.includes(g)}
+              onClick={range.onClick}
               onChange={(e) => {
+                // Shift-click takes every type between the last one clicked and
+                // this one, in the order shown.
+                const ids = range.rangeFor(g) ?? [g]
                 const next = e.target.checked
-                  ? [...chosen, g]
-                  : chosen.filter((t) => t !== g)
+                  ? [...chosen, ...ids.filter((t) => !chosen.includes(t))]
+                  : chosen.filter((t) => !ids.includes(t))
                 set(desc.key, next.length ? next : undefined)
               }}
             />

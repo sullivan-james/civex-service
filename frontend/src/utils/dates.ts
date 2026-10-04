@@ -78,15 +78,22 @@ function wallParts(ms: number, tz: string | null): WallParts {
 const pad = (n: number, width = 2) => String(n).padStart(width, '0')
 
 /** Stored UTC instant -> value for <input type="datetime-local"> in `tz`
- * (null = the viewer's zone). Empty string if missing/unparseable. */
+ * (null = the viewer's zone). Empty string if missing/unparseable. Seconds are
+ * included when the value has them (the input must have `step={1}` to show and
+ * keep them), so a minute-aligned value reads exactly as it always did.
+ * Fractions of a second are not shown. */
 export function utcToZonedLocal(iso: string, tz: string | null = null): string {
   const d = parseStoredInstant(iso)
   if (!d) return ''
   const w = wallParts(d.getTime(), knownTimeZone(tz))
-  return `${pad(w.year, 4)}-${pad(w.month)}-${pad(w.day)}T${pad(w.hour)}:${pad(w.minute)}`
+  const minute = `${pad(w.year, 4)}-${pad(w.month)}-${pad(w.day)}T${pad(w.hour)}:${pad(w.minute)}`
+  return w.second ? `${minute}:${pad(w.second)}` : minute
 }
 
-const LOCAL_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/
+// Seconds are optional, and so is a fraction of one (an input with a sub-minute
+// step can report `:45.000`); the fraction is kept to the millisecond.
+const LOCAL_RE =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/
 
 /** A <input type="datetime-local"> value read as wall time in `tz` -> UTC ISO
  * string. '' for empty input. Returns null when the wall time can't be
@@ -105,7 +112,8 @@ export function zonedLocalToUTC(
   }
   const m = LOCAL_RE.exec(local)
   if (!m) return null
-  const [y, mo, d, h, mi, s] = m.slice(1).map((v) => (v ? Number(v) : 0))
+  const [y, mo, d, h, mi, s] = m.slice(1, 7).map((v) => (v ? Number(v) : 0))
+  const ms = m[7] ? Number(m[7].slice(0, 3).padEnd(3, '0')) : 0
   const asUtc = Date.UTC(y, mo - 1, d, h, mi, s)
   const offsetAt = (ms: number) => {
     const w = wallParts(ms, zone)
@@ -120,7 +128,7 @@ export function zonedLocalToUTC(
     if (offsetAt(t) === o) candidates.add(t)
   }
   if (candidates.size !== 1) return null
-  return new Date([...candidates][0]).toISOString()
+  return new Date([...candidates][0] + ms).toISOString()
 }
 
 /** The value to send for a typed datetime. Wall time the client can resolve
@@ -132,7 +140,8 @@ export function datetimeInputToWire(local: string, tz: string | null): string {
 }
 
 /** Human-readable instant in `tz` with its zone abbreviation, e.g.
- * "Mar 1, 2024, 3:30 PM CST". Falls back to the raw value if unparseable. */
+ * "Mar 1, 2024, 3:30 PM CST", or "3:30:45 PM" when it has seconds. Falls back
+ * to the raw value if unparseable. */
 export function formatDateTime(
   iso: string,
   tz: string | null = null,
@@ -148,6 +157,8 @@ export function formatDateTime(
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    // Only when there are some, so minute-aligned values stay as compact as before.
+    second: d.getUTCSeconds() ? '2-digit' : undefined,
     timeZoneName: 'short',
   }).format(d)
 }

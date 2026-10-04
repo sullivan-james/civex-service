@@ -105,6 +105,10 @@ class WorkflowContext:
     dataset: DatasetDTO
     _app_ctx: "AppContext"
     job_depth: int = 0
+    # Which run this is, so a record it saves can say, on any run that save
+    # triggers, which run and workflow started it.
+    job_id: str | None = None
+    workflow_name: str | None = None
     # Records this workflow run has created or updated so far, in touch
     # order -- the job's audit trail of what it did to the data (surfaced on
     # WorkflowJobDTO.affected_records). Keyed by record id so a record
@@ -120,16 +124,18 @@ class WorkflowContext:
         )
 
     def _note_affected(self, dto: RecordDTO, action: str) -> None:
+        # Only the record's id and schema, never its name: a name is worked out
+        # from the record when someone looks (`RecordService.labels`), so a
+        # rename or a change of name template shows in old runs too, instead of
+        # a copy taken now going stale in the run's history.
         for entry in self.affected_records:
             if entry["record_id"] == str(dto.id):
-                entry["natural_name"] = dto.natural_name
                 entry["action"] = action
                 return
         self.affected_records.append(
             {
                 "record_id": str(dto.id),
                 "schema_name": dto.schema_name,
-                "natural_name": dto.natural_name,
                 "action": action,
             }
         )
@@ -146,12 +152,38 @@ class WorkflowContext:
     def store_file(self, data: bytes, filename: str) -> FileRef:
         return self._app_ctx.file_svc.store_bytes(data, filename, str(self.dataset.id))
 
+    @property
+    def _cause(self) -> dict[str, Any] | None:
+        if self.job_id is None:
+            return None
+        return {"job_id": self.job_id, "workflow": self.workflow_name}
+
     def update_record(self, record_id: str, data: dict[str, Any]) -> RecordDTO:
         dto = self._app_ctx.record_svc.update(
-            record_id, data, _job_depth=self.job_depth + 1
+            record_id, data, _job_depth=self.job_depth + 1, _cause=self._cause
         )
         self._note_affected(dto, "updated")
         return dto
+
+    def patch_record(self, record_id: str, fields: dict[str, Any]) -> RecordDTO:
+        """Change only `fields` on a record; every other field stays exactly as it
+        is *now*.
+
+        `update_record` replaces a record's whole data with what it is given, so
+        a plugin that passes only the fields it knows about erases the rest (a
+        table with a few columns would wipe the file and every computed value on
+        the records it matches). Almost every plugin wants this instead: it reads
+        the record fresh, so a change an earlier step made isn't undone by a stale
+        copy, and it writes nothing at all when the fields already hold these
+        values, so a run that changes nothing leaves no history and triggers
+        nothing. An absent value is simply not in `fields`; it never clears
+        anything.
+        """
+        current = self._app_ctx.record_svc.get(record_id)
+        existing = without_file_locations(current.data)
+        if all(existing.get(k) == v for k, v in fields.items()):
+            return current  # nothing to change: not touched, so not "affected"
+        return self.update_record(record_id, {**existing, **fields})
 
     def create_record(
         self,
@@ -166,6 +198,7 @@ class WorkflowContext:
             data,
             parent_record_id=context_record_id or str(self.record.id),
             _job_depth=self.job_depth + 1,
+            _cause=self._cause,
         )
         self._note_affected(dto, "created")
         return dto

@@ -38,7 +38,10 @@ import { DrillLinks } from './DrillLinks'
 import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
 import { SelectionBar } from './SelectionBar'
+import { BulkRunWorkflow, bulkRunnable } from '../workflows/BulkRunWorkflow'
+import { useWorkflows } from '../../hooks/useWorkflows'
 import { useExplorer, type ExplorerScope } from './useExplorer'
+import { withRange } from '../../hooks/useRangeSelect'
 import { useCollection } from '../../hooks/useCollections'
 import { recordRecent } from '../../hooks/usePins'
 import { placeTarget, viewTarget } from '../../utils/navTargets'
@@ -206,6 +209,8 @@ export function RecordsExplorer({
     ...(parentIsRoot && x.rootId ? { parent: x.rootId } : {}),
   })}`
   const bulkCount = allMatching ? total : selected.size
+  const { data: allWorkflows } = useWorkflows()
+  const runnable = listed ? bulkRunnable(allWorkflows, listed.name) : []
   const listedLabel = listed ? displayLabel(listed.name, listed.label) : ''
 
   // What the star pins: the saved filter when one is applied as saved,
@@ -504,6 +509,17 @@ export function RecordsExplorer({
             }}
             onDelete={() => setConfirmDelete(true)}
             deleting={deleteMany.isPending || deleteMatching.isPending}
+            // Runs are queued for the records ticked, not for "all matching":
+            // that would be every record the filters match, on every page.
+            actions={
+              !allMatching && (
+                <BulkRunWorkflow
+                  workflows={runnable}
+                  recordIds={[...selected]}
+                  onStarted={() => setSelected(new Set())}
+                />
+              )
+            }
           />
         )}
 
@@ -565,6 +581,15 @@ export function RecordsExplorer({
                           if (!next.delete(id)) next.add(id)
                           return next
                         })
+                      },
+                      onSetMany: (ids, on) => {
+                        // A shift-click range, from what is shown now (with "all
+                        // matching" the whole page is ticked).
+                        const shown = allMatching
+                          ? new Set(rows.map((r) => r.id))
+                          : selected
+                        setAllMatching(false)
+                        setSelected(withRange(shown, ids, on))
                       },
                       onToggleAll: () => {
                         setAllMatching(false)

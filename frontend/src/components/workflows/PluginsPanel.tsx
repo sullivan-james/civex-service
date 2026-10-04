@@ -13,10 +13,11 @@ import {
   ConfirmDialog,
 } from '../ui'
 import { ChevronUp, ChevronDown } from '../ui/icons'
-import type {
-  PluginInfo,
-  PluginIOSpec,
-  PluginLoadError,
+import {
+  configType,
+  type PluginInfo,
+  type PluginIOSpec,
+  type PluginLoadError,
 } from '../../api/plugins'
 
 function IOSpecList({ specs }: { specs: PluginIOSpec[] | null }) {
@@ -71,7 +72,7 @@ function PluginContractDetail({ plugin }: { plugin: PluginInfo }) {
             {configProps.map(([key, prop]) => (
               <li key={key} className="font-mono">
                 <span className="text-fg">{key}</span>
-                <span className="text-fg-muted"> : {prop.type ?? 'any'}</span>
+                <span className="text-fg-muted"> : {configType(prop)}</span>
                 {!required.has(key) && (
                   <span className="text-fg-muted"> (optional)</span>
                 )}

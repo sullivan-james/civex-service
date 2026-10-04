@@ -1,21 +1,27 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { filesApi } from '../../api/files'
 import { useUploadCollection } from '../../hooks/uploadCollection'
+import { useFileUploads } from '../../hooks/useFileUploads'
 import type { Field } from '../../api/schemas'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
 import { displayLabel } from '../../utils/naming'
 import { isGeometry, parseLocation, type Geometry } from '../../utils/geo'
 import { LocatorMap } from '../ui/LocatorMap'
 import { tidy, toFieldUnit } from '../../utils/units'
-import { Button, Checkbox, FormError, IconButton } from '../ui'
+import {
+  Checkbox,
+  ConfirmDialog,
+  FileDropZone,
+  FormError,
+  IconButton,
+} from '../ui'
 import { Paperclip, X } from '../ui/icons'
 import { DynamicField, type FileRef } from './DynamicField'
-import { PendingFiles, type StagedFile } from './PendingFiles'
 import { acceptProblem, sizeProblem } from '../../utils/fileChecks'
 import { ReferenceChips } from './ReferenceChips'
 import type { FieldSaveError } from './saveErrors'
 import { FieldValue } from './FieldValue'
 import { FileLink, FileLocationChip } from './FileLocation'
+import { UploadProgress } from './UploadProgress'
 
 const isEmpty = (v: unknown) =>
   v === null ||
@@ -64,11 +70,12 @@ function toSaved(field: Field, draft: unknown): unknown | undefined | null {
   return draft
 }
 
-/** Attach / replace / remove for file and file_list fields. An upload starts
- * as soon as a file is picked, but the file only waits beside the field
- * until someone approves it: the record changes (and any workflow that
- * watches the field runs) on approval, never on upload. Pending files live
- * in the page, so leaving it discards them. */
+/** Attach / replace / remove for file and file_list fields. Picking or
+ * dropping a file uploads it and saves the record straight away, with live
+ * progress, so an upload behaves like any other edit. The only question asked
+ * is when a file would go: removing one, or replacing one (which removes the
+ * current file). The file's type and size are checked first, so a file the
+ * field won't take is refused before anything is uploaded. */
 function FileControl({
   field,
   value,
@@ -84,59 +91,41 @@ function FileControl({
     : value
       ? [value as FileRef]
       : []
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [staged, setStaged] = useState<StagedFile[]>([])
+  // A file waiting on "are you sure": one to remove, or a replacement to swap in.
+  const [removing, setRemoving] = useState<FileRef | null>(null)
+  const [replacement, setReplacement] = useState<File | null>(null)
   const collectionId = useUploadCollection()
+  const { current, uploading, run, cancel } = useFileUploads(collectionId)
   const { accept, maxSize } = toInputProps(field)
+  const label = displayLabel(field.name, field.label)
 
-  async function pick(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? [])
-    e.target.value = ''
-    if (!files.length) return
-    const tooBig = files.find((f) => maxSize !== undefined && f.size > maxSize)
-    if (tooBig) {
-      setError(`${tooBig.name} is too large — max ${formatBytes(maxSize!)}`)
-      return
-    }
+  async function attach(files: File[]) {
     setError(null)
-    try {
-      const uploaded: StagedFile[] = []
-      for (let i = 0; i < files.length; i++) {
-        setBusy(
-          files.length > 1
-            ? `Uploading ${i + 1} of ${files.length}…`
-            : 'Uploading…',
-        )
-        const ref = await filesApi.uploadStreaming(
-          files[i],
-          () => {},
-          collectionId,
-        )
-        uploaded.push({
-          ref,
-          problem:
-            acceptProblem(files[i].name, files[i].type, accept) ??
-            sizeProblem(files[i].size, maxSize),
-        })
+    for (const f of files) {
+      const problem =
+        acceptProblem(f.name, f.type, accept) ?? sizeProblem(f.size, maxSize)
+      if (problem) {
+        setError(`${f.name}: ${problem}`)
+        return
       }
-      // A single-file field holds one pending file: a new pick replaces it.
-      setStaged((prev) => (multiple ? [...prev, ...uploaded] : uploaded))
+    }
+    try {
+      // Files that finished before a cancel are kept.
+      const { refs: done } = await run(files)
+      if (done.length) onSave(multiple ? [...refs, ...done] : done[0])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed')
-    } finally {
-      setBusy(null)
     }
   }
 
-  function approve() {
-    const approved = staged.map((s) => s.ref)
-    setStaged([])
-    onSave(multiple ? [...refs, ...approved] : approved[0])
+  function pick(files: File[]) {
+    // Replacing removes the current file, so that one is confirmed.
+    if (!multiple && refs.length) setReplacement(files[0])
+    else void attach(files)
   }
 
-  const remove = (sha256: string) => {
+  function remove(sha256: string) {
     const rest = refs.filter((r) => r.sha256 !== sha256)
     onSave(multiple ? rest : undefined)
   }
@@ -163,52 +152,77 @@ function FileControl({
           <IconButton
             icon={X}
             variant="danger"
-            onClick={() => remove(ref.sha256)}
+            onClick={() => setRemoving(ref)}
             aria-label={`Remove ${ref.filename}`}
           />
         </div>
       ))}
-      <PendingFiles
-        staged={staged}
-        replacing={!multiple && refs.length ? refs[0].filename : undefined}
-        onDiscard={(sha) =>
-          setStaged((p) => p.filter((s) => s.ref.sha256 !== sha))
-        }
-        onApprove={approve}
-        onDiscardAll={() => setStaged([])}
-      />
-      <div className="flex flex-wrap items-center gap-2">
-        {refs.length === 0 && staged.length === 0 && (
-          <span className="inline-flex items-center rounded-full bg-attention-subtle px-3 py-1 text-xs font-semibold text-attention-emphasis">
-            empty
+      {refs.length === 0 && (
+        <span className="inline-flex items-center rounded-full bg-attention-subtle px-3 py-1 text-xs font-semibold text-attention-emphasis">
+          empty
+        </span>
+      )}
+      <FileDropZone
+        multiple={multiple}
+        accept={accept}
+        disabled={uploading}
+        inputLabel={`Upload ${label}`}
+        onFiles={pick}
+      >
+        {multiple ? undefined : refs.length ? (
+          <span>
+            Drop a file here or <span className="text-accent">browse</span> to
+            replace it
           </span>
-        )}
-        <input
-          ref={inputRef}
-          type="file"
-          multiple={multiple}
-          accept={accept}
-          onChange={pick}
-          className="hidden"
-          aria-label={`Upload ${displayLabel(field.name, field.label)}`}
-        />
-        <Button
-          size="sm"
-          disabled={busy !== null}
-          onClick={() => inputRef.current?.click()}
-        >
-          {busy ??
-            (multiple
-              ? 'Add files…'
-              : refs.length
-                ? 'Replace file…'
-                : 'Attach file…')}
-        </Button>
-      </div>
+        ) : undefined}
+      </FileDropZone>
+      {current && <UploadProgress state={current} onCancel={cancel} />}
       {error && (
         <p role="alert" className="text-xs text-danger">
           {error}
         </p>
+      )}
+
+      {removing && (
+        <ConfirmDialog
+          title="Remove file"
+          confirmLabel="Remove file"
+          variant="danger"
+          body={
+            <p className="text-sm">
+              Remove{' '}
+              <strong>{removing.resolved_filename ?? removing.filename}</strong>{' '}
+              from this record? The file stays in storage until it is cleaned
+              up, but nothing on the record will point to it.
+            </p>
+          }
+          onConfirm={() => {
+            remove(removing.sha256)
+            setRemoving(null)
+          }}
+          onClose={() => setRemoving(null)}
+        />
+      )}
+      {replacement && refs[0] && (
+        <ConfirmDialog
+          title="Replace file"
+          confirmLabel="Replace file"
+          variant="danger"
+          body={
+            <p className="text-sm">
+              Replace{' '}
+              <strong>{refs[0].resolved_filename ?? refs[0].filename}</strong>{' '}
+              with <strong>{replacement.name}</strong>? The current file is
+              removed from this record.
+            </p>
+          }
+          onConfirm={() => {
+            const file = replacement
+            setReplacement(null)
+            void attach([file])
+          }}
+          onClose={() => setReplacement(null)}
+        />
       )}
     </div>
   )

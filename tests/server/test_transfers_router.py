@@ -55,6 +55,30 @@ def test_a_transfer_runs_to_completion(client: TestClient, tmp_path: Path) -> No
     assert len(client.get("/api/store/transfers").json()) == 1
 
 
+def test_a_second_transfer_is_queued_not_refused(
+    client: TestClient, tmp_path: Path
+) -> None:
+    _setup(client, tmp_path)
+    ctx = build_local_context(load_config())
+    (tmp_path / "mnt" / "c").mkdir(parents=True)
+    ctx.store_svc.add_volume("c", str(tmp_path / "mnt" / "c"))
+    ctx.commit()
+    ctx.close()
+    # The second empties the drive the first fills, so it only works if it waits.
+    follow_on = _body(sources=["b"], targets=["c"])
+
+    first = client.post("/api/store/transfers", json=_body())
+    preview = client.post("/api/store/transfers/preview", json=follow_on)
+    second = client.post("/api/store/transfers", json=follow_on)
+
+    assert first.status_code == 202 and second.status_code == 202
+    assert preview.json()["can_proceed"] is True
+    assert second.json()["status"] in ("queued", "running", "completed")
+    _wait(client, first.json()["id"], "completed")
+    done = _wait(client, second.json()["id"], "completed")
+    assert done["progress"]["files_done"] == 5
+
+
 def test_an_impossible_transfer_is_refused_with_reasons(
     client: TestClient, tmp_path: Path
 ) -> None:

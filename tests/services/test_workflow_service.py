@@ -101,11 +101,11 @@ _CYCLE_YAML = """\
 name: cyclic
 steps:
   - id: a
-    plugin: civex.load_csv
+    plugin: civex.parse_table
     inputs:
       bytes: b.table
   - id: b
-    plugin: civex.load_csv
+    plugin: civex.parse_table
     inputs:
       bytes: a.table
 """

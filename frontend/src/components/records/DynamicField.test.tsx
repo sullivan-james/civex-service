@@ -129,6 +129,33 @@ describe('DynamicField datetime and timezones', () => {
     expect(screen.getByText('Time in America/Chicago')).toBeInTheDocument()
   })
 
+  it('has a field for seconds, and shows the seconds that are stored', () => {
+    render(
+      <CollectionTimeZone timeZone="America/Chicago">
+        <DynamicField
+          field={dt()}
+          value="2024-03-01T21:30:45+00:00"
+          onChange={() => {}}
+        />
+      </CollectionTimeZone>,
+    )
+    // A minute step would hide the seconds field and drop them on every edit.
+    expect(input()).toHaveAttribute('step', '1')
+    // (jsdom writes the value back with a fraction; a browser doesn't.)
+    expect(input().value).toMatch(/^2024-03-01T15:30:45/)
+  })
+
+  it('sends typed seconds on, not just the minute', () => {
+    const onChange = vi.fn()
+    render(
+      <CollectionTimeZone timeZone="America/Chicago">
+        <DynamicField field={dt()} value="" onChange={onChange} />
+      </CollectionTimeZone>,
+    )
+    fireEvent.change(input(), { target: { value: '2024-07-01T15:30:42' } })
+    expect(onChange).toHaveBeenCalledWith('2024-07-01T20:30:42.000Z')
+  })
+
   it('sends typed wall time as a UTC instant', () => {
     const onChange = vi.fn()
     render(

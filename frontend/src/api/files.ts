@@ -8,6 +8,10 @@ export interface FileLocation {
     'online' | 'offline' | 'wrong_drive' | 'readonly' | 'retired' | 'unknown'
   /** Can be opened right now; null when unknown. */
   available: boolean | null
+  /** Why it can't be opened, in plain words (blank when it can). */
+  reason?: string
+  /** What to do about it, e.g. which drive to plug in (blank when nothing). */
+  fix?: string
 }
 
 export interface FileRef {
@@ -17,6 +21,14 @@ export interface FileRef {
   volume: string
   resolved_filename?: string
   location?: FileLocation | null
+}
+
+/** What `uploadStreaming` reports as it goes. */
+export interface UploadInfo {
+  loaded: number
+  total: number
+  /** Every byte is sent; the server is still saving the file. */
+  saving: boolean
 }
 
 export interface FileCopy {
@@ -60,21 +72,42 @@ export const filesApi = {
   /** Streams `file`'s raw bytes directly (no multipart wrapping) so the
    * server can write straight to the object store instead of buffering the
    * whole upload first, and so `onProgress` gets real upload-progress
-   * events -- `fetch()` request bodies don't expose those, only XHR does. */
+   * events -- `fetch()` request bodies don't expose those, only XHR does.
+   *
+   * `onProgress` is told the fraction sent and the bytes; once every byte is
+   * sent it is called again with `saving: true`, because the server is then
+   * still hashing and writing the file (which, for a large file on a slow
+   * drive, takes a while the bar can't show). Aborting `signal` stops the
+   * upload and rejects with an `AbortError`. */
   uploadStreaming: (
     file: File,
-    onProgress?: (fraction: number) => void,
+    onProgress?: (fraction: number, info?: UploadInfo) => void,
     collectionId?: string,
+    signal?: AbortSignal,
   ): Promise<FileRef> =>
     new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new DOMException('Upload cancelled', 'AbortError'))
+        return
+      }
       const xhr = new XMLHttpRequest()
       xhr.open(
         'PUT',
         `/api/files/stream?filename=${encodeURIComponent(file.name)}${collectionQuery(collectionId)}`,
       )
       xhr.upload.onprogress = (e) => {
-        if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total)
+        if (onProgress && e.lengthComputable)
+          onProgress(e.loaded / e.total, {
+            loaded: e.loaded,
+            total: e.total,
+            saving: false,
+          })
       }
+      xhr.upload.onload = () =>
+        onProgress?.(1, { loaded: file.size, total: file.size, saving: true })
+      signal?.addEventListener('abort', () => xhr.abort(), { once: true })
+      xhr.onabort = () =>
+        reject(new DOMException('Upload cancelled', 'AbortError'))
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           try {

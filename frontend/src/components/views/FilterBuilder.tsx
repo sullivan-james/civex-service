@@ -198,10 +198,10 @@ function ConditionEditor({
         value={field ? fieldKey(field) : ''}
         onChange={(e) => {
           const picked = fields.find((f) => fieldKey(f) === e.target.value)
-          const ops = operatorsFor(picked?.type)
+          const ops = operatorsFor(picked?.type, picked?.operators)
           update({
             field: picked?.name ?? '',
-            schema: picked?.sourceSchemaName,
+            schema: picked?.ownerless ? undefined : picked?.sourceSchemaName,
             value: '',
             // Keep the operator when the new field supports it; otherwise
             // fall back to its first (e.g. reference lists have no "is").
@@ -211,18 +211,26 @@ function ConditionEditor({
         className="w-56"
       >
         <option value="">Select field…</option>
-        {groupFields(fields).map(({ schemaName, relation, items }) => (
-          <optgroup
-            key={schemaName}
-            label={`${schemaName} (${RELATION_HINT[relation]})`}
-          >
-            {items.map((f) => (
+        {groupFields(fields).map(
+          ({ schemaName, relation, items, ownerless }) => {
+            const options = items.map((f) => (
               <option key={fieldKey(f)} value={fieldKey(f)}>
                 {displayLabel(f.name, f.label)}
               </option>
-            ))}
-          </optgroup>
-        ))}
+            ))
+            // Fields that belong to no schema need no heading to say whose they are.
+            return ownerless ? (
+              options
+            ) : (
+              <optgroup
+                key={schemaName}
+                label={`${schemaName} (${RELATION_HINT[relation]})`}
+              >
+                {options}
+              </optgroup>
+            )
+          },
+        )}
       </Select>
       <Select
         aria-label="Operator"
@@ -239,7 +247,7 @@ function ConditionEditor({
         }}
         className="w-32"
       >
-        {operatorsFor(field?.type).map((o) => (
+        {operatorsFor(field?.type, field?.operators).map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
@@ -270,6 +278,7 @@ function groupFields(fields: FilterableField[]) {
   const groups: {
     schemaName: string
     relation: FieldRelation
+    ownerless: boolean
     items: FilterableField[]
   }[] = []
   for (const f of fields) {
@@ -279,6 +288,7 @@ function groupFields(fields: FilterableField[]) {
       groups.push({
         schemaName: f.sourceSchemaName,
         relation: f.relation,
+        ownerless: !!f.ownerless,
         items: [f],
       })
   }

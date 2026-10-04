@@ -45,6 +45,10 @@ Opening [http://localhost:8000](http://localhost:8000) (or wherever you configur
 
 **Collections** — Create collections and browse their records top-down through the schema hierarchy, with search, filters, saved filters ([views](views.md)), columns, sort and export. The collections you open most appear under **Collections** in the left-hand navigation. See [Browsing a collection](collections-and-records.md#browsing-a-collection).
 
+**Selecting several** — In any table with tick boxes, and in the lists of columns, schemas and shape types, click one box and then **shift-click** another to tick (or untick) everything between them, in the order shown. The next range starts from the box you last clicked.
+
+**Tab titles** — The browser tab says where you are, so several open tabs can be told apart: a record shows its name, then the record it sits under and its collection ("Sample 12 · Patient 3 · study"), a settings page shows its area ("Tasks · Storage · Settings"), and everything ends with "civex".
+
 **Records** — Each record has a detail page showing its field values, attached files, everything under it (children, grandchildren, … in the same explorer), workflow jobs that have run against it, and a form to edit field values.
 
 - File fields show a file picker for upload and a download link for existing attachments.
@@ -55,7 +59,7 @@ Opening [http://localhost:8000](http://localhost:8000) (or wherever you configur
 
 **Runs** — A paginated log of all workflow job executions, filterable by status (`pending`, `running`, `completed`, `failed`). Each job shows its log output.
 
-**Workflows** — View and edit workflow YAML files directly in the browser. Run a workflow manually by selecting it from a record's detail page.
+**Workflows** — View and edit workflow YAML files directly in the browser. Run a workflow manually with the **Run** button on a record's detail page.
 
 ### Pins, Home and jump-to
 

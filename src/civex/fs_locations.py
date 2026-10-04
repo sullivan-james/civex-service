@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, TypeVar
@@ -78,7 +79,18 @@ class Unresponsive(Exception):
 _pool = concurrent.futures.ThreadPoolExecutor(
     max_workers=16, thread_name_prefix="civex-fs"
 )
-_pending: dict[str, concurrent.futures.Future[Any]] = {}
+
+
+@dataclass
+class _Call:
+    future: concurrent.futures.Future[Any]
+    started: float
+    fn: Callable[..., Any]
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
+
+
+_pending: dict[str, _Call] = {}
 _pending_lock = threading.Lock()
 
 
@@ -89,19 +101,40 @@ def guarded(key: str, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     the request that made it. Raises `Unresponsive` after FS_TIMEOUT seconds;
     any other exception from `fn` (OSError and so on) is raised as usual.
 
-    At most one call per `key` is ever outstanding: while an earlier call on the
-    same location is still stuck, later ones fail at once instead of piling up
-    blocked threads behind a dead mount."""
-    with _pending_lock:
-        stuck = _pending.get(key)
-        if stuck is not None and not stuck.done():
+    At most one call per `key` is ever outstanding, so a dead mount can't pile
+    up blocked threads. A later caller on a location that is merely *busy* --
+    an earlier call younger than FS_TIMEOUT, which is normal while a copy is
+    running or several requests probe the same drive at once -- shares that
+    call's answer if it is the same call, and otherwise waits its turn. Only a
+    call that has already outlived FS_TIMEOUT is treated as stuck, and later
+    callers fail at once instead of queueing behind it."""
+    deadline = time.monotonic() + FS_TIMEOUT
+    while True:
+        with _pending_lock:
+            call = _pending.get(key)
+            if call is not None and call.future.done():
+                call = None
+            mine = call is None
+            if mine:
+                call = _Call(
+                    _pool.submit(fn, *args, **kwargs),
+                    time.monotonic(),
+                    fn,
+                    args,
+                    kwargs,
+                )
+                _pending[key] = call
+        assert call is not None
+        if not mine and time.monotonic() - call.started >= FS_TIMEOUT:
             raise Unresponsive("an earlier request is still waiting for it")
-        future = _pool.submit(fn, *args, **kwargs)
-        _pending[key] = future
-    try:
-        return future.result(timeout=FS_TIMEOUT)
-    except concurrent.futures.TimeoutError:
-        raise Unresponsive(f"no answer after {FS_TIMEOUT:g}s") from None
+
+        remaining = max(deadline - time.monotonic(), 0.0)
+        done, _ = concurrent.futures.wait([call.future], timeout=remaining)
+        if not done:
+            raise Unresponsive(f"no answer after {FS_TIMEOUT:g}s")
+        if mine or (call.fn == fn and call.args == args and call.kwargs == kwargs):
+            return call.future.result()
+        # A different call finished first: now it's our turn.
 
 
 def normalise(path: str) -> str:

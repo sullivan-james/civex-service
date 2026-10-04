@@ -281,7 +281,13 @@ def _migrate_on_startup() -> None:
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _migrate_on_startup()
-    yield
+    from civex.services.transfer_jobs import jobs
+
+    jobs.ensure_worker()  # picks up anything a restart left waiting
+    try:
+        yield
+    finally:
+        jobs.shutdown()
 
 
 def create_app() -> FastAPI:
@@ -322,6 +328,7 @@ def create_app() -> FastAPI:
     app.include_router(files.router, prefix="/api")
     app.include_router(workflows.router, prefix="/api")
     app.include_router(jobs.router, prefix="/api")
+    app.include_router(jobs.automation_router, prefix="/api")
     app.include_router(audit.router, prefix="/api")
     app.include_router(remote.router, prefix="/api")
     app.include_router(store.router, prefix="/api")

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  causedBy,
   describeTrigger,
   explainFailure,
   pluginDisplayName,
@@ -25,6 +26,8 @@ function makeJob(overrides: Partial<WorkflowJob> = {}): WorkflowJob {
     created_at: '2026-01-01T00:00:00Z',
     started_at: '2026-01-01T00:00:00Z',
     finished_at: '2026-01-01T00:00:01Z',
+    depth: 0,
+    trigger_detail: null,
     ...overrides,
   }
 }
@@ -54,6 +57,46 @@ describe('describeTrigger', () => {
     expect(describeTrigger(makeJob({ trigger: 'manual' }))).toContain(
       'Run manually',
     )
+  })
+})
+
+describe('describeTrigger with the field that changed', () => {
+  const updated = (changes: object[], caused_by = null) =>
+    makeJob({
+      trigger: 'record_updated',
+      trigger_detail: { changes, caused_by } as WorkflowJob['trigger_detail'],
+    })
+
+  it('names the one field that started the run', () => {
+    const job = updated([
+      { field: 'contour_file', before: 'a.csv', after: 'b.csv', watched: true },
+    ])
+    expect(describeTrigger(job)).toBe(
+      'Triggered automatically because contour_file was updated on this Subject record.',
+    )
+  })
+
+  it('names several, and only the ones the workflow watches', () => {
+    const job = updated([
+      { field: 'a', before: null, after: '1', watched: true },
+      { field: 'b', before: null, after: '2', watched: true },
+      { field: 'c', before: null, after: '3', watched: false },
+    ])
+    expect(describeTrigger(job)).toContain('a and b were updated')
+    expect(describeTrigger(job)).not.toMatch(/\bc\b/)
+  })
+
+  it('falls back to the plain sentence for a run that predates this', () => {
+    expect(describeTrigger(makeJob({ trigger: 'record_updated' }))).toBe(
+      'Triggered automatically when this Subject record was updated.',
+    )
+  })
+
+  it('reports the run behind a chained one', () => {
+    expect(
+      causedBy(updated([], { job_id: 'j0', workflow: 'wf0' } as never)),
+    ).toEqual({ job_id: 'j0', workflow: 'wf0' })
+    expect(causedBy(makeJob())).toBeNull()
   })
 })
 
@@ -155,8 +198,8 @@ describe('pluginDisplayName', () => {
   it('resolves a display name from the plugin list', () => {
     const plugins: PluginInfo[] = [
       {
-        id: 'civex.load_csv',
-        name: 'Load CSV',
+        id: 'civex.parse_table',
+        name: 'Parse Table',
         description: '',
         builtin: true,
         category: 'inputs',
@@ -167,7 +210,7 @@ describe('pluginDisplayName', () => {
         filename: null,
       },
     ]
-    expect(pluginDisplayName('civex.load_csv', plugins)).toBe('Load CSV')
+    expect(pluginDisplayName('civex.parse_table', plugins)).toBe('Parse Table')
   })
 
   it('falls back to the raw id when the plugin is unknown', () => {

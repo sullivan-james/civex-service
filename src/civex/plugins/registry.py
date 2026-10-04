@@ -97,7 +97,7 @@ def _registration_for_tier0(plugin_cls: type[Tier0Plugin]) -> PluginRegistration
         # BUILTIN plugin's author code sees the identical invoke-time values
         # (a real DataFrame, real `bytes`) while its *outputs* still leave in
         # the always-JSON-safe wire form. Without this, a step like
-        # civex.load_csv would hand a live DataFrame to the next step -- fine
+        # civex.parse_table would hand a live DataFrame to the next step -- fine
         # for another in-process step, but a TypeError the moment that step is
         # a subprocess/container one whose RunRequest has to json.dumps it.
         #

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Button } from '../ui'
 
 /** Shown while rows are ticked. Ticking a whole page offers "select all N
@@ -12,6 +13,7 @@ export function SelectionBar({
   onClear,
   onDelete,
   deleting,
+  actions,
 }: {
   selectedCount: number
   pageCount: number
@@ -21,6 +23,8 @@ export function SelectionBar({
   onClear: () => void
   onDelete: () => void
   deleting: boolean
+  /** Other things to do with the selection, before Delete. */
+  actions?: ReactNode
 }) {
   if (selectedCount === 0 && !allMatching) return null
   const count = allMatching ? total : selectedCount
@@ -36,6 +40,7 @@ export function SelectionBar({
           Select all {total.toLocaleString()} matching
         </Button>
       )}
+      {actions}
       <Button variant="danger" size="sm" disabled={deleting} onClick={onDelete}>
         {deleting ? 'Deleting…' : `Delete ${count.toLocaleString()}`}
       </Button>

@@ -23,6 +23,7 @@ import {
   useTabParam,
 } from '../../ui'
 import { Network } from '../../ui/icons'
+import { CleanUpDialog } from './CleanUpDialog'
 import { NewTransferModal, type TransferPreset } from './NewTransferModal'
 import { StatusDot } from './StatusDot'
 import { TransferCard } from './TransferCard'
@@ -58,6 +59,7 @@ export default function VolumePage() {
   const { data: transfers = [] } = useTransfers()
   const actions = useVolumeActions(() => navigate(STORAGE))
   const [moving, setMoving] = useState<TransferPreset | null>(null)
+  const [cleaning, setCleaning] = useState(false)
   const [tab, setTab] = useTabParam(VOLUME_TABS, 'contents')
 
   const vol = volumes?.find((v) => v.name === name)
@@ -318,7 +320,7 @@ export default function VolumePage() {
             r.collectionId ? `/collections/${r.collectionId}` : undefined
           }
           onRowClick={(r) => {
-            if (r.kind === 'unused') navigate(`${STORAGE}?tab=tasks`)
+            if (r.kind === 'unused') setCleaning(true)
           }}
           emptyTitle="Nothing is stored here yet"
           actionsWidth="8rem"
@@ -332,8 +334,12 @@ export default function VolumePage() {
                 Move…
               </Button>
             ) : r.kind === 'unused' ? (
-              <Button size="sm" variant="link" to={`${STORAGE}?tab=tasks`}>
-                Clean up
+              <Button
+                size="sm"
+                variant="link"
+                onClick={() => setCleaning(true)}
+              >
+                Clean up…
               </Button>
             ) : null
           }
@@ -351,6 +357,9 @@ export default function VolumePage() {
       {actions.dialogs}
       {moving && (
         <NewTransferModal preset={moving} onClose={() => setMoving(null)} />
+      )}
+      {cleaning && (
+        <CleanUpDialog volume={vol.name} onClose={() => setCleaning(false)} />
       )}
     </Page>
   )

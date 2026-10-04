@@ -43,7 +43,13 @@ export interface TransferProgress {
 }
 
 export type TransferStatus =
-  'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+  | 'queued'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted'
 
 export interface Transfer {
   id: string

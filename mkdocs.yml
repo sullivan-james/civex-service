@@ -135,6 +135,6 @@ nav:
           - Extract from Filename: reference/plugins/extract_from_filename.md
           - Create Records from Files: reference/plugins/create_records_from_files.md
           - Match Files to Records: reference/plugins/match_files_to_records.md
-          - Load CSV: reference/plugins/load_csv.md
+          - Parse Table: reference/plugins/parse_table.md
           - Rows to Records: reference/plugins/rows_to_records.md
           - Upsert Records: reference/plugins/upsert_records.md

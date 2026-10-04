@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { Outlet, useLocation } from 'react-router'
+import { Outlet, useLocation, useSearchParams } from 'react-router'
 import { InfoTip, Page, Skeleton, TabNav } from '../../components/ui'
 
 /** Settings is a set of pages, one per area, each with its own address
@@ -38,11 +38,28 @@ const settingsSections = [
   },
 ] as const
 
+/** The tabs inside Settings > Storage, by their address (`?tab=`). */
+const STORAGE_TABS: Record<string, string> = {
+  collections: 'Collections',
+  tasks: 'Tasks',
+  transfers: 'Tasks',
+  maintenance: 'Tasks',
+}
+
 export default function SettingsLayout() {
   const { pathname } = useLocation()
+  const [params] = useSearchParams()
   const current = settingsSections.find((s) => pathname.split('/')[2] === s.to)
+  // The tab says which area, and for Storage which of its tabs.
+  const storageTab =
+    current?.to === 'storage'
+      ? (STORAGE_TABS[params.get('tab') ?? ''] ?? 'Volumes')
+      : undefined
   return (
-    <Page title="Settings">
+    <Page
+      title="Settings"
+      documentTitle={[storageTab ?? '', current?.label ?? '', 'Settings']}
+    >
       <div className="flex flex-col gap-6 md:flex-row md:gap-10">
         <div className="shrink-0 md:w-48">
           <TabNav

@@ -1,68 +1,33 @@
-import { useState } from 'react'
-import type { Transfer } from '../../../api/transfers'
-import {
-  useCancelTransfer,
-  usePauseTransfer,
-  useResumeTransfer,
-  useTransfers,
-} from '../../../hooks/useTransfers'
+import { useTransfers } from '../../../hooks/useTransfers'
 import { errorMessage } from '../../../lib/errors'
-import { formatEstimate } from '../../../utils/dbFormat'
-import { formatSize } from '../../../utils/storage'
-import {
-  RESUMABLE,
-  STATUS_LABEL,
-  STATUS_VARIANT,
-  percentDone,
-} from '../../../utils/transfers'
-import {
-  Badge,
-  Button,
-  ConfirmDialog,
-  EmptyState,
-  ErrorState,
-  Skeleton,
-} from '../../ui'
+import { queueAhead } from '../../../utils/transfers'
+import { ErrorState, Skeleton, Subheading } from '../../ui'
 import { TransferCard } from './TransferCard'
-import { NewTransferModal, type TransferPreset } from './NewTransferModal'
 
-/** Moving files between volumes: start a move, and watch, pause or cancel it. */
-export function TransfersTab({ preset }: { preset?: TransferPreset }) {
+/** The moves that have been started, newest first, each with its progress and
+ * what can be done with it. Starting one is on the Tasks page above. */
+export function TransfersTab() {
   const { data, isLoading, error } = useTransfers()
-  const [creating, setCreating] = useState<TransferPreset | null>(
-    preset ?? null,
-  )
 
   if (isLoading) return <Skeleton className="h-24 w-full" />
   if (error) return <ErrorState message={errorMessage(error)} />
+  const ahead = queueAhead(data ?? [])
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-fg-muted">
-          Empty a volume, or gather a collection onto one. Every file is checked
-          before the original is removed, so a move can be paused or stopped at
-          any time.
-        </p>
-        <Button variant="primary" onClick={() => setCreating({})}>
-          Move files…
-        </Button>
-      </div>
+    <section aria-label="Moves" className="space-y-3">
+      <Subheading as="h3">Moves</Subheading>
       {data && data.length > 0 ? (
         <ul className="space-y-3">
           {data.map((t) => (
-            <TransferCard key={t.id} t={t} />
+            <TransferCard key={t.id} t={t} ahead={ahead.get(t.id)} />
           ))}
         </ul>
       ) : (
-        <EmptyState
-          title="No moves yet"
-          message="Moves you start appear here."
-        />
+        <p className="text-sm text-fg-muted">
+          No moves yet. One you start appears here, and across the bottom of the
+          screen while it runs.
+        </p>
       )}
-      {creating && (
-        <NewTransferModal preset={creating} onClose={() => setCreating(null)} />
-      )}
-    </div>
+    </section>
   )
 }

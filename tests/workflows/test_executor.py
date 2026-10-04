@@ -156,3 +156,57 @@ def test_step_if_referencing_unrun_step_raises() -> None:
     )
     with pytest.raises(ValueError, match="unknown step 'nope'"):
         executor.run(wf, _FakeCtx(), {"test.plugin": _recording_registration([])})
+
+
+# -- stopping a run (the kill switch) ---------------------------------------------
+
+
+def test_a_run_told_to_stop_ends_before_its_next_step() -> None:
+    from civex.domain.exceptions import JobCancelled
+
+    seen: list[float] = []
+    wf = WorkflowDef(
+        name="wf",
+        steps=[
+            StepDef(id="s1", plugin="test.plugin"),
+            StepDef(id="s2", plugin="test.plugin", inputs={"x": "s1.ok"}),
+            StepDef(id="s3", plugin="test.plugin", inputs={"x": "s2.ok"}),
+        ],
+    )
+    asked: list[int] = []
+
+    def stop_after_the_first_step() -> bool:
+        asked.append(len(seen))
+        return len(seen) >= 1
+
+    with pytest.raises(JobCancelled, match="before step 's2'") as stopped:
+        executor.run(
+            wf,
+            _FakeCtx(),
+            {"test.plugin": _recording_registration(seen)},
+            should_stop=stop_after_the_first_step,
+        )
+
+    assert len(seen) == 1  # only the first step ran
+    # What had been done is kept for the run's record, as for a failure.
+    steps = stopped.value.step_executions  # type: ignore[attr-defined]
+    assert [s["step_id"] for s in steps] == ["s1"]
+    assert asked == [0, 1]  # asked before every step that was reached
+
+
+def test_a_run_that_is_not_told_to_stop_runs_to_the_end() -> None:
+    seen: list[float] = []
+    wf = WorkflowDef(
+        name="wf",
+        steps=[
+            StepDef(id="s1", plugin="test.plugin"),
+            StepDef(id="s2", plugin="test.plugin", inputs={"x": "s1.ok"}),
+        ],
+    )
+    executor.run(
+        wf,
+        _FakeCtx(),
+        {"test.plugin": _recording_registration(seen)},
+        should_stop=lambda: False,
+    )
+    assert len(seen) == 2

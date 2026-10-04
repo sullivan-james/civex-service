@@ -52,6 +52,47 @@ def test_move_drains_a_volume_and_is_listed(project_dir: Path, tmp_path: Path) -
     assert "drain" in listing and "4/4 files" in listing
 
 
+def test_a_move_queues_behind_one_already_running_and_run_finishes_it(
+    project_dir: Path, tmp_path: Path
+) -> None:
+    _two_volumes(tmp_path)
+    holder = build_local_context(load_config())
+    try:
+        with holder.file_svc._store.transfer_lock():  # another process is moving files
+            result = runner.invoke(app, ["store", "move", "--off", "a", "--to", "b"])
+            assert result.exit_code == 0, result.output
+            assert "queued" in _plain(result).lower()
+            listing = _plain(runner.invoke(app, ["store", "transfers", "list"]))
+            assert "queued" in listing and "0/4 files" in listing
+    finally:
+        holder.close()
+
+    # Nothing holds the lock any more: the waiting move runs in this terminal.
+    result = runner.invoke(app, ["store", "transfers", "run"])
+    assert result.exit_code == 0, result.output
+    assert "completed" in _plain(result)
+    listing = _plain(runner.invoke(app, ["store", "transfers", "list"]))
+    assert "4/4 files" in listing and "queued" not in listing
+
+
+def test_a_waiting_move_can_be_cancelled_from_the_terminal(
+    project_dir: Path, tmp_path: Path
+) -> None:
+    _two_volumes(tmp_path)
+    holder = build_local_context(load_config())
+    try:
+        with holder.file_svc._store.transfer_lock():
+            runner.invoke(app, ["store", "move", "--off", "a", "--to", "b"])
+            ctx = build_local_context(load_config())
+            transfer_id = ctx.transfer_svc.recent()[0].id[:8]
+            ctx.close()
+            result = runner.invoke(app, ["store", "transfers", "cancel", transfer_id])
+            assert result.exit_code == 0, result.output
+            assert "cancelled" in _plain(result)
+    finally:
+        holder.close()
+
+
 def test_move_needs_exactly_one_of_off_or_collection(project_dir: Path) -> None:
     assert runner.invoke(app, ["store", "move", "--to", "b"]).exit_code == 2
 

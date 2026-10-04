@@ -249,6 +249,11 @@ def store_gc(
     show: int = typer.Option(
         20, "--show", help="Max collectible objects to list individually"
     ),
+    volume: Optional[str] = typer.Option(
+        None,
+        "--volume",
+        help="Only clean up objects stored on this volume (default: every volume).",
+    ),
     rebuild_refs: bool = typer.Option(
         False,
         "--rebuild-refs",
@@ -273,7 +278,7 @@ def store_gc(
             count = ctx.gc_svc.rebuild_references()
             ctx.commit()
             console.print(f"Rebuilt file-reference table ({count} references).")
-        report = ctx.gc_svc.run(dry_run=not apply, grace_days=grace_days)
+        report = ctx.gc_svc.run(dry_run=not apply, grace_days=grace_days, volume=volume)
     except CivexError as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)

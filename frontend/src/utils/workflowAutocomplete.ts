@@ -1,4 +1,4 @@
-import type { PluginInfo } from '../api/plugins'
+import { configType, type PluginInfo } from '../api/plugins'
 
 export interface Suggestion {
   /** Text inserted in place of the matched prefix. */
@@ -247,7 +247,7 @@ function configKeySuggestions(
     .map(([key, prop]) => ({
       insertText: `${key}: `,
       label: key,
-      detail: prop.type ?? 'any',
+      detail: configType(prop),
     }))
 }
 

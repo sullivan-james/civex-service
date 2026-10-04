@@ -78,6 +78,28 @@ def test_naive_datetime_without_a_zone_is_read_as_utc(client: TestClient) -> Non
     assert r.json()["data"]["taken_at"] == "2024-03-01T15:30:00+00:00"
 
 
+def test_seconds_are_stored_and_returned(client: TestClient) -> None:
+    """The server keeps the seconds a datetime was given, in any zone; losing
+    them was the browser input's doing, never the storage."""
+    _setup(client, CHICAGO)
+    r = _add(client, "2024-03-01T15:30:45")  # CST, UTC-6
+    assert r.status_code == 201, r.text
+    stored = r.json()["data"]["taken_at"]
+    assert stored == "2024-03-01T21:30:45+00:00"
+    again = client.get(f"/api/records/{r.json()['id']}")
+    assert again.json()["data"]["taken_at"] == "2024-03-01T21:30:45+00:00"
+
+
+def test_seconds_survive_with_an_explicit_offset_and_with_no_zone(
+    client: TestClient,
+) -> None:
+    _setup(client, None)
+    utc = _add(client, "2024-03-01T15:30:07")
+    assert utc.json()["data"]["taken_at"] == "2024-03-01T15:30:07+00:00"
+    offset = _add(client, "2024-03-01T15:30:07+02:00")
+    assert offset.json()["data"]["taken_at"] == "2024-03-01T13:30:07+00:00"
+
+
 def test_explicit_offset_wins_over_the_collection_zone(client: TestClient) -> None:
     _setup(client, CHICAGO)
     r = _add(client, "2024-03-01T15:30:00+00:00")

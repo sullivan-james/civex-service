@@ -120,6 +120,16 @@ class StoreService:
         save_config(fresh)
         sc.volumes[name].state = state
 
+    def restore_volume_state(self, name: str, before: str) -> None:
+        """Put back the state a transfer changed, but only if it is still the one
+        the transfer set (read-only), judged from config.toml as it is now, not
+        from this process's copy: someone may have changed it since."""
+        from civex.config import load_config
+
+        fresh = load_config().store_config.volumes.get(name)
+        if fresh is not None and fresh.state == "readonly":
+            self.set_volume_state(name, before)
+
     def update_volume(
         self, name: str, *, path: str | None = None, allocated_gb=_UNSET
     ) -> None:

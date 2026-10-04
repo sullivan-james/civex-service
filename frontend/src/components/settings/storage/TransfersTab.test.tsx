@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
-import { TransfersTab } from './TransfersTab'
+import { TasksTab } from './TasksTab'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -120,16 +120,16 @@ function renderTab(preset?: { source?: string }) {
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
-        <TransfersTab preset={preset} />
+        <TasksTab preset={preset} />
       </MemoryRouter>
     </QueryClientProvider>,
   )
 }
 
-describe('TransfersTab', () => {
+describe('Tasks page', () => {
   it('shows an empty state when nothing has been moved', async () => {
     renderTab()
-    expect(await screen.findByText('No moves yet')).toBeInTheDocument()
+    expect(await screen.findByText(/No moves yet/)).toBeInTheDocument()
   })
 
   it('shows progress for a running transfer and pauses it', async () => {
@@ -146,6 +146,35 @@ describe('TransfersTab', () => {
         calls.some((c) => c.method === 'POST' && c.path.endsWith('/t1/pause')),
       ).toBe(true),
     )
+  })
+
+  it('shows a waiting move with its place in the queue, and can pause or cancel it', async () => {
+    transfers = [
+      transfer({ id: 't1' }),
+      transfer({
+        id: 't2',
+        status: 'queued',
+        live: false,
+        created_at: '2026-10-04T10:00:00Z',
+        progress: progress({ files_done: 0, bytes_done: 0 }),
+      }),
+    ]
+    renderTab()
+    expect(
+      await screen.findByText(/starts after 1 other move/),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Waiting')).toBeInTheDocument()
+    // The running one and the waiting one can each be paused and cancelled.
+    expect(screen.getAllByRole('button', { name: 'Pause' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Cancel' })).toHaveLength(2)
+  })
+
+  it('says a new move joins the queue when another is running', async () => {
+    transfers = [transfer()]
+    renderTab({ source: 'a' })
+    expect(
+      await screen.findByRole('button', { name: 'Add to queue' }),
+    ).toBeInTheDocument()
   })
 
   it('offers to resume an interrupted transfer, reassuringly', async () => {

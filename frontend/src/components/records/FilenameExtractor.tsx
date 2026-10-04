@@ -130,8 +130,9 @@ export function FilenameExtractor({
         setConvertErr('Result is not a valid datetime')
         return
       }
-      // datetimeLocalToUTC treats the string as local time if tz-naive
-      setConverted(datetimeLocalToUTC(isoStr.slice(0, 16))) // store as UTC
+      // datetimeLocalToUTC treats the string as local time if tz-naive. Keep the
+      // seconds (YYYY-MM-DDTHH:MM:SS): a filename's `SS` token is a real value.
+      setConverted(datetimeLocalToUTC(isoStr.slice(0, 19))) // store as UTC
     } else {
       // string
       setConverted(raw)

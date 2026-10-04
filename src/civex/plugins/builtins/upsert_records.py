@@ -17,7 +17,8 @@ class Plugin(Tier0Plugin):
     name = "Upsert Records"
     description = (
         "Create or update one record per table row, matching existing records "
-        "on a key column."
+        "on a key column. An update changes only the columns in the table; the "
+        "record's other fields are kept, and an empty cell never clears a value."
     )
     category = "outputs"
     capabilities: list[str] = ["create_record", "update_record", "find_records"]
@@ -105,7 +106,10 @@ class Plugin(Tier0Plugin):
 
             try:
                 if existing:
-                    ctx.update_record(str(existing[0].id), data)
+                    # Only the fields the row has: the record's other fields (a
+                    # file, computed values) stay, and an empty cell leaves its
+                    # field alone rather than clearing it.
+                    ctx.patch_record(str(existing[0].id), data)
                     updated += 1
                 else:
                     ctx.create_record(

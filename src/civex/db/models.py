@@ -396,7 +396,7 @@ class WorkflowJob(Base):
     A queued or completed workflow execution.
     Jobs are enqueued automatically when a record event matches a workflow trigger,
     or manually via `civex worker enqueue`. The worker drains pending jobs in order.
-    status: pending → running → completed | failed
+    status: pending → running → completed | failed | cancelled
     trigger: record_created | record_updated | manual
     """
 
@@ -444,6 +444,10 @@ class WorkflowJob(Base):
     depth: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    # What caused this run, beyond the event name: {"changes": [{field, before,
+    # after, watched}], "caused_by": {job_id, workflow} | null}. Null for a run
+    # started by hand, or that predates this field.
+    trigger_detail: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
     started_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
@@ -560,7 +564,7 @@ class StorageTransfer(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
-    # running | paused | completed | failed | cancelled | interrupted
+    # queued | running | paused | completed | failed | cancelled | interrupted
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     spec: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False)
     plan: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)

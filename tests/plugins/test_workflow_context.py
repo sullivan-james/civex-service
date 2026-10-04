@@ -168,7 +168,6 @@ def test_create_record_appends_to_affected_records(
         {
             "record_id": str(created.id),
             "schema_name": "child",
-            "natural_name": created.natural_name,
             "action": "created",
         }
     ]
@@ -183,13 +182,12 @@ def test_update_record_appends_to_affected_records(
     other = make_record("study", "subject", {"status": "pending"})
     wf_ctx = _wf_ctx(ctx, trigger, dataset)
 
-    updated = wf_ctx.update_record(str(other.id), {"status": "done"})
+    wf_ctx.update_record(str(other.id), {"status": "done"})
 
     assert wf_ctx.affected_records == [
         {
             "record_id": str(other.id),
             "schema_name": "subject",
-            "natural_name": updated.natural_name,
             "action": "updated",
         }
     ]
@@ -207,14 +205,13 @@ def test_affected_records_upgrades_created_to_updated_on_later_touch(
     wf_ctx = _wf_ctx(ctx, trigger, dataset)
 
     created = wf_ctx.create_record("study", "child", {"name": "first"})
-    updated = wf_ctx.update_record(str(created.id), {"name": "corrected"})
+    wf_ctx.update_record(str(created.id), {"name": "corrected"})
 
     # One entry, not two -- and it reflects the more recent action.
     assert wf_ctx.affected_records == [
         {
             "record_id": str(created.id),
             "schema_name": "child",
-            "natural_name": updated.natural_name,
             "action": "updated",
         }
     ]

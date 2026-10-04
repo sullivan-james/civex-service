@@ -1,5 +1,7 @@
 import { type ReactNode } from 'react'
 import { Link } from 'react-router'
+import { useDocumentTitle } from '../../hooks/useDocumentTitle'
+import { pageTitleParts } from '../../utils/documentTitle'
 import { IconButton } from './IconButton'
 import { Menu } from './Menu'
 import { InfoTip } from './Tooltip'
@@ -108,6 +110,11 @@ export interface PageProps {
   loading?: ReactNode
   /** Replaces the title row and content on error. */
   error?: ReactNode
+  /** What the browser tab says, most specific first, when the title and trail
+   * don't say it (a page with several sections of its own). Otherwise it is
+   * made from the title and the breadcrumb trail: the current item, then what
+   * it sits inside. */
+  documentTitle?: string[]
   children?: ReactNode
 }
 
@@ -125,8 +132,10 @@ export function Page({
   tabs,
   loading,
   error,
+  documentTitle,
   children,
 }: PageProps) {
+  useDocumentTitle(documentTitle ?? pageTitleParts(title, breadcrumbs))
   const hasTitleRow = !!(title || meta || action || secondaryActions?.length)
 
   return (

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select, update
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from civex.db.models import (
@@ -15,6 +15,8 @@ from civex.db.models import (
     WorkflowJob,
 )
 from civex.domain.dtos import WorkflowJobDTO
+from civex.domain.exceptions import ValidationError
+from civex.domain.filters import FilterCondition, FilterGroup, FilterNode
 from civex.repositories.local._bucketing import day_bucket, rebucket
 from civex.repositories.protocols import JobStatusRow, PluginFailureRow
 
@@ -39,8 +41,19 @@ _SORTABLE = {
 }
 
 
-def _narrow(q, status: str | None, trigger: str | None, search: str | None):
+def _narrow(
+    q,
+    status: str | None,
+    trigger: str | None,
+    search: str | None,
+    workflow: str | None = None,
+    where: FilterNode | None = None,
+):
     """The run filters a person picks in the UI, shared by list and count."""
+    if where is not None:
+        q = q.filter(_tree(where))
+    if workflow:
+        q = q.filter(WorkflowJob.workflow_name == workflow)
     if status:
         q = q.filter(WorkflowJob.status == status)
     if trigger:
@@ -54,6 +67,78 @@ def _narrow(q, status: str | None, trigger: str | None, search: str | None):
             )
         )
     return q
+
+
+def _utc(value: object) -> datetime:
+    """A filter's date, as the UTC instant the column holds."""
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        raise ValidationError(f"Not a date: {value!r}")
+    return (
+        parsed.replace(tzinfo=timezone.utc)
+        if parsed.tzinfo is None
+        else parsed.astimezone(timezone.utc)
+    )
+
+
+def _run_column(name: str):
+    """What a run-filter field is in the database."""
+    return {
+        "workflow": WorkflowJob.workflow_name,
+        "status": WorkflowJob.status,
+        "trigger": WorkflowJob.trigger,
+        "schema": _SORTABLE["schema_name"],
+        "created_at": WorkflowJob.created_at,
+        "finished_at": WorkflowJob.finished_at,
+        "error_kind": WorkflowJob.error_details["kind"].as_string(),
+        "error": cast(WorkflowJob.error, String),
+        "failed_step": WorkflowJob.error_details["step"].as_string(),
+        "depth": WorkflowJob.depth,
+        "record": cast(WorkflowJob.record_id, String),
+    }[name]
+
+
+def _condition(leaf: FilterCondition):
+    col = _run_column(leaf.field)
+    value = leaf.value
+    if leaf.field in ("created_at", "finished_at") and leaf.op != "is_null":
+        value = _utc(value)
+    if leaf.field == "record":
+        value = (
+            [str(v).replace("-", "") for v in value]
+            if isinstance(value, list)
+            else str(value).replace("-", "")
+        )
+        col = func.replace(col, "-", "")
+    match leaf.op:
+        case "eq":
+            return col == value
+        case "ne":
+            # Not-equal keeps runs where the column is empty, as a person means it.
+            return or_(col.is_(None), col != value)
+        case "gt":
+            return col > value
+        case "gte":
+            return col >= value
+        case "lt":
+            return col < value
+        case "lte":
+            return col <= value
+        case "contains":
+            return col.ilike(f"%{value}%")
+        case "in":
+            return col.in_(value)
+        case "is_null":
+            return col.is_(None) if value else col.is_not(None)
+    raise ValidationError(f"Unsupported operator '{leaf.op}'")
+
+
+def _tree(node: FilterNode):
+    if isinstance(node, FilterGroup):
+        parts = [_tree(c) for c in node.conditions]
+        return and_(*parts) if node.op == "and" else or_(*parts)
+    return _condition(node)
 
 
 def _order(sort: str | None) -> list:
@@ -82,6 +167,7 @@ class LocalWorkflowJobRepository:
         trigger: str,
         input_data: dict | None = None,
         depth: int = 0,
+        trigger_detail: dict | None = None,
     ) -> WorkflowJobDTO:
         row = WorkflowJob(
             workflow_name=workflow_name,
@@ -90,25 +176,104 @@ class LocalWorkflowJobRepository:
             status="pending",
             input_data=input_data,
             depth=depth,
+            trigger_detail=trigger_detail,
         )
         self._s.add(row)
         self._s.flush()
         return _to_dto(row)
 
     def claim_pending(self) -> WorkflowJobDTO | None:
-        """Claim the oldest pending job by marking it running. Not safe for concurrent workers."""
-        row = (
-            self._s.query(WorkflowJob)
-            .filter_by(status="pending")
-            .order_by(WorkflowJob.created_at)
-            .first()
+        """Claim the oldest pending job by marking it running. The claim is a
+        conditional UPDATE, so two workers (the server starts a drain per
+        request) can't take the same job, and a job cancelled a moment ago
+        isn't started."""
+        while True:
+            row = (
+                self._s.query(WorkflowJob)
+                .filter_by(status="pending")
+                .order_by(WorkflowJob.created_at)
+                .first()
+            )
+            if row is None:
+                return None
+            taken = (
+                self._s.query(WorkflowJob)
+                .filter(WorkflowJob.id == row.id, WorkflowJob.status == "pending")
+                .update(
+                    {"status": "running", "started_at": _now()},
+                    synchronize_session=False,
+                )
+            )
+            if taken:
+                self._s.refresh(row)
+                self._s.flush()
+                return _to_dto(row)
+            self._s.refresh(row)  # someone else got it first: look again
+
+    def status_of(self, job_id: uuid.UUID) -> str | None:
+        """A job's status read straight from the database, never from this
+        session's cache: a running job asks this between steps to see whether
+        someone cancelled it from another request or process."""
+        return self._s.execute(
+            select(WorkflowJob.status).where(WorkflowJob.id == job_id)
+        ).scalar_one_or_none()
+
+    def cancel(self, job_id: uuid.UUID, reason: str) -> WorkflowJobDTO | None:
+        """Cancel a waiting or running job. A waiting one never starts; a
+        running one is noticed by its worker before its next step. A job that
+        already finished is left as it is. None if there is no such job."""
+        self._s.execute(
+            update(WorkflowJob)
+            .where(
+                WorkflowJob.id == job_id,
+                WorkflowJob.status.in_(("pending", "running")),
+            )
+            .values(status="cancelled", finished_at=_now(), error=reason)
         )
-        if row is None:
-            return None
-        row.status = "running"
-        row.started_at = _now()
         self._s.flush()
-        return _to_dto(row)
+        return self.get_by_id(job_id)
+
+    def cancel_all_active(self, reason: str) -> int:
+        """Cancel every waiting and running job. How many were cancelled."""
+        cancelled = (
+            self._s.query(WorkflowJob)
+            .filter(WorkflowJob.status.in_(("pending", "running")))
+            .update(
+                {"status": "cancelled", "finished_at": _now(), "error": reason},
+                synchronize_session=False,
+            )
+        )
+        self._s.flush()
+        return cancelled
+
+    def mark_cancelled(
+        self,
+        job_id: uuid.UUID,
+        log: str | None = None,
+        step_executions: list[dict] | None = None,
+        affected_records: list[dict] | None = None,
+    ) -> None:
+        """Keep what a cancelled run got done: its log, the steps that ran, and
+        the records it touched. The status stays `cancelled`."""
+        row = self._s.query(WorkflowJob).filter_by(id=job_id).first()
+        if row:
+            self._keep_cancelled(row, log, step_executions, affected_records)
+            self._s.flush()
+
+    def _keep_cancelled(
+        self,
+        row: WorkflowJob,
+        log: str | None,
+        step_executions: list[dict] | None,
+        affected_records: list[dict] | None,
+    ) -> None:
+        row.status = "cancelled"
+        row.finished_at = row.finished_at or _now()
+        row.log = log
+        row.affected_records = affected_records or None
+        _replace_step_executions(self._s, row.id, step_executions)
+        _replace_affected_schemas(self._s, row.id, affected_records)
+        _replace_affected_records(self._s, row.id, affected_records)
 
     def mark_completed(
         self,
@@ -118,7 +283,11 @@ class LocalWorkflowJobRepository:
         affected_records: list[dict] | None = None,
     ) -> None:
         row = self._s.query(WorkflowJob).filter_by(id=job_id).first()
-        if row:
+        if row and row.status == "cancelled":
+            # Cancelled while its last step ran: it stays cancelled.
+            self._keep_cancelled(row, log, step_executions, affected_records)
+            self._s.flush()
+        elif row:
             row.status = "completed"
             row.finished_at = _now()
             row.log = log
@@ -137,7 +306,10 @@ class LocalWorkflowJobRepository:
         affected_records: list[dict] | None = None,
     ) -> None:
         row = self._s.query(WorkflowJob).filter_by(id=job_id).first()
-        if row:
+        if row and row.status == "cancelled":
+            self._keep_cancelled(row, log, step_executions, affected_records)
+            self._s.flush()
+        elif row:
             row.status = "failed"
             row.finished_at = _now()
             # `error` and `error_details["message"]` are the same string --
@@ -166,11 +338,13 @@ class LocalWorkflowJobRepository:
         trigger: str | None = None,
         search: str | None = None,
         sort: str | None = None,
+        workflow: str | None = None,
+        where: FilterNode | None = None,
     ) -> list[WorkflowJobDTO]:
         q = self._s.query(WorkflowJob).options(
             selectinload(WorkflowJob.steps), _WITH_SCHEMA
         )
-        q = _narrow(q, status, trigger, search)
+        q = _narrow(q, status, trigger, search, workflow, where)
         if record_id:
             try:
                 q = q.filter_by(record_id=uuid.UUID(record_id))
@@ -197,8 +371,12 @@ class LocalWorkflowJobRepository:
         affected_schema: str | None = None,
         trigger: str | None = None,
         search: str | None = None,
+        workflow: str | None = None,
+        where: FilterNode | None = None,
     ) -> int:
-        q = _narrow(self._s.query(WorkflowJob), status, trigger, search)
+        q = _narrow(
+            self._s.query(WorkflowJob), status, trigger, search, workflow, where
+        )
         if affected_schema:
             q = q.filter(_touches_schema(affected_schema))
         if record_id:
@@ -212,6 +390,102 @@ class LocalWorkflowJobRepository:
                 return 0
             q = q.filter(touched)
         return q.count()
+
+    def ids_matching(self, where: FilterNode | None, limit: int) -> list[uuid.UUID]:
+        """Ids of the runs a filter matches, newest first, at most `limit`."""
+        q = _narrow(self._s.query(WorkflowJob.id), None, None, None, None, where)
+        return [r[0] for r in q.order_by(*_order(None)).limit(limit).all()]
+
+    def failure_groups(self, where: FilterNode | None) -> list[dict]:
+        """The failed runs a filter matches, grouped by what went wrong: workflow,
+        failure type and message, with how many and when last. Most first."""
+        kind = WorkflowJob.error_details["kind"].as_string()
+        step = WorkflowJob.error_details["step"].as_string()
+        q = _narrow(
+            self._s.query(
+                WorkflowJob.workflow_name,
+                kind,
+                step,
+                cast(WorkflowJob.error, String),
+                func.count(WorkflowJob.id),
+                func.max(WorkflowJob.created_at),
+            ),
+            "failed",
+            None,
+            None,
+            None,
+            where,
+        )
+        rows = (
+            q.group_by(
+                WorkflowJob.workflow_name, kind, step, cast(WorkflowJob.error, String)
+            )
+            .order_by(
+                func.count(WorkflowJob.id).desc(),
+                func.max(WorkflowJob.created_at).desc(),
+            )
+            .limit(200)
+            .all()
+        )
+        return [
+            {
+                "workflow": r[0],
+                "kind": r[1],
+                "step": r[2],
+                "message": r[3],
+                "count": r[4],
+                "last_at": r[5],
+            }
+            for r in rows
+        ]
+
+    def batch_stats(self) -> dict | None:
+        """How far through the current stretch of work the queue is, or None when
+        it is idle. The stretch is every run that was queued while something was
+        still waiting or running -- so a bulk start of 50 is 50 from the first
+        poll, and a run that ended and was followed straight by another counts
+        with it -- and it ends when the queue empties. Worked out from the runs'
+        own timestamps; nothing is stored."""
+        active = (
+            self._s.query(func.count(WorkflowJob.id), func.min(WorkflowJob.created_at))
+            .filter(WorkflowJob.status.in_(("pending", "running")))
+            .one()
+        )
+        if not active[0]:
+            return None
+        start = active[1]
+        horizon = _now() - timedelta(days=1)
+        finished = (
+            self._s.query(
+                WorkflowJob.created_at, WorkflowJob.finished_at, WorkflowJob.status
+            )
+            .filter(
+                WorkflowJob.finished_at.is_not(None), WorkflowJob.finished_at >= horizon
+            )
+            .order_by(WorkflowJob.finished_at.desc())
+            .limit(20000)
+            .all()
+        )
+        included: set[int] = set()
+        grew = True
+        while grew:
+            grew = False
+            for i, (created, ended, _) in enumerate(finished):
+                if i not in included and ended >= start:
+                    included.add(i)
+                    start = min(start, created)
+                    grew = True
+        done = {"completed": 0, "failed": 0, "cancelled": 0}
+        for i in included:
+            done[finished[i][2]] = done.get(finished[i][2], 0) + 1
+        return {
+            "active": active[0],
+            "started_at": start,
+            "completed": done["completed"],
+            "failed": done["failed"],
+            "cancelled": done["cancelled"],
+            "total": active[0] + len(included),
+        }
 
     def get_by_id(self, job_id: uuid.UUID) -> WorkflowJobDTO | None:
         row = (
@@ -467,6 +741,7 @@ def _to_dto(row: WorkflowJob) -> WorkflowJobDTO:
         started_at=row.started_at,
         finished_at=row.finished_at,
         depth=row.depth,
+        trigger_detail=row.trigger_detail,
         step_executions=step_executions,
         affected_records=row.affected_records,
     )

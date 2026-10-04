@@ -13,6 +13,7 @@ from civex.domain.transfers import (
     KIND_CONSOLIDATE,
     KIND_DRAIN,
     RESUMABLE,
+    STATUS_QUEUED,
     STATUS_RUNNING,
     TransferProgress,
     TransferRecord,
@@ -72,8 +73,11 @@ def _print_plan(spec: TransferSpec, ctx) -> bool:
     return plan.can_proceed
 
 
-def _run_foreground(ctx, transfer_id: str) -> TransferRecord:
-    """Run in this terminal. Ctrl+C pauses (nothing is lost) instead of killing."""
+def _run_queue(highlight: str | None = None) -> None:
+    """Run the queue in this terminal, with a live progress bar: every waiting
+    transfer, oldest first, each as its own bar. Ctrl+C pauses the running one
+    (nothing is lost). If another process is already moving files (the server,
+    or another terminal) it is left to finish the queue, and this says so."""
     from rich.progress import (
         BarColumn,
         Progress,
@@ -81,7 +85,10 @@ def _run_foreground(ctx, transfer_id: str) -> TransferRecord:
         TimeRemainingColumn,
     )
 
-    control = TransferControl()
+    from civex.services.transfer_worker import TransferWorker
+
+    current: dict[str, object] = {}
+    worker = TransferWorker(get_ctx)
     with Progress(
         TextColumn("{task.description}"),
         BarColumn(),
@@ -91,21 +98,56 @@ def _run_foreground(ctx, transfer_id: str) -> TransferRecord:
     ) as bar:
         task = bar.add_task("Moving", total=1)
 
-        def show(p: TransferProgress) -> None:
+        def began(transfer_id: str, control: TransferControl) -> None:
+            current.update(id=transfer_id, control=control)
+            bar.reset(task, total=1, description=f"Moving {transfer_id[:8]}")
+
+        def show(transfer_id: str, p: TransferProgress) -> None:
             total = max(p.bytes_total, 1)
             bar.update(
                 task,
                 total=total,
                 completed=min(p.bytes_done + p.current_bytes, total),
-                description=f"Moving {p.files_done}/{p.files_total} files",
+                description=(
+                    f"Moving {transfer_id[:8]}  {p.files_done}/{p.files_total} files"
+                    + (
+                        f"  {format_bytes(p.rate_bytes_per_second)}/s"
+                        if p.rate_bytes_per_second
+                        else ""
+                    )
+                ),
             )
 
         try:
-            return ctx.transfer_svc.execute(transfer_id, control, show)
+            result = worker.drain(on_job_start=began, on_progress=show)
         except KeyboardInterrupt:
-            control.pause()
+            control = current.get("control")
+            transfer_id = current.get("id")
             console.print("\n[yellow]Pausing…[/yellow]")
-            return ctx.transfer_svc.execute(transfer_id, control, show)
+            if isinstance(control, TransferControl) and isinstance(transfer_id, str):
+                control.pause()
+                ctx = get_ctx()
+                try:
+                    paused = ctx.transfer_svc.execute(
+                        transfer_id, control, lambda p: show(transfer_id, p)
+                    )
+                finally:
+                    ctx.close()
+                _summary(paused)
+            return
+    for record in result.ran:
+        _summary(record)
+    if result.busy:
+        console.print(
+            "[yellow]Another move is already running (the server, or another "
+            "terminal). Yours is queued and starts when it finishes; "
+            "`civex store transfers list` shows where things stand.[/yellow]"
+        )
+    elif highlight is not None and not any(r.id == highlight for r in result.ran):
+        console.print(
+            f"[yellow]{highlight[:8]} did not run. See "
+            f"`civex store transfers show {highlight[:8]}`.[/yellow]"
+        )
 
 
 def _start(spec: TransferSpec, dry_run: bool) -> None:
@@ -118,15 +160,15 @@ def _start(spec: TransferSpec, dry_run: bool) -> None:
             raise typer.Exit(1)
         record = ctx.transfer_svc.create(spec)
         console.print(
-            f"Started {record.id[:8]}. Ctrl+C pauses; resume with "
+            f"Queued {record.id[:8]}. Ctrl+C pauses; resume with "
             f"`civex store transfers resume {record.id[:8]}`."
         )
-        _summary(_run_foreground(ctx, record.id))
     except CivexError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
     finally:
         ctx.close()
+    _run_queue(record.id)
 
 
 def move(
@@ -159,7 +201,8 @@ def move(
     Use --off to empty a volume, or --collection to gather a collection's
     files onto one volume. Each file is copied and checked before the original
     is removed, so stopping at any moment, even a power cut, loses nothing.
-    Ctrl+C pauses; resume later with `civex store transfers resume`.
+    Moves run one at a time: if one is already running, this one is queued
+    behind it. Ctrl+C pauses; resume later with `civex store transfers resume`.
     """
     if bool(off) == bool(collection):
         console.print("[red]Give either --off or --collection.[/red]")
@@ -234,7 +277,8 @@ def transfers_show(
 
 @transfers_app.command("pause")
 def transfers_pause(transfer: str = typer.Argument(..., help="Transfer id.")) -> None:
-    """Ask a running transfer to pause (it keeps what it has moved)."""
+    """Ask a transfer to pause (it keeps what it has moved); a waiting one is
+    taken out of the queue."""
     ctx = get_ctx()
     try:
         ctx.transfer_svc.request_control(_find(ctx, transfer).id, "pause")
@@ -255,6 +299,8 @@ def transfers_cancel(transfer: str = typer.Argument(..., help="Transfer id.")) -
         if record.status == STATUS_RUNNING:
             ctx.transfer_svc.request_control(record.id, "cancel")
             console.print("Cancel requested.")
+        elif record.status == STATUS_QUEUED:
+            _summary(ctx.transfer_svc.request_control(record.id, "cancel"))
         else:
             _summary(ctx.transfer_svc.cancel_idle(record.id))
     except CivexError as exc:
@@ -266,7 +312,8 @@ def transfers_cancel(transfer: str = typer.Argument(..., help="Transfer id.")) -
 
 @transfers_app.command("resume")
 def transfers_resume(transfer: str = typer.Argument(..., help="Transfer id.")) -> None:
-    """Carry on a paused, failed or interrupted transfer in this terminal."""
+    """Queue a paused, failed or interrupted transfer again and run the queue in
+    this terminal."""
     ctx = get_ctx()
     try:
         record = _find(ctx, transfer)
@@ -274,9 +321,20 @@ def transfers_resume(transfer: str = typer.Argument(..., help="Transfer id.")) -
             console.print(f"[red]It is {record.status}; nothing to resume.[/red]")
             raise typer.Exit(1)
         ctx.transfer_svc.begin_resume(record.id)
-        _summary(_run_foreground(ctx, record.id))
     except CivexError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
     finally:
         ctx.close()
+    _run_queue(record.id)
+
+
+@transfers_app.command("run")
+def transfers_run() -> None:
+    """Run the waiting moves in this terminal, oldest first.
+
+    Moves normally start by themselves as soon as they are queued, by this
+    terminal or the server. Use this to carry on a queue left waiting (the
+    server isn't running, say). Ctrl+C pauses the running move.
+    """
+    _run_queue()

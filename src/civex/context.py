@@ -195,6 +195,7 @@ def build_local_context(
         dataset_repo,
         store_svc,
         session.commit,
+        session.rollback,
     )
     ai_svc = AiService(schema_svc, dataset_svc, record_svc, job_svc)
     ai_usage_svc = AiUsageService(engine)

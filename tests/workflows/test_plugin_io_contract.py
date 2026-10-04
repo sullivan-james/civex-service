@@ -32,7 +32,7 @@ from civex.workflows.definition import WorkflowDef
 def test_table_data_crosses_a_builtin_to_builtin_chain_as_records_not_a_dataframe(
     ctx, make_collection, make_schema, make_record
 ):
-    """civex.load_csv -> civex.rows_to_records, both BUILTIN-tier -- proves
+    """civex.parse_table -> civex.rows_to_records, both BUILTIN-tier -- proves
     the dataflow between two in-process steps is genuinely list[dict]
     records, the same shape a subprocess/container-tier step downstream
     would receive, rather than a raw DataFrame that only happens to work
@@ -50,7 +50,7 @@ inputs:
   bytes: {type: bytes}
 steps:
   - id: parse
-    plugin: civex.load_csv
+    plugin: civex.parse_table
     inputs: {bytes: __input__.bytes}
   - id: create
     plugin: civex.rows_to_records
@@ -122,7 +122,7 @@ if __name__ == "__main__":
 def test_a_table_crosses_from_a_builtin_step_into_a_real_subprocess_step(
     ctx, make_collection, make_schema, make_record, tmp_path: Path
 ):
-    """Regression: civex.load_csv (BUILTIN) -> a real Tier 1 `uv run`
+    """Regression: civex.parse_table (BUILTIN) -> a real Tier 1 `uv run`
     plugin -> civex.upsert_records (BUILTIN).
 
     The crossing is the whole point. A BUILTIN step's raw pandas DataFrame
@@ -149,7 +149,7 @@ inputs:
   bytes: {type: bytes}
 steps:
   - id: parse
-    plugin: civex.load_csv
+    plugin: civex.parse_table
     inputs: {bytes: __input__.bytes}
   - id: rename
     plugin: project.rename_columns

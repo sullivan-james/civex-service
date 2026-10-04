@@ -3,7 +3,7 @@
  * escape hatch. Only ever emits the two fixed shapes below (a files-input
  * workflow around `civex.create_records_from_files` /
  * `civex.match_files_to_records`, or a record-triggered CSV workflow around
- * `civex.load_file` -> `civex.load_csv` -> `civex.rows_to_records`) so a
+ * `civex.load_file` -> `civex.parse_table` -> `civex.rows_to_records`) so a
  * full YAML emitter would be overkill — `JSON.stringify` on every scalar
  * keeps each line valid YAML (YAML flow scalars accept JSON string syntax)
  * without hand-writing escaping rules.
@@ -90,7 +90,7 @@ export function buildCsvImportWorkflowYaml(
     '    config:',
     `      field: ${str(p.csvFieldName)}`,
     '  - id: parse',
-    '    plugin: civex.load_csv',
+    '    plugin: civex.parse_table',
     '    inputs:',
     '      bytes: load.bytes',
     '  - id: create',

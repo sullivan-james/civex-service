@@ -1,15 +1,14 @@
-import { useState } from 'react'
 import { StatusDot } from '../settings/storage/StatusDot'
-import { NewTransferModal } from '../settings/storage/NewTransferModal'
 import { STATE_LABEL } from '../settings/storage/volumeState'
-import { useCollectionStorage } from '../../hooks/useStore'
+import { useCollectionStorage, useVolumes } from '../../hooks/useStore'
 import { Button } from '../ui'
 import { gatherPlan } from '../../utils/collectionStorage'
 import { formatSize } from '../../utils/storage'
 import { SpreadBar } from './SpreadBar'
 
 /** Where this collection's files are, volume by volume, and (when they are
- * split) a way to gather them. Read from the catalog, so it is cheap. */
+ * split) a link to gather them in Settings. A report: moving files is done in
+ * one place, Settings > Storage. Read from the catalog, so it is cheap. */
 export function CollectionFileLocations({
   collectionId,
   home,
@@ -19,7 +18,7 @@ export function CollectionFileLocations({
   home?: string
 }) {
   const { data } = useCollectionStorage(collectionId)
-  const [gathering, setGathering] = useState(false)
+  const { data: volumes = [] } = useVolumes()
   if (!data || data.files === 0) return null
 
   const split = data.volumes.length > 1
@@ -53,7 +52,12 @@ export function CollectionFileLocations({
             {!v.available && (
               <span className="text-xs text-attention">
                 {STATE_LABEL[v.state]}: these files can&apos;t be opened right
-                now
+                now.
+                {/* Which drive to plug in, from the volume's own status. */}
+                {(() => {
+                  const fix = volumes.find((x) => x.name === v.volume)?.fix
+                  return fix ? ` ${fix}` : ''
+                })()}
               </span>
             )}
           </li>
@@ -68,15 +72,12 @@ export function CollectionFileLocations({
       )}
 
       {plan && (
-        <Button size="sm" onClick={() => setGathering(true)}>
+        <Button
+          size="sm"
+          to={`/settings/storage?tab=tasks&collection=${collectionId}&to=${encodeURIComponent(plan.target)}`}
+        >
           Gather onto {plan.target}…
         </Button>
-      )}
-      {gathering && plan && (
-        <NewTransferModal
-          preset={{ collectionId, target: plan.target }}
-          onClose={() => setGathering(false)}
-        />
       )}
     </div>
   )

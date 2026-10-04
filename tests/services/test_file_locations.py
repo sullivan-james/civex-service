@@ -40,6 +40,8 @@ def test_a_file_says_which_volume_it_is_on(ctx: AppContext, docs, make_record) -
         "volume": "default",
         "state": "online",
         "available": True,
+        "reason": "",
+        "fix": "",
     }
 
 
@@ -69,7 +71,12 @@ def test_a_file_on_an_unplugged_volume_is_flagged_unavailable(
 
     location = ctx.record_svc.get(str(record.id)).data["scan"]["location"]
 
-    assert location == {"volume": "archive", "state": "offline", "available": False}
+    assert location["volume"] == "archive" and location["state"] == "offline"
+    assert location["available"] is False
+    # It says why and what to do, so the record page can tell a person which
+    # drive to plug in without sending them to Settings first.
+    assert location["reason"] and location["fix"]
+    assert "archive" in location["reason"] + location["fix"]
 
 
 def test_a_file_that_is_nowhere_is_unknown_not_missing(
@@ -80,7 +87,13 @@ def test_a_file_that_is_nowhere_is_unknown_not_missing(
 
     location = ctx.record_svc.get(str(record.id)).data["scan"]["location"]
 
-    assert location == {"volume": None, "state": "unknown", "available": None}
+    assert location == {
+        "volume": None,
+        "state": "unknown",
+        "available": None,
+        "reason": "",
+        "fix": "",
+    }
 
 
 def test_only_file_fields_are_decorated(

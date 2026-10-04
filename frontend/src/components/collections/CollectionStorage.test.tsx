@@ -106,88 +106,61 @@ describe('CollectionStorage', () => {
     expect(screen.getByText('no choice')).toBeInTheDocument()
   })
 
-  it('sets a home volume', async () => {
-    const user = userEvent.setup()
+  it('says where new files go when there is no home volume', async () => {
     renderIt()
 
-    await screen.findByRole('option', { name: /archive/ })
-    const [home] = screen.getAllByRole('combobox')
-    await user.selectOptions(home, 'archive')
-    await user.click(screen.getByRole('button', { name: 'Save' }))
-
-    await waitFor(() =>
-      expect(calls).toContainEqual({
-        method: 'PUT',
-        path: `/api/store/placement/${CID}`,
-        body: { volume: 'archive', on_unavailable: 'spill' },
-      }),
-    )
+    const section = await screen.findByRole('region', {
+      name: 'Where new files go',
+    })
+    expect(section).toHaveTextContent("Wherever there's room")
+    expect(section).toHaveTextContent('no home volume')
   })
 
-  it('can refuse uploads instead of spilling', async () => {
-    const user = userEvent.setup()
-    renderIt()
-    await screen.findByRole('option', { name: /archive/ })
-    const [home] = screen.getAllByRole('combobox')
-    await user.selectOptions(home, 'archive')
-    const [, policy] = screen.getAllByRole('combobox')
-    await user.selectOptions(policy, 'fail')
-    await user.click(screen.getByRole('button', { name: 'Save' }))
-
-    await waitFor(() =>
-      expect(calls).toContainEqual({
-        method: 'PUT',
-        path: `/api/store/placement/${CID}`,
-        body: { volume: 'archive', on_unavailable: 'fail' },
-      }),
-    )
-  })
-
-  it('shows the home that is set, and clears it', async () => {
+  it('says which volume is home, whether it is up, and what happens when it is full', async () => {
     placements = [
       {
         collection_id: CID,
         collection_name: 'study',
         volume: 'archive',
-        on_unavailable: 'spill',
+        on_unavailable: 'fail',
       },
     ]
-    const user = userEvent.setup()
     renderIt()
 
-    const save = await screen.findByRole('button', { name: 'Save' })
-    expect(save).toBeDisabled()
-    await screen.findByRole('option', { name: /archive/ })
-    const [home] = screen.getAllByRole('combobox')
-    expect(home).toHaveValue('archive')
+    const section = await screen.findByRole('region', {
+      name: 'Where new files go',
+    })
+    await waitFor(() => expect(section).toHaveTextContent('(online)'))
+    expect(section).toHaveTextContent('To archive')
+    expect(section).toHaveTextContent('the upload is refused')
+  })
 
-    await user.selectOptions(home, '')
-    await user.click(save)
+  it('does not edit anything here: changing it is a link into Settings', async () => {
+    renderIt()
 
-    await waitFor(() =>
-      expect(calls).toContainEqual({
-        method: 'DELETE',
-        path: `/api/store/placement/${CID}`,
-        body: undefined,
-      }),
+    const link = await screen.findByRole('link', {
+      name: 'Change where new files go',
+    })
+    expect(link).toHaveAttribute(
+      'href',
+      `/settings/storage?tab=collections&focus=${CID}`,
     )
-  })
-
-  it('links to the page that manages every collection home', async () => {
-    renderIt()
-
+    // One place to change a home, so there is nothing to set or save here.
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
     expect(
-      await screen.findByRole('link', { name: /all collections/i }),
-    ).toHaveAttribute('href', '/settings/storage?tab=collections')
+      calls.filter((c) => c.method === 'PUT' || c.method === 'DELETE'),
+    ).toEqual([])
   })
 
-  it('warns when the home volume is offline, with the reason', async () => {
+  it('warns when the home volume is offline, with the reason and what to do', async () => {
     volumes = [
       volume('default'),
       volume('archive', {
         state: 'offline',
         available: false,
         reason: 'path missing: /mnt/archive',
+        fix: "Plug in the drive for 'archive'.",
       }),
     ]
     placements = [
@@ -201,7 +174,9 @@ describe('CollectionStorage', () => {
     renderIt()
 
     expect(
-      await screen.findByText('path missing: /mnt/archive'),
+      await screen.findByText(
+        /path missing: \/mnt\/archive Plug in the drive for 'archive'\./,
+      ),
     ).toBeInTheDocument()
   })
 
@@ -245,7 +220,25 @@ describe('CollectionStorage', () => {
       expect(block).toHaveTextContent(/can.t be opened right now/)
     })
 
-    it('offers to gather onto the home volume', async () => {
+    it('tells a person which drive to plug in for files that are out of reach', async () => {
+      volumes = [
+        volume('default'),
+        volume('usb', {
+          state: 'offline',
+          available: false,
+          fix: "Plug in the drive for 'usb'.",
+        }),
+      ]
+      spread = split()
+      renderIt()
+
+      const block = await screen.findByTestId('file-locations')
+      await waitFor(() =>
+        expect(block).toHaveTextContent("Plug in the drive for 'usb'."),
+      )
+    })
+
+    it('links to gather in Settings, where moves are managed', async () => {
       spread = split()
       placements = [
         {
@@ -257,8 +250,11 @@ describe('CollectionStorage', () => {
       ]
       renderIt()
       expect(
-        await screen.findByRole('button', { name: /Gather onto archive/ }),
-      ).toBeInTheDocument()
+        await screen.findByRole('link', { name: /Gather onto archive/ }),
+      ).toHaveAttribute(
+        'href',
+        `/settings/storage?tab=tasks&collection=${CID}&to=archive`,
+      )
     })
 
     it('has nothing to gather when everything is on one volume', async () => {
@@ -278,7 +274,7 @@ describe('CollectionStorage', () => {
       expect(await screen.findByTestId('file-locations')).toHaveTextContent(
         'on one volume',
       )
-      expect(screen.queryByRole('button', { name: /Gather/ })).toBeNull()
+      expect(screen.queryByRole('link', { name: /Gather/ })).toBeNull()
     })
   })
 })

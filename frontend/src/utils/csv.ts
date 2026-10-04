@@ -1,7 +1,7 @@
 /**
  * Minimal RFC 4180 CSV parser for client-side preview and import. The real
  * parse that gets written to records happens server-side in
- * `civex.load_csv` (pandas) — this only has to be good enough to preview
+ * `civex.parse_table` (pandas) — this only has to be good enough to preview
  * columns/rows and drive the same row data the plugin would produce.
  */
 
