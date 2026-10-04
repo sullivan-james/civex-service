@@ -240,10 +240,12 @@ class StoreService:
             raise ValidationError(f"Permission denied: can't open '{target}'") from None
         except fs_locations.Unresponsive:
             raise ValidationError(_not_responding(target)) from None
-        parent = os.path.dirname(target.rstrip("/"))
+        here = Path(target)
+        # A root (`/`, `C:/`) has no parent; `Path` knows that on every OS.
+        parent = None if here.parent == here else here.parent.as_posix()
         return DirectoryListing(
             path=target,
-            parent=parent if parent and parent != target else None,
+            parent=parent,
             entries=[DirectoryEntry(name=n, path=p) for n, p in raw],
             truncated=truncated,
             locations=self._locations(),

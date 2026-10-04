@@ -46,7 +46,7 @@ def test_build_command_without_local_sdk_source(
         "--no-project",
         "--with",
         f"civex-plugin-sdk=={_SDK_VERSION}",
-        "/plugins/thing.py",
+        str(Path("/plugins/thing.py")),
     ]
 
 
@@ -56,7 +56,7 @@ def test_build_command_omits_pin_when_sdk_version_unknown(
     monkeypatch.setattr(rt, "_sdk_find_links_dir", lambda: None)
     monkeypatch.setattr(rt, "_installed_sdk_version", lambda: None)
     argv = rt._build_command("uv", Path("/plugins/thing.py"))
-    assert argv == ["uv", "run", "--no-project", "/plugins/thing.py"]
+    assert argv == ["uv", "run", "--no-project", str(Path("/plugins/thing.py"))]
 
 
 def test_build_command_with_local_sdk_source(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -67,8 +67,8 @@ def test_build_command_with_local_sdk_source(monkeypatch: pytest.MonkeyPatch) ->
         "run",
         "--no-project",
         "--find-links",
-        "/wheels",
-        "/plugins/thing.py",
+        str(Path("/wheels")),
+        str(Path("/plugins/thing.py")),
     ]
 
 

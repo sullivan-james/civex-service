@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 import shutil
 from pathlib import Path
 
@@ -565,6 +566,11 @@ def test_an_unplugged_target_pauses_to_resume_by_itself(
     assert resumed.status == STATUS_COMPLETED and _on_disk(ctx, "b") == set(files)
 
 
+@pytest.mark.posix_only
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows will not rename a folder holding open files",
+)
 def test_a_source_that_vanishes_part_way_is_not_mistaken_for_an_empty_one(
     ctx: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

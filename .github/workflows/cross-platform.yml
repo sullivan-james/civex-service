@@ -1,0 +1,63 @@
+name: Cross-platform
+
+# The full suite runs on Linux (ci.yml). macOS and Windows runners cost several
+# times as much, and most tests are plain Python that behaves the same
+# everywhere, so here only the tests marked `os_sensitive` run (see
+# tests/conftest.py): the ones that touch real files, paths, processes, mounts
+# or the launcher.
+#
+#   Both: PRs that touch OS-sensitive code or tests, nightly, tags, on demand.
+#   (macOS is the costliest runner. To save minutes later, restrict it to the
+#   schedule/tags/dispatch by making the matrix below depend on the event.)
+
+on:
+  pull_request:
+    paths:
+      - "src/civex/fs_locations.py"
+      - "src/civex/launcher.py"
+      - "src/civex/processes.py"
+      - "src/civex/config.py"
+      - "src/civex/project.py"
+      - "src/civex/repositories/local/file_store.py"
+      - "src/civex/services/store_service.py"
+      - "src/civex/services/transfer*.py"
+      - "src/civex/services/db_move_service.py"
+      - "src/civex/plugins/**"
+      - "src/civex/desktop/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/cross-platform.yml"
+  schedule:
+    - cron: "17 3 * * *"
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: cross-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  os-sensitive-tests:
+    name: os_sensitive tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # setuptools_scm reads tags
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install with dev extras
+        run: uv sync --extra server --extra workflows --extra dev
+
+      - name: Run OS-sensitive tests
+        run: uv run pytest -m os_sensitive -q -n auto -p no:cacheprovider --durations=15
