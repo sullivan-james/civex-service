@@ -72,7 +72,9 @@ def _record(transfer_id: str) -> TransferRecord:
         ctx.close()
 
 
-def _wait(check: Callable[[], bool], what: str, timeout: float = 15.0) -> None:
+# A deadline only costs time when something is stuck, so it is generous: a
+# Windows runner can take many seconds to copy and fsync a handful of files.
+def _wait(check: Callable[[], bool], what: str, timeout: float = 60.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if check():
@@ -82,7 +84,7 @@ def _wait(check: Callable[[], bool], what: str, timeout: float = 15.0) -> None:
 
 
 def _wait_for_status(
-    transfer_id: str, status: str, timeout: float = 15.0
+    transfer_id: str, status: str, timeout: float = 60.0
 ) -> TransferRecord:
     _wait(lambda: _record(transfer_id).status == status, f"status {status}", timeout)
     return _record(transfer_id)
@@ -402,7 +404,7 @@ def test_a_transfer_running_in_another_process_can_be_paused_from_here(
 
         paused = _wait_for_status(record.id, STATUS_PAUSED)
     finally:
-        thread.join(timeout=20)
+        thread.join(timeout=60)
     assert 3 <= paused.progress.files_done < 30
     assert _contents_intact(files)
 
