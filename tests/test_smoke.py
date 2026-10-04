@@ -52,3 +52,21 @@ def test_full_flow_schema_collection_record(project_dir: Path) -> None:
     result = runner.invoke(app, ["record", "find", "--in", "study"])
     assert result.exit_code == 0
     assert "trial" in result.output
+
+
+def test_file_upload_round_trip_and_config_save(client: TestClient) -> None:
+    """The parts of a run that touch the real filesystem: the object store
+    (write, atomic rename, read back) and the atomic config.toml rewrite."""
+    from civex.config import load_config, save_config
+
+    payload = b"hello from the object store\r\nsecond line\r\n"
+    uploaded = client.post(
+        "/api/files", files={"file": ("note.txt", payload, "text/plain")}
+    )
+    assert uploaded.status_code == 201
+    sha = uploaded.json()["sha256"]
+    assert client.get(f"/api/files/{sha}").content == payload  # bytes untouched
+
+    config = load_config()
+    save_config(config)
+    assert load_config().project_root == config.project_root

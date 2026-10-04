@@ -111,6 +111,15 @@ where = ["src"]
 [tool.setuptools.package-data]
 civex = ["server/static/**", "db/migrations/script.py.mako"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "os_sensitive: touches the real OS (files, paths, processes, mounts, the launcher); the only tests run on Windows and macOS in CI. Applied by file name in tests/conftest.py.",
+    "posix_only: needs POSIX permissions, signals or process groups",
+    "windows_only: needs Windows APIs",
+    "macos_only: needs macOS behaviour",
+]
+
 [tool.coverage.run]
 source = ["civex"]
 branch = true

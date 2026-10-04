@@ -21,3 +21,10 @@
 # calculation may still flag the file; the runner pushes the clean merge
 # when that happens, which settles it.
 frontend/src/components/ui/index.ts merge=union
+
+# Line endings: LF in the repository and in checkouts on every OS, so Prettier,
+# ruff and the line-oriented scripts see the same bytes on Windows as on Linux.
+# Windows batch files need CRLF (civex also writes its own Desktop .bat).
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
