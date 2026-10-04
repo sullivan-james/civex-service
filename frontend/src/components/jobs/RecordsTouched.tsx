@@ -39,7 +39,10 @@ export default function RecordsTouched({ job }: { job: WorkflowJob }) {
             to={`/records/${rec.record_id}`}
             className="min-w-0 truncate text-accent hover:underline"
           >
-            <RecordName id={rec.record_id} fallback={rec.natural_name} />
+            <RecordName
+              id={rec.record_id}
+              fallback={rec.natural_name ?? null}
+            />
           </Link>
           <span className="text-xs text-fg-muted">{rec.schema_name}</span>
         </li>

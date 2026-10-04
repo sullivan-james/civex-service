@@ -191,7 +191,10 @@ describe('CleanUpDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Check again' }))
 
     await waitFor(() =>
-      expect(gcCalls().at(-1)?.body).toEqual({ apply: false, grace_days: 30 }),
+      expect(gcCalls().slice(-1)[0]?.body).toEqual({
+        apply: false,
+        grace_days: 30,
+      }),
     )
   })
 
@@ -202,7 +205,9 @@ describe('CleanUpDialog', () => {
     await screen.findByRole('button', { name: /^Delete 3 files/ })
 
     // The header's X and the footer button both close it.
-    await user.click(screen.getAllByRole('button', { name: 'Close' }).at(-1)!)
+    await user.click(
+      screen.getAllByRole('button', { name: 'Close' }).slice(-1)[0],
+    )
 
     expect(onClose).toHaveBeenCalled()
     expect(gcCalls().every((c) => c.body.apply === false)).toBe(true)

@@ -50,7 +50,9 @@ export interface StepExecution {
 export interface AffectedRecord {
   record_id: string
   schema_name: string
-  natural_name: string | null
+  /** Only on runs made before names stopped being stored (names are worked out
+   * when looked at: `POST /records/labels`). */
+  natural_name?: string | null
   action: 'created' | 'updated'
 }
 

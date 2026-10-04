@@ -30,7 +30,12 @@ const run = {
       plugin: 'civex.match_files_to_records',
       status: 'success',
       inputs: {},
-      outputs: { created: 2, updated: 0, unmatched: [], ambiguous: [] },
+      outputs: {
+        created: 2,
+        updated: 0,
+        unmatched: [],
+        ambiguous: [],
+      } as Record<string, unknown>,
       duration_seconds: 1,
       error: null,
       depends_on: [],

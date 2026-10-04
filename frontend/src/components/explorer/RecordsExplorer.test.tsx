@@ -607,7 +607,7 @@ describe('RecordsExplorer', () => {
                 fetch as unknown as {
                   mock: { calls: [unknown, RequestInit][] }
                 }
-              ).mock.calls.at(-1)![1].body,
+              ).mock.calls.slice(-1)[0][1].body,
             ),
           ) as { record_ids: string[] }
           runManyBodies.push({ name, ids: body.record_ids })

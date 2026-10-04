@@ -36,6 +36,8 @@ export interface RecordsTableSelection {
   selected: Set<string>
   onToggle: (id: string) => void
   onToggleAll: () => void
+  /** A shift-click range as one update, when given (see `useRangeSelect`). */
+  onSetMany?: (ids: string[], on: boolean) => void
 }
 
 export interface RecordsTableProps {
