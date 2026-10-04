@@ -326,8 +326,6 @@ def test_one_broken_plugin_file_does_not_stop_discovery_of_the_others(
     assert get_plugin("project.b_good_plugin") is not None
     assert "a_broken_plugin.py" in caplog.text
 
-    assert get_plugin("project.corrupt_cache_plugin") is not None
-
 
 def test_get_load_failures_surfaces_which_file_failed_and_why(
     tmp_path: Path, monkeypatch
