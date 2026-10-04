@@ -11,12 +11,19 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from civex.domain.dtos import (
+    AuditBatchDTO,
+    AuditEventDTO,
     AuditLogDTO,
     DatasetDTO,
     FieldDTO,
     NameIssue,
     RecordDTO,
     ReferrerGroupDTO,
+    RestoreAllPlanDTO,
+    RestoreAllResultDTO,
+    RestorePlanDTO,
+    RetentionReportDTO,
+    RevertPlanDTO,
     SchemaDeleteImpactDTO,
     SchemaDTO,
     ViewDTO,
@@ -1218,14 +1225,54 @@ class AutomationStatusResponse(BaseModel):
 # --- Audit ---
 
 
+class AuditChange(BaseModel):
+    field: str = Field(
+        description="The field (record entries) or attribute (everything else) "
+        "that changed, by name."
+    )
+    label: str | None = Field(
+        default=None,
+        description="The field's display name now; null when it has since been "
+        "renamed or deleted, or for a non-record entry.",
+    )
+    dtype: str | None = Field(
+        default=None, description="The field's type, when it still exists."
+    )
+    before: Any = Field(default=None, description="The value before; null if unset.")
+    after: Any = Field(default=None, description="The value after; null if unset.")
+
+
+class AuditNow(BaseModel):
+    kind: str = Field(
+        description="What the entry is about: record, collection or schema."
+    )
+    status: str = Field(
+        description="live (it exists), deleted (in Recently Deleted, restorable) "
+        "or gone (permanently deleted)."
+    )
+    ref: str | None = Field(
+        default=None,
+        description="What to restore or purge it by: a record's id, else its name.",
+    )
+    name: str | None = Field(default=None, description="Its name now.")
+    schema_name: str | None = Field(
+        default=None,
+        description="Its schema; known even for a record that is gone for good.",
+    )
+    collection: str | None = Field(default=None, description="The collection it is in.")
+    deleted_at: datetime | None = None
+
+
 class AuditLogResponse(BaseModel):
     id: str
     commit_id: str | None = Field(
         default=None,
         description="Sync commit this entry was bundled into. Null until the next push.",
     )
-    action: str = Field(description="One of: create, update, delete, purge.")
-    entity_type: str = Field(description="One of: record, schema, field, dataset.")
+    action: str = Field(description="One of: create, update, delete, restore, purge.")
+    entity_type: str = Field(
+        description="One of: record, schema, field, dataset, view."
+    )
     entity_id: str
     old_data: dict[str, Any] | None = Field(
         default=None,
@@ -1234,6 +1281,17 @@ class AuditLogResponse(BaseModel):
     new_data: dict[str, Any] | None = Field(
         default=None,
         description="Full entity snapshot after the change. Null on delete.",
+    )
+    changes: list[AuditChange] = Field(
+        default_factory=list,
+        description="What the entry changed, field by field, in schema order. "
+        "A delete or purge lists the values that were lost; a restore lists "
+        "nothing.",
+    )
+    now: AuditNow | None = Field(
+        default=None,
+        description="Where the record this entry is about is now, so a lost one "
+        "can be told from one that was edited, deleted or purged.",
     )
     timestamp: datetime
 
@@ -1247,8 +1305,215 @@ class AuditLogResponse(BaseModel):
             entity_id=str(dto.entity_id),
             old_data=dto.old_data,
             new_data=dto.new_data,
+            changes=[AuditChange(**c) for c in dto.changes],
+            now=AuditNow(**dto.now) if dto.now else None,
             timestamp=dto.timestamp,
         )
+
+
+class AuditBatchResponse(BaseModel):
+    id: str
+    kind: str = Field(description="import, delete, restore, purge or workflow.")
+    label: str | None = Field(
+        default=None, description="A workflow's name or an import's file."
+    )
+    ref: str | None = Field(
+        default=None, description="What started it, e.g. a workflow run's id."
+    )
+    created_at: datetime
+
+    @classmethod
+    def from_dto(cls, dto: AuditBatchDTO) -> AuditBatchResponse:
+        return cls(**dto.to_dict())
+
+
+class AuditPart(BaseModel):
+    entity_type: str
+    action: str
+    count: int
+
+
+class AuditEventResponse(BaseModel):
+    id: str = Field(description="The entry's id, or the batch's.")
+    kind: str = Field(description="entry (a single change) or batch.")
+    timestamp: datetime = Field(description="The latest change in it.")
+    count: int = Field(description="Changes in it that match the filters.")
+    entry: AuditLogResponse | None = Field(
+        default=None, description="The change itself, for kind=entry."
+    )
+    batch: AuditBatchResponse | None = Field(
+        default=None, description="What the batch was, for kind=batch."
+    )
+    parts: list[AuditPart] = Field(
+        default_factory=list,
+        description="For a batch, what it holds by kind of thing and action. Its "
+        "entries are listed at /audit/batches/{id}/entries.",
+    )
+
+    @classmethod
+    def from_dto(cls, dto: AuditEventDTO) -> AuditEventResponse:
+        return cls(
+            id=str(dto.id),
+            kind="batch" if dto.batch else "entry",
+            timestamp=dto.timestamp,
+            count=dto.count,
+            entry=AuditLogResponse.from_dto(dto.entry) if dto.entry else None,
+            batch=AuditBatchResponse.from_dto(dto.batch) if dto.batch else None,
+            parts=[AuditPart(**p) for p in dto.parts],
+        )
+
+
+class PaginatedAuditEventsResponse(BaseModel):
+    items: list[AuditEventResponse]
+    total: int
+    offset: int
+    limit: int
+
+
+class OpenBatchRequest(BaseModel):
+    kind: Literal["import"] = Field(
+        default="import",
+        description="What the batch is. Only an import is opened by a client; the "
+        "server opens its own for deletes, restores and workflow runs.",
+    )
+    label: str | None = Field(default=None, description="E.g. the file imported.")
+
+
+class RevertRequest(BaseModel):
+    fields: list[str] | None = Field(
+        default=None,
+        description="Only put these fields back. Omit to revert everything the "
+        "entry changed.",
+    )
+    force: bool = Field(
+        default=False,
+        description="Also overwrite fields that were edited since the entry.",
+    )
+
+
+class RevertFieldResponse(BaseModel):
+    field: str
+    label: str | None = None
+    dtype: str | None = None
+    current: Any = Field(default=None, description="What the record holds now.")
+    target: Any = Field(default=None, description="What reverting would put back.")
+    status: str = Field(
+        description="apply (still as the entry left it), conflict (edited since; "
+        "reverted only when forced), same (already the older value) or skipped "
+        "(cannot be put back; see reason)."
+    )
+    reason: str | None = None
+
+
+class RestoreAllRequest(BaseModel):
+    filter: dict[str, Any] | None = Field(
+        default=None,
+        description="The history filter tree whose matches are restored (the one "
+        "`GET /audit/events` takes), or null for everything deleted.",
+    )
+    q: str | None = Field(default=None, description="Text the changes must contain.")
+
+
+class RestoreAllPlanResponse(BaseModel):
+    collections: int = Field(description="Deleted collections matched.")
+    schemas: int = Field(description="Deleted schemas matched.")
+    records: int = Field(description="Deleted records matched.")
+    things: int = Field(description="All of the above.")
+    restores: int = Field(
+        description="Records that would be live afterwards, counting what came "
+        "back with each, once."
+    )
+    blocked: int = Field(
+        description="Matched, but under something deleted that is not in the set."
+    )
+    truncated: bool = Field(description="More matched than were looked at.")
+
+    @classmethod
+    def from_dto(cls, dto: RestoreAllPlanDTO) -> RestoreAllPlanResponse:
+        return cls(**dto.to_dict())
+
+
+class RestoreAllResultResponse(BaseModel):
+    restored: int = Field(description="Things brought back.")
+    records: int = Field(description="Records that came back in all.")
+    blocked: int = Field(
+        description="Left deleted: a parent is deleted and not in the set."
+    )
+
+    @classmethod
+    def from_dto(cls, dto: RestoreAllResultDTO) -> RestoreAllResultResponse:
+        return cls(**dto.to_dict())
+
+
+class BlockerResponse(BaseModel):
+    kind: str = Field(description="collection, schema or record.")
+    id: str
+    name: str = Field(description="What to call it: a name, or a record's name.")
+
+
+class RestorePlanResponse(BaseModel):
+    kind: str = Field(description="record, collection or schema.")
+    id: str
+    name: str
+    records: int = Field(
+        description="How many records come back: those deleted together with "
+        "this, the record itself included when it is one. Never something "
+        "deleted on its own earlier."
+    )
+    blocked_by: BlockerResponse | None = Field(
+        default=None,
+        description="The deleted collection, schema or record that must be "
+        "restored first. Null when it can be restored now.",
+    )
+    collection: str | None = Field(
+        default=None, description="For a record: the collection it will be in."
+    )
+    collection_id: str | None = None
+    blocked: str | None = Field(
+        default=None,
+        description="Why it can't be restored yet, in plain words. Null when it can.",
+    )
+    can_restore: bool
+
+    @classmethod
+    def from_dto(cls, dto: RestorePlanDTO) -> RestorePlanResponse:
+        return cls(**dto.to_dict())
+
+
+class RevertPlanResponse(BaseModel):
+    audit_id: str
+    entity_type: str
+    entity_id: str
+    kind: str | None = Field(
+        default=None,
+        description="update (put fields back), restore (undo a delete) or "
+        "delete (undo a create). Null when nothing can be reverted.",
+    )
+    fields: list[RevertFieldResponse] = Field(
+        default_factory=list, description="Per-field plan, for an update."
+    )
+    blocked: str | None = Field(
+        default=None, description="Why the entry can't be reverted at all."
+    )
+    blocker: BlockerResponse | None = Field(
+        default=None,
+        description="When a deleted record can't come back yet, what to restore first.",
+    )
+    can_apply: bool
+    has_conflicts: bool
+
+    @classmethod
+    def from_dto(cls, dto: RevertPlanDTO) -> RevertPlanResponse:
+        return cls(**dto.to_dict())
+
+
+class RevertResultResponse(BaseModel):
+    audit_id: str
+    entity_id: str
+    kind: str
+    applied: list[str] = Field(
+        description="Names of the fields that were put back (an update only)."
+    )
 
 
 class PaginatedAuditLogResponse(BaseModel):
@@ -1460,13 +1725,93 @@ class UpdateMapSettingsRequest(BaseModel):
 
 class RetentionSettingsResponse(BaseModel):
     purge_after_days: int = Field(
-        description="Soft-deleted items become eligible for permanent "
-        "deletion this many days after being deleted."
+        description="Deleted items can be restored for this many days. A "
+        "clean-up only deletes them permanently after that when "
+        "`auto_purge_deleted` is on."
+    )
+    auto_purge_deleted: bool = Field(
+        description="Whether a clean-up permanently deletes items deleted more "
+        "than `purge_after_days` ago."
+    )
+    audit_days: int | None = Field(
+        description="Change history older than this many days is removed by a "
+        "clean-up. Null keeps it forever."
+    )
+    run_days: int | None = Field(
+        description="Finished workflow runs, with their step logs, older than "
+        "this many days are removed by a clean-up. Null keeps them forever."
     )
 
 
 class UpdateRetentionSettingsRequest(BaseModel):
-    purge_after_days: int = Field(ge=1)
+    """Only the fields sent are changed; send null for `audit_days` or
+    `run_days` to keep that kind forever."""
+
+    purge_after_days: int | None = Field(default=None, ge=1)
+    auto_purge_deleted: bool | None = None
+    audit_days: int | None = Field(default=None, ge=1)
+    run_days: int | None = Field(default=None, ge=1)
+
+
+class RetentionRunRequest(BaseModel):
+    dry_run: bool = Field(default=True, description="Only count what would be removed.")
+    from_settings: bool = Field(
+        default=False,
+        description="Apply the retention settings (each kind left at keep-forever "
+        "is left alone).",
+    )
+    deleted_before: datetime | None = Field(
+        default=None,
+        description="Permanently delete everything deleted before this.",
+    )
+    audit_before: datetime | None = Field(
+        default=None,
+        description="Remove change history before this (not about anything that "
+        "can still be restored, and with a remote, not yet pushed).",
+    )
+    runs_before: datetime | None = Field(
+        default=None,
+        description="Remove finished workflow runs, with their step logs, before this.",
+    )
+
+
+class ForgetPurgedRequest(BaseModel):
+    dry_run: bool = Field(
+        default=True, description="Only count the entries that would be deleted."
+    )
+
+
+class ForgetPurgedResponse(BaseModel):
+    dry_run: bool
+    entries: int = Field(
+        description="History entries about records that no longer exist."
+    )
+
+
+class RetentionReportResponse(BaseModel):
+    dry_run: bool
+    deleted_records: int
+    deleted_collections: int
+    deleted_schemas: int
+    skipped: list[str] = Field(
+        description="Deleted things that could not be removed, with why."
+    )
+    audit_entries: int
+    audit_batches: int
+    audit_kept_restorable: int = Field(
+        description="Older history kept because it is about something that can "
+        "still be restored."
+    )
+    audit_kept_unsynced: int = Field(
+        description="Older history kept because it has not been pushed to the remote."
+    )
+    runs: int
+    run_steps: int
+    anything: bool
+
+    @classmethod
+    def from_dto(cls, dto: RetentionReportDTO) -> RetentionReportResponse:
+        return cls(**dto.to_dict())
 
 
 # --- Analytics ---

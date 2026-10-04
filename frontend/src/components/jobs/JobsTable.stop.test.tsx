@@ -39,6 +39,8 @@ let rerunBodies: string[][]
 let skipped: { id: string; reason: string }[]
 let jobQueries: URLSearchParams[]
 let groups: Record<string, unknown>[]
+let recordGroups: Record<string, unknown>[]
+let groupQueries: URLSearchParams[]
 let rerunPayloads: Record<string, unknown>[]
 
 const RUN_FIELDS = [
@@ -73,6 +75,8 @@ beforeEach(() => {
   skipped = []
   jobQueries = []
   groups = []
+  recordGroups = []
+  groupQueries = []
   rerunPayloads = []
   vi.stubGlobal(
     'fetch',
@@ -85,7 +89,15 @@ beforeEach(() => {
           { name: 'follow-up', stem: 'follow-up' },
         ])
       if (url.pathname === '/api/jobs/filter-fields') return json(RUN_FIELDS)
-      if (url.pathname === '/api/jobs/failure-groups') return json(groups)
+      if (url.pathname === '/api/jobs/failure-groups') {
+        groupQueries.push(url.searchParams)
+        // The server answers for the runs the filter covers: one record's, or all.
+        return json(
+          (url.searchParams.get('filter') ?? '').includes('"record"')
+            ? recordGroups
+            : groups,
+        )
+      }
       if (url.pathname === '/api/schemas') return json([])
       if (url.pathname === '/api/jobs/rerun') {
         const payload = JSON.parse(String(init?.body)) as {
@@ -628,5 +640,114 @@ describe('Runs table: stopping and what started a run', () => {
     expect(
       screen.getAllByText('completed').some((el) => el.closest('td')),
     ).toBe(true)
+  })
+})
+
+const RECORD = 'bbbbbbbb-0000-4000-8000-000000000002'
+const FAILURES = [
+  {
+    workflow: 'compute',
+    kind: 'timeout',
+    step: 'load',
+    message: 'took too long',
+    count: 448,
+    last_at: '2026-10-04T10:00:00Z',
+  },
+]
+const recordScope = { field: 'record', op: 'eq', value: RECORD }
+
+describe("Runs table on a record: counts and bulk actions are that record's", () => {
+  it("asks for the failures of this record's runs, not of every run", async () => {
+    jobs = []
+    groups = FAILURES // the whole project's failures
+    recordGroups = []
+    renderIt(RECORD)
+
+    await waitFor(() => expect(groupQueries.length).toBeGreaterThan(0))
+    for (const q of groupQueries)
+      expect(JSON.parse(q.get('filter')!)).toEqual(recordScope)
+    expect(screen.queryByText(/failed runs?$/)).toBeNull()
+  })
+
+  it("does not show the Runs page's failures after visiting it", async () => {
+    // The same cache serves both pages, as in the app.
+    jobs = []
+    groups = FAILURES
+    recordGroups = []
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const page = (recordId?: string) => (
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <JobsTable recordId={recordId} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    const first = render(page())
+    expect(await screen.findByText('448 failed runs')).toBeInTheDocument()
+    first.unmount()
+
+    render(page(RECORD))
+    await waitFor(() =>
+      expect(
+        groupQueries.some((q) => (q.get('filter') ?? '').includes('"record"')),
+      ).toBe(true),
+    )
+    expect(screen.queryByText('448 failed runs')).toBeNull()
+  })
+
+  it("shows this record's own failures, and counts only them", async () => {
+    jobs = [job({ status: 'failed' })]
+    recordGroups = [{ ...FAILURES[0], count: 3 }]
+    renderIt(RECORD)
+    expect(await screen.findByText('3 failed runs')).toBeInTheDocument()
+  })
+
+  it("re-running a failure group on a record re-runs this record's runs only", async () => {
+    jobs = [job({ status: 'failed' })]
+    recordGroups = [{ ...FAILURES[0], count: 3 }]
+    const user = userEvent.setup()
+    renderIt(RECORD)
+
+    await user.click(await screen.findByText('3 failed runs')) // open the groups
+    await user.click(await screen.findByRole('button', { name: /Re-run 3$/ }))
+    await waitFor(() => expect(rerunPayloads).toHaveLength(1))
+    const sent = rerunPayloads[0] as { filter: { and: unknown[] } }
+    expect(sent.filter.and).toContainEqual(recordScope)
+    expect(sent.filter.and).toContainEqual({
+      field: 'error_kind',
+      op: 'eq',
+      value: 'timeout',
+    })
+  })
+
+  it('re-running everything a filter matches stays on this record', async () => {
+    jobs = [job({ status: 'failed' })]
+    const user = userEvent.setup()
+    renderIt(
+      RECORD,
+      `/?filter=${encodeURIComponent(JSON.stringify({ field: 'status', op: 'eq', value: 'failed' }))}`,
+    )
+    await user.click(
+      await screen.findByRole('button', { name: /Re-run all 1…/ }),
+    )
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: /^Re-run 1$/ }))
+
+    await waitFor(() => expect(rerunPayloads).toHaveLength(1))
+    expect(rerunPayloads[0]).toEqual({
+      filter: {
+        and: [recordScope, { field: 'status', op: 'eq', value: 'failed' }],
+      },
+    })
+  })
+
+  it('does not add a record scope on the Runs page itself', async () => {
+    jobs = [job({ status: 'failed' })]
+    groups = FAILURES
+    renderIt()
+    await screen.findByText('448 failed runs')
+    for (const q of groupQueries) expect(q.get('filter')).toBeNull()
   })
 })

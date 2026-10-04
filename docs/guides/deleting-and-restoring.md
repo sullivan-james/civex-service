@@ -51,22 +51,24 @@ fields are cleared instead.
     ```
 
 === "Web UI"
-    Go to **Recently Deleted** in the sidebar, find the item, and click **Restore**.
+    Go to **Activity** in the sidebar and press **Deleted**. Search or filter to find the item, and click **Restore** on its row; or click **Restore all N** to restore everything listed. A deletion that took many records with it (a bulk delete, a tree) is one line. A window says what will come back and where it will go, and after you confirm, a message names what was restored and links to it.
 
-Restoring a schema or collection also restores the records that were
-cascade-deleted with it; restoring a record also restores its cascade-deleted
-children. If any of those records had already been deleted individually
-*before* the parent was deleted, restoring the parent restores them too —
-restore mirrors the cascade at delete time rather than tracking each delete
-as a separately-undoable batch.
+Restoring a schema or collection brings back the records that were deleted
+*with* it, and restoring a record brings back the children deleted with it.
+Anything you had deleted on its own earlier stays in Recently Deleted, so you
+get back what that one delete took and nothing else.
+
+A record can't be restored while something above it is still deleted — its
+collection, its schema, or a parent record — because it would come back
+somewhere it can't be seen. Restoring it says what is in the way. In the web
+UI the window offers **Restore the collection “…” instead** (or the schema, or
+parent record); that brings back everything deleted with it, and the record
+along with it. On the command line, restore the item named in the message
+first. Undoing a delete from a record's History follows the same rules.
 
 ## Retention and permanent deletion
 
-Soft-deleted items become eligible for permanent deletion after a
-configurable number of days (`purge_after_days`, default 30 — see
-**Settings → Recently Deleted** or `[retention]` in `_civex/config.toml`).
-Reaching that age doesn't delete anything by itself; permanent deletion is
-always a separate, explicit action:
+Deleted items can be restored for a number of days (`purge_after_days`, default 30). Reaching that age doesn't delete anything by itself. Permanent deletion is a separate, explicit step, or something you switch on for clean-ups to do (see below):
 
 === "CLI"
     ```bash
@@ -77,7 +79,33 @@ always a separate, explicit action:
     ```
 
 === "Web UI"
-    **Delete permanently** on an item in Recently Deleted.
+    Open the deleted item in **Activity** (press **Deleted**) and choose **Delete permanently**.
 
-Purging is irreversible: it removes the row (and, for a schema or
-collection, everything cascade-deleted with it) for good.
+Purging is irreversible: it removes the row (and, for a schema or collection, everything cascade-deleted with it) for good, **and every history entry about the records removed**. What it held is not kept anywhere in the change history. For each record, history keeps one note, a *tombstone*: that it was permanently deleted, when, its ID, and its schema and collection. That is what **Activity** shows as *Gone for good*. A permanently deleted collection or schema keeps its own entry (its name is not record data) and its records leave no notes of their own.
+
+For records that were permanently deleted before this was so, **Settings → Retention** shows how many history entries still hold their values and offers to delete them (leaving each the tombstone); on the command line, `civex retention forget-purged`.
+
+## Keeping less: retention settings and clean-ups
+
+Three things grow without limit unless you say otherwise: deleted items, the change history, and finished workflow runs with their step logs. **Settings → Retention** sets how long to keep each (the default for all of them is forever):
+
+| Kind | Setting | What a clean-up does |
+|---|---|---|
+| Deleted items | restorable for *N* days, and **Delete them for good when cleaning up** | permanently deletes what was deleted longer ago than that, if the switch is on |
+| Change history | keep for *N* days, or forever | removes older entries |
+| Workflow runs and logs | keep for *N* days, or forever | removes finished runs, and their step logs, that are older |
+
+Nothing is removed by itself. A **clean-up** applies the settings, or deletes everything before a date you choose, separately for each kind. It always counts first and shows you what would go, and you type `delete` to confirm.
+
+=== "CLI"
+    ```bash
+    civex retention show                                  # what is kept, and what a clean-up would remove now
+    civex retention run --settings                        # apply the settings (asks first)
+    civex retention run --history-before 2026-01-01       # or by date, per kind:
+    civex retention run --deleted-before 2026-01-01 --runs-before 2026-01-01 --dry-run
+    ```
+
+=== "Web UI"
+    **Settings → Retention**: set the periods and **Save**; then **Clean up now…** to apply them, or pick dates under **Delete everything before a date** and **Preview…**.
+
+Some history is always kept: entries about something you can still restore (so *Deleted* in Activity keeps working), and, when a remote is configured, entries not yet pushed to it. A workflow run that is waiting or running is never removed, and a deleted parent is kept while anything beneath it is. Files that nothing refers to after a clean-up are removed by **Settings → Storage → Tasks → Clean up unused files** (`civex store gc`); run it afterwards to get the space back.

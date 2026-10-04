@@ -3,6 +3,7 @@ import { useSchemas } from '../../hooks/useSchemas'
 import { useCollections } from '../../hooks/useCollections'
 import { useRecords, useHasSchemaRecords } from '../../hooks/useRecords'
 import { schemasApi, type Schema } from '../../api/schemas'
+import { auditApi } from '../../api/audit'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import { collectionsApi } from '../../api/collections'
 import { filesApi } from '../../api/files'
@@ -428,6 +429,13 @@ export default function ImportWizard({
         }
       }
 
+      // Everything this import writes is one event in history, not a line per
+      // record. Best effort: without it the records are just logged singly.
+      const batch = await auditApi
+        .openBatch(files.length === 1 ? files[0].name : `${files.length} files`)
+        .catch(() => null)
+      const batchOptions = batch ? { batchId: batch.id } : undefined
+
       const created: CivexRecord[] = []
       const updated: CivexRecord[] = []
       const skipped: { label: string; reason: string }[] = []
@@ -441,11 +449,15 @@ export default function ImportWizard({
             })
           } else {
             try {
-              const rec = await recordsApi.create(finalDatasetName, {
-                schema_name: schemaName,
-                data: rowPlan.data,
-                parent_record_id: mapState.parentRecordId || undefined,
-              })
+              const rec = await recordsApi.create(
+                finalDatasetName,
+                {
+                  schema_name: schemaName,
+                  data: rowPlan.data,
+                  parent_record_id: mapState.parentRecordId || undefined,
+                },
+                batchOptions,
+              )
               created.push(rec)
             } catch (e) {
               skipped.push({
@@ -466,16 +478,27 @@ export default function ImportWizard({
           try {
             const ref = await filesApi.upload(filePlan.file, finalCollectionId)
             if (filePlan.matchedRecord) {
-              const rec = await recordsApi.update(filePlan.matchedRecord.id, {
-                data: { ...filePlan.matchedRecord.data, [fileFieldName]: ref },
-              })
+              const rec = await recordsApi.update(
+                filePlan.matchedRecord.id,
+                {
+                  data: {
+                    ...filePlan.matchedRecord.data,
+                    [fileFieldName]: ref,
+                  },
+                },
+                batchOptions,
+              )
               updated.push(rec)
             } else {
-              const rec = await recordsApi.create(finalDatasetName, {
-                schema_name: schemaName,
-                data: { ...filePlan.data, [fileFieldName]: ref },
-                parent_record_id: mapState.parentRecordId || undefined,
-              })
+              const rec = await recordsApi.create(
+                finalDatasetName,
+                {
+                  schema_name: schemaName,
+                  data: { ...filePlan.data, [fileFieldName]: ref },
+                  parent_record_id: mapState.parentRecordId || undefined,
+                },
+                batchOptions,
+              )
               created.push(rec)
             }
           } catch (e) {

@@ -8,6 +8,7 @@ from civex.domain.dtos import (
     NameIssue,
     ResolvedField,
     ResolvedSchema,
+    RestorePlanDTO,
     SchemaDeleteImpactDTO,
     SchemaDTO,
 )
@@ -667,6 +668,37 @@ class SchemaService:
     def list_deleted(self) -> list[SchemaDTO]:
         return self._repo.list_deleted()
 
+    def find(self, ids: set[uuid.UUID]) -> dict[uuid.UUID, SchemaDTO]:
+        """Schemas by id, deleted ones included; ids that are gone are left out."""
+        found: dict[uuid.UUID, SchemaDTO] = {}
+        for schema_id in ids:
+            dto = self._repo.get_by_id(schema_id, include_deleted=True)
+            if dto:
+                found[schema_id] = dto
+        return found
+
+    def id_of(self, name: str) -> uuid.UUID:
+        """A schema's id by name, deleted or not (its history outlives it)."""
+        schema = self._repo.get_by_name(name, include_deleted=True)
+        if schema is None:
+            raise NotFoundError(f"Schema '{name}' not found")
+        return schema.id
+
+    def restore_plan(self, name: str) -> RestorePlanDTO:
+        """What restoring this deleted schema would bring back: it and the
+        records deleted with it, not those deleted on their own earlier."""
+        schema = self._repo.get_by_name(name, include_deleted=True)
+        if schema is None:
+            raise NotFoundError(f"Schema '{name}' not found")
+        if schema.deleted_at is None:
+            raise ValidationError(f"Schema '{name}' is not deleted")
+        return RestorePlanDTO(
+            kind="schema",
+            id=schema.id,
+            name=schema.name,
+            records=self._repo.cascade_count(schema.id),
+        )
+
     def restore(self, name: str) -> SchemaDTO:
         """Undo delete(): the schema and the records cascade-deleted with it
         become live again (see SchemaRepository.restore)."""
@@ -700,6 +732,8 @@ class SchemaService:
             )
         if self._audit:
             self._audit.log_change("purge", "schema", schema.id, schema.to_dict(), None)
+            # Its records go with it, and so does their history.
+            self._audit.forget_records_matching(f'"schema_id": "{schema.id}"')
         self._repo.purge(schema.id)
 
     def resolve(self, schema: SchemaDTO) -> ResolvedSchema:

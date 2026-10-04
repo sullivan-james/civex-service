@@ -16,10 +16,16 @@ export class ApiError extends Error {
   }
 }
 
+const JSON_HEADERS = { 'Content-Type': 'application/json' }
+
+/** `init.headers`, when given, replaces the JSON default entirely (an upload
+ * passes `{}` so the browser sets the multipart boundary). Left out, or
+ * `undefined`, it is the default: a body the server can't tell is JSON is
+ * refused as a validation error, so this must never be lost. */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
     ...init,
+    headers: init?.headers ?? JSON_HEADERS,
   })
 
   if (!res.ok) {
@@ -32,12 +38,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: 'POST', body: JSON.stringify(body) }),
+  post: <T>(path: string, body: unknown, headers?: Record<string, string>) =>
+    request<T>(path, { method: 'POST', body: JSON.stringify(body), headers }),
   put: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
-  patch: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
+  patch: <T>(path: string, body: unknown, headers?: Record<string, string>) =>
+    request<T>(path, { method: 'PATCH', body: JSON.stringify(body), headers }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
   /** Multipart file upload — does NOT set Content-Type (browser sets it with boundary). */
   upload: <T>(path: string, form: FormData) =>

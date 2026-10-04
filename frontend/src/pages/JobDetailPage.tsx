@@ -29,7 +29,7 @@ import RunSummary from '../components/jobs/RunSummary'
 import RecordsTouched from '../components/jobs/RecordsTouched'
 import FailureExplanation from '../components/jobs/FailureExplanation'
 import { RefreshCw } from '../components/ui/icons'
-import { RecordName } from '../components/records/RecordName'
+import { RecordLink } from '../components/records/RecordLink'
 
 const RUN_TABS = [
   { id: 'summary' },
@@ -199,13 +199,7 @@ export default function JobDetailPage() {
             <div>
               <dt className="text-fg-muted font-medium">Record</dt>
               <dd>
-                <Link
-                  to={`/records/${job.record_id}`}
-                  className="text-accent hover:underline"
-                  title={job.record_id}
-                >
-                  <RecordName id={job.record_id} />
-                </Link>
+                <RecordLink id={job.record_id} />
               </dd>
             </div>
             <div>

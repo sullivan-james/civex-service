@@ -17,6 +17,8 @@ from civex.db.models import (
 from civex.domain.dtos import WorkflowJobDTO
 from civex.domain.exceptions import ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode
+from civex.repositories.local._dates import utc
+from civex.repositories.local._jobs import bulk_delete_jobs
 from civex.repositories.local._bucketing import day_bucket, rebucket
 from civex.repositories.protocols import JobStatusRow, PluginFailureRow
 
@@ -69,19 +71,6 @@ def _narrow(
     return q
 
 
-def _utc(value: object) -> datetime:
-    """A filter's date, as the UTC instant the column holds."""
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        raise ValidationError(f"Not a date: {value!r}")
-    return (
-        parsed.replace(tzinfo=timezone.utc)
-        if parsed.tzinfo is None
-        else parsed.astimezone(timezone.utc)
-    )
-
-
 def _run_column(name: str):
     """What a run-filter field is in the database."""
     return {
@@ -103,7 +92,7 @@ def _condition(leaf: FilterCondition):
     col = _run_column(leaf.field)
     value = leaf.value
     if leaf.field in ("created_at", "finished_at") and leaf.op != "is_null":
-        value = _utc(value)
+        value = utc(value)
     if leaf.field == "record":
         value = (
             [str(v).replace("-", "") for v in value]
@@ -390,6 +379,34 @@ class LocalWorkflowJobRepository:
                 return 0
             q = q.filter(touched)
         return q.count()
+
+    def _finished_before(self, before: datetime) -> list:
+        """A run that is over (never one pending or running) and older than
+        `before`, by when it finished, or was queued if it never says."""
+        return [
+            WorkflowJob.status.in_(("completed", "failed", "cancelled")),
+            func.coalesce(WorkflowJob.finished_at, WorkflowJob.created_at) < before,
+        ]
+
+    def count_finished_before(self, before: datetime) -> tuple[int, int]:
+        """(runs, step logs) `delete_finished_before` would remove."""
+        criteria = self._finished_before(before)
+        runs = self._s.query(WorkflowJob).filter(*criteria).count()
+        job_ids = select(WorkflowJob.id).where(*criteria)
+        steps = (
+            self._s.query(StepExecution)
+            .filter(StepExecution.job_id.in_(job_ids))
+            .count()
+        )
+        return runs, steps
+
+    def delete_finished_before(self, before: datetime) -> int:
+        """Remove finished runs older than `before`, with their step logs."""
+        criteria = self._finished_before(before)
+        runs = self._s.query(WorkflowJob).filter(*criteria).count()
+        bulk_delete_jobs(self._s, *criteria)
+        self._s.expire_all()
+        return runs
 
     def ids_matching(self, where: FilterNode | None, limit: int) -> list[uuid.UUID]:
         """Ids of the runs a filter matches, newest first, at most `limit`."""

@@ -1,5 +1,5 @@
 import { Link } from 'react-router'
-import { useRecord } from '../../hooks/useRecords'
+import { RecordLink } from './RecordLink'
 import { CollectionMarker } from './CollectionMarker'
 
 export function referenceLabel(
@@ -60,6 +60,7 @@ export function ReferenceLink({
  * `reference_labels` to. Uses the same cached `useRecord` query every other
  * reference to this id anywhere on the page already shares. */
 export function FetchedReferenceLink({ id }: { id: string }) {
-  const { data } = useRecord(id)
-  return <LinkedId id={id} label={data?.natural_name ?? undefined} />
+  // Names come in one request for the screen, and a target that is deleted or
+  // permanently deleted is said to be, not linked to a page that isn't there.
+  return <RecordLink id={id} />
 }

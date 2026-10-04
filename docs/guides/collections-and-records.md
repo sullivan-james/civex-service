@@ -140,6 +140,33 @@ A record's page has a **Referenced by** section (collapsed until you open it) co
 
 Deleting a record moves it (and its children, if any) to **Recently Deleted** rather than removing it outright — see [Deleting & restoring data](deleting-and-restoring.md).
 
+## History and undo
+
+Every change to a record, schema, field, collection or view is kept. A record's **History** tab, a schema's **History** tab and a collection's **Activity** tab list the entries newest first; a row shows the first few things that changed (`Count 1 → 2`) and opens to show all of them. A delete lists the values the record held, so you can see what was lost.
+
+**Activity** in the sidebar lists every change in the project, newest first. An import, a delete that took a whole tree with it, or a workflow run is **one line** that says what it did ("Deleted 1,204 records"), and opens to the changes inside it. A change to a record that is not there now says so (**Deleted now**, or **Gone for good** once it has been permanently deleted), which is usually what explains something missing. Each change names what it is about, with its short ID, and links to it when it can be opened.
+
+Press **Deleted** to see only what you can still restore. A deleted item has **Restore** on its row, and **Restore all N** restores everything the list shows, after saying what comes back. There is no separate Recently Deleted page.
+
+Changes are filtered the way records and runs are: type in the search box to find a value or a file name, and click **Filter** to build conditions. You can filter by when, what kind of thing, what was done, how (on its own, an import, a delete, a restore, a workflow run), which collection, which schema (the schema's own changes, its fields, and records of that type), which record it is under, and where it is now. The filter is held in the address, so a view can be linked.
+
+The same list is on a record's **History** tab, where it covers the record **and everything beneath it** (so an encounter's history shows a recording that was deleted from it), and on a collection's **Activity** tab, which covers the records in it, deleted ones included.
+
+An entry on a record can be undone. An **update** puts the fields it changed back to the values they had before, a **delete** restores the record, and a **create** deletes it (to Recently Deleted). A field that was edited again after the entry is left alone unless you choose to overwrite it, and a field that no longer exists, or a file that has since been cleaned up, can't be put back and is skipped with the reason. The undo is recorded as an ordinary edit, so it can be undone too. Changes to schemas, fields and collections can be read but not undone, because undoing them could destroy data.
+
+=== "CLI"
+    ```bash
+    civex history record <record-id>          # also: history schema <name>, history collection <name>
+    civex history show <entry-id>             # one entry with every change in full
+    civex history revert <entry-id>           # shows what goes back, then asks
+    civex history revert <entry-id> --field legs --force
+    ```
+
+    Entry ids are the short ones the list prints.
+
+=== "Web UI"
+    Open a record's **History** tab, click an entry, then **Revert…**. The next step shows each field as it is now and as it would become, marks any that were edited since, and does nothing until you confirm.
+
 ## Exporting and restoring
 
 Export everything (schemas, collections, records, workflows) to a single YAML file:

@@ -116,10 +116,12 @@ nav:
           - civex automation: reference/cli/automation.md
           - civex collection: reference/cli/collection.md
           - civex db: reference/cli/db.md
+          - civex history: reference/cli/history.md
           - civex plugin: reference/cli/plugin.md
           - civex policy: reference/cli/policy.md
           - civex record: reference/cli/record.md
           - civex remote: reference/cli/remote.md
+          - civex retention: reference/cli/retention.md
           - civex schema: reference/cli/schema.md
           - civex store: reference/cli/store.md
           - civex trash: reference/cli/trash.md

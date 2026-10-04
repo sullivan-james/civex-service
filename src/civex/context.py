@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from civex.services.ai.service import AiService
     from civex.services.ai_usage_service import AiUsageService
     from civex.services.analytics_service import AnalyticsService
+    from civex.services.audit_service import AuditService
     from civex.services.container_plugin_service import ContainerPluginService
     from civex.services.dataset_service import DatasetService
     from civex.services.file_service import FileService
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     from civex.services.plugin_service import PluginService
     from civex.services.policy_service import PolicyService
     from civex.services.record_service import RecordService
+    from civex.services.retention_service import RetentionService
     from civex.services.schema_service import SchemaService
     from civex.services.store_service import StoreService
     from civex.services.view_service import ViewService
@@ -78,6 +80,8 @@ class AppContext:
     file_info_svc: FileInfoService
     transfer_svc: TransferService
     audit_svc: LocalAuditRepository
+    history_svc: AuditService
+    retention_svc: RetentionService
     ai_svc: AiService
     ai_usage_svc: AiUsageService
     analytics_svc: AnalyticsService
@@ -129,6 +133,7 @@ def build_local_context(
     from civex.services.ai.service import AiService
     from civex.services.ai_usage_service import AiUsageService
     from civex.services.analytics_service import AnalyticsService
+    from civex.services.audit_service import AuditService
     from civex.services.container_plugin_service import ContainerPluginService
     from civex.services.dataset_service import DatasetService
     from civex.services.file_service import FileService
@@ -139,6 +144,7 @@ def build_local_context(
     from civex.services.plugin_service import PluginService
     from civex.services.policy_service import PolicyService
     from civex.services.record_service import RecordService
+    from civex.services.retention_service import RetentionService
     from civex.services.schema_service import SchemaService
     from civex.services.store_service import StoreService
     from civex.services.view_service import ViewService
@@ -213,6 +219,19 @@ def build_local_context(
     container_plugin_svc = ContainerPluginService(config.civex_dir)
     policy_svc = PolicyService(config.civex_dir)
     view_svc = ViewService(view_repo, schema_svc, record_svc, audit_repo)
+    history_svc = AuditService(
+        audit_repo, schema_svc, record_svc, dataset_svc, file_store
+    )
+
+    retention_svc = RetentionService(
+        record_svc,
+        dataset_svc,
+        schema_svc,
+        audit_repo,
+        job_repo,
+        config.retention,
+        config.remote is not None,
+    )
 
     ctx = AppContext(
         schema_svc=schema_svc,
@@ -225,6 +244,8 @@ def build_local_context(
         file_info_svc=file_info_svc,
         transfer_svc=transfer_svc,
         audit_svc=audit_repo,
+        history_svc=history_svc,
+        retention_svc=retention_svc,
         ai_svc=ai_svc,
         ai_usage_svc=ai_usage_svc,
         analytics_svc=analytics_svc,

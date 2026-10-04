@@ -14,6 +14,7 @@ from civex.server.models import (
     CreateDatasetRequest,
     DatasetResponse,
     PaginatedAuditLogResponse,
+    RestorePlanResponse,
     UpdateDatasetRequest,
 )
 
@@ -106,20 +107,8 @@ def list_dataset_audit(
 ):
     """Audit entries for a collection — renames, description changes,
     delete/restore/purge — most recent first."""
-    dataset = None
-    try:
-        uid = uuid.UUID(name_or_id)
-        dataset = ctx.dataset_svc._datasets.get_by_id(uid)
-    except ValueError:
-        pass
-    if dataset is None:
-        try:
-            dataset = ctx.dataset_svc.get(name_or_id)
-        except NotFoundError as e:
-            raise HTTPException(404, detail=str(e))
-    return audit_page(
-        ctx, view, offset, limit, entity_id=dataset.id, entity_type="dataset"
-    )
+    scope = ctx.history_svc.scope_of("collection", name_or_id)
+    return audit_page(ctx, view, offset, limit, **scope)
 
 
 @router.patch("/{name_or_id}", response_model=DatasetResponse)
@@ -164,6 +153,18 @@ def delete_dataset(name: str, ctx: AppContext = Depends(get_ctx)):
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+
+
+@router.get("/{name}/restore-plan", response_model=RestorePlanResponse)
+def restore_dataset_plan(name: str, ctx: AppContext = Depends(get_ctx)):
+    """What restoring a deleted collection would bring back: it and the records
+    deleted with it, not records deleted on their own earlier."""
+    try:
+        return RestorePlanResponse.from_dto(ctx.dataset_svc.restore_plan(name))
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
 
 
 @router.post("/{name}/restore", response_model=DatasetResponse)

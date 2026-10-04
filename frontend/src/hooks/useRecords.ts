@@ -216,6 +216,7 @@ export function useDeleteRecord(datasetName: string) {
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
       qc.invalidateQueries({ queryKey: ['collections'] })
       qc.invalidateQueries({ queryKey: ['records-deleted'] })
+      qc.invalidateQueries({ queryKey: ['trash'] })
       invalidateRecordNames(qc)
       qc.invalidateQueries({ queryKey: ['record-audit', vars.id] })
       toast.success('Record moved to Recently Deleted', {
@@ -231,6 +232,7 @@ export function useDeleteRecord(datasetName: string) {
                     })
                     qc.invalidateQueries({ queryKey: ['collections'] })
                     qc.invalidateQueries({ queryKey: ['records-deleted'] })
+                    qc.invalidateQueries({ queryKey: ['trash'] })
                     invalidateRecordNames(qc)
                     toast.success('Record restored')
                   },
@@ -252,24 +254,6 @@ export function useDeletedRecords(datasetName?: string) {
   })
 }
 
-export function useRestoreRecord() {
-  const qc = useQueryClient()
-  const toast = useToast()
-  return useMutation({
-    mutationFn: recordsApi.restore,
-    onSuccess: (_data, id) => {
-      qc.invalidateQueries({ queryKey: ['records'] })
-      qc.invalidateQueries({ queryKey: ['record-counts'] })
-      qc.invalidateQueries({ queryKey: ['collections'] })
-      qc.invalidateQueries({ queryKey: ['records-deleted'] })
-      invalidateRecordNames(qc)
-      qc.invalidateQueries({ queryKey: ['record-audit', id] })
-      toast.success('Record restored')
-    },
-    onError: (err) => toast.error(errorMessage(err)),
-  })
-}
-
 export function usePurgeRecord() {
   const qc = useQueryClient()
   const toast = useToast()
@@ -277,6 +261,7 @@ export function usePurgeRecord() {
     mutationFn: recordsApi.purge,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['records-deleted'] })
+      qc.invalidateQueries({ queryKey: ['trash'] })
       invalidateRecordNames(qc)
       toast.success('Record permanently deleted')
     },

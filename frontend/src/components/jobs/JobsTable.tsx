@@ -1,5 +1,4 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router'
+import { useCallback, useMemo, useState } from 'react'
 import { useListParams } from '../../hooks/useListParams'
 import { withRange } from '../../hooks/useRangeSelect'
 import {
@@ -22,6 +21,7 @@ import { FilterControls } from '../explorer/FilterControls'
 import { FailureGroups } from './FailureGroups'
 import {
   RUN_LIST,
+  allOf,
   failureGroupFilter,
   legacyRunFilter,
   runFilterFields,
@@ -39,7 +39,7 @@ import {
   Pagination,
 } from '../ui'
 import { RefreshCw, X } from '../ui/icons'
-import { RecordName } from '../records/RecordName'
+import { RecordLink } from '../records/RecordLink'
 import JobStatusBadge from './JobStatusBadge'
 import {
   LONG_CHAIN,
@@ -189,10 +189,22 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
     [runFields, workflows, schemas],
   )
 
+  // On a record's page every count and every bulk action is about that record's
+  // runs. The list is scoped by `recordId`; anything sent as a filter has to
+  // say so itself, or it would reach every run in the project that matches.
+  const recordScope = useMemo<FilterTreeWire | null>(
+    () => (recordId ? { field: 'record', op: 'eq', value: recordId } : null),
+    [recordId],
+  )
+  const scoped = useCallback(
+    (wire: FilterTreeWire | null): FilterTreeWire | null =>
+      allOf(...[recordScope, wire].filter((t): t is FilterTreeWire => !!t)),
+    [recordScope],
+  )
+
   // Why the runs in view failed, for whatever the filter covers.
   const { data: groups } = useFailureGroups(
-    useMemo(() => (recordId ? null : filter), [recordId, filter]),
-    !recordId,
+    useMemo(() => scoped(filter), [scoped, filter]),
   )
   const lookingAtFailures = JSON.stringify(filter ?? {}).includes('"failed"')
 
@@ -204,7 +216,7 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
     rerunMany.mutate({ ids: [...selected] }, { onSuccess: done })
   }
   function rerunMatching(which: FilterTreeWire) {
-    rerunMany.mutate({ filter: which }, { onSuccess: done })
+    rerunMany.mutate({ filter: scoped(which)! }, { onSuccess: done })
   }
   // One failure group: its runs, alongside whatever else narrowed the list
   // (a time window, say), replacing what said otherwise about the same things.
@@ -284,13 +296,7 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
             header: 'Record',
             render: (job: WorkflowJob) => (
               <div className="min-w-0">
-                <Link
-                  to={`/records/${job.record_id}`}
-                  className="text-accent hover:underline"
-                  title={job.record_id}
-                >
-                  <RecordName id={job.record_id} />
-                </Link>
+                <RecordLink id={job.record_id} />
                 <div className="text-xs text-fg-subtle">{job.schema_name}</div>
               </div>
             ),

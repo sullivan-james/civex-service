@@ -34,12 +34,14 @@ import { recordTarget } from '../utils/navTargets'
 import { recordRecent } from '../hooks/usePins'
 import { formatDate } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
+import { ApiError } from '../api/client'
+import { RecordMissing } from '../components/records/RecordMissing'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
 import type { Field as SchemaField } from '../api/schemas'
 import JobsTable from '../components/jobs/JobsTable'
 import RecordProvenance from '../components/jobs/RecordProvenance'
-import { AuditTrail } from '../components/audit/AuditTrail'
-import { describeAuditEntry as describeRecordAuditEntry } from '../utils/recordAudit'
+import { ActivityFeed } from '../components/audit/ActivityFeed'
+import { underRecord } from '../utils/auditFilter'
 import { RecordFieldGrid } from '../components/records/RecordFieldGrid'
 
 const RECORD_TABS = [
@@ -101,9 +103,11 @@ export default function RecordDetailPage() {
       <Page
         breadcrumbs={breadcrumbs}
         error={
-          <ErrorState
-            message={error ? errorMessage(error) : 'Record not found'}
-          />
+          error && !(error instanceof ApiError && error.status === 404) ? (
+            <ErrorState message={errorMessage(error)} />
+          ) : (
+            <RecordMissing id={id ?? ''} />
+          )
         }
       />
     )
@@ -257,13 +261,10 @@ export default function RecordDetailPage() {
         </TabPanel>
 
         <TabPanel id="history" value={shownTab}>
-          <AuditTrail
-            queryKey={['records', record.id, 'audit']}
-            fetchPage={(offset, limit, view) =>
-              recordsApi.audit(record.id, offset, limit, view)
-            }
-            describeEntry={(entry) => describeRecordAuditEntry(entry, schema)}
-            emptyMessage="Changes to this record will appear here."
+          <ActivityFeed
+            scope={underRecord(record.id)}
+            ns="history."
+            emptyMessage="Changes to this record, and to everything beneath it, will appear here."
           />
         </TabPanel>
 

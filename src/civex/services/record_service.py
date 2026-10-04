@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+from contextlib import nullcontext
 import re
 import uuid
 from datetime import date as _date, datetime as _dt
@@ -8,6 +9,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from civex.domain.dtos import (
+    DERIVED_FILE_KEYS,
+    BlockerDTO,
     DatasetDTO,
     FieldDTO,
     FileRef,
@@ -15,9 +18,11 @@ from civex.domain.dtos import (
     ReferrerGroupDTO,
     ResolvedField,
     ResolvedSchema,
+    RestorePlanDTO,
     SchemaDTO,
 )
 from civex.domain import geo as geo_domain
+from civex.domain.audit_diff import tombstone
 from civex.domain import partial_dates, templating, units
 from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
 from civex.domain.filters import (
@@ -256,9 +261,10 @@ def resolve_filename(
     return resolved or ref.filename
 
 
-# Keys the server adds to a file value in responses. They describe the moment
-# of the read, so a client that echoes them back must not get them stored.
-DERIVED_FILE_KEYS = ("resolved_filename", "location")
+def _audit_batch(audit: AuditRepository | None, kind: str, many: bool):
+    """One batch for an operation that touches several records, so history
+    shows it as one event. A single record is just its own entry."""
+    return audit.batch(kind) if audit is not None and many else nullcontext()
 
 
 def _file_dicts(value: Any) -> list[dict[str, Any]]:
@@ -1908,10 +1914,16 @@ class RecordService:
         self._handle_referrers(doomed, force)
         records = self._records.list_by_ids(every)
         if self._audit:
-            for record in records:
-                self._audit.log_change(
-                    "delete", "record", record.id, record.to_dict(), None
-                )
+            shapes = self._schema_svc.resolver()
+            with _audit_batch(self._audit, "delete", len(records) > 1):
+                for record in records:
+                    self._audit.log_change(
+                        "delete",
+                        "record",
+                        record.id,
+                        self._with_names(record, shapes).to_dict(),
+                        None,
+                    )
         self._records.delete_many(every)
         requested = set(ids)
         return sum(
@@ -1940,34 +1952,159 @@ class RecordService:
             )
         )
 
-    def restore(self, record_id: str) -> RecordDTO:
-        """Undo delete(): the record and every descendant cascade-deleted
-        with it become live again."""
+    def subtree_ids(self, record_id: str) -> list[uuid.UUID]:
+        """A record and every record beneath it, live or deleted."""
+        record = self._records.get_by_prefix(record_id, include_deleted=True)
+        if record is None:
+            raise NotFoundError(f"Record '{record_id}' not found")
+        levels = self._records.subtree_levels([record.id], deleted=None)
+        return [rid for level in levels for rid in level]
+
+    def restore_group_ids(self, record_id: str) -> list[uuid.UUID]:
+        """The records that come back when this deleted one is restored: it, and
+        what was deleted with it."""
+        return self._restore_group(self._deleted_record(record_id))
+
+    def restore_plan(self, record_id: str) -> RestorePlanDTO:
+        """What restoring this deleted record would do, without doing it: what
+        comes back with it, and what, if anything, is in the way. A record
+        can't come back while its collection, its schema or a record above it
+        is still deleted -- it would be live but nowhere to be seen."""
+        record = self._deleted_record(record_id)
+        dataset = self._datasets.get_by_id(
+            record.dataset_id,
+            include_deleted=True,
+            with_count=False,
+            with_schemas=False,
+        )
+        return RestorePlanDTO(
+            kind="record",
+            id=record.id,
+            name=self._deleted_name(record),
+            records=len(self._restore_group(record)),
+            blocked_by=self._restore_blocker(record, dataset),
+            collection=dataset.name if dataset else None,
+            collection_id=dataset.id if dataset else None,
+        )
+
+    def _deleted_record(self, record_id: str) -> RecordDTO:
         record = self._records.get_by_prefix(record_id, include_deleted=True)
         if record is None:
             raise NotFoundError(f"Record '{record_id}' not found")
         if record.deleted_at is None:
             raise ValidationError(f"Record '{record_id}' is not deleted")
+        return record
+
+    def _deleted_name(self, record: RecordDTO) -> str:
+        named = self.labels([str(record.id)])
+        return (named[0].natural_name if named else None) or (
+            f"{record.schema_name} {str(record.id)[:8]}"
+        )
+
+    def _restore_group(self, record: RecordDTO) -> list[uuid.UUID]:
+        """The record and what was deleted *with* it: the descendants stamped
+        with the same moment, reached through others in the group. A child
+        deleted on its own earlier stays deleted, as does everything under it."""
         levels = self._records.subtree_levels([record.id], deleted=True)
         every = [rid for level in levels for rid in level]
-        before = {r.id: r for r in self._records.list_by_ids(every)}
+        rows = {r.id: r for r in self._records.list_by_ids(every)}
+        group = [record.id]
+        kept = {record.id}
+        for rid in every:
+            row = rows[rid]
+            if (
+                rid != record.id
+                and row.deleted_at == record.deleted_at
+                and row.parent_record_id in kept
+            ):
+                group.append(rid)
+                kept.add(rid)
+        return group
+
+    def _restore_blocker(
+        self, record: RecordDTO, dataset: DatasetDTO | None
+    ) -> BlockerDTO | None:
+        if dataset is not None and dataset.deleted_at is not None:
+            return BlockerDTO("collection", dataset.id, dataset.name)
+        schema = self._schema_svc._repo.get_by_id(
+            record.schema_id, include_deleted=True
+        )
+        if schema is not None and schema.deleted_at is not None:
+            return BlockerDTO("schema", schema.id, schema.name)
+        # The topmost of the deleted records directly above this one: bringing
+        # that back brings its group back, and the next step is then open.
+        top: RecordDTO | None = None
+        current = record
+        while current.parent_record_id is not None:
+            parent = self._records.get_by_prefix(
+                str(current.parent_record_id), include_deleted=True
+            )
+            if parent is None or parent.deleted_at is None:
+                break
+            top = current = parent
+        if top is not None:
+            return BlockerDTO("record", top.id, self._deleted_name(top))
+        return None
+
+    def restore(self, record_id: str) -> RecordDTO:
+        """Undo delete(): the record and what was deleted with it become live
+        again. Refused while its collection, schema or a parent record is still
+        deleted (see `restore_plan`)."""
+        record = self._deleted_record(record_id)
+        plan = self.restore_plan(str(record.id))
+        if plan.blocked_message:
+            raise ValidationError(plan.blocked_message)
+        every = self._restore_group(record)
+        shapes = self._schema_svc.resolver()
+        before = {
+            r.id: self._with_names(r, shapes) for r in self._records.list_by_ids(every)
+        }
         self._records.restore_many(every)
         if self._audit:
-            shapes = self._schema_svc.resolver()
-            for restored in self._records.list_by_ids(every):
-                self._audit.log_change(
-                    "restore",
-                    "record",
-                    restored.id,
-                    before[restored.id].to_dict(),
-                    self._with_names(restored, shapes).to_dict(),
-                )
+            with _audit_batch(self._audit, "restore", len(every) > 1):
+                for restored in self._records.list_by_ids(every):
+                    self._audit.log_change(
+                        "restore",
+                        "record",
+                        restored.id,
+                        before[restored.id].to_dict(),
+                        self._with_names(restored, shapes).to_dict(),
+                    )
         return self.get(str(record.id))
+
+    def purgeable_deleted(
+        self, cutoff: _dt
+    ) -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]:
+        """(id, collection id, schema id) of the records deleted before `cutoff`
+        that can go for good without leaving a child pointing at them."""
+        return self._records.purgeable_deleted(cutoff)
+
+    def purge_records(self, ids: list[uuid.UUID]) -> None:
+        """Permanently remove these already-deleted records. Every history entry
+        about them is deleted, and each leaves one tombstone: that it was
+        permanently deleted, which record, and when, never what it held. The
+        caller has checked they are safe to remove (see `purgeable_deleted`)."""
+        shapes = self._schema_svc.resolver()
+        with _audit_batch(self._audit, "purge", len(ids) > 1):
+            for start in range(0, len(ids), 500):
+                self._purge_chunk(ids[start : start + 500], shapes)
+
+    def _purge_chunk(self, ids: list[uuid.UUID], shapes) -> None:
+        if self._audit:
+            stones = [
+                (gone.id, tombstone(self._with_names(gone, shapes).to_dict()))
+                for gone in self._records.list_by_ids(ids)
+            ]
+            self._audit.forget_records(ids)
+            for record_id, stone in stones:
+                self._audit.log_change("purge", "record", record_id, stone, None)
+        self._records.purge_many(ids)
 
     def purge(self, record_id: str) -> None:
         """Permanently remove a record (and its cascade-deleted descendants)
         that's already in Recently Deleted — a separate, explicit action
-        from delete(). Irreversible."""
+        from delete(). Irreversible, and so is the history: every entry about
+        the records removed is deleted, leaving one tombstone for each."""
         record = self._records.get_by_prefix(record_id, include_deleted=True)
         if record is None:
             raise NotFoundError(f"Record '{record_id}' not found")
@@ -1977,17 +2114,7 @@ class RecordService:
             )
         levels = self._records.subtree_levels([record.id], deleted=None)
         every = [rid for level in levels for rid in level]
-        if self._audit:
-            shapes = self._schema_svc.resolver()
-            for gone in self._records.list_by_ids(every):
-                self._audit.log_change(
-                    "purge",
-                    "record",
-                    gone.id,
-                    self._with_names(gone, shapes).to_dict(),
-                    None,
-                )
-        self._records.purge_many(every)
+        self.purge_records(every)
 
     def _reference_field_map(
         self, target_schema: str | None = None

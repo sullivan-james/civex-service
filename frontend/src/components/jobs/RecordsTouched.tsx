@@ -1,7 +1,6 @@
-import { Link } from 'react-router'
 import type { WorkflowJob } from '../../api/workflows'
 import { Badge } from '../ui'
-import { RecordName } from '../records/RecordName'
+import { RecordLink } from '../records/RecordLink'
 
 /** The records a run created or changed, each named as it is now (see
  * `RecordName`), in the order the run touched them. */
@@ -35,15 +34,12 @@ export default function RecordsTouched({ job }: { job: WorkflowJob }) {
           >
             {rec.action}
           </Badge>
-          <Link
-            to={`/records/${rec.record_id}`}
-            className="min-w-0 truncate text-accent hover:underline"
-          >
-            <RecordName
+          <span className="min-w-0 truncate">
+            <RecordLink
               id={rec.record_id}
               fallback={rec.natural_name ?? null}
             />
-          </Link>
+          </span>
           <span className="text-xs text-fg-muted">{rec.schema_name}</span>
         </li>
       ))}

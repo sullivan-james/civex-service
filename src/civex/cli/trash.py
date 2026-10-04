@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import typer
+from rich.markup import escape
 from rich.table import Table
 
 from civex.cli.utils import cli_load_config, get_ctx as _ctx
@@ -27,43 +29,79 @@ def _deleted_at(dto: SchemaDTO | DatasetDTO | RecordDTO) -> datetime:
     return dto.deleted_at
 
 
+# `--kind` as the history filter's kind of thing.
+_KIND_FILTER = {"schema": "schema", "collection": "dataset", "record": "record"}
+KINDS = tuple(_KIND_FILTER)
+
+
 @app.command("list")
-def trash_list() -> None:
-    """List everything currently in Recently Deleted."""
+def trash_list(
+    kind: Optional[str] = typer.Option(
+        None, "--kind", "-k", help="Only schemas, collections or records"
+    ),
+    search: Optional[str] = typer.Option(
+        None, "--search", "-s", help="Text to find in a name or a record's values"
+    ),
+    limit: int = typer.Option(25, "--limit", "-n", min=1, help="How many to show"),
+    offset: int = typer.Option(0, "--offset", min=0, help="Skip this many"),
+) -> None:
+    """List what is in Recently Deleted, newest first.
+
+    This is history filtered to what is deleted now (`civex history` shows the
+    rest). A delete that took many records with it, such as a bulk delete or a
+    tree, is one line.
+    """
+    if kind is not None and kind not in KINDS:
+        console.print(f"[error]--kind must be one of: {', '.join(KINDS)}[/error]")
+        raise typer.Exit(1)
+    conditions = [
+        {"field": "now", "op": "eq", "value": "deleted"},
+        {"field": "change", "op": "eq", "value": "delete"},
+    ]
+    if kind:
+        conditions.append({"field": "kind", "op": "eq", "value": _KIND_FILTER[kind]})
     ctx = _ctx()
-    config = cli_load_config()
-    cutoff_days = config.retention.purge_after_days
+    try:
+        events, total = ctx.history_svc.events(
+            where={"and": conditions}, search=search, offset=offset, limit=limit
+        )
+        retention = cli_load_config().retention.purge_after_days
+    finally:
+        ctx.close()
 
-    schemas = ctx.schema_svc.list_deleted()
-    collections = ctx.dataset_svc.list_deleted()
-    records = ctx.record_svc.list_deleted()
-
-    if not (schemas or collections or records):
-        console.print("[info]Recently Deleted is empty.[/info]")
+    if not events:
+        console.print(
+            "[info]No matches.[/info]"
+            if (kind or search)
+            else "[info]Recently Deleted is empty.[/info]"
+        )
         return
 
-    table = Table("Type", "Name / ID", "Deleted", "Purge eligible")
-    now = datetime.now(timezone.utc)
-    rows = (
-        [("schema", s.name, _deleted_at(s)) for s in schemas]
-        + [("collection", d.name, _deleted_at(d)) for d in collections]
-        + [
-            ("record", f"{r.schema_name} {str(r.id)[:8]}…", _deleted_at(r))
-            for r in records
-        ]
-    )
-    rows.sort(key=lambda r: r[2], reverse=True)
-    for kind, label, deleted_at in rows:
-        eligible = deleted_at <= now - timedelta(days=cutoff_days)
-        table.add_row(
-            kind,
-            label,
-            _age(deleted_at),
-            "[warning]yes[/warning]" if eligible else "no",
-        )
+    table = Table("Type", "Name", "ID", "Deleted")
+    for event in events:
+        if event.entry is not None:
+            entry = event.entry
+            now = entry.now or {}
+            name = now.get("name") or (entry.old_data or {}).get("name") or "-"
+            where = (
+                f" [dim]in {now['collection']}[/dim]" if now.get("collection") else ""
+            )
+            table.add_row(
+                now.get("kind", entry.entity_type),
+                f"{escape(str(name))}{where}",
+                str(entry.entity_id)[:8],
+                _age(entry.timestamp),
+            )
+        else:
+            held = ", ".join(f"{p['count']} {p['entity_type']}(s)" for p in event.parts)
+            table.add_row(
+                "batch", f"Deleted together: {held}", "", _age(event.timestamp)
+            )
     console.print(table)
+    if total > len(events):
+        console.print(f"[dim]Showing {len(events)} of {total}. Use --offset.[/dim]")
     console.print(
-        f"[dim]Retention: {cutoff_days} day(s). Restore with `civex schema|collection|record "
+        f"[dim]Retention: {retention} day(s). Restore with `civex schema|collection|record "
         "restore <name/id>`, or delete permanently with `... purge`.[/dim]"
     )
 

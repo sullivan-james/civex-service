@@ -31,7 +31,7 @@ describe('SettingsLayout', () => {
       'Appearance',
       'Database',
       'Storage',
-      'Recently Deleted',
+      'Retention',
       'Map',
       'Advanced',
     ])

@@ -1,5 +1,5 @@
 import { api } from './client'
-import { auditUrl, type AuditView } from './audit'
+import { auditUrl, type AuditView, type PaginatedAuditLog } from './audit'
 import {
   recordQueryString,
   type PageParams,
@@ -60,26 +60,6 @@ export interface PaginatedRecords {
   limit: number
 }
 
-export interface AuditLogEntry {
-  id: string
-  commit_id: string | null
-  action: string
-  entity_type: string
-  entity_id: string
-  /** Full record snapshot before the change (record id/data/timestamps). Null on create. */
-  old_data: Record<string, unknown> | null
-  /** Full record snapshot after the change. Null on delete. */
-  new_data: Record<string, unknown> | null
-  timestamp: string
-}
-
-export interface PaginatedAuditLog {
-  items: AuditLogEntry[]
-  total: number
-  offset: number
-  limit: number
-}
-
 export type ListParams = RecordQueryParams & PageParams
 
 /** A record's name as it is now, with what is needed to say what it is. */
@@ -90,6 +70,13 @@ export interface RecordLabel {
   natural_name: string | null
   /** In Recently Deleted: it still has a name, and can be restored. */
   deleted: boolean
+}
+
+/** The header that puts a request's changes in a batch (see `auditApi.openBatch`). */
+function batchHeaders(batchId?: string): Record<string, string> | undefined {
+  return batchId
+    ? { 'Content-Type': 'application/json', 'X-Civex-Batch': batchId }
+    : undefined
 }
 
 export const recordsApi = {
@@ -122,17 +109,29 @@ export const recordsApi = {
   referrers: (id: string) =>
     api.get<ReferrerGroup[]>(`/records/${id}/referrers`),
 
+  /** `batchId` puts the change in a batch opened with `auditApi.openBatch`, so
+   * work done over many requests is one event in history. */
   create: (
     datasetName: string,
     body: { schema_name: string; data: object; parent_record_id?: string },
+    options?: { batchId?: string },
   ) =>
     api.post<CivexRecord>(
       `/collections/${encodeURIComponent(datasetName)}/records`,
       body,
+      batchHeaders(options?.batchId),
     ),
 
-  update: (id: string, body: { data: object }) =>
-    api.patch<CivexRecord>(`/records/${id}`, body),
+  update: (
+    id: string,
+    body: { data: object },
+    options?: { batchId?: string },
+  ) =>
+    api.patch<CivexRecord>(
+      `/records/${id}`,
+      body,
+      batchHeaders(options?.batchId),
+    ),
 
   delete: (id: string) => api.delete<void>(`/records/${id}`),
 

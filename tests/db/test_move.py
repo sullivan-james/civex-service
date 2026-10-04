@@ -64,7 +64,11 @@ def populated(ctx: AppContext, make_schema, make_collection) -> Engine:
             ctx.record_svc.add(
                 "study", "selection", {"label": f"s{j}"}, parent_record_id=str(rec.id)
             )
-    ctx.record_svc.add("study", "cohort", {"members": [str(p) for p in patients[:5]]})
+    # A batch with an audit row in it, so the move is tried against both.
+    with ctx.history_svc.batch("import", "cohorts.csv"):
+        ctx.record_svc.add(
+            "study", "cohort", {"members": [str(p) for p in patients[:5]]}
+        )
 
     # The remaining tables, so a copy is checked against every one of them.
     ctx.dataset_svc.update(

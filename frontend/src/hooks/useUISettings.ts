@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { settingsApi } from '../api/settings'
+import { settingsApi, type RetentionSettings } from '../api/settings'
 
 export function useUISettings() {
   return useQuery({
@@ -28,8 +28,8 @@ export function useRetentionSettings() {
 export function useSetRetention() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (purgeAfterDays: number) =>
-      settingsApi.updateRetention(purgeAfterDays),
+    mutationFn: (settings: Partial<RetentionSettings>) =>
+      settingsApi.updateRetention(settings),
     onSuccess: (settings) =>
       qc.setQueryData(['settings', 'retention'], settings),
   })
