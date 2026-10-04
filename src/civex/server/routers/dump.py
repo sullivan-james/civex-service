@@ -9,7 +9,12 @@ from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.server.deps import get_ctx
 from civex.server.downloads import new_temp_path, serve, temp_paths
-from civex.services.dump_service import RESTORE_BATCH, write_dump
+from civex.services.dump_service import (
+    RESTORE_BATCH,
+    restore_datasets,
+    restore_schemas,
+    write_dump,
+)
 
 router = APIRouter(tags=["dump"])
 
@@ -69,51 +74,12 @@ async def import_dump(
     if not isinstance(doc, dict):
         raise HTTPException(status_code=400, detail="Dump file must be a YAML mapping")
 
-    schemas_restored = 0
-    for s in doc.get("schemas", []):
-        try:
-            ctx.schema_svc.create(
-                s["name"],
-                description=s.get("description"),
-                parent=s.get("parent"),
-                label=s.get("label"),
-                # A dump predating slug validation must restore as-is; see
-                # SchemaService.create.
-                allow_legacy_name=True,
-            )
-            ctx.commit()
-            schemas_restored += 1
-        except AlreadyExistsError:
-            pass
-
-        for f in s.get("fields", []):
-            try:
-                ctx.schema_svc.add_field(
-                    s["name"],
-                    f["name"],
-                    f["type"],
-                    required=f.get("required", False),
-                    label=f.get("label"),
-                    allow_legacy_name=True,
-                    auto_name=False,  # restore the dump as it was
-                )
-                ctx.commit()
-            except AlreadyExistsError:
-                pass
-
-    datasets_restored = 0
-    for d in doc.get("datasets", []):
-        try:
-            ctx.dataset_svc.create(
-                d["name"],
-                description=d.get("description"),
-                scope=d.get("scope") or "local",
-                schemas=d.get("schemas") or [],
-            )
-            ctx.commit()
-            datasets_restored += 1
-        except AlreadyExistsError:
-            pass
+    schemas_restored = restore_schemas(
+        ctx.schema_svc, doc.get("schemas", []), ctx.commit
+    )
+    datasets_restored = restore_datasets(
+        ctx.dataset_svc, doc.get("datasets", []), ctx.commit
+    )
 
     records_total = len(doc.get("records", []))
     records_restored = 0

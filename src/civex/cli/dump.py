@@ -7,8 +7,13 @@ import yaml
 
 from civex.cli.utils import cli_load_config, get_ctx
 from civex.console import console
-from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
-from civex.services.dump_service import RESTORE_BATCH, write_dump
+from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.services.dump_service import (
+    RESTORE_BATCH,
+    restore_datasets,
+    restore_schemas,
+    write_dump,
+)
 
 
 def dump(
@@ -80,83 +85,25 @@ def restore(
     ctx = get_ctx()
 
     # --- schemas (parents-first order guaranteed by dump) ---
-    for s in doc.get("schemas", []):
-        try:
-            ctx.schema_svc.create(
-                s["name"],
-                description=s.get("description"),
-                parent=s.get("parent"),
-                label=s.get("label"),
-                # A dump predating slug validation must restore as-is; see
-                # SchemaService.create.
-                allow_legacy_name=True,
-            )
-            ctx.commit()
-        except AlreadyExistsError:
-            console.print(
-                f"  [warning]Schema '{s['name']}' already exists — skipped.[/warning]"
-            )
-            continue
-
-        for f in s.get("fields", []):
-            # A filename template may name a field added later in this loop,
-            # so it is applied once the schema's fields all exist (below).
-            restrictions = {
-                k: v
-                for k, v in (f.get("restrictions") or {}).items()
-                if k != "filename_template"
-            }
-            try:
-                ctx.schema_svc.add_field(
-                    s["name"],
-                    f["name"],
-                    f["type"],
-                    required=f.get("required", False),
-                    restrictions=restrictions,
-                    default_value=f.get("default_value"),
-                    label=f.get("label"),
-                    allow_legacy_name=True,
-                    auto_name=False,  # restore the dump as it was
-                )
-                ctx.commit()
-            except AlreadyExistsError:
-                pass
-
-        for f in s.get("fields", []):
-            template = (f.get("restrictions") or {}).get("filename_template")
-            if template:
-                ctx.schema_svc.update_field(
-                    s["name"],
-                    f["name"],
-                    restrictions={
-                        **(f.get("restrictions") or {}),
-                    },
-                )
-                ctx.commit()
-
-    # Name templates may reach through a reference (`{ref.field}`) into another
-    # schema, so they are set once every schema and field exists.
-    for s in doc.get("schemas", []):
-        if s.get("display_template"):
-            ctx.schema_svc.update(s["name"], display_template=s["display_template"])
-            ctx.commit()
-
+    restore_schemas(
+        ctx.schema_svc,
+        doc.get("schemas", []),
+        ctx.commit,
+        on_exists=lambda name: console.print(
+            f"  [warning]Schema '{name}' already exists — skipped.[/warning]"
+        ),
+    )
     console.print("  Schemas restored.")
 
     # --- datasets ---
-    for d in doc.get("datasets", []):
-        try:
-            ctx.dataset_svc.create(
-                d["name"],
-                description=d.get("description"),
-                scope=d.get("scope") or "local",
-                timezone=d.get("timezone"),
-                schemas=d.get("schemas") or [],
-            )
-            ctx.commit()
-        except AlreadyExistsError as e:
-            console.print(f"  [warning]Dataset '{d['name']}': {e} — skipped.[/warning]")
-
+    restore_datasets(
+        ctx.dataset_svc,
+        doc.get("datasets", []),
+        ctx.commit,
+        on_exists=lambda name, e: console.print(
+            f"  [warning]Dataset '{name}': {e} — skipped.[/warning]"
+        ),
+    )
     console.print("  Datasets restored.")
 
     # --- records ---

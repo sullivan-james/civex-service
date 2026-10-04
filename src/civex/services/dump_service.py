@@ -1,7 +1,8 @@
-"""Writing a project's dump file: schemas, collections, records, workflows and
-plugins as one YAML document.
+"""Writing a project's dump file -- and restoring its schemas and collections --
+as one YAML document of schemas, collections, records, workflows and plugins.
 
-Shared by `civex dump` and `GET /dump`. Records are paged out of the database
+Shared by `civex dump`/`civex restore` and `GET /dump`/`POST /restore`, so what a
+dump holds and what a restore reads back are decided in one place. Records are paged out of the database
 and written as they arrive, so a dump's size is bounded by disk, not memory,
 and no collection is cut short; the sections concatenate to the same mapping a
 single `yaml.dump` of the whole document would produce.
@@ -12,11 +13,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, Callable, TextIO
 
 import yaml
 
 from civex import __version__
+from civex.domain.exceptions import AlreadyExistsError
 from civex.services.dataset_service import DatasetService
 from civex.services.record_service import RecordService
 from civex.services.schema_service import SchemaService
@@ -83,6 +85,97 @@ def export_schemas(schema_svc: SchemaService) -> list[dict]:
             for s in schemas
         ]
     )
+
+
+def restore_schemas(
+    schema_svc: SchemaService,
+    schemas: list[dict],
+    commit: Callable[[], None],
+    on_exists: Callable[[str], None] | None = None,
+) -> int:
+    """Create the dump's schemas and fields, restrictions and defaults included.
+    Returns how many schemas were new; ones that already exist are reported to
+    `on_exists` and only gain fields they lack.
+
+    Name templates, and a file field's `filename_template`, can name fields
+    defined later (or, through a reference, on another schema), so they are set
+    once every schema and field exists."""
+    created: set[str] = set()
+    for s in schemas:
+        try:
+            schema_svc.create(
+                s["name"],
+                description=s.get("description"),
+                parent=s.get("parent"),
+                label=s.get("label"),
+                # A dump predating slug validation must restore as-is; see
+                # SchemaService.create.
+                allow_legacy_name=True,
+            )
+            commit()
+            created.add(s["name"])
+        except AlreadyExistsError:
+            if on_exists:
+                on_exists(s["name"])
+
+        for f in s.get("fields", []):
+            restrictions = {
+                k: v
+                for k, v in (f.get("restrictions") or {}).items()
+                if k != "filename_template"
+            }
+            try:
+                schema_svc.add_field(
+                    s["name"],
+                    f["name"],
+                    f["type"],
+                    required=f.get("required", False),
+                    restrictions=restrictions,
+                    default_value=f.get("default_value"),
+                    label=f.get("label"),
+                    allow_legacy_name=True,
+                    auto_name=False,  # restore the dump as it was
+                )
+                commit()
+            except AlreadyExistsError:
+                continue
+            if (f.get("restrictions") or {}).get("filename_template"):
+                schema_svc.update_field(
+                    s["name"], f["name"], restrictions=f["restrictions"]
+                )
+                commit()
+
+    for s in schemas:
+        if s["name"] in created and s.get("display_template"):
+            schema_svc.update(s["name"], display_template=s["display_template"])
+            commit()
+    return len(created)
+
+
+def restore_datasets(
+    dataset_svc: DatasetService,
+    datasets: list[dict],
+    commit: Callable[[], None],
+    on_exists: Callable[[str, Exception], None] | None = None,
+) -> int:
+    """Create the dump's collections (scope, timezone and schema list included).
+    Returns how many were new."""
+    restored = 0
+    for d in datasets:
+        try:
+            dataset_svc.create(
+                d["name"],
+                description=d.get("description"),
+                scope=d.get("scope") or "local",
+                timezone=d.get("timezone"),
+                schemas=d.get("schemas") or [],
+            )
+            commit()
+            restored += 1
+        except AlreadyExistsError as e:
+            if on_exists:
+                on_exists(d["name"], e)
+    return restored
 
 
 def _yaml(doc: Any) -> str:

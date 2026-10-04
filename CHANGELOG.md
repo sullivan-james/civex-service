@@ -42,6 +42,16 @@ from the next tag forward.
   them. Dumps made by earlier versions don't contain this information, so
   restrictions on a project restored from one must be set again by hand.
 
+- Importing a dump through the web UI (`POST /restore`) ignored field
+  restrictions, defaults, name templates and collection timezones, even from a
+  dump that contained them. It had its own copy of the restore code; the
+  command line and the web import now share one, so they restore the same
+  things.
+- A project whose database was last used by a newer civex now says so
+  ("was last used by a newer version of civex ... run `civex update`") instead
+  of failing with `Can't locate revision`. The database is left unchanged, and
+  `civex db current` reports it rather than "Pending migrations".
+
 ### Features
 
 - `civex doctor` now checks the installation, and works outside a project:
