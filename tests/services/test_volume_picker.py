@@ -53,8 +53,8 @@ def test_browse_lists_folders_with_a_parent_and_places_to_start(
 
     listing = ctx.store_svc.browse_directory(str(tmp_path))
 
-    assert listing.path == str(tmp_path)
-    assert listing.parent == str(tmp_path.parent)
+    assert listing.path == tmp_path.as_posix()
+    assert listing.parent == tmp_path.parent.as_posix()
     assert [e.name for e in listing.entries] == ["a", "b"]
     kinds = {loc.label: loc for loc in listing.locations}
     assert {"Project", "Home", "usb", "nas"} <= set(kinds)
@@ -65,6 +65,14 @@ def test_browse_lists_folders_with_a_parent_and_places_to_start(
 
 def test_browse_at_the_top_has_no_parent(ctx: AppContext) -> None:
     assert ctx.store_svc.browse_directory("/").parent is None
+
+
+def test_browsing_the_drive_root_you_are_on_has_no_parent(
+    ctx: AppContext, tmp_path: Path
+) -> None:
+    # `/` on POSIX, `C:/` on Windows: going "up" from a root must not offer a
+    # bare drive letter (which means "the current folder of that drive").
+    assert ctx.store_svc.browse_directory(tmp_path.anchor).parent is None
 
 
 def test_browse_errors_are_clear(ctx: AppContext, tmp_path: Path) -> None:
@@ -98,7 +106,7 @@ def test_browsing_a_location_that_stops_answering_reports_it(
 
 def test_create_folder(ctx: AppContext, tmp_path: Path) -> None:
     made = ctx.store_svc.create_folder(str(tmp_path), "civex-data")
-    assert Path(made).is_dir() and made == str(tmp_path / "civex-data")
+    assert Path(made).is_dir() and made == (tmp_path / "civex-data").as_posix()
     with pytest.raises(AlreadyExistsError):
         ctx.store_svc.create_folder(str(tmp_path), "civex-data")
     with pytest.raises(NotFoundError):
@@ -226,7 +234,11 @@ def test_a_network_location_is_flagged_with_what_that_means(
 
 
 def test_a_network_address_must_be_mounted_first(ctx: AppContext) -> None:
-    for address in ("smb://nas/share", "//nas/share", "nfs://nas/export"):
+    # `//host/share` is a valid local UNC path on Windows, so it is not refused there.
+    addresses = ["smb://nas/share", "nfs://nas/export"]
+    if sys.platform != "win32":
+        addresses.append("//nas/share")
+    for address in addresses:
         inspection = ctx.store_svc.inspect_path(address)
         assert "mount it first" in inspection.problems[0], address
         with pytest.raises(ValidationError, match="mount it first"):
@@ -321,6 +333,7 @@ def test_reads_of_other_volumes_are_not_stalled_by_a_dead_one(hung_drive) -> Non
     assert time.monotonic() - started < 0.5
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX mount table")
 def test_volume_stats_flags_network_volumes(
     ctx: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

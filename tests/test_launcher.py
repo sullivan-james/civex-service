@@ -32,7 +32,8 @@ def test_shortcut_runs_serve_open_in_the_project(tmp_path, desktop, monkeypatch)
     assert "serve" in text and "--open" in text
     assert launcher._quoted([sys.executable], "linux") in text
     assert "Terminal=true" in text
-    assert path.stat().st_mode & 0o111  # executable
+    if sys.platform != "win32":
+        assert path.stat().st_mode & 0o111  # executable
     assert launcher.shortcut_exists(project)
 
 

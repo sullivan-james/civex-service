@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 import tomllib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -185,15 +186,32 @@ def find_project_root() -> Path | None:
     return None
 
 
+def _retry_sharing_violation(action, attempts: int = 40, delay: float = 0.005):
+    """Run `action()`; on Windows, a file that another thread has open for
+    reading or replacing raises PermissionError for a moment, so try again.
+    Elsewhere (and when it persists) the error is real and propagates."""
+    for attempt in range(attempts):
+        try:
+            return action()
+        except PermissionError:
+            if os.name != "nt" or attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
 def load_config() -> Config:
     root = find_project_root()
     if root is None:
         raise ConfigError("No civex project found. Run `civex init` to create one.")
 
     config_path = root / "_civex" / "config.toml"
-    try:
+
+    def _read() -> dict:
         with open(config_path, "rb") as f:
-            data = tomllib.load(f)
+            return tomllib.load(f)
+
+    try:
+        data = _retry_sharing_violation(_read)
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(
             f"Malformed config file ({config_path}): {e}. "
@@ -455,7 +473,7 @@ def save_config(config: Config) -> None:
         tmp.write_text(content, encoding="utf-8")
         with open(tmp, "rb") as f:
             tomllib.load(f)
-        os.replace(tmp, config_path)
+        _retry_sharing_violation(lambda: os.replace(tmp, config_path))
     except Exception as e:
         tmp.unlink(missing_ok=True)
         raise ConfigError(
