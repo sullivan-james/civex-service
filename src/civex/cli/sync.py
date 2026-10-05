@@ -243,10 +243,10 @@ def conflicts(
     for f in found:
         table.add_row(
             str(f.id),
-            f"{f.entity_type} {str(f.entity_id)[:8]}",
-            f.field or "",
+            escape(f.record_name or f"{f.entity_type} {str(f.entity_id)[:8]}"),
+            escape(f.field_label or f.field or ""),
             escape(str(f.yours)),
-            escape(str(f.theirs)),
+            escape(str(f.theirs) + (f" ({f.theirs_actor})" if f.theirs_actor else "")),
             f.resolution or f.status,
         )
     console.print(table)
@@ -258,7 +258,15 @@ def resolve(
     take: str = typer.Option(
         ...,
         "--take",
-        help="'theirs' keeps the authority's value; 'mine' makes yours a new change.",
+        help="'theirs' keeps what the authority has; 'mine' puts your value back as "
+        "a new edit; 'delete' deletes a record that was deleted there; 'retry' sends "
+        "a refused change again from the record as it is now.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Put your value back even though the record's value has changed again "
+        "since the conflict was recorded.",
     ),
 ) -> None:
     """Settle a conflict."""
@@ -268,7 +276,7 @@ def resolve(
         raise _fail(ValueError("That is not a conflict id"))
     c = _ctx()
     try:
-        c.sync_svc.resolve_conflict(cid, take)
+        c.sync_svc.resolve_conflict(cid, take, force=force)
     except CivexError as e:
         raise _fail(e)
     finally:

@@ -12,6 +12,8 @@ from civex.config import load_config
 from civex.context import AppContext, build_local_context
 from civex.project import scaffold_project
 
+from .peers import build_study, connect, device
+
 
 @pytest.fixture(autouse=True)
 def _user_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -40,3 +42,18 @@ def project(tmp_path: Path) -> Iterator[Callable[[str], AppContext]]:
     yield _make
     for ctx in made:
         ctx.close()
+
+
+@pytest.fixture()
+def authority(project):
+    return project("authority")
+
+
+@pytest.fixture()
+def pair(project, authority):
+    laptop = device(project, authority, "laptop")
+    record = build_study(laptop)
+    connect(laptop)
+    phone = device(project, authority, "phone")
+    connect(phone)
+    return laptop, phone, record

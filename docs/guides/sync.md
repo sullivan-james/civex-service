@@ -71,10 +71,43 @@ them under the device's name.
 
 - Two people edit **different fields** of a record: both edits are kept.
 - Two people edit the **same field**: the authority's value stays, and yours is
-  kept as a conflict. `civex sync conflicts` lists them; `civex sync resolve <id>
-  --take mine|theirs` settles one (`mine` makes your value a new change).
+  kept as a conflict on your device. Nothing is lost either way.
 - One edits a record another **deleted**: the record is kept, with a conflict.
+- A change the authority **refuses** (a value outside its field's rules, a name
+  already taken, a unique key that is already used) is kept on your device with the
+  reason. The authority holds changes from a device to the same rules as an edit
+  made there.
 - Schema changes are applied in the order the authority receives them.
+
+### Reviewing conflicts
+
+A conflict shows the record and field by name, what the value was before either of
+you changed it, the value that stayed (and who wrote it, and when), and yours. It
+also lists the other values of the same edit that did go in, so you can see
+nothing else was lost.
+
+- On the **record's page**, a banner lists that record's conflicts with the choices
+  beside them.
+- **Review** (the status bar, or Settings → Sync) opens them one at a time: ← →
+  to move, `1` and `2` for the first two buttons. **List** shows them all, with
+  tick boxes (shift-click for a range) to settle many at once.
+
+Each is settled with one of:
+
+| Choice | What it does |
+| --- | --- |
+| **Keep theirs** | Nothing to change: this project already has the authority's value. |
+| **Use mine** | Puts your value back as a new edit. It is checked like any edit, appears in the history, and syncs. If the value has changed again since, you are told what it is now and asked to confirm. |
+| **Edit…** | Puts a value you type instead (text and number fields). |
+| **Delete it** | For a record deleted elsewhere: deletes it here too. |
+| **Send again** | For a refused change: sends it again from the record as it is now, after you have put the cause right. |
+
+Nobody else is told when you put your value back; it shows in Activity with your
+name, like any change.
+
+From a terminal, `civex sync conflicts` lists them and `civex sync resolve <id>
+--take theirs|mine|delete|retry` settles one (`--force` puts yours back even though
+the value has changed again).
 
 ## If the network fails
 

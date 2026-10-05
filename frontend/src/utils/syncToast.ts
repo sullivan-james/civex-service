@@ -16,8 +16,7 @@ export function describeResult(r: SyncResult): string {
   if (r.pushed) parts.push(`sent ${plural(r.pushed, 'change')}`)
   if (r.files_sent) parts.push(`uploaded ${plural(r.files_sent, 'file')}`)
   let text = parts.length ? `Synced: ${parts.join(', ')}` : 'Already up to date'
-  if (r.conflicts)
-    text += `. ${plural(r.conflicts, 'value')} to review in Settings → Sync`
+  if (r.conflicts) text += `. ${plural(r.conflicts, 'value')} to review`
   if (r.rejected) text += `. ${plural(r.rejected, 'change')} refused`
   return text
 }

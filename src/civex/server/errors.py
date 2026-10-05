@@ -11,6 +11,8 @@ Split of responsibilities:
 
 from __future__ import annotations
 
+from typing import Any
+
 import json
 import uuid
 
@@ -23,6 +25,7 @@ from civex.domain.exceptions import (
     AlreadyExistsError,
     CivexError,
     ConfigError,
+    ConflictMovedError,
     DatabaseUnavailableError,
     GCAlreadyRunningError,
     NotFoundError,
@@ -111,7 +114,7 @@ class RequestContextMiddleware:
 def _status_for(exc: CivexError) -> int:
     if isinstance(exc, NotFoundError):
         return 404
-    if isinstance(exc, (AlreadyExistsError, GCAlreadyRunningError)):
+    if isinstance(exc, (AlreadyExistsError, GCAlreadyRunningError, ConflictMovedError)):
         return 409
     if isinstance(exc, ValidationError):
         return 422
@@ -141,7 +144,10 @@ def register_error_handlers(app: FastAPI) -> None:
             status=status,
             path=request.url.path,
         )
-        return JSONResponse(status_code=status, content={"detail": str(exc)})
+        content: dict[str, Any] = {"detail": str(exc)}
+        if isinstance(exc, ConflictMovedError):
+            content.update(code="conflict_moved", current=exc.current)
+        return JSONResponse(status_code=status, content=content)
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error(

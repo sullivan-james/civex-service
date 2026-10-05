@@ -52,3 +52,14 @@ def test_the_name_changes_are_recorded_under_can_be_chosen(client: TestClient) -
     assert client.get("/api/settings/identity").json()["chosen"] == "Dana"
     back = client.patch("/api/settings/identity", json={"name": None}).json()
     assert back["chosen"] is None and back["name"] == back["default"]
+
+
+def test_a_conflict_that_moved_on_answers_409_with_what_is_there_now(
+    client: TestClient,
+) -> None:
+    """Putting a value back refuses, and says what is on the record now, when it
+    changed since the conflict was recorded."""
+    from civex.domain.exceptions import ConflictMovedError
+    from civex.server.errors import _status_for
+
+    assert _status_for(ConflictMovedError("moved", "newer")) == 409

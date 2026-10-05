@@ -48,6 +48,7 @@ import { ActivityFeed } from '../components/audit/ActivityFeed'
 import { underRecord } from '../utils/auditFilter'
 import { DeletedFieldValues } from '../components/records/DeletedFieldValues'
 import { RecordFieldGrid } from '../components/records/RecordFieldGrid'
+import { RecordConflicts } from '../components/sync/RecordConflicts'
 
 const RECORD_TABS = [
   { id: 'fields' },
@@ -241,6 +242,7 @@ export default function RecordDetailPage() {
           </>
         }
       >
+        <RecordConflicts recordId={record.id} />
         <TabPanel id="fields" value={shownTab}>
           <UploadCollectionContext.Provider value={record.dataset_id}>
             <div className="mb-3">

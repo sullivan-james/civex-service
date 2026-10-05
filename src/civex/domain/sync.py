@@ -9,10 +9,14 @@ entry's id, which is what makes sending it twice harmless.
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
+
+from civex.domain import hlc
 
 # Bumped when the wire format changes in a way an older peer can't read.
 PROTOCOL_VERSION = 1
@@ -29,6 +33,11 @@ REJECTED = "rejected"  # can never be accepted (it breaks a rule); say why
 DEFERRED = "deferred"  # not yet (a file hasn't arrived); send it again later
 
 RETRY_STATUSES = frozenset({DEFERRED})
+
+ACTIONS = frozenset({"create", "update", "delete", "restore", "purge"})
+# A delete's time becomes the `deleted_at` of what it deletes, so a device whose
+# clock is further ahead than this is refused rather than stamping the future.
+MAX_DELETE_AHEAD = timedelta(milliseconds=hlc.MAX_DRIFT_MS)
 
 
 @dataclass
@@ -118,6 +127,36 @@ class SyncEntry:
             hub_seq=d.get("hub_seq"),
             superseded=bool(d.get("superseded", False)),
         )
+
+
+def problem_with(entry: SyncEntry, now: datetime | None = None) -> str | None:
+    """Why a change can never be taken, or None. The one place a change's shape
+    is checked, so nothing downstream has to cope with a value it can't read:
+    a single odd entry must be refused by itself, not fail the whole push."""
+    now = now or datetime.now(timezone.utc)
+    if entry.entity_type not in ENTITY_ORDER:
+        return f"Unknown kind '{entry.entity_type}'"
+    if entry.action not in ACTIONS:
+        return f"Unknown action '{entry.action}'"
+    for name in ("old_data", "new_data"):
+        value = getattr(entry, name)
+        if value is not None and not isinstance(value, dict):
+            return f"{name} is not an object"
+    if entry.action in ("create", "update", "restore") and (
+        not entry.new_data or str(entry.new_data.get("id")) != str(entry.entity_id)
+    ):
+        return "The change does not say what the thing became"
+    try:
+        made = datetime.fromisoformat(entry.timestamp)
+    except (TypeError, ValueError):
+        return "The change has no readable time"
+    if made.tzinfo is None:
+        made = made.replace(tzinfo=timezone.utc)
+    if entry.action == "delete" and made > now + MAX_DELETE_AHEAD:
+        return "This device's clock is more than an hour ahead of the server's"
+    if entry.hlc is not None and not hlc.is_valid(entry.hlc):
+        return "The change's clock stamp is not valid"
+    return None
 
 
 @dataclass
@@ -294,7 +333,29 @@ class SyncConflictDTO:
     status: str  # open | resolved
     created_at: str
     resolved_at: str | None
-    resolution: str | None  # mine | theirs
+    resolution: str | None  # mine | theirs | value | delete | retry
+    # What the value was before either side changed it, and who wrote the one that
+    # stayed, and when.
+    base: Any = None
+    theirs_actor: str | None = None
+    theirs_at: str | None = None
+    # Response-only, worked out when read (see `FieldValueDTO`): what a person
+    # needs to recognise the record and the field, and whether the value they are
+    # being asked about is still the one on the record.
+    record_name: str | None = None
+    dataset_name: str | None = None
+    schema_name: str | None = None
+    field_label: str | None = None
+    dtype: str | None = None
+    current: Any = None
+    stale: bool = False
+    record_deleted: bool = False
+    # What can be done about it (see `SyncService.resolve_conflict`), so no screen
+    # keeps its own copy of the rule.
+    takes: list[str] = dataclasses.field(default_factory=list)
+    # The other values the same edit set that did go in: what a person checking a
+    # clash wants to see is that nothing else of theirs was lost.
+    also_saved: list[dict[str, Any]] = dataclasses.field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -312,6 +373,19 @@ class SyncConflictDTO:
             "created_at": self.created_at,
             "resolved_at": self.resolved_at,
             "resolution": self.resolution,
+            "base": self.base,
+            "theirs_actor": self.theirs_actor,
+            "theirs_at": self.theirs_at,
+            "record_name": self.record_name,
+            "dataset_name": self.dataset_name,
+            "schema_name": self.schema_name,
+            "field_label": self.field_label,
+            "dtype": self.dtype,
+            "current": self.current,
+            "stale": self.stale,
+            "record_deleted": self.record_deleted,
+            "takes": self.takes,
+            "also_saved": self.also_saved,
         }
 
 

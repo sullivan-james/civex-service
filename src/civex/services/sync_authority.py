@@ -40,8 +40,10 @@ from civex.domain.sync import (
     SyncDeviceDTO,
     SyncEntry,
     SyncError,
+    problem_with,
 )
 from civex.repositories.protocols import FileObjectStore, SyncRepository
+from civex.services.record_service import RecordService
 from civex.services.sync_applier import SyncApplier, stamp_of
 
 FEED_MAX = 500
@@ -62,10 +64,14 @@ class SyncAuthorityService:
         repo: SyncRepository,
         applier: SyncApplier,
         files: FileObjectStore,
+        records: RecordService,
     ) -> None:
         self._repo = repo
         self._applier = applier
         self._files = files
+        # The rules a record must satisfy are the record service's, not copied
+        # here: a change from a device is held to what a person's edit is.
+        self._records = records
 
     # ------------------------------------------------------------------
     # Who may sync
@@ -210,7 +216,7 @@ class SyncAuthorityService:
         prior = self._repo.get_op(entry.id)
         if prior is not None:
             return prior  # sent before: the same answer, nothing done again
-        problem = _unacceptable(entry)
+        problem = problem_with(entry)
         if problem:
             return self._refuse(device, device_id, entry, problem)
         try:
@@ -218,37 +224,23 @@ class SyncAuthorityService:
                 result = self._take(device, device_id, entry)
         except ValidationError as e:
             return self._refuse(device, device_id, entry, str(e))
+        except (ValueError, TypeError, KeyError, AttributeError) as e:
+            # A value inside the snapshots that can't be read (an id or a date
+            # that isn't one). Refused by itself, so it can't hold up the rest
+            # of the push or be sent again for ever.
+            return self._refuse(device, device_id, entry, f"A value is not valid: {e}")
         self._repo.save_op(entry, result, device_id, device.name)
-        for conflict in result.conflicts:
-            self._repo.add_conflict(
-                kind=conflict.get("kind", "conflict"),
-                entity_type=entry.entity_type,
-                entity_id=entry.entity_id,
-                field=conflict.get("field"),
-                yours=conflict.get("yours"),
-                theirs=conflict.get("theirs"),
-                op_id=entry.id,
-                device_name=device.name,
-                message=conflict.get("message"),
-            )
         return result
 
     def _refuse(
         self, device: SyncDeviceDTO, device_id: str | None, entry: SyncEntry, why: str
     ) -> OpResult:
+        """Answer that a change can never be taken. The answer is remembered, so
+        a repeat gets it again; the device that sent it keeps what it made and
+        shows it for review (conflicts are held by the device whose change did
+        not go in, not here)."""
         result = OpResult(entry.id, REJECTED, why)
         self._repo.save_op(entry, result, device_id, device.name)
-        self._repo.add_conflict(
-            kind="rejected",
-            entity_type=entry.entity_type,
-            entity_id=entry.entity_id,
-            field=None,
-            yours=entry.new_data,
-            theirs=None,
-            op_id=entry.id,
-            device_name=device.name,
-            message=why,
-        )
         return result
 
     def _take(
@@ -283,24 +275,24 @@ class SyncAuthorityService:
                     # nothing, and the thing keeps its own date.
                     final["updated_at"] = incoming["updated_at"]
                 conflicts = [
-                    {
-                        "kind": "conflict",
-                        "field": c.field,
-                        "yours": c.incoming,
-                        "theirs": c.head,
-                    }
+                    self._clash(kind, eid, c.field, c.incoming, c.head, c.base)
                     for c in merged.conflicts
                 ]
                 if head.get("deleted_at") and entry.action != "restore":
                     conflicts.append(
-                        {
-                            "kind": "edit_vs_delete",
-                            "field": None,
-                            "yours": None,
-                            "theirs": None,
-                            "message": "It was deleted on the server, and edited here: it has been kept",
-                        }
+                        self._clash(
+                            kind,
+                            eid,
+                            None,
+                            None,
+                            None,
+                            None,
+                            "edit_vs_delete",
+                            "It was deleted on the server, and edited here: it has been kept",
+                        )
                     )
+            if kind == "record":
+                self._records.check_incoming(final, head)
             self._applier.apply_state(kind, eid, final)
         elif entry.action == "delete":
             if head is not None and head.get("deleted_at"):
@@ -311,13 +303,16 @@ class SyncAuthorityService:
             elif head is not None:
                 if _edited_since(entry.old_data, head):
                     conflicts.append(
-                        {
-                            "kind": "edit_vs_delete",
-                            "field": None,
-                            "yours": None,
-                            "theirs": None,
-                            "message": "It was edited on the server after you last saw it, so it was not deleted",
-                        }
+                        self._clash(
+                            kind,
+                            eid,
+                            None,
+                            None,
+                            None,
+                            None,
+                            "edit_vs_delete",
+                            "It was edited on the server after you last saw it, so it was not deleted",
+                        )
                     )
                     final = head
                 else:
@@ -336,6 +331,33 @@ class SyncAuthorityService:
                 c.get("message") for c in conflicts if c["kind"] == "edit_vs_delete"
             )
         return OpResult(entry.id, status, message, conflicts, seq)
+
+    def _clash(
+        self,
+        kind: str,
+        entity_id: uuid.UUID,
+        path: str | None,
+        yours: Any,
+        theirs: Any,
+        base: Any,
+        what: str = "conflict",
+        message: str | None = None,
+    ) -> dict[str, Any]:
+        """One thing that did not go in as made, as the answer carries it: both
+        sides, what the value was, and who wrote the one that stayed and when.
+        The device that sent the change keeps it for review (the authority keeps
+        no list of its own)."""
+        actor, at = self._repo.last_change(kind, entity_id, path)
+        return {
+            "kind": what,
+            "field": path,
+            "yours": yours,
+            "theirs": theirs,
+            "base": base,
+            "theirs_actor": actor,
+            "theirs_at": at,
+            "message": message,
+        }
 
     def _seed(self, device_id: str | None) -> None:
         """The first data an empty authority takes marks who put it there: the
@@ -380,7 +402,7 @@ class SyncAuthorityService:
             timestamp=entry.timestamp,
             actor=device.name,  # who sent it is who the token says, not what was claimed
             device_id=device_id,
-            hlc=entry.hlc,
+            hlc=self._believable(entry.hlc),
             batch=entry.batch,
         )
         self._repo.insert_entry(sent, hub_seq=seq)
@@ -405,6 +427,13 @@ class SyncAuthorityService:
                 )
         return seq
 
+    def _believable(self, stamp: str | None) -> str | None:
+        """The stamp to keep for a change: the device's own, unless it claims to
+        be further ahead than a clock may be, when the authority issues one."""
+        if stamp is None or not hlc.is_ahead(stamp, _now_ms()):
+            return stamp
+        return hlc.tick(self._repo.latest_hlc(), _now_ms())
+
 
 def _now_ms() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -426,15 +455,3 @@ def _differs(entry: SyncEntry, final: dict[str, Any] | None) -> bool:
     if final is None:
         return False
     return _comparable(final) != _comparable(entry.new_data or {})
-
-
-_KNOWN = ENTITY_ORDER
-
-
-def _unacceptable(entry: SyncEntry) -> str | None:
-    if entry.entity_type not in _KNOWN:
-        return f"Unknown kind '{entry.entity_type}'"
-    if entry.action in ("create", "update", "restore"):
-        if not entry.new_data or str(entry.new_data.get("id")) != str(entry.entity_id):
-            return "The change does not say what the thing became"
-    return None

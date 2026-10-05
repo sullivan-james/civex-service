@@ -12,6 +12,11 @@ from __future__ import annotations
 _WALL_DIGITS = 13  # milliseconds since 1970 stays 13 digits until the year 2286
 _COUNTER_DIGITS = 4
 
+# How far ahead of its own clock a stamp from elsewhere may be before it is not
+# believed. A stamp that far ahead would hold every later stamp here in the
+# future (a clock only moves forward), so it is replaced, not kept.
+MAX_DRIFT_MS = 60 * 60 * 1000
+
 
 def format_stamp(wall_ms: int, counter: int) -> str:
     return f"{wall_ms:0{_WALL_DIGITS}d}.{counter:0{_COUNTER_DIGITS}d}"
@@ -20,6 +25,28 @@ def format_stamp(wall_ms: int, counter: int) -> str:
 def parse_stamp(stamp: str) -> tuple[int, int]:
     wall, _, counter = stamp.partition(".")
     return int(wall), int(counter or 0)
+
+
+def is_valid(stamp: object) -> bool:
+    """Whether `stamp` is one this module wrote: only such a stamp may be stored,
+    because every later `tick` reads the largest one stored and a stamp that
+    can't be parsed would make each of them fail."""
+    if not isinstance(stamp, str):
+        return False
+    wall, dot, counter = stamp.partition(".")
+    return (
+        bool(dot)
+        and len(wall) == _WALL_DIGITS
+        and wall.isascii()
+        and wall.isdigit()
+        and counter.isascii()
+        and counter.isdigit()
+    )
+
+
+def is_ahead(stamp: str, wall_ms: int) -> bool:
+    """Whether a valid stamp is further ahead of `wall_ms` than a clock may be."""
+    return parse_stamp(stamp)[0] > wall_ms + MAX_DRIFT_MS
 
 
 def tick(last: str | None, wall_ms: int) -> str:

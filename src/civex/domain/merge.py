@@ -145,6 +145,19 @@ def _decide(base: Any, head: Any, incoming: Any) -> Any:
     return _CONFLICT
 
 
+def value_at(snapshot: dict[str, Any] | None, path: str) -> Any:
+    """The value `path` names in a snapshot: an attribute, or `data.<field id>`
+    for a record's value. None when it is not there. The one reader of a path,
+    so what a conflict names and what the history diff reads can't disagree."""
+    if snapshot is None:
+        return None
+    top, dot, sub = path.partition(".")
+    if not dot:
+        return snapshot.get(top)
+    inner = snapshot.get(top)
+    return inner.get(sub) if isinstance(inner, dict) else None
+
+
 def _put(target: dict[str, Any], key: str, value: Any) -> None:
     if value is _MISSING:
         target.pop(key, None)

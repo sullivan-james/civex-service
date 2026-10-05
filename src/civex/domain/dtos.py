@@ -191,6 +191,25 @@ class ResolvedSchema:
 
 
 @dataclass
+class FieldValueDTO:
+    """One value of one record, described for a person: the record's name, where
+    it lives, the field's label and type, and the value as it is now. What a
+    list of changes needs to say "depth on Encounter 12" instead of two ids.
+    Response-only: worked out when read, never stored, so a rename shows."""
+
+    record_id: str
+    record_name: str | None
+    dataset_name: str | None
+    schema_name: str | None
+    field_name: str | None  # what a write names; None when the field is gone
+    field_label: str | None  # None when the field no longer exists
+    dtype: str | None
+    value: Any = None
+    record_deleted: bool = False
+    field_deleted: bool = False
+
+
+@dataclass
 class NameIssue:
     """A schema or field whose `name` predates slug validation.
 

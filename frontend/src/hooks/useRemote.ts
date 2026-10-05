@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { remoteApi } from '../api/remote'
+import { errorMessage } from '../lib/errors'
+import { remoteApi, type ResolveBody, type SyncConflict } from '../api/remote'
 
 const KEY = ['remote']
 
@@ -23,6 +24,22 @@ export function useSyncConflicts(enabled: boolean) {
     queryFn: () => remoteApi.conflicts('open'),
     enabled,
   })
+}
+
+const NONE: SyncConflict[] = []
+
+/** The open conflicts about one thing (a record's page says so). The same list
+ * as `useSyncConflicts`, narrowed, so it costs no request of its own, and is not
+ * even fetched while there is nothing to review. */
+export function useConflictsAbout(entityId: string) {
+  const { data: status } = useRemoteStatus()
+  const { data } = useQuery({
+    queryKey: [...KEY, 'conflicts'],
+    queryFn: () => remoteApi.conflicts('open'),
+    enabled: (status?.open_conflicts ?? 0) > 0,
+    select: (all) => all.filter((c) => c.entity_id === entityId),
+  })
+  return data ?? NONE
 }
 
 /** Everything that changes what a sync shows: the status, the conflicts, and the
@@ -64,11 +81,38 @@ export function useUpdateRemote() {
   return useMutation({ mutationFn: remoteApi.update, onSuccess: refresh })
 }
 
+/** Settle several at once, one after another, and say which could not be:
+ * a value that has changed again since is refused, and the others still go. */
+export function useResolveMany() {
+  const refresh = useRefreshing()
+  return useMutation({
+    mutationFn: async ({
+      ids,
+      take,
+    }: {
+      ids: string[]
+      take: ResolveBody['take']
+    }) => {
+      const failed: { id: string; message: string }[] = []
+      for (const id of ids) {
+        try {
+          await remoteApi.resolve(id, { take })
+        } catch (e) {
+          failed.push({ id, message: errorMessage(e) })
+        }
+      }
+      return { done: ids.length - failed.length, failed }
+    },
+    onSettled: refresh,
+  })
+}
+
 export function useResolveConflict() {
   const refresh = useRefreshing()
   return useMutation({
-    mutationFn: ({ id, take }: { id: string; take: 'mine' | 'theirs' }) =>
-      remoteApi.resolve(id, take),
-    onSuccess: refresh,
+    mutationFn: ({ id, ...body }: { id: string } & ResolveBody) =>
+      remoteApi.resolve(id, body),
+    // Also when it is refused: the list then says what changed (`stale`).
+    onSettled: refresh,
   })
 }

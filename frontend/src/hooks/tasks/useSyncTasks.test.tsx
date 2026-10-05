@@ -70,5 +70,8 @@ describe('useSyncTasks', () => {
     const { result } = tasksFor({ ...base, open_conflicts: 2 })
     await waitFor(() => expect(result.current).toHaveLength(1))
     expect(result.current[0].title).toBe('2 changes were not taken as made')
+    expect(result.current[0].actions).toEqual([
+      { label: 'Review', to: '/sync/review' },
+    ])
   })
 })

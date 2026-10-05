@@ -119,10 +119,11 @@ def test_two_edits_to_one_field_keep_the_authoritys_and_keep_yours_for_review(wo
 
     assert statuses(result) == ["conflict"]
     assert head(authority, record.id)["site"] == "laptop-says"
-    (conflict,) = authority.sync_repo.list_conflicts()
-    assert conflict.entity_id == record.id and conflict.device_name == "phone"
-    assert (conflict.yours, conflict.theirs) == ("phone-says", "laptop-says")
-    assert result.results[0].conflicts[0]["yours"] == "phone-says"
+    # The conflict is the losing device's to review: the answer carries both
+    # sides, and the authority keeps no list of its own.
+    assert authority.sync_repo.list_conflicts() == []
+    (found,) = result.results[0].conflicts
+    assert (found["yours"], found["theirs"]) == ("phone-says", "laptop-says")
     # A device that reads the feed ends where the authority is.
     entries, _ = authority.sync_repo.entries_after(0, 100)
     assert (
@@ -212,10 +213,7 @@ def test_a_name_already_taken_is_refused_not_half_done(world):
     assert "UNIQUE" in (refused.message or "").upper() or "unique" in (
         refused.message or ""
     )
-    (conflict,) = [
-        c for c in authority.sync_repo.list_conflicts() if c.kind == "rejected"
-    ]
-    assert conflict.device_name == "phone"
+    assert authority.sync_repo.list_conflicts() == []
     # Told so again, the same way, without redoing anything.
     assert phone.sync_repo.pending_entries(10) == []
 
@@ -296,3 +294,197 @@ def test_a_joining_device_reads_each_kind_in_pages_with_the_head_taken_first(wor
     assert len(page.items) == 1 and page.more is False and page.head_seq > 0
     with pytest.raises(Exception):
         authority.authority_svc.snapshot("nonsense", 0, 10)
+
+
+# -- a change that can't be read is refused by itself ---------------------------
+
+
+def _pending(device):
+    from civex.domain.sync import SyncEntry
+    from .peers import wire
+
+    return [SyncEntry.from_dict(wire(e.to_dict())) for e in device.sync_repo.pending_entries(50)]
+
+
+def _send(authority, entries, name="phone"):
+    found = (
+        authority.sync_repo.device_named(name)
+        or authority.authority_svc.add_device(name)[0]
+    )
+    result = authority.authority_svc.push(found, device_uuid(name), entries)
+    authority.commit()
+    return result
+
+
+def test_one_unreadable_change_is_refused_and_the_rest_of_the_push_goes_through(world):
+    authority, laptop, phone, record = world
+    phone.record_svc.update(str(record.id), {"site": "a", "depth": 2.0})
+    phone.record_svc.update(str(record.id), {"site": "b", "depth": 3.0})
+    phone.commit()
+    first, second = _pending(phone)
+    first.timestamp = "not a time"
+
+    result = _send(authority, [first, second])
+
+    # The second edit was made on top of the refused one, so it clashes with
+    # what the authority holds: it is answered, which is the point (the push
+    # was not abandoned at the first).
+    assert statuses(result) == ["rejected", "conflict"]
+    assert "time" in result.results[0].message
+
+
+def test_a_value_that_is_not_an_id_is_refused_not_a_server_error(world):
+    authority, laptop, phone, record = world
+    phone.record_svc.update(str(record.id), {"site": "a", "depth": 2.0})
+    phone.commit()
+    (entry,) = _pending(phone)
+    entry.new_data = {**entry.new_data, "dataset_id": "not-a-uuid"}
+
+    result = _send(authority, [entry])
+
+    assert statuses(result) == ["rejected"]
+    # Asked again it is answered the same way, and nothing is redone.
+    assert statuses(_send(authority, [entry])) == ["rejected"]
+
+
+def test_a_clock_stamp_that_cannot_be_read_is_refused_and_the_authority_keeps_working(
+    world,
+):
+    authority, laptop, phone, record = world
+    phone.record_svc.update(str(record.id), {"site": "a", "depth": 2.0})
+    phone.commit()
+    (entry,) = _pending(phone)
+    entry.hlc = "zzz"
+
+    result = _send(authority, [entry])
+
+    assert statuses(result) == ["rejected"]
+    # Its own edits still get stamped: nothing unreadable was stored.
+    authority.record_svc.update(str(record.id), {"site": "hub", "depth": 5.0})
+    authority.commit()
+    assert authority.sync_repo.sequence_local_entries() >= 1
+
+
+def test_a_clock_stamp_far_ahead_is_replaced_by_one_the_authority_issues(world):
+    from civex.domain import hlc
+
+    authority, laptop, phone, record = world
+    phone.record_svc.update(str(record.id), {"site": "a", "depth": 2.0})
+    phone.commit()
+    (entry,) = _pending(phone)
+    entry.hlc = hlc.format_stamp(9_999_999_999_999, 0)
+
+    result = _send(authority, [entry])
+
+    assert statuses(result) == ["applied"]
+    stored = authority.sync_repo.get_entry(entry.id)
+    assert stored.hlc != entry.hlc
+    assert not hlc.is_ahead(stored.hlc, int(__import__("time").time() * 1000))
+
+
+def test_a_delete_stamped_in_the_future_is_refused(world):
+    from datetime import datetime, timedelta, timezone
+
+    authority, laptop, phone, record = world
+    phone.record_svc.delete(str(record.id))
+    phone.commit()
+    entry = next(e for e in _pending(phone) if e.action == "delete")
+    entry.timestamp = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+
+    result = _send(authority, [entry])
+
+    assert statuses(result) == ["rejected"]
+    assert "clock" in result.results[0].message
+    assert authority.sync_repo.snapshot("record", record.id)["deleted_at"] is None
+
+
+# -- a device's change is held to the rules a person's edit is --------------------
+
+
+@pytest.fixture()
+def unique_world(project):
+    """An authority with a uniqueness policy on `site`, and a device (the phone)
+    that joined before either of two records with the same site existed."""
+    authority = project("authority")
+    laptop, phone = project("laptop"), project("phone")
+    laptop.schema_svc.create("encounter")
+    laptop.schema_svc.add_field("encounter", "site", "string")
+    laptop.schema_svc.add_field("encounter", "depth", "float")
+    laptop.schema_svc.set_unique_keys("encounter", [["site"]])
+    laptop.dataset_svc.create("study")
+    laptop.dataset_svc.update("study", schemas=["encounter"])
+    laptop.commit()
+    push(authority, laptop, "laptop")
+    join(authority, phone)
+    return authority, laptop, phone
+
+
+def test_a_second_record_with_a_taken_unique_value_is_refused_not_stored(
+    unique_world,
+):
+    authority, laptop, phone = unique_world
+    # Each device saw no other "x", so each was allowed to add one.
+    first = laptop.record_svc.add("study", "encounter", {"site": "x", "depth": 1.0})
+    second = phone.record_svc.add("study", "encounter", {"site": "x", "depth": 2.0})
+    laptop.commit()
+    phone.commit()
+    push(authority, laptop, "laptop")
+
+    result = push(authority, phone, "phone")
+
+    (refused,) = by_status(result, "rejected")
+    assert "already exists" in refused.message
+    assert authority.sync_repo.snapshot("record", second.id) is None
+    assert head(authority, first.id)["site"] == "x"
+
+
+def test_a_value_outside_its_restriction_is_refused(project):
+    authority, laptop = project("authority"), project("laptop")
+    laptop.schema_svc.create("encounter")
+    laptop.schema_svc.add_field(
+        "encounter", "depth", "float", restrictions={"min": 0, "max": 10}
+    )
+    laptop.dataset_svc.create("study")
+    laptop.dataset_svc.update("study", schemas=["encounter"])
+    record = laptop.record_svc.add("study", "encounter", {"depth": 5.0})
+    laptop.commit()
+    # The device's own copy of the rule changed after it saved, so what it holds
+    # no longer fits what the authority holds.
+    pending = _pending(laptop)
+    entry = next(e for e in pending if e.entity_id == record.id)
+    entry.new_data = {
+        **entry.new_data,
+        "data": {k: 99.0 for k in entry.new_data["data"]},
+    }
+
+    result = _send(authority, pending, "laptop")
+
+    assert result.results[-1].status == "rejected"
+    assert authority.sync_repo.snapshot("record", record.id) is None
+
+
+def test_editing_a_record_that_already_clashes_is_not_refused_over_the_old_clash(
+    unique_world,
+):
+    authority, laptop, phone = unique_world
+    laptop.record_svc.add("study", "encounter", {"site": "x", "depth": 1.0})
+    laptop.commit()
+    push(authority, laptop, "laptop")
+    # Give the authority a second "x" the way an older version could have.
+    from civex.db.models import Record
+
+    dup = phone.record_svc.add("study", "encounter", {"site": "y", "depth": 2.0})
+    phone.commit()
+    push(authority, phone, "phone")
+    row = authority._session.get(Record, dup.id)
+    stored_key = next(iter(row.data))
+    row.data = {**row.data, stored_key: "x"}
+    authority._session.flush()
+    join(authority, phone)
+
+    phone.record_svc.update(str(dup.id), {"site": "x", "depth": 3.0})
+    phone.commit()
+    result = push(authority, phone, "phone")
+
+    assert "rejected" not in statuses(result)
+    assert head(authority, dup.id)["depth"] == 3.0

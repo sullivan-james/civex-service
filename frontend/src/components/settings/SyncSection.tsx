@@ -2,13 +2,11 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { settingsApi } from '../../api/settings'
 import { errorMessage } from '../../lib/errors'
-import type { RemoteStatus, SyncConflict } from '../../api/remote'
+import type { RemoteStatus } from '../../api/remote'
 import {
   useConnectRemote,
   useDisconnectRemote,
   useRemoteStatus,
-  useResolveConflict,
-  useSyncConflicts,
   useSyncNow,
   useUpdateRemote,
 } from '../../hooks/useRemote'
@@ -33,11 +31,6 @@ const INTERVALS = [
 
 function when(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString() : 'never'
-}
-
-function show(value: unknown): string {
-  if (value === null || value === undefined) return 'nothing'
-  return typeof value === 'string' ? value : JSON.stringify(value)
 }
 
 function ConnectForm() {
@@ -84,68 +77,22 @@ function ConnectForm() {
   )
 }
 
-function ConflictRow({ c }: { c: SyncConflict }) {
-  const resolve = useResolveConflict()
-  const settleable = c.kind === 'conflict'
-  return (
-    <li className="space-y-2 border-b border-border py-3 last:border-0">
-      <div className="text-sm">
-        {c.message ??
-          `${c.field ?? 'A value'} on a ${c.entity_type} was changed on both sides.`}
-      </div>
-      {settleable && (
-        <div className="grid gap-1 text-xs sm:grid-cols-2">
-          <div>
-            <span className="text-fg-muted">Yours: </span>
-            <span className="font-mono">{show(c.yours)}</span>
-          </div>
-          <div>
-            <span className="text-fg-muted">Kept: </span>
-            <span className="font-mono">{show(c.theirs)}</span>
-          </div>
-        </div>
-      )}
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          disabled={resolve.isPending}
-          onClick={() => resolve.mutate({ id: c.id, take: 'theirs' })}
-        >
-          {settleable ? 'Keep theirs' : 'Dismiss'}
-        </Button>
-        {settleable && (
-          <Button
-            size="sm"
-            disabled={resolve.isPending}
-            onClick={() => resolve.mutate({ id: c.id, take: 'mine' })}
-          >
-            Use mine
-          </Button>
-        )}
-      </div>
-      {resolve.error && (
-        <p role="alert" className="text-xs text-danger">
-          {errorMessage(resolve.error)}
-        </p>
-      )}
-    </li>
-  )
-}
-
 function Conflicts({ count }: { count: number }) {
-  const { data = [] } = useSyncConflicts(count > 0)
   if (count === 0) return null
   return (
-    <Card title="Needs a look" count={count}>
+    <Card
+      title="Needs a look"
+      count={count}
+      action={
+        <Button size="sm" variant="primary" to="/sync/review">
+          Review
+        </Button>
+      }
+    >
       <p className="text-xs text-fg-muted">
         These values did not go in as you made them. The authority’s value was
         kept; yours is saved here until you choose.
       </p>
-      <ul>
-        {data.map((c) => (
-          <ConflictRow key={c.id} c={c} />
-        ))}
-      </ul>
     </Card>
   )
 }

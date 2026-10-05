@@ -17,15 +17,19 @@ import logging
 
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
 
 from civex import user_state
 from civex.config import Config, save_config
 from civex.domain import hlc
-from civex.domain.exceptions import ValidationError, VolumeUnavailableError
-from civex.domain.file_refs import collect_sha256_refs
+from civex.domain.exceptions import (
+    ConflictMovedError,
+    ValidationError,
+    VolumeUnavailableError,
+)
+from civex.domain.file_refs import collect_sha256_refs, without_file_locations
 from civex.domain.sync import (
     DEFERRED,
     ENTITY_ORDER,
@@ -43,6 +47,7 @@ from civex.repositories.protocols import (
     FileObjectStore,
     SyncRepository,
 )
+from civex.services.record_service import RecordService
 from civex.services.sync_applier import SyncApplier
 from civex.services.sync_lock import sync_lock, sync_running
 
@@ -103,6 +108,7 @@ class SyncService:
         files: FileObjectStore,
         commit: Callable[[], None],
         make_transport: TransportFactory,
+        records: RecordService,
     ) -> None:
         self._config = config
         self._repo = repo
@@ -111,6 +117,9 @@ class SyncService:
         self._files = files
         self._commit = commit
         self._make_transport = make_transport
+        # What a person does about a conflict is an ordinary edit, made by the
+        # record service like any other: validated, in the history, synced.
+        self._records = records
 
     # ------------------------------------------------------------------
     # Status
@@ -139,7 +148,73 @@ class SyncService:
         )
 
     def conflicts(self, status: str | None = "open") -> list[SyncConflictDTO]:
-        return self._repo.list_conflicts(status)
+        """The conflicts, each described for a person (`_describe`)."""
+        return self._describe(self._repo.list_conflicts(status))
+
+    def _describe(self, found: list[SyncConflictDTO]) -> list[SyncConflictDTO]:
+        """Add what a row needs to be recognised and acted on: the record's name
+        and where it is, the field's label and type, the value on the record now
+        (and whether it is still the one that stayed), what can be done, and what
+        else the same edit saved. Worked out when read, so a rename shows and
+        nothing is copied into the row."""
+        saved = {c.id: self._also_saved(c, found) for c in found}
+        pairs = [
+            (str(c.entity_id), fid)
+            for c in found
+            if c.entity_type == "record"
+            for fid in [_field_id(c) or "", *saved[c.id]]
+        ]
+        values = self._records.field_values(pairs)
+        out = []
+        for c in found:
+            takes = list(_takes_for(c))
+            v = values.get((str(c.entity_id), _field_id(c) or ""))
+            if v is None:
+                out.append(replace(c, takes=takes))
+                continue
+            current = without_file_locations(v.value) if c.field else None
+            also = [
+                {"field_label": w.field_label, "value": without_file_locations(w.value)}
+                for fid in saved[c.id]
+                if (w := values.get((str(c.entity_id), fid))) and w.field_label
+            ]
+            out.append(
+                replace(
+                    c,
+                    record_name=v.record_name,
+                    dataset_name=v.dataset_name,
+                    schema_name=v.schema_name,
+                    field_label=v.field_label,
+                    dtype=v.dtype,
+                    current=current,
+                    stale=c.kind == "conflict"
+                    and c.status == "open"
+                    and current != c.theirs,
+                    record_deleted=v.record_deleted,
+                    takes=takes,
+                    also_saved=also,
+                )
+            )
+        return out
+
+    def _also_saved(
+        self, conflict: SyncConflictDTO, rows: list[SyncConflictDTO]
+    ) -> list[str]:
+        """Field ids the edit behind a clash set that did go in: those it changed
+        that are not themselves clashing (in this list or settled since)."""
+        if conflict.kind != "conflict" or conflict.entity_type != "record":
+            return []
+        entry = self._repo.get_entry(conflict.op_id) if conflict.op_id else None
+        if entry is None:
+            return []
+        before = (entry.old_data or {}).get("data") or {}
+        after = (entry.new_data or {}).get("data") or {}
+        clashing = {_field_id(c) for c in rows if c.op_id == conflict.op_id}
+        return [
+            fid
+            for fid in sorted(set(before) | set(after))
+            if before.get(fid) != after.get(fid) and fid not in clashing
+        ]
 
     # ------------------------------------------------------------------
     # Connecting
@@ -524,8 +599,9 @@ class SyncService:
     def _note(
         self, results: list[Any], sent: dict[uuid.UUID, SyncEntry], report: SyncReport
     ) -> int:
-        """Keep what the authority said that a person should see. Returns how
-        many changes it held back."""
+        """Keep what the authority said that a person should see: a clash, or a
+        refusal (the same kind of row, so one path). Returns how many changes it
+        held back."""
         held = 0
         for result in results:
             entry = sent.get(result.op_id)
@@ -533,35 +609,37 @@ class SyncService:
                 continue
             if result.status == DEFERRED:
                 held += 1
-            elif result.status == REJECTED:
+                continue
+            problems = result.conflicts
+            if result.status == REJECTED:
                 report.rejected += 1
-                if not self._repo.has_conflict(result.op_id, None, "rejected"):
-                    self._repo.add_conflict(
-                        kind="rejected",
-                        entity_type=entry.entity_type,
-                        entity_id=entry.entity_id,
-                        field=None,
-                        yours=entry.new_data,
-                        theirs=None,
-                        op_id=result.op_id,
-                        device_name=None,
-                        message=result.message,
-                    )
-            for conflict in result.conflicts:
-                kind = conflict.get("kind", "conflict")
-                if self._repo.has_conflict(result.op_id, conflict.get("field"), kind):
+                problems = [
+                    {
+                        "kind": "rejected",
+                        "field": None,
+                        "yours": entry.new_data,
+                        "message": result.message,
+                    }
+                ]
+            for problem in problems:
+                kind = problem.get("kind", "conflict")
+                if self._repo.has_conflict(result.op_id, problem.get("field"), kind):
                     continue
-                report.conflicts += 1
+                if result.status != REJECTED:
+                    report.conflicts += 1
                 self._repo.add_conflict(
                     kind=kind,
                     entity_type=entry.entity_type,
                     entity_id=entry.entity_id,
-                    field=conflict.get("field"),
-                    yours=conflict.get("yours"),
-                    theirs=conflict.get("theirs"),
+                    field=problem.get("field"),
+                    yours=problem.get("yours"),
+                    theirs=problem.get("theirs"),
+                    base=problem.get("base"),
+                    theirs_actor=problem.get("theirs_actor"),
+                    theirs_at=problem.get("theirs_at"),
                     op_id=result.op_id,
                     device_name=None,
-                    message=conflict.get("message"),
+                    message=problem.get("message"),
                 )
         return held
 
@@ -684,45 +762,101 @@ class SyncService:
     # Conflicts
     # ------------------------------------------------------------------
 
-    def resolve_conflict(self, conflict_id: uuid.UUID, take: str) -> None:
-        """Settle a conflict. `theirs` keeps what the authority has (nothing to
-        do: this project already agrees). `mine` makes the value this device set
-        an ordinary change of its own, which syncs like any edit."""
+    def resolve_conflict(
+        self,
+        conflict_id: uuid.UUID,
+        take: str,
+        value: Any = None,
+        force: bool = False,
+    ) -> None:
+        """Settle a conflict. What can be done depends on what it is:
+
+        - a clashing value: `theirs` keeps what the authority has (nothing to do:
+          this project already agrees), `mine` puts this device's value back and
+          `value` puts another one;
+        - an edit to something deleted there: `theirs` keeps it as it is,
+          `delete` deletes it;
+        - a refused change: `retry` sends it again from the thing as it is now
+          (after the cause was put right), `theirs` lets it go.
+
+        Putting a value back is an ordinary edit by the record service, so it is
+        checked like any, appears in the history and syncs. If the value on the
+        record is no longer the one that was kept (it changed again since the
+        person looked), this refuses with what is there now unless `force`."""
         conflict = self._repo.get_conflict(conflict_id)
         if conflict is None or conflict.status != "open":
             raise ValidationError("That conflict is not open")
-        if take not in ("mine", "theirs"):
-            raise ValidationError("Choose 'mine' or 'theirs'")
-        if take == "mine":
-            self._reapply(conflict)
+        if take not in _takes_for(conflict):
+            raise ValidationError(f"A {conflict.kind} can't be settled with '{take}'")
+        if take in ("mine", "value"):
+            self._put_value(
+                conflict, conflict.yours if take == "mine" else value, force
+            )
+        elif take == "delete":
+            self._records.delete(str(conflict.entity_id))
+        elif take == "retry":
+            self._resend(conflict)
         self._repo.resolve_conflict(conflict_id, take)
         self._commit()
 
-    def _reapply(self, conflict: SyncConflictDTO) -> None:
-        if conflict.kind != "conflict" or not conflict.field:
-            raise ValidationError("Only a value that clashed can be put back as yours")
+    def _put_value(self, conflict: SyncConflictDTO, value: Any, force: bool) -> None:
+        field_id = _field_id(conflict)
+        if conflict.entity_type != "record" or field_id is None:
+            raise ValidationError("Only a record's value can be put back")
+        rid = str(conflict.entity_id)
+        found = self._records.field_values([(rid, field_id)]).get((rid, field_id))
+        if found is None or found.record_deleted:
+            raise ValidationError("The record is deleted: restore it first")
+        if found.field_name is None:
+            raise ValidationError("That field no longer exists")
+        current = without_file_locations(found.value)
+        if not force and current != conflict.theirs:
+            raise ConflictMovedError(
+                f"{found.field_label} has changed since this was recorded", current
+            )
+        self._records.patch(rid, {found.field_name: value})
+
+    def _resend(self, conflict: SyncConflictDTO) -> None:
+        """Send a refused change again, from the thing as it is now: the same
+        kind of change on the same starting point, new content. A new entry (the
+        authority remembers the old one's answer by its id)."""
         current = self._repo.snapshot(conflict.entity_type, conflict.entity_id)
         if current is None:
-            raise ValidationError("It no longer exists")
-        edited = _with_value(current, conflict.field, conflict.yours)
-        self._repo.apply_snapshot(conflict.entity_type, edited)
+            raise ValidationError(
+                "It no longer exists here, so there is nothing to send"
+            )
+        original = self._repo.get_entry(conflict.op_id) if conflict.op_id else None
+        if original is None:
+            raise ValidationError("The change is no longer held here")
+        if original.action not in ("create", "update", "restore"):
+            raise ValidationError("Only a created or edited thing can be sent again")
         self._audit.log_change(
-            "update", conflict.entity_type, conflict.entity_id, current, edited
+            original.action,
+            conflict.entity_type,
+            conflict.entity_id,
+            original.old_data,
+            current,
         )
 
 
-def _with_value(snapshot: dict[str, Any], path: str, value: Any) -> dict[str, Any]:
-    """`snapshot` with one value changed: `data.<field id>` for a record's value,
-    else an attribute. A value that was removed (None) is removed."""
-    edited = {k: (dict(v) if isinstance(v, dict) else v) for k, v in snapshot.items()}
-    if "." in path:
-        top, _, sub = path.partition(".")
-        container = dict(edited.get(top) or {})
-        if value is None:
-            container.pop(sub, None)
-        else:
-            container[sub] = value
-        edited[top] = container
-    else:
-        edited[path] = value
-    return edited
+# What each kind of conflict can be settled with. Only a record's values can be
+# put back or deleted by a person; a refused change of anything can be sent again.
+_TAKES: dict[str, tuple[str, ...]] = {
+    "conflict": ("theirs", "mine", "value"),
+    "edit_vs_delete": ("theirs", "delete"),
+    "rejected": ("theirs", "retry"),
+}
+_RECORD_ONLY = frozenset({"mine", "value", "delete"})
+
+
+def _takes_for(conflict: SyncConflictDTO) -> tuple[str, ...]:
+    takes = _TAKES.get(conflict.kind, ("theirs",))
+    if conflict.entity_type == "record":
+        return takes
+    return tuple(t for t in takes if t not in _RECORD_ONLY)
+
+
+def _field_id(conflict: SyncConflictDTO) -> str | None:
+    """The field id a conflict is about (`data.<field id>`), if it is about one."""
+    top, _, sub = (conflict.field or "").partition(".")
+    return sub if top == "data" and sub else None

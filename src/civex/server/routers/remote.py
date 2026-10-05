@@ -79,17 +79,61 @@ class ConflictResponse(BaseModel):
     field: str | None
     yours: Any = Field(description="The value this device set.")
     theirs: Any = Field(description="The value the authority kept.")
+    base: Any = Field(
+        default=None, description="What the value was before either side changed it."
+    )
+    theirs_actor: str | None = Field(
+        default=None, description="Who wrote the value that stayed."
+    )
+    theirs_at: str | None = Field(default=None, description="When they wrote it.")
     device_name: str | None
     message: str | None
     status: str = Field(description="open or resolved.")
     created_at: str
     resolved_at: str | None
-    resolution: str | None = Field(description="mine or theirs, once resolved.")
+    resolution: str | None = Field(
+        description="mine, theirs, value, delete or retry, once resolved."
+    )
+    record_name: str | None = Field(
+        default=None, description="The record's name as it is now (records only)."
+    )
+    dataset_name: str | None = Field(default=None, description="Its collection.")
+    schema_name: str | None = Field(default=None, description="Its schema.")
+    field_label: str | None = Field(
+        default=None, description="The field's label now; null if the field is gone."
+    )
+    dtype: str | None = Field(default=None, description="The field's type.")
+    current: Any = Field(default=None, description="The value on the record now.")
+    stale: bool = Field(
+        default=False,
+        description="The record's value is no longer the one that stayed: it changed "
+        "again since, so putting yours back would overwrite something newer.",
+    )
+    record_deleted: bool = Field(
+        default=False, description="The record is deleted (restore it first)."
+    )
+    takes: list[str] = Field(
+        default_factory=list,
+        description="What this can be settled with: theirs, mine, value, delete, retry.",
+    )
+    also_saved: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Other values the same edit set that did go in: field_label, value.",
+    )
 
 
 class ResolveRequest(BaseModel):
     take: str = Field(
-        description="`theirs` keeps the authority's value; `mine` makes yours a new change."
+        description="`theirs` keeps what the authority has (or lets a refused change "
+        "go); `mine` puts your value back as a new edit; `value` puts the one in "
+        "`value`; `delete` deletes a record that was deleted there; `retry` sends a "
+        "refused change again from the record as it is now."
+    )
+    value: Any = Field(default=None, description="The value, for `take: value`.")
+    force: bool = Field(
+        default=False,
+        description="Put the value back even though the record's value changed "
+        "since the conflict was recorded.",
     )
 
 
@@ -183,32 +227,18 @@ def conflicts(
 ):
     """Values that did not go in as made, with both sides."""
     found = ctx.sync_svc.conflicts(None if status in (None, "all") else status)
-    return [
-        ConflictResponse(
-            id=str(c.id),
-            kind=c.kind,
-            entity_type=c.entity_type,
-            entity_id=str(c.entity_id),
-            field=c.field,
-            yours=c.yours,
-            theirs=c.theirs,
-            device_name=c.device_name,
-            message=c.message,
-            status=c.status,
-            created_at=c.created_at,
-            resolved_at=c.resolved_at,
-            resolution=c.resolution,
-        )
-        for c in found
-    ]
+    return [ConflictResponse(**c.to_dict()) for c in found]
 
 
 @router.post("/conflicts/{conflict_id}/resolve", response_model=RemoteStatusResponse)
 def resolve(conflict_id: str, body: ResolveRequest, ctx: AppContext = Depends(get_ctx)):
-    """Settle a conflict by keeping theirs or making yours a new change."""
+    """Settle a conflict. Putting a value back is an ordinary edit (checked, in the
+    history, synced); it answers 409 with what is there now when the record's value
+    changed since the conflict was recorded, unless `force`."""
     try:
         cid = uuid.UUID(conflict_id)
     except ValueError:
         raise HTTPException(422, detail="Not a conflict id")
-    ctx.sync_svc.resolve_conflict(cid, body.take)
+    ctx.sync_svc.resolve_conflict(cid, body.take, body.value, body.force)
+    ctx.commit()
     return _status(ctx)

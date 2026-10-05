@@ -3,6 +3,7 @@ import type { BackgroundTask } from '../../utils/backgroundTasks'
 import { useRemoteStatus, useSyncNow } from '../useRemote'
 
 const DETAILS = '/settings/sync'
+const REVIEW = '/sync/review'
 
 /** Syncing, as a task: shown while a sync is running, when the last attempt
  * failed (it tries again by itself), or when values are waiting for a person to
@@ -59,7 +60,7 @@ export function useSyncTasks(): BackgroundTask[] {
         title: `${data.open_conflicts} change${
           data.open_conflicts === 1 ? ' was' : 's were'
         } not taken as made`,
-        actions: [{ label: 'Review', to: DETAILS }],
+        actions: [{ label: 'Review', to: REVIEW }],
       },
     ]
 

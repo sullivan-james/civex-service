@@ -29,6 +29,10 @@ export interface SyncResult {
   rejected: number
 }
 
+/** How a conflict is settled. Which of these a row offers is the server's word
+ * (`takes`), so this screen keeps no rule of its own. */
+export type ConflictTake = 'theirs' | 'mine' | 'value' | 'delete' | 'retry'
+
 /** A value that did not go in as made. */
 export interface SyncConflict {
   id: string
@@ -45,7 +49,34 @@ export interface SyncConflict {
   status: 'open' | 'resolved'
   created_at: string
   resolved_at: string | null
-  resolution: 'mine' | 'theirs' | null
+  resolution: ConflictTake | null
+  /** What the value was before either side changed it. */
+  base: unknown
+  /** Who wrote the value that stayed, and when. */
+  theirs_actor: string | null
+  theirs_at: string | null
+  /** Worked out when read (records only): what a person recognises. */
+  record_name: string | null
+  dataset_name: string | null
+  schema_name: string | null
+  field_label: string | null
+  dtype: string | null
+  /** The value on the record now. */
+  current: unknown
+  /** The record's value is no longer the one that stayed: it changed again. */
+  stale: boolean
+  record_deleted: boolean
+  takes: ConflictTake[]
+  /** Other values the same edit set that did go in. */
+  also_saved: { field_label: string; value: unknown }[]
+}
+
+export interface ResolveBody {
+  take: ConflictTake
+  /** The value, for `take: 'value'`. */
+  value?: unknown
+  /** Put it back even though the record's value changed since. */
+  force?: boolean
 }
 
 export const remoteApi = {
@@ -58,6 +89,6 @@ export const remoteApi = {
     api.patch<RemoteStatus>('/remote', body),
   conflicts: (status: 'open' | 'resolved' | 'all' = 'open') =>
     api.get<SyncConflict[]>(`/remote/conflicts?status=${status}`),
-  resolve: (id: string, take: 'mine' | 'theirs') =>
-    api.post<RemoteStatus>(`/remote/conflicts/${id}/resolve`, { take }),
+  resolve: (id: string, body: ResolveBody) =>
+    api.post<RemoteStatus>(`/remote/conflicts/${id}/resolve`, body),
 }

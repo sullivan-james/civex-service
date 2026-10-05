@@ -266,7 +266,7 @@ def build_local_context(
 
     sync_repo = LocalSyncRepository(session)
     applier = SyncApplier(sync_repo, audit_repo)
-    authority_svc = SyncAuthorityService(sync_repo, applier, file_store)
+    authority_svc = SyncAuthorityService(sync_repo, applier, file_store, record_svc)
     sync_svc = SyncService(
         config,
         sync_repo,
@@ -275,6 +275,7 @@ def build_local_context(
         file_store,
         session.commit,
         build_transport,
+        record_svc,
     )
 
     ctx = AppContext(

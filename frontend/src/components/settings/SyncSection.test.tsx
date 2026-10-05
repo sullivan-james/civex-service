@@ -124,38 +124,18 @@ describe('SyncSection', () => {
     ).toBeInTheDocument()
   })
 
-  it('lets a person keep theirs or use mine for a conflict', async () => {
+  it('says how many need a look and leads to the review', async () => {
     status = {
       ...base,
       configured: true,
       remote: 'https://a.example',
-      open_conflicts: 1,
+      open_conflicts: 3,
     }
-    conflicts = [
-      {
-        id: 'c1',
-        kind: 'conflict',
-        entity_type: 'record',
-        entity_id: 'r1',
-        field: 'depth',
-        yours: 5,
-        theirs: 9,
-        device_name: null,
-        message: null,
-        status: 'open',
-        created_at: '2026-10-05T00:00:00Z',
-        resolved_at: null,
-        resolution: null,
-      },
-    ]
     renderSection()
-    await userEvent.click(
-      await screen.findByRole('button', { name: 'Use mine' }),
-    )
-    await waitFor(() =>
-      expect(calls.find((c) => c.path.endsWith('/resolve'))?.body).toEqual({
-        take: 'mine',
-      }),
+    expect(await screen.findByText('Needs a look')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Review' })).toHaveAttribute(
+      'href',
+      '/sync/review',
     )
   })
 

@@ -8,11 +8,13 @@ from datetime import date as _date, datetime as _dt, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
+from civex.domain.file_refs import without_file_locations
 from civex.domain.dtos import (
     DERIVED_FILE_KEYS,
     BlockerDTO,
     DatasetDTO,
     FieldDTO,
+    FieldValueDTO,
     FileRef,
     RecordDTO,
     ReferrerGroupDTO,
@@ -1127,6 +1129,152 @@ class RecordService:
         records = {r.id: r for r in self._records.list_by_ids(list(fields))}
         return total, [(records[rid], f) for rid, f in fields.items() if rid in records]
 
+    def patched_data(
+        self, record_id: str, fields: dict[str, Any]
+    ) -> tuple[RecordDTO, dict[str, Any] | None]:
+        """The record as it is *now*, and the whole data it would hold with only
+        `fields` changed (None when they already hold those values, so there is
+        nothing to write). `update` replaces a record's whole data, so a caller
+        that knows only some fields must start from the current ones: this is
+        the one place that does, for `patch` and for a plugin's `patch_record`."""
+        current = self.get(record_id)
+        existing = without_file_locations(current.data)
+        if all(existing.get(k) == v for k, v in fields.items()):
+            return current, None
+        return current, {**existing, **fields}
+
+    def patch(
+        self,
+        record_id: str,
+        fields: dict[str, Any],
+        _job_depth: int = 0,
+        _cause: dict[str, Any] | None = None,
+    ) -> RecordDTO:
+        """Change only `fields`; every other field stays as it is now. Writes
+        nothing (no history, no triggers) when they already hold these values."""
+        current, data = self.patched_data(record_id, fields)
+        if data is None:
+            return current
+        return self.update(record_id, data, _job_depth=_job_depth, _cause=_cause)
+
+    def field_values(
+        self, pairs: list[tuple[str, str]]
+    ) -> dict[tuple[str, str], FieldValueDTO]:
+        """Describe (record id, field id) pairs for a person: see `FieldValueDTO`.
+        A fixed number of queries however many pairs. A pair whose record is gone
+        is left out."""
+        shapes = self._schema_svc.resolver()
+        records = {str(r.id): r for r in self.labels([rid for rid, _ in pairs])}
+        out: dict[tuple[str, str], FieldValueDTO] = {}
+        for rid, fid in dict.fromkeys(pairs):
+            record = records.get(rid)
+            if record is None:
+                continue
+            shape = shapes(record.schema_id)
+            name = shape.id_to_name.get(fid) if shape else None
+            field = shape.by_name.get(name) if shape and name else None
+            out[(rid, fid)] = FieldValueDTO(
+                record_id=rid,
+                record_name=record.natural_name,
+                dataset_name=record.dataset_name,
+                schema_name=record.schema_name,
+                field_name=name if field else None,
+                field_label=field.display_name if field else None,
+                dtype=field.dtype if field else None,
+                value=record.data.get(name) if name else None,
+                record_deleted=record.deleted_at is not None,
+                field_deleted=bool(shape and fid in shape.deleted_by_id),
+            )
+        return out
+
+    def _check_parent(
+        self, parent: RecordDTO, dataset: DatasetDTO, schema: SchemaDTO
+    ) -> None:
+        """A child record's parent is in the same collection and of the schema
+        this one inherits from."""
+        if parent.dataset_id != dataset.id:
+            raise ValidationError(
+                f"Parent record must belong to dataset '{dataset.name}'"
+            )
+        if parent.schema_id != schema.parent_id:
+            expected = (
+                self._schema_svc._repo.get_by_id(schema.parent_id, include_deleted=True)
+                if schema.parent_id
+                else None
+            )
+            raise ValidationError(
+                f"Parent record uses schema '{parent.schema_name}', "
+                f"expected '{expected.name if expected else schema.parent_id}'"
+            )
+
+    def check_incoming(
+        self, state: dict[str, Any], head: dict[str, Any] | None
+    ) -> None:
+        """Refuse a record state sent by another device that a person's own write
+        would have refused: values outside their field's restrictions,
+        references to records that aren't there or can't be referenced, a
+        uniqueness key already taken, a collection that doesn't hold its schema,
+        a parent that isn't right. The same checks as `add`/`update`, so sync
+        can't bring in what an edit here couldn't.
+
+        `state` is the record as it would become (values keyed by field id, as
+        stored) and `head` what is held now, or None for a record not held. What
+        `head` already holds is not checked again, so an unrelated edit is never
+        refused over an old problem. Required fields are not checked: they were
+        when the change was made, and the schema may have moved on since.
+        Writing is not done here (that is `SyncRepository.apply_snapshot`), and
+        neither are history or triggers: the change is already in the feed."""
+        if state.get("deleted_at"):
+            return  # a record going away has nothing to satisfy
+        try:
+            record_id = uuid.UUID(str(state["id"]))
+            dataset_id = uuid.UUID(str(state["dataset_id"]))
+            schema_id = uuid.UUID(str(state["schema_id"]))
+            parent_id = (
+                uuid.UUID(str(state["parent_record_id"]))
+                if state.get("parent_record_id")
+                else None
+            )
+        except (KeyError, ValueError):
+            raise ValidationError("The record's ids are not valid") from None
+        data = state.get("data") or {}
+        if not isinstance(data, dict):
+            raise ValidationError("The record's values are not an object")
+        shape = self._schema_svc.resolver()(schema_id)
+        if shape is None:
+            raise ValidationError("The record's schema does not exist here")
+        dataset = self._datasets.get_by_id(
+            dataset_id, include_deleted=True, with_count=False
+        )
+        if dataset is None or dataset.deleted_at is not None:
+            raise ValidationError("The record's collection does not exist here")
+
+        if head is None:
+            self._check_schema_allowed(dataset, shape.schema)
+            if shape.schema.parent_id:
+                parent = self._records.get_by_id(parent_id) if parent_id else None
+                if parent is None:
+                    raise ValidationError(
+                        f"Schema '{shape.schema.name}' inherits from another "
+                        "schema: its parent record does not exist here"
+                    )
+                self._check_parent(parent, dataset, shape.schema)
+        # A record that is deleted here and comes back is checked in full: its
+        # stored values say nothing about whether they still fit.
+        before = head.get("data") or {} if head and not head.get("deleted_at") else None
+        named = self._ids_to_names(data, shape)
+        before_named = self._ids_to_names(before, shape) if before is not None else None
+        changed = {
+            k: v
+            for k, v in named.items()
+            if before_named is None or before_named.get(k) != v
+        }
+        self._validate_data(changed, shape)
+        self._check_references(named, shape, dataset, unchanged=before_named)
+        self._check_unique(
+            shape, dataset.id, parent_id, data, exclude_id=record_id, unchanged=before
+        )
+
     def _validate_data(
         self, data: dict[str, Any], shape: ResolvedSchema | None
     ) -> None:
@@ -1198,18 +1346,7 @@ class RecordService:
             parent_record = self._records.get_by_prefix(parent_record_id)
             if not parent_record:
                 raise NotFoundError(f"Parent record '{parent_record_id}' not found")
-            if parent_record.dataset_id != dataset.id:
-                raise ValidationError(
-                    f"Parent record must belong to dataset '{dataset_name}'"
-                )
-            if parent_record.schema_id != schema.parent_id:
-                expected_parent = self._schema_svc._repo.get_by_id(
-                    schema.parent_id, include_deleted=True
-                )
-                raise ValidationError(
-                    f"Parent record uses schema '{parent_record.schema_name}', "
-                    f"expected '{expected_parent.name if expected_parent else schema.parent_id}'"
-                )
+            self._check_parent(parent_record, dataset, schema)
             resolved_parent_id = parent_record.id
             own_fields = [
                 ResolvedField(field=f, source_schema_name=schema.name)

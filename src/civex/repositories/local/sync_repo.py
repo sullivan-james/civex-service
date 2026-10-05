@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import BigInteger, func, select, text, update
+from sqlalchemy import BigInteger, func, or_, select, text, update
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -34,6 +34,7 @@ from civex.db.models import (
     _UTCDateTime,
 )
 from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.domain.merge import value_at
 from civex.domain.sync import (
     OpResult,
     SyncBatchInfo,
@@ -279,6 +280,9 @@ class LocalSyncRepository:
         op_id: uuid.UUID | None,
         device_name: str | None,
         message: str | None,
+        base: Any = None,
+        theirs_actor: str | None = None,
+        theirs_at: str | None = None,
     ) -> SyncConflictDTO:
         row = SyncConflict(
             kind=kind,
@@ -287,6 +291,9 @@ class LocalSyncRepository:
             field=field,
             yours=yours,
             theirs=theirs,
+            base=base,
+            theirs_actor=theirs_actor,
+            theirs_at=_parse(theirs_at),
             op_id=op_id,
             device_name=device_name,
             message=message,
@@ -321,6 +328,33 @@ class LocalSyncRepository:
     def get_conflict(self, id: uuid.UUID) -> SyncConflictDTO | None:
         row = self._s.get(SyncConflict, id)
         return _conflict_dto(row) if row else None
+
+    def last_change(
+        self, kind: str, entity_id: uuid.UUID, path: str | None
+    ) -> tuple[str | None, str | None]:
+        """Who last changed a value of a thing, and when (actor, ISO time): the
+        latest numbered entry whose before and after differ at `path`, or the
+        latest entry of any kind when `path` is None. What a conflict says about
+        the value that stayed."""
+        rows = (
+            self._s.query(AuditLog)
+            .filter(
+                AuditLog.entity_type == kind,
+                AuditLog.entity_id == entity_id,
+                # The state the authority settles on is written under this name:
+                # it is nobody's edit.
+                or_(AuditLog.actor.is_(None), AuditLog.actor != "sync"),
+            )
+            .order_by(AuditLog.timestamp.desc(), text("rowid desc"))
+            .limit(50)
+            .all()
+        )
+        for row in rows:
+            if path is None or value_at(row.old_data, path) != value_at(
+                row.new_data, path
+            ):
+                return row.actor, _iso(row.timestamp)
+        return None, None
 
     def resolve_conflict(self, id: uuid.UUID, resolution: str) -> None:
         row = self._s.get(SyncConflict, id)
@@ -797,6 +831,9 @@ def _conflict_dto(row: SyncConflict) -> SyncConflictDTO:
         op_id=row.op_id,
         device_name=row.device_name,
         message=row.message,
+        base=row.base,
+        theirs_actor=row.theirs_actor,
+        theirs_at=_iso(row.theirs_at),
         status=row.status,
         created_at=_iso(row.created_at) or "",
         resolved_at=_iso(row.resolved_at),

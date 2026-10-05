@@ -961,6 +961,11 @@ class SyncConflict(Base):
     field: Mapped[str | None] = mapped_column(String(200), nullable=True)
     yours: Mapped[Any | None] = mapped_column(_JSON, nullable=True)
     theirs: Mapped[Any | None] = mapped_column(_JSON, nullable=True)
+    # What the value was before either side changed it, who wrote `theirs` and
+    # when: what a person needs to judge a clash without going to the history.
+    base: Mapped[Any | None] = mapped_column(_JSON, nullable=True)
+    theirs_actor: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    theirs_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     op_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     device_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)

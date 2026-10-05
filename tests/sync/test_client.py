@@ -6,23 +6,7 @@ import pytest
 
 from civex.domain.sync import SyncError
 
-from .peers import connect, device, flaky, snapshots
-
-
-def build_study(ctx):
-    ctx.schema_svc.create("encounter")
-    ctx.schema_svc.add_field("encounter", "site", "string")
-    ctx.schema_svc.add_field("encounter", "depth", "float")
-    ctx.dataset_svc.create("study")
-    ctx.dataset_svc.update("study", schemas=["encounter"])
-    record = ctx.record_svc.add("study", "encounter", {"site": "x", "depth": 1.0})
-    ctx.commit()
-    return record
-
-
-@pytest.fixture()
-def authority(project):
-    return project("authority")
+from .peers import build_study, connect, device, flaky, snapshots
 
 
 def data(ctx, record):
@@ -99,16 +83,6 @@ def test_connecting_again_carries_on(project, authority):
 
 
 # --- syncing ----------------------------------------------------------------
-
-
-@pytest.fixture()
-def pair(project, authority):
-    laptop = device(project, authority, "laptop")
-    record = build_study(laptop)
-    connect(laptop)
-    phone = device(project, authority, "phone")
-    connect(phone)
-    return laptop, phone, record
 
 
 def test_a_change_on_one_device_reaches_the_other(pair, authority):
