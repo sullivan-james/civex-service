@@ -262,9 +262,9 @@ function NameCard() {
   return (
     <Card title="Your name on changes">
       <p className="mb-2 text-xs text-fg-muted">
-        Recorded with every change you make in this project. Left empty it is
-        your computer’s user name ({data.default ?? 'unknown'}). It is kept for
-        you on this computer, not in the project.
+        Recorded with every change made in this project, like git’s user name.
+        Left empty it is your computer’s user name ({data.default ?? 'unknown'}
+        ). It is saved in this project’s settings file.
       </p>
       <div className="flex items-center gap-2">
         <Input

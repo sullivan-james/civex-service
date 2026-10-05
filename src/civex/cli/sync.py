@@ -81,20 +81,18 @@ def user(
     name: str = typer.Argument(None, help="The name to record on your changes."),
     reset: bool = typer.Option(False, "--reset", help="Go back to the default."),
 ) -> None:
-    """Show or choose the name your changes to this project are recorded under.
-    The default is your operating-system user. The choice is kept for you and
-    this project, not in the project folder."""
-    from civex import user_state
+    """Show or set the name changes in this project are recorded under, like
+    git's user.name. It is saved in this project's config.toml; the default is
+    your operating-system user."""
     from civex.identity import local_actor
 
-    c = _ctx()
-    try:
-        project_id = c.sync_repo.meta().project_id
-    finally:
-        c.close()
+    config = cli_load_config()
     if reset or name:
-        user_state.set_actor(project_id, None if reset else name)
-    console.print(f"Recorded as {escape(local_actor(project_id) or '(unknown)')}")
+        config.identity.name = None if reset else name.strip()[:100] or None
+        save_config(config)
+    console.print(
+        f"Recorded as {escape(local_actor(config.identity.name) or '(unknown)')}"
+    )
 
 
 @app.command("interval")

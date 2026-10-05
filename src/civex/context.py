@@ -175,16 +175,15 @@ def build_local_context(
         session, is_postgres=engine.dialect.name == "postgresql"
     )
     job_repo = LocalWorkflowJobRepository(session)
-    from civex import user_state
-    from civex.repositories.local.sync_repo import LocalSyncRepository as _Sync
-
-    project_id = _Sync(session).meta().project_id
     device_id = None
     if config.sync.remote:
         # Syncing: every entry written here carries which device made it.
-        device_id = user_state.device_id_for(project_id)
+        from civex import user_state
+        from civex.repositories.local.sync_repo import LocalSyncRepository as _Sync
+
+        device_id = user_state.device_id_for(_Sync(session).meta().project_id)
     audit_repo = LocalAuditRepository(
-        session, actor=local_actor(project_id), device_id=device_id
+        session, actor=local_actor(config.identity.name), device_id=device_id
     )
     view_repo = LocalViewRepository(session)
     if file_store is None:

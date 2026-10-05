@@ -615,7 +615,7 @@ class SyncService:
         interrupted seed can simply be run again."""
         meta = self._repo.meta()
         device_id = str(user_state.device_id_for(meta.project_id))
-        actor = local_actor(meta.project_id)
+        actor = local_actor(self._config.identity.name)
         head = meta.cursor
         problems: list[str] = []
         batch: list[SyncEntry] = []

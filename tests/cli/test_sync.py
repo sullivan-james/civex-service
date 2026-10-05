@@ -44,6 +44,11 @@ def test_the_recorded_name_can_be_chosen_and_reset(project_dir: Path) -> None:
     assert "Dana" not in runner.invoke(app, ["sync", "user", "--reset"]).output
 
 
+def test_the_name_lives_in_this_projects_config(project_dir: Path) -> None:
+    runner.invoke(app, ["sync", "user", "Dana"])
+    assert 'name = "Dana"' in (project_dir / "_civex" / "config.toml").read_text()
+
+
 def test_the_interval_can_be_never(project_dir: Path) -> None:
     assert "only when asked" in runner.invoke(app, ["sync", "interval", "never"]).output
     assert runner.invoke(app, ["sync", "interval", "2"]).exit_code == 1

@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from civex.config import load_config, save_config
-from civex import launcher, user_state
-from civex.context import AppContext
+from civex import launcher
 from civex.identity import local_actor
-from civex.server.deps import get_ctx
 from civex.domain.exceptions import ConfigError
 from civex.server.models import (
     MapSettingsResponse,
@@ -43,31 +41,34 @@ class UpdateIdentityRequest(BaseModel):
     name: str | None = Field(
         default=None,
         max_length=100,
-        description="The name to record on changes made here; blank or null goes "
-        "back to the default. Kept for this user and project, not in the project folder.",
+        description="The name to record on changes made in this project; blank or null "
+        "goes back to the default (the operating-system user). Saved in the "
+        "project's config.toml.",
     )
 
 
-def _identity(ctx: AppContext) -> IdentityResponse:
-    project_id = ctx.sync_repo.meta().project_id
+def _identity(config) -> IdentityResponse:  # noqa: ANN001 - Config
     return IdentityResponse(
-        name=local_actor(project_id),
-        chosen=user_state.actor_for(project_id),
+        name=local_actor(config.identity.name),
+        chosen=config.identity.name,
         default=local_actor(),
     )
 
 
 @router.get("/identity", response_model=IdentityResponse)
-def get_identity(ctx: AppContext = Depends(get_ctx)):
-    """Who this user appears as on changes to this project."""
-    return _identity(ctx)
+def get_identity():
+    """Who changes made in this project are recorded as."""
+    return _identity(_load_config())
 
 
 @router.patch("/identity", response_model=IdentityResponse)
-def update_identity(body: UpdateIdentityRequest, ctx: AppContext = Depends(get_ctx)):
-    """Choose the name recorded on changes made from here (per user and project)."""
-    user_state.set_actor(ctx.sync_repo.meta().project_id, body.name)
-    return _identity(ctx)
+def update_identity(body: UpdateIdentityRequest):
+    """Choose the name recorded on changes made in this project, like git's
+    `user.name`: it is saved in this project's config.toml."""
+    config = _load_config()
+    config.identity.name = (body.name or "").strip()[:100] or None
+    save_config(config)
+    return _identity(config)
 
 
 @router.get("/ui", response_model=UISettingsResponse)

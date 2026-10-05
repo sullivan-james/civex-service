@@ -38,7 +38,7 @@ def _write(data: dict[str, Any]) -> None:
     path = state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
-    for table in ("devices", "tokens", "actors"):
+    for table in ("devices", "tokens"):
         entries = data.get(table) or {}
         if entries:
             lines.append(f"[{table}]\n")
@@ -80,32 +80,10 @@ def move_device(old: uuid.UUID | str, new: uuid.UUID | str) -> uuid.UUID:
     data = _read()
     devices = dict(data.get("devices") or {})
     devices[str(new)] = str(device)
-    actors = dict(data.get("actors") or {})
     if str(old) != str(new):
         devices.pop(str(old), None)
-        if str(old) in actors:
-            actors[str(new)] = actors.pop(str(old))
-    _write({**data, "devices": devices, "actors": actors})
+    _write({**data, "devices": devices})
     return device
-
-
-def actor_for(project_id: uuid.UUID | str) -> str | None:
-    """The name this user chose to appear as on changes to this project, if any
-    (otherwise the caller falls back to the operating-system user)."""
-    value = (_read().get("actors") or {}).get(str(project_id))
-    return value or None
-
-
-def set_actor(project_id: uuid.UUID | str, name: str | None) -> None:
-    """Choose, or with None/blank clear, the name for this project. It is per
-    user and per project, so it lives here, not in the shared project folder."""
-    data = _read()
-    actors = dict(data.get("actors") or {})
-    if name and name.strip():
-        actors[str(project_id)] = name.strip()[:100]
-    else:
-        actors.pop(str(project_id), None)
-    _write({**data, "actors": actors})
 
 
 def forget_device(project_id: uuid.UUID | str) -> None:

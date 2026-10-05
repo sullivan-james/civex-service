@@ -49,5 +49,6 @@ def test_the_name_changes_are_recorded_under_can_be_chosen(client: TestClient) -
     assert first["chosen"] is None
     saved = client.patch("/api/settings/identity", json={"name": "Dana"}).json()
     assert saved["name"] == "Dana" and saved["chosen"] == "Dana"
+    assert client.get("/api/settings/identity").json()["chosen"] == "Dana"
     back = client.patch("/api/settings/identity", json={"name": None}).json()
     assert back["chosen"] is None and back["name"] == back["default"]

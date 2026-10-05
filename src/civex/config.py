@@ -60,6 +60,16 @@ def _interval(value: object) -> int:
 
 
 @dataclass
+class IdentityConfig:
+    """Who changes made in this project are recorded as, like `user.name` in a
+    git repository's config. None: the operating-system user. It is only a label
+    (history says who, unverified); a synced change is attributed by the
+    authority from the device's token."""
+
+    name: str | None = None
+
+
+@dataclass
 class SyncConfig:
     """Keeping this project in step with other copies of it (CIVEX-305): one
     instance is the *authority* and every other device follows it."""
@@ -194,6 +204,7 @@ class Config:
     retention: RetentionConfig = field(default_factory=RetentionConfig)
     automation: AutomationConfig = field(default_factory=AutomationConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
+    identity: IdentityConfig = field(default_factory=IdentityConfig)
 
     @property
     def civex_dir(self) -> Path:
@@ -349,6 +360,7 @@ def load_config() -> Config:
         paused=bool(data.get("automation", {}).get("paused", False)),
     )
 
+    identity_name = str(data.get("identity", {}).get("name") or "").strip()[:100]
     sync_data = data.get("sync", {})
     sync_cfg = SyncConfig(
         remote=(str(sync_data["remote"]).rstrip("/") or None)
@@ -375,6 +387,7 @@ def load_config() -> Config:
         retention=retention_cfg,
         automation=automation_cfg,
         sync=sync_cfg,
+        identity=IdentityConfig(name=identity_name or None),
     )
 
 
@@ -493,6 +506,9 @@ def save_config(config: Config) -> None:
 
     if config.automation.paused:
         lines += ["\n[automation]\n", "paused = true\n"]
+
+    if config.identity.name:
+        lines += ["\n[identity]\n", f"name = {_tv(config.identity.name)}\n"]
 
     sync = config.sync
     if sync.remote or sync.serve or sync.paused or sync.interval_seconds != 60:

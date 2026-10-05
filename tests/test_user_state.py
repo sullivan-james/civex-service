@@ -63,20 +63,9 @@ def test_a_damaged_file_is_treated_as_empty_not_a_crash(_own_state: Path):
     assert isinstance(user_state.device_id_for(uuid.uuid4()), uuid.UUID)
 
 
-def test_a_chosen_name_is_per_project_and_can_be_cleared(tmp_path, monkeypatch):
-    monkeypatch.setenv("CIVEX_USER_STATE", str(tmp_path / "s.toml"))
-    from civex import user_state
+def test_the_name_changes_are_recorded_under_comes_from_the_projects_config(tmp_path):
+    from civex.config import IdentityConfig  # noqa: F401
     from civex.identity import local_actor
 
-    one, two = (
-        "11111111-1111-1111-1111-111111111111",
-        "22222222-2222-2222-2222-222222222222",
-    )
-    assert user_state.actor_for(one) is None
-    user_state.set_actor(one, "  Dana  ")
-    assert local_actor(one) == "Dana"
-    assert (
-        local_actor(two) == local_actor()
-    )  # the OS user: another project is unaffected
-    user_state.set_actor(one, "")
-    assert user_state.actor_for(one) is None
+    assert local_actor("  Dana  ") == "Dana"
+    assert local_actor(None) == local_actor("")  # the OS user
