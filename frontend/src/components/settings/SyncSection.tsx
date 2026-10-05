@@ -173,6 +173,10 @@ function Following({ s }: { s: RemoteStatus }) {
               <Badge>Paused</Badge>
             ) : s.last_error ? (
               <Badge variant="attention">Could not sync</Badge>
+            ) : s.pending > 0 ? (
+              <Badge variant="attention">
+                {s.pending} change{s.pending === 1 ? '' : 's'} waiting to send
+              </Badge>
             ) : (
               <Badge variant="success">Up to date</Badge>
             )}
