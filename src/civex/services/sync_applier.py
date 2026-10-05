@@ -20,11 +20,11 @@ from civex.repositories.protocols import AuditRepository, SyncRepository
 
 
 def stamp_of(entry: SyncEntry) -> datetime:
-    """The moment a delete is stamped with. Everything a bulk delete took shares
-    its batch's, so a restore of the group finds them as one, however the
-    entries arrive; a single delete uses its own."""
-    when = entry.batch.created_at if entry.batch else entry.timestamp
-    parsed = datetime.fromisoformat(when)
+    """The moment a delete stamps what it deletes with. The deleting device
+    uses one instant for the stamp and for its entries' time, so the entry's own
+    time *is* the stamp: everything a bulk delete took shares it, a restore of
+    the group finds them as one, and every device ends with the same dates."""
+    parsed = datetime.fromisoformat(entry.timestamp)
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 

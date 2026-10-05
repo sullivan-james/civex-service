@@ -691,14 +691,15 @@ class LocalRecordRepository:
             ]
         return levels
 
-    def delete_many(self, ids: list[uuid.UUID]) -> None:
-        """Soft-delete every live record in `ids`."""
-        now = datetime.now(timezone.utc)
+    def delete_many(self, ids: list[uuid.UUID], stamp: datetime | None = None) -> None:
+        """Soft-delete every live record in `ids`. Not an edit: each keeps the
+        date it was last changed."""
+        now = stamp or datetime.now(timezone.utc)
         for chunk in _chunks(ids):
             self._s.execute(
                 update(Record)
                 .where(Record.id.in_(chunk), Record.deleted_at.is_(None))
-                .values(deleted_at=now)
+                .values(deleted_at=now, updated_at=Record.updated_at)
                 .execution_options(synchronize_session=False)
             )
         self._s.expire_all()
@@ -708,7 +709,7 @@ class LocalRecordRepository:
             self._s.execute(
                 update(Record)
                 .where(Record.id.in_(chunk))
-                .values(deleted_at=None)
+                .values(deleted_at=None, updated_at=Record.updated_at)
                 .execution_options(synchronize_session=False)
             )
         self._s.expire_all()

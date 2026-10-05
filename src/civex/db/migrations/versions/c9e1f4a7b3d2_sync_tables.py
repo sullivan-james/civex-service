@@ -107,6 +107,17 @@ def upgrade() -> None:
             "ix_sync_conflicts_status", "sync_conflicts", ["status", "created_at"]
         )
 
+    if "apply_state" not in {c["name"] for c in inspector.get_columns("audit_log")}:
+        with op.batch_alter_table("audit_log") as batch:
+            batch.add_column(
+                sa.Column(
+                    "apply_state",
+                    sa.String(10),
+                    nullable=False,
+                    server_default="applied",
+                )
+            )
+
     indexes = {i["name"] for i in inspector.get_indexes("audit_log")}
     if "ix_audit_log_hub_seq" not in indexes:
         op.create_index("ix_audit_log_hub_seq", "audit_log", ["hub_seq"])
@@ -121,6 +132,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    with op.batch_alter_table("audit_log") as batch:
+        batch.drop_column("apply_state")
     op.drop_index("ix_audit_log_unsynced", table_name="audit_log")
     op.drop_index("ix_audit_log_hub_seq", table_name="audit_log")
     op.drop_index("ix_sync_conflicts_status", table_name="sync_conflicts")

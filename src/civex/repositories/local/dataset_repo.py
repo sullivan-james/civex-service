@@ -133,7 +133,7 @@ class LocalDatasetRepository:
         )
         return {name for (name,) in rows}
 
-    def delete(self, id: uuid.UUID) -> None:
+    def delete(self, id: uuid.UUID, stamp: datetime | None = None) -> None:
         """Soft-delete: mark the dataset deleted and cascade to every record
         in it (a record's whole parent_record_id chain always lives in the
         same dataset, so this can't leave a child pointing at a live parent
@@ -141,11 +141,14 @@ class LocalDatasetRepository:
         row = self._s.query(Dataset).filter_by(id=id).first()
         if row is None or row.deleted_at is not None:
             return
-        now = datetime.now(timezone.utc)
+        now = stamp or datetime.now(timezone.utc)
         row.deleted_at = now
         self._s.query(Record).filter(
             Record.dataset_id == id, Record.deleted_at.is_(None)
-        ).update({"deleted_at": now}, synchronize_session=False)
+        ).update(
+            {"deleted_at": now, "updated_at": Record.updated_at},
+            synchronize_session=False,
+        )
         self._s.flush()
 
     def restore(self, id: uuid.UUID) -> DatasetDTO:
@@ -158,7 +161,10 @@ class LocalDatasetRepository:
         cascade = self._cascade_query(id, row.deleted_at)
         row.deleted_at = None
         if cascade is not None:
-            cascade.update({"deleted_at": None}, synchronize_session=False)
+            cascade.update(
+                {"deleted_at": None, "updated_at": Record.updated_at},
+                synchronize_session=False,
+            )
         self._s.flush()
         return _to_dto(self._s, row)
 

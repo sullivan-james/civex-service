@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
+from typing import Any, Protocol
 
 # Bumped when the wire format changes in a way an older peer can't read.
 PROTOCOL_VERSION = 1
@@ -249,9 +250,12 @@ class SyncError(RuntimeError):
     """Sync could not finish. `retryable` is true for what trying again can fix
     (a network failure); a refused token or a protocol mismatch is not."""
 
-    def __init__(self, message: str, retryable: bool = True) -> None:
+    def __init__(self, message: str, retryable: bool = True, status: int = 400) -> None:
         super().__init__(message)
         self.retryable = retryable
+        # How an authority reports it over HTTP: 401 no/invalid token, 403 a
+        # token used from another device, 426 a protocol this server can't speak.
+        self.status = status
 
 
 @dataclass
@@ -309,3 +313,16 @@ class SyncConflictDTO:
             "resolved_at": self.resolved_at,
             "resolution": self.resolution,
         }
+
+
+class SyncTransport(Protocol):
+    """How a device talks to an authority. HTTP in use; tests supply one that
+    calls an authority in the same process (and ones that fail on purpose)."""
+
+    def hello(self) -> Hello: ...
+    def push(self, entries: list[SyncEntry]) -> PushResult: ...
+    def feed(self, after: int, limit: int) -> FeedPage: ...
+    def snapshot(self, kind: str, offset: int, limit: int) -> SnapshotPage: ...
+    def missing_files(self, shas: list[str]) -> list[str]: ...
+    def upload_file(self, sha256: str, path: Path) -> None: ...
+    def download_file(self, sha256: str, dest: Path) -> None: ...

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import uuid
 from typing import Any
 
@@ -663,9 +665,12 @@ class SchemaService:
         holders = self._template_holders(field)
         # A uniqueness policy can't outlive one of its fields.
         kept_keys = [k for k in schema.unique_keys if str(field.id) not in k]
+        stamp = datetime.now(timezone.utc)
         if self._audit:
-            self._audit.log_change("delete", "field", field.id, field.to_dict(), None)
-        self._repo.delete_field(field.id)
+            self._audit.log_change(
+                "delete", "field", field.id, field.to_dict(), None, timestamp=stamp
+            )
+        self._repo.delete_field(field.id, stamp)
         if len(kept_keys) != len(schema.unique_keys):
             updated = self._repo.update(
                 schema.id, name=None, description=None, unique_keys=kept_keys
@@ -826,11 +831,14 @@ class SchemaService:
         Schemas that inherit from this one are left untouched and keep
         resolving its fields; see docs/guides/deleting-and-restoring.md."""
         schema = self.get(name)
+        stamp = datetime.now(
+            timezone.utc
+        )  # the entry's time and the stamp: one instant
         if self._audit:
             self._audit.log_change(
-                "delete", "schema", schema.id, schema.to_dict(), None
+                "delete", "schema", schema.id, schema.to_dict(), None, timestamp=stamp
             )
-        self._repo.delete(schema.id)
+        self._repo.delete(schema.id, stamp)
 
     def list_deleted(self) -> list[SchemaDTO]:
         return self._repo.list_deleted()

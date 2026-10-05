@@ -90,7 +90,9 @@ class SyncAuthorityService:
         device = self._repo.device_by_token_hash(hash_token(token))
         if device is None:
             raise SyncError(
-                "That token is not valid, or has been revoked", retryable=False
+                "That token is not valid, or has been revoked",
+                retryable=False,
+                status=401,
             )
         if device_id:
             try:
@@ -98,7 +100,11 @@ class SyncAuthorityService:
             except ValueError:
                 raise SyncError("The device id is not valid", retryable=False)
             if device.device_id and device.device_id != device_id:
-                raise SyncError("That token belongs to another device", retryable=False)
+                raise SyncError(
+                    "That token belongs to another device",
+                    retryable=False,
+                    status=403,
+                )
             if not device.device_id:
                 self._repo.bind_device(device.id, device_id)
         self._repo.touch_device(device.id)
@@ -256,6 +262,11 @@ class SyncAuthorityService:
                     if incoming.get("deleted_at") is None
                     else head.get("deleted_at")
                 )
+                if merged.changed and incoming.get("updated_at"):
+                    # Something of the edit went in, so the thing was updated
+                    # when the edit was made. An edit that all clashed changes
+                    # nothing, and the thing keeps its own date.
+                    final["updated_at"] = incoming["updated_at"]
                 conflicts = [
                     {
                         "kind": "conflict",
@@ -277,7 +288,12 @@ class SyncAuthorityService:
                     )
             self._applier.apply_state(kind, eid, final)
         elif entry.action == "delete":
-            if head is not None and not head.get("deleted_at"):
+            if head is not None and head.get("deleted_at"):
+                # Already deleted (another device got there first). Both are
+                # deleted, but with their own stamps: settle on the authority's.
+                if head["deleted_at"] != stamp_of(entry).isoformat():
+                    final = head
+            elif head is not None:
                 if _edited_since(entry.old_data, head):
                     conflicts.append(
                         {

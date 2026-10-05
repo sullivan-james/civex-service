@@ -72,6 +72,20 @@ def device_id_for(project_id: uuid.UUID | str) -> uuid.UUID:
     return fresh
 
 
+def move_device(old: uuid.UUID | str, new: uuid.UUID | str) -> uuid.UUID:
+    """A project that takes the authority's project id is still this machine:
+    carry its device id across, so the authority (which bound a token to it)
+    still recognises it."""
+    device = device_id_for(old)
+    data = _read()
+    devices = dict(data.get("devices") or {})
+    devices[str(new)] = str(device)
+    if str(old) != str(new):
+        devices.pop(str(old), None)
+    _write({**data, "devices": devices})
+    return device
+
+
 def forget_device(project_id: uuid.UUID | str) -> None:
     data = _read()
     devices = dict(data.get("devices") or {})

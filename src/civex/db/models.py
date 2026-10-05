@@ -478,6 +478,15 @@ class AuditLog(Base):
     sync_state: Mapped[str] = mapped_column(
         String(10), nullable=False, default="pending", server_default="pending"
     )
+    # What became of this entry's state here: `applied` (it is, or was, the
+    # thing's state), `held` (a change from the authority kept but not applied
+    # because this device had its own unsent change to the same thing; applied
+    # later if it is still the latest, see SyncService._catch_up) or
+    # `superseded` (the authority settled on something else, carried by a later
+    # entry, so this one's state is never applied).
+    apply_state: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="applied", server_default="applied"
+    )
 
 
 class WorkflowJob(Base):

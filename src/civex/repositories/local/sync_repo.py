@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy import BigInteger, func, text, update
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from civex.db.models import (
     AuditBatch,
@@ -376,6 +377,11 @@ class LocalSyncRepository:
         else:
             for name, value in values.items():
                 setattr(row, name, value)
+            if "updated_at" in values:
+                # Written even when it equals what is there: otherwise a change
+                # to the other columns lets the column's on-update default stamp
+                # it with this machine's clock, and the copies drift apart.
+                flag_modified(row, "updated_at")
         self._s.flush()
         if kind == "dataset" and "schema_ids" in snap:
             self._set_schema_links(row, snap["schema_ids"])
@@ -400,14 +406,24 @@ class LocalSyncRepository:
         if row is None or getattr(row, "deleted_at", None) is not None:
             return
         row.deleted_at = stamp
+        if kind == "record":
+            # A delete is not an edit: written explicitly, or the column's
+            # on-update default would stamp it with this machine's clock.
+            flag_modified(row, "updated_at")
         if kind == "schema":
             self._s.query(Record).filter(
                 Record.schema_id == id, Record.deleted_at.is_(None)
-            ).update({"deleted_at": stamp}, synchronize_session=False)
+            ).update(
+                {"deleted_at": stamp, "updated_at": Record.updated_at},
+                synchronize_session=False,
+            )
         elif kind == "dataset":
             self._s.query(Record).filter(
                 Record.dataset_id == id, Record.deleted_at.is_(None)
-            ).update({"deleted_at": stamp}, synchronize_session=False)
+            ).update(
+                {"deleted_at": stamp, "updated_at": Record.updated_at},
+                synchronize_session=False,
+            )
         self._s.flush()
         self._s.expire_all()
 
@@ -419,14 +435,22 @@ class LocalSyncRepository:
             return
         stamp = getattr(row, "deleted_at", None)
         row.deleted_at = None
+        if kind == "record":
+            flag_modified(row, "updated_at")
         if stamp is not None and kind == "schema":
             self._s.query(Record).filter(
                 Record.schema_id == id, Record.deleted_at == stamp
-            ).update({"deleted_at": None}, synchronize_session=False)
+            ).update(
+                {"deleted_at": None, "updated_at": Record.updated_at},
+                synchronize_session=False,
+            )
         elif stamp is not None and kind == "dataset":
             self._s.query(Record).filter(
                 Record.dataset_id == id, Record.deleted_at == stamp
-            ).update({"deleted_at": None}, synchronize_session=False)
+            ).update(
+                {"deleted_at": None, "updated_at": Record.updated_at},
+                synchronize_session=False,
+            )
         self._s.flush()
         self._s.expire_all()
 
@@ -464,6 +488,10 @@ class LocalSyncRepository:
     # ------------------------------------------------------------------
     # History entries, as sync moves them
     # ------------------------------------------------------------------
+
+    def get_entry(self, id: uuid.UUID) -> SyncEntry | None:
+        row = self._s.get(AuditLog, id)
+        return self._entries([row])[0] if row is not None else None
 
     def has_entry(self, id: uuid.UUID) -> bool:
         return self._s.get(AuditLog, id) is not None
@@ -508,6 +536,8 @@ class LocalSyncRepository:
                 row.sync_state = "synced"
                 if result.hub_seq is not None:
                     row.hub_seq = result.hub_seq
+                if result.status in ("merged", "conflict"):
+                    row.apply_state = "superseded"
         self._s.flush()
 
     def mark_seq(self, entry_id: uuid.UUID, seq: int) -> None:
@@ -533,7 +563,12 @@ class LocalSyncRepository:
         self._s.expire_all()
 
     def insert_entry(
-        self, entry: SyncEntry, *, hub_seq: int | None, state: str = "synced"
+        self,
+        entry: SyncEntry,
+        *,
+        hub_seq: int | None,
+        state: str = "synced",
+        apply_state: str = "applied",
     ) -> None:
         """Keep an entry made elsewhere in this project's history, as it was."""
         batch_id = None
@@ -565,9 +600,70 @@ class LocalSyncRepository:
                 hlc=entry.hlc,
                 hub_seq=hub_seq,
                 sync_state=state,
+                apply_state=apply_state,
             )
         )
         self._s.flush()
+
+    def held_entries(self) -> list[SyncEntry]:
+        """Changes from the authority kept but not applied yet, oldest first."""
+        rows = (
+            self._s.query(AuditLog)
+            .filter(AuditLog.apply_state == "held")
+            .order_by(AuditLog.hub_seq)
+            .all()
+        )
+        return self._entries(rows)
+
+    def mark_applied(self, entry_ids: list[uuid.UUID]) -> None:
+        if entry_ids:
+            self._s.execute(
+                update(AuditLog)
+                .where(AuditLog.id.in_(entry_ids))
+                .values(apply_state="applied")
+                .execution_options(synchronize_session=False)
+            )
+            self._s.expire_all()
+
+    def has_newer_state(self, kind: str, entity_id: uuid.UUID, seq: int) -> bool:
+        """Whether a later-numbered entry that carries a state (one the authority
+        did not supersede) already stands for this thing: a change of this
+        device's own that the authority numbered after the entry in hand. A
+        delete carries none, so it never stands in for an older state."""
+        return (
+            self._s.query(AuditLog.id)
+            .filter(
+                AuditLog.entity_type == kind,
+                AuditLog.entity_id == entity_id,
+                AuditLog.hub_seq > seq,
+                AuditLog.apply_state != "superseded",
+                AuditLog.action.in_(("create", "update", "restore")),
+            )
+            .first()
+            is not None
+        )
+
+    def effective_entries(
+        self, things: set[tuple[str, uuid.UUID]]
+    ) -> dict[tuple[str, uuid.UUID], list[tuple[uuid.UUID, str, str]]]:
+        """For each thing, its numbered entries the authority did not supersede,
+        oldest first, as (id, action, apply_state): what it ended in is the last
+        that carries a state, then a delete or purge that follows it."""
+        found: dict[tuple[str, uuid.UUID], list[tuple[uuid.UUID, str, str]]] = {}
+        for kind, entity_id in things:
+            rows = (
+                self._s.query(AuditLog.id, AuditLog.action, AuditLog.apply_state)
+                .filter(
+                    AuditLog.entity_type == kind,
+                    AuditLog.entity_id == entity_id,
+                    AuditLog.hub_seq.is_not(None),
+                    AuditLog.apply_state != "superseded",
+                )
+                .order_by(AuditLog.hub_seq)
+                .all()
+            )
+            found[(kind, entity_id)] = [(r[0], r[1], r[2]) for r in rows]
+        return found
 
     def sequence_local_entries(self) -> int:
         """Authority: number the changes made on this instance itself, in the

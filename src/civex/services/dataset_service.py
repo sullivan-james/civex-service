@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import uuid
 from typing import TYPE_CHECKING, Callable
 
@@ -207,11 +209,19 @@ class DatasetService:
         collections reference can't be deleted."""
         dataset = self.get(name)
         self._check_not_referenced(dataset, "delete")
+        stamp = datetime.now(
+            timezone.utc
+        )  # the entry's time and the stamp: one instant
         if self._audit:
             self._audit.log_change(
-                "delete", "dataset", dataset.id, dataset.to_dict(), None
+                "delete",
+                "dataset",
+                dataset.id,
+                dataset.to_dict(),
+                None,
+                timestamp=stamp,
             )
-        self._datasets.delete(dataset.id)
+        self._datasets.delete(dataset.id, stamp)
 
     def list_deleted(self) -> list[DatasetDTO]:
         return self._datasets.list_deleted()

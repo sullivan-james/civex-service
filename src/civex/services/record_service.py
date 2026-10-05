@@ -4,7 +4,7 @@ import dataclasses
 from contextlib import nullcontext
 import re
 import uuid
-from datetime import date as _date, datetime as _dt
+from datetime import date as _date, datetime as _dt, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -2157,6 +2157,9 @@ class RecordService:
         doomed = set(every)
         self._handle_referrers(doomed, force)
         records = self._records.list_by_ids(every)
+        # One instant: it is the entries' time and what the records are stamped
+        # with, so every device that applies these entries stamps them alike.
+        stamp = _dt.now(timezone.utc)
         if self._audit:
             with _audit_batch(self._audit, "delete", len(records) > 1):
                 for record in records:
@@ -2166,8 +2169,9 @@ class RecordService:
                         record.id,
                         self._snapshot(record),
                         None,
+                        timestamp=stamp,
                     )
-        self._records.delete_many(every)
+        self._records.delete_many(every, stamp)
         requested = set(ids)
         return sum(
             1
