@@ -469,13 +469,13 @@ def refuse_to_abandon_data(config: Config, new_url: str) -> None:
         return
     from sqlalchemy import create_engine
 
-    from civex.db.move import row_counts
+    from civex.db.move import is_empty, row_counts
 
     current = target = None
     try:
         current, target = create_engine(config.db.url), create_engine(new_url)
         held = row_counts(current).get("records", 0)
-        target_empty = sum(row_counts(target).values()) == 0
+        target_empty = is_empty(target)
     except Exception:
         return
     finally:
