@@ -27,6 +27,11 @@ const settingsSections = [
     info: 'How long deleted items, change history and workflow runs are kept. Nothing is removed by itself: a clean-up applies these, or deletes everything before a date you choose.',
   },
   {
+    to: 'sync',
+    label: 'Sync',
+    info: 'Keep this project in step with another Civex that holds the shared copy. Changes are saved here first and sent when it can be reached.',
+  },
+  {
     to: 'map',
     label: 'Map',
     info: 'The location editor draws built-in coastlines and a grid, so it works offline. For street-level detail, point it at a tile server; you are responsible for that provider’s terms of use.',

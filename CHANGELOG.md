@@ -33,6 +33,10 @@ from the next tag forward.
   another civex over HTTP. Changes merge field by field; the authority's value
   wins a clash and yours is kept as a conflict you can take back. Retries are
   safe, and a dropped connection resumes. See the Syncing guide.
+- **Sync runs by itself** while the server is up (and with `civex sync watch`):
+  after changes, on an interval, backing off when the authority is unreachable.
+  Settings → Sync connects, shows status, syncs now, pauses and settles
+  conflicts; the status bar shows a failing or waiting sync.
 - `civex sync authority enable` + `civex sync device add` turn a server into an
   authority; remote hosts reach only `/api/sync/v1/`.
 

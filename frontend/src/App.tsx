@@ -53,6 +53,7 @@ const StorageSettings = lazy(
 const RetentionSection = lazy(
   () => import('./components/settings/RetentionSection'),
 )
+const SyncSection = lazy(() => import('./components/settings/SyncSection'))
 const MapSection = lazy(() => import('./components/settings/MapSection'))
 const AdvancedSection = lazy(
   () => import('./components/settings/AdvancedSection'),
@@ -137,6 +138,7 @@ export default function App() {
                 path="recently-deleted"
                 element={<Navigate to="/settings/retention" replace />}
               />
+              <Route path="sync" element={<SyncSection />} />
               <Route path="map" element={<MapSection />} />
               <Route path="advanced" element={<AdvancedSection />} />
             </Route>

@@ -35,6 +35,17 @@ civex sync connect https://civex.example.com --token <token>
 Run `civex sync` to sync now, `civex sync status` to see where things stand,
 `civex sync pause` / `resume` to stop and start it.
 
+## Syncing by itself
+
+While `civex serve` is running, the project syncs in the background: a few
+seconds after you make changes, and every minute (Settings → Sync changes the
+interval) to bring in other people's. If the authority can't be reached it backs
+off, up to 15 minutes between tries, and the status bar says why. Without a
+server, `civex sync watch` does the same in a terminal.
+
+Settings → **Sync** is where you connect, see when it last synced, press
+**Sync now**, pause the schedule, disconnect, and settle conflicts.
+
 ## What happens when changes collide
 
 - Two people edit **different fields** of a record: both edits are kept.
