@@ -123,6 +123,7 @@ nav:
           - civex retention: reference/cli/retention.md
           - civex schema: reference/cli/schema.md
           - civex store: reference/cli/store.md
+          - civex sync: reference/cli/sync.md
           - civex trash: reference/cli/trash.md
           - civex view: reference/cli/view.md
           - civex workflow: reference/cli/workflow.md
