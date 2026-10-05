@@ -36,3 +36,14 @@ def test_conflicts_lists_nothing_on_a_fresh_project(project_dir: Path) -> None:
     result = runner.invoke(app, ["sync", "conflicts"])
     assert result.exit_code == 0
     assert "No conflicts" in result.output
+
+
+def test_the_recorded_name_can_be_chosen_and_reset(project_dir: Path) -> None:
+    assert "Dana" in runner.invoke(app, ["sync", "user", "Dana"]).output
+    assert "Dana" in runner.invoke(app, ["sync", "user"]).output
+    assert "Dana" not in runner.invoke(app, ["sync", "user", "--reset"]).output
+
+
+def test_the_interval_can_be_never(project_dir: Path) -> None:
+    assert "only when asked" in runner.invoke(app, ["sync", "interval", "never"]).output
+    assert runner.invoke(app, ["sync", "interval", "2"]).exit_code == 1

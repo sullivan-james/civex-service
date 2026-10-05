@@ -13,6 +13,8 @@ not arrived) is neither recorded nor refused, and is sent again later.
 
 from __future__ import annotations
 
+import logging
+
 import hashlib
 import secrets
 import uuid
@@ -50,6 +52,9 @@ PUSH_MAX = 500
 
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+log = logging.getLogger(__name__)
 
 
 class SyncAuthorityService:
@@ -173,7 +178,32 @@ class SyncAuthorityService:
             results.append(result)
             if result.status == DEFERRED:
                 break
+        self._log_push(device, entries, results)
         return PushResult(results, self._repo.head_seq())
+
+    @staticmethod
+    def _log_push(
+        device: SyncDeviceDTO, entries: list[SyncEntry], results: list[OpResult]
+    ) -> None:
+        """One line per push saying what became of the changes, and one per
+        change that was not simply taken, naming the thing."""
+        counts: dict[str, int] = {}
+        for r in results:
+            counts[r.status] = counts.get(r.status, 0) + 1
+        summary = ", ".join(f"{n} {s}" for s, n in sorted(counts.items())) or "nothing"
+        log.info("sync push from %s: %d sent, %s", device.name, len(entries), summary)
+        by_id = {e.id: e for e in entries}
+        for r in results:
+            if r.status in ("conflict", "rejected", "deferred", "merged"):
+                e = by_id.get(r.op_id)
+                what = f"{e.entity_type} {e.entity_id}" if e else str(r.op_id)
+                log.warning(
+                    "sync push from %s: %s %s%s",
+                    device.name,
+                    what,
+                    r.status,
+                    f" ({r.message})" if r.message else "",
+                )
 
     def _settle(
         self, device: SyncDeviceDTO, device_id: str | None, entry: SyncEntry

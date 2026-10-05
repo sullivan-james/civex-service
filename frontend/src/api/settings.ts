@@ -26,7 +26,17 @@ export interface ShortcutState {
   path: string | null
 }
 
+/** Who changes made here are recorded as, for this user and project. */
+export interface Identity {
+  name: string | null
+  chosen: string | null
+  default: string | null
+}
+
 export const settingsApi = {
+  getIdentity: () => api.get<Identity>('/settings/identity'),
+  updateIdentity: (name: string | null) =>
+    api.patch<Identity>('/settings/identity', { name }),
   getShortcut: () => api.get<ShortcutState>('/settings/shortcut'),
   createShortcut: () => api.post<ShortcutState>('/settings/shortcut', {}),
   getMap: () => api.get<MapSettings>('/settings/map'),

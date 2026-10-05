@@ -411,3 +411,25 @@ def test_once_syncing_every_new_entry_carries_the_device_and_a_rising_clock(
         assert all(stamps) and stamps == sorted(stamps) and len(set(stamps)) == 3
     finally:
         reopened.close()
+
+
+def test_one_lost_file_does_not_hold_up_unrelated_changes_and_says_why(pair, authority):
+    laptop, _, record = pair
+    laptop.schema_svc.add_field("encounter", "scan", "file")
+    laptop.commit()
+    laptop.sync_svc.sync()
+    ref = laptop.file_svc.store_bytes(b"lost", "scan.bin")
+    laptop.record_svc.update(
+        str(record.id), {"site": "a", "depth": 1.0, "scan": ref.to_dict()}
+    )
+    other = laptop.record_svc.add("study", "encounter", {"site": "b", "depth": 2.0})
+    laptop.commit()
+    laptop.file_svc.object_path(ref.sha256).unlink()
+
+    report = laptop.sync_svc.sync()
+
+    assert report.blocked_files == [ref.sha256]
+    assert report.waiting >= 1
+    assert data(authority, other) is not None  # the unrelated record went
+    status = laptop.sync_svc.status()
+    assert status.last_error and "waiting for a file" in status.last_error

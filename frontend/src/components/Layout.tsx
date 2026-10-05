@@ -15,6 +15,7 @@ import {
   useDefaultLayout,
 } from 'react-resizable-panels'
 import { useUISettings } from '../hooks/useUISettings'
+import { useRemoteStatus, useSyncNow } from '../hooks/useRemote'
 import { useFrequentCollections } from '../hooks/useFrequentCollections'
 import { useDialogA11y } from '../hooks/useDialogA11y'
 import { PinnedNav } from './PinnedNav'
@@ -280,6 +281,38 @@ function NavGroups({
   )
 }
 
+/** Sync now, in the top bar, once the project follows an authority. Spins while
+ * a sync runs and shows how many changes are waiting to go. */
+function SyncButton() {
+  const { data } = useRemoteStatus()
+  const syncNow = useSyncNow()
+  if (!data?.configured) return null
+  const busy = data.running || syncNow.isPending
+  const tip = data.last_error
+    ? `Could not sync: ${data.last_error}`
+    : data.pending > 0
+      ? `${data.pending} change(s) waiting to send. Sync now.`
+      : 'Everything is in step. Sync now to check.'
+  return (
+    <Tooltip content={tip} side="bottom">
+      <Button
+        variant="nav"
+        size="sm"
+        disabled={busy}
+        onClick={() => syncNow.mutate()}
+      >
+        <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />
+        Sync
+        {data.pending > 0 && !busy && (
+          <span className="ml-1 rounded-full bg-nav-border px-1.5 text-xs">
+            {data.pending}
+          </span>
+        )}
+      </Button>
+    </Tooltip>
+  )
+}
+
 export default function Layout({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const [aiOpen, setAiOpen] = useState(false)
@@ -381,6 +414,8 @@ export default function Layout({ children }: { children: ReactNode }) {
             Refresh
           </Button>
         </Tooltip>
+
+        <SyncButton />
 
         <Button
           variant={aiOpen ? 'navActive' : 'nav'}

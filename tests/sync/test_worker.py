@@ -105,3 +105,13 @@ def test_a_busy_project_is_left_alone() -> None:
     r.outcomes = [SyncBusy()]
     assert r.tick() is None
     assert r.worker._failures == 0
+
+
+def test_never_syncs_only_when_asked() -> None:
+    r = Rig()
+    r.sync_config.interval_seconds = 0
+    r.pending = 5
+    assert r.tick(1000) is None and r.calls == 0  # not by schedule, not for edits
+    r.worker.request()
+    assert r.tick() == "report"
+    assert r.tick(1000) is None and r.calls == 1

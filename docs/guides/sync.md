@@ -46,6 +46,21 @@ server, `civex sync watch` does the same in a terminal.
 Settings → **Sync** is where you connect, see when it last synced, press
 **Sync now**, pause the schedule, disconnect, and settle conflicts.
 
+Set the frequency to **Never** (Settings → Sync, or `civex sync interval never`)
+to sync only when you press **Sync now** (also in the top bar) or run
+`civex sync`.
+
+If changes cite a file that is on neither your computer nor the authority, only
+those records wait; everything else is sent, and Settings → Sync names the
+problem. The server log has one line per sync (what was received and sent) and a
+warning for anything held back, refused or in conflict.
+
+## Who changes are recorded as
+
+Changes you make are recorded under your computer's user name. To use another
+name for a project: `civex sync user "Dana"` or Settings → Sync (kept for you on
+this computer, not in the project). `civex sync user --reset` goes back.
+
 ## What happens when changes collide
 
 - Two people edit **different fields** of a record: both edits are kept.

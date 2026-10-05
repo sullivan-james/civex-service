@@ -37,3 +37,17 @@ def test_no_conflicts_on_a_fresh_project(client: TestClient) -> None:
     assert client.get("/api/remote/conflicts").json() == []
     bad = client.post("/api/remote/conflicts/nope/resolve", json={"take": "mine"})
     assert bad.status_code == 422
+
+
+def test_never_is_an_interval_of_zero(client: TestClient) -> None:
+    assert client.patch("/api/remote", json={"interval_seconds": 0}).status_code == 200
+    assert client.get("/api/remote").json()["interval_seconds"] == 0
+
+
+def test_the_name_changes_are_recorded_under_can_be_chosen(client: TestClient) -> None:
+    first = client.get("/api/settings/identity").json()
+    assert first["chosen"] is None
+    saved = client.patch("/api/settings/identity", json={"name": "Dana"}).json()
+    assert saved["name"] == "Dana" and saved["chosen"] == "Dana"
+    back = client.patch("/api/settings/identity", json={"name": None}).json()
+    assert back["chosen"] is None and back["name"] == back["default"]

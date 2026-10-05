@@ -13,9 +13,11 @@ point leaves the project as it was or one step further, never between.
 
 from __future__ import annotations
 
+import logging
+
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -51,6 +53,9 @@ SNAPSHOT_PAGE = 200
 TransportFactory = Callable[[str, str, str], SyncTransport]
 
 
+log = logging.getLogger(__name__)
+
+
 @dataclass
 class SyncReport:
     pulled: int = 0  # changes from others brought in
@@ -59,6 +64,9 @@ class SyncReport:
     conflicts: int = 0  # values that did not go in as made
     rejected: int = 0  # changes the authority refused
     waiting: int = 0  # changes held back (a file is not available yet)
+    # Files cited by waiting changes that this computer cannot read (not in any
+    # volume it can reach) and the authority does not have.
+    blocked_files: list[str] = field(default_factory=list)
 
     @property
     def changed(self) -> bool:
@@ -216,8 +224,10 @@ class SyncService:
         save_config(self._config)
 
     def set_interval(self, seconds: int) -> None:
-        if seconds < 5:
-            raise ValidationError("The interval must be at least 5 seconds")
+        if seconds != 0 and seconds < 5:
+            raise ValidationError(
+                "The interval must be at least 5 seconds, or 0 to sync only when asked"
+            )
         self._config.sync.interval_seconds = seconds
         save_config(self._config)
 
@@ -254,16 +264,51 @@ class SyncService:
         `SyncError` when the authority can't be reached or refuses this device
         (`retryable` says whether trying later can help)."""
         with sync_lock(self._config.civex_dir):
+            log.info("sync with %s: starting", self._config.sync.remote)
             try:
                 report = self._sync()
             except SyncError as e:
+                log.warning(
+                    "sync with %s failed (%s): %s",
+                    self._config.sync.remote,
+                    "will retry" if e.retryable else "will not retry until fixed",
+                    e,
+                )
                 self._commit_quietly()
                 self._repo.record_outcome(str(e))
                 self._commit()
                 raise
-            self._repo.record_outcome(None)
+            note = self._waiting_note(report)
+            log.info(
+                "sync with %s: received %d, sent %d, files sent %d, conflicts %d, "
+                "refused %d, waiting %d",
+                self._config.sync.remote,
+                report.pulled,
+                report.pushed,
+                report.files_sent,
+                report.conflicts,
+                report.rejected,
+                report.waiting,
+            )
+            if note:
+                log.warning("sync with %s: %s", self._config.sync.remote, note)
+            self._repo.record_outcome(note)
             self._commit()
             return report
+
+    @staticmethod
+    def _waiting_note(report: SyncReport) -> str | None:
+        """Why some changes were not sent, when it is something a person has to
+        deal with: a file they cite is on neither this computer nor the
+        authority."""
+        if not report.blocked_files:
+            return None
+        names = ", ".join(s[:10] for s in report.blocked_files[:3])
+        return (
+            f"{report.waiting} change(s) are waiting for a file that is not on "
+            f"this computer or the authority ({names}…). Put the file back, or "
+            "remove it from the record, and they will go."
+        )
 
     def _commit_quietly(self) -> None:
         try:
@@ -457,10 +502,37 @@ class SyncService:
                     unavailable.add(sha)
         if not unavailable:
             return entries
-        for i, entry in enumerate(entries):
-            if collect_sha256_refs(entry.new_data or {}) & unavailable:
-                return entries[:i]
-        return entries
+        # Only the things that cite such a file wait (and everything later that
+        # was done to the same thing, to keep its changes in order); the rest
+        # of the changes go. One missing file must not hold up the whole
+        # project, and it must say so.
+        blocked: set[tuple[str, uuid.UUID]] = set()
+        ready: list[SyncEntry] = []
+        for entry in entries:
+            thing = (entry.entity_type, entry.entity_id)
+            if (
+                thing in blocked
+                or collect_sha256_refs(entry.new_data or {}) & unavailable
+            ):
+                blocked.add(thing)
+            else:
+                ready.append(entry)
+        report.blocked_files = sorted(unavailable)
+        for sha in report.blocked_files:
+            users = sorted(
+                {
+                    f"{e.entity_type} {e.entity_id}"
+                    for e in entries
+                    if sha in collect_sha256_refs(e.new_data or {})
+                }
+            )
+            log.warning(
+                "file %s is not on this computer or the authority; held back "
+                "changes to: %s",
+                sha[:12],
+                ", ".join(users[:5]) + (" …" if len(users) > 5 else ""),
+            )
+        return ready
 
     def _note(
         self, results: list[Any], sent: dict[uuid.UUID, SyncEntry], report: SyncReport
@@ -556,7 +628,7 @@ class SyncService:
         interrupted seed can simply be run again."""
         meta = self._repo.meta()
         device_id = str(user_state.device_id_for(meta.project_id))
-        actor = local_actor()
+        actor = local_actor(meta.project_id)
         head = meta.cursor
         problems: list[str] = []
         batch: list[SyncEntry] = []

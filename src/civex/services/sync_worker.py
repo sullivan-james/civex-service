@@ -8,7 +8,7 @@ Whoever hosts it (the server on a thread, `civex sync watch` in a terminal) call
   seconds after the last attempt (so a burst of edits goes in one round), or
 - the interval has passed, to bring in other people's changes.
 
-A failure backs off (doubling, up to 15 minutes) so a server that is down is not
+With the interval set to never, only a request syncs. A failure backs off (doubling, up to 15 minutes) so a server that is down is not
 hammered; a refusal that waiting cannot fix (a revoked token, a different
 project) waits the full 15 minutes and keeps saying why. Pausing stops all of it.
 The sync itself is `SyncService.sync`, which is safe to repeat and holds a lock so
@@ -78,8 +78,10 @@ class SyncWorker:
         now = self._clock()
         asked = self._requested.is_set()
         waiting = now >= self._backoff_until
+        manual_only = config.sync.interval_seconds == 0
         due = asked or (
-            waiting
+            not manual_only
+            and waiting
             and (
                 now >= self._next_interval
                 or (
@@ -92,6 +94,7 @@ class SyncWorker:
             return None
         self._requested.clear()
         self._last_attempt = now
+        log.info("background sync: %s", "requested" if asked else "due")
         try:
             report = ctx.sync_svc.sync()
         except SyncBusy:

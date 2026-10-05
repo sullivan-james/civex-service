@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { settingsApi } from '../../api/settings'
 import { errorMessage } from '../../lib/errors'
 import type { RemoteStatus, SyncConflict } from '../../api/remote'
 import {
@@ -22,6 +24,7 @@ import {
 } from '../ui'
 
 const INTERVALS = [
+  { seconds: 0, label: 'Never (only when I press Sync now)' },
   { seconds: 15, label: 'Every 15 seconds' },
   { seconds: 60, label: 'Every minute' },
   { seconds: 300, label: 'Every 5 minutes' },
@@ -155,6 +158,7 @@ function Following({ s }: { s: RemoteStatus }) {
   const interval = INTERVALS.some((i) => i.seconds === s.interval_seconds)
     ? s.interval_seconds
     : 60
+  const manualOnly = s.interval_seconds === 0
   return (
     <div className="max-w-2xl space-y-5">
       <Card title="Authority">
@@ -171,6 +175,8 @@ function Following({ s }: { s: RemoteStatus }) {
               <Badge variant="accent">Syncing</Badge>
             ) : s.paused ? (
               <Badge>Paused</Badge>
+            ) : manualOnly && s.pending === 0 ? (
+              <Badge>Only when asked</Badge>
             ) : s.last_error ? (
               <Badge variant="attention">Could not sync</Badge>
             ) : s.pending > 0 ? (
@@ -240,8 +246,59 @@ function Following({ s }: { s: RemoteStatus }) {
   )
 }
 
+function NameCard() {
+  const qc = useQueryClient()
+  const { data } = useQuery({
+    queryKey: ['settings', 'identity'],
+    queryFn: settingsApi.getIdentity,
+  })
+  const save = useMutation({
+    mutationFn: (name: string | null) => settingsApi.updateIdentity(name),
+    onSuccess: (saved) => qc.setQueryData(['settings', 'identity'], saved),
+  })
+  const [draft, setDraft] = useState<string | null>(null)
+  if (!data) return null
+  const value = draft ?? data.chosen ?? ''
+  return (
+    <Card title="Your name on changes">
+      <p className="mb-2 text-xs text-fg-muted">
+        Recorded with every change you make in this project. Left empty it is
+        your computer’s user name ({data.default ?? 'unknown'}). It is kept for
+        you on this computer, not in the project.
+      </p>
+      <div className="flex items-center gap-2">
+        <Input
+          aria-label="Your name on changes"
+          value={value}
+          placeholder={data.default ?? ''}
+          onChange={(e) => setDraft(e.target.value)}
+          className="max-w-xs"
+        />
+        <Button
+          size="sm"
+          disabled={save.isPending || value === (data.chosen ?? '')}
+          onClick={() =>
+            save.mutate(value.trim() || null, {
+              onSuccess: () => setDraft(null),
+            })
+          }
+        >
+          Save
+        </Button>
+      </div>
+    </Card>
+  )
+}
+
 export default function SyncSection() {
   const { data } = useRemoteStatus()
   if (!data) return <Skeleton className="h-9 w-80" />
-  return data.configured ? <Following s={data} /> : <ConnectForm />
+  return (
+    <div className="space-y-5">
+      {data.configured ? <Following s={data} /> : <ConnectForm />}
+      <div className="max-w-2xl">
+        <NameCard />
+      </div>
+    </div>
+  )
 }

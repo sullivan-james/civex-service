@@ -44,10 +44,15 @@ def test_existing_history_is_kept_and_the_project_gets_an_id(tmp_path: Path) -> 
 
         tables = set(inspect(conn).get_table_names())
         assert {"sync_meta", "sync_ops", "sync_devices", "sync_conflicts"} <= tables
-        meta = conn.execute(text("SELECT project_id, head_seq, cursor FROM sync_meta")).one()
+        meta = conn.execute(
+            text("SELECT project_id, head_seq, cursor FROM sync_meta")
+        ).one()
         uuid.UUID(str(meta[0]))
         assert (meta[1], meta[2]) == (0, 0)
-        assert conn.execute(text("SELECT apply_state FROM audit_log")).scalar() == "applied"
+        assert (
+            conn.execute(text("SELECT apply_state FROM audit_log")).scalar()
+            == "applied"
+        )
 
         command.downgrade(cfg, _PRE)
         conn.commit()

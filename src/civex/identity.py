@@ -16,9 +16,16 @@ import getpass
 _MAX_LEN = 100
 
 
-def local_actor() -> str | None:
-    """The OS user running civex, or None where there isn't one (some
-    containers run as a uid with no name)."""
+def local_actor(project_id: object | None = None) -> str | None:
+    """Who to record as the author on this machine: the name this user chose for
+    the project (`civex sync user`, Settings), else the OS user running civex, or
+    None where there isn't one (some containers run as a uid with no name)."""
+    if project_id is not None:
+        from civex import user_state
+
+        chosen = user_state.actor_for(str(project_id))
+        if chosen:
+            return chosen[:_MAX_LEN]
     try:
         name = getpass.getuser().strip()
     except (KeyError, OSError, ImportError):

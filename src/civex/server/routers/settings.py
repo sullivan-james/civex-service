@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from civex.config import load_config, save_config
-from civex import launcher
+from civex import launcher, user_state
+from civex.context import AppContext
+from civex.identity import local_actor
+from civex.server.deps import get_ctx
 from civex.domain.exceptions import ConfigError
 from civex.server.models import (
     MapSettingsResponse,
@@ -23,6 +27,47 @@ def _load_config():
         return load_config()
     except ConfigError as e:
         raise HTTPException(500, detail=str(e))
+
+
+class IdentityResponse(BaseModel):
+    name: str | None = Field(description="What changes made here are recorded as.")
+    chosen: str | None = Field(
+        description="The name chosen for this project, or null when none is."
+    )
+    default: str | None = Field(
+        description="What is used when none is chosen: the operating-system user."
+    )
+
+
+class UpdateIdentityRequest(BaseModel):
+    name: str | None = Field(
+        default=None,
+        max_length=100,
+        description="The name to record on changes made here; blank or null goes "
+        "back to the default. Kept for this user and project, not in the project folder.",
+    )
+
+
+def _identity(ctx: AppContext) -> IdentityResponse:
+    project_id = ctx.sync_repo.meta().project_id
+    return IdentityResponse(
+        name=local_actor(project_id),
+        chosen=user_state.actor_for(project_id),
+        default=local_actor(),
+    )
+
+
+@router.get("/identity", response_model=IdentityResponse)
+def get_identity(ctx: AppContext = Depends(get_ctx)):
+    """Who this user appears as on changes to this project."""
+    return _identity(ctx)
+
+
+@router.patch("/identity", response_model=IdentityResponse)
+def update_identity(body: UpdateIdentityRequest, ctx: AppContext = Depends(get_ctx)):
+    """Choose the name recorded on changes made from here (per user and project)."""
+    user_state.set_actor(ctx.sync_repo.meta().project_id, body.name)
+    return _identity(ctx)
 
 
 @router.get("/ui", response_model=UISettingsResponse)

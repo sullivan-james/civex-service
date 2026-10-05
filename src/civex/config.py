@@ -53,6 +53,12 @@ class PluginsConfig:
     default_timeout_seconds: float = 60.0
 
 
+def _interval(value: object) -> int:
+    """Seconds between automatic syncs; 0 means never (only when asked)."""
+    seconds = int(value)  # type: ignore[call-overload]
+    return 0 if seconds <= 0 else max(5, seconds)
+
+
 @dataclass
 class SyncConfig:
     """Keeping this project in step with other copies of it (CIVEX-305): one
@@ -68,7 +74,8 @@ class SyncConfig:
     # Stops the background sync (a manual sync still works). Kept here so every
     # process sees it, like `[automation] paused`.
     paused: bool = False
-    # How often the background sync looks for changes, in seconds.
+    # How often the background sync looks for changes, in seconds. 0 = never:
+    # it syncs only when asked (Sync now, `civex sync`).
     interval_seconds: int = 60
 
 
@@ -349,7 +356,7 @@ def load_config() -> Config:
         else None,
         serve=bool(sync_data.get("serve", False)),
         paused=bool(sync_data.get("paused", False)),
-        interval_seconds=max(5, int(sync_data.get("interval_seconds", 60))),
+        interval_seconds=_interval(sync_data.get("interval_seconds", 60)),
     )
 
     return Config(

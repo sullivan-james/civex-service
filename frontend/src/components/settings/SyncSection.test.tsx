@@ -13,6 +13,7 @@ const json = (body: unknown, status = 200) =>
 
 let status: Record<string, unknown>
 let conflicts: Record<string, unknown>[]
+let identity: Record<string, unknown>
 let calls: { method: string; path: string; body: unknown }[]
 
 const base = {
@@ -33,6 +34,7 @@ const base = {
 beforeEach(() => {
   status = { ...base }
   conflicts = []
+  identity = { name: 'sulli', chosen: null, default: 'sulli' }
   calls = []
   vi.stubGlobal(
     'fetch',
@@ -43,6 +45,11 @@ beforeEach(() => {
       if (url.pathname === '/api/remote/connect') {
         status = { ...status, configured: true, remote: body.url }
         return json({ mode: 'joined' })
+      }
+      if (url.pathname === '/api/settings/identity') {
+        if (init?.method === 'PATCH')
+          identity = { ...identity, chosen: body.name }
+        return json(identity)
       }
       if (url.pathname === '/api/remote/conflicts') return json(conflicts)
       if (url.pathname.endsWith('/resolve')) {
@@ -148,6 +155,47 @@ describe('SyncSection', () => {
       expect(calls.find((c) => c.path.endsWith('/resolve'))?.body).toEqual({
         take: 'mine',
       }),
+    )
+  })
+
+  it('can be set to never sync by itself', async () => {
+    status = { ...base, configured: true, remote: 'https://a.example' }
+    renderSection()
+    const pick = await screen.findByLabelText('How often to look for changes')
+    await userEvent.selectOptions(pick, '0')
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.method === 'PATCH' && c.path === '/api/remote')
+          ?.body,
+      ).toEqual({ interval_seconds: 0 }),
+    )
+    expect(await screen.findByText('Only when asked')).toBeInTheDocument()
+  })
+
+  it('says changes are waiting rather than up to date', async () => {
+    status = {
+      ...base,
+      configured: true,
+      remote: 'https://a.example',
+      pending: 26,
+    }
+    renderSection()
+    expect(
+      await screen.findByText('26 changes waiting to send'),
+    ).toBeInTheDocument()
+  })
+
+  it('lets a person choose the name recorded on their changes', async () => {
+    renderSection()
+    const box = await screen.findByLabelText('Your name on changes')
+    await userEvent.type(box, 'Dana')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(
+        calls.find(
+          (c) => c.method === 'PATCH' && c.path === '/api/settings/identity',
+        )?.body,
+      ).toEqual({ name: 'Dana' }),
     )
   })
 })

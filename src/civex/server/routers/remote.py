@@ -23,7 +23,9 @@ class RemoteStatusResponse(BaseModel):
     remote: str | None = Field(description="The authority's address.")
     project_id: str
     paused: bool = Field(description="The schedule is stopped; Sync now still works.")
-    interval_seconds: int = Field(description="How often it looks for changes.")
+    interval_seconds: int = Field(
+        description="How often it looks for changes; 0 means only when asked."
+    )
     serving: bool = Field(description="This project is itself an authority.")
     pending: int = Field(description="Changes made here that have not been sent.")
     open_conflicts: int = Field(description="Values that did not go in as made.")
@@ -50,7 +52,9 @@ class RemoteConnectResponse(BaseModel):
 class RemoteUpdateRequest(BaseModel):
     paused: bool | None = Field(default=None, description="Stop or start the schedule.")
     interval_seconds: int | None = Field(
-        default=None, ge=5, description="Seconds between looks for changes."
+        default=None,
+        ge=0,
+        description="Seconds between looks for changes; 0 = never (only when asked).",
     )
 
 

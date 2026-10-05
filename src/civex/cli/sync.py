@@ -76,10 +76,54 @@ def now() -> None:
         c.close()
 
 
+@app.command("user")
+def user(
+    name: str = typer.Argument(None, help="The name to record on your changes."),
+    reset: bool = typer.Option(False, "--reset", help="Go back to the default."),
+) -> None:
+    """Show or choose the name your changes to this project are recorded under.
+    The default is your operating-system user. The choice is kept for you and
+    this project, not in the project folder."""
+    from civex import user_state
+    from civex.identity import local_actor
+
+    c = _ctx()
+    try:
+        project_id = c.sync_repo.meta().project_id
+    finally:
+        c.close()
+    if reset or name:
+        user_state.set_actor(project_id, None if reset else name)
+    console.print(f"Recorded as {escape(local_actor(project_id) or '(unknown)')}")
+
+
+@app.command("interval")
+def interval(
+    value: str = typer.Argument(help="Seconds between automatic syncs, or 'never'."),
+) -> None:
+    """Set how often the background sync runs. With 'never' it syncs only when
+    you ask (`civex sync now`, or Sync now in the app)."""
+    try:
+        seconds = 0 if value.lower() == "never" else int(value)
+    except ValueError:
+        raise _fail(ValueError("Give a number of seconds, or 'never'"))
+    c = _ctx()
+    try:
+        c.sync_svc.set_interval(seconds)
+    except CivexError as e:
+        raise _fail(e)
+    finally:
+        c.close()
+    console.print(
+        "Sync only when asked." if seconds == 0 else f"Every {seconds} seconds."
+    )
+
+
 @app.command("watch")
 def watch() -> None:
     """Keep syncing in this terminal until stopped (Ctrl+C): after edits, on the
     interval, and backing off when the authority can't be reached."""
+    import logging
     import threading
 
     from civex.context import build_local_context
@@ -89,6 +133,9 @@ def watch() -> None:
     if not config.sync.remote:
         console.print("[error]No authority is set. Use `civex sync connect`.[/error]")
         raise typer.Exit(1)
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
     console.print(f"Syncing with {config.sync.remote} (Ctrl+C to stop).")
     stop = threading.Event()
     worker = SyncWorker(cli_load_config, build_local_context)
