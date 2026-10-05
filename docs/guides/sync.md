@@ -50,10 +50,13 @@ Set the frequency to **Never** (Settings → Sync, or `civex sync interval never
 to sync only when you press **Sync now** (also in the top bar) or run
 `civex sync`.
 
-If changes cite a file that is on neither your computer nor the authority, only
-those records wait; everything else is sent, and Settings → Sync names the
-problem. The server log has one line per sync (what was received and sent) and a
-warning for anything held back, refused or in conflict.
+Changes and files travel separately, so a missing file never holds a change up.
+If a change cites a file this computer can't read right now (a drive that is
+unplugged, or files you still have to recover), the change is sent and the file
+is remembered as *owed*. Settings → Sync shows how many; they are uploaded by
+themselves as soon as they can be read, whether you plug the drive back in or
+add the same files later (matching content has the same hash). The server log
+has one line per sync, and a warning for anything refused or in conflict.
 
 ## Who changes are recorded as
 

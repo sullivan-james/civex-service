@@ -25,6 +25,7 @@ const base = {
   serving: false,
   pending: 0,
   open_conflicts: 0,
+  files_owed: 0,
   last_synced_at: null,
   last_error: null,
   last_error_at: null,

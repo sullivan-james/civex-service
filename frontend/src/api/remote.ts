@@ -13,6 +13,8 @@ export interface RemoteStatus {
   /** Changes made here that have not been sent. */
   pending: number
   open_conflicts: number
+  /** Files the authority lacks that cannot be read here yet; sent when they can be. */
+  files_owed: number
   last_synced_at: string | null
   last_error: string | null
   last_error_at: string | null

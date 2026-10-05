@@ -339,25 +339,60 @@ def test_one_sync_at_a_time(pair):
     laptop.sync_svc.sync()  # free again
 
 
-def test_a_file_the_device_cannot_read_holds_back_only_what_depends_on_it(
-    pair, authority
-):
-    laptop, _, record = pair
+def _record_with_unreadable_file(laptop, record):
     laptop.schema_svc.add_field("encounter", "scan", "file")
     laptop.commit()
     laptop.sync_svc.sync()
-    ref = laptop.file_svc.store_bytes(b"gone soon", "scan.bin")
+    ref = laptop.file_svc.store_bytes(b"gone for now", "scan.bin")
+    path = laptop.file_svc.object_path(ref.sha256)
+    saved = path.read_bytes()
     laptop.record_svc.update(
         str(record.id), {"site": "a", "depth": 1.0, "scan": ref.to_dict()}
     )
     laptop.commit()
-    laptop.file_svc.object_path(ref.sha256).unlink()  # the drive is unplugged
+    path.unlink()  # the drive is unplugged
+    return ref, path, saved
+
+
+def test_a_file_the_device_cannot_read_does_not_hold_the_change_back(pair, authority):
+    laptop, _, record = pair
+    ref, _path, _saved = _record_with_unreadable_file(laptop, record)
 
     report = laptop.sync_svc.sync()
 
-    assert report.waiting >= 1 and report.pushed == 0
-    assert laptop.sync_repo.count_pending() >= 1
-    assert "scan" not in data(authority, record)
+    assert report.pushed >= 1 and laptop.sync_repo.count_pending() == 0
+    assert data(authority, record)["scan"]["sha256"] == ref.sha256
+    assert not authority.file_svc.exists(ref.sha256)
+    assert report.owed_files == [ref.sha256]
+    assert laptop.sync_svc.status().files_owed == 1
+
+
+def test_the_owed_file_goes_by_itself_when_it_can_be_read_again(pair, authority):
+    laptop, _, record = pair
+    ref, path, saved = _record_with_unreadable_file(laptop, record)
+    laptop.sync_svc.sync()
+    laptop.sync_svc.sync()  # still unplugged: nothing to do, nothing breaks
+    assert laptop.sync_svc.status().files_owed == 1
+
+    path.write_bytes(saved)  # the drive is plugged back in
+    report = laptop.sync_svc.sync()
+
+    assert authority.file_svc.exists(ref.sha256)
+    assert report.files_sent == 1
+    assert laptop.sync_svc.status().files_owed == 0
+
+
+def test_one_lost_file_does_not_hold_up_unrelated_changes(pair, authority):
+    laptop, _, record = pair
+    _record_with_unreadable_file(laptop, record)
+    other = laptop.record_svc.add("study", "encounter", {"site": "b", "depth": 2.0})
+    laptop.commit()
+
+    laptop.sync_svc.sync()
+
+    assert data(authority, other) is not None
+    status = laptop.sync_svc.status()
+    assert status.last_error is None  # owing a file is not a failure
 
 
 def test_files_a_change_cites_are_sent_first(pair, authority):
@@ -411,25 +446,3 @@ def test_once_syncing_every_new_entry_carries_the_device_and_a_rising_clock(
         assert all(stamps) and stamps == sorted(stamps) and len(set(stamps)) == 3
     finally:
         reopened.close()
-
-
-def test_one_lost_file_does_not_hold_up_unrelated_changes_and_says_why(pair, authority):
-    laptop, _, record = pair
-    laptop.schema_svc.add_field("encounter", "scan", "file")
-    laptop.commit()
-    laptop.sync_svc.sync()
-    ref = laptop.file_svc.store_bytes(b"lost", "scan.bin")
-    laptop.record_svc.update(
-        str(record.id), {"site": "a", "depth": 1.0, "scan": ref.to_dict()}
-    )
-    other = laptop.record_svc.add("study", "encounter", {"site": "b", "depth": 2.0})
-    laptop.commit()
-    laptop.file_svc.object_path(ref.sha256).unlink()
-
-    report = laptop.sync_svc.sync()
-
-    assert report.blocked_files == [ref.sha256]
-    assert report.waiting >= 1
-    assert data(authority, other) is not None  # the unrelated record went
-    status = laptop.sync_svc.status()
-    assert status.last_error and "waiting for a file" in status.last_error

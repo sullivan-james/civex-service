@@ -220,10 +220,9 @@ def test_a_name_already_taken_is_refused_not_half_done(world):
     assert phone.sync_repo.pending_entries(10) == []
 
 
-def test_a_record_that_cites_a_file_the_authority_lacks_waits_for_it(world):
+def test_a_record_that_cites_a_file_the_authority_lacks_is_taken_anyway(world):
+    """Data and files converge separately: the change is not held for a file."""
     authority, laptop, phone, record = world
-    from civex.domain.dtos import FileRef  # noqa: F401
-
     laptop.schema_svc.add_field("encounter", "scan", "file")
     laptop.commit()
     push(authority, laptop, "laptop")
@@ -233,33 +232,11 @@ def test_a_record_that_cites_a_file_the_authority_lacks_waits_for_it(world):
     )
     laptop.commit()
 
-    waiting = push(authority, laptop, "laptop")
-    assert statuses(waiting) == ["deferred"]
-    assert (
-        authority.sync_repo.get_op(waiting.results[0].op_id) is None
-    )  # not remembered
-    assert "scan" not in head(authority, record.id)
-
-    authority.file_svc.store_bytes(b"the bytes", "scan.bin")  # the file arrives
-    done = push(authority, laptop, "laptop")
-    assert statuses(done) == ["applied"]
-    assert head(authority, record.id)["scan"]["sha256"] == ref.sha256
-
-
-def test_a_deferred_change_holds_back_the_ones_after_it(world):
-    authority, laptop, _phone, record = world
-    laptop.schema_svc.add_field("encounter", "scan", "file")
-    ref = laptop.file_svc.store_bytes(b"more bytes", "scan.bin")
-    laptop.record_svc.update(
-        str(record.id), {"site": "x", "depth": 1.0, "scan": ref.to_dict()}
-    )
-    laptop.record_svc.update(
-        str(record.id), {"site": "later", "depth": 1.0, "scan": ref.to_dict()}
-    )
-    laptop.commit()
-    push(authority, laptop, "laptop")  # the field
     result = push(authority, laptop, "laptop")
-    assert statuses(result) == ["deferred"]  # one answer: the rest were not tried
+
+    assert statuses(result) == ["applied"]
+    assert head(authority, record.id)["scan"]["sha256"] == ref.sha256
+    assert not authority.file_svc.exists(ref.sha256)  # the bytes follow
 
 
 def test_what_the_authority_numbers_pages_back_in_order(world):

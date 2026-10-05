@@ -23,7 +23,6 @@ from typing import Any
 
 from civex.domain import hlc
 from civex.domain.exceptions import ValidationError
-from civex.domain.file_refs import collect_sha256_refs
 from civex.domain.merge import LIFECYCLE_KEYS, DERIVED_KEYS, merge
 from civex.domain.sync import (
     APPLIED,
@@ -214,13 +213,6 @@ class SyncAuthorityService:
         problem = _unacceptable(entry)
         if problem:
             return self._refuse(device, device_id, entry, problem)
-        missing = self._missing_for(entry)
-        if missing:
-            return OpResult(
-                entry.id,
-                DEFERRED,
-                f"Waiting for {len(missing)} file{'s' if len(missing) != 1 else ''} to arrive",
-            )
         try:
             with self._repo.savepoint():
                 result = self._take(device, device_id, entry)
@@ -258,13 +250,6 @@ class SyncAuthorityService:
             message=why,
         )
         return result
-
-    def _missing_for(self, entry: SyncEntry) -> list[str]:
-        if not entry.new_data:
-            return []
-        return [
-            s for s in collect_sha256_refs(entry.new_data) if not self._files.exists(s)
-        ]
 
     def _take(
         self, device: SyncDeviceDTO, device_id: str | None, entry: SyncEntry

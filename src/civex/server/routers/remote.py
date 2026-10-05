@@ -29,6 +29,10 @@ class RemoteStatusResponse(BaseModel):
     serving: bool = Field(description="This project is itself an authority.")
     pending: int = Field(description="Changes made here that have not been sent.")
     open_conflicts: int = Field(description="Values that did not go in as made.")
+    files_owed: int = Field(
+        description="Files the authority lacks that cannot be read here yet (a drive "
+        "that is unplugged, say). They are sent as soon as they can be."
+    )
     last_synced_at: str | None
     last_error: str | None = Field(
         description="Why the last attempt failed, if it did."
@@ -91,6 +95,7 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         serving=s.serving,
         pending=s.pending,
         open_conflicts=s.open_conflicts,
+        files_owed=s.files_owed,
         last_synced_at=s.last_synced_at,
         last_error=s.last_error,
         last_error_at=s.last_error_at,

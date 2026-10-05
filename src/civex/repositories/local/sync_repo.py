@@ -116,6 +116,14 @@ class LocalSyncRepository:
             last_error_at=_iso(row.last_error_at),
         )
 
+    def owed_files(self) -> list[str]:
+        return list(self._meta_row().owed_files or [])
+
+    def set_owed_files(self, shas: list[str]) -> None:
+        row = self._meta_row()
+        row.owed_files = sorted(set(shas)) or None
+        self._s.flush()
+
     def set_project_id(self, project_id: uuid.UUID) -> None:
         self._meta_row().project_id = project_id
         self._s.flush()

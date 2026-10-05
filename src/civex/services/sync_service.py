@@ -64,9 +64,10 @@ class SyncReport:
     conflicts: int = 0  # values that did not go in as made
     rejected: int = 0  # changes the authority refused
     waiting: int = 0  # changes held back (a file is not available yet)
-    # Files cited by waiting changes that this computer cannot read (not in any
-    # volume it can reach) and the authority does not have.
-    blocked_files: list[str] = field(default_factory=list)
+    # Files the authority still lacks because this computer cannot read them
+    # (a drive that is unplugged, bytes not recovered yet). The changes citing
+    # them have gone; the files follow when they can be read.
+    owed_files: list[str] = field(default_factory=list)
 
     @property
     def changed(self) -> bool:
@@ -87,6 +88,7 @@ class SyncStatus:
     last_error_at: str | None
     running: bool  # a sync is in progress right now
     interval_seconds: int = 60
+    files_owed: int = 0  # files the authority lacks that are not readable here yet
     serving: bool = False  # this project is itself an authority
 
 
@@ -132,6 +134,7 @@ class SyncService:
             last_error_at=meta.last_error_at,
             running=sync_running(self._config.civex_dir),
             interval_seconds=self._config.sync.interval_seconds,
+            files_owed=len(self._repo.owed_files()) if self.configured else 0,
             serving=self._config.sync.serve,
         )
 
@@ -278,7 +281,6 @@ class SyncService:
                 self._repo.record_outcome(str(e))
                 self._commit()
                 raise
-            note = self._waiting_note(report)
             log.info(
                 "sync with %s: received %d, sent %d, files sent %d, conflicts %d, "
                 "refused %d, waiting %d",
@@ -290,25 +292,9 @@ class SyncService:
                 report.rejected,
                 report.waiting,
             )
-            if note:
-                log.warning("sync with %s: %s", self._config.sync.remote, note)
-            self._repo.record_outcome(note)
+            self._repo.record_outcome(None)
             self._commit()
             return report
-
-    @staticmethod
-    def _waiting_note(report: SyncReport) -> str | None:
-        """Why some changes were not sent, when it is something a person has to
-        deal with: a file they cite is on neither this computer nor the
-        authority."""
-        if not report.blocked_files:
-            return None
-        names = ", ".join(s[:10] for s in report.blocked_files[:3])
-        return (
-            f"{report.waiting} change(s) are waiting for a file that is not on "
-            f"this computer or the authority ({names}…). Put the file back, or "
-            "remove it from the record, and they will go."
-        )
 
     def _commit_quietly(self) -> None:
         try:
@@ -328,6 +314,7 @@ class SyncService:
         report = SyncReport()
         report.pulled += self._pull(transport)
         report.pushed += self._push(transport, report)
+        self._send_owed(transport, report)
         if report.pushed or report.conflicts:
             report.pulled += self._pull(transport)
         return report
@@ -487,52 +474,49 @@ class SyncService:
     def _with_files(
         self, transport: SyncTransport, entries: list[SyncEntry], report: SyncReport
     ) -> list[SyncEntry]:
-        """Send the files these changes cite that the authority lacks, and
-        return the changes that may go: up to the first one citing a file this
-        device can't read right now (a drive that is unplugged), since later
-        changes may depend on it."""
+        """Send the files these changes cite that the authority lacks. The
+        changes always go: a file this computer cannot read right now (a drive
+        that is unplugged, bytes still to be recovered) is *owed*, remembered,
+        and uploaded as soon as it can be read. Data and files converge
+        separately, so a missing file never holds up a change, and when it turns
+        up nothing has to be done by hand."""
         cited = {s for e in entries for s in collect_sha256_refs(e.new_data or {})}
-        unavailable: set[str] = set()
         if cited:
+            owed = set(self._repo.owed_files())
             for sha in transport.missing_files(sorted(cited)):
-                try:
-                    transport.upload_file(sha, self._files.object_path(sha))
-                    report.files_sent += 1
-                except (FileNotFoundError, VolumeUnavailableError):
-                    unavailable.add(sha)
-        if not unavailable:
-            return entries
-        # Only the things that cite such a file wait (and everything later that
-        # was done to the same thing, to keep its changes in order); the rest
-        # of the changes go. One missing file must not hold up the whole
-        # project, and it must say so.
-        blocked: set[tuple[str, uuid.UUID]] = set()
-        ready: list[SyncEntry] = []
-        for entry in entries:
-            thing = (entry.entity_type, entry.entity_id)
-            if (
-                thing in blocked
-                or collect_sha256_refs(entry.new_data or {}) & unavailable
-            ):
-                blocked.add(thing)
-            else:
-                ready.append(entry)
-        report.blocked_files = sorted(unavailable)
-        for sha in report.blocked_files:
-            users = sorted(
-                {
-                    f"{e.entity_type} {e.entity_id}"
-                    for e in entries
-                    if sha in collect_sha256_refs(e.new_data or {})
-                }
+                if not self._upload(transport, sha, report):
+                    owed.add(sha)
+            self._repo.set_owed_files(sorted(owed))
+        return entries
+
+    def _upload(self, transport: SyncTransport, sha: str, report: SyncReport) -> bool:
+        try:
+            transport.upload_file(sha, self._files.object_path(sha))
+        except (FileNotFoundError, VolumeUnavailableError):
+            return False
+        report.files_sent += 1
+        return True
+
+    def _send_owed(self, transport: SyncTransport, report: SyncReport) -> None:
+        """Upload files owed from earlier, now that they may be readable. One
+        the authority has meanwhile (another device sent it) is simply dropped."""
+        owed = self._repo.owed_files()
+        if not owed:
+            return
+        still = set(transport.missing_files(owed))
+        for sha in sorted(still):
+            if self._upload(transport, sha, report):
+                still.discard(sha)
+        report.owed_files = sorted(still)
+        self._repo.set_owed_files(sorted(still))
+        self._commit()
+        if still:
+            log.info(
+                "sync with %s: %d file(s) still owed (not readable here yet): %s",
+                self._config.sync.remote,
+                len(still),
+                ", ".join(x[:10] for x in sorted(still)[:5]),
             )
-            log.warning(
-                "file %s is not on this computer or the authority; held back "
-                "changes to: %s",
-                sha[:12],
-                ", ".join(users[:5]) + (" …" if len(users) > 5 else ""),
-            )
-        return ready
 
     def _note(
         self, results: list[Any], sent: dict[uuid.UUID, SyncEntry], report: SyncReport
