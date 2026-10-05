@@ -92,10 +92,23 @@ class SchemaDTO:
     # Fields deleted from this schema and still restorable. `fields` holds only
     # the live ones, so nothing that reads a schema sees a deleted field.
     deleted_fields: list[FieldDTO] = field(default_factory=list)
+    # Uniqueness policies: each a list of this schema's own field ids. See
+    # domain/uniqueness.py.
+    unique_keys: list[list[str]] = field(default_factory=list)
 
     @property
     def display_name(self) -> str:
         return display_label(self.name, self.label)
+
+    @property
+    def unique_key_names(self) -> list[list[str]]:
+        """`unique_keys` by field name; a key naming a field that's gone is dropped."""
+        by_id = {str(f.id): f.name for f in self.fields}
+        return [
+            [by_id[i] for i in key]
+            for key in self.unique_keys
+            if all(i in by_id for i in key)
+        ]
 
     def to_dict(self) -> dict[str, Any]:
         # fields excluded — it's a loaded relationship, not a scalar property
@@ -106,6 +119,7 @@ class SchemaDTO:
             "description": self.description,
             "parent_id": str(self.parent_id) if self.parent_id else None,
             "display_template": self.display_template,
+            "unique_keys": self.unique_keys,
             "created_at": self.created_at.isoformat(),
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
@@ -125,6 +139,7 @@ class SchemaDTO:
                 if d.get("display_fields")
                 else None
             ),
+            unique_keys=d.get("unique_keys") or [],
             created_at=datetime.fromisoformat(d["created_at"]),
             deleted_at=_parse_dt(d.get("deleted_at")),
         )
@@ -670,6 +685,45 @@ class BlockerDTO:
 
 
 @dataclass
+class RestoreConflictDTO:
+    """Why a deleted record can't come back although nothing above it is
+    deleted: while it was gone, another record took the values of a uniqueness
+    key (`fields`). Resolving it means changing or deleting `existing_id`, or
+    leaving this one deleted."""
+
+    record_id: (
+        uuid.UUID
+    )  # the record that can't come back (may be below the one asked for)
+    record_name: str
+    existing_id: str
+    existing_name: str
+    fields: list[str]
+
+    @property
+    def message(self) -> str:
+        names = (
+            self.fields[0]
+            if len(self.fields) == 1
+            else ", ".join(self.fields[:-1]) + " and " + self.fields[-1]
+        )
+        return (
+            f"'{self.record_name}' can't come back: '{self.existing_name}' now has "
+            f"the same {names}, and these must be unique. Change or delete "
+            f"'{self.existing_name}' first, or leave this one deleted."
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "record_id": str(self.record_id),
+            "record_name": self.record_name,
+            "existing_id": self.existing_id,
+            "existing_name": self.existing_name,
+            "fields": self.fields,
+            "message": self.message,
+        }
+
+
+@dataclass
 class RestorePlanDTO:
     """What restoring something from Recently Deleted would do, worked out
     without doing it: whether it can be done, what is in the way, and what
@@ -697,14 +751,25 @@ class RestorePlanDTO:
     # (each would come back by itself, not with what was deleted alongside it).
     # Restoring just this record then brings back `parents_needed + 1`.
     parents_needed: int | None = None
+    # A live record has taken the unique values of one that would come back.
+    conflict: RestoreConflictDTO | None = None
 
     @property
     def can_restore(self) -> bool:
-        return self.blocked_by is None and self.reason is None
+        return self.blocked_by is None and self.reason is None and self.conflict is None
 
     @property
     def blocked_message(self) -> str | None:
         """Why it can't be restored, in plain words; None when it can."""
+        return self.held_back_message or (
+            self.conflict.message if self.conflict else None
+        )
+
+    @property
+    def held_back_message(self) -> str | None:
+        """Why it is held back by something deleted (or a taken field name),
+        as opposed to a clash of unique values (`conflict`), which restoring
+        less (`only_this`) can sidestep."""
         if self.reason:
             return self.reason
         b = self.blocked_by
@@ -734,6 +799,7 @@ class RestorePlanDTO:
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
             "parents_needed": self.parents_needed,
             "blocked": self.blocked_message,
+            "conflict": self.conflict.to_dict() if self.conflict else None,
             "can_restore": self.can_restore,
         }
 

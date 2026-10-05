@@ -103,6 +103,11 @@ class Schema(Base):
     # Template naming this schema's records (domain/templating.py); null means
     # "use the first plain value on the record".
     display_template: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # Uniqueness policies: a list of keys, each a list of this schema's own
+    # field ids. No two live records of the schema may share a key's values
+    # within the same parent (or, at the top level, the same collection).
+    # Enforced by RecordService, not the database (see domain/uniqueness.py).
+    unique_keys: Mapped[list[list[str]] | None] = mapped_column(_JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
     # Soft-delete marker. NULL = live. Set instead of a hard DELETE so a
     # schema (and, via SchemaRepository's cascade, the records typed by it)

@@ -254,8 +254,14 @@ def run(
         timeout = step.timeout if step.timeout is not None else default_timeout_seconds
         try:
             result = registration.invoke(inputs, config, ctx, timeout)
+            refused = ctx.take_duplicates()
+            if refused:
+                # A step that skips a row a uniqueness policy refused and
+                # carries on must still say which records it collided with.
+                result.outputs = {**result.outputs, "duplicates": refused}
             _assert_json_safe_outputs(step.id, step.plugin, result.outputs)
         except Exception as e:
+            ctx.take_duplicates()
             # Attach the step id and re-raise unchanged. The exception keeps
             # its own type and kind -- this is the one place that knows which
             # step was running, and a job error that doesn't name the failing

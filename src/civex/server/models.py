@@ -92,6 +92,14 @@ class SchemaResponse(BaseModel):
         ),
     )
     fields: list[FieldResponse]
+    unique_keys: list[list[str]] = Field(
+        default_factory=list,
+        description=(
+            "Uniqueness policies: each a list of this schema's own field names "
+            "whose values no two records may share, within the same parent "
+            "record (or the same collection, for a top-level record)."
+        ),
+    )
     deleted_at: datetime | None = Field(
         default=None,
         description="When this schema was soft-deleted. Null means live.",
@@ -107,8 +115,19 @@ class SchemaResponse(BaseModel):
             parent_id=str(dto.parent_id) if dto.parent_id else None,
             display_template=dto.display_template,
             fields=[FieldResponse.from_dto(f) for f in dto.fields],
+            unique_keys=dto.unique_key_names,
             deleted_at=dto.deleted_at,
         )
+
+
+class SetUniqueKeysRequest(BaseModel):
+    keys: list[list[str]] = Field(
+        description=(
+            "The schema's complete list of uniqueness keys, replacing the "
+            "current one; each key is a list of the schema's own field names. "
+            "An empty list removes every policy."
+        ),
+    )
 
 
 class PreviewNameRequest(BaseModel):
@@ -1529,6 +1548,17 @@ class BlockerResponse(BaseModel):
     name: str = Field(description="What to call it: a name, or a record's name.")
 
 
+class RestoreConflictResponse(BaseModel):
+    record_id: str = Field(description="The record that can't come back.")
+    record_name: str
+    existing_id: str = Field(
+        description="The live record that now holds the same unique values."
+    )
+    existing_name: str
+    fields: list[str] = Field(description="The unique key's field names.")
+    message: str = Field(description="The whole explanation, in plain words.")
+
+
 class RestorePlanResponse(BaseModel):
     kind: str = Field(description="record, collection, schema or field.")
     id: str
@@ -1564,6 +1594,12 @@ class RestorePlanResponse(BaseModel):
     blocked: str | None = Field(
         default=None,
         description="Why it can't be restored yet, in plain words. Null when it can.",
+    )
+    conflict: RestoreConflictResponse | None = Field(
+        default=None,
+        description="Set when another record has taken the values of a "
+        "uniqueness key while this one was deleted: restoring is refused until "
+        "that record is changed or deleted.",
     )
     can_restore: bool
 

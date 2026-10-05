@@ -7,7 +7,11 @@ from typing import Any
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field
 
-from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.domain.exceptions import (
+    DuplicateRecordError,
+    NotFoundError,
+    ValidationError,
+)
 from civex.plugins.base import Tier0Plugin, WorkflowContext
 
 log = logging.getLogger(__name__)
@@ -173,6 +177,9 @@ class Plugin(Tier0Plugin):
                         key_value,
                     )
                     updated += 1
+                except DuplicateRecordError as e:
+                    log.warning("  ✗ cannot update %s: %s", filename, e)
+                    unmatched.append(f"{filename} (not saved: {e})")
                 except (ValidationError, NotFoundError) as e:
                     # Symmetric with the create branch below: a schema
                     # restriction violation, or the matched record being
@@ -206,6 +213,9 @@ class Plugin(Tier0Plugin):
                         key_value,
                     )
                     created += 1
+                except DuplicateRecordError as e:
+                    log.warning("  ✗ cannot create %s: %s", filename, e)
+                    unmatched.append(f"{filename} (not saved: {e})")
                 except ValidationError as e:
                     log.warning(
                         "  ✗ cannot create %s (key=%s): %s",
