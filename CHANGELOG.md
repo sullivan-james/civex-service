@@ -20,6 +20,22 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## Unreleased — syncing between machines
+
+### Breaking
+
+- Migration `c9e1f4a7b3d2` adds the sync tables, indexes on `audit_log`, and
+  `audit_log.apply_state`. It runs automatically; existing history is kept.
+
+### Added
+
+- **Sync with an authority** (`civex sync`, `civex clone`): a project can follow
+  another civex over HTTP. Changes merge field by field; the authority's value
+  wins a clash and yours is kept as a conflict you can take back. Retries are
+  safe, and a dropped connection resumes. See the Syncing guide.
+- `civex sync authority enable` + `civex sync device add` turn a server into an
+  authority; remote hosts reach only `/api/sync/v1/`.
+
 ## v1.2.1 — history records every change (2026-10-05)
 
 ### Fixes
