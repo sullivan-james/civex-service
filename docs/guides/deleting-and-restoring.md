@@ -59,6 +59,8 @@ fields are cleared instead.
 === "Web UI"
     Go to **Activity** in the sidebar and press **Deleted**. Search or filter to find the item, and click **Restore** on its row; or click **Restore all N** to restore everything listed. A deletion that took many records with it (a bulk delete, a tree) is one line. A window says what will come back and where it will go, and after you confirm, a message names what was restored and links to it.
 
+A record can also be refused because a schema's [uniqueness rule](schemas-and-fields.md#keeping-records-unique) would be broken: another record took its values while it was deleted. The Restore window names that record and offers to open it; change or delete it, then restore. Bulk restores skip such records and report them as held back.
+
 Restoring a **field** brings it back to its schema with every record's value for
 it. It can't come back while its schema is deleted (restore the schema first;
 the window offers it), or while another field on the schema has taken its name

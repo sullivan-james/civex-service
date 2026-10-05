@@ -66,6 +66,31 @@ Fields a schema inherits from its parent can be used like its own; the builder l
 
 The same builder names **downloads**: a `file` field's *Download file name* rule takes a template too, where `{ext}` is the file's extension. There, a missing value makes the download keep its original name instead of a partial one.
 
+## Keeping records unique
+
+A schema can say that no two of its records may hold the same values in a set of fields: a plot number within a site, a recording number within an encounter. Open the schema's **Uniqueness** tab, tick the fields and press **Add rule**, or from the CLI:
+
+```bash
+civex schema add-unique plot site number    # no two plots may share both
+civex schema unique plot                    # list the rules
+civex schema remove-unique plot site number
+```
+
+A rule is checked among the records of that schema **under the same parent record** or, for a top-level record, **in the same collection**. The same values in another encounter, or another collection, are fine. Some details:
+
+- A record with a **blank** in any of a rule's fields isn't held to it (use *required* to insist on a value).
+- A rule uses the schema's **own** fields, of types that compare as plain values: numbers, text, dates, yes/no, choices, links and references. Files, locations, tags and lists can't be part of one.
+- A **deleted** record frees its values; it is checked again if you restore it.
+- You can't add a rule while records already break it. The message says how many sets of records clash and names some, so you can fix them first.
+- Renaming a field keeps the rules that use it. Deleting a field removes them.
+- Saving a record never fails because of an *old* duplicate it already had, only if the rule's values change into a clash.
+
+When a save is refused, the message names the record that already has the values, so you can open it. This applies everywhere a record is written: the web form, the CLI, imports and workflows.
+
+**Workflows.** A row a workflow step can't save because of a rule is skipped like any other row that fails validation (the step reports it as skipped or unmatched, and the run is marked as having problems). The step's output also has a `duplicates` list naming, for each refused row, the record it collided with. A step that doesn't skip (such as *Save field*) fails the run with the same message.
+
+**Restoring.** A deleted record can't come back while another record has taken its values. Its Restore window says which one (with a button to open it) and what to do: change or delete that record first, or leave this one deleted. **Restore all** and **Restore N selected** bring back everything they can, leave the clashing records deleted and count them as held back, rather than stopping.
+
 ## Creating a schema
 
 === "CLI"

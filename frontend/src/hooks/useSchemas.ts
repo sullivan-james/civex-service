@@ -89,6 +89,16 @@ export function useCreateSchema() {
   })
 }
 
+export function useSetUniqueKeys(name: string) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: (keys: string[][]) => schemasApi.setUniqueKeys(name, keys),
+    onSuccess: () => toast.success(`Uniqueness rules for "${name}" saved`),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
+  })
+}
+
 export function useUpdateSchema(name: string) {
   const qc = useQueryClient()
   const toast = useToast()

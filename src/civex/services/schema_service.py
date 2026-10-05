@@ -24,6 +24,7 @@ from civex.domain.field_descriptors import (
 )
 from civex.domain.naming import is_slug, slugify, validate_name
 from civex.domain.timezones import validate_timezone
+from civex.domain.uniqueness import UNIQUE_DTYPES, normalise_keys
 from civex.repositories.protocols import (
     AuditRepository,
     RecordRepository,
@@ -377,6 +378,66 @@ class SchemaService:
             )
         return updated
 
+    def set_unique_keys(self, name: str, keys: list[list[str]]) -> SchemaDTO:
+        """Replace the schema's uniqueness policies. Each key is a list of the
+        schema's own field names that no two records may share the values of
+        (under the same parent record, or in the same collection at the top
+        level). Refused when existing records already break a key being added,
+        naming some of them: the policy would be violated from the start."""
+        schema = self.get(name)
+        own = {f.name: f for f in schema.fields}
+        ids: list[list[str]] = []
+        for key in keys:
+            if not key:
+                raise ValidationError("A uniqueness key needs at least one field")
+            if len(set(key)) != len(key):
+                raise ValidationError(
+                    f"A uniqueness key can't repeat a field: {', '.join(key)}"
+                )
+            for fname in key:
+                f = own.get(fname)
+                if f is None:
+                    raise NotFoundError(
+                        f"Field '{fname}' not found on schema '{name}' "
+                        "(a key uses the schema's own fields)"
+                    )
+                if f.dtype not in UNIQUE_DTYPES:
+                    raise ValidationError(
+                        f"Field '{fname}' is a {f.dtype} field, which can't be part "
+                        f"of a uniqueness key (use one of: "
+                        f"{', '.join(sorted(UNIQUE_DTYPES))})"
+                    )
+            ids.append([str(own[fname].id) for fname in key])
+        ids = normalise_keys(ids)
+
+        had = {frozenset(k) for k in schema.unique_keys}
+        id_to_name = {str(f.id): f.name for f in schema.fields}
+        for key in ids:
+            if frozenset(key) in had or self._records is None:
+                continue
+            groups = self._records.key_duplicates(schema.id, key)
+            if groups:
+                shown = "; ".join(
+                    ", ".join(str(i)[:8] for i in g[:4]) + (" …" if len(g) > 4 else "")
+                    for g in groups[:3]
+                )
+                raise ValidationError(
+                    f"Can't require ({', '.join(id_to_name[i] for i in key)}) to be "
+                    f"unique: {len(groups)} set(s) of existing records already share "
+                    f"those values (e.g. records {shown}). Change or delete the "
+                    "duplicates first."
+                )
+
+        old_dict = schema.to_dict()
+        updated = self._repo.update(
+            schema.id, name=None, description=None, unique_keys=ids
+        )
+        if self._audit and updated.unique_keys != schema.unique_keys:
+            self._audit.log_change(
+                "update", "schema", updated.id, old_dict, updated.to_dict()
+            )
+        return updated
+
     def _reference_targets(self, schema: SchemaDTO) -> dict[str, set[str]]:
         """For each single-record reference field on `schema` (own or inherited)
         that names its target schema, the field names of that target schema.
@@ -584,9 +645,19 @@ class SchemaService:
                 f"Field '{field_name}' not found on schema '{schema_name}'"
             )
         holders = self._template_holders(field)
+        # A uniqueness policy can't outlive one of its fields.
+        kept_keys = [k for k in schema.unique_keys if str(field.id) not in k]
         if self._audit:
             self._audit.log_change("delete", "field", field.id, field.to_dict(), None)
         self._repo.delete_field(field.id)
+        if len(kept_keys) != len(schema.unique_keys):
+            updated = self._repo.update(
+                schema.id, name=None, description=None, unique_keys=kept_keys
+            )
+            if self._audit:
+                self._audit.log_change(
+                    "update", "schema", updated.id, schema.to_dict(), updated.to_dict()
+                )
         self._rewrite_templates(
             holders, lambda tpl, via: templating.remove_field(tpl, field_name, via)
         )

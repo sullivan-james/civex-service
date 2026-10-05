@@ -114,6 +114,76 @@ def schema_show(name: str = typer.Argument(..., help="Schema name")) -> None:
             else f"↑ {rf.source_schema_name}",
         )
     console.print(table)
+    for key in schema.unique_key_names:
+        console.print(f"  Unique: {', '.join(key)}")
+
+
+def _unique_fields_arg() -> Any:
+    return typer.Argument(..., help="The fields of the key (the schema's own)")
+
+
+@app.command("unique")
+def schema_unique(name: str = typer.Argument(..., help="Schema name")) -> None:
+    """List a schema's uniqueness keys."""
+    ctx = _ctx()
+    try:
+        keys = ctx.schema_svc.get(name).unique_key_names
+    except NotFoundError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    if not keys:
+        console.print(f"Schema '{name}' has no uniqueness keys.")
+        return
+    for key in keys:
+        console.print(f"  unique: {', '.join(key)}")
+
+
+@app.command("add-unique")
+def schema_add_unique(
+    name: str = typer.Argument(..., help="Schema name"),
+    fields: list[str] = _unique_fields_arg(),
+) -> None:
+    """Require a combination of fields to be unique.
+
+    No two records of the schema may then hold the same values in all of the
+    given fields, within the same parent record (or the same collection, for
+    a top-level record). A record with a blank in any of them is not
+    constrained. Refused while existing records already share values.
+    """
+    ctx = _ctx()
+    try:
+        current = ctx.schema_svc.get(name).unique_key_names
+        ctx.schema_svc.set_unique_keys(name, [*current, fields])
+        ctx.commit()
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    console.print(
+        f"[success]'{name}' records must now have a unique ({', '.join(fields)}).[/success]"
+    )
+
+
+@app.command("remove-unique")
+def schema_remove_unique(
+    name: str = typer.Argument(..., help="Schema name"),
+    fields: list[str] = _unique_fields_arg(),
+) -> None:
+    """Remove a uniqueness key (give the same fields it was added with)."""
+    ctx = _ctx()
+    try:
+        current = ctx.schema_svc.get(name).unique_key_names
+        remaining = [k for k in current if set(k) != set(fields)]
+        if len(remaining) == len(current):
+            console.print(
+                f"[error]'{name}' has no uniqueness key on ({', '.join(fields)}).[/error]"
+            )
+            raise typer.Exit(1)
+        ctx.schema_svc.set_unique_keys(name, remaining)
+        ctx.commit()
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    console.print(f"[success]Removed the unique ({', '.join(fields)}).[/success]")
 
 
 def _parse_bbox(text: str) -> list[float]:

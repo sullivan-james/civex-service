@@ -106,6 +106,16 @@ def _exists_down(hops: int, schema_id: uuid.UUID | None, predicate):
     return q.where(*conds, predicate(last)).correlate(Record).exists()
 
 
+def _canonical(value: Any) -> Any:
+    """`value` as find_key_match compares it: numbers as numbers (1 == 1.0),
+    and a bool never equal to a number."""
+    if isinstance(value, bool):
+        return ("bool", value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    return value
+
+
 def _coerce_json_value(v: str) -> Any:
     """Parse v as JSON so JSONB @> containment is type-correct (e.g. "30" → 30)."""
     try:
@@ -581,6 +591,57 @@ class LocalRecordRepository:
         row.data = data
         self._s.flush()
         return _to_dto(row)
+
+    def find_key_match(
+        self,
+        dataset_id: uuid.UUID,
+        schema_id: uuid.UUID,
+        parent_record_id: uuid.UUID | None,
+        key: dict[str, Any],
+        exclude_id: uuid.UUID | None = None,
+        include_deleted: bool = False,
+    ) -> RecordDTO | None:
+        """A record of the schema, in the same place (collection and parent),
+        holding exactly `key`'s values (field id -> scalar). Live ones only
+        unless `include_deleted`; `exclude_id` leaves out the record being
+        saved."""
+        q = self._s.query(Record).filter(
+            Record.dataset_id == dataset_id, Record.schema_id == schema_id
+        )
+        if not include_deleted:
+            q = q.filter(Record.deleted_at.is_(None))
+        if parent_record_id is None:
+            q = q.filter(Record.parent_record_id.is_(None))
+        else:
+            q = q.filter(Record.parent_record_id == parent_record_id)
+        if exclude_id is not None:
+            q = q.filter(Record.id != exclude_id)
+        for field_id, value in key.items():
+            q = q.filter(_typed_comparison(Record.data[field_id], "eq", value))
+        row = q.order_by(Record.created_at).first()
+        return _to_dto(row) if row else None
+
+    def key_duplicates(
+        self, schema_id: uuid.UUID, field_ids: list[str]
+    ) -> list[list[uuid.UUID]]:
+        """Groups of live records of the schema that already share `field_ids`'
+        values in the same place (collection and parent): each group is the ids
+        of two or more records. Records with a blank in the key are skipped."""
+        from civex.domain.uniqueness import key_values
+
+        groups: dict[tuple, list[uuid.UUID]] = {}
+        rows = self._s.execute(
+            select(Record.id, Record.dataset_id, Record.parent_record_id, Record.data)
+            .where(Record.schema_id == schema_id, Record.deleted_at.is_(None))
+            .order_by(Record.created_at)
+        ).yield_per(1000)
+        for rid, dataset_id, parent_id, data in rows:
+            values = key_values(data or {}, field_ids)
+            if values is None:
+                continue
+            marker = (dataset_id, parent_id, tuple(_canonical(v) for v in values))
+            groups.setdefault(marker, []).append(rid)
+        return [ids for ids in groups.values() if len(ids) > 1]
 
     def subtree_levels(
         self, root_ids: list[uuid.UUID], deleted: bool | None = None
