@@ -20,6 +20,24 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## v1.2.1 — history records every change (2026-10-05)
+
+### Fixes
+
+- **Reordering a schema's fields now appears in history.** It wrote no entry,
+  so the new order was in the database but nowhere in the history (and would
+  never have reached another device once sync exists). Each field that moved is
+  recorded as an edit of that field.
+- **Renaming or deleting a field now records the name templates it rewrites.**
+  A schema's record-name template, or a file field's download-name template,
+  that used the field was updated without an entry; each template changed is
+  now an edit of its schema or field in history.
+
+A new test (`tests/services/test_audit_replay.py`) does everything a person can
+do to schemas, fields, collections, views and records and checks that the last
+history entry about each thing matches the database, so the next change that
+forgets to write history fails it.
+
 ## v1.2.0 — uniqueness policies, recoverable fields, old sync removed (2026-10-05)
 
 ### Added
