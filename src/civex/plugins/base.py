@@ -7,6 +7,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from civex.domain.dtos import DatasetDTO, FileRef, RecordDTO, SchemaDTO
+from civex.domain.exceptions import DuplicateRecordError
 from civex.domain.file_refs import without_file_locations
 from civex_plugin_sdk.plugin_base import PluginBase
 
@@ -115,6 +116,11 @@ class WorkflowContext:
     # touched more than once in one run (e.g. created, then corrected by a
     # later step) appears once, with its most recent action.
     affected_records: list[dict[str, Any]] = field(default_factory=list)
+    # Writes the run attempted that a uniqueness policy refused, since the last
+    # step finished (see take_duplicates). A step that skips such a row and
+    # carries on would otherwise leave no trace of *which* record it collided
+    # with; the executor adds these to that step's outputs.
+    duplicates: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # However the record was built, a workflow sees a file's identity, not
@@ -158,10 +164,29 @@ class WorkflowContext:
             return None
         return {"job_id": self.job_id, "workflow": self.workflow_name}
 
-    def update_record(self, record_id: str, data: dict[str, Any]) -> RecordDTO:
-        dto = self._app_ctx.record_svc.update(
-            record_id, data, _job_depth=self.job_depth + 1, _cause=self._cause
+    def _note_duplicate(self, e: DuplicateRecordError) -> None:
+        self.duplicates.append(
+            {
+                "message": str(e),
+                "fields": e.fields,
+                "existing_record_id": e.existing_id,
+                "existing_record": e.existing_name,
+            }
         )
+
+    def take_duplicates(self) -> list[dict[str, Any]]:
+        """The refused writes noted since the last call, clearing the list."""
+        taken, self.duplicates = self.duplicates, []
+        return taken
+
+    def update_record(self, record_id: str, data: dict[str, Any]) -> RecordDTO:
+        try:
+            dto = self._app_ctx.record_svc.update(
+                record_id, data, _job_depth=self.job_depth + 1, _cause=self._cause
+            )
+        except DuplicateRecordError as e:
+            self._note_duplicate(e)
+            raise
         self._note_affected(dto, "updated")
         return dto
 
@@ -192,14 +217,18 @@ class WorkflowContext:
         data: dict[str, Any],
         context_record_id: str | None = None,
     ) -> RecordDTO:
-        dto = self._app_ctx.record_svc.add(
-            dataset_name,
-            schema_name,
-            data,
-            parent_record_id=context_record_id or str(self.record.id),
-            _job_depth=self.job_depth + 1,
-            _cause=self._cause,
-        )
+        try:
+            dto = self._app_ctx.record_svc.add(
+                dataset_name,
+                schema_name,
+                data,
+                parent_record_id=context_record_id or str(self.record.id),
+                _job_depth=self.job_depth + 1,
+                _cause=self._cause,
+            )
+        except DuplicateRecordError as e:
+            self._note_duplicate(e)
+            raise
         self._note_affected(dto, "created")
         return dto
 

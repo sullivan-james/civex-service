@@ -22,6 +22,10 @@ export interface Schema {
   parent_id: string | null
   /** Template naming this schema's records; null means the first plain value. */
   display_template: string | null
+  /** Uniqueness rules: each a list of this schema's own field names whose
+   * values no two records may share (within the same parent record, or the
+   * same collection for a top-level record). */
+  unique_keys?: string[][]
   fields: Field[]
   /** When this schema was soft-deleted. Null means live. */
   deleted_at: string | null
@@ -127,6 +131,8 @@ export const schemasApi = {
       display_template?: string
     },
   ) => api.patch<Schema>(`/schemas/${name}`, body),
+  setUniqueKeys: (name: string, keys: string[][]) =>
+    api.put<Schema>(`/schemas/${name}/unique-keys`, { keys }),
   delete: (name: string) => api.delete<void>(`/schemas/${name}`),
   listDeleted: () => api.get<Schema[]>('/schemas/deleted'),
   restore: (name: string) => api.post<Schema>(`/schemas/${name}/restore`, {}),

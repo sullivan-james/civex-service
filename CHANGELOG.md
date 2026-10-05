@@ -20,9 +20,23 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
-## v1.2.0 — old push/pull sync removed (2026-10-05)
+## v1.2.0 — uniqueness policies, recoverable fields, old sync removed (2026-10-05)
 
 ### Added
+
+- **Uniqueness policies on schemas.** A schema can declare keys (combinations
+  of its own fields) that no two live records may share, within the same
+  parent record or, for a top-level record, the same collection. Records with
+  a blank in a key's fields aren't held to it. Enforced wherever a record is
+  written (form, CLI, import, workflows); a refusal names the existing record.
+  A policy can't be added while records already break it. Restoring a record
+  whose values were taken meanwhile is refused with the same explanation
+  (the restore window offers to open the other record), and Restore all /
+  Restore selected leave such records deleted and count them as held back.
+  Workflow steps that skip a refused row add a `duplicates` output naming what
+  each collided with. Schema page **Uniqueness** tab; CLI `civex schema
+  add-unique | remove-unique | unique`; `PUT /schemas/{name}/unique-keys`;
+  carried in dump/restore.
 
 - History now records who made each change. Every new entry stores the
   operating-system user running civex (`civex.identity.local_actor`), shown as
@@ -81,6 +95,17 @@ from the next tag forward.
   `schema_name`/`deleted_at` on restore plans, `fields` on the restore-all
   plan, and `GET|POST /schemas/{schema}/fields/{field_id}/restore[-plan]`.
 
+### Fixes
+
+- A custom plugin could keep failing with `did not find executable at ...
+  \Temp\civex-plugin-...\python.exe` after the v1.1.4 fix, because `uv`
+  reuses the environment it built for the plugin and that environment still
+  pointed at a Python from the earlier failed run. `civex doctor` now finds
+  cached plugin environments whose Python no longer exists, and
+  `civex doctor --fix` removes them (`uv` rebuilds each on the plugin's next
+  run, so it only costs a slower first run). The plugin error itself now says
+  to run it.
+
 ### Breaking
 
 - **The old push/pull sync is removed.** It had no server to talk to and no
@@ -102,6 +127,9 @@ from the next tag forward.
 
 ### Migration
 
+- `a3d8f0b6c125` adds a nullable `schemas.unique_keys` JSON column (uniqueness
+  policies). It runs automatically and changes nothing until a policy is
+  added. Downgrading drops the policies.
 - `b7f2c9a14d36` adds `fields.deleted_at` and replaces the one-name-per-schema
   rule with one among live fields. Existing fields are untouched. Downgrading
   deletes any deleted fields (a deleted field can share a name with a live
@@ -111,19 +139,6 @@ from the next tag forward.
   `hub_seq`, `sync_state`; only `actor` is written so far). Every history entry is
   kept. `audit_log` is rebuilt once, which can take a moment on a project with
   a very long history. Downgrading recreates an empty `commits` table.
-
-## v1.1.5 — repair broken plugin environments (2026-10-05)
-
-### Fixes
-
-- A custom plugin could keep failing with `did not find executable at ...
-  \Temp\civex-plugin-...\python.exe` after the v1.1.4 fix, because `uv`
-  reuses the environment it built for the plugin and that environment still
-  pointed at a Python from the earlier failed run. `civex doctor` now finds
-  cached plugin environments whose Python no longer exists, and
-  `civex doctor --fix` removes them (`uv` rebuilds each on the plugin's next
-  run, so it only costs a slower first run). The plugin error itself now says
-  to run it.
 
 ## v1.1.4 — Windows plugin fix, install checks (2026-10-04)
 

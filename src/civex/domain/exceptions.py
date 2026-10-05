@@ -41,6 +41,27 @@ class ValidationError(CivexError):
     kind = "validation_error"
 
 
+class DuplicateRecordError(ValidationError):
+    """A write would give two records the same values for a schema's unique
+    key. A ValidationError, so every caller that skips or reports a bad row
+    already handles it. `existing_id`/`existing_name` name the record that
+    already holds the values and `fields` the key's field names."""
+
+    kind = "duplicate_record"
+
+    def __init__(
+        self,
+        message: str,
+        existing_id: str | None = None,
+        fields: list[str] | None = None,
+        existing_name: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.existing_id = existing_id
+        self.existing_name = existing_name
+        self.fields = fields or []
+
+
 class WorkflowValidationError(ValidationError):
     """A workflow's steps violate their plugins' declared contracts.
 

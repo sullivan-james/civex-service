@@ -19,6 +19,7 @@ from civex.server.models import (
     RestorePlanResponse,
     SchemaDeleteImpactResponse,
     SchemaResponse,
+    SetUniqueKeysRequest,
     UpdateFieldRequest,
     UpdateSchemaRequest,
 )
@@ -296,6 +297,28 @@ def update_field(
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
     return FieldResponse.from_dto(field)
+
+
+@router.put("/{name}/unique-keys", response_model=SchemaResponse)
+def set_unique_keys(
+    name: str, body: SetUniqueKeysRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """Replace a schema's uniqueness policies.
+
+    Each key is a set of the schema's own fields that no two records may
+    share the values of, within the same parent record (top-level records:
+    the same collection). Refused with 422 when existing records already
+    break a key being added. Records with a blank in a key's fields are not
+    constrained by it.
+    """
+    try:
+        dto = ctx.schema_svc.set_unique_keys(name, body.keys)
+        ctx.commit()
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return SchemaResponse.from_dto(dto)
 
 
 @router.put("/{name}/fields/reorder", response_model=SchemaResponse)

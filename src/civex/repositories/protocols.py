@@ -82,6 +82,7 @@ class SchemaRepository(Protocol):
         description: str | None,
         display_template: str | None = ...,
         label: str | None = ...,
+        unique_keys: list[list[str]] | None = ...,
     ) -> SchemaDTO: ...
     def delete(self, id: uuid.UUID) -> None: ...
     def restore(self, id: uuid.UUID) -> SchemaDTO: ...
@@ -204,6 +205,18 @@ class RecordRepository(Protocol):
         self, prefix: str, include_deleted: bool = False
     ) -> RecordDTO | None: ...
     def list_all(self) -> list[RecordDTO]: ...
+    def find_key_match(
+        self,
+        dataset_id: uuid.UUID,
+        schema_id: uuid.UUID,
+        parent_record_id: uuid.UUID | None,
+        key: dict[str, Any],
+        exclude_id: uuid.UUID | None = None,
+        include_deleted: bool = False,
+    ) -> RecordDTO | None: ...
+    def key_duplicates(
+        self, schema_id: uuid.UUID, field_ids: list[str]
+    ) -> list[list[uuid.UUID]]: ...
     def list_deleted(
         self,
         dataset_id: uuid.UUID | None = None,

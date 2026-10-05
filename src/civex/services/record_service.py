@@ -18,6 +18,7 @@ from civex.domain.dtos import (
     ReferrerGroupDTO,
     ResolvedField,
     ResolvedSchema,
+    RestoreConflictDTO,
     RestorePlanDTO,
     RestoreSetDTO,
     RestoreSetResultDTO,
@@ -26,7 +27,12 @@ from civex.domain.dtos import (
 from civex.domain import geo as geo_domain
 from civex.domain.audit_diff import tombstone
 from civex.domain import partial_dates, templating, units
-from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
+from civex.domain.exceptions import (
+    CoercionError,
+    DuplicateRecordError,
+    NotFoundError,
+    ValidationError,
+)
 from civex.domain.filters import (
     SELF,
     FilterCondition,
@@ -40,6 +46,7 @@ from civex.domain.filters import (
 from civex.domain.query import RecordQuery, ResolvedQuery
 from civex.domain.scopes import GLOBAL, can_reference
 from civex.domain.timezones import parse_datetime
+from civex.domain.uniqueness import key_values
 from civex.repositories.protocols import (
     AuditRepository,
     DatasetRepository,
@@ -329,6 +336,20 @@ def _with_resolved_filename(
 # cap here a single record could demand an unboundedly large in-memory zip.
 MAX_ZIP_FILE_COUNT = 2000
 MAX_ZIP_TOTAL_SIZE = 500 * 1024 * 1024  # 500 MB, summed from stored FileRef.size
+
+
+def _hashable(value: Any) -> Any:
+    """A key value as `find_key_match` compares it (1 == 1.0, a bool is no number)."""
+    if isinstance(value, bool):
+        return ("bool", value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    return value
+
+
+def _join_names(names: list[str], cap: bool = False) -> str:
+    text = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return text[:1].upper() + text[1:] if cap else text
 
 
 def _unique_zip_name(name: str, used: set[str]) -> str:
@@ -936,6 +957,54 @@ class RecordService:
                 f"'{dataset.name}' -- add it to the collection's schemas first"
             )
 
+    def _check_unique(
+        self,
+        shape: ResolvedSchema | None,
+        dataset_id: uuid.UUID,
+        parent_record_id: uuid.UUID | None,
+        id_data: dict[str, Any],
+        exclude_id: uuid.UUID | None = None,
+        unchanged: dict[str, Any] | None = None,
+    ) -> None:
+        """Refuse a record that would share a uniqueness key's values with
+        another live record of its schema in the same place (under the same
+        parent, or in the same collection at the top level). Keys with a blank
+        value are not checked, and, on update, neither is a key whose values
+        are the stored ones: saving an unrelated field mustn't be blocked by an
+        old duplicate. `id_data` is keyed by field id, as stored."""
+        if shape is None or not shape.schema.unique_keys:
+            return
+        for key in shape.schema.unique_keys:
+            values = key_values(id_data, key)
+            if values is None:
+                continue
+            if unchanged is not None and key_values(unchanged, key) == values:
+                continue
+            other = self._records.find_key_match(
+                dataset_id,
+                shape.schema.id,
+                parent_record_id,
+                dict(zip(key, values)),
+                exclude_id=exclude_id,
+            )
+            if other is None:
+                continue
+            names = [shape.id_to_name.get(i, i) for i in key]
+            raise DuplicateRecordError(
+                f"A {shape.schema.display_name} with the same "
+                f"{_join_names(names)} already exists: {self._deleted_name(other)}"
+                f" ({str(other.id)[:8]}). {_join_names(names, cap=True)} must be "
+                "unique"
+                + (
+                    " within its parent."
+                    if parent_record_id
+                    else " within the collection."
+                ),
+                existing_id=str(other.id),
+                fields=names,
+                existing_name=self._deleted_name(other),
+            )
+
     def _check_references(
         self,
         data: dict[str, Any],
@@ -1152,6 +1221,7 @@ class RecordService:
         self._validate_data(data, shape)
         self._check_references(data, shape, dataset)
         id_data = self._names_to_ids(data, shape)
+        self._check_unique(shape, dataset.id, resolved_parent_id, id_data)
         dto = self._records.create(
             dataset_id=dataset.id,
             schema_id=schema.id,
@@ -1311,6 +1381,15 @@ class RecordService:
             # restoring the field would bring back an empty one.
             kept = {k: v for k, v in raw.data.items() if k in shape.deleted_by_id}
             id_data = {**kept, **id_data}
+        if dataset:
+            self._check_unique(
+                shape,
+                dataset.id,
+                raw.parent_record_id,
+                id_data,
+                exclude_id=raw.id,
+                unchanged=raw.data,
+            )
         dto = self._records.update(id=raw.id, data=id_data)
         named = self._with_names(dto, shapes)
         # What was stored, by field name, with nothing the server adds on a read
@@ -2035,6 +2114,8 @@ class RecordService:
             name=self._deleted_name(record),
             records=len(group),
             blocked_by=blocker,
+            # Only worth saying once nothing else stands in the way.
+            conflict=None if blocker else self._restore_conflict(group),
             collection=dataset.name if dataset else None,
             collection_id=dataset.id if dataset else None,
             deleted_at=record.deleted_at,
@@ -2094,6 +2175,75 @@ class RecordService:
                 kept.add(rid)
         return group
 
+    def _restore_clashes(
+        self, rows: list[RecordDTO]
+    ) -> dict[uuid.UUID, DuplicateRecordError]:
+        """Which of these deleted records can't come back because their
+        schema's unique key is held by another live record, or by an earlier one
+        in this same set (two deleted records can have shared values with
+        nothing live between them). By record id, with `rows`' order deciding
+        which of two such records is the one that comes back."""
+        clashes: dict[uuid.UUID, DuplicateRecordError] = {}
+        shapes = self._schema_svc.resolver()
+        taken: dict[tuple, RecordDTO] = {}
+        for row in rows:
+            shape = shapes(row.schema_id)
+            if shape is None or not shape.schema.unique_keys:
+                continue
+            try:
+                self._check_unique(
+                    shape,
+                    row.dataset_id,
+                    row.parent_record_id,
+                    row.data,
+                    exclude_id=row.id,
+                )
+            except DuplicateRecordError as e:
+                clashes[row.id] = e
+                continue
+            for key in shape.schema.unique_keys:
+                values = key_values(row.data, key)
+                if values is None:
+                    continue
+                marker = (
+                    row.dataset_id,
+                    row.schema_id,
+                    row.parent_record_id,
+                    tuple(key),
+                    tuple(_hashable(v) for v in values),
+                )
+                other = taken.get(marker)
+                if other is not None:
+                    names = [shape.id_to_name.get(i, i) for i in key]
+                    clashes[row.id] = DuplicateRecordError(
+                        f"'{self._deleted_name(row)}' and "
+                        f"'{self._deleted_name(other)}' have the same "
+                        f"{_join_names(names)}",
+                        existing_id=str(other.id),
+                        fields=names,
+                        existing_name=self._deleted_name(other),
+                    )
+                    break
+                taken[marker] = row
+        return clashes
+
+    def _restore_conflict(self, group: list[uuid.UUID]) -> RestoreConflictDTO | None:
+        """The first record in `group` that can't come back for a clash of
+        unique values (see `_restore_clashes`)."""
+        rows = self._records.list_by_ids(group)
+        clashes = self._restore_clashes(rows)
+        for row in rows:
+            e = clashes.get(row.id)
+            if e is not None:
+                return RestoreConflictDTO(
+                    record_id=row.id,
+                    record_name=self._deleted_name(row),
+                    existing_id=e.existing_id or "",
+                    existing_name=e.existing_name or "",
+                    fields=e.fields,
+                )
+        return None
+
     def _restore_blocker(
         self, record: RecordDTO, dataset: DatasetDTO | None
     ) -> BlockerDTO | None:
@@ -2150,7 +2300,23 @@ class RecordService:
         blockers = self._restore_blockers(rows)
         groups = self._restore_groups(rows)
         plan = RestoreSetDTO(groups=groups)
+        # A record whose group holds one that can't come back for a clash of
+        # unique values is left whole (a half-restored group would be worse).
+        clashing: set[uuid.UUID] = set()
+        members = {
+            r.id: r
+            for r in self._records.list_by_ids(
+                list(dict.fromkeys(m for g in groups.values() for m in g))
+            )
+        }
+        clashes = self._restore_clashes(list(members.values()))
+        for root, group in groups.items():
+            if any(m in clashes for m in group):
+                clashing.add(root)
         for record in rows:
+            if record.id in clashing:
+                plan.blocked.append(record.id)
+                continue
             blocker = blockers[record.id]
             covered = blocker is not None and (
                 (blocker.kind == "record" and blocker.id in chosen)
@@ -2242,7 +2408,8 @@ class RecordService:
         # A record can come back unless a deleted collection or schema holds it
         # or a deleted record above it is not itself coming back. Anything
         # dropped can hold others up, so go round until it settles.
-        ok = set(coming)
+        # Nor can one whose unique values were taken meanwhile.
+        ok = set(coming) - set(self._restore_clashes(list(coming.values())))
         while True:
             held = {
                 rid
@@ -2373,11 +2540,21 @@ class RecordService:
         record = self._deleted_record(record_id)
         plan = self.restore_plan(str(record.id))
         needs_parents = plan.blocked_by is not None and plan.blocked_by.kind == "record"
-        if plan.blocked_message and not (with_parents and needs_parents):
-            raise ValidationError(plan.blocked_message)
+        if plan.held_back_message and not (with_parents and needs_parents):
+            raise ValidationError(plan.held_back_message)
         every = [record.id] if only_this else self._restore_group(record)
         if with_parents and needs_parents:
             every = [a.id for a in self._deleted_above(record)] + every
+        # Checked against what actually comes back, so restoring just this
+        # record sidesteps a clash that only a child has.
+        conflict = self._restore_conflict(every)
+        if conflict:
+            raise DuplicateRecordError(
+                conflict.message,
+                conflict.existing_id,
+                conflict.fields,
+                conflict.existing_name,
+            )
         before = {r.id: self._snapshot(r) for r in self._records.list_by_ids(every)}
         self._records.restore_many(every)
         if self._audit:

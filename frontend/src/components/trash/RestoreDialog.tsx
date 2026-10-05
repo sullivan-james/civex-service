@@ -43,6 +43,10 @@ export function RestoreDialog({
   const { data: plan, error, isLoading } = useRestorePlan(current)
   const restore = useRestore(onClose)
   const parents = plan?.parents_needed ?? 0
+  // Whether the clash is in the record itself (nothing to do but change or
+  // delete the other record) or only in something deleted with it, in which
+  // case restoring just this record still works.
+  const clashHere = plan?.conflict?.record_id === plan?.id
   const blockedByRecords =
     plan?.blocked_by?.kind === 'record' && plan.parents_needed != null
 
@@ -120,8 +124,17 @@ export function RestoreDialog({
               </>
             ) : plan.kind === 'record' && plan.records > 1 ? (
               <>
+                {plan.conflict && (
+                  <Button
+                    variant="link"
+                    to={`/records/${plan.conflict.existing_id}`}
+                    onClick={onClose}
+                  >
+                    Open “{plan.conflict.existing_name}”
+                  </Button>
+                )}
                 <Button
-                  disabled={restore.isPending || !plan.can_restore}
+                  disabled={restore.isPending || (!!plan.conflict && clashHere)}
                   onClick={() => restore.mutate({ ...plan, onlyThis: true })}
                 >
                   Restore only this
@@ -137,13 +150,24 @@ export function RestoreDialog({
                 </Button>
               </>
             ) : (
-              <Button
-                variant="primary"
-                disabled={restore.isPending || !plan.can_restore}
-                onClick={() => restore.mutate(plan)}
-              >
-                {restore.isPending ? 'Restoring…' : 'Restore'}
-              </Button>
+              <>
+                {plan.conflict && (
+                  <Button
+                    variant="primary"
+                    to={`/records/${plan.conflict.existing_id}`}
+                    onClick={onClose}
+                  >
+                    Open “{plan.conflict.existing_name}”
+                  </Button>
+                )}
+                <Button
+                  variant={plan.conflict ? undefined : 'primary'}
+                  disabled={restore.isPending || !plan.can_restore}
+                  onClick={() => restore.mutate(plan)}
+                >
+                  {restore.isPending ? 'Restoring…' : 'Restore'}
+                </Button>
+              </>
             )}
           </ModalFooter>
         </>
@@ -162,6 +186,19 @@ function PlanBody({ plan }: { plan: RestorePlan }) {
             ? `Restoring it brings back everything that was deleted with it. Or bring back just this ${KIND_WORD[plan.kind]}, with the ${records(plan.parents_needed)} it sits under (each by itself), and leave the rest deleted.`
             : `Restoring it also brings back everything that was deleted with it, and this ${KIND_WORD[plan.kind]} can then be restored.`}
         </p>
+      </>
+    )
+  if (plan.conflict)
+    return (
+      <>
+        <p className="text-sm text-fg">{plan.conflict.message}</p>
+        {plan.conflict.record_id !== plan.id && (
+          <p className="text-sm text-fg-muted">
+            The clash is with “{plan.conflict.record_name}”, deleted with it.
+            You can still bring back just “{plan.name}”, and leave that one
+            deleted.
+          </p>
+        )}
       </>
     )
   // Nothing deleted above it is the cause (a field whose name was taken), so

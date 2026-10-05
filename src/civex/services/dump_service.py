@@ -70,6 +70,7 @@ def export_schemas(schema_svc: SchemaService) -> list[dict]:
                 "description": s.description,
                 "parent": names.get(s.parent_id) if s.parent_id else None,
                 "display_template": s.display_template,
+                "unique_keys": s.unique_key_names,
                 "fields": [
                     {
                         "name": f.name,
@@ -148,6 +149,10 @@ def restore_schemas(
     for s in schemas:
         if s["name"] in created and s.get("display_template"):
             schema_svc.update(s["name"], display_template=s["display_template"])
+            commit()
+    for s in schemas:
+        if s["name"] in created and s.get("unique_keys"):
+            schema_svc.set_unique_keys(s["name"], s["unique_keys"])
             commit()
     return len(created)
 
