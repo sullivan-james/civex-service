@@ -20,9 +20,8 @@ def write_zip(
     local file (e.g. the CSV an export was written to). Each blob is copied
     from its on-disk object by `zipfile`, which streams in fixed-size chunks
     -- unlike `zf.writestr(name, file_svc.retrieve(...))`, peak memory is
-    independent of file size. Raises FileNotFoundError / SyncError for a blob
-    that is neither local nor on the remote; the caller owns cleanup of
-    `dest`."""
+    independent of file size. Raises FileNotFoundError for a blob that is not
+    stored locally; the caller owns cleanup of `dest`."""
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
         if data_member is not None:
             name, path = data_member

@@ -144,7 +144,7 @@ Deleting a record moves it (and its children, if any) to **Recently Deleted** ra
 
 Every change to a record, schema, field, collection or view is kept. A record's **History** tab, a schema's **History** tab and a collection's **Activity** tab list the entries newest first; a row shows the first few things that changed (`Count 1 → 2`) and opens to show all of them. A delete lists the values the record held, so you can see what was lost.
 
-**Activity** in the sidebar lists every change in the project, newest first. An import, a delete that took a whole tree with it, or a workflow run is **one line** that says what it did ("Deleted 1,204 records"), and opens to the changes inside it. A change to a record that is not there now says so (**Deleted now**, or **Gone for good** once it has been permanently deleted), which is usually what explains something missing. Each change names what it is about, with its short ID, and links to it when it can be opened.
+**Activity** in the sidebar lists every change in the project, newest first. Each line starts with **Who** made it (the operating-system user on the machine that made the change; a dash for changes from before that was recorded), then what happened, then when. An import, a delete that took a whole tree with it, or a workflow run is **one line** that says what it did ("Deleted 1,204 records"), and opens to the changes inside it. A change to a record that is not there now says so (**Deleted now**, or **Gone for good** once it has been permanently deleted), which is usually what explains something missing. Each change names what it is about, with its short ID, and links to it when it can be opened.
 
 Press **Deleted** to see only what you can still restore. A deleted item has **Restore** on its row, and **Restore all N** restores everything the list shows, after saying what comes back. There is no separate Recently Deleted page.
 
@@ -181,6 +181,6 @@ civex dump --no-data --output schema-only.yaml
 civex restore backup.yaml
 ```
 
-File attachments referenced by records are not included in the dump file. Export the `_civex/objects/` directory separately, or use [remote sync](remote-sync.md), which transfers objects automatically.
+File attachments referenced by records are not included in the dump file. Export the `_civex/objects/` directory separately.
 
 For a quick, human-readable export of a single collection instead of a full backup, use **Export CSV** on the collection's detail page in the web UI.

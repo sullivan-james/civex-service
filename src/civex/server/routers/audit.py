@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from civex.context import AppContext
 from civex.domain.audit_filters import AUDIT_FIELDS
+from civex.domain.exceptions import ValidationError
 from civex.server.deps import get_ctx
 from civex.server.models import (
     AuditBatchResponse,
@@ -166,13 +167,23 @@ def plan_restore_all(
         default=None, description="The history filter, as for `/audit/events`."
     ),
     q: str | None = Query(default=None),
+    batch: str | None = Query(
+        default=None,
+        description="Only what this batch deleted: the id of a bulk delete's "
+        "event in `/audit/events`, to undo it whole.",
+    ),
     ctx: AppContext = Depends(get_ctx),
 ):
     """What restoring everything deleted that this filter matches would do,
-    without doing it: how many collections, schemas and records, how many
-    records come back in all, and how many are blocked because something above
-    them is deleted and not in the set."""
-    return RestoreAllPlanResponse.from_dto(ctx.history_svc.plan_restore_all(filter, q))
+    without doing it: how many collections, schemas, fields and records, how
+    many records come back in all, and how many are blocked because something
+    above them is deleted and not in the set."""
+    try:
+        return RestoreAllPlanResponse.from_dto(
+            ctx.history_svc.plan_restore_all(filter, q, batch)
+        )
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
 
 
 @router.post("/audit/restore-all", response_model=RestoreAllResultResponse)
@@ -181,7 +192,10 @@ def restore_all(body: RestoreAllRequest, ctx: AppContext = Depends(get_ctx)):
     history: collections and schemas first, then records parent-first. A record
     left under something deleted that is not in the set stays deleted and is
     counted as blocked."""
-    result = ctx.history_svc.restore_all(body.filter, body.q)
+    try:
+        result = ctx.history_svc.restore_all(body.filter, body.q, body.batch)
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
     ctx.commit()
     return RestoreAllResultResponse.from_dto(result)
 

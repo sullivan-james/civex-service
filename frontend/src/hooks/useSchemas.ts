@@ -262,8 +262,15 @@ export function useDeleteField(schemaName: string) {
     mutationFn: (fieldName: string) =>
       schemasApi.deleteField(schemaName, fieldName),
     onSuccess: (_data, fieldName) => {
-      qc.invalidateQueries({ queryKey: ['schemas'] })
-      toast.success(`Field "${fieldName}" deleted`)
+      for (const key of [
+        'schemas',
+        'records',
+        'record',
+        'audit',
+        'record-audit',
+      ])
+        qc.invalidateQueries({ queryKey: [key] })
+      toast.success(`Field "${fieldName}" deleted. Restore it from Activity.`)
     },
     onError: (err) => toast.error(errorMessage(err)),
   })

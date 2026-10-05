@@ -2,8 +2,7 @@
 
 One page per sub-app group (`civex schema`, `civex record`, ...), one page for
 the bare top-level commands, and an index listing every command. Hidden
-commands are skipped -- the five SSH plumbing commands are documented by hand
-in docs/reference/cli/plumbing.md instead.
+commands are skipped.
 
 Why this is a custom generator rather than mkdocs-click or `typer utils docs`:
 see docs/contributing/cli-docs-tooling-decision.md. The short version is that
@@ -297,10 +296,6 @@ def render_index(groups: dict[str, Any], top_level: dict[str, Any]) -> str:
             f"| {summary(cmd)} |\n"
         )
 
-    out += (
-        "\n## Plumbing\n\nFive hidden commands back the SSH transport and are "
-        "not intended for direct use. See [Plumbing commands](plumbing.md).\n"
-    )
     return out
 
 

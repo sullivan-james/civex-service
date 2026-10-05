@@ -10,7 +10,6 @@ from civex.context import AppContext
 from civex.domain.exceptions import AllVolumesFull, VolumeUnavailableError
 from civex.server.deps import get_ctx
 from civex.server.models import FileInfoResponse, FileRefResponse
-from civex.sync.transport import SyncError
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -100,7 +99,7 @@ def download_file(sha256: str, filename: str = "", ctx: AppContext = Depends(get
     """
     try:
         path = ctx.file_svc.local_path(sha256)
-    except (FileNotFoundError, SyncError):
+    except FileNotFoundError:
         # "Not there" and "on a drive that isn't plugged in" are different
         # problems with different fixes: say which.
         offline = ctx.file_svc.offline_location(sha256)

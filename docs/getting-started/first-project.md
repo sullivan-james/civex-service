@@ -10,7 +10,7 @@ This creates a `_civex/` directory with:
 
 ```
 _civex/
-  config.toml     # database URL and optional remote config
+  config.toml     # database URL and settings
   civex.db        # SQLite database (if not using PostgreSQL)
   objects/        # content-addressed file storage
   workflows/      # YAML workflow definitions

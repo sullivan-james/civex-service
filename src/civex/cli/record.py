@@ -262,11 +262,24 @@ def record_delete(
 @app.command("restore")
 def record_restore(
     record_id: str = typer.Argument(..., help="Record ID or short prefix"),
+    only_this: bool = typer.Option(
+        False,
+        "--only-this",
+        help="Restore just this record, not the children deleted with it.",
+    ),
+    with_parents: bool = typer.Option(
+        False,
+        "--with-parents",
+        help="If deleted records above it hold it back, restore them too, each "
+        "by itself, leaving their other children deleted.",
+    ),
 ) -> None:
     """Restore a soft-deleted record (and the children cascade-deleted with it)."""
     ctx = _ctx()
     try:
-        ctx.record_svc.restore(record_id)
+        ctx.record_svc.restore(
+            record_id, only_this=only_this, with_parents=with_parents
+        )
         ctx.commit()
         console.print(f"[success]Restored record '{record_id}'.[/success]")
     except (NotFoundError, ValidationError) as e:

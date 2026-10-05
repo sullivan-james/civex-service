@@ -20,6 +20,98 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## v1.2.0 — old push/pull sync removed (2026-10-05)
+
+### Added
+
+- History now records who made each change. Every new entry stores the
+  operating-system user running civex (`civex.identity.local_actor`), shown as
+  "by <name>" in an entry's detail and as the first column of Activity. It is what the machine reports, not a verified
+  identity, and entries made before this release have none. `actor` is also
+  returned by the audit HTTP API.
+
+- **Deleting a field can be undone.** A removed field used to disappear, and
+  the values records held for it were lost the next time each record was
+  saved. It is now marked deleted instead: every record keeps its value, so
+  **restoring the field brings the values back**. A record shows them under
+  **Deleted fields** with when the field was deleted and a **Restore…**
+  button; Activity (press **Deleted**) lists deleted fields beside deleted
+  schemas, collections and records, and **Restore all** includes them. A
+  field can't come back while its schema is deleted, or while another field
+  has taken its name. CLI: `civex schema restore-field <schema> <field-id>`,
+  and `civex trash list --kind field`. A deleted field is not purged by
+  retention yet.
+- **A bulk delete can be undone from its one line in Activity.** Deleting a
+  record with children (a recording with 70 selections) is one line; it now
+  has a **Restore** button, and the line's window has **Restore everything…**,
+  which says how many records come back and restores them parent-first. Before,
+  only the individual records could be restored, one at a time, and finding
+  the parent among them was hard. `GET|POST /audit/restore-all` takes a
+  `batch` to scope it to one bulk delete.
+- **A delete no longer has to be undone as a whole.** Restoring a selection
+  whose recording is deleted used to mean restoring the recording and all 70
+  selections deleted with it; restoring a record always brought back every
+  child deleted alongside it. Now: the restore window offers **Restore only
+  this** (the selection and the recording it sits under, leaving the others
+  deleted), **this and what was deleted with it**, or all of it; and a bulk
+  delete's window lets you **tick the records** to bring back (**Restore N
+  selected**), with **Choose which…** from its Restore button. CLI:
+  `civex record restore <id> --only-this --with-parents`. API:
+  `POST /records/{id}/restore?only_this=&with_parents=` and
+  `POST /records/restore-selected`; the restore plan reports `parents_needed`.
+- **Describing and undoing a bulk delete is fast.** Working out what "restore
+  everything" would do took about 18 database queries per record (a recording
+  with 70 selections: over 1,200 queries, with the window on a spinner) and
+  restoring 13 per record. Both are now a handful of queries however many
+  records there are.
+- **Activity leads with who.** Each line now starts with **Who** (always shown,
+  including for bulk changes), then what happened, then when.
+- A record or schema page for something that was deleted now says when, and
+  offers **Restore…** (for a record that went with its schema, the window
+  offers the schema first). A deleted thing no longer links to a page that
+  isn't there.
+- History entries for records store values by **field id** instead of name,
+  so an entry stays correct when a field is renamed (before, old entries kept
+  the old name and showed it unlabelled). The API still shows names in
+  `changes`; `old_data`/`new_data` are the stored snapshot, so a record's
+  values in them are now keyed by id. A change to a field that has since been
+  deleted says so (`deleted` on the change). Collection entries record
+  `schema_ids` beside `schemas`.
+- The HTTP API gains `deleted_fields` on records, `deleted` on audit changes,
+  `schema_name`/`deleted_at` on restore plans, `fields` on the restore-all
+  plan, and `GET|POST /schemas/{schema}/fields/{field_id}/restore[-plan]`.
+
+### Breaking
+
+- **The old push/pull sync is removed.** It had no server to talk to and no
+  authentication, and a clone silently lost data (labels, name templates,
+  defaults, views), so it is being replaced by a new design (CIVEX-305)
+  rather than patched. Gone: `civex push`, `civex pull`, `civex clone`,
+  `civex remote ...`, `civex auth ...`, `civex status`, `civex init --bare`,
+  the five hidden plumbing commands (`transfer-pack`, `receive-pack`,
+  `head-seq`, `get-object`, `put-object`), the Sync menu in the web UI and
+  the `/api/remote/*` routes. Nothing local is affected. To move a project
+  between machines now, use `civex dump` / `civex restore` and copy
+  `_civex/objects/`.
+- A `[remote]` table in `config.toml` is ignored and dropped the next time the
+  config is saved.
+- `commit_id` is gone from audit entries in the HTTP API (it was null until a
+  push), and the `commits` table is removed.
+- Files that exist only on a remote are no longer fetched on demand; there is
+  no remote.
+
+### Migration
+
+- `b7f2c9a14d36` adds `fields.deleted_at` and replaces the one-name-per-schema
+  rule with one among live fields. Existing fields are untouched. Downgrading
+  deletes any deleted fields (a deleted field can share a name with a live
+  one).
+- `a9d3e5f1c708` drops `commits` and `audit_log.commit_id`, and adds the
+  columns the new sync will use to `audit_log` (`actor`, `device_id`, `hlc`,
+  `hub_seq`, `sync_state`; only `actor` is written so far). Every history entry is
+  kept. `audit_log` is rebuilt once, which can take a moment on a project with
+  a very long history. Downgrading recreates an empty `commits` table.
+
 ## v1.1.5 — repair broken plugin environments (2026-10-05)
 
 ### Fixes

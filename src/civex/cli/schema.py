@@ -587,7 +587,12 @@ def schema_remove_field(
     field_name: str = typer.Argument(..., help="Field to remove"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
 ) -> None:
-    """Remove a field from a schema."""
+    """Remove a field from a schema.
+
+    Reversible: the field goes to Recently Deleted and every record keeps the
+    value it held for it. Bring it back with `civex schema restore-field`
+    (find its ID with `civex trash list --kind field`).
+    """
     if not yes:
         typer.confirm(
             f"Remove field '{field_name}' from schema '{schema_name}'?", abort=True
@@ -600,6 +605,36 @@ def schema_remove_field(
             f"[success]Removed field '{field_name}' from '{schema_name}'.[/success]"
         )
     except NotFoundError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+
+
+@app.command("restore-field")
+def schema_restore_field(
+    schema_name: str = typer.Argument(..., help="Schema the field was removed from"),
+    field_id: str = typer.Argument(
+        ..., help="ID of the removed field (see `civex trash list --kind field`)"
+    ),
+) -> None:
+    """Restore a removed field, with the values records still hold for it."""
+    import uuid
+
+    try:
+        parsed = uuid.UUID(field_id)
+    except ValueError:
+        console.print(
+            "[error]That is not a field ID. Find it with "
+            "`civex trash list --kind field` (give the full ID).[/error]"
+        )
+        raise typer.Exit(1)
+    ctx = _ctx()
+    try:
+        field = ctx.schema_svc.restore_field(schema_name, parsed)
+        ctx.commit()
+        console.print(
+            f"[success]Restored field '{field.name}' on '{schema_name}'.[/success]"
+        )
+    except (NotFoundError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 

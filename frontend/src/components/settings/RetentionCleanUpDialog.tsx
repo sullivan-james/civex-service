@@ -71,7 +71,7 @@ function Kept({ report }: { report: RetentionReport }) {
             'older history entry',
             'older history entries',
           )}{' '}
-          kept: not yet pushed to the remote.
+          kept: not yet synced.
         </p>
       )}
       {report.skipped.map((s) => (

@@ -22,7 +22,6 @@ class AuditFilter:
     entity_ids: list[uuid.UUID] | None = None  # these things'
     entity_type: str | None = None  # record | schema | field | dataset | view
     batch_id: uuid.UUID | None = None  # what is in this batch
-    commit_id: uuid.UUID | None = None
     action: str | None = None  # create | update | delete | restore | purge
     since: datetime | None = None
     search: str | None = None  # text in a stored value, a file name, a batch label

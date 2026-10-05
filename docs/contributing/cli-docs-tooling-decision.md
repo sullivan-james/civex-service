@@ -31,9 +31,9 @@ this short of Typer depending on real Click, which it doesn't.
 output with correct recursion (1,531 lines for this app), but it's unusable
 as-is:
 
-- Emits all five `hidden=True` plumbing commands (`transfer-pack`,
-  `receive-pack`, `head-seq`, `get-object`, `put-object`) both in the index
-  and as full sections, with no flag to exclude them.
+- Emits `hidden=True` commands (at the time, the five SSH plumbing commands
+  of the old sync) both in the index and as full sections, with no flag to
+  exclude them.
 - HTML-escapes apostrophes in help text.
 - Produces one monolithic page, which can't be split across nav entries
   (one page per sub-app is required).
@@ -61,9 +61,8 @@ does).
 ## What it produces
 
 One page per sub-app (`reference/cli/<name>.md`), one page for the bare
-top-level commands grouped by their `rich_help_panel`, and an index. The
-five hidden plumbing commands are excluded and stay hand-written in
-`reference/cli/plumbing.md`.
+top-level commands grouped by their `rich_help_panel`, and an index. Hidden
+commands are excluded.
 
 Two drift checks keep it honest:
 

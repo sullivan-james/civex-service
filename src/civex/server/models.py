@@ -467,6 +467,25 @@ class RecordRef(BaseModel):
     natural_name: str | None
 
 
+class RestoreSelectedRequest(BaseModel):
+    ids: list[str] = Field(
+        max_length=5000, description="The deleted records to restore."
+    )
+    with_parents: bool = Field(
+        default=True,
+        description="Also restore the deleted records above a chosen one, each "
+        "by itself. Without it, a record under a deleted record is left.",
+    )
+
+
+class RestoreSelectedResponse(BaseModel):
+    restored: int = Field(description="Chosen records that came back.")
+    came_back: int = Field(
+        description="Records live again in all, counting the parents brought back."
+    )
+    left: int = Field(description="Chosen records still deleted, and why not.")
+
+
 class RecordLabelsRequest(BaseModel):
     ids: list[str] = Field(
         max_length=200,
@@ -485,6 +504,9 @@ class RecordLabelResponse(BaseModel):
     )
     deleted: bool = Field(
         description="True for a record in Recently Deleted (it can still be restored)."
+    )
+    deleted_at: datetime | None = Field(
+        default=None, description="When it was deleted; null for a live record."
     )
 
 
@@ -512,6 +534,23 @@ class ReferrerGroupResponse(BaseModel):
             dtype=dto.dtype,
             count=dto.count,
         )
+
+
+class DeletedFieldValue(BaseModel):
+    id: str = Field(description="The deleted field's id.")
+    name: str
+    label: str = Field(description="Its display name.")
+    dtype: str
+    schema_name: str = Field(
+        description="The schema it was defined on, which is where to restore it."
+    )
+    deleted_at: datetime | None = Field(
+        default=None, description="When the field was deleted."
+    )
+    value: Any = Field(
+        description="What this record still holds for it; back in `data` once "
+        "the field is restored."
+    )
 
 
 class RecordResponse(BaseModel):
@@ -566,6 +605,13 @@ class RecordResponse(BaseModel):
         description="Only on a single-record fetch: the parent chain, root "
         "first, for breadcrumbs.",
     )
+    deleted_fields: list[DeletedFieldValue] | None = Field(
+        default=None,
+        description="Values this record still holds for fields that have been "
+        "deleted from its schema. Nothing is lost: restoring the field "
+        "(`POST /schemas/{schema_name}/fields/{id}/restore`) puts each back in "
+        "`data`. Null when there are none.",
+    )
 
     @classmethod
     def from_dto(cls, dto: RecordDTO) -> RecordResponse:
@@ -586,6 +632,9 @@ class RecordResponse(BaseModel):
             reference_collections=dto.reference_collections,
             child_counts=dto.child_counts,
             derived=dto.derived,
+            deleted_fields=[DeletedFieldValue(**d) for d in dto.deleted_fields]
+            if dto.deleted_fields
+            else None,
         )
 
 
@@ -1240,11 +1289,18 @@ class AuditChange(BaseModel):
     )
     before: Any = Field(default=None, description="The value before; null if unset.")
     after: Any = Field(default=None, description="The value after; null if unset.")
+    deleted: dict[str, Any] | None = Field(
+        default=None,
+        description="Set when this field has since been deleted: status "
+        "(deleted = can still be restored, gone = permanently deleted), its id "
+        "and, for a deleted one, the schema to restore it on and when it was "
+        "deleted.",
+    )
 
 
 class AuditNow(BaseModel):
     kind: str = Field(
-        description="What the entry is about: record, collection or schema."
+        description="What the entry is about: record, collection, schema or field."
     )
     status: str = Field(
         description="live (it exists), deleted (in Recently Deleted, restorable) "
@@ -1252,12 +1308,14 @@ class AuditNow(BaseModel):
     )
     ref: str | None = Field(
         default=None,
-        description="What to restore or purge it by: a record's id, else its name.",
+        description="What to restore or purge it by: a record's or field's id, "
+        "else its name.",
     )
     name: str | None = Field(default=None, description="Its name now.")
     schema_name: str | None = Field(
         default=None,
-        description="Its schema; known even for a record that is gone for good.",
+        description="Its schema (for a field, the schema it belongs to); known "
+        "even for a record that is gone for good.",
     )
     collection: str | None = Field(default=None, description="The collection it is in.")
     deleted_at: datetime | None = None
@@ -1265,22 +1323,27 @@ class AuditNow(BaseModel):
 
 class AuditLogResponse(BaseModel):
     id: str
-    commit_id: str | None = Field(
-        default=None,
-        description="Sync commit this entry was bundled into. Null until the next push.",
-    )
     action: str = Field(description="One of: create, update, delete, restore, purge.")
+    actor: str | None = Field(
+        default=None,
+        description="Who made the change, as reported by the machine that made "
+        "it (the operating-system user). Not verified. Null for entries from "
+        "before this was recorded.",
+    )
     entity_type: str = Field(
         description="One of: record, schema, field, dataset, view."
     )
     entity_id: str
     old_data: dict[str, Any] | None = Field(
         default=None,
-        description="Full entity snapshot before the change. Null on create.",
+        description="Full entity snapshot before the change, as stored. A record's "
+        "values are keyed by field id, so an entry survives a rename; `changes` "
+        "has them by current name. Null on create.",
     )
     new_data: dict[str, Any] | None = Field(
         default=None,
-        description="Full entity snapshot after the change. Null on delete.",
+        description="Full entity snapshot after the change, as stored (see "
+        "`old_data`). Null on delete.",
     )
     changes: list[AuditChange] = Field(
         default_factory=list,
@@ -1299,8 +1362,8 @@ class AuditLogResponse(BaseModel):
     def from_dto(cls, dto: AuditLogDTO) -> AuditLogResponse:
         return cls(
             id=str(dto.id),
-            commit_id=str(dto.commit_id) if dto.commit_id else None,
             action=dto.action,
+            actor=dto.actor,
             entity_type=dto.entity_type,
             entity_id=str(dto.entity_id),
             old_data=dto.old_data,
@@ -1349,6 +1412,12 @@ class AuditEventResponse(BaseModel):
         description="For a batch, what it holds by kind of thing and action. Its "
         "entries are listed at /audit/batches/{id}/entries.",
     )
+    actor: str | None = Field(
+        default=None,
+        description="Who made it, as reported by the machine that made it (the "
+        "operating-system user); for a batch, who made its changes. Null when "
+        "it was not recorded.",
+    )
 
     @classmethod
     def from_dto(cls, dto: AuditEventDTO) -> AuditEventResponse:
@@ -1360,6 +1429,7 @@ class AuditEventResponse(BaseModel):
             entry=AuditLogResponse.from_dto(dto.entry) if dto.entry else None,
             batch=AuditBatchResponse.from_dto(dto.batch) if dto.batch else None,
             parts=[AuditPart(**p) for p in dto.parts],
+            actor=dto.actor,
         )
 
 
@@ -1412,11 +1482,17 @@ class RestoreAllRequest(BaseModel):
         "`GET /audit/events` takes), or null for everything deleted.",
     )
     q: str | None = Field(default=None, description="Text the changes must contain.")
+    batch: str | None = Field(
+        default=None,
+        description="Only what this batch deleted: the id of a bulk delete (a "
+        "record and everything beneath it) from `/audit/events`.",
+    )
 
 
 class RestoreAllPlanResponse(BaseModel):
     collections: int = Field(description="Deleted collections matched.")
     schemas: int = Field(description="Deleted schemas matched.")
+    fields: int = Field(default=0, description="Deleted fields matched.")
     records: int = Field(description="Deleted records matched.")
     things: int = Field(description="All of the above.")
     restores: int = Field(
@@ -1424,7 +1500,8 @@ class RestoreAllPlanResponse(BaseModel):
         "back with each, once."
     )
     blocked: int = Field(
-        description="Matched, but under something deleted that is not in the set."
+        description="Matched, but under something deleted that is not in the set "
+        "(for a field, also one whose name has since been taken)."
     )
     truncated: bool = Field(description="More matched than were looked at.")
 
@@ -1437,7 +1514,8 @@ class RestoreAllResultResponse(BaseModel):
     restored: int = Field(description="Things brought back.")
     records: int = Field(description="Records that came back in all.")
     blocked: int = Field(
-        description="Left deleted: a parent is deleted and not in the set."
+        description="Left deleted: a parent is deleted and not in the set, or a "
+        "field's name has been taken."
     )
 
     @classmethod
@@ -1452,9 +1530,12 @@ class BlockerResponse(BaseModel):
 
 
 class RestorePlanResponse(BaseModel):
-    kind: str = Field(description="record, collection or schema.")
+    kind: str = Field(description="record, collection, schema or field.")
     id: str
     name: str
+    schema_name: str | None = Field(
+        default=None, description="For a field: the schema it belongs to."
+    )
     records: int = Field(
         description="How many records come back: those deleted together with "
         "this, the record itself included when it is one. Never something "
@@ -1469,6 +1550,17 @@ class RestorePlanResponse(BaseModel):
         default=None, description="For a record: the collection it will be in."
     )
     collection_id: str | None = None
+    deleted_at: datetime | None = Field(
+        default=None, description="When it was deleted."
+    )
+    parents_needed: int | None = Field(
+        default=None,
+        description="For a record held back only by deleted records above it: "
+        "how many of them. `POST .../restore?with_parents=true` brings each "
+        "back by itself (not what was deleted alongside it), so just this record "
+        "(`&only_this=true`) comes back as `parents_needed + 1` records and "
+        "its deleted siblings stay deleted. Null otherwise.",
+    )
     blocked: str | None = Field(
         default=None,
         description="Why it can't be restored yet, in plain words. Null when it can.",
@@ -1803,7 +1895,7 @@ class RetentionReportResponse(BaseModel):
         "still be restored."
     )
     audit_kept_unsynced: int = Field(
-        description="Older history kept because it has not been pushed to the remote."
+        description="Older history kept because it has not been synced yet."
     )
     runs: int
     run_steps: int

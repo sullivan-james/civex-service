@@ -4,8 +4,9 @@ Pure: it reads the `old_data` / `new_data` snapshots an entry carries and
 nothing else. It is the one place a history entry is turned into a diff, so
 the web UI, the CLI and any script see the same changes.
 
-A record's snapshot holds its values under `data`, keyed by field name. Every
-other entity (schema, field, collection, view) is a flat dict of attributes.
+A record's snapshot holds its values under `data`, keyed by field id (older
+entries by name; `AuditService` turns either into current names before it asks
+for a diff). Every other entity (schema, field, collection, view) is a flat dict of attributes.
 Anything that is bookkeeping rather than a change (ids, timestamps) is left
 out.
 """
@@ -34,6 +35,10 @@ class Change:
     after: Any = None
     label: str | None = None
     dtype: str | None = None
+    # Set when the field has since been deleted: {status: deleted | gone, id,
+    # schema_name, deleted_at}. `deleted` fields can be restored; `gone` ones
+    # (permanently deleted) can't.
+    deleted: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -42,6 +47,7 @@ class Change:
             "dtype": self.dtype,
             "before": self.before,
             "after": self.after,
+            "deleted": self.deleted,
         }
 
 

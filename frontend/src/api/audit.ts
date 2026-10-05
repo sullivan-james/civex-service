@@ -14,16 +14,25 @@ export interface AuditChange {
   dtype: string | null
   before: unknown
   after: unknown
+  /** Set when this field has since been deleted: `deleted` can still be
+   * restored (on `schema_name`), `gone` was deleted for good. */
+  deleted?: {
+    status: 'deleted' | 'gone'
+    id: string
+    schema_name?: string
+    deleted_at?: string | null
+  } | null
 }
 
 export interface AuditNow {
-  kind: 'record' | 'collection' | 'schema'
-  /** What to restore or purge it by: a record's id, else its name. */
+  kind: 'record' | 'collection' | 'schema' | 'field'
+  /** What to restore or purge it by: a record's or field's id, else its name. */
   ref: string | null
   /** live: it exists; deleted: in Recently Deleted, restorable; gone: purged. */
   status: 'live' | 'deleted' | 'gone'
   name: string | null
-  /** Known even for a record that is gone for good. */
+  /** Known even for a record that is gone for good; for a field, the schema
+   * it belongs to. */
   schema_name: string | null
   collection: string | null
   deleted_at: string | null
@@ -31,7 +40,9 @@ export interface AuditNow {
 
 export interface AuditLogEntry {
   id: string
-  commit_id: string | null
+  /** Who made the change, as the machine that made it reported it (the OS
+   * user). Not verified. Null for entries from before it was recorded. */
+  actor?: string | null
   action: string
   entity_type: string
   entity_id: string
@@ -132,6 +143,7 @@ export const auditApi = {
     const qs = new URLSearchParams()
     if (query.filter) qs.set('filter', JSON.stringify(query.filter))
     if (query.search) qs.set('q', query.search)
+    if (query.batch) qs.set('batch', query.batch)
     return api.get<RestoreAllPlan>(`/audit/restore-all?${qs}`)
   },
 
@@ -140,6 +152,7 @@ export const auditApi = {
     api.post<RestoreAllResult>('/audit/restore-all', {
       filter: query.filter ?? null,
       q: query.search ?? null,
+      batch: query.batch ?? null,
     }),
 
   /** Start a batch for work done over many requests, such as an import; send
@@ -159,6 +172,7 @@ export const auditApi = {
 export interface RestoreAllPlan {
   collections: number
   schemas: number
+  fields: number
   records: number
   things: number
   /** Records that would be live afterwards, counting what came back with each. */
@@ -203,6 +217,9 @@ export interface AuditEvent {
   entry: AuditLogEntry | null
   batch: AuditBatch | null
   parts: AuditPart[]
+  /** Who made it (the OS user on the machine that did); for a batch, who made
+   * its changes. Null when it was not recorded. */
+  actor?: string | null
 }
 
 export interface PaginatedAuditEvents {
@@ -218,6 +235,8 @@ export interface AuditEventQuery {
   filter?: FilterTreeWire | null
   search?: string
   sort?: string
+  /** Only for restoring: just what this one bulk delete took. */
+  batch?: string
 }
 
 export function eventsUrl(

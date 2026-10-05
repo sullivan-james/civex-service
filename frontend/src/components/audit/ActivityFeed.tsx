@@ -25,6 +25,7 @@ import {
   ListToolbar,
   Pagination,
 } from '../ui'
+import { RestoreBatchDialog } from '../trash/RestoreBatchDialog'
 import { RestoreDialog } from '../trash/RestoreDialog'
 import { AuditEntryDialog } from './AuditEntryDialog'
 import { BatchDialog } from './BatchDialog'
@@ -112,6 +113,7 @@ export function ActivityFeed({
   )
   const [open, setOpen] = useState<AuditEvent | null>(null)
   const [restoring, setRestoring] = useState<RestoreTarget | null>(null)
+  const [restoringBatch, setRestoringBatch] = useState<AuditEvent | null>(null)
   const [confirmAll, setConfirmAll] = useState(false)
   const narrowed = !!(filter || list.q)
   const deletedOn = isDeletedView(filter)
@@ -166,13 +168,27 @@ export function ActivityFeed({
         onSortChange={list.toggleSort}
         onRowClick={setOpen}
         actions={(e) => {
+          // A bulk delete is one line: undo it as a whole from here, rather
+          // than finding the parent among everything it took with it.
+          if (e.batch?.kind === 'delete')
+            return (
+              <Button size="sm" onClick={() => setRestoringBatch(e)}>
+                Restore
+              </Button>
+            )
           const now = e.entry?.now
           return e.entry?.action === 'delete' &&
             now?.status === 'deleted' &&
             now.ref ? (
             <Button
               size="sm"
-              onClick={() => setRestoring({ kind: now.kind, ref: now.ref! })}
+              onClick={() =>
+                setRestoring({
+                  kind: now.kind,
+                  ref: now.ref!,
+                  schema: now.schema_name ?? undefined,
+                })
+              }
             >
               Restore
             </Button>
@@ -181,12 +197,18 @@ export function ActivityFeed({
         actionsWidth="7rem"
         columns={[
           {
-            key: 'timestamp',
-            header: 'When',
-            sortable: true,
-            width: '12rem',
-            className: 'text-fg-muted whitespace-nowrap',
-            render: (e: AuditEvent) => new Date(e.timestamp).toLocaleString(),
+            key: 'actor',
+            header: 'Who',
+            width: '9rem',
+            className: 'whitespace-nowrap',
+            render: (e: AuditEvent) => {
+              const who = e.actor ?? e.entry?.actor
+              return who ? (
+                <span className="font-medium text-fg">{who}</span>
+              ) : (
+                <span className="text-fg-subtle">—</span>
+              )
+            },
           },
           {
             key: 'event',
@@ -216,6 +238,14 @@ export function ActivityFeed({
               )
             },
           },
+          {
+            key: 'timestamp',
+            header: 'When',
+            sortable: true,
+            width: '12rem',
+            className: 'text-fg-muted whitespace-nowrap',
+            render: (e: AuditEvent) => new Date(e.timestamp).toLocaleString(),
+          },
         ]}
         rows={data?.items ?? []}
         getRowId={(e) => e.id}
@@ -243,6 +273,16 @@ export function ActivityFeed({
       {restoring && (
         <RestoreDialog target={restoring} onClose={() => setRestoring(null)} />
       )}
+      {restoringBatch && (
+        <RestoreBatchDialog
+          batchId={restoringBatch.batch!.id}
+          onClose={() => setRestoringBatch(null)}
+          onChoose={() => {
+            setOpen(restoringBatch)
+            setRestoringBatch(null)
+          }}
+        />
+      )}
       {confirmAll && plan && (
         <ConfirmDialog
           title={`Restore ${plan.things.toLocaleString()} deleted ${plan.things === 1 ? 'thing' : 'things'}`}
@@ -254,6 +294,8 @@ export function ActivityFeed({
                     `${plan.collections.toLocaleString()} collection${plan.collections === 1 ? '' : 's'}`,
                   plan.schemas &&
                     `${plan.schemas.toLocaleString()} schema${plan.schemas === 1 ? '' : 's'}`,
+                  plan.fields &&
+                    `${plan.fields.toLocaleString()} field${plan.fields === 1 ? '' : 's'}`,
                   plan.records &&
                     `${plan.records.toLocaleString()} record${plan.records === 1 ? '' : 's'}`,
                 ]
@@ -265,8 +307,9 @@ export function ActivityFeed({
               </p>
               {plan.blocked > 0 && (
                 <p>
-                  {plan.blocked.toLocaleString()} stay deleted: a parent they
-                  sit under is deleted and is not in this list.
+                  {plan.blocked.toLocaleString()} stay deleted: something they
+                  belong to is deleted and is not in this list, or a field's
+                  name has since been taken.
                 </p>
               )}
               {plan.truncated && (

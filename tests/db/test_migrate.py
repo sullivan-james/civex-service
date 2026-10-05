@@ -49,7 +49,6 @@ def test_fresh_project_ends_at_head_with_all_tables(tmp_path: Path) -> None:
         "fields",
         "datasets",
         "records",
-        "commits",
         "audit_log",
         "workflow_jobs",
         "ai_usage_events",

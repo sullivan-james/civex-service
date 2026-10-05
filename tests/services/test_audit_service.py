@@ -54,7 +54,9 @@ def test_a_delete_shows_the_values_that_were_lost_by_name(ctx: AppContext, thing
     ctx.record_svc.delete(str(thing.id))
     ctx.commit()
     entry = _entries(ctx, thing, "delete")[0]
-    assert set(entry.old_data["data"]) == {"title", "count"}  # names, not ids
+    ids = {f.name: str(f.id) for f in ctx.schema_svc.get("thing").fields}
+    # Stored by field id, shown by name.
+    assert set(entry.old_data["data"]) == {ids["title"], ids["count"]}
     assert _changes(entry) == {"title": ("a", None), "count": (1, None)}
 
 
@@ -64,10 +66,11 @@ def test_a_restore_has_no_changes(ctx: AppContext, thing):
     ctx.commit()
     entry = _entries(ctx, thing, "restore")[0]
     assert entry.changes == []
-    assert set(entry.old_data["data"]) == {"title", "count"}
+    ids = {f.name: str(f.id) for f in ctx.schema_svc.get("thing").fields}
+    assert set(entry.old_data["data"]) == {ids["title"], ids["count"]}
 
 
-def test_a_legacy_snapshot_keyed_by_field_id_is_read_by_name(ctx: AppContext, thing):
+def test_a_snapshot_keyed_by_field_id_is_read_by_name(ctx: AppContext, thing):
     shape = ctx.schema_svc.resolver()(thing.schema_id)
     by_id = {shape.name_to_id["title"]: "a", shape.name_to_id["count"]: 1}
     old = {"id": str(thing.id), "schema_id": str(thing.schema_id), "data": by_id}

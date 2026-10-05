@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import type { AuditEvent, AuditLogEntry } from '../../api/audit'
 import { useBatchEntries } from '../../hooks/useAudit'
+import { useRestoreSelected } from '../../hooks/useRestore'
 import { errorMessage } from '../../lib/errors'
 import { describeAnyAuditEntry, describeParts } from '../../utils/activityAudit'
 import {
@@ -13,6 +14,7 @@ import {
   ModalHeader,
   Pagination,
 } from '../ui'
+import { RestoreBatchDialog } from '../trash/RestoreBatchDialog'
 import { AuditEntryDialog } from './AuditEntryDialog'
 import { EntrySubject } from './EntrySubject'
 
@@ -32,7 +34,24 @@ export function BatchDialog({
   const batch = event.batch!
   const [page, setPage] = useState(0)
   const [member, setMember] = useState<AuditLogEntry | null>(null)
+  const [restoring, setRestoring] = useState(false)
+  // Picked records, by entry id -> the record's id; kept across pages so a
+  // choice made on page one survives looking at page two.
+  const [picked, setPicked] = useState<Map<string, string>>(new Map())
+  const restoreSelected = useRestoreSelected(() => setPicked(new Map()))
   const { data, isLoading, error } = useBatchEntries(batch.id, page, PAGE)
+  const rows = data?.items ?? []
+  // Only a bulk delete is worth picking from: take back some of what it took.
+  const canPick = batch.kind === 'delete'
+  const setMany = (entries: AuditLogEntry[], on: boolean) =>
+    setPicked((prev) => {
+      const next = new Map(prev)
+      for (const e of entries) {
+        if (on) next.set(e.id, e.entity_id)
+        else next.delete(e.id)
+      }
+      return next
+    })
 
   return (
     <Modal onClose={onClose} size="xl">
@@ -50,10 +69,40 @@ export function BatchDialog({
             Open the run
           </Link>
         )}
+        {canPick && (
+          <p className="text-sm text-fg-muted">
+            Tick the records to bring back, or restore everything this delete
+            took. A record under a deleted record brings that one back too, by
+            itself; the rest stays deleted.
+          </p>
+        )}
         <DataTable
           layout="auto"
           dense
           onRowClick={setMember}
+          selection={
+            canPick
+              ? {
+                  selected: new Set(picked.keys()),
+                  onToggle: (id) => {
+                    const entry = rows.find((e) => e.id === id)
+                    if (entry) setMany([entry], !picked.has(id))
+                  },
+                  onSetMany: (ids, on) =>
+                    setMany(
+                      rows.filter((e) => ids.includes(e.id)),
+                      on,
+                    ),
+                  onToggleAll: () =>
+                    setMany(
+                      rows,
+                      !(rows.length > 0 && rows.every((e) => picked.has(e.id))),
+                    ),
+                  allLabel: 'Select every record on this page',
+                  rowLabel: () => 'Select this record',
+                }
+              : undefined
+          }
           columns={[
             {
               key: 'change',
@@ -72,7 +121,7 @@ export function BatchDialog({
               },
             },
           ]}
-          rows={data?.items ?? []}
+          rows={rows}
           getRowId={(e) => e.id}
           isLoading={isLoading}
           error={error ? errorMessage(error) : undefined}
@@ -90,7 +139,32 @@ export function BatchDialog({
       </ModalBody>
       <ModalFooter>
         <Button onClick={onClose}>Close</Button>
+        {batch.kind === 'delete' && picked.size > 0 && (
+          <Button
+            variant="primary"
+            disabled={restoreSelected.isPending}
+            onClick={() => restoreSelected.mutate([...picked.values()])}
+          >
+            {restoreSelected.isPending
+              ? 'Restoring…'
+              : `Restore ${picked.size.toLocaleString()} selected`}
+          </Button>
+        )}
+        {batch.kind === 'delete' && (
+          <Button
+            variant={picked.size > 0 ? 'default' : 'primary'}
+            onClick={() => setRestoring(true)}
+          >
+            Restore everything…
+          </Button>
+        )}
       </ModalFooter>
+      {restoring && (
+        <RestoreBatchDialog
+          batchId={batch.id}
+          onClose={() => setRestoring(false)}
+        />
+      )}
       {member && (
         <AuditEntryDialog
           entry={member}

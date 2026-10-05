@@ -1,6 +1,7 @@
 import { Fragment } from 'react'
 import type { AuditChange } from '../../api/audit'
 import { changeLabel } from '../../utils/auditValues'
+import { RestoreFieldButton } from '../trash/RestoreFieldButton'
 import { AuditValue } from './AuditValue'
 
 /** The first few changes on one line: "Age 1 → 2; Note (none) → hello". For a
@@ -54,6 +55,29 @@ function ChangeValues({
   )
 }
 
+/** Said beside a change to a field that has since been deleted: whether it can
+ * still come back, and the button that does it. */
+function DeletedFieldNote({ change }: { change: AuditChange }) {
+  const gone = change.deleted
+  if (!gone) return null
+  if (gone.status === 'gone')
+    return (
+      <span className="block text-xs text-fg-subtle">
+        Deleted field, gone for good
+      </span>
+    )
+  return (
+    <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-attention">
+      Deleted field
+      {gone.deleted_at &&
+        ` · ${new Date(gone.deleted_at).toLocaleDateString()}`}
+      {gone.schema_name && (
+        <RestoreFieldButton fieldId={gone.id} schemaName={gone.schema_name} />
+      )}
+    </span>
+  )
+}
+
 /** Every change an entry made, one per row, for the entry's detail. */
 export function AuditChangeList({
   changes,
@@ -73,6 +97,7 @@ export function AuditChangeList({
         >
           <dt className="text-xs font-medium text-fg-muted">
             {changeLabel(c)}
+            <DeletedFieldNote change={c} />
           </dt>
           <dd className="min-w-0 text-sm text-fg break-words">
             <ChangeValues change={c} action={action} />

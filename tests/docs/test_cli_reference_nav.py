@@ -61,7 +61,7 @@ def test_every_sub_app_has_a_nav_entry() -> None:
 def test_nav_has_no_entries_for_removed_sub_apps() -> None:
     """The reverse drift: a nav entry whose generated page no longer exists is a
     hard `mkdocs build --strict` failure, so catch it in the test suite first."""
-    static_pages = {"index", "top-level", "plumbing"}
+    static_pages = {"index", "top-level"}
     stale = sorted(_nav_cli_pages() - _visible_groups() - static_pages)
     assert not stale, (
         "mkdocs.yml nav references CLI pages that are no longer generated: "

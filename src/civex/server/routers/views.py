@@ -16,7 +16,6 @@ from civex.server.models import (
 from civex.services.archive import write_zip
 from civex.domain.naming import safe_filename
 from civex.services.view_service import write_csv, write_json
-from civex.sync.transport import SyncError
 
 router = APIRouter(prefix="/schemas/{schema_name}/views", tags=["views"])
 all_views_router = APIRouter(prefix="/views", tags=["views"])
@@ -195,7 +194,7 @@ def export_view(
                 file_entries,
                 data_member=(data_filename, data_path),
             )
-        except (FileNotFoundError, SyncError) as e:
+        except FileNotFoundError as e:
             raise HTTPException(404, detail=f"Export file not found: {e}")
         tmp.remove(zip_path)
         tmp.remove(data_path)

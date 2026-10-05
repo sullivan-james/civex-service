@@ -18,7 +18,6 @@ const ENTRY_ID = '11111111-0000-4000-8000-000000000001'
 
 const update: AuditLogEntry = {
   id: ENTRY_ID,
-  commit_id: null,
   action: 'update',
   entity_type: 'record',
   entity_id: '22222222-0000-4000-8000-000000000002',

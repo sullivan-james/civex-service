@@ -66,12 +66,13 @@ export function AuditEntryDialog({
             <EntrySubject entry={entry} full />
             <p className="text-xs text-fg-muted">
               {new Date(entry.timestamp).toLocaleString()}
+              {entry.actor ? ` · by ${entry.actor}` : ''}
             </p>
             <AuditChangeList changes={entry.changes} action={entry.action} />
           </ModalBody>
           <ModalFooter>
             <Button onClick={onClose}>Close</Button>
-            {stillDeleted && (
+            {stillDeleted && now?.kind !== 'field' && (
               <Button variant="danger" onClick={() => setPurging(true)}>
                 Delete permanently…
               </Button>
@@ -91,7 +92,11 @@ export function AuditEntryDialog({
       )}
       {restoring && now?.ref && (
         <RestoreDialog
-          target={{ kind: now.kind, ref: now.ref }}
+          target={{
+            kind: now.kind,
+            ref: now.ref,
+            schema: now.schema_name ?? undefined,
+          }}
           onClose={() => setRestoring(false)}
         />
       )}

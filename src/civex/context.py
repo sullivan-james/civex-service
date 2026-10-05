@@ -2,7 +2,6 @@
 AppContext bundles all services for a single CLI command invocation (or HTTP request).
 
 build_local_context() wires together the SQLAlchemy repos and the local file store.
-If a [remote] is configured, a transport is passed to FileService for lazy object fetch.
 An optional file_store parameter lets callers inject a custom object
 store instead of the default LocalFileObjectStore.
 """
@@ -123,6 +122,7 @@ def build_local_context(
 
     from civex.db.migrate import ensure_schema_current
     from civex.repositories.local.audit_repo import LocalAuditRepository
+    from civex.identity import local_actor
     from civex.repositories.local.dataset_repo import LocalDatasetRepository
     from civex.repositories.local.file_ref_repo import LocalFileReferenceRepository
     from civex.repositories.local.file_store import VolumeAwareFileObjectStore
@@ -160,19 +160,11 @@ def build_local_context(
         session, is_postgres=engine.dialect.name == "postgresql"
     )
     job_repo = LocalWorkflowJobRepository(session)
-    audit_repo = LocalAuditRepository(session)
+    audit_repo = LocalAuditRepository(session, actor=local_actor())
     view_repo = LocalViewRepository(session)
     if file_store is None:
         file_store = VolumeAwareFileObjectStore(
             config.store_config, config.project_root, session=session
-        )
-
-    remote_transport = None
-    if config.remote:
-        from civex.sync.transport import get_transport
-
-        remote_transport, _path = get_transport(
-            config.remote.url, remote_civex=config.remote.remote_civex
         )
 
     schema_svc = SchemaService(schema_repo, audit_repo, record_repo)
@@ -187,7 +179,7 @@ def build_local_context(
         record_svc,
         on_purge=lambda collection_id: store_svc.clear_placement(str(collection_id)),
     )
-    file_svc = FileService(file_store, remote_transport=remote_transport)
+    file_svc = FileService(file_store)
     store_svc = StoreService(config, file_store)
     gc_svc = GCService(file_store, LocalFileReferenceRepository(session))
     file_info_svc = FileInfoService(
@@ -230,7 +222,9 @@ def build_local_context(
         audit_repo,
         job_repo,
         config.retention,
-        config.remote is not None,
+        # No sync exists yet, so no history waits to be pushed. Sync (CIVEX-307)
+        # turns this on while a remote is set.
+        False,
     )
 
     ctx = AppContext(

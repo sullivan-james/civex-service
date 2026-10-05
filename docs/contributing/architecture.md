@@ -15,6 +15,8 @@ civex-service/
     context.py     # AppContext factory (wires all repos + services)
 ```
 
+**Sync** does not exist yet: the old push/pull was removed in 1.2.0 and is being redesigned (CIVEX-305). The plan is one authority per project that other devices sync to, with `audit_log` as the queue of changes to send. `audit_log` already has the columns it will use (`actor`, `device_id`, `hlc`, `hub_seq`, `sync_state`); only `actor` is written so far (the OS user running civex, unverified). For synced changes `actor` will be set by the authority from the authenticated caller, never by the client, and `device_id` is generated once per machine and stored outside the project folder.
+
 **Layer rules (strict):**
 
 - `cli` → `services` via `AppContext`. Never touches repos or DB models directly.

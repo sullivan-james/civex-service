@@ -172,10 +172,12 @@ def test_the_audit_log_does_not_show_a_file_as_changed_when_it_was_not(
     update = next(
         e for e in ctx.audit_svc.list_audit(entity_id=record.id) if e.action == "update"
     )
+    # Entries are stored by field id.
+    ids = {f.name: str(f.id) for f in ctx.schema_svc.get("invoice").fields}
     old, new = update.old_data["data"], update.new_data["data"]
-    assert old["scan"] == new["scan"]  # same file, same stored value
-    assert "resolved_filename" not in new["scan"]
-    assert new["total"] == 3.0
+    assert old[ids["scan"]] == new[ids["scan"]]  # same file, same stored value
+    assert "resolved_filename" not in new[ids["scan"]]
+    assert new[ids["total"]] == 3.0
 
 
 def test_record_data_carries_resolved_filename_for_file_field(

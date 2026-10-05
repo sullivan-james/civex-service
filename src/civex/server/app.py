@@ -22,7 +22,6 @@ from civex.server.routers import (
     legal,
     plugins,
     records,
-    remote,
     retention,
     schemas,
     settings,
@@ -339,7 +338,6 @@ def create_app() -> FastAPI:
     app.include_router(jobs.automation_router, prefix="/api")
     app.include_router(audit.router, prefix="/api")
     app.include_router(retention.router, prefix="/api")
-    app.include_router(remote.router, prefix="/api")
     app.include_router(store.router, prefix="/api")
     app.include_router(transfers.router, prefix="/api")
     app.include_router(db.router, prefix="/api")

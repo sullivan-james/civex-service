@@ -6,11 +6,8 @@ Minimal config.toml (local only):
     [db]
     url = "sqlite:///..."
 
-With a remote (added by `civex remote set <url>`):
-    [remote]
-    url = "ssh://user@host:/srv/repos/myrepo"
-    last_pushed_seq = 42   # optional, monotonic commit sequence number
-    last_pulled_seq = 38   # optional
+A `[remote]` table written by civex before 1.2 is ignored (and dropped on the
+next save): the old push/pull sync was removed.
 """
 
 from __future__ import annotations
@@ -20,7 +17,6 @@ import threading
 import time
 import tomllib
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 
 from civex.domain.exceptions import ConfigError
@@ -113,16 +109,6 @@ class DBConfig:
 
 
 @dataclass
-class RemoteConfig:
-    url: str
-    last_pushed_seq: int = 0
-    last_pulled_seq: int = 0
-    remote_civex: str = "civex"  # path to civex on the remote (for SSH transport)
-    last_pushed_at: datetime | None = None
-    last_pulled_at: datetime | None = None
-
-
-@dataclass
 class VolumeConfig:
     name: str
     path: (
@@ -170,7 +156,6 @@ def _default_store(project_root: Path) -> StoreConfig:
 class Config:
     project_root: Path
     db: DBConfig
-    remote: RemoteConfig | None  # None when [remote] is absent — local-only mode
     store: StoreConfig | None = (
         None  # None until first access; use store_config property
     )
@@ -246,26 +231,6 @@ def load_config() -> Config:
         raise ConfigError(
             f"Malformed config file ({config_path}): {e}. "
             "If the database URL contains backslashes (Windows path), replace them with forward slashes."
-        )
-
-    remote: RemoteConfig | None = None
-    if "remote" in data:
-
-        def _parse_dt(val: str | None) -> datetime | None:
-            if not val:
-                return None
-            try:
-                return datetime.fromisoformat(val).replace(tzinfo=timezone.utc)
-            except ValueError:
-                return None
-
-        remote = RemoteConfig(
-            url=data["remote"]["url"],
-            last_pushed_seq=int(data["remote"].get("last_pushed_seq", 0)),
-            last_pulled_seq=int(data["remote"].get("last_pulled_seq", 0)),
-            remote_civex=data["remote"].get("remote_civex", "civex"),
-            last_pushed_at=_parse_dt(data["remote"].get("last_pushed_at")),
-            last_pulled_at=_parse_dt(data["remote"].get("last_pulled_at")),
         )
 
     store: StoreConfig | None = None
@@ -363,7 +328,6 @@ def load_config() -> Config:
             url=data["db"]["url"],
             docker_managed=bool(data["db"].get("docker_managed", False)),
         ),
-        remote=remote,
         store=store,
         ai=ai,
         logging=logging_cfg,
@@ -416,20 +380,6 @@ def save_config(config: Config) -> None:
     ]
     if config.db.docker_managed:
         lines.append("docker_managed = true\n")
-    if config.remote:
-        lines += ["\n[remote]\n", f'url = "{_ts(config.remote.url)}"\n']
-        if config.remote.remote_civex != "civex":
-            lines.append(f'remote_civex = "{_ts(config.remote.remote_civex)}"\n')
-        lines.append(f"last_pushed_seq = {config.remote.last_pushed_seq}\n")
-        lines.append(f"last_pulled_seq = {config.remote.last_pulled_seq}\n")
-        if config.remote.last_pushed_at:
-            lines.append(
-                f'last_pushed_at = "{config.remote.last_pushed_at.isoformat()}"\n'
-            )
-        if config.remote.last_pulled_at:
-            lines.append(
-                f'last_pulled_at = "{config.remote.last_pulled_at.isoformat()}"\n'
-            )
 
     if config.ai and not config.ai.from_env:
         lines += ["\n[ai]\n", f'api_key = "{_ts(config.ai.api_key)}"\n']

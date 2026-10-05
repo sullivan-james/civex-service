@@ -5,7 +5,6 @@ import type { AuditLogEntry } from '../api/audit'
 function makeEntry(overrides: Partial<AuditLogEntry> = {}): AuditLogEntry {
   return {
     id: 'audit-1',
-    commit_id: null,
     action: 'create',
     entity_type: 'schema',
     entity_id: 'schema-1',
