@@ -76,6 +76,28 @@ def now() -> None:
         c.close()
 
 
+@app.command("watch")
+def watch() -> None:
+    """Keep syncing in this terminal until stopped (Ctrl+C): after edits, on the
+    interval, and backing off when the authority can't be reached."""
+    import threading
+
+    from civex.context import build_local_context
+    from civex.services.sync_worker import SyncWorker
+
+    config = cli_load_config()
+    if not config.sync.remote:
+        console.print("[error]No authority is set. Use `civex sync connect`.[/error]")
+        raise typer.Exit(1)
+    console.print(f"Syncing with {config.sync.remote} (Ctrl+C to stop).")
+    stop = threading.Event()
+    worker = SyncWorker(cli_load_config, build_local_context)
+    try:
+        worker.run(stop)
+    except KeyboardInterrupt:
+        stop.set()
+
+
 @app.command("status")
 def status() -> None:
     """Show where this project stands with its authority."""

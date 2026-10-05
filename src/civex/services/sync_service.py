@@ -78,6 +78,8 @@ class SyncStatus:
     last_error: str | None
     last_error_at: str | None
     running: bool  # a sync is in progress right now
+    interval_seconds: int = 60
+    serving: bool = False  # this project is itself an authority
 
 
 class SyncService:
@@ -121,6 +123,8 @@ class SyncService:
             last_error=meta.last_error,
             last_error_at=meta.last_error_at,
             running=sync_running(self._config.civex_dir),
+            interval_seconds=self._config.sync.interval_seconds,
+            serving=self._config.sync.serve,
         )
 
     def conflicts(self, status: str | None = "open") -> list[SyncConflictDTO]:
@@ -209,6 +213,12 @@ class SyncService:
 
     def set_paused(self, paused: bool) -> None:
         self._config.sync.paused = paused
+        save_config(self._config)
+
+    def set_interval(self, seconds: int) -> None:
+        if seconds < 5:
+            raise ValidationError("The interval must be at least 5 seconds")
+        self._config.sync.interval_seconds = seconds
         save_config(self._config)
 
     def _check_protocol(self, hello: Hello) -> None:

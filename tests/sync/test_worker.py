@@ -1,0 +1,107 @@
+"""When a project syncs by itself: after edits, on an interval, on request; and
+how it backs off when the authority can't be reached."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from civex.config import SyncConfig
+from civex.domain.sync import SyncError
+from civex.services.sync_lock import SyncBusy
+from civex.services.sync_worker import BASE_BACKOFF, DEBOUNCE, MAX_BACKOFF, SyncWorker
+
+
+class Rig:
+    def __init__(self) -> None:
+        self.now = 1000.0
+        self.pending = 0
+        self.outcomes: list[object] = []  # exceptions raise; anything else returns
+        self.calls = 0
+        self.sync_config = SyncConfig(remote="http://a", interval_seconds=60)
+        self.worker = SyncWorker(self._config, self._ctx, clock=lambda: self.now)
+
+    def _config(self):
+        return SimpleNamespace(sync=self.sync_config)
+
+    def _ctx(self, _config):
+        def sync():
+            self.calls += 1
+            out = self.outcomes.pop(0) if self.outcomes else "report"
+            if isinstance(out, Exception):
+                raise out
+            return out
+
+        return SimpleNamespace(
+            sync_repo=SimpleNamespace(count_pending=lambda: self.pending),
+            sync_svc=SimpleNamespace(sync=sync),
+            close=lambda: None,
+        )
+
+    def tick(self, advance: float = 0.0):
+        self.now += advance
+        return self.worker.tick()
+
+
+def test_it_syncs_at_once_then_waits_for_the_interval() -> None:
+    r = Rig()
+    assert r.tick() == "report"
+    assert r.tick(10) is None
+    assert r.tick(60) == "report"
+    assert r.calls == 2
+
+
+def test_it_does_nothing_without_an_authority_or_when_paused() -> None:
+    r = Rig()
+    r.sync_config.remote = None
+    assert r.tick() is None
+    r.sync_config.remote = "http://a"
+    r.sync_config.paused = True
+    assert r.tick(1000) is None and r.calls == 0  # the schedule stops
+    r.worker.request()
+    assert r.tick() == "report"  # but asking still works
+    assert r.tick(1000) is None and r.calls == 1
+
+
+def test_local_changes_go_after_a_short_pause_not_at_every_tick() -> None:
+    r = Rig()
+    r.tick()
+    r.pending = 3
+    assert r.tick(1) is None  # within the debounce of the last attempt
+    assert r.tick(DEBOUNCE) == "report"
+
+
+def test_a_request_syncs_now_whatever_the_schedule() -> None:
+    r = Rig()
+    r.tick()
+    r.worker.request()
+    assert r.tick(1) == "report"
+
+
+def test_a_failure_backs_off_and_a_success_resets_it() -> None:
+    r = Rig()
+    r.outcomes = [SyncError("down"), SyncError("down")]
+    assert r.tick() is None
+    r.pending = 1
+    assert r.tick(BASE_BACKOFF) is None  # still backing off (waits 10s after 1st)
+    assert r.calls == 1
+    assert r.tick(BASE_BACKOFF * 2) is None  # second failure
+    assert r.calls == 2
+    assert r.tick(1) is None and r.calls == 2  # 20s back-off now
+    assert r.tick(BASE_BACKOFF * 4) == "report"
+    assert r.worker._failures == 0
+
+
+def test_a_refusal_waits_the_longest() -> None:
+    r = Rig()
+    r.outcomes = [SyncError("revoked", retryable=False, status=401)]
+    r.tick()
+    r.pending = 1
+    assert r.tick(MAX_BACKOFF - 1) is None
+    assert r.tick(2) == "report"
+
+
+def test_a_busy_project_is_left_alone() -> None:
+    r = Rig()
+    r.outcomes = [SyncBusy()]
+    assert r.tick() is None
+    assert r.worker._failures == 0

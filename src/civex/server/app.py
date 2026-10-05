@@ -24,6 +24,7 @@ from civex.server.routers import (
     legal,
     plugins,
     records,
+    remote,
     retention,
     schemas,
     settings,
@@ -301,11 +302,15 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _migrate_on_startup()
     from civex.services.transfer_jobs import jobs
 
+    from civex.services.sync_jobs import sync_jobs
+
     jobs.ensure_worker()  # picks up anything a restart left waiting
+    sync_jobs.ensure_worker()  # idles unless the project follows an authority
     try:
         yield
     finally:
         jobs.shutdown()
+        sync_jobs.shutdown()
 
 
 def create_app() -> FastAPI:
@@ -353,6 +358,7 @@ def create_app() -> FastAPI:
     app.include_router(retention.router, prefix="/api")
     app.include_router(store.router, prefix="/api")
     app.include_router(sync_peer.router, prefix="/api")
+    app.include_router(remote.router, prefix="/api")
     app.include_router(transfers.router, prefix="/api")
     app.include_router(db.router, prefix="/api")
     app.include_router(legal.router, prefix="/api")
