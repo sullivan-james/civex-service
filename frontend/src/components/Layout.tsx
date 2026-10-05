@@ -28,7 +28,6 @@ import AiPanel from './ai/AiPanel'
 import { useToast } from './ui/ToastProvider'
 import { Button } from './ui/Button'
 import { IconButton } from './ui/IconButton'
-import { Tooltip } from './ui/Tooltip'
 import { Menu as Dropdown } from './ui/Menu'
 import {
   RefreshCw,
@@ -294,19 +293,17 @@ function SyncButton() {
   const state = syncButtonState(data, spinning)
   const busy = state.tone === 'busy'
   return (
-    <Tooltip content={state.tip} side="bottom">
-      <Button
-        variant={state.tone === 'ok' || busy ? 'nav' : 'navActive'}
-        size="sm"
-        disabled={busy}
-        onClick={() =>
-          request(() => queryClient.refetchQueries({ type: 'active' }))
-        }
-      >
-        <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />
-        {state.label}
-      </Button>
-    </Tooltip>
+    <Button
+      variant={state.tone === 'ok' || busy ? 'nav' : 'navActive'}
+      size="sm"
+      disabled={busy}
+      onClick={() =>
+        request(() => queryClient.refetchQueries({ type: 'active' }))
+      }
+    >
+      <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />
+      {state.label}
+    </Button>
   )
 }
 

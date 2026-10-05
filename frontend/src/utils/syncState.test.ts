@@ -29,10 +29,10 @@ describe('syncButtonState', () => {
       { label: 'Sync · 26 to send', tone: 'needed' },
     )
   })
-  it('says it failed, with the reason', () => {
-    const s = syncButtonState({ ...base, last_error: 'No route' }, false, NOW)
-    expect(s.tone).toBe('error')
-    expect(s.tip).toContain('No route')
+  it('says it failed', () => {
+    expect(
+      syncButtonState({ ...base, last_error: 'No route' }, false, NOW).tone,
+    ).toBe('error')
   })
   it('is busy while running or starting', () => {
     expect(syncButtonState({ ...base, running: true }, false, NOW).tone).toBe(
@@ -44,14 +44,6 @@ describe('syncButtonState', () => {
     expect(
       syncButtonState({ ...base, open_conflicts: 2 }, false, NOW).label,
     ).toBe('Sync · 2 to review')
-  })
-  it('says when syncing is manual or paused', () => {
-    expect(
-      syncButtonState({ ...base, interval_seconds: 0 }, false, NOW).tip,
-    ).toContain('only when you press')
-    expect(
-      syncButtonState({ ...base, paused: true }, false, NOW).tip,
-    ).toContain('paused')
   })
   it('has a plain label before the first sync', () => {
     expect(
