@@ -364,22 +364,20 @@ def test_a_file_the_device_cannot_read_does_not_hold_the_change_back(pair, autho
     assert data(authority, record)["scan"]["sha256"] == ref.sha256
     assert not authority.file_svc.exists(ref.sha256)
     assert report.owed_files == [ref.sha256]
-    assert laptop.sync_svc.status().files_owed == 1
 
 
 def test_the_owed_file_goes_by_itself_when_it_can_be_read_again(pair, authority):
     laptop, _, record = pair
     ref, path, saved = _record_with_unreadable_file(laptop, record)
     laptop.sync_svc.sync()
-    laptop.sync_svc.sync()  # still unplugged: nothing to do, nothing breaks
-    assert laptop.sync_svc.status().files_owed == 1
+    again = laptop.sync_svc.sync()  # still unplugged: nothing to do, nothing breaks
+    assert again.owed_files == [ref.sha256]
 
     path.write_bytes(saved)  # the drive is plugged back in
     report = laptop.sync_svc.sync()
 
     assert authority.file_svc.exists(ref.sha256)
-    assert report.files_sent == 1
-    assert laptop.sync_svc.status().files_owed == 0
+    assert report.files_sent == 1 and report.owed_files == []
 
 
 def test_one_lost_file_does_not_hold_up_unrelated_changes(pair, authority):

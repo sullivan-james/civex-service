@@ -905,9 +905,6 @@ class SyncMeta(Base):
     last_synced_at: Mapped[datetime | None] = mapped_column(
         _UTCDateTime(), nullable=True
     )
-    # Hashes of files cited by changes already sent that this device could not
-    # read at the time; uploaded when they can be (see SyncService._send_owed).
-    owed_files: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_error_at: Mapped[datetime | None] = mapped_column(
         _UTCDateTime(), nullable=True

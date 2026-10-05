@@ -169,18 +169,6 @@ function Following({ s }: { s: RemoteStatus }) {
           <dd>{when(s.last_synced_at)}</dd>
           <dt className="text-fg-muted">Not yet sent</dt>
           <dd>{s.pending}</dd>
-          {s.files_owed > 0 && (
-            <>
-              <dt className="text-fg-muted">Files to send</dt>
-              <dd>
-                {s.files_owed}{' '}
-                <span className="text-xs text-fg-muted">
-                  not readable here yet (a drive that is unplugged, or files
-                  still to be recovered). They go as soon as they can be read.
-                </span>
-              </dd>
-            </>
-          )}
           <dt className="text-fg-muted">State</dt>
           <dd>
             {s.running ? (

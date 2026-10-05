@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import BigInteger, func, text, update
+from sqlalchemy import BigInteger, func, select, text, update
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -23,6 +23,7 @@ from civex.db.models import (
     Dataset,
     DatasetSchema,
     Field,
+    FileReference,
     Record,
     Schema,
     SyncConflict,
@@ -116,13 +117,19 @@ class LocalSyncRepository:
             last_error_at=_iso(row.last_error_at),
         )
 
-    def owed_files(self) -> list[str]:
-        return list(self._meta_row().owed_files or [])
-
-    def set_owed_files(self, shas: list[str]) -> None:
-        row = self._meta_row()
-        row.owed_files = sorted(set(shas)) or None
-        self._s.flush()
+    def referenced_shas(self, after: str, limit: int) -> list[str]:
+        """Hashes of the files live records cite, in hash order, `limit` of them
+        after `after`. The catalog is kept up to date as records are written, so
+        what a device still owes its authority is worked out from it each time
+        rather than remembered."""
+        rows = self._s.execute(
+            select(FileReference.sha256)
+            .where(FileReference.record_id.is_not(None), FileReference.sha256 > after)
+            .distinct()
+            .order_by(FileReference.sha256)
+            .limit(limit)
+        )
+        return [sha for (sha,) in rows]
 
     def set_project_id(self, project_id: uuid.UUID) -> None:
         self._meta_row().project_id = project_id

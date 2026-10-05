@@ -47,6 +47,8 @@ from civex.services.sync_applier import SyncApplier
 from civex.services.sync_lock import sync_lock, sync_running
 
 PUSH_BATCH = 100
+# How many referenced files are checked against the authority per request.
+FILE_CHECK_PAGE = 1000
 FEED_PAGE = 200
 SNAPSHOT_PAGE = 200
 
@@ -88,7 +90,6 @@ class SyncStatus:
     last_error_at: str | None
     running: bool  # a sync is in progress right now
     interval_seconds: int = 60
-    files_owed: int = 0  # files the authority lacks that are not readable here yet
     serving: bool = False  # this project is itself an authority
 
 
@@ -134,7 +135,6 @@ class SyncService:
             last_error_at=meta.last_error_at,
             running=sync_running(self._config.civex_dir),
             interval_seconds=self._config.sync.interval_seconds,
-            files_owed=len(self._repo.owed_files()) if self.configured else 0,
             serving=self._config.sync.serve,
         )
 
@@ -262,14 +262,17 @@ class SyncService:
     # Syncing
     # ------------------------------------------------------------------
 
-    def sync(self) -> SyncReport:
+    def sync(self, check_files: bool = True) -> SyncReport:
         """Pull, push, pull. Raises `SyncBusy` when another sync is running and
         `SyncError` when the authority can't be reached or refuses this device
-        (`retryable` says whether trying later can help)."""
+        (`retryable` says whether trying later can help). `check_files` also
+        looks for files the authority lacks that can be read here now (a
+        drive plugged back in); a background sync does that every few minutes
+        rather than every time."""
         with sync_lock(self._config.civex_dir):
             log.info("sync with %s: starting", self._config.sync.remote)
             try:
-                report = self._sync()
+                report = self._sync(check_files)
             except SyncError as e:
                 log.warning(
                     "sync with %s failed (%s): %s",
@@ -302,7 +305,7 @@ class SyncService:
         except Exception:  # noqa: BLE001 - nothing to save; the error matters more
             pass
 
-    def _sync(self) -> SyncReport:
+    def _sync(self, check_files: bool = True) -> SyncReport:
         transport = self._transport()
         hello = transport.hello()
         self._check_protocol(hello)
@@ -314,7 +317,8 @@ class SyncService:
         report = SyncReport()
         report.pulled += self._pull(transport)
         report.pushed += self._push(transport, report)
-        self._send_owed(transport, report)
+        if check_files:
+            self._send_missing_files(transport, report)
         if report.pushed or report.conflicts:
             report.pulled += self._pull(transport)
         return report
@@ -476,17 +480,13 @@ class SyncService:
     ) -> list[SyncEntry]:
         """Send the files these changes cite that the authority lacks. The
         changes always go: a file this computer cannot read right now (a drive
-        that is unplugged, bytes still to be recovered) is *owed*, remembered,
-        and uploaded as soon as it can be read. Data and files converge
-        separately, so a missing file never holds up a change, and when it turns
-        up nothing has to be done by hand."""
+        that is unplugged, bytes still to be recovered) is skipped, and
+        `_send_missing_files` finds it again once it can be read. Data and files
+        converge separately, so a missing file never holds up a change."""
         cited = {s for e in entries for s in collect_sha256_refs(e.new_data or {})}
         if cited:
-            owed = set(self._repo.owed_files())
             for sha in transport.missing_files(sorted(cited)):
-                if not self._upload(transport, sha, report):
-                    owed.add(sha)
-            self._repo.set_owed_files(sorted(owed))
+                self._upload(transport, sha, report)  # unreadable: caught up later
         return entries
 
     def _upload(self, transport: SyncTransport, sha: str, report: SyncReport) -> bool:
@@ -497,25 +497,28 @@ class SyncService:
         report.files_sent += 1
         return True
 
-    def _send_owed(self, transport: SyncTransport, report: SyncReport) -> None:
-        """Upload files owed from earlier, now that they may be readable. One
-        the authority has meanwhile (another device sent it) is simply dropped."""
-        owed = self._repo.owed_files()
-        if not owed:
-            return
-        still = set(transport.missing_files(owed))
-        for sha in sorted(still):
-            if self._upload(transport, sha, report):
-                still.discard(sha)
-        report.owed_files = sorted(still)
-        self._repo.set_owed_files(sorted(still))
-        self._commit()
-        if still:
+    def _send_missing_files(self, transport: SyncTransport, report: SyncReport) -> None:
+        """Make the authority hold every file a live record here cites and this
+        computer can read. Nothing is remembered between syncs: what is missing
+        is worked out from the references catalog and the authority's answer, so
+        a drive plugged back in, or files added later, are simply found. A file
+        that still can't be read is counted and left for next time."""
+        after = ""
+        while True:
+            page = self._repo.referenced_shas(after, FILE_CHECK_PAGE)
+            if not page:
+                break
+            after = page[-1]
+            for sha in transport.missing_files(page):
+                if not self._upload(transport, sha, report):
+                    report.owed_files.append(sha)
+        if report.owed_files:
             log.info(
-                "sync with %s: %d file(s) still owed (not readable here yet): %s",
+                "sync with %s: %d file(s) the authority lacks cannot be read here "
+                "yet; they go when they can: %s",
                 self._config.sync.remote,
-                len(still),
-                ", ".join(x[:10] for x in sorted(still)[:5]),
+                len(report.owed_files),
+                ", ".join(x[:10] for x in report.owed_files[:5]),
             )
 
     def _note(

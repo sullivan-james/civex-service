@@ -34,6 +34,9 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 DEBOUNCE = 3.0
+# The look for files the authority lacks costs a request per thousand files, so a
+# background sync does it this often (a manual sync always does).
+FILE_CHECK_EVERY = 600.0
 BASE_BACKOFF = 5.0
 MAX_BACKOFF = 900.0
 
@@ -53,6 +56,7 @@ class SyncWorker:
         self._backoff_until = 0.0
         self._next_interval = 0.0
         self._last_attempt = -DEBOUNCE
+        self._last_file_check = -FILE_CHECK_EVERY
 
     def request(self) -> None:
         """Ask for a sync at the next tick, whatever the schedule says."""
@@ -96,7 +100,10 @@ class SyncWorker:
         self._last_attempt = now
         log.info("background sync: %s", "requested" if asked else "due")
         try:
-            report = ctx.sync_svc.sync()
+            files = asked or now - self._last_file_check >= FILE_CHECK_EVERY
+            report = ctx.sync_svc.sync(check_files=files)
+            if files:
+                self._last_file_check = now
         except SyncBusy:
             return None
         except SyncError as e:

@@ -52,9 +52,9 @@ to sync only when you press **Sync now** (also in the top bar) or run
 
 Changes and files travel separately, so a missing file never holds a change up.
 If a change cites a file this computer can't read right now (a drive that is
-unplugged, or files you still have to recover), the change is sent and the file
-is remembered as *owed*. Settings → Sync shows how many; they are uploaded by
-themselves as soon as they can be read, whether you plug the drive back in or
+unplugged, or files you still have to recover), the change is sent without it. Every
+few minutes (and on every manual sync) civex checks which files the authority
+lacks that it can now read and uploads them, whether you plug the drive back in or
 add the same files later (matching content has the same hash). The server log
 has one line per sync, and a warning for anything refused or in conflict.
 
