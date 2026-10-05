@@ -171,9 +171,7 @@ def test_reverting_a_delete_explains_the_clash(ctx: AppContext, plots):
     ctx.commit()
     plots("survey", "plot", {"site": "A", "number": 1})
     entry = next(
-        e
-        for e in ctx.history_svc.page(entity_id=first.id)
-        if e.action == "delete"
+        e for e in ctx.history_svc.page(entity_id=first.id) if e.action == "delete"
     )
     plan = ctx.history_svc.plan_revert(str(entry.id))
     assert plan.can_apply is False
@@ -231,3 +229,66 @@ def test_renaming_a_field_keeps_the_key(ctx: AppContext, plots):
 def test_a_policy_change_is_in_history(ctx: AppContext, plots):
     entries = ctx.history_svc.page(entity_id=ctx.schema_svc.get("plot").id)
     assert any(e.action == "update" for e in entries)
+
+
+# --- restoring in parts -------------------------------------------------------
+
+
+@pytest.fixture()
+def tree(ctx: AppContext, make_schema, make_collection, make_record):
+    """An encounter with two recordings numbered 1 and 2, deleted together."""
+    make_schema("encounter", fields=[("site", "string")])
+    make_schema("recording", fields=[("number", "integer")], parent="encounter")
+    make_collection("survey")
+    ctx.schema_svc.set_unique_keys("recording", [["number"]])
+    enc = make_record("survey", "encounter", {"site": "S"})
+    recs = [
+        make_record("survey", "recording", {"number": n}, parent_record_id=str(enc.id))
+        for n in (1, 2)
+    ]
+    ctx.record_svc.delete(str(enc.id))
+    ctx.commit()
+    return enc, recs
+
+
+def test_a_recording_whose_number_was_taken_is_held_back_but_its_sibling_is_not(
+    ctx: AppContext, tree
+):
+    enc, recs = tree
+    ctx.record_svc.restore(str(enc.id), only_this=True)
+    taker = ctx.record_svc.add(
+        "survey", "recording", {"number": 1}, parent_record_id=str(enc.id)
+    )
+
+    plan = ctx.record_svc.restore_plan(str(recs[0].id))
+    assert plan.can_restore is False
+    assert plan.conflict is not None and plan.conflict.existing_id == str(taker.id)
+    assert ctx.record_svc.restore_plan(str(recs[1].id)).can_restore is True
+    ctx.record_svc.restore(str(recs[1].id))
+
+
+def test_restore_selected_skips_the_clashing_record_and_reports_it_left(
+    ctx: AppContext, plots
+):
+    clash = plots("survey", "plot", {"site": "A", "number": 1})
+    fine = plots("survey", "plot", {"site": "A", "number": 2})
+    ctx.record_svc.delete_many([str(clash.id), str(fine.id)])
+    ctx.commit()
+    plots("survey", "plot", {"site": "A", "number": 1})
+
+    result = ctx.record_svc.restore_records([str(clash.id), str(fine.id)])
+    assert result.restored == 1
+    assert result.left == [str(clash.id)]
+
+
+def test_two_deleted_records_with_the_same_values_do_not_both_come_back(
+    ctx: AppContext, plots
+):
+    a = plots("survey", "plot", {"site": "A", "number": 1})
+    ctx.record_svc.delete(str(a.id))
+    b = plots("survey", "plot", {"site": "A", "number": 1})
+    ctx.record_svc.delete(str(b.id))
+    ctx.commit()
+
+    result = ctx.record_svc.restore_records([str(a.id), str(b.id)])
+    assert result.restored == 1 and len(result.left) == 1

@@ -210,3 +210,22 @@ def test_a_run_that_is_not_told_to_stop_runs_to_the_end() -> None:
         should_stop=lambda: False,
     )
     assert len(seen) == 2
+
+
+def test_a_steps_refused_writes_are_added_to_its_outputs() -> None:
+    """A step that skips a row a uniqueness policy refused still says which
+    record the row collided with (see WorkflowContext.take_duplicates)."""
+
+    class Ctx(_FakeCtx):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pending = [{"message": "m", "existing_record_id": "abc"}]
+
+        def take_duplicates(self):
+            taken, self.pending = self.pending, []
+            return taken
+
+    wf = WorkflowDef(name="wf", steps=[StepDef(id="s1", plugin="test.plugin")])
+    ctx = Ctx()
+    executions = executor.run(wf, ctx, {"test.plugin": _recording_registration([])})
+    assert executions[0]["outputs"]["duplicates"][0]["existing_record_id"] == "abc"

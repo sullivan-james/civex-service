@@ -14,6 +14,19 @@ export interface Blocker {
   name: string
 }
 
+/** Another record has taken the unique values of one that would come back
+ * (the schema's uniqueness rule), so restoring is refused. */
+export interface RestoreConflict {
+  /** The record that can't come back: the one asked for, or one below it. */
+  record_id: string
+  record_name: string
+  /** The live record that now holds the values. */
+  existing_id: string
+  existing_name: string
+  fields: string[]
+  message: string
+}
+
 /** What restoring something would do, worked out without doing it. */
 export interface RestorePlan {
   kind: RestoreKind
@@ -34,6 +47,8 @@ export interface RestorePlan {
    * them. Each can come back by itself, so restoring just this record brings
    * back `parents_needed + 1` and leaves its deleted siblings. */
   parents_needed?: number | null
+  /** Set when restoring would break a uniqueness rule. */
+  conflict?: RestoreConflict | null
   /** When it was deleted. */
   deleted_at?: string | null
   can_restore: boolean

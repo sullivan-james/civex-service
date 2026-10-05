@@ -5,7 +5,7 @@ A schema can say which field combinations no two of its records may share
 Stored as a JSON list of keys, each a list of the schema's own field ids.
 
 Revision ID: a3d8f0b6c125
-Revises: f2a6c8d1e093
+Revises: b7f2c9a14d36
 Create Date: 2026-10-05 00:00:00.000000
 """
 
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 import civex.db.models
 
 revision: str = "a3d8f0b6c125"
-down_revision: Union[str, None] = "f2a6c8d1e093"
+down_revision: Union[str, None] = "b7f2c9a14d36"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

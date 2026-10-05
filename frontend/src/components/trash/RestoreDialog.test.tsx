@@ -160,6 +160,32 @@ describe('RestoreDialog', () => {
     ).toBeInTheDocument()
   })
 
+  it('explains a clash of unique values, disables Restore and links to the other record', async () => {
+    plans['/api/records/rec-1/restore-plan'] = plan({
+      can_restore: false,
+      blocked:
+        "'Plot 1' can't come back: 'Plot 1b' now has the same site and number, and these must be unique. Change or delete 'Plot 1b' first, or leave this one deleted.",
+      conflict: {
+        record_id: 'rec-1',
+        record_name: 'Plot 1',
+        existing_id: 'rec-9',
+        existing_name: 'Plot 1b',
+        fields: ['site', 'number'],
+        message:
+          "'Plot 1' can't come back: 'Plot 1b' now has the same site and number, and these must be unique. Change or delete 'Plot 1b' first, or leave this one deleted.",
+      },
+    })
+    renderDialog('record', 'rec-1')
+
+    expect(
+      await screen.findByText(/now has the same site and number/),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Restore' })).toBeDisabled()
+    expect(
+      screen.getByRole('link', { name: /Open “Plot 1b”/ }),
+    ).toHaveAttribute('href', '/records/rec-9')
+  })
+
   it('will not restore a blocked record, and offers the blocker instead', async () => {
     plans['/api/records/rec-1/restore-plan'] = plan({
       can_restore: false,

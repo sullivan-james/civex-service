@@ -30,6 +30,7 @@ import { displayLabel, nameError } from '../utils/naming'
 import { Upload } from '../components/ui/icons'
 import { SchemaFieldsSection } from '../components/schemas/SchemaFieldsSection'
 import { NamingSection } from '../components/schemas/NamingSection'
+import { UniquenessSection } from '../components/schemas/UniquenessSection'
 import { AuditTrail } from '../components/audit/AuditTrail'
 import { describeAuditEntry as describeSchemaAuditEntry } from '../utils/schemaAudit'
 import { WorkflowsPanel } from '../components/workflows/WorkflowsPanel'
@@ -131,6 +132,7 @@ function MetaEditor({
 const TABS = [
   { id: 'fields', label: 'Fields' },
   { id: 'naming', label: 'Naming' },
+  { id: 'uniqueness', label: 'Uniqueness' },
   { id: 'automations', label: 'Automations' },
   { id: 'history', label: 'History' },
 ] as const
@@ -252,6 +254,10 @@ export default function SchemaDetailPage() {
 
       <TabPanel id="naming" value={tab}>
         <NamingSection schema={schema} allSchemas={allSchemas} />
+      </TabPanel>
+
+      <TabPanel id="uniqueness" value={tab}>
+        <UniquenessSection schema={schema} />
       </TabPanel>
 
       <TabPanel id="automations" value={tab}>
