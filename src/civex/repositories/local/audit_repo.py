@@ -14,20 +14,19 @@ from sqlalchemy import (
     not_,
     or_,
     select,
-    update,
 )
 from sqlalchemy.orm import Session
 
 from contextlib import contextmanager
 from typing import Iterator
 
-from civex.db.models import AuditBatch, AuditLog, Commit, Dataset, Record, Schema
+from civex.db.models import AuditBatch, AuditLog, Dataset, Field, Record, Schema
 from civex.domain.audit_diff import tombstone
 from civex.domain.audit_filter import AuditFilter
 from civex.domain.exceptions import ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode
 from civex.repositories.local._dates import utc
-from civex.domain.dtos import AuditBatchDTO, AuditEventDTO, AuditLogDTO, CommitDTO
+from civex.domain.dtos import AuditBatchDTO, AuditEventDTO, AuditLogDTO
 from civex.repositories.local._bucketing import day_bucket
 from civex.repositories.local._ids import prefix_span
 from civex.repositories.protocols import AuditEventRow
@@ -64,14 +63,15 @@ def _how():
 
 
 def _now_is(state: str):
-    """The record, collection or schema a change is about is live, deleted
-    (restorable) or gone. Changes to anything else (a field, a view) are none of
+    """The record, collection, schema or field a change is about is live,
+    deleted (restorable) or gone. Changes to anything else (a view) are none of
     these, so a filter on it leaves them out."""
     parts = []
     for entity_type, table in (
         ("record", Record),
         ("dataset", Dataset),
         ("schema", Schema),
+        ("field", Field),
     ):
         about = AuditLog.entity_type == entity_type
         if state == "live":
@@ -171,8 +171,10 @@ def _tree(node: FilterNode):
 
 
 class LocalAuditRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, actor: str | None = None) -> None:
         self._s = session
+        # Who is writing: stamped on every entry made through this repository.
+        self._actor = actor
         # The batch the next writes belong to. A batch opened with `batch()` is
         # only created once something is written into it, so one that turns out
         # to touch nothing leaves no trace.
@@ -251,6 +253,7 @@ class LocalAuditRepository:
                 new_data=new_data,
                 timestamp=datetime.now(timezone.utc),
                 batch_id=self._current_batch(),
+                actor=self._actor,
             )
         )
 
@@ -282,55 +285,6 @@ class LocalAuditRepository:
         return [
             (d, action, entity_type, count) for d, action, entity_type, count in rows
         ]
-
-    # ------------------------------------------------------------------
-    # Commit management (used by AuditService / CLI)
-    # ------------------------------------------------------------------
-
-    def create_commit(self, message: str | None = None) -> CommitDTO:
-        by_type = self._staged_counts()
-        if not by_type:
-            raise ValueError("Nothing to commit — no staged changes")
-
-        next_seq = (self._s.query(func.max(Commit.seq)).scalar() or 0) + 1
-        commit = Commit(
-            seq=next_seq,
-            message=message,
-            record_count=by_type.get("record", 0),
-            schema_count=by_type.get("schema", 0) + by_type.get("field", 0),
-            dataset_count=by_type.get("dataset", 0),
-        )
-        self._s.add(commit)
-        self._s.flush()
-
-        # One UPDATE however many entries are staged, not one per entry.
-        self._s.execute(
-            update(AuditLog)
-            .where(AuditLog.commit_id.is_(None))
-            .values(commit_id=commit.id)
-            .execution_options(synchronize_session=False)
-        )
-        self._s.expire_all()
-        return _commit_dto(commit)
-
-    def count_staged(self) -> dict[str, int]:
-        by_type = self._staged_counts()
-        return {
-            "total": sum(by_type.values()),
-            "records": by_type.get("record", 0),
-            "schemas": by_type.get("schema", 0) + by_type.get("field", 0),
-            "datasets": by_type.get("dataset", 0),
-        }
-
-    def list_commits(self, limit: int = 50, offset: int = 0) -> list[CommitDTO]:
-        rows = (
-            self._s.query(Commit)
-            .order_by(Commit.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
-        return [_commit_dto(r) for r in rows]
 
     def get_audit(self, audit_id: uuid.UUID) -> AuditLogDTO | None:
         row = self._s.get(AuditLog, audit_id)
@@ -403,6 +357,15 @@ class LocalAuditRepository:
             )
         }
         parts = self._parts(base, list(batches))
+        # A batch is made in one go by one person: any of its entries' actors.
+        batch_actor: dict[uuid.UUID | None, str | None] = {}
+        if batches:
+            for bid, who in (
+                self._s.query(AuditLog.batch_id, func.min(AuditLog.actor))
+                .filter(AuditLog.batch_id.in_(list(batches)))
+                .group_by(AuditLog.batch_id)
+            ):
+                batch_actor[bid] = who
         events = [
             AuditEventDTO(
                 id=key,
@@ -411,6 +374,7 @@ class LocalAuditRepository:
                 entry=entries.get(key),
                 batch=batches.get(key),
                 parts=parts.get(key, []),
+                actor=(entries[key].actor if key in entries else batch_actor.get(key)),
             )
             for key, ts, n in rows
         ]
@@ -547,6 +511,7 @@ class LocalAuditRepository:
                             old_data=tombstone(snapshot),
                             new_data=None,
                             timestamp=max(e.timestamp for e in entries),
+                            actor=self._actor,
                         )
                     )
             self._s.flush()
@@ -555,17 +520,13 @@ class LocalAuditRepository:
     def _prunable(self, before: datetime, protect_unsynced: bool) -> list:
         """The conditions for an entry that may be removed: older than `before`,
         not about something that can still be restored, and (with a remote) not
-        waiting to be pushed."""
+        waiting to be synced."""
         conditions: list = [
             AuditLog.timestamp < before,
             not_(_now_is("deleted")),
         ]
         if protect_unsynced:
-            unpushed = select(Commit.id).where(Commit.pushed_at.is_(None))
-            conditions += [
-                AuditLog.commit_id.is_not(None),
-                AuditLog.commit_id.not_in(unpushed),
-            ]
+            conditions.append(AuditLog.sync_state != "pending")
         return conditions
 
     def count_prunable(
@@ -655,8 +616,6 @@ class LocalAuditRepository:
             q = q.filter(AuditLog.entity_id == f.entity_id)
         if f.entity_type is not None:
             q = q.filter(AuditLog.entity_type == f.entity_type)
-        if f.commit_id is not None:
-            q = q.filter(AuditLog.commit_id == f.commit_id)
         if f.batch_id is not None:
             q = q.filter(AuditLog.batch_id == f.batch_id)
         if f.where is not None:
@@ -681,95 +640,6 @@ class LocalAuditRepository:
             )
         return q
 
-    def list_unpushed_commits(self) -> list[CommitDTO]:
-        rows = (
-            self._s.query(Commit)
-            .filter(Commit.pushed_at.is_(None))
-            .order_by(Commit.created_at)
-            .all()
-        )
-        return [_commit_dto(r) for r in rows]
-
-    def list_audit_for_commits(self, commit_ids: list[uuid.UUID]) -> list[AuditLogDTO]:
-        if not commit_ids:
-            return []
-        rows = (
-            self._s.query(AuditLog)
-            .filter(AuditLog.commit_id.in_(commit_ids))
-            .order_by(AuditLog.timestamp)
-            .all()
-        )
-        return [_audit_dto(r) for r in rows]
-
-    def upsert_commit(self, d: dict) -> None:
-        uid = uuid.UUID(d["id"])
-        existing = self._s.get(Commit, uid)
-        pushed_at = _parse_dt(d.get("pushed_at"))
-        if existing is None:
-            self._s.add(
-                Commit(
-                    id=uid,
-                    message=d.get("message"),
-                    created_at=_parse_dt(d.get("created_at"))
-                    or datetime.now(timezone.utc),
-                    record_count=d.get("record_count", 0),
-                    schema_count=d.get("schema_count", 0),
-                    dataset_count=d.get("dataset_count", 0),
-                    pushed_at=pushed_at,
-                )
-            )
-        else:
-            existing.message = d.get("message")
-            if pushed_at and not existing.pushed_at:
-                existing.pushed_at = pushed_at
-
-    def upsert_audit_entry(self, d: dict) -> None:
-        uid = uuid.UUID(d["id"])
-        if self._s.get(AuditLog, uid) is None:
-            self._s.add(
-                AuditLog(
-                    id=uid,
-                    commit_id=uuid.UUID(d["commit_id"]) if d.get("commit_id") else None,
-                    action=d["action"],
-                    entity_type=d["entity_type"],
-                    entity_id=uuid.UUID(d["entity_id"]),
-                    old_data=d.get("old_data"),
-                    new_data=d.get("new_data"),
-                    timestamp=_parse_dt(d.get("timestamp"))
-                    or datetime.now(timezone.utc),
-                )
-            )
-
-    def mark_pushed(self, commit_ids: list[uuid.UUID]) -> None:
-        now = datetime.now(timezone.utc)
-        for cid in commit_ids:
-            row = self._s.get(Commit, cid)
-            if row:
-                row.pushed_at = now
-
-    def _staged_counts(self) -> dict[str, int]:
-        """Uncommitted audit entries per entity type -- one grouped count over
-        the staged index, not every entry (with its record JSON) loaded."""
-        return dict(
-            self._s.query(AuditLog.entity_type, func.count(AuditLog.id))
-            .filter(AuditLog.commit_id.is_(None))
-            .group_by(AuditLog.entity_type)
-            .all()  # type: ignore[arg-type]
-        )
-
-
-def _commit_dto(r: Commit) -> CommitDTO:
-    return CommitDTO(
-        id=r.id,
-        seq=r.seq,
-        message=r.message,
-        created_at=r.created_at,
-        record_count=r.record_count,
-        schema_count=r.schema_count,
-        dataset_count=r.dataset_count,
-        pushed_at=r.pushed_at,
-    )
-
 
 def _batch_dto(r: AuditBatch) -> AuditBatchDTO:
     return AuditBatchDTO(
@@ -780,13 +650,13 @@ def _batch_dto(r: AuditBatch) -> AuditBatchDTO:
 def _audit_dto(r: AuditLog) -> AuditLogDTO:
     return AuditLogDTO(
         id=r.id,
-        commit_id=r.commit_id,
         action=r.action,
         entity_type=r.entity_type,
         entity_id=r.entity_id,
         old_data=r.old_data,
         new_data=r.new_data,
         timestamp=r.timestamp,
+        actor=r.actor,
     )
 
 

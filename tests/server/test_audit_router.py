@@ -129,7 +129,14 @@ def test_audit_entries_carry_their_changes(client: TestClient) -> None:
 
     entry = _latest_update(client, record_id)
     assert entry["changes"] == [
-        {"field": "age", "label": "Age", "dtype": "integer", "before": 1, "after": 2}
+        {
+            "field": "age",
+            "label": "Age",
+            "dtype": "integer",
+            "before": 1,
+            "after": 2,
+            "deleted": None,
+        }
     ]
     single = client.get(f"/api/audit/{entry['id']}")
     assert single.status_code == 200
@@ -291,3 +298,29 @@ def test_unknown_batch_is_404_and_only_imports_can_be_opened(
     missing = "00000000-0000-0000-0000-000000000000"
     assert client.get(f"/api/audit/batches/{missing}").status_code == 404
     assert client.post("/api/audit/batches", json={"kind": "delete"}).status_code == 422
+
+
+def test_restore_all_takes_a_batch_and_refuses_one_that_is_not_an_id(
+    client: TestClient,
+) -> None:
+    assert client.get("/api/audit/restore-all?batch=nope").status_code == 422
+    assert (
+        client.post("/api/audit/restore-all", json={"batch": "nope"}).status_code == 422
+    )
+    plan = client.get(
+        "/api/audit/restore-all?batch=00000000-0000-0000-0000-000000000000"
+    )
+    assert plan.status_code == 200
+    assert plan.json()["things"] == 0  # nothing in a batch that doesn't exist
+
+
+def test_restore_selected_takes_ids_and_says_what_came_back(client: TestClient) -> None:
+    r = client.post("/api/records/restore-selected", json={"ids": []})
+    assert r.status_code == 200
+    assert r.json() == {"restored": 0, "came_back": 0, "left": 0}
+    # An id that is not a record is skipped, not an error.
+    r = client.post(
+        "/api/records/restore-selected",
+        json={"ids": ["not-an-id", "00000000-0000-0000-0000-000000000000"]},
+    )
+    assert r.json()["restored"] == 0

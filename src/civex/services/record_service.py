@@ -19,6 +19,8 @@ from civex.domain.dtos import (
     ResolvedField,
     ResolvedSchema,
     RestorePlanDTO,
+    RestoreSetDTO,
+    RestoreSetResultDTO,
     SchemaDTO,
 )
 from civex.domain import geo as geo_domain
@@ -275,6 +277,10 @@ def _audit_batch(audit: AuditRepository | None, kind: str, many: bool):
     return audit.batch(kind) if audit is not None and many else nullcontext()
 
 
+def _is_blank_value(value: Any) -> bool:
+    return value is None or value == "" or value == [] or value == {}
+
+
 def _file_dicts(value: Any) -> list[dict[str, Any]]:
     """The file reference dicts in a `file` or `file_list` value."""
     if isinstance(value, dict):
@@ -444,7 +450,20 @@ class RecordService:
     ) -> dict[str, Any]:
         if shape is None:
             return data
-        return {shape.id_to_name.get(k, k): v for k, v in data.items()}
+        # A deleted field's value stays in the stored data (so a restore brings it
+        # back) but isn't a field the record has now.
+        return {
+            shape.id_to_name.get(k, k): v
+            for k, v in data.items()
+            if k not in shape.deleted_by_id
+        }
+
+    def _snapshot(self, dto: RecordDTO) -> dict[str, Any]:
+        """What a history entry stores for a record: the record as it is held,
+        its values keyed by field *id*. Names change, ids don't, so an entry
+        still means the same thing after a field is renamed; `AuditService`
+        turns ids into current names when it serves one."""
+        return dto.to_dict()
 
     def _with_names(
         self, dto: RecordDTO, shapes: SchemaResolver | None = None
@@ -455,13 +474,33 @@ class RecordService:
         shape = (shapes or self._schema_svc.resolver())(dto.schema_id)
         if shape is None:
             return dataclasses.replace(dto)
-        named_data = {shape.id_to_name.get(k, k): v for k, v in dto.data.items()}
+        named_data = self._ids_to_names(dto.data, shape)
+        deleted = [
+            {
+                "id": str(d.field.id),
+                "name": d.field.name,
+                "label": d.field.display_name,
+                "dtype": d.field.dtype,
+                "schema_name": d.schema_name,
+                "deleted_at": d.field.deleted_at.isoformat()
+                if d.field.deleted_at
+                else None,
+                "value": dto.data[fid],
+            }
+            for fid, d in shape.deleted_by_id.items()
+            if fid in dto.data and not _is_blank_value(dto.data[fid])
+        ]
         builtins = _name_builtins(shape.schema.name, dto.id)
         natural_name = _natural_name(
             named_data, shape.fields, shape.schema.display_template, builtins
         )
         named_data = _apply_filename_templates(named_data, shape.fields, builtins)
-        return dataclasses.replace(dto, data=named_data, natural_name=natural_name)
+        return dataclasses.replace(
+            dto,
+            data=named_data,
+            natural_name=natural_name,
+            deleted_fields=deleted or None,
+        )
 
     def labels(self, record_ids: list[str]) -> list[RecordDTO]:
         """Each of these records with its name as it is now, for showing a record
@@ -1123,7 +1162,9 @@ class RecordService:
         shapes.prime(shape)
         named = self._with_names(dto, shapes)
         if self._audit:
-            self._audit.log_change("create", "record", dto.id, None, named.to_dict())
+            self._audit.log_change(
+                "create", "record", dto.id, None, self._snapshot(dto)
+            )
         if self._job_svc:
             self._job_svc.trigger_for_record(
                 named, "record_created", depth=_job_depth, cause=_cause
@@ -1264,19 +1305,21 @@ class RecordService:
         if dataset:
             self._check_references(data, shape, dataset, unchanged=old_data)
         id_data = self._names_to_ids(data, shape)
+        if shape is not None and shape.deleted_by_id:
+            # Saving replaces the record's data. Values held for deleted fields
+            # aren't part of what the caller sent, and must survive it, or
+            # restoring the field would bring back an empty one.
+            kept = {k: v for k, v in raw.data.items() if k in shape.deleted_by_id}
+            id_data = {**kept, **id_data}
         dto = self._records.update(id=raw.id, data=id_data)
         named = self._with_names(dto, shapes)
         # What was stored, by field name, with nothing the server adds on a read
-        # (`resolved_filename`): that is what "before" is, so it is what "after"
-        # must be, or every file field would look edited on every save.
+        # (`resolved_filename`): what "before" is, so it is what "after" must be,
+        # or every file field would look edited on every save.
         new_data = self._ids_to_names(dto.data, shape)
         if self._audit:
-            old_named = dataclasses.replace(
-                raw, data=old_data, schema_name=named.schema_name
-            )
-            new_named = dataclasses.replace(named, data=new_data)
             self._audit.log_change(
-                "update", "record", raw.id, old_named.to_dict(), new_named.to_dict()
+                "update", "record", raw.id, self._snapshot(raw), self._snapshot(dto)
             )
         if self._job_svc:
             # Which fields changed decides which triggers fire. A workflow that
@@ -1922,14 +1965,13 @@ class RecordService:
         self._handle_referrers(doomed, force)
         records = self._records.list_by_ids(every)
         if self._audit:
-            shapes = self._schema_svc.resolver()
             with _audit_batch(self._audit, "delete", len(records) > 1):
                 for record in records:
                     self._audit.log_change(
                         "delete",
                         "record",
                         record.id,
-                        self._with_names(record, shapes).to_dict(),
+                        self._snapshot(record),
                         None,
                     )
         self._records.delete_many(every)
@@ -1985,15 +2027,38 @@ class RecordService:
             with_count=False,
             with_schemas=False,
         )
+        group = self._restore_group(record)
+        blocker = self._restore_blocker(record, dataset)
         return RestorePlanDTO(
             kind="record",
             id=record.id,
             name=self._deleted_name(record),
-            records=len(self._restore_group(record)),
-            blocked_by=self._restore_blocker(record, dataset),
+            records=len(group),
+            blocked_by=blocker,
             collection=dataset.name if dataset else None,
             collection_id=dataset.id if dataset else None,
+            deleted_at=record.deleted_at,
+            parents_needed=(
+                len(self._deleted_above(record))
+                if blocker is not None and blocker.kind == "record"
+                else None
+            ),
         )
+
+    def _deleted_above(self, record: RecordDTO) -> list[RecordDTO]:
+        """The deleted records directly above this one, topmost first: what has
+        to come back for it to be seen."""
+        above: list[RecordDTO] = []
+        current = record
+        while current.parent_record_id is not None:
+            parent = self._records.get_by_prefix(
+                str(current.parent_record_id), include_deleted=True
+            )
+            if parent is None or parent.deleted_at is None:
+                break
+            above.append(parent)
+            current = parent
+        return list(reversed(above))
 
     def _deleted_record(self, record_id: str) -> RecordDTO:
         record = self._records.get_by_prefix(record_id, include_deleted=True)
@@ -2054,19 +2119,266 @@ class RecordService:
             return BlockerDTO("record", top.id, self._deleted_name(top))
         return None
 
-    def restore(self, record_id: str) -> RecordDTO:
+    def plan_restore_set(
+        self,
+        ids: list[str],
+        covered_collections: frozenset[str] | set[str] = frozenset(),
+        covered_schemas: frozenset[str] | set[str] = frozenset(),
+    ) -> RestoreSetDTO:
+        """Which of these deleted records can come back, for all of them at once:
+        the records, their collections, schemas and ancestors, and what each
+        brings back with it, are looked up together rather than record by record
+        (`restore_plan` per record is a dozen queries each, so a bulk delete of a
+        few hundred took minutes to even describe).
+
+        A record is held back while its collection, its schema, or the topmost
+        deleted record above it is deleted -- unless that is itself being
+        restored (`covered_*` name the collections and schemas that are, and any
+        chosen record is): it then comes back with it."""
+        wanted: list[uuid.UUID] = []
+        for raw in ids:
+            try:
+                wanted.append(uuid.UUID(str(raw)))
+            except ValueError:
+                continue
+        rows = [
+            r
+            for r in self._records.list_by_ids(list(dict.fromkeys(wanted)))
+            if r.deleted_at is not None
+        ]
+        chosen = {r.id for r in rows}
+        blockers = self._restore_blockers(rows)
+        groups = self._restore_groups(rows)
+        plan = RestoreSetDTO(groups=groups)
+        for record in rows:
+            blocker = blockers[record.id]
+            covered = blocker is not None and (
+                (blocker.kind == "record" and blocker.id in chosen)
+                or (
+                    blocker.kind == "collection" and blocker.name in covered_collections
+                )
+                or (blocker.kind == "schema" and blocker.name in covered_schemas)
+            )
+            if blocker is not None and not covered:
+                plan.blocked.append(record.id)
+                continue
+            plan.coming.update(groups[record.id])
+            if blocker is None:
+                plan.ready.append(record.id)
+            else:
+                plan.waiting.append(record.id)
+        return plan
+
+    def restore_set(self, ids: list[str]) -> RestoreSetResultDTO:
+        """Restore every one of these deleted records that nothing deleted holds
+        back, each with what was deleted with it, in one go: one lookup, one
+        update and one history entry per record, not a full plan and restore
+        per record. Those held back are returned in `left` (restoring what is
+        above them may free them; the caller goes round again)."""
+        plan = self.plan_restore_set(ids)
+        every = list(
+            dict.fromkeys(rid for root in plan.ready for rid in plan.groups[root])
+        )
+        if every:
+            before = {r.id: self._snapshot(r) for r in self._records.list_by_ids(every)}
+            self._records.restore_many(every)
+            if self._audit:
+                with _audit_batch(self._audit, "restore", len(every) > 1):
+                    for restored in self._records.list_by_ids(every):
+                        self._audit.log_change(
+                            "restore",
+                            "record",
+                            restored.id,
+                            before[restored.id],
+                            self._snapshot(restored),
+                        )
+        back = set(every)
+        # Held back, or waiting for a parent that was not deleted with them:
+        # whatever is not live now is left for the next round.
+        left = [str(i) for i in (*plan.blocked, *plan.waiting) if i not in back]
+        return RestoreSetResultDTO(
+            restored=len(plan.ready), came_back=len(every), left=left
+        )
+
+    def restore_records(
+        self, ids: list[str], with_parents: bool = True
+    ) -> RestoreSetResultDTO:
+        """Restore exactly these deleted records and nothing else: not what was
+        deleted alongside them, which is how a bulk delete of sixty records can
+        be undone for three of them. A record under a deleted record comes back
+        only with it, so with `with_parents` (the default) the deleted records
+        above a chosen one come back too, each by itself; without it such a
+        record is left. One held back by a deleted collection or schema is left
+        either way. One lookup, one update and one history entry per record."""
+        wanted: list[uuid.UUID] = []
+        for raw in ids:
+            try:
+                wanted.append(uuid.UUID(str(raw)))
+            except ValueError:
+                continue
+        chosen = {
+            r.id: r
+            for r in self._records.list_by_ids(list(dict.fromkeys(wanted)))
+            if r.deleted_at is not None
+        }
+        coming = dict(chosen)
+        if with_parents:
+            frontier = {
+                r.parent_record_id
+                for r in chosen.values()
+                if r.parent_record_id is not None
+            }
+            while frontier:
+                found = [
+                    p
+                    for p in self._records.list_by_ids(list(frontier))
+                    if p.deleted_at is not None and p.id not in coming
+                ]
+                coming.update({p.id: p for p in found})
+                frontier = {
+                    p.parent_record_id for p in found if p.parent_record_id is not None
+                }
+        blockers = self._restore_blockers(list(coming.values()))
+        # A record can come back unless a deleted collection or schema holds it
+        # or a deleted record above it is not itself coming back. Anything
+        # dropped can hold others up, so go round until it settles.
+        ok = set(coming)
+        while True:
+            held = {
+                rid
+                for rid in ok
+                if (b := blockers[rid]) is not None
+                and (b.kind != "record" or b.id not in ok)
+            }
+            if not held:
+                break
+            ok -= held
+        every = [rid for rid in coming if rid in ok]
+        if every:
+            before = {r.id: self._snapshot(r) for r in self._records.list_by_ids(every)}
+            self._records.restore_many(every)
+            if self._audit:
+                with _audit_batch(self._audit, "restore", len(every) > 1):
+                    for restored in self._records.list_by_ids(every):
+                        self._audit.log_change(
+                            "restore",
+                            "record",
+                            restored.id,
+                            before[restored.id],
+                            self._snapshot(restored),
+                        )
+        return RestoreSetResultDTO(
+            restored=len([rid for rid in every if rid in chosen]),
+            came_back=len(every),
+            left=[str(rid) for rid in chosen if rid not in ok],
+        )
+
+    def _restore_groups(
+        self, records: list[RecordDTO]
+    ) -> dict[uuid.UUID, list[uuid.UUID]]:
+        """`_restore_group` for many deleted records at once: the subtrees are
+        fetched together (a query per level) and each record's group is worked
+        out in memory."""
+        if not records:
+            return {}
+        levels = self._records.subtree_levels([r.id for r in records], deleted=True)
+        every = list(dict.fromkeys(rid for level in levels for rid in level))
+        rows = {r.id: r for r in self._records.list_by_ids(every)}
+        children: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for row in rows.values():
+            if row.parent_record_id is not None:
+                children.setdefault(row.parent_record_id, []).append(row.id)
+        groups: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for record in records:
+            group = [record.id]
+            pending = [record.id]
+            while pending:
+                for child in children.get(pending.pop(), []):
+                    # Deleted with it: stamped with the same moment, reached
+                    # through others in the group.
+                    if rows[child].deleted_at == record.deleted_at:
+                        group.append(child)
+                        pending.append(child)
+            groups[record.id] = group
+        return groups
+
+    def _restore_blockers(
+        self, records: list[RecordDTO]
+    ) -> dict[uuid.UUID, BlockerDTO | None]:
+        """`_restore_blocker` for many records at once. Collections and schemas
+        are looked up once each, and the records above them a level at a time.
+        A record blocker carries no name (it takes a rendering per record);
+        callers that need one use `restore_plan`."""
+        datasets = {
+            did: self._datasets.get_by_id(
+                did, include_deleted=True, with_count=False, with_schemas=False
+            )
+            for did in {r.dataset_id for r in records}
+        }
+        schemas = {
+            sid: self._schema_svc._repo.get_by_id(sid, include_deleted=True)
+            for sid in {r.schema_id for r in records}
+        }
+        known = {r.id: r for r in records}
+        frontier = {
+            r.parent_record_id
+            for r in records
+            if r.parent_record_id is not None and r.parent_record_id not in known
+        }
+        while frontier:
+            found = self._records.list_by_ids(list(frontier))
+            known.update({r.id: r for r in found})
+            frontier = {
+                r.parent_record_id
+                for r in found
+                if r.parent_record_id is not None and r.parent_record_id not in known
+            }
+        blockers: dict[uuid.UUID, BlockerDTO | None] = {}
+        for record in records:
+            dataset = datasets[record.dataset_id]
+            schema = schemas[record.schema_id]
+            if dataset is not None and dataset.deleted_at is not None:
+                blockers[record.id] = BlockerDTO("collection", dataset.id, dataset.name)
+            elif schema is not None and schema.deleted_at is not None:
+                blockers[record.id] = BlockerDTO("schema", schema.id, schema.name)
+            else:
+                top: RecordDTO | None = None
+                current = record
+                while current.parent_record_id is not None:
+                    parent = known.get(current.parent_record_id)
+                    if parent is None or parent.deleted_at is None:
+                        break
+                    top = current = parent
+                blockers[record.id] = (
+                    BlockerDTO("record", top.id, "") if top is not None else None
+                )
+        return blockers
+
+    def restore(
+        self,
+        record_id: str,
+        only_this: bool = False,
+        with_parents: bool = False,
+    ) -> RecordDTO:
         """Undo delete(): the record and what was deleted with it become live
         again. Refused while its collection, schema or a parent record is still
-        deleted (see `restore_plan`)."""
+        deleted (see `restore_plan`).
+
+        Two choices, because a delete is not all-or-nothing:
+        `only_this` brings back just this record, not what was deleted
+        alongside it (its children); `with_parents` lets a record held back only
+        by deleted records above it come back anyway, bringing those back too,
+        each by itself, so its siblings stay deleted. Restoring one selection of
+        a deleted recording then doesn't bring back all of them."""
         record = self._deleted_record(record_id)
         plan = self.restore_plan(str(record.id))
-        if plan.blocked_message:
+        needs_parents = plan.blocked_by is not None and plan.blocked_by.kind == "record"
+        if plan.blocked_message and not (with_parents and needs_parents):
             raise ValidationError(plan.blocked_message)
-        every = self._restore_group(record)
-        shapes = self._schema_svc.resolver()
-        before = {
-            r.id: self._with_names(r, shapes) for r in self._records.list_by_ids(every)
-        }
+        every = [record.id] if only_this else self._restore_group(record)
+        if with_parents and needs_parents:
+            every = [a.id for a in self._deleted_above(record)] + every
+        before = {r.id: self._snapshot(r) for r in self._records.list_by_ids(every)}
         self._records.restore_many(every)
         if self._audit:
             with _audit_batch(self._audit, "restore", len(every) > 1):
@@ -2075,8 +2387,8 @@ class RecordService:
                         "restore",
                         "record",
                         restored.id,
-                        before[restored.id].to_dict(),
-                        self._with_names(restored, shapes).to_dict(),
+                        before[restored.id],
+                        self._snapshot(restored),
                     )
         return self.get(str(record.id))
 
@@ -2092,15 +2404,14 @@ class RecordService:
         about them is deleted, and each leaves one tombstone: that it was
         permanently deleted, which record, and when, never what it held. The
         caller has checked they are safe to remove (see `purgeable_deleted`)."""
-        shapes = self._schema_svc.resolver()
         with _audit_batch(self._audit, "purge", len(ids) > 1):
             for start in range(0, len(ids), 500):
-                self._purge_chunk(ids[start : start + 500], shapes)
+                self._purge_chunk(ids[start : start + 500])
 
-    def _purge_chunk(self, ids: list[uuid.UUID], shapes) -> None:
+    def _purge_chunk(self, ids: list[uuid.UUID]) -> None:
         if self._audit:
             stones = [
-                (gone.id, tombstone(self._with_names(gone, shapes).to_dict()))
+                (gone.id, tombstone(self._snapshot(gone)))
                 for gone in self._records.list_by_ids(ids)
             ]
             self._audit.forget_records(ids)
@@ -2182,7 +2493,6 @@ class RecordService:
 
         target_strs = {str(t) for t in target_ids}
         for rec, matched_fields in referrers:
-            old_named = self._with_names(rec)
             new_data = dict(rec.data)
             for fid_str in matched_fields:
                 val = new_data.get(fid_str)
@@ -2196,8 +2506,8 @@ class RecordService:
                     "update",
                     "record",
                     rec.id,
-                    old_named.to_dict(),
-                    self._with_names(updated).to_dict(),
+                    self._snapshot(rec),
+                    self._snapshot(updated),
                 )
 
     def find_dangling_references(self) -> list[dict[str, Any]]:

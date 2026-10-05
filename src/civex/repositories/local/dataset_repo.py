@@ -235,11 +235,12 @@ def _to_dtos(
                 or 0
             )
     schema_names: dict[uuid.UUID, list[str]] = {}
-    for dataset_id, name in (
+    schema_ids: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for dataset_id, schema_id, name in (
         ()
         if not with_schemas
         else (
-            session.query(DatasetSchema.dataset_id, Schema.name)
+            session.query(DatasetSchema.dataset_id, Schema.id, Schema.name)
             .join(Schema, DatasetSchema.schema_id == Schema.id)
             .filter(DatasetSchema.dataset_id.in_(ids))
             .order_by(Schema.name)
@@ -247,6 +248,7 @@ def _to_dtos(
         )
     ):
         schema_names.setdefault(dataset_id, []).append(name)
+        schema_ids.setdefault(dataset_id, []).append(schema_id)
     return [
         DatasetDTO(
             id=row.id,
@@ -258,6 +260,7 @@ def _to_dtos(
             timezone=row.timezone,
             scope=row.scope,
             schemas=schema_names.get(row.id, []),
+            schema_ids=schema_ids.get(row.id, []),
         )
         for row in rows
     ]

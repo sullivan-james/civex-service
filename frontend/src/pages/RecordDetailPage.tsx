@@ -42,6 +42,7 @@ import JobsTable from '../components/jobs/JobsTable'
 import RecordProvenance from '../components/jobs/RecordProvenance'
 import { ActivityFeed } from '../components/audit/ActivityFeed'
 import { underRecord } from '../utils/auditFilter'
+import { DeletedFieldValues } from '../components/records/DeletedFieldValues'
 import { RecordFieldGrid } from '../components/records/RecordFieldGrid'
 
 const RECORD_TABS = [
@@ -236,6 +237,7 @@ export default function RecordDetailPage() {
               errors={saveErrors}
               onDismissError={() => updateRecord.reset()}
             />
+            <DeletedFieldValues fields={record.deleted_fields ?? []} />
           </UploadCollectionContext.Provider>
         </TabPanel>
 

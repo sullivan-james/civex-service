@@ -9,7 +9,13 @@ from sqlalchemy import update
 
 from civex.config import RetentionConfig
 from civex.context import AppContext
-from civex.db.models import AuditBatch, Record, StepExecution, WorkflowJob
+from civex.db.models import (
+    AuditBatch,
+    AuditLog,
+    Record,
+    StepExecution,
+    WorkflowJob,
+)
 from civex.domain.dtos import RetentionCutoffs
 from civex.repositories.local.job_repo import LocalWorkflowJobRepository
 from civex.services.retention_service import RetentionService
@@ -189,16 +195,14 @@ def test_a_batch_with_nothing_left_is_removed_too(ctx, survey, make_record):
     assert ctx._session.query(AuditBatch).count() == 0
 
 
-def test_with_a_remote_history_not_yet_pushed_is_kept(ctx, survey):
+def test_with_a_remote_history_not_yet_synced_is_kept(ctx, survey):
     ctx.commit()
     svc = service(ctx, protect_unsynced=True)
     report = svc.run(RetentionCutoffs(audit_before=TOMORROW()), dry_run=False)
     assert report.audit_entries == 0 and report.audit_kept_unsynced > 0
 
-    commit = ctx.audit_svc.create_commit("push")
-    ctx.commit()
-    assert svc.run(RetentionCutoffs(audit_before=TOMORROW())).audit_entries == 0
-    ctx.audit_svc.mark_pushed([commit.id])
+    # Once the authority has acknowledged the entries they can go.
+    ctx._session.query(AuditLog).update({"sync_state": "synced"})
     ctx.commit()
     assert svc.run(RetentionCutoffs(audit_before=TOMORROW())).audit_entries > 0
 

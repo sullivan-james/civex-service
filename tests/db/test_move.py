@@ -98,7 +98,6 @@ def populated(ctx: AppContext, make_schema, make_collection) -> Engine:
             }
         ],
     )
-    ctx.audit_svc.create_commit("first")
     ctx._session.add(
         AiUsageEvent(provider="anthropic", model="m", input_tokens=1, output_tokens=2)
     )

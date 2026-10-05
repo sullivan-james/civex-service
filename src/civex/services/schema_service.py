@@ -4,6 +4,8 @@ import uuid
 from typing import Any
 
 from civex.domain.dtos import (
+    BlockerDTO,
+    DeletedField,
     FieldDTO,
     NameIssue,
     ResolvedField,
@@ -508,6 +510,72 @@ class SchemaService:
                     del restrictions["filename_template"]
                 self._repo.update_field(f.id, restrictions=restrictions)
 
+    def restore_field_plan(
+        self, schema_name: str, field_id: uuid.UUID
+    ) -> RestorePlanDTO:
+        """What restoring this deleted field would do: bring it back to its
+        schema, with the values records still hold for it. Blocked by a deleted
+        schema (restore that first) or by a live field that has taken its name."""
+        schema, field = self._deleted_field(schema_name, field_id)
+        plan = RestorePlanDTO(
+            kind="field",
+            id=field.id,
+            name=field.name,
+            records=0,
+            schema_name=schema.name,
+            deleted_at=field.deleted_at,
+        )
+        if schema.deleted_at is not None:
+            plan.blocked_by = BlockerDTO(kind="schema", id=schema.id, name=schema.name)
+        elif field.name in {f.name for f in schema.fields}:
+            plan.reason = (
+                f"A field named '{field.name}' now exists on '{schema.name}'. "
+                "Rename or delete it, then restore this one."
+            )
+        return plan
+
+    def restore_field(self, schema_name: str, field_id: uuid.UUID) -> FieldDTO:
+        """Undo delete_field(): the field is back on its schema and every record
+        shows the value it held for it again (see SchemaRepository.delete_field)."""
+        plan = self.restore_field_plan(schema_name, field_id)
+        if message := plan.blocked_message:
+            raise ValidationError(message)
+        schema, field = self._deleted_field(schema_name, field_id)
+        restored = self._repo.restore_field(field.id)
+        if self._audit:
+            self._audit.log_change(
+                "restore", "field", restored.id, field.to_dict(), restored.to_dict()
+            )
+        return restored
+
+    def _deleted_field(
+        self, schema_name: str, field_id: uuid.UUID
+    ) -> tuple[SchemaDTO, FieldDTO]:
+        schema = self._repo.get_by_name(schema_name, include_deleted=True)
+        if schema is None:
+            raise NotFoundError(f"Schema '{schema_name}' not found")
+        field = next((f for f in schema.deleted_fields if f.id == field_id), None)
+        if field is None:
+            if any(f.id == field_id for f in schema.fields):
+                raise ValidationError("That field is not deleted")
+            raise NotFoundError(
+                f"No deleted field '{field_id}' on schema '{schema_name}'"
+            )
+        return schema, field
+
+    def find_fields(self, ids: set[uuid.UUID]) -> dict[uuid.UUID, tuple[FieldDTO, str]]:
+        """Fields by id with the name of their schema, deleted ones included;
+        ids that are gone are left out."""
+        found = self._repo.find_fields(ids)
+        names: dict[uuid.UUID, str] = {}
+        out: dict[uuid.UUID, tuple[FieldDTO, str]] = {}
+        for fid, field in found.items():
+            if field.schema_id not in names:
+                schema = self._repo.get_by_id(field.schema_id, include_deleted=True)
+                names[field.schema_id] = schema.name if schema else ""
+            out[fid] = (field, names[field.schema_id])
+        return out
+
     def delete_field(self, schema_name: str, field_name: str) -> None:
         schema = self.get(schema_name)
         field = next((f for f in schema.fields if f.name == field_name), None)
@@ -685,10 +753,21 @@ class SchemaService:
             raise NotFoundError(f"Schema '{name}' not found")
         return schema.id
 
+    def _by_name_or_id(self, ref: str) -> SchemaDTO | None:
+        """A schema, deleted or not, by name or (as the schema page's address
+        has it) by id."""
+        schema = self._repo.get_by_name(ref, include_deleted=True)
+        if schema is None:
+            try:
+                schema = self._repo.get_by_id(uuid.UUID(ref), include_deleted=True)
+            except ValueError:
+                pass
+        return schema
+
     def restore_plan(self, name: str) -> RestorePlanDTO:
         """What restoring this deleted schema would bring back: it and the
         records deleted with it, not those deleted on their own earlier."""
-        schema = self._repo.get_by_name(name, include_deleted=True)
+        schema = self._by_name_or_id(name)
         if schema is None:
             raise NotFoundError(f"Schema '{name}' not found")
         if schema.deleted_at is None:
@@ -698,12 +777,13 @@ class SchemaService:
             id=schema.id,
             name=schema.name,
             records=self._repo.cascade_count(schema.id),
+            deleted_at=schema.deleted_at,
         )
 
     def restore(self, name: str) -> SchemaDTO:
         """Undo delete(): the schema and the records cascade-deleted with it
         become live again (see SchemaRepository.restore)."""
-        schema = self._repo.get_by_name(name, include_deleted=True)
+        schema = self._by_name_or_id(name)
         if schema is None:
             raise NotFoundError(f"Schema '{name}' not found")
         if schema.deleted_at is None:
@@ -740,13 +820,14 @@ class SchemaService:
     def resolve(self, schema: SchemaDTO) -> ResolvedSchema:
         """`schema` with inherited fields flattened and indexed -- one parent
         walk, however many lookups the caller then makes against it."""
-        fields = self.collect_fields(schema)
+        fields, deleted = self._collect(schema)
         return ResolvedSchema(
             schema=schema,
             fields=fields,
             by_name={rf.field.name: rf.field for rf in fields},
             name_to_id={rf.field.name: str(rf.field.id) for rf in fields},
             id_to_name={str(rf.field.id): rf.field.name for rf in fields},
+            deleted_by_id=deleted,
         )
 
     def resolver(self) -> SchemaResolver:
@@ -798,11 +879,21 @@ class SchemaService:
         Own fields come first; parent fields follow (depth-first).
         Own fields shadow parent fields with the same name.
         """
+        return self._collect(schema)[0]
+
+    def _collect(
+        self, schema: SchemaDTO
+    ) -> tuple[list[ResolvedField], dict[str, DeletedField]]:
+        """`collect_fields`, and in the same walk up the parent chain the fields
+        deleted from `schema` or a schema it inherits from, by id."""
         own = [
             ResolvedField(field=f, source_schema_name=schema.name)
             for f in schema.fields
         ]
         seen_names = {f.field.name for f in own}
+        deleted = {
+            str(f.id): DeletedField(f, schema.name) for f in schema.deleted_fields
+        }
 
         inherited: list[ResolvedField] = []
         if schema.parent_id:
@@ -812,9 +903,11 @@ class SchemaService:
             # not gone, until purged).
             parent = self._repo.get_by_id(schema.parent_id, include_deleted=True)
             if parent:
-                for resolved in self.collect_fields(parent):
+                parent_fields, parent_deleted = self._collect(parent)
+                deleted = {**parent_deleted, **deleted}
+                for resolved in parent_fields:
                     if resolved.field.name not in seen_names:
                         inherited.append(resolved)
                         seen_names.add(resolved.field.name)
 
-        return own + inherited
+        return own + inherited, deleted

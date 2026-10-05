@@ -65,6 +65,7 @@ class LocalSchemaRepository:
         rows = (
             self._s.query(Field)
             .filter_by(schema_id=schema_id)
+            .filter(Field.deleted_at.is_(None))
             .order_by(nulls_last(Field.position), Field.created_at)
             .all()
         )
@@ -229,17 +230,37 @@ class LocalSchemaRepository:
         return _field_to_dto(row)
 
     def delete_field(self, field_id: uuid.UUID) -> None:
+        """Soft-delete: the field disappears from its schema but keeps its row,
+        and every record keeps the values it holds for it (keyed by this id)."""
         row = self._s.query(Field).filter_by(id=field_id).first()
-        if row:
-            self._s.delete(row)
+        if row and row.deleted_at is None:
+            row.deleted_at = datetime.now(timezone.utc)
             self._s.flush()
+
+    def restore_field(self, field_id: uuid.UUID) -> FieldDTO:
+        """Undo delete_field(): the field is back, and so are its values."""
+        row = self._s.query(Field).filter_by(id=field_id).first()
+        if row is None:
+            raise NotFoundError(f"Field '{field_id}' not found")
+        row.deleted_at = None
+        self._s.flush()
+        return _field_to_dto(row)
+
+    def find_fields(self, ids: set[uuid.UUID]) -> dict[uuid.UUID, FieldDTO]:
+        """Fields by id, deleted ones included; ids that are gone are left out."""
+        found: dict[uuid.UUID, FieldDTO] = {}
+        for start in range(0, len(ids), 500):
+            chunk = list(ids)[start : start + 500]
+            for row in self._s.query(Field).filter(Field.id.in_(chunk)):
+                found[row.id] = _field_to_dto(row)
+        return found
 
     def reorder_fields(
         self, schema_id: uuid.UUID, field_ids: list[uuid.UUID]
     ) -> list[FieldDTO]:
         for i, fid in enumerate(field_ids):
             row = self._s.query(Field).filter_by(id=fid, schema_id=schema_id).first()
-            if row:
+            if row and row.deleted_at is None:
                 row.position = i
         self._s.flush()
         return self.get_fields(schema_id)
@@ -262,6 +283,7 @@ def _field_to_dto(row: Field) -> FieldDTO:
         default_value=row.default_value,
         position=row.position,
         created_at=row.created_at,
+        deleted_at=row.deleted_at,
     )
 
 
@@ -274,6 +296,7 @@ def _schema_to_dto(row: Schema) -> SchemaDTO:
         parent_id=row.parent_id,
         display_template=row.display_template,
         created_at=row.created_at,
-        fields=[_field_to_dto(f) for f in row.fields],
+        fields=[_field_to_dto(f) for f in row.fields if f.deleted_at is None],
         deleted_at=row.deleted_at,
+        deleted_fields=[_field_to_dto(f) for f in row.fields if f.deleted_at],
     )

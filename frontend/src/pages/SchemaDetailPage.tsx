@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router'
 import { errorMessage } from '../lib/errors'
+import { SchemaMissing } from '../components/schemas/SchemaMissing'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
 import { schemasApi } from '../api/schemas'
 import {
@@ -15,7 +16,6 @@ import {
   Button,
   DetailSkeleton,
   Skeleton,
-  ErrorState,
   Field,
   Input,
   ConfirmDialog,
@@ -176,7 +176,8 @@ export default function SchemaDetailPage() {
       <Page
         breadcrumbs={breadcrumbs}
         error={
-          <ErrorState
+          <SchemaMissing
+            id={id!}
             message={error ? errorMessage(error) : 'Schema not found'}
           />
         }

@@ -131,7 +131,19 @@ class Field(Base):
     """
 
     __tablename__ = "fields"
-    __table_args__ = (UniqueConstraint("schema_id", "name"),)
+    __table_args__ = (
+        # A name is unique among a schema's *live* fields. A deleted field keeps
+        # its name so it can be restored, without stopping a new field from
+        # taking that name in the meantime.
+        Index(
+            "ux_fields_schema_name_live",
+            "schema_id",
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     schema_id: Mapped[uuid.UUID] = mapped_column(
@@ -146,6 +158,12 @@ class Field(Base):
     default_value: Mapped[Any | None] = mapped_column(_JSON, nullable=True)
     position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    # Soft-delete marker, like Schema.deleted_at. A deleted field is hidden from
+    # the schema but keeps its row, and the values records hold for it stay in
+    # their data (keyed by this field's id), so restoring it brings them back.
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        _UTCDateTime(), nullable=True, default=None
+    )
 
     schema: Mapped[Schema] = relationship("Schema", back_populates="fields")
 
@@ -338,23 +356,6 @@ class Record(Base):
     schema: Mapped[Schema] = relationship("Schema", lazy="joined")
 
 
-class Commit(Base):
-    """A named snapshot grouping a set of audit log entries (uncommitted changes)."""
-
-    __tablename__ = "commits"
-
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
-    seq: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True)
-    message: Mapped[str | None] = mapped_column(String(1000))
-    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
-    record_count: Mapped[int] = mapped_column(Integer, default=0)
-    schema_count: Mapped[int] = mapped_column(Integer, default=0)
-    dataset_count: Mapped[int] = mapped_column(Integer, default=0)
-    pushed_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
-
-    entries: Mapped[list[AuditLog]] = relationship("AuditLog", back_populates="commit")
-
-
 class AuditBatch(Base):
     """A set of audit entries that happened as one thing: an import, a delete
     that took a whole tree with it, a workflow run. Gives a bulk operation a
@@ -377,23 +378,11 @@ class AuditLog(Base):
     __tablename__ = "audit_log"
     __table_args__ = (
         Index("ix_audit_log_entity", "entity_id", "timestamp"),
-        Index("ix_audit_log_commit", "commit_id"),
         Index("ix_audit_log_timestamp", "timestamp"),
         Index("ix_audit_log_batch", "batch_id"),
-        # Staged (uncommitted) entries: a tiny, hot subset of a table that
-        # otherwise grows forever.
-        Index(
-            "ix_audit_log_staged",
-            "timestamp",
-            postgresql_where=text("commit_id IS NULL"),
-            sqlite_where=text("commit_id IS NULL"),
-        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
-    commit_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("commits.id"), nullable=True
-    )
     action: Mapped[str] = mapped_column(
         String(20), nullable=False
     )  # create | update | delete
@@ -408,7 +397,23 @@ class AuditLog(Base):
         ForeignKey("audit_batches.id"), nullable=True
     )
 
-    commit: Mapped[Commit | None] = relationship("Commit", back_populates="entries")
+    # Sync bookkeeping (sync is CIVEX-305). Only `actor` is written so far; the rest are
+    # here so the one rebuild of this table that dropping `commit_id` forces
+    # also covers them, instead of a second one on a large table later.
+    #  - actor: who made the change: the OS user on that machine, unverified
+    #    (None for entries from before it was recorded).
+    #  - device_id: which installation made it.
+    #  - hlc: hybrid logical clock stamp, an opaque string that sorts
+    #    correctly; orders changes without trusting wall clocks.
+    #  - hub_seq: position in the authority's change feed once it has one.
+    #  - sync_state: `pending` until the authority has acknowledged the entry.
+    actor: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    hlc: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    hub_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    sync_state: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="pending", server_default="pending"
+    )
 
 
 class WorkflowJob(Base):

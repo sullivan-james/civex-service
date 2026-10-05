@@ -219,6 +219,38 @@ def delete_field(name: str, field_name: str, ctx: AppContext = Depends(get_ctx))
         raise HTTPException(404, detail=str(e))
 
 
+@router.get(
+    "/{name}/fields/{field_id}/restore-plan", response_model=RestorePlanResponse
+)
+def restore_field_plan(
+    name: str, field_id: uuid.UUID, ctx: AppContext = Depends(get_ctx)
+):
+    """What restoring a deleted field would do: it returns to the schema with
+    the values records still hold for it. Blocked while the schema is deleted,
+    or when a live field has since taken its name."""
+    try:
+        return RestorePlanResponse.from_dto(
+            ctx.schema_svc.restore_field_plan(name, field_id)
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+
+
+@router.post("/{name}/fields/{field_id}/restore", response_model=FieldResponse)
+def restore_field(name: str, field_id: uuid.UUID, ctx: AppContext = Depends(get_ctx)):
+    """Bring a deleted field back, with every value records still hold for it."""
+    try:
+        dto = ctx.schema_svc.restore_field(name, field_id)
+        ctx.commit()
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return FieldResponse.from_dto(dto)
+
+
 @router.patch("/{name}/fields/{field_name}", response_model=FieldResponse)
 def update_field(
     name: str,

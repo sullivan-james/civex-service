@@ -241,11 +241,15 @@ When you add a `selection` record, civex prompts for the parent `encounter` reco
 === "CLI"
     ```bash
     civex schema remove-field trial score
+    civex trash list --kind field                 # the removed field's ID
+    civex schema restore-field trial <field-id>   # undoes it
     civex schema delete trial          # moves the schema + its records to Recently Deleted
     civex schema restore trial         # undoes it
     ```
 
 === "Web UI"
     Click the **✕** on a field row to remove it, or **Delete schema** on the schema's detail page.
+
+Deleting a field is reversible too. The field leaves the schema, but every record keeps the value it held for it, so **restoring the field brings those values back**, not an empty field. While it is deleted, a record shows the value under **Deleted fields**, with when it was deleted and a **Restore…** button, and the field can be restored from **Activity** (press **Deleted**). You can add a new field with the same name in the meantime; the old one then can't come back until that name is free.
 
 Deleting a schema is reversible: it (and every record typed by it, across every collection) moves to **Recently Deleted** rather than being removed outright. See [Deleting & restoring data](deleting-and-restoring.md) for the full cascade and retention rules.

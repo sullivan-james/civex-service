@@ -30,14 +30,19 @@ def _deleted_at(dto: SchemaDTO | DatasetDTO | RecordDTO) -> datetime:
 
 
 # `--kind` as the history filter's kind of thing.
-_KIND_FILTER = {"schema": "schema", "collection": "dataset", "record": "record"}
+_KIND_FILTER = {
+    "schema": "schema",
+    "field": "field",
+    "collection": "dataset",
+    "record": "record",
+}
 KINDS = tuple(_KIND_FILTER)
 
 
 @app.command("list")
 def trash_list(
     kind: Optional[str] = typer.Option(
-        None, "--kind", "-k", help="Only schemas, collections or records"
+        None, "--kind", "-k", help="Only schemas, fields, collections or records"
     ),
     search: Optional[str] = typer.Option(
         None, "--search", "-s", help="Text to find in a name or a record's values"
@@ -83,13 +88,19 @@ def trash_list(
             entry = event.entry
             now = entry.now or {}
             name = now.get("name") or (entry.old_data or {}).get("name") or "-"
-            where = (
-                f" [dim]in {now['collection']}[/dim]" if now.get("collection") else ""
+            place = now.get("collection") or (
+                f"schema {now['schema_name']}"
+                if now.get("kind") == "field" and now.get("schema_name")
+                else None
             )
+            where = f" [dim]in {escape(str(place))}[/dim]" if place else ""
             table.add_row(
                 now.get("kind", entry.entity_type),
                 f"{escape(str(name))}{where}",
-                str(entry.entity_id)[:8],
+                # A field is restored by its full ID; the rest by name.
+                str(entry.entity_id)
+                if now.get("kind") == "field"
+                else str(entry.entity_id)[:8],
                 _age(entry.timestamp),
             )
         else:
@@ -102,7 +113,8 @@ def trash_list(
         console.print(f"[dim]Showing {len(events)} of {total}. Use --offset.[/dim]")
     console.print(
         f"[dim]Retention: {retention} day(s). Restore with `civex schema|collection|record "
-        "restore <name/id>`, or delete permanently with `... purge`.[/dim]"
+        "restore <name/id>` (a field: `civex schema restore-field <schema> <id>`), "
+        "or delete permanently with `... purge`.[/dim]"
     )
 
 

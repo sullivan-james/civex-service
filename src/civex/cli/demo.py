@@ -25,7 +25,7 @@ def demo(
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
-    config = Config(project_root=resolved, db=DBConfig(url=db_url), remote=None)
+    config = Config(project_root=resolved, db=DBConfig(url=db_url))
     ctx = build_local_context(config)
 
     # --- Schemas ---

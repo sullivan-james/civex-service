@@ -31,9 +31,25 @@ beforeEach(() => {
               schema_name: 'Selection',
               natural_name: id === LIVE ? 'Selection 26' : 'Selection 27',
               deleted: id === DELETED,
+              deleted_at: id === DELETED ? '2026-03-04T10:00:00Z' : null,
             })),
         )
       }
+      if (url.pathname === `/api/records/${DELETED}/restore-plan`)
+        return json({
+          kind: 'record',
+          id: DELETED,
+          name: 'Selection 27',
+          records: 1,
+          blocked_by: { kind: 'schema', id: 's1', name: 'selection' },
+          blocked:
+            "'Selection 27' is typed by the schema 'selection', which is deleted. Restore that first.",
+          can_restore: false,
+          collection: 'study',
+          collection_id: 'c1',
+          schema_name: null,
+          deleted_at: '2026-03-04T10:00:00Z',
+        })
       return json({})
     }),
   )
@@ -86,13 +102,23 @@ describe('RecordLink', () => {
 })
 
 describe('RecordMissing', () => {
-  it('says a deleted record can be restored from its history', async () => {
+  it('says when a deleted record was deleted and offers to restore it', async () => {
     renderIn(<RecordMissing id={DELETED} />)
     expect(
-      await screen.findByText(/This record is deleted/),
+      await screen.findByText(
+        /This record was deleted on .* It can be restored/,
+      ),
     ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Restore…' })).toBeInTheDocument()
     expect(
       screen.getByRole('link', { name: 'See what happened to it' }),
+    ).toBeInTheDocument()
+  })
+
+  it('says when a deleted record went with its deleted schema', async () => {
+    renderIn(<RecordMissing id={DELETED} />)
+    expect(
+      await screen.findByText(/typed by the schema .*selection.*deleted too/),
     ).toBeInTheDocument()
   })
 

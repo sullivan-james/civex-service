@@ -4,14 +4,12 @@ from typing import Annotated, Optional
 from civex import __version__
 from civex.cli import (
     ai as ai_cli,
-    auth,
     dataset,
     db,
     history,
     plugin,
     policy,
     record,
-    remote,
     retention,
     schema,
     store,
@@ -21,22 +19,12 @@ from civex.cli import (
     worker,
 )
 from civex.cli.shell import run_shell
-from civex.cli.clone import clone
 from civex.cli.demo import demo
 from civex.cli.doctor import doctor
 from civex.cli.dump import dump, restore
 from civex.cli.init import init
 from civex.cli.license import license_cmd
-from civex.cli.plumbing import (
-    get_object,
-    head_seq,
-    put_object,
-    receive_pack,
-    transfer_pack,
-)
 from civex.cli.resolve import resolve
-from civex.cli.status import status
-from civex.cli.sync import pull, push
 from civex.cli.update import update
 
 app = typer.Typer(
@@ -74,7 +62,6 @@ _WORK = "Work on the current change"
 _COLLAB = "Collaborate"
 
 app.command("init", rich_help_panel=_START)(init)
-app.command("clone", rich_help_panel=_START)(clone)
 app.command("demo", rich_help_panel=_START)(demo)
 app.add_typer(db.app, name="db", rich_help_panel=_START)
 app.command("license", rich_help_panel=_START)(license_cmd)
@@ -96,21 +83,8 @@ app.add_typer(view.app, name="view", rich_help_panel=_WORK)
 app.command("resolve", rich_help_panel=_WORK)(resolve)
 app.command("doctor", rich_help_panel=_WORK)(doctor)
 
-app.command("status", rich_help_panel=_COLLAB)(status)
-
-app.add_typer(remote.app, name="remote", rich_help_panel=_COLLAB)
-app.add_typer(auth.app, name="auth", rich_help_panel=_COLLAB)
-app.command("push", rich_help_panel=_COLLAB)(push)
-app.command("pull", rich_help_panel=_COLLAB)(pull)
 app.command("dump", rich_help_panel=_COLLAB)(dump)
 app.command("restore", rich_help_panel=_COLLAB)(restore)
-
-# Plumbing commands — called by SSHTransport on the remote side via SSH subprocess.
-app.command("transfer-pack", hidden=True)(transfer_pack)
-app.command("receive-pack", hidden=True)(receive_pack)
-app.command("head-seq", hidden=True)(head_seq)
-app.command("get-object", hidden=True)(get_object)
-app.command("put-object", hidden=True)(put_object)
 
 
 def _is_loopback_host(host: str) -> bool:

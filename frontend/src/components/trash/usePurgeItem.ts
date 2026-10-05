@@ -11,6 +11,7 @@ export function usePurgeItem(): (target: RestoreTarget) => void {
   return ({ kind, ref }) => {
     if (kind === 'schema') schema.mutate(ref)
     else if (kind === 'collection') collection.mutate(ref)
-    else record.mutate(ref)
+    else if (kind === 'record') record.mutate(ref)
+    // A deleted field is only ever restored: it has nothing to delete for good.
   }
 }

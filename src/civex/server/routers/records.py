@@ -17,6 +17,8 @@ from civex.server.models import (
     PaginatedRecordResponse,
     RecordLabelResponse,
     RecordLabelsRequest,
+    RestoreSelectedRequest,
+    RestoreSelectedResponse,
     RecordRef,
     RecordResponse,
     RestorePlanResponse,
@@ -25,7 +27,6 @@ from civex.server.models import (
 )
 from civex.server.query_params import record_query
 from civex.services.archive import write_zip
-from civex.sync.transport import SyncError
 
 router = APIRouter(tags=["records"])
 
@@ -222,6 +223,7 @@ def record_labels(body: RecordLabelsRequest, ctx: AppContext = Depends(get_ctx))
             schema_name=r.schema_name,
             natural_name=r.natural_name,
             deleted=r.deleted_at is not None,
+            deleted_at=r.deleted_at,
         )
         for r in ctx.record_svc.labels(body.ids)
     ]
@@ -282,7 +284,7 @@ def export_record_files_zip(
         tmp.append(zip_path)
         try:
             write_zip(zip_path, ctx.file_svc, entries)
-        except (FileNotFoundError, SyncError) as e:
+        except FileNotFoundError as e:
             raise HTTPException(
                 404, detail=f"Object not found locally or on remote: {e}"
             )
@@ -336,15 +338,49 @@ def restore_record_plan(record_id: str, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.post("/records/{record_id}/restore", response_model=RecordResponse)
-def restore_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
+def restore_record(
+    record_id: str,
+    only_this: bool = Query(
+        default=False,
+        description="Restore just this record, not what was deleted alongside "
+        "it (its children).",
+    ),
+    with_parents: bool = Query(
+        default=False,
+        description="When only deleted records above this one hold it back, "
+        "restore them too, each by itself, so its deleted siblings stay "
+        "deleted.",
+    ),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Restore a deleted record with what was deleted alongside it. Refused while
+    its collection or schema is deleted, or a record above it is (unless
+    `with_parents`)."""
     try:
-        dto = ctx.record_svc.restore(record_id)
+        dto = ctx.record_svc.restore(
+            record_id, only_this=only_this, with_parents=with_parents
+        )
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
     return RecordResponse.from_dto(dto)
+
+
+@router.post("/records/restore-selected", response_model=RestoreSelectedResponse)
+def restore_selected_records(
+    body: RestoreSelectedRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """Restore exactly these deleted records, not what was deleted alongside
+    them: for taking back three of the sixty records one delete took. The
+    deleted records above a chosen one come back too (each by itself) unless
+    `with_parents` is false, in which case such a record is left."""
+    result = ctx.record_svc.restore_records(body.ids, body.with_parents)
+    ctx.commit()
+    return RestoreSelectedResponse(
+        restored=result.restored, came_back=result.came_back, left=len(result.left)
+    )
 
 
 @router.delete("/records/{record_id}/purge", status_code=204)

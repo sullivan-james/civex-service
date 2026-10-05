@@ -288,6 +288,25 @@ class AuditService:
                         else None,
                     }
                 )
+        field_ids = {e.entity_id for e in entries if e.entity_type == "field"}
+        if field_ids:
+            fields = self._schema_svc.find_fields(field_ids)
+            for fid in field_ids:
+                found_field = fields.get(fid)
+                where[fid] = (
+                    {"kind": "field", "status": "gone"}
+                    if found_field is None
+                    else {
+                        "kind": "field",
+                        "ref": str(fid),
+                        "status": "deleted" if found_field[0].deleted_at else "live",
+                        "name": found_field[0].name,
+                        "schema_name": found_field[1],
+                        "deleted_at": found_field[0].deleted_at.isoformat()
+                        if found_field[0].deleted_at
+                        else None,
+                    }
+                )
         return where
 
     def _diff(self, entry: AuditLogDTO, shapes) -> list[Change]:
@@ -307,6 +326,21 @@ class AuditService:
             field = shape.by_name.get(change.field)
             if field is not None:
                 change.label, change.dtype = field.display_name, field.dtype
+            elif change.field in shape.deleted_by_id:
+                gone = shape.deleted_by_id[change.field]
+                change.label, change.dtype = gone.field.display_name, gone.field.dtype
+                change.deleted = {
+                    "status": "deleted",
+                    "id": change.field,
+                    "schema_name": gone.schema_name,
+                    "deleted_at": gone.field.deleted_at.isoformat()
+                    if gone.field.deleted_at
+                    else None,
+                }
+            elif _is_uuid(change.field):
+                # A field id nothing resolves any more: deleted for good.
+                change.label = "(deleted field)"
+                change.deleted = {"status": "gone", "id": change.field}
         return sorted(changes, key=lambda c: (order.get(c.field, len(order)), c.field))
 
     # ------------------------------------------------------------------
@@ -314,45 +348,59 @@ class AuditService:
     # ------------------------------------------------------------------
 
     def plan_restore_all(
-        self, where: Any = None, search: str | None = None
+        self,
+        where: Any = None,
+        search: str | None = None,
+        batch_id: uuid.UUID | str | None = None,
     ) -> RestoreAllPlanDTO:
         """What restoring everything deleted that a filter matches would do,
         without doing it. The filter is the one history is browsed with; only
         things that are deleted now, and whose history says they were deleted,
-        count."""
-        collections, schemas, records, truncated = self._deleted_matching(where, search)
-        chosen = set(records)
-        coming: set[uuid.UUID] = set()  # records that will be live afterwards
+        count. With `batch_id`, only what that one bulk delete took (a record
+        and everything beneath it, say), so it can be undone as the one event
+        it was."""
+        collections, schemas, fields, records, truncated = self._deleted_matching(
+            where, search, batch_id
+        )
         blocked = 0
-        for ref in records:
-            plan = self._records.restore_plan(ref)
+        for schema_name, field_id in fields:
+            plan = self._schema_svc.restore_field_plan(schema_name, field_id)
             b = plan.blocked_by
-            # Under something that is itself being restored: comes with it.
-            covered = b is not None and (
-                (b.kind == "record" and str(b.id) in chosen)
-                or (b.kind == "collection" and b.name in collections)
-                or (b.kind == "schema" and b.name in schemas)
-            )
-            if b is not None and not covered:
+            covered = b is not None and b.kind == "schema" and b.name in schemas
+            if plan.reason or (b is not None and not covered):
                 blocked += 1
-                continue
-            coming.update(self._records.restore_group_ids(ref))
-        restores = len(coming)
+        # Whether each can come back, and what comes back with it, is worked out
+        # for all of them together: a record at a time was a dozen queries each.
+        wanted = self._records.plan_restore_set(records, set(collections), set(schemas))
+        blocked += len(wanted.blocked)
+        restores = len(wanted.coming)
         restores += sum(self._datasets.restore_plan(n).records for n in collections)
         restores += sum(self._schema_svc.restore_plan(n).records for n in schemas)
         return RestoreAllPlanDTO(
-            len(collections), len(schemas), len(records), restores, blocked, truncated
+            len(collections),
+            len(schemas),
+            len(records),
+            restores,
+            blocked,
+            truncated,
+            fields=len(fields),
         )
 
     def restore_all(
-        self, where: Any = None, search: str | None = None
+        self,
+        where: Any = None,
+        search: str | None = None,
+        batch_id: uuid.UUID | str | None = None,
     ) -> RestoreAllResultDTO:
         """Restore everything deleted that a filter matches, as one event in
         history. Collections and schemas first, then records parent-first; a
         record still under something deleted that is not in the set stays
         deleted and is counted as blocked."""
-        collections, schemas, records, _ = self._deleted_matching(where, search)
+        collections, schemas, fields, records, _ = self._deleted_matching(
+            where, search, batch_id
+        )
         restored = came_back = 0
+        field_blocked = 0
         with self._audit.batch("restore", "Restore all"):
             for name in collections:
                 came_back += self._datasets.restore_plan(name).records
@@ -362,34 +410,38 @@ class AuditService:
                 came_back += self._schema_svc.restore_plan(name).records
                 self._schema_svc.restore(name)
                 restored += 1
+            for schema_name, field_id in fields:
+                try:
+                    self._schema_svc.restore_field(schema_name, field_id)
+                except (NotFoundError, ValidationError):
+                    field_blocked += 1  # its name was taken, or it is already back
+                    continue
+                restored += 1
             pending = list(records)
             # A record under another in the set comes back with it, or once it
-            # has: go round until nothing more can.
+            # has: go round until nothing more can. Each round restores every
+            # record that nothing deleted holds back, all together.
             for _ in range(MAX_RESTORE_PASSES):
-                still = []
-                for ref in pending:
-                    try:
-                        plan = self._records.restore_plan(ref)
-                    except (NotFoundError, ValidationError):
-                        continue  # already back with its parent, or gone
-                    if plan.blocked_by is not None:
-                        still.append(ref)
-                        continue
-                    came_back += plan.records
-                    self._records.restore(ref)
-                    restored += 1
-                progressed = len(still) < len(pending)
-                pending = still
-                if not pending or not progressed:
+                if not pending:
                     break
-        return RestoreAllResultDTO(restored, came_back, len(pending))
+                done = self._records.restore_set(pending)
+                restored += done.restored
+                came_back += done.came_back
+                pending = done.left
+                if not done.restored:
+                    break
+        return RestoreAllResultDTO(restored, came_back, len(pending) + field_blocked)
 
     def _deleted_matching(
-        self, where: Any, search: str | None
-    ) -> tuple[list[str], list[str], list[str], bool]:
-        """Names of the deleted collections, names of the deleted schemas and ids
-        of the deleted records a history filter matches (and whether there were
-        more than were looked at)."""
+        self,
+        where: Any,
+        search: str | None,
+        batch_id: uuid.UUID | str | None = None,
+    ) -> tuple[list[str], list[str], list[tuple[str, uuid.UUID]], list[str], bool]:
+        """Names of the deleted collections, names of the deleted schemas, the
+        deleted fields as (schema name, field id) and ids of the deleted records
+        a history filter matches (and whether there were more than were looked
+        at)."""
         tree = _parsed(where)
         scope: list[FilterNode] = [
             FilterCondition("now", "eq", "deleted"),
@@ -397,11 +449,15 @@ class AuditService:
         ]
         if tree is not None:
             scope.insert(0, self._resolve(tree))
+        batch = _as_uuid(batch_id, "batch") if batch_id else None
         things, truncated = self._audit.entities(
-            AuditFilter(where=FilterGroup("and", scope), search=search),
+            AuditFilter(where=FilterGroup("and", scope), search=search, batch_id=batch),
             MAX_RESTORE_ALL,
         )
-        ids = {t: {i for kind, i in things if kind == t} for t in ("dataset", "schema")}
+        ids = {
+            t: {i for kind, i in things if kind == t}
+            for t in ("dataset", "schema", "field")
+        }
         collections = sorted(
             d.name for d in self._datasets.find(ids["dataset"]).values() if d.deleted_at
         )
@@ -410,8 +466,15 @@ class AuditService:
             for s in self._schema_svc.find(ids["schema"]).values()
             if s.deleted_at
         )
+        fields = sorted(
+            (schema_name, field.id)
+            for field, schema_name in self._schema_svc.find_fields(
+                ids["field"]
+            ).values()
+            if field.deleted_at
+        )
         records = [str(i) for kind, i in things if kind == "record"]
-        return collections, schemas, records, truncated
+        return collections, schemas, fields, records, truncated
 
     # ------------------------------------------------------------------
     # Reverting
@@ -595,12 +658,31 @@ def _schema_id(snapshot: dict[str, Any] | None) -> uuid.UUID | None:
         return None
 
 
+def _as_uuid(value: uuid.UUID | str, what: str) -> uuid.UUID:
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(value)
+    except (ValueError, AttributeError, TypeError):
+        raise ValidationError(f"'{value}' is not a valid {what} id")
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return True
+
+
 def _by_field_name(
     snapshot: dict[str, Any] | None, shape: ResolvedSchema | None
 ) -> dict[str, Any] | None:
-    """A record snapshot with its values keyed by field name. Snapshots from
-    before delete and restore were named kept the raw field ids; those are
-    translated, and anything unrecognised is left as it is."""
+    """A record snapshot with its values keyed by the field's name *now*.
+    Entries store field ids, so a rename can't separate an entry from its
+    field; an older entry that kept names is left as it is. An id that belongs
+    to a deleted field is left as the id (a live field may since have taken
+    its name) and `_diff` labels it."""
     if snapshot is None or shape is None or not snapshot.get("data"):
         return snapshot
     data = {shape.id_to_name.get(k, k): v for k, v in snapshot["data"].items()}

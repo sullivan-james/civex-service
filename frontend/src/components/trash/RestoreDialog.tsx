@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
   blockerTarget,
+  type RestoreKind,
   type RestorePlan,
   type RestoreTarget,
 } from '../../api/restore'
@@ -16,10 +17,11 @@ import {
   Spinner,
 } from '../ui'
 
-const KIND_WORD = {
+const KIND_WORD: Record<RestoreKind, string> = {
   record: 'record',
   collection: 'collection',
   schema: 'schema',
+  field: 'field',
 }
 
 const records = (n: number) =>
@@ -40,6 +42,9 @@ export function RestoreDialog({
   const current = trail[trail.length - 1]
   const { data: plan, error, isLoading } = useRestorePlan(current)
   const restore = useRestore(onClose)
+  const parents = plan?.parents_needed ?? 0
+  const blockedByRecords =
+    plan?.blocked_by?.kind === 'record' && plan.parents_needed != null
 
   return (
     <Modal onClose={onClose} size="md" dismissible={!restore.isPending}>
@@ -74,19 +79,67 @@ export function RestoreDialog({
               </Button>
             )}
             {plan.blocked_by ? (
-              <Button
-                variant="primary"
-                onClick={() =>
-                  setTrail([...trail, blockerTarget(plan.blocked_by!)])
-                }
-              >
-                Restore the {KIND_WORD[plan.blocked_by.kind]} “
-                {plan.blocked_by.name}” instead…
-              </Button>
+              <>
+                {blockedByRecords && (
+                  <>
+                    <Button
+                      disabled={restore.isPending}
+                      onClick={() =>
+                        restore.mutate({
+                          ...plan,
+                          onlyThis: true,
+                          withParents: true,
+                        })
+                      }
+                    >
+                      {restore.isPending
+                        ? 'Restoring…'
+                        : `Restore only this (${records(parents + 1)})`}
+                    </Button>
+                    {plan.records > 1 && (
+                      <Button
+                        disabled={restore.isPending}
+                        onClick={() =>
+                          restore.mutate({ ...plan, withParents: true })
+                        }
+                      >
+                        {`This and the ${records(plan.records - 1)} deleted with it (${records(parents + plan.records)})`}
+                      </Button>
+                    )}
+                  </>
+                )}
+                <Button
+                  variant="primary"
+                  onClick={() =>
+                    setTrail([...trail, blockerTarget(plan.blocked_by!)])
+                  }
+                >
+                  Restore the {KIND_WORD[plan.blocked_by.kind]} “
+                  {plan.blocked_by.name}” and all of it…
+                </Button>
+              </>
+            ) : plan.kind === 'record' && plan.records > 1 ? (
+              <>
+                <Button
+                  disabled={restore.isPending || !plan.can_restore}
+                  onClick={() => restore.mutate({ ...plan, onlyThis: true })}
+                >
+                  Restore only this
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={restore.isPending || !plan.can_restore}
+                  onClick={() => restore.mutate(plan)}
+                >
+                  {restore.isPending
+                    ? 'Restoring…'
+                    : `Restore with the ${records(plan.records - 1)} deleted with it`}
+                </Button>
+              </>
             ) : (
               <Button
                 variant="primary"
-                disabled={restore.isPending}
+                disabled={restore.isPending || !plan.can_restore}
                 onClick={() => restore.mutate(plan)}
               >
                 {restore.isPending ? 'Restoring…' : 'Restore'}
@@ -105,10 +158,21 @@ function PlanBody({ plan }: { plan: RestorePlan }) {
       <>
         <p className="text-sm text-fg">{plan.blocked}</p>
         <p className="text-sm text-fg-muted">
-          Restoring it also brings back what was deleted with it, and this
-          record can then be restored.
+          {plan.blocked_by.kind === 'record' && plan.parents_needed != null
+            ? `Restoring it brings back everything that was deleted with it. Or bring back just this ${KIND_WORD[plan.kind]}, with the ${records(plan.parents_needed)} it sits under (each by itself), and leave the rest deleted.`
+            : `Restoring it also brings back everything that was deleted with it, and this ${KIND_WORD[plan.kind]} can then be restored.`}
         </p>
       </>
+    )
+  // Nothing deleted above it is the cause (a field whose name was taken), so
+  // restoring something else won't help; the message says what will.
+  if (plan.blocked) return <p className="text-sm text-fg">{plan.blocked}</p>
+  if (plan.kind === 'field')
+    return (
+      <p className="text-sm text-fg">
+        The field “{plan.name}” comes back on the schema “{plan.schema_name}”,
+        with the values records still hold for it.
+      </p>
     )
   if (plan.kind === 'record')
     return (

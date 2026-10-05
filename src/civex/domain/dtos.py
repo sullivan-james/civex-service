@@ -35,6 +35,8 @@ class FieldDTO:
     # Free-text display name; None means "derive one from name".
     # See civex.domain.naming for the name/label split.
     label: str | None = None
+    # Soft-delete marker; None means live. See SchemaRepository.delete_field.
+    deleted_at: datetime | None = None
 
     @property
     def display_name(self) -> str:
@@ -52,6 +54,7 @@ class FieldDTO:
             "default_value": self.default_value,
             "position": self.position,
             "created_at": self.created_at.isoformat(),
+            "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
 
     @classmethod
@@ -67,6 +70,7 @@ class FieldDTO:
             default_value=d.get("default_value"),
             position=d.get("position"),
             created_at=datetime.fromisoformat(d["created_at"]),
+            deleted_at=_parse_dt(d.get("deleted_at")),
         )
 
 
@@ -85,6 +89,9 @@ class SchemaDTO:
     label: str | None = None
     # Soft-delete marker; None means live. See SchemaRepository.delete/restore.
     deleted_at: datetime | None = None
+    # Fields deleted from this schema and still restorable. `fields` holds only
+    # the live ones, so nothing that reads a schema sees a deleted field.
+    deleted_fields: list[FieldDTO] = field(default_factory=list)
 
     @property
     def display_name(self) -> str:
@@ -144,6 +151,15 @@ class ResolvedField:
 
 
 @dataclass(frozen=True)
+class DeletedField:
+    """A deleted field and the schema it was defined on (which may be an
+    ancestor of the schema a record is typed by), so it can be restored."""
+
+    field: FieldDTO
+    schema_name: str
+
+
+@dataclass(frozen=True)
 class ResolvedSchema:
     """A schema with its inherited fields flattened and indexed. Resolving a
     schema walks its parent chain, so a caller does it once per operation and
@@ -154,6 +170,9 @@ class ResolvedSchema:
     by_name: dict[str, FieldDTO]
     name_to_id: dict[str, str]  # field name -> str(field.id)
     id_to_name: dict[str, str]  # str(field.id) -> field name
+    # Fields deleted from this schema or one it inherits from, by str(field.id):
+    # what a record's leftover values belong to, and what can be restored.
+    deleted_by_id: dict[str, DeletedField] = field(default_factory=dict)
 
 
 @dataclass
@@ -188,6 +207,10 @@ class DatasetDTO:
     # Names of the schemas this collection is for; records here can only be
     # of these. Sorted by name.
     schemas: list[str] = field(default_factory=list)
+    # The same schemas by id, in the same order. History stores these too: a
+    # schema's name can change, its id can't, so an entry still says which
+    # schemas the collection was for after a rename.
+    schema_ids: list[uuid.UUID] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         # record_count excluded — it's a computed value, not stored on the entity
@@ -198,6 +221,7 @@ class DatasetDTO:
             "timezone": self.timezone,
             "scope": self.scope,
             "schemas": list(self.schemas),
+            "schema_ids": [str(i) for i in self.schema_ids],
             "created_at": self.created_at.isoformat(),
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
@@ -216,6 +240,7 @@ class DatasetDTO:
             # Likewise absent before collection scopes existed.
             scope=d.get("scope") or "local",
             schemas=list(d.get("schemas") or []),
+            schema_ids=[uuid.UUID(i) for i in d.get("schema_ids") or []],
         )
 
 
@@ -535,6 +560,10 @@ class RecordDTO:
     # (inherited fields, `ref.field` joins). See RecordService.query_records.
     child_counts: dict[str, int] | None = None
     derived: dict[str, Any] | None = None
+    # Response-only: values this record still holds for fields that have been
+    # deleted from its schema, each with when it was deleted and the schema to
+    # restore it on. Nothing in `data` is lost; a restore brings them back.
+    deleted_fields: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         # schema_name excluded — denormalized display field, not stored on the entity
@@ -582,48 +611,8 @@ class ReferrerGroupDTO:
 
 
 @dataclass
-class CommitDTO:
-    id: uuid.UUID
-    seq: int | None
-    message: str | None
-    created_at: datetime
-    record_count: int
-    schema_count: int
-    dataset_count: int
-    pushed_at: datetime | None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": str(self.id),
-            "seq": self.seq,
-            "message": self.message,
-            "created_at": self.created_at.isoformat(),
-            "record_count": self.record_count,
-            "schema_count": self.schema_count,
-            "dataset_count": self.dataset_count,
-            "pushed_at": self.pushed_at.isoformat() if self.pushed_at else None,
-        }
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> CommitDTO:
-        return cls(
-            id=uuid.UUID(d["id"]),
-            seq=d.get("seq"),
-            message=d.get("message"),
-            created_at=datetime.fromisoformat(d["created_at"]),
-            record_count=d.get("record_count", 0),
-            schema_count=d.get("schema_count", 0),
-            dataset_count=d.get("dataset_count", 0),
-            pushed_at=datetime.fromisoformat(d["pushed_at"])
-            if d.get("pushed_at")
-            else None,
-        )
-
-
-@dataclass
 class AuditLogDTO:
     id: uuid.UUID
-    commit_id: uuid.UUID | None
     action: str  # "create" | "update" | "delete" | "restore" | "purge"
     entity_type: str  # "record" | "schema" | "field" | "dataset" | "view"
     entity_id: uuid.UUID
@@ -632,17 +621,19 @@ class AuditLogDTO:
     timestamp: datetime
     # Response-only, like RecordDTO.reference_labels: what the entry changed, as
     # `audit_diff.Change.to_dict()` rows, worked out by AuditService on a read.
-    # Never stored, never in a sync bundle.
+    # Never stored.
     changes: list[dict[str, Any]] = field(default_factory=list)
     # Response-only, like `changes`: where the thing this entry is about is now
     # -- {kind, status: live|deleted|gone, name, collection, deleted_at} -- so a
     # lost record can be told from one that was edited, deleted or purged.
     now: dict[str, Any] | None = None
+    # Who made the change, as the machine that made it reported it (the OS
+    # user). None for entries from before this was recorded.
+    actor: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": str(self.id),
-            "commit_id": str(self.commit_id) if self.commit_id else None,
             "action": self.action,
             "entity_type": self.entity_type,
             "entity_id": str(self.entity_id),
@@ -655,7 +646,6 @@ class AuditLogDTO:
     def from_dict(cls, d: dict[str, Any]) -> AuditLogDTO:
         return cls(
             id=uuid.UUID(d["id"]),
-            commit_id=uuid.UUID(d["commit_id"]) if d.get("commit_id") else None,
             action=d["action"],
             entity_type=d["entity_type"],
             entity_id=uuid.UUID(d["entity_id"]),
@@ -687,7 +677,7 @@ class RestorePlanDTO:
     included when it is one; only what was deleted *with* it comes back, never
     something deleted on its own earlier."""
 
-    kind: str  # "record" | "collection" | "schema"
+    kind: str  # "record" | "collection" | "schema" | "field"
     id: uuid.UUID
     name: str
     records: int
@@ -695,20 +685,36 @@ class RestorePlanDTO:
     # Where a restored record will be (its collection), for saying so.
     collection: str | None = None
     collection_id: uuid.UUID | None = None
+    # For a field: the schema it belongs to.
+    schema_name: str | None = None
+    # When it was deleted, for saying so.
+    deleted_at: datetime | None = None
+    # Why it can't come back when no deleted thing above it is the cause (a
+    # field whose name has since been taken). Restoring something else won't
+    # help, so there is no `blocked_by`.
+    reason: str | None = None
+    # For a record held back only by deleted records above it: how many of them
+    # (each would come back by itself, not with what was deleted alongside it).
+    # Restoring just this record then brings back `parents_needed + 1`.
+    parents_needed: int | None = None
 
     @property
     def can_restore(self) -> bool:
-        return self.blocked_by is None
+        return self.blocked_by is None and self.reason is None
 
     @property
     def blocked_message(self) -> str | None:
         """Why it can't be restored, in plain words; None when it can."""
+        if self.reason:
+            return self.reason
         b = self.blocked_by
         if b is None:
             return None
         where = {
             "collection": "is in the collection",
-            "schema": "is typed by the schema",
+            "schema": "is a field of the schema"
+            if self.kind == "field"
+            else "is typed by the schema",
             "record": "is under the record",
         }[b.kind]
         return (
@@ -724,6 +730,9 @@ class RestorePlanDTO:
             "blocked_by": self.blocked_by.to_dict() if self.blocked_by else None,
             "collection": self.collection,
             "collection_id": str(self.collection_id) if self.collection_id else None,
+            "schema_name": self.schema_name,
+            "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
+            "parents_needed": self.parents_needed,
             "blocked": self.blocked_message,
             "can_restore": self.can_restore,
         }
@@ -785,6 +794,33 @@ class RetentionReportDTO:
 
 
 @dataclass
+class RestoreSetDTO:
+    """Which of a set of deleted records can come back, worked out for the whole
+    set at once (a bulk delete can be thousands, so nothing here is a query per
+    record)."""
+
+    # Chosen records with nothing deleted above them: restorable right now.
+    ready: list[uuid.UUID] = field(default_factory=list)
+    # Chosen records held back by something deleted that is not covered.
+    blocked: list[uuid.UUID] = field(default_factory=list)
+    # Chosen records under another chosen one: they come back with it only if
+    # they were deleted with it. Otherwise they wait for it, and go next round.
+    waiting: list[uuid.UUID] = field(default_factory=list)
+    # Every chosen record -> the records that come back with it (itself and what
+    # was deleted with it).
+    groups: dict[uuid.UUID, list[uuid.UUID]] = field(default_factory=dict)
+    # Everything that would be live afterwards, counting each record once.
+    coming: set[uuid.UUID] = field(default_factory=set)
+
+
+@dataclass
+class RestoreSetResultDTO:
+    restored: int  # records restored in their own right
+    came_back: int  # records live again in all, with what went with them
+    left: list[str]  # chosen records still held back, as ids
+
+
+@dataclass
 class RestoreAllPlanDTO:
     """What restoring every deleted thing a history filter matches would do,
     worked out without doing it."""
@@ -795,15 +831,17 @@ class RestoreAllPlanDTO:
     restores: int  # records that would come back in all, with what went with them
     blocked: int  # matched, but something above is deleted and not in the set
     truncated: bool = False  # more matched than were looked at
+    fields: int = 0  # deleted fields matched
 
     @property
     def things(self) -> int:
-        return self.collections + self.schemas + self.records
+        return self.collections + self.schemas + self.fields + self.records
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "collections": self.collections,
             "schemas": self.schemas,
+            "fields": self.fields,
             "records": self.records,
             "restores": self.restores,
             "blocked": self.blocked,
@@ -948,6 +986,9 @@ class AuditEventDTO:
     parts: list[dict[str, Any]] = field(
         default_factory=list
     )  # {entity_type, action, count}
+    # Who made it: the entry's actor, or for a batch the one its changes were
+    # made by. None when it was not recorded.
+    actor: str | None = None
 
 
 @dataclass

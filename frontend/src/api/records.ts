@@ -33,6 +33,29 @@ export interface CivexRecord {
   derived?: Record<string, unknown> | null
   /** Only on a single-record fetch: the parent chain, root first. */
   ancestors?: RecordRef[] | null
+  /** Values this record still holds for fields deleted from its schema. They
+   * come back in `data` when the field is restored. */
+  deleted_fields?: DeletedFieldValue[] | null
+}
+
+export interface RestoreSelectedResult {
+  /** Chosen records that came back. */
+  restored: number
+  /** Records live again in all, counting the parents brought back. */
+  came_back: number
+  /** Chosen records that stayed deleted. */
+  left: number
+}
+
+export interface DeletedFieldValue {
+  id: string
+  name: string
+  label: string
+  dtype: string
+  /** The schema it was defined on: where to restore it. */
+  schema_name: string
+  deleted_at: string | null
+  value: unknown
 }
 
 export interface RecordRef {
@@ -70,6 +93,8 @@ export interface RecordLabel {
   natural_name: string | null
   /** In Recently Deleted: it still has a name, and can be restored. */
   deleted: boolean
+  /** When it was deleted; null for a live record. */
+  deleted_at?: string | null
 }
 
 /** The header that puts a request's changes in a batch (see `auditApi.openBatch`). */
@@ -179,6 +204,15 @@ export const recordsApi = {
   },
 
   restore: (id: string) => api.post<CivexRecord>(`/records/${id}/restore`, {}),
+
+  /** Restore exactly these deleted records, not what was deleted alongside
+   * them. The deleted records above a chosen one come back too (each by
+   * itself) unless `withParents` is false, when such a record is left. */
+  restoreSelected: (ids: string[], withParents = true) =>
+    api.post<RestoreSelectedResult>('/records/restore-selected', {
+      ids,
+      with_parents: withParents,
+    }),
 
   purge: (id: string) => api.delete<void>(`/records/${id}/purge`),
 

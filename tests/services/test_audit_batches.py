@@ -161,3 +161,256 @@ def test_paging_events_counts_events_not_entries(ctx: AppContext, tree):
     page, total_again = ctx.history_svc.events(limit=1, offset=0)
     assert total == total_again == len(all_events)
     assert len(page) == 1
+
+
+# --- undoing a bulk delete as the one event it was ---------------------------
+
+
+def _delete_batch_id(ctx: AppContext):
+    events, _ = _events(ctx, leaf("change", "delete"))
+    return events[0].batch.id
+
+
+def test_a_whole_delete_can_be_restored_from_its_one_event(ctx: AppContext, tree):
+    ctx.record_svc.delete(str(tree.id))
+    ctx.commit()
+    batch_id = _delete_batch_id(ctx)
+
+    plan = ctx.history_svc.plan_restore_all(batch_id=batch_id)
+    # The parent and both children were deleted; they come back together.
+    assert plan.records == 3 and plan.restores == 3 and plan.blocked == 0
+
+    result = ctx.history_svc.restore_all(batch_id=batch_id)
+    ctx.commit()
+    assert result.records == 3 and result.blocked == 0
+    assert ctx.record_svc.get(str(tree.id)).deleted_at is None
+    assert len(ctx.record_svc.find("humpback", "recording")) == 2
+
+
+def test_restoring_one_event_leaves_other_deletes_alone(ctx: AppContext, tree):
+    one = ctx.record_svc.find("humpback", "recording")[0]
+    ctx.record_svc.delete(str(one.id))  # a separate, earlier delete
+    ctx.record_svc.delete(str(tree.id))
+    ctx.commit()
+    batch_id = _delete_batch_id(ctx)
+
+    ctx.history_svc.restore_all(batch_id=batch_id)
+    ctx.commit()
+
+    assert ctx.record_svc.get(str(tree.id)).deleted_at is None
+    # The recording deleted on its own earlier stays deleted.
+    assert [r.id for r in ctx.record_svc.find("humpback", "recording")] != []
+    assert str(one.id) not in {
+        str(r.id) for r in ctx.record_svc.find("humpback", "recording")
+    }
+
+
+def test_a_batch_that_is_not_an_id_is_refused(ctx: AppContext, tree):
+    from civex.domain.exceptions import ValidationError
+
+    with pytest.raises(ValidationError):
+        ctx.history_svc.plan_restore_all(batch_id="not-an-id")
+
+
+def _queries(ctx: AppContext, fn) -> int:
+    from sqlalchemy import event
+
+    count = {"n": 0}
+    engine = ctx._session.get_bind()
+
+    def bump(*_args, **_kwargs):
+        count["n"] += 1
+
+    event.listen(engine, "before_cursor_execute", bump)
+    try:
+        fn()
+    finally:
+        event.remove(engine, "before_cursor_execute", bump)
+    return count["n"]
+
+
+def test_describing_and_undoing_a_bulk_delete_costs_the_same_however_big_it_is(
+    ctx: AppContext, make_schema, make_collection, make_record
+):
+    """Restoring a recording with 70 selections used to take a dozen queries
+    per record to even describe (and the dialog sat on a spinner). The cost is
+    now a few queries, whatever the size of the delete."""
+    make_schema("recording", fields=[("site", "string")])
+    make_schema("selection", fields=[("n", "integer")], parent="recording")
+    make_collection("c")
+
+    def delete_tree(children: int):
+        rec = make_record("c", "recording", {"site": "x"})
+        for i in range(children):
+            make_record("c", "selection", {"n": i}, parent_record_id=str(rec.id))
+        ctx.record_svc.delete(str(rec.id))
+        ctx.commit()
+        events, _ = _events(ctx, leaf("change", "delete"))
+        return events[0].batch.id
+
+    small = delete_tree(3)
+    small_plan = _queries(ctx, lambda: ctx.history_svc.plan_restore_all(batch_id=small))
+    small_restore = _queries(ctx, lambda: ctx.history_svc.restore_all(batch_id=small))
+    ctx.commit()
+
+    big = delete_tree(60)
+    big_plan = _queries(ctx, lambda: ctx.history_svc.plan_restore_all(batch_id=big))
+    big_restore = _queries(ctx, lambda: ctx.history_svc.restore_all(batch_id=big))
+    ctx.commit()
+
+    assert big_plan == small_plan <= 12
+    assert big_restore == small_restore <= 20
+    assert len(ctx.record_svc.find("c", "selection", limit=500)) == 63
+
+
+def test_a_record_under_a_deleted_schema_waits_unless_the_schema_comes_too(
+    ctx: AppContext, tree
+):
+    ctx.schema_svc.delete("recording")
+    ctx.commit()
+    # Everything deleted: the schema and its records come back together.
+    plan = ctx.history_svc.plan_restore_all()
+    assert plan.schemas == 1 and plan.blocked == 0
+    ctx.history_svc.restore_all()
+    ctx.commit()
+    assert len(ctx.record_svc.find("humpback", "recording")) == 2
+
+
+def test_a_child_deleted_earlier_comes_back_in_a_second_round(ctx: AppContext, tree):
+    """A child deleted on its own, then its parent: restoring both takes two
+    rounds (the child is held back until the parent is live), and it works."""
+    child = ctx.record_svc.find("humpback", "recording")[0]
+    ctx.record_svc.delete(str(child.id))
+    ctx.record_svc.delete(str(tree.id))
+    ctx.commit()
+
+    plan = ctx.history_svc.plan_restore_all()
+    assert plan.blocked == 0  # the parent is in the set, so the child is covered
+    result = ctx.history_svc.restore_all()
+    ctx.commit()
+    assert result.blocked == 0
+    assert ctx.record_svc.get(str(tree.id)).deleted_at is None
+    assert ctx.record_svc.get(str(child.id)).deleted_at is None
+
+
+# --- restoring one child of a deleted parent ---------------------------------
+
+
+def test_each_deleted_record_has_its_own_entry_even_though_they_show_as_one(
+    ctx: AppContext, tree
+):
+    from civex.db.models import AuditLog
+
+    ctx.record_svc.delete(str(tree.id))
+    ctx.commit()
+    entries = (
+        ctx._session.query(AuditLog)
+        .filter(AuditLog.action == "delete", AuditLog.entity_type == "record")
+        .all()
+    )
+    assert len(entries) == 3  # the encounter and its two recordings
+    assert len({e.batch_id for e in entries}) == 1  # tied together, not merged
+
+
+def test_restoring_one_child_can_leave_its_siblings_deleted(ctx: AppContext, tree):
+    ctx.record_svc.delete(str(tree.id))
+    ctx.commit()
+    deleted_children = [
+        e.entity_id
+        for e in ctx.history_svc.page(limit=50)
+        if e.action == "delete" and e.entity_id != tree.id
+    ]
+    one, other = deleted_children[0], deleted_children[1]
+
+    plan = ctx.record_svc.restore_plan(str(one))
+    assert plan.blocked_by is not None and plan.blocked_by.kind == "record"
+    assert plan.records == 1
+    # One deleted parent would have to come back with it.
+    assert plan.parents_needed == 1
+    # Without asking for it, a child still waits for its parent.
+    from civex.domain.exceptions import ValidationError
+
+    with pytest.raises(ValidationError):
+        ctx.record_svc.restore(str(one))
+
+    ctx.record_svc.restore(str(one), with_parents=True)
+    ctx.commit()
+
+    assert ctx.record_svc.get(str(tree.id)).deleted_at is None
+    assert ctx.record_svc.get(str(one)).deleted_at is None
+    assert ctx.record_svc.labels([str(other)])[0].deleted_at is not None
+    assert [str(r.id) for r in ctx.record_svc.find("humpback", "recording")] == [
+        str(one)
+    ]
+
+
+def test_restoring_the_parent_still_brings_everything_back(ctx: AppContext, tree):
+    ctx.record_svc.delete(str(tree.id))
+    ctx.commit()
+    plan = ctx.record_svc.restore_plan(str(tree.id))
+    assert plan.records == 3 and plan.parents_needed is None
+    ctx.record_svc.restore(str(tree.id))
+    ctx.commit()
+    assert len(ctx.record_svc.find("humpback", "recording")) == 2
+
+
+def test_a_record_can_come_back_without_what_was_deleted_with_it(ctx: AppContext, tree):
+    ctx.record_svc.delete(str(tree.id))
+    ctx.commit()
+
+    ctx.record_svc.restore(str(tree.id), only_this=True)
+    ctx.commit()
+
+    assert ctx.record_svc.get(str(tree.id)).deleted_at is None
+    # Its two recordings were deleted with it and stay deleted.
+    assert ctx.record_svc.find("humpback", "recording") == []
+
+
+def test_exactly_the_chosen_records_come_back_with_the_parents_they_need(
+    ctx: AppContext, tree
+):
+    ctx.record_svc.delete(str(tree.id))
+    ctx.commit()
+    children = [
+        e.entity_id
+        for e in ctx.history_svc.page(limit=50)
+        if e.action == "delete" and e.entity_id != tree.id
+    ]
+
+    result = ctx.record_svc.restore_records([str(children[0])])
+    ctx.commit()
+
+    assert result.restored == 1 and result.came_back == 2 and result.left == []
+    assert ctx.record_svc.get(str(tree.id)).deleted_at is None
+    assert [str(r.id) for r in ctx.record_svc.find("humpback", "recording")] == [
+        str(children[0])
+    ]
+
+
+def test_chosen_records_under_a_deleted_parent_are_left_when_parents_are_not_wanted(
+    ctx: AppContext, tree
+):
+    ctx.record_svc.delete(str(tree.id))
+    ctx.commit()
+    child = next(
+        e.entity_id
+        for e in ctx.history_svc.page(limit=50)
+        if e.action == "delete" and e.entity_id != tree.id
+    )
+
+    result = ctx.record_svc.restore_records([str(child)], with_parents=False)
+    ctx.commit()
+
+    assert result.restored == 0 and result.left == [str(child)]
+    assert ctx.record_svc.find("humpback", "recording") == []
+
+
+def test_restoring_chosen_records_leaves_alone_one_held_by_a_deleted_schema(
+    ctx: AppContext, tree
+):
+    ctx.record_svc.delete(str(tree.id))
+    ctx.schema_svc.delete("encounter")
+    ctx.commit()
+
+    result = ctx.record_svc.restore_records([str(tree.id)])
+    assert result.restored == 0 and result.left == [str(tree.id)]

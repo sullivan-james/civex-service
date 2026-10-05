@@ -7,15 +7,13 @@ import {
   useState,
 } from 'react'
 import { NavLink } from 'react-router'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Group,
   Panel,
   Separator,
   useDefaultLayout,
 } from 'react-resizable-panels'
-import { remoteApi } from '../api/remote'
-import { errorMessage } from '../lib/errors'
 import { useUISettings } from '../hooks/useUISettings'
 import { useFrequentCollections } from '../hooks/useFrequentCollections'
 import { useDialogA11y } from '../hooks/useDialogA11y'
@@ -28,16 +26,12 @@ import { useToast } from './ui/ToastProvider'
 import { Button } from './ui/Button'
 import { IconButton } from './ui/IconButton'
 import { Tooltip } from './ui/Tooltip'
-import { Spinner } from './ui/Spinner'
 import { Menu as Dropdown } from './ui/Menu'
 import {
   RefreshCw,
   Sparkles,
   Settings,
   ExternalLink,
-  ArrowDownToLine,
-  ArrowUpToLine,
-  ArrowRightLeft,
   FolderOpen,
   FolderPlus,
   Folder,
@@ -286,8 +280,6 @@ function NavGroups({
 
 export default function Layout({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
-  const [syncing, setSyncing] = useState<'push' | 'pull' | null>(null)
-  const [syncAnnouncement, setSyncAnnouncement] = useState('')
   const [aiOpen, setAiOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -296,13 +288,6 @@ export default function Layout({ children }: { children: ReactNode }) {
   const drawerRef = useRef<HTMLDivElement>(null)
   const drawerTitleId = useId()
   const toast = useToast()
-
-  const { data: remote } = useQuery({
-    queryKey: ['remote-status'],
-    queryFn: remoteApi.status,
-    retry: false,
-    staleTime: 30_000,
-  })
 
   const { data: uiSettings } = useUISettings()
   const showAdvanced = uiSettings?.show_advanced ?? false
@@ -347,34 +332,6 @@ export default function Layout({ children }: { children: ReactNode }) {
       localStorage.setItem(NAV_COLLAPSED_KEY, next ? '1' : '0')
       return next
     })
-  }
-
-  async function runSync(op: 'push' | 'pull') {
-    setSyncing(op)
-    const verb = op === 'push' ? 'Push' : 'Pull'
-    setSyncAnnouncement(
-      op === 'push' ? 'Pushing to remote…' : 'Pulling from remote…',
-    )
-    try {
-      const result =
-        op === 'push' ? await remoteApi.push() : await remoteApi.pull()
-      toast.success(
-        `${verb}ed — ${result.records}r ${result.schemas}s ${result.datasets}d`,
-      )
-      setSyncAnnouncement(
-        `${verb} complete. ${result.records} record${result.records === 1 ? '' : 's'}, ` +
-          `${result.schemas} record type${result.schemas === 1 ? '' : 's'} updated.`,
-      )
-      // Invalidate all data queries so the UI reflects pulled changes.
-      if (op === 'pull') {
-        queryClient.invalidateQueries()
-      }
-    } catch (e: unknown) {
-      toast.error(errorMessage(e))
-      setSyncAnnouncement(`${verb} failed.`)
-    } finally {
-      setSyncing(null)
-    }
   }
 
   return (
@@ -466,48 +423,6 @@ export default function Layout({ children }: { children: ReactNode }) {
               )}
             />
           </>
-        )}
-
-        <div className="flex-1" />
-
-        {remote && (
-          <div aria-busy={syncing !== null}>
-            <span role="status" aria-live="polite" className="sr-only">
-              {syncAnnouncement}
-            </span>
-            <Dropdown
-              items={[
-                {
-                  label: 'Pull',
-                  icon: ArrowDownToLine,
-                  disabled: syncing !== null,
-                  onClick: () => runSync('pull'),
-                },
-                {
-                  label: 'Push',
-                  icon: ArrowUpToLine,
-                  disabled: syncing !== null,
-                  onClick: () => runSync('push'),
-                },
-              ]}
-              trigger={({ toggle }) => (
-                <Button
-                  variant="nav"
-                  size="sm"
-                  onClick={toggle}
-                  disabled={syncing !== null}
-                >
-                  {syncing !== null ? (
-                    <Spinner size={14} />
-                  ) : (
-                    <ArrowRightLeft size={14} />
-                  )}
-                  Sync
-                  <ChevronDown size={14} />
-                </Button>
-              )}
-            />
-          </div>
         )}
       </header>
 

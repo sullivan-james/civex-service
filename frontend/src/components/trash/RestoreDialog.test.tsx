@@ -22,12 +22,13 @@ const plan = (over: Partial<RestorePlan> = {}): RestorePlan => ({
   blocked: null,
   collection: 'study',
   collection_id: 'col-1',
+  schema_name: null,
   can_restore: true,
   ...over,
 })
 
 let plans: Record<string, RestorePlan>
-let calls: { method: string; path: string }[]
+let calls: { method: string; path: string; search?: string }[]
 const onClose = vi.fn()
 
 function renderDialog(kind: 'record' | 'collection' | 'schema', ref: string) {
@@ -52,7 +53,11 @@ beforeEach(() => {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), 'http://x')
       const method = init?.method ?? 'GET'
-      calls.push({ method, path: url.pathname })
+      calls.push(
+        url.search
+          ? { method, path: url.pathname, search: url.search }
+          : { method, path: url.pathname },
+      )
       if (method === 'GET' && url.pathname.endsWith('/restore-plan')) {
         const found = plans[url.pathname]
         return found ? json(found) : json({ detail: 'not found' }, 404)
@@ -72,7 +77,11 @@ describe('RestoreDialog', () => {
     expect(await screen.findByText(/goes back to study/)).toHaveTextContent(
       'along with 2 records deleted with it',
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Restore' }))
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: 'Restore with the 2 records deleted with it',
+      }),
+    )
 
     await waitFor(() =>
       expect(
@@ -89,6 +98,66 @@ describe('RestoreDialog', () => {
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument()
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it('offers just one child, or it with what was deleted with it, not only the whole parent', async () => {
+    plans['/api/records/sel-1/restore-plan'] = plan({
+      id: 'sel-1',
+      name: 'Selection 1',
+      records: 3,
+      can_restore: false,
+      blocked:
+        "'Selection 1' is under the record 'Recording 7', which is deleted. Restore that first.",
+      blocked_by: { kind: 'record', id: 'rec-7', name: 'Recording 7' },
+      parents_needed: 1,
+    })
+    renderDialog('record', 'sel-1')
+
+    expect(
+      await screen.findByText(
+        /bring back just this record, with the 1 record it sits under/,
+      ),
+    ).toBeInTheDocument()
+    // The default stays available: the parent and everything deleted with it.
+    expect(
+      screen.getByRole('button', {
+        name: /Restore the record “Recording 7” and all of it/,
+      }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', {
+        name: 'This and the 2 records deleted with it (4 records)',
+      }),
+    ).toBeInTheDocument()
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Restore only this (2 records)' }),
+    )
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: 'POST',
+        path: '/api/records/sel-1/restore',
+        search: '?only_this=true&with_parents=true',
+      }),
+    )
+  })
+
+  it('lets a record come back without the children deleted with it', async () => {
+    plans['/api/records/rec-1/restore-plan'] = plan({ records: 61 })
+    renderDialog('record', 'rec-1')
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Restore only this' }),
+    )
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: 'POST',
+        path: '/api/records/rec-1/restore',
+        search: '?only_this=true',
+      }),
+    )
+    expect(
+      await screen.findByText('Restored just "Sample 12" to study'),
+    ).toBeInTheDocument()
   })
 
   it('will not restore a blocked record, and offers the blocker instead', async () => {
@@ -115,7 +184,7 @@ describe('RestoreDialog', () => {
 
     await userEvent.click(
       screen.getByRole('button', {
-        name: /Restore the collection “study” instead/,
+        name: /Restore the collection “study” and all of it/,
       }),
     )
     // The dialog now describes the collection and what comes back with it.

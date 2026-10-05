@@ -46,8 +46,8 @@ class RetentionService:
         self._audit = audit
         self._jobs = jobs
         self._retention = retention
-        # With a remote, history not yet pushed is the only copy a pull on the
-        # other side would be missing, so it is kept.
+        # With a remote, history the authority hasn't acknowledged
+        # (`sync_state` pending) is the only copy it is missing, so it is kept.
         self._protect_unsynced = protect_unsynced
 
     def settings_cutoffs(self, now: datetime | None = None) -> RetentionCutoffs:

@@ -225,6 +225,7 @@ class DatasetService:
             id=dataset.id,
             name=dataset.name,
             records=self._datasets.cascade_count(dataset.id),
+            deleted_at=dataset.deleted_at,
         )
 
     def _deleted(self, name: str) -> DatasetDTO:

@@ -38,7 +38,7 @@ def test_retrieve_roundtrips_bytes(ctx: AppContext) -> None:
     assert ctx.file_svc.retrieve(ref.sha256) == b"round trip me"
 
 
-def test_retrieve_missing_object_without_remote_raises(ctx: AppContext) -> None:
+def test_retrieve_missing_object_raises(ctx: AppContext) -> None:
     with pytest.raises(FileNotFoundError):
         ctx.file_svc.retrieve("0" * 64)
 

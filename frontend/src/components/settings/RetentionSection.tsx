@@ -128,7 +128,7 @@ function RetentionForm({ settings }: { settings: RetentionSettings }) {
         <KeepFor
           label="Keep history for (days)"
           foreverLabel="Keep history forever"
-          info="Older entries are removed by a clean-up, except those about things that can still be restored, and with a remote, those not yet pushed."
+          info="Older entries are removed by a clean-up, except those about things that can still be restored."
           forever={auditForever}
           days={auditDays}
           onForever={setAuditForever}

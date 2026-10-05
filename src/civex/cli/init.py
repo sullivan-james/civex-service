@@ -12,20 +12,12 @@ from civex.services import db_service
 
 def init(
     path: Path = typer.Argument(Path("."), help="Directory to initialize"),
-    bare: bool = typer.Option(
-        False,
-        "--bare",
-        help="Create a bare repository (remote storage, no working directory)",
-    ),
     sqlite: bool = typer.Option(
         False, "--sqlite", help="Force SQLite instead of Docker PostgreSQL"
     ),
 ) -> None:
     """Initialize a new civex project in the given directory."""
-    if bare:
-        _init_bare(path.resolve())
-    else:
-        _init_working(path.resolve(), use_sqlite=sqlite)
+    _init_working(path.resolve(), use_sqlite=sqlite)
 
 
 def _init_working(target: Path, use_sqlite: bool = False) -> None:
@@ -90,30 +82,3 @@ def _display_url(db_url: str) -> str:
     except Exception:
         pass
     return db_url
-
-
-def _init_bare(target: Path) -> None:
-    from sqlalchemy import create_engine
-
-    from civex.db.migrate import ensure_schema_current
-
-    marker = target / "CIVEX_BARE"
-    if marker.exists():
-        console.print("[warning]Already a bare repository.[/warning]")
-        raise typer.Exit(0)
-
-    target.mkdir(parents=True, exist_ok=True)
-
-    db_path = target / "civex.db"
-    db_url = f"sqlite:///{db_path.as_posix()}"
-
-    (target / "objects").mkdir(exist_ok=True)
-    marker.write_text("")
-
-    engine = create_engine(db_url)
-    ensure_schema_current(engine)
-    engine.dispose()
-
-    console.print(f"[success]Initialized bare civex repository at {target}[/success]")
-    console.print(f"  Database   {db_path}")
-    console.print(f"  Objects    {target / 'objects'}")

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
@@ -35,7 +35,6 @@ const FIELDS = [
 
 const entry = (over: Partial<AuditLogEntry> = {}): AuditLogEntry => ({
   id: 'e1',
-  commit_id: null,
   action: 'delete',
   entity_type: 'record',
   entity_id: 'r1',
@@ -92,6 +91,7 @@ const batch: AuditEvent = {
 let events: AuditEvent[]
 let restoreAll: Record<string, unknown>
 let calls: { method: string; path: string; params: URLSearchParams }[]
+let restoreSelectedBody: unknown
 
 function renderFeed(scope?: ReturnType<typeof underRecord>, initial = '/') {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -114,6 +114,7 @@ beforeEach(() => {
   restoreAll = {
     collections: 0,
     schemas: 0,
+    fields: 0,
     records: 0,
     things: 0,
     restores: 0,
@@ -130,6 +131,10 @@ beforeEach(() => {
         path: url.pathname,
         params: url.searchParams,
       })
+      if (url.pathname === '/api/records/restore-selected') {
+        restoreSelectedBody = JSON.parse(String(init?.body))
+        return json({ restored: 1, came_back: 1, left: 0 })
+      }
       if (url.pathname === '/api/audit/restore-all')
         return init?.method === 'POST'
           ? json({ restored: 3, records: 1206, blocked: 1 })
@@ -282,6 +287,7 @@ describe('ActivityFeed', () => {
   })
 
   it('restores a deleted record from its row', async () => {
+    events = [single]
     renderFeed()
     await screen.findByText('Deleted now')
     await userEvent.click(screen.getByRole('button', { name: 'Restore' }))
@@ -291,10 +297,171 @@ describe('ActivityFeed', () => {
     )
   })
 
+  it('leads each row with who made the change, then what happened, then when', async () => {
+    events = [
+      { ...single, id: 'a', entry: entry({ id: 'a', actor: 'alice' }) },
+      { ...single, id: 'b', entry: entry({ id: 'b', actor: 'alice' }) },
+    ]
+    renderFeed()
+    await screen.findAllByText('Deleted now')
+    const headers = screen
+      .getAllByRole('columnheader')
+      .map((h) => h.textContent?.trim())
+      .filter(Boolean)
+    expect(headers.slice(0, 3)).toEqual(['Who', 'What happened', 'When'])
+    expect(screen.getAllByText('alice')).toHaveLength(2)
+  })
+
+  it('names the person behind a bulk change too, and a dash when it was not recorded', async () => {
+    events = [
+      { ...batch, id: 'bb', actor: 'bob' },
+      { ...single, id: 'old', entry: entry({ id: 'old' }) },
+    ]
+    renderFeed()
+    await screen.findByText('Deleted 1,204 records')
+    expect(screen.getByText('bob')).toBeInTheDocument()
+    expect(screen.getByText('—')).toBeInTheDocument()
+  })
+
+  it('restores a deleted field from its row, on the schema it came from', async () => {
+    events = [
+      {
+        ...single,
+        entry: entry({
+          id: 'fe1',
+          entity_type: 'field',
+          entity_id: 'f1f1f1f1-0000-4000-8000-000000000001',
+          old_data: { name: 'note', schema_id: 's1' },
+          changes: [],
+          now: {
+            kind: 'field',
+            ref: 'f1f1f1f1-0000-4000-8000-000000000001',
+            status: 'deleted',
+            name: 'note',
+            schema_name: 'thing',
+            collection: null,
+            deleted_at: '2026-03-04T10:00:00Z',
+          },
+        }),
+      },
+    ]
+    renderFeed()
+    await screen.findByText('Deleted now')
+    // A deleted field has no page of its own to link to.
+    expect(screen.queryByRole('link', { name: 'note' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Restore' }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(
+      calls.some(
+        (c) =>
+          c.path ===
+          '/api/schemas/thing/fields/f1f1f1f1-0000-4000-8000-000000000001/restore-plan',
+      ),
+    ).toBe(true)
+  })
+
+  it('undoes a whole bulk delete from its one line, after saying what comes back', async () => {
+    events = [batch]
+    restoreAll = {
+      collections: 0,
+      schemas: 0,
+      fields: 0,
+      records: 1204,
+      things: 1204,
+      restores: 1204,
+      blocked: 0,
+      truncated: false,
+    }
+    renderFeed()
+    await screen.findByText('Deleted 1,204 records')
+    await userEvent.click(screen.getByRole('button', { name: 'Restore' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('1,204 records')
+    expect(dialog).toHaveTextContent('parent first')
+    // The plan is for this one delete, not everything that is deleted.
+    const planCall = calls.find((c) => c.path === '/api/audit/restore-all')!
+    expect(planCall.params.get('batch')).toBe('b1')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Restore all' }))
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) => c.method === 'POST' && c.path === '/api/audit/restore-all',
+        ),
+      ).toBe(true),
+    )
+  })
+
+  it('lets some of a bulk delete come back instead of all of it', async () => {
+    events = [batch]
+    restoreAll = {
+      collections: 0,
+      schemas: 0,
+      fields: 0,
+      records: 1204,
+      things: 1204,
+      restores: 1204,
+      blocked: 0,
+      truncated: false,
+    }
+    renderFeed()
+    await screen.findByText('Deleted 1,204 records')
+    await userEvent.click(screen.getByRole('button', { name: 'Restore' }))
+    // The one-click restore stays, and so does a way to choose.
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Choose which…' }),
+    )
+
+    const dialog = await screen.findByRole('dialog', {
+      name: /Deleted 1,204 records/,
+    })
+    expect(dialog).toHaveTextContent('Tick the records to bring back')
+    await userEvent.click(
+      await within(dialog).findByRole('checkbox', {
+        name: 'Select this record',
+      }),
+    )
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Restore 1 selected' }),
+    )
+
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.method === 'POST' && c.path === '/api/records/restore-selected',
+        ),
+      ).toBe(true),
+    )
+    expect(restoreSelectedBody).toEqual({ ids: ['r1'], with_parents: true })
+  })
+
+  it('says so when nothing from a bulk delete is still deleted', async () => {
+    events = [batch]
+    renderFeed()
+    await screen.findByText('Deleted 1,204 records')
+    await userEvent.click(screen.getByRole('button', { name: 'Restore' }))
+    expect(
+      await screen.findByText(/Nothing from this delete is still deleted/),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Restore all' })).toBeNull()
+  })
+
+  it("offers the same undo inside the bulk delete's window", async () => {
+    events = [batch]
+    renderFeed()
+    await userEvent.click(await screen.findByText('Deleted 1,204 records'))
+    expect(
+      await screen.findByRole('button', { name: 'Restore everything…' }),
+    ).toBeInTheDocument()
+  })
+
   it('offers to restore everything the Deleted view lists, after saying what it does', async () => {
     restoreAll = {
       collections: 1,
       schemas: 0,
+      fields: 0,
       records: 2,
       things: 3,
       restores: 1206,

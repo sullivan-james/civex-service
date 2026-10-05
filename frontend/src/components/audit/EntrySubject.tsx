@@ -21,7 +21,9 @@ export function EntrySubject({
     ? (now?.name ?? now?.schema_name ?? 'Record')
     : ((snapshot?.name as string | undefined) ?? entry.entity_type)
   const target = auditEntryTarget(entry)
-  const openable = target && !(isRecord && now && now.status !== 'live')
+  // Something deleted (or gone for good) has no page to open: a link would only
+  // lead to "not found". Its row says where it is now instead.
+  const openable = target && !(now && now.status !== 'live')
 
   return (
     <span className="flex flex-wrap items-center gap-x-2 text-sm">

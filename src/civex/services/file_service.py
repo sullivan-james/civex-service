@@ -8,13 +8,8 @@ from civex.repositories.protocols import FileObjectStore
 
 
 class FileService:
-    def __init__(
-        self,
-        store: FileObjectStore,
-        remote_transport=None,  # LocalTransport | SSHTransport | None
-    ) -> None:
+    def __init__(self, store: FileObjectStore) -> None:
         self._store = store
-        self._remote = remote_transport
 
     # `collection_id` (here and below) is the id of the collection the file is
     # for. It only steers where new content is written -- see
@@ -51,43 +46,15 @@ class FileService:
 
     def local_path(self, sha256: str) -> Path:
         """Path of the object's bytes on local disk, for streaming it out
-        without loading it into memory. An object that only exists on the
-        remote is fetched and cached first (the transports still move a
-        blob as a single buffer, so that one-time fetch is whole-object)."""
-        try:
-            return self._store.object_path(sha256)
-        except FileNotFoundError:
-            if self._remote is None:
-                raise
-        self.retrieve(sha256)
+        without loading it into memory."""
         return self._store.object_path(sha256)
 
     def retrieve(self, sha256: str) -> bytes:
-        """Return object bytes, fetching from the remote and caching locally if needed."""
-        try:
-            return self._store.get(sha256)
-        except FileNotFoundError:
-            pass
-        if self._remote is None:
-            raise FileNotFoundError(
-                f"Object {sha256} not found locally and no remote is configured"
-            )
-        data = self._remote.get_object(sha256)
-        self._store.put(
-            data, sha256
-        )  # cache locally; filename is sha256 (internal only)
-        return data
+        """Return the object's bytes."""
+        return self._store.get(sha256)
 
     def exists(self, sha256: str) -> bool:
-        if self._store.exists(sha256):
-            return True
-        if self._remote is not None:
-            try:
-                self._remote.get_object(sha256)
-                return True
-            except Exception:
-                return False
-        return False
+        return self._store.exists(sha256)
 
     def object_path(self, sha256: str) -> Path:
         return self._store.object_path(sha256)

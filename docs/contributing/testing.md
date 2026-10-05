@@ -96,7 +96,7 @@ per built-in plugin (especially the regex-heavy `extract_from_filename` and
 `match_files_to_records`).
 
 **5. Server routers** — `datasets`, `files`, `jobs`, `plugins`, `workflows`,
-`remote`, `store`, `dump` have no tests. `ai.py` (873 lines, the largest
+`store`, `dump` have no tests. `ai.py` (873 lines, the largest
 untested router) needs its outbound `httpx` calls mocked so tests don't hit
 real providers.
 

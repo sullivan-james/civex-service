@@ -288,7 +288,7 @@ export function SchemaFieldsSection({
       {confirmDeleteField && (
         <ConfirmDialog
           title="Remove field"
-          body={`Remove field '${confirmDeleteField}'? This cannot be undone.`}
+          body={`Remove field '${confirmDeleteField}'? Records keep the values they hold for it, and the field can be restored from Activity (press Deleted).`}
           confirmLabel="Remove"
           variant="danger"
           warning={

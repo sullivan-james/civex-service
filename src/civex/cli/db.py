@@ -120,7 +120,7 @@ def _load_or_new_config(root: Path, is_new: bool):
     from civex.config import Config, DBConfig, load_config
 
     if is_new:
-        return Config(project_root=root, db=DBConfig(url=""), remote=None)
+        return Config(project_root=root, db=DBConfig(url=""))
     return load_config()
 
 

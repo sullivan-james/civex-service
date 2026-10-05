@@ -100,7 +100,7 @@ def _print_report(report: RetentionReportDTO) -> None:
     if report.audit_kept_unsynced:
         console.print(
             f"[dim]Kept {report.audit_kept_unsynced} older history entr(ies): "
-            "not yet pushed to the remote.[/dim]"
+            "not yet synced.[/dim]"
         )
     for skipped in report.skipped:
         console.print(f"[warning]Could not delete {skipped}[/warning]")
@@ -136,7 +136,7 @@ def retention_run(
     Give --settings to apply the settings, and/or a date per kind (a date wins
     over the setting for its kind). It always counts first and asks before
     removing anything. History about something that can still be restored is
-    never removed, and with a remote neither is history not yet pushed. Run
+    never removed. Run
     `civex store gc` afterwards to reclaim files nothing refers to any more.
     """
     dates = (

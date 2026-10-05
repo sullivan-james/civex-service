@@ -22,8 +22,7 @@ def run_retention(body: RetentionRunRequest, ctx: AppContext = Depends(get_ctx))
     a date given outright wins over the setting for that kind. With `dry_run`
     (the default) nothing is removed and the response says what would be.
 
-    History about something that can still be restored is never removed, and
-    with a remote configured neither is history not yet pushed. Files nothing
+    History about something that can still be restored is never removed. Files nothing
     refers to afterwards are the file clean-up's job (`/store/gc`)."""
     svc = ctx.retention_svc
     cutoffs = svc.cutoffs(
