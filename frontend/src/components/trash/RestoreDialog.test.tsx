@@ -22,6 +22,7 @@ const plan = (over: Partial<RestorePlan> = {}): RestorePlan => ({
   blocked: null,
   collection: 'study',
   collection_id: 'col-1',
+  schema_name: null,
   can_restore: true,
   ...over,
 })

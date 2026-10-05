@@ -35,7 +35,6 @@ const FIELDS = [
 
 const entry = (over: Partial<AuditLogEntry> = {}): AuditLogEntry => ({
   id: 'e1',
-  commit_id: null,
   action: 'delete',
   entity_type: 'record',
   entity_id: 'r1',
