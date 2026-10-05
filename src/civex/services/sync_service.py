@@ -335,6 +335,23 @@ class SyncService:
             state = "applied"
             self._apply(entry)
         self._repo.insert_entry(entry, hub_seq=entry.hub_seq, apply_state=state)
+        if state == "applied" and entry.action in ("create", "update", "restore"):
+            self._reapply_later_delete(entry)
+
+    def _reapply_later_delete(self, entry: SyncEntry) -> None:
+        """A change can reach this device after a delete the authority numbered
+        later (the delete was ours, and its answer came first). The state just
+        applied would undo it, so the delete is applied again: it is the end."""
+        thing = (entry.entity_type, entry.entity_id)
+        entries = self._repo.effective_entries({thing}).get(thing) or []
+        if (
+            entries
+            and entries[-1][1] in ("delete", "purge")
+            and entries[-1][0] != entry.id
+        ):
+            last = self._repo.get_entry(entries[-1][0])
+            if last is not None:
+                self._apply(last)
 
     def _apply(self, entry: SyncEntry) -> None:
         try:
