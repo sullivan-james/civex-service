@@ -57,6 +57,9 @@ class SyncWorker:
         self._next_interval = 0.0
         self._last_attempt = -DEBOUNCE
         self._last_file_check = -FILE_CHECK_EVERY
+        # What the last sync run here did, for the app to report. Kept in memory:
+        # it is a notice, not state anyone needs after a restart.
+        self.last_report: SyncReport | None = None
 
     def request(self) -> None:
         """Ask for a sync at the next tick, whatever the schedule says."""
@@ -104,6 +107,7 @@ class SyncWorker:
             report = ctx.sync_svc.sync(check_files=files)
             if files:
                 self._last_file_check = now
+            self.last_report = report
         except SyncBusy:
             return None
         except SyncError as e:

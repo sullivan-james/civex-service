@@ -15,7 +15,9 @@ import {
   useDefaultLayout,
 } from 'react-resizable-panels'
 import { useUISettings } from '../hooks/useUISettings'
-import { useRemoteStatus, useSyncNow } from '../hooks/useRemote'
+import { useRemoteStatus } from '../hooks/useRemote'
+import { syncButtonState } from '../utils/syncState'
+import { useManualSync } from '../hooks/useSyncToasts'
 import { useFrequentCollections } from '../hooks/useFrequentCollections'
 import { useDialogA11y } from '../hooks/useDialogA11y'
 import { PinnedNav } from './PinnedNav'
@@ -281,40 +283,34 @@ function NavGroups({
   )
 }
 
-/** Sync now, in the top bar, once the project follows an authority. Spins while
- * a sync runs and shows how many changes are waiting to go. */
+/** The top-bar sync button, once the project follows an authority. It says
+ * whether a sync is needed (changes to send, a failure, conflicts to review) or
+ * when it last synced, and pressing it syncs and refreshes what is on screen. */
 function SyncButton() {
   const { data } = useRemoteStatus()
-  const syncNow = useSyncNow()
+  const { request, spinning } = useManualSync()
+  const queryClient = useQueryClient()
   if (!data?.configured) return null
-  const busy = data.running || syncNow.isPending
-  const tip = data.last_error
-    ? `Could not sync: ${data.last_error}`
-    : data.pending > 0
-      ? `${data.pending} change(s) waiting to send. Sync now.`
-      : 'Everything is in step. Sync now to check.'
+  const state = syncButtonState(data, spinning)
+  const busy = state.tone === 'busy'
   return (
-    <Tooltip content={tip} side="bottom">
+    <Tooltip content={state.tip} side="bottom">
       <Button
-        variant="nav"
+        variant={state.tone === 'ok' || busy ? 'nav' : 'navActive'}
         size="sm"
         disabled={busy}
-        onClick={() => syncNow.mutate()}
+        onClick={() =>
+          request(() => queryClient.refetchQueries({ type: 'active' }))
+        }
       >
         <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />
-        Sync
-        {data.pending > 0 && !busy && (
-          <span className="ml-1 rounded-full bg-nav-border px-1.5 text-xs">
-            {data.pending}
-          </span>
-        )}
+        {state.label}
       </Button>
     </Tooltip>
   )
 }
 
 export default function Layout({ children }: { children: ReactNode }) {
-  const queryClient = useQueryClient()
   const [aiOpen, setAiOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -403,17 +399,6 @@ export default function Layout({ children }: { children: ReactNode }) {
             Ctrl K
           </kbd>
         </Button>
-
-        <Tooltip content="Refresh all data" side="bottom">
-          <Button
-            variant="nav"
-            size="sm"
-            onClick={() => queryClient.refetchQueries({ type: 'active' })}
-          >
-            <RefreshCw size={14} />
-            Refresh
-          </Button>
-        </Tooltip>
 
         <SyncButton />
 

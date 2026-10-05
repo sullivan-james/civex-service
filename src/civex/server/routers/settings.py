@@ -63,8 +63,8 @@ def get_identity():
 
 @router.patch("/identity", response_model=IdentityResponse)
 def update_identity(body: UpdateIdentityRequest):
-    """Choose the name recorded on changes made in this project, like git's
-    `user.name`: it is saved in this project's config.toml."""
+    """Choose the name recorded on changes made in this project. It is saved
+    in this project's config.toml."""
     config = _load_config()
     config.identity.name = (body.name or "").strip()[:100] or None
     save_config(config)

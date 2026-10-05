@@ -17,6 +17,16 @@ export interface RemoteStatus {
   last_error: string | null
   last_error_at: string | null
   running: boolean
+  /** What the last sync run by this server did (null until one has run). */
+  last_result: SyncResult | null
+}
+
+export interface SyncResult {
+  pulled: number
+  pushed: number
+  files_sent: number
+  conflicts: number
+  rejected: number
 }
 
 /** A value that did not go in as made. */

@@ -61,7 +61,7 @@ has one line per sync, and a warning for anything refused or in conflict.
 ## Who changes are recorded as
 
 Changes you make are recorded under your computer's user name. To use another
-name in a project, as with git's `user.name`: `civex sync user "Dana"` or
+name in a project: `civex sync user "Dana"` or
 Settings → Sync. It is saved in that project's `_civex/config.toml` (`[identity]`),
 so each project has its own, and a copy of the folder carries it along.
 `civex sync user --reset` goes back. Once changes sync, the authority records

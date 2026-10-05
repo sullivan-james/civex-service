@@ -35,6 +35,19 @@ class RemoteStatusResponse(BaseModel):
     )
     last_error_at: str | None
     running: bool = Field(description="A sync is in progress right now.")
+    last_result: SyncResultResponse | None = Field(
+        default=None,
+        description="What the last sync run by this server did; null after a "
+        "restart or before the first one.",
+    )
+
+
+class SyncResultResponse(BaseModel):
+    pulled: int = Field(description="Changes from others brought in.")
+    pushed: int = Field(description="Changes of this project's that were sent.")
+    files_sent: int
+    conflicts: int = Field(description="Values that did not go in as made.")
+    rejected: int = Field(description="Changes the authority refused.")
 
 
 class RemoteConnectRequest(BaseModel):
@@ -80,6 +93,19 @@ class ResolveRequest(BaseModel):
     )
 
 
+def _last_result() -> SyncResultResponse | None:
+    r = sync_jobs.worker.last_report
+    if r is None:
+        return None
+    return SyncResultResponse(
+        pulled=r.pulled,
+        pushed=r.pushed,
+        files_sent=r.files_sent,
+        conflicts=r.conflicts,
+        rejected=r.rejected,
+    )
+
+
 def _status(ctx: AppContext) -> RemoteStatusResponse:
     s = ctx.sync_svc.status()
     return RemoteStatusResponse(
@@ -95,6 +121,7 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         last_error=s.last_error,
         last_error_at=s.last_error_at,
         running=s.running,
+        last_result=_last_result(),
     )
 
 

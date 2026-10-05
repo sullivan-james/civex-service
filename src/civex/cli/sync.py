@@ -81,9 +81,9 @@ def user(
     name: str = typer.Argument(None, help="The name to record on your changes."),
     reset: bool = typer.Option(False, "--reset", help="Go back to the default."),
 ) -> None:
-    """Show or set the name changes in this project are recorded under, like
-    git's user.name. It is saved in this project's config.toml; the default is
-    your operating-system user."""
+    """Show or set the author name recorded on changes in this project. It is
+    saved in this project's config.toml; the default is your operating-system
+    user."""
     from civex.identity import local_actor
 
     config = cli_load_config()

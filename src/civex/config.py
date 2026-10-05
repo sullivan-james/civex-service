@@ -61,8 +61,7 @@ def _interval(value: object) -> int:
 
 @dataclass
 class IdentityConfig:
-    """Who changes made in this project are recorded as, like `user.name` in a
-    git repository's config. None: the operating-system user. It is only a label
+    """Who changes made in this project are recorded as. None: the operating-system user. It is only a label
     (history says who, unverified); a synced change is attributed by the
     authority from the device's token."""
 

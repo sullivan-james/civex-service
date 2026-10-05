@@ -24,7 +24,7 @@ import {
 } from '../ui'
 
 const INTERVALS = [
-  { seconds: 0, label: 'Never (only when I press Sync now)' },
+  { seconds: 0, label: 'Never' },
   { seconds: 15, label: 'Every 15 seconds' },
   { seconds: 60, label: 'Every minute' },
   { seconds: 300, label: 'Every 5 minutes' },
@@ -158,7 +158,6 @@ function Following({ s }: { s: RemoteStatus }) {
   const interval = INTERVALS.some((i) => i.seconds === s.interval_seconds)
     ? s.interval_seconds
     : 60
-  const manualOnly = s.interval_seconds === 0
   return (
     <div className="max-w-2xl space-y-5">
       <Card title="Authority">
@@ -175,8 +174,6 @@ function Following({ s }: { s: RemoteStatus }) {
               <Badge variant="accent">Syncing</Badge>
             ) : s.paused ? (
               <Badge>Paused</Badge>
-            ) : manualOnly && s.pending === 0 ? (
-              <Badge>Only when asked</Badge>
             ) : s.last_error ? (
               <Badge variant="attention">Could not sync</Badge>
             ) : s.pending > 0 ? (
@@ -260,20 +257,19 @@ function NameCard() {
   if (!data) return null
   const value = draft ?? data.chosen ?? ''
   return (
-    <Card title="Your name on changes">
-      <p className="mb-2 text-xs text-fg-muted">
-        Recorded with every change made in this project, like git’s user name.
-        Left empty it is your computer’s user name ({data.default ?? 'unknown'}
-        ). It is saved in this project’s settings file.
-      </p>
-      <div className="flex items-center gap-2">
-        <Input
-          aria-label="Your name on changes"
-          value={value}
-          placeholder={data.default ?? ''}
-          onChange={(e) => setDraft(e.target.value)}
-          className="max-w-xs"
-        />
+    <Card title="Author">
+      <div className="flex items-end gap-2">
+        <Field
+          label="Author name"
+          info={`Recorded with each change you make in this project. Left empty, it is your computer's user name (${data.default ?? 'unknown'}).`}
+        >
+          <Input
+            value={value}
+            placeholder={data.default ?? ''}
+            onChange={(e) => setDraft(e.target.value)}
+            className="max-w-xs"
+          />
+        </Field>
         <Button
           size="sm"
           disabled={save.isPending || value === (data.chosen ?? '')}

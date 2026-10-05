@@ -17,6 +17,7 @@ const base = {
   last_error: null,
   last_error_at: null,
   running: false,
+  last_result: null,
 }
 
 function tasksFor(status: Record<string, unknown>) {

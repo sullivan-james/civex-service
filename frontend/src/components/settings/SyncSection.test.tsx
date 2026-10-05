@@ -29,6 +29,7 @@ const base = {
   last_error: null,
   last_error_at: null,
   running: false,
+  last_result: null,
 }
 
 beforeEach(() => {
@@ -169,7 +170,7 @@ describe('SyncSection', () => {
           ?.body,
       ).toEqual({ interval_seconds: 0 }),
     )
-    expect(await screen.findByText('Only when asked')).toBeInTheDocument()
+    expect(await screen.findByText('Up to date')).toBeInTheDocument()
   })
 
   it('says changes are waiting rather than up to date', async () => {
@@ -187,7 +188,7 @@ describe('SyncSection', () => {
 
   it('lets a person choose the name recorded on their changes', async () => {
     renderSection()
-    const box = await screen.findByLabelText('Your name on changes')
+    const box = await screen.findByLabelText('Author name')
     await userEvent.type(box, 'Dana')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
