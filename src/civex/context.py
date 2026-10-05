@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
     from civex.repositories.local.audit_repo import LocalAuditRepository
     from civex.repositories.local.file_store import VolumeAwareFileObjectStore
+    from civex.repositories.local.sync_repo import LocalSyncRepository
     from civex.services.ai.service import AiService
     from civex.services.ai_usage_service import AiUsageService
     from civex.services.analytics_service import AnalyticsService
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from civex.services.schema_service import SchemaService
     from civex.services.store_service import StoreService
     from civex.services.export_definition_service import ExportDefinitionService
+    from civex.services.sync_authority import SyncAuthorityService
     from civex.services.view_service import ViewService
     from civex.services.workflow_job_service import WorkflowJobService
     from civex.services.workflow_service import WorkflowService
@@ -93,6 +95,8 @@ class AppContext:
     policy_svc: PolicyService
     view_svc: ViewService
     export_def_svc: ExportDefinitionService
+    sync_repo: LocalSyncRepository
+    authority_svc: SyncAuthorityService
     _session: Session
 
     def commit(self) -> None:
@@ -242,6 +246,15 @@ def build_local_context(
         False,
     )
 
+    from civex.repositories.local.sync_repo import LocalSyncRepository
+    from civex.services.sync_applier import SyncApplier
+    from civex.services.sync_authority import SyncAuthorityService
+
+    sync_repo = LocalSyncRepository(session)
+    authority_svc = SyncAuthorityService(
+        sync_repo, SyncApplier(sync_repo, audit_repo), file_store
+    )
+
     ctx = AppContext(
         schema_svc=schema_svc,
         dataset_svc=dataset_svc,
@@ -265,6 +278,8 @@ def build_local_context(
         policy_svc=policy_svc,
         view_svc=view_svc,
         export_def_svc=export_def_svc,
+        sync_repo=sync_repo,
+        authority_svc=authority_svc,
         _session=session,
     )
     ai_svc._app_ctx = ctx
