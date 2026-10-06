@@ -198,9 +198,7 @@ function AttemptHeader({ conflict: c }: { conflict: SyncConflict }) {
       {open ? (
         <div className="flex flex-wrap items-center gap-2">
           {c.kind === 'rejected' && c.attempted !== 'delete' && (
-            <span className="text-xs text-fg-muted">
-              Fix the values below, then:
-            </span>
+            <span className="text-xs text-fg-muted">Or:</span>
           )}
           {choices.map((t: ConflictTake) => (
             <Button

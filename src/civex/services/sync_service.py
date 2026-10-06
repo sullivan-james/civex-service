@@ -651,19 +651,72 @@ class SyncService:
             pending = self._repo.pending_entries(PUSH_BATCH)
             if not pending:
                 return total
-            ready = self._with_files(transport, pending, report)
+            ready, folded = self._send_whole(pending)
+            ready = self._with_files(transport, ready, report)
             if not ready:
                 report.waiting += len(pending)
                 return total
             result = transport.push(ready)
             sent = {e.id: e for e in ready}
             self._repo.mark_sent(result.results)
-            held = self._note(result.results, sent, report)
+            for r in result.results:
+                if r.op_id in folded and r.status != DEFERRED:
+                    self._repo.mark_folded(
+                        folded[r.op_id],
+                        "rejected" if r.status == REJECTED else "synced",
+                    )
+            held = self._note(result.results, sent, report, set(folded))
             self._commit()
             total += len(result.results) - held
             if held or len(result.results) < len(ready) or len(ready) < len(pending):
                 report.waiting += held + (len(pending) - len(result.results))
                 return total
+
+    def _send_whole(
+        self, pending: list[SyncEntry]
+    ) -> tuple[list[SyncEntry], dict[uuid.UUID, list[uuid.UUID]]]:
+        """What to send for these pending changes. A thing the authority never
+        took (its create was refused, say a value its field no longer allows)
+        can't be edited there: the edits made to it since, fixing it or not, go
+        as one create of the thing as it is now, in place of the first of them.
+        Returns what to send and, for each such create, every entry it stands
+        for (settled together)."""
+        untaken = self._repo.never_taken(
+            {
+                (e.entity_type, e.entity_id)
+                for e in pending
+                if e.action in ("update", "restore")
+            }
+        )
+        if not untaken:
+            return pending, {}
+        ready: list[SyncEntry] = []
+        folded: dict[uuid.UUID, list[uuid.UUID]] = {}
+        first: dict[uuid.UUID, uuid.UUID] = {}
+        for entry in pending:
+            if entry.entity_id not in untaken or entry.action not in (
+                "update",
+                "restore",
+            ):
+                ready.append(entry)
+                continue
+            if entry.entity_id in first:
+                folded[first[entry.entity_id]].append(entry.id)
+                continue
+            current = self._repo.snapshot(entry.entity_type, entry.entity_id)
+            first[entry.entity_id] = entry.id
+            folded[entry.id] = [entry.id]
+            if current is None or current.get("deleted_at"):
+                continue  # gone here too: nothing to send, settled below
+            ready.append(
+                replace(
+                    entry, action="create", old_data=None, new_data=current, delta=None
+                )
+            )
+        for entry_id, entries in folded.items():
+            if not any(e.id == entry_id for e in ready):
+                self._repo.mark_folded(entries, "synced")
+        return ready, {k: v for k, v in folded.items() if any(e.id == k for e in ready)}
 
     def _with_files(
         self, transport: SyncTransport, entries: list[SyncEntry], report: SyncReport
@@ -712,11 +765,18 @@ class SyncService:
             )
 
     def _note(
-        self, results: list[Any], sent: dict[uuid.UUID, SyncEntry], report: SyncReport
+        self,
+        results: list[Any],
+        sent: dict[uuid.UUID, SyncEntry],
+        report: SyncReport,
+        whole: set[uuid.UUID] | None = None,
     ) -> int:
         """Keep what the authority said that a person should see: a clash, or a
-        refusal (the same kind of row, so one path). Returns how many changes it
-        held back."""
+        refusal (the same kind of row, so one path). A thing has at most one
+        refusal waiting: a newer one replaces the one before (the person fixes
+        the thing once, not every attempt), and when a thing never taken before
+        goes in as a whole (`whole`), its refusal is settled by that. Returns
+        how many changes it held back."""
         held = 0
         for result in results:
             entry = sent.get(result.op_id)
@@ -725,6 +785,17 @@ class SyncService:
             if result.status == DEFERRED:
                 held += 1
                 continue
+            earlier = [
+                c.id
+                for c in self._repo.find_open_conflicts(
+                    kind="rejected", entity_id=entry.entity_id
+                )
+                if c.op_id != result.op_id
+            ]
+            if result.status == REJECTED:
+                self._repo.resolve_conflicts(earlier, "replaced")
+            elif whole and result.op_id in whole:
+                self._repo.resolve_conflicts(earlier, "sent")
             problems = result.conflicts
             if result.status == REJECTED:
                 report.rejected += 1

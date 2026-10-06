@@ -69,7 +69,10 @@ export function useMergeConflicts(entityId: string, enabled: boolean) {
       all.filter(
         (c) =>
           c.status === 'open' ||
-          (c.resolved_at !== null && utcMs(c.resolved_at) >= since),
+          // A refusal a later attempt replaced was never the person's to settle.
+          (c.resolution !== 'replaced' &&
+            c.resolved_at !== null &&
+            utcMs(c.resolved_at) >= since),
       ),
   })
 }
