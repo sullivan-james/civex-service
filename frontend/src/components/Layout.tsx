@@ -451,7 +451,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             further down. */}
         <nav
           aria-label="Primary"
-          className={`hidden min-[900px]:flex shrink-0 flex-col border-r border-border bg-canvas-subtle py-3 ${
+          className={`hidden min-[900px]:flex shrink-0 flex-col overflow-y-auto border-r border-border bg-canvas-subtle py-3 ${
             collapsed ? 'w-16 px-2' : 'w-56 px-3'
           }`}
         >
@@ -490,7 +490,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               aria-modal="true"
               aria-labelledby={drawerTitleId}
               tabIndex={-1}
-              className="absolute inset-y-0 left-0 w-64 max-w-[80vw] bg-canvas border-r border-border shadow-lg flex flex-col py-3 px-3 focus:outline-none"
+              className="absolute inset-y-0 left-0 w-64 max-w-[80vw] overflow-y-auto bg-canvas border-r border-border shadow-lg flex flex-col py-3 px-3 focus:outline-none"
             >
               <div className="flex items-center justify-between pb-2">
                 <span
@@ -535,7 +535,11 @@ export default function Layout({ children }: { children: ReactNode }) {
             onLayoutChanged={aiSplitLayout.onLayoutChanged}
           >
             <Panel id="main" minSize="30%" className="h-full flex flex-col">
-              <main className="flex-1 min-h-0 overflow-y-auto">
+              {/* Both <main>s are `relative`: the scroll area is then what
+                  anything absolutely positioned in a page is placed against (a
+                  visually hidden input, say), so it lengthens this area, never
+                  the window, which must not scroll. */}
+              <main className="relative flex-1 min-h-0 overflow-y-auto">
                 <div className="max-w-[1600px] mx-auto px-6 py-6">
                   {children}
                 </div>
@@ -552,7 +556,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             </Panel>
           </Group>
         ) : (
-          <main className="flex-1 min-w-0 overflow-y-auto">
+          <main className="relative flex-1 min-w-0 overflow-y-auto">
             <div className="max-w-[1600px] mx-auto px-6 py-6">{children}</div>
           </main>
         )}
