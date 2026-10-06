@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, RefreshCw } from '../../components/ui/icons'
 import { StopAutomationDialog } from '../../components/workflows/StopAutomationDialog'
@@ -10,25 +10,12 @@ import {
   failedRunsHref,
   queuedSince,
 } from '../../utils/runFilter'
+import { useBusyFor } from '../useBusyFor'
 import { useAutomation, useResumeAutomation } from '../useWorkflows'
 
 /** How long workflows must have been busy before they show in the bar: an
  * ordinary edit starts a run that is over in a moment, and must not flash it. */
 export const SHOW_AFTER_MS = 2000
-
-/** True once `busy` has stayed true for `ms` without a break. */
-function useBusyFor(busy: boolean, ms: number): boolean {
-  const [long, setLong] = useState(false)
-  useEffect(() => {
-    if (!busy) return
-    const timer = setTimeout(() => setLong(true), ms)
-    return () => {
-      clearTimeout(timer)
-      setLong(false)
-    }
-  }, [busy, ms])
-  return long
-}
 
 /** How a batch that has ended came out, counted by the server: every run queued
  * since it began, and how many of those failed. */

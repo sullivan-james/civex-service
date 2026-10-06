@@ -311,9 +311,10 @@ def test_export_view_bundles_file_columns_as_zip(client: TestClient):
     assert len(file_entries) == 1
     assert file_entries[0].endswith("/scan.pdf")
     assert zf.read(file_entries[0]) == b"scan-bytes"
+    # The spreadsheet says where each file is in the zip.
     assert zf.read("with_scan.csv").decode().splitlines() == [
         "scan",
-        "scan.pdf",
+        file_entries[0],
     ]
 
 
@@ -346,7 +347,7 @@ def test_view_with_a_friendly_name_round_trips_through_the_url(client: TestClien
     assert client.get(path).json()["name"] == name
 
     export = client.get(f"{path}/export", params={"format": "csv"})
-    assert export.status_code == 200
+    assert export.status_code == 200, export.text
     # the name is display text; the download's file name is made safe
     assert ".csv" in export.headers["content-disposition"]
     assert "/" not in export.headers["content-disposition"].split("filename")[1]
@@ -360,3 +361,40 @@ def test_view_name_with_a_slash_is_rejected(client: TestClient):
     _make_schema(client, "trial")
     response = client.post("/api/schemas/trial/views", json={"name": "a/b"})
     assert response.status_code == 422
+
+
+def test_a_views_layout_is_saved_changed_and_used_by_its_export(client: TestClient):
+    _make_schema(client, "invoice", fields=[("scan", "file")])
+    client.post("/api/collections", json={"name": "study"})
+    scan = _upload(client, "scan.pdf", b"scan-bytes")
+    client.post(
+        "/api/collections/study/records",
+        json={"schema_name": "invoice", "data": {"scan": scan}},
+    )
+    made = client.post(
+        "/api/schemas/invoice/views", json={"name": "v", "columns": ["scan"]}
+    )
+    assert made.status_code == 201 and made.json()["files_layout"] == "tree"
+
+    changed = client.patch(
+        "/api/schemas/invoice/views/v", json={"files_layout": "flat"}
+    )
+    resp = client.get("/api/schemas/invoice/views/v/export")
+
+    assert changed.json()["files_layout"] == "flat"
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    assert sorted(zf.namelist()) == ["scan.pdf", "v.csv"]
+    assert zf.read("v.csv").decode().splitlines() == ["scan", "scan.pdf"]
+    # Leaving it out of a later change leaves it alone.
+    again = client.patch("/api/schemas/invoice/views/v", json={"rename": "w"})
+    assert again.json()["files_layout"] == "flat"
+
+
+def test_a_bad_layout_is_refused(client: TestClient):
+    _make_schema(client, "invoice", fields=[("scan", "file")])
+
+    created = client.post(
+        "/api/schemas/invoice/views", json={"name": "v", "files_layout": "spiral"}
+    )
+
+    assert created.status_code == 422

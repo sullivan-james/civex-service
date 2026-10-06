@@ -6,7 +6,7 @@ import re
 import uuid
 from datetime import date as _date, datetime as _dt
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from civex.domain.dtos import (
     DERIVED_FILE_KEYS,
@@ -335,6 +335,7 @@ def _with_resolved_filename(
 # count restriction (schema_service.VALID_RESTRICTION_KEYS), so without a
 # cap here a single record could demand an unboundedly large in-memory zip.
 MAX_ZIP_FILE_COUNT = 2000
+_MAX_TRAIL_DEPTH = 64  # a record's ancestors; a guard against a parent loop
 MAX_ZIP_TOTAL_SIZE = 500 * 1024 * 1024  # 500 MB, summed from stored FileRef.size
 
 
@@ -1869,6 +1870,14 @@ class RecordService:
                 f"Unknown column field(s) ['{col}'] for schema '{target_schema_name}'"
             )
 
+    def with_derived(
+        self, schema_name: str, records: list[RecordDTO], columns: list[str]
+    ) -> list[RecordDTO]:
+        """`records` (all of one schema) with `derived` filled for `columns`: the
+        fields a record's own data can't answer (inherited from an ancestor,
+        `ref.field` joins). For a table made from records already in hand."""
+        return self._attach_derived(schema_name, records, columns)
+
     def _attach_derived(
         self, schema_name: str, records: list[RecordDTO], columns: list[str]
     ) -> list[RecordDTO]:
@@ -1998,6 +2007,111 @@ class RecordService:
             current = parent
         chain.reverse()
         return chain
+
+    def ancestor_trails(
+        self, records: list[RecordDTO]
+    ) -> dict[uuid.UUID, list[RecordDTO]]:
+        """Each record's parent chain, root first and named (so a caller can show
+        or build a path from it) -- `ancestors` for a whole batch, with one
+        lookup per level of the hierarchy instead of one per record."""
+        known: dict[uuid.UUID, RecordDTO] = {}
+        pending = {r.parent_record_id for r in records if r.parent_record_id}
+        for _ in range(_MAX_TRAIL_DEPTH):
+            wanted = [p for p in pending if p not in known]
+            if not wanted:
+                break
+            found = self._records.list_by_ids(wanted)
+            known.update({a.id: a for a in found})
+            pending = {a.parent_record_id for a in found if a.parent_record_id}
+        shapes = self._schema_svc.resolver()
+        named = {
+            a.id: a
+            for a in self._label_references(
+                [self._with_names(a, shapes) for a in known.values()], shapes
+            )
+        }
+        trails: dict[uuid.UUID, list[RecordDTO]] = {}
+        for r in records:
+            chain: list[RecordDTO] = []
+            parent = r.parent_record_id
+            while parent and parent in named and len(chain) < _MAX_TRAIL_DEPTH:
+                chain.append(named[parent])
+                parent = named[parent].parent_record_id
+            trails[r.id] = chain[::-1]
+        return trails
+
+    def beneath(
+        self,
+        records: list[RecordDTO],
+        on_level: Callable[[int], None] | None = None,
+    ) -> list[RecordDTO]:
+        """Every live record beneath these (children, their children, and so on),
+        in the full response form, found a level at a time: a few queries for the
+        whole set however many records there are, not one per record. The given
+        records themselves are not repeated. `on_level` is told how many have
+        been found after each level."""
+        seen = {r.id for r in records}
+        frontier = [r.id for r in records]
+        found: list[RecordDTO] = []
+        shapes = self._schema_svc.resolver()
+        for _ in range(_MAX_TRAIL_DEPTH):
+            kids = [
+                k for k in self._records.list_children_of(frontier) if k.id not in seen
+            ]
+            if not kids:
+                break
+            seen.update(k.id for k in kids)
+            named = [self._with_names(k, shapes) for k in kids]
+            found.extend(self._attach_reference_labels(named, shapes))
+            frontier = [k.id for k in kids]
+            if on_level:
+                on_level(len(found))
+        return found
+
+    def get_many(self, record_ids: list[str]) -> list[RecordDTO]:
+        """These live records in the order asked, in the full response form
+        (names, reference labels, where each file is stored), in a fixed number
+        of queries. Ids that aren't live records are left out."""
+        ids: list[uuid.UUID] = []
+        for raw in dict.fromkeys(record_ids):
+            try:
+                ids.append(uuid.UUID(raw))
+            except (ValueError, AttributeError, TypeError):
+                continue
+        found = {r.id: r for r in self._records.list_by_ids(ids) if not r.deleted_at}
+        shapes = self._schema_svc.resolver()
+        named = [self._with_names(found[i], shapes) for i in ids if i in found]
+        return self._attach_reference_labels(named, shapes)
+
+    def file_values(
+        self, records: list[RecordDTO], field_names: list[str] | None = None
+    ) -> tuple[list[tuple[RecordDTO, str, dict[str, Any]]], set[str]]:
+        """Every file held by `records`, as (record, field name, file value) in
+        record then field order -- a `file_list` contributes one per file. Only
+        the named fields when `field_names` is given. Also returns the names of
+        all file fields the records' schemas have, so a caller can tell "no
+        files" from "no such field"."""
+        shapes = self._schema_svc.resolver()
+        wanted = set(field_names) if field_names is not None else None
+        known: set[str] = set()
+        out: list[tuple[RecordDTO, str, dict[str, Any]]] = []
+        for r in records:
+            shape = shapes(r.schema_id)
+            if shape is None:
+                continue
+            for rf in shape.fields:
+                name = rf.field.name
+                if rf.field.dtype not in ("file", "file_list"):
+                    continue
+                known.add(name)
+                if wanted is not None and name not in wanted:
+                    continue
+                out.extend(
+                    (r, name, ref)
+                    for ref in _file_dicts(r.data.get(name))
+                    if ref.get("sha256")
+                )
+        return out, known
 
     def delete(self, record_id: str, force: bool = False) -> None:
         record = self.get(record_id)

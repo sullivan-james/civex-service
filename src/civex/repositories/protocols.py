@@ -38,6 +38,7 @@ from civex.domain.dtos import (
     SchemaDTO,
     StoredObjectInfo,
     ViewDTO,
+    ExportDefinitionDTO,
     VolumeStatus,
     WorkflowJobDTO,
 )
@@ -184,6 +185,7 @@ class ViewRepository(Protocol):
         columns: list[str],
         filter_tree: dict[str, Any] | None,
         sort: list[dict[str, Any]],
+        files_layout: str = ...,
     ) -> ViewDTO: ...
     def update(
         self,
@@ -192,7 +194,42 @@ class ViewRepository(Protocol):
         columns: list[str] = ...,
         filter_tree: dict[str, Any] | None = ...,
         sort: list[dict[str, Any]] = ...,
+        files_layout: str = ...,
     ) -> ViewDTO: ...
+    def delete(self, id: uuid.UUID) -> None: ...
+
+
+class ExportDefinitionRepository(Protocol):
+    def get_by_name(
+        self, schema_id: uuid.UUID, name: str
+    ) -> ExportDefinitionDTO | None: ...
+    def list_by_schema(self, schema_id: uuid.UUID) -> list[ExportDefinitionDTO]: ...
+    def list_for_schemas(
+        self, schema_ids: list[uuid.UUID]
+    ) -> list[ExportDefinitionDTO]: ...
+    def list_all(self) -> list[ExportDefinitionDTO]: ...
+    def create(
+        self,
+        schema_id: uuid.UUID,
+        name: str,
+        holder_id: uuid.UUID | None,
+        fields: list[str],
+        filter_tree: dict[str, Any] | None,
+        files_layout: str,
+        include_files: bool = True,
+        tables: list[dict[str, Any]] | None = None,
+    ) -> ExportDefinitionDTO: ...
+    def update(
+        self,
+        id: uuid.UUID,
+        name: str | None = None,
+        holder_id: uuid.UUID | None = ...,
+        fields: list[str] = ...,
+        filter_tree: dict[str, Any] | None = ...,
+        files_layout: str = ...,
+        include_files: bool = ...,
+        tables: list[dict[str, Any]] = ...,
+    ) -> ExportDefinitionDTO: ...
     def delete(self, id: uuid.UUID) -> None: ...
 
 
@@ -265,6 +302,7 @@ class RecordRepository(Protocol):
     def list_children(
         self, parent_id: uuid.UUID, include_deleted: bool = False
     ) -> list[RecordDTO]: ...
+    def list_children_of(self, parent_ids: list[uuid.UUID]) -> list[RecordDTO]: ...
     def referrers_of(
         self, target_ids: list[uuid.UUID], field_ids: list[uuid.UUID]
     ) -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]:
@@ -546,6 +584,7 @@ class FileObjectStore(Protocol):
     def touch_transfer_lock(self) -> None: ...
     def transfer_lock_held(self) -> bool: ...
     def object_path(self, sha256: str) -> Path: ...
+    def path_on(self, sha256: str, volume: str) -> Path: ...
     def list_objects(self) -> list[StoredObjectInfo]: ...
     def iter_objects(self) -> Iterator[StoredObjectInfo]: ...
     def volume_names(self) -> list[str]: ...

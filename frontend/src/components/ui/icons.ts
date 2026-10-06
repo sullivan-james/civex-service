@@ -64,4 +64,8 @@ export {
   HardDrive,
   Network,
   House,
+  Archive,
+  Bookmark,
+  FolderTree,
+  SlidersHorizontal,
 } from 'lucide-react'

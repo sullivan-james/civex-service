@@ -21,6 +21,7 @@ from civex.domain.exceptions import (
 from civex.domain.transfers import (
     KIND_CONSOLIDATE,
     KIND_DRAIN,
+    KIND_FILES,
     STATUS_CANCELLED,
     STATUS_COMPLETED,
     STATUS_INTERRUPTED,
@@ -838,3 +839,80 @@ def test_a_lock_with_no_readable_owner_falls_back_to_how_recent_it_is(
     with pytest.raises(Exception, match="transfer is running"):
         with ctx.file_svc._store.gc_lock():
             pass
+
+
+# -- moving named files ---------------------------------------------------------------
+
+
+def test_a_files_move_is_sized_from_just_the_files_named(
+    ctx: AppContext, tmp_path: Path
+) -> None:
+    _volumes(ctx, tmp_path, "a", "b")
+    files = _put_on(ctx, "a", 4, size=400)
+    chosen = list(files)[:3]
+
+    plan = ctx.transfer_svc.plan(
+        TransferSpec(kind=KIND_FILES, targets=["b"], shas=chosen)
+    )
+
+    assert plan.can_proceed and plan.files == 3
+    assert plan.bytes == sum(len(files[sha]) for sha in chosen)
+    assert plan.already_there == 0
+
+
+def test_files_already_on_the_target_are_counted_as_there(
+    ctx: AppContext, tmp_path: Path
+) -> None:
+    _volumes(ctx, tmp_path, "a", "b")
+    on_a = _put_on(ctx, "a", 2)
+    on_b = _put_on(ctx, "b", 1)
+
+    plan = ctx.transfer_svc.plan(
+        TransferSpec(kind=KIND_FILES, targets=["b"], shas=[*on_a, *on_b])
+    )
+
+    assert (plan.files, plan.already_there) == (2, 1)
+
+
+def test_a_files_move_needs_files_and_a_sensible_number_of_them(
+    ctx: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _volumes(ctx, tmp_path, "a", "b")
+
+    none = ctx.transfer_svc.plan(TransferSpec(kind=KIND_FILES, targets=["b"]))
+    monkeypatch.setattr("civex.services.transfer_service.MAX_TRANSFER_FILES", 2)
+    many = ctx.transfer_svc.plan(
+        TransferSpec(
+            kind=KIND_FILES, targets=["b"], shas=["a" * 64, "b" * 64, "c" * 64]
+        )
+    )
+
+    assert "Choose which files" in none.problems[0]
+    assert "Narrow the selection" in many.problems[0]
+
+
+def test_a_files_move_that_will_not_fit_is_refused(
+    ctx: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _volumes(ctx, tmp_path, "a", "b")
+    files = _put_on(ctx, "a", 2, size=800)
+    monkeypatch.setattr(ctx.file_svc._store, "room_on", lambda volume: 100)
+
+    with pytest.raises(ValidationError, match="room"):
+        ctx.transfer_svc.create(
+            TransferSpec(kind=KIND_FILES, targets=["b"], shas=list(files))
+        )
+
+
+def test_the_hashes_are_tidied_when_the_move_is_queued(
+    ctx: AppContext, tmp_path: Path
+) -> None:
+    _volumes(ctx, tmp_path, "a", "b")
+    files = _put_on(ctx, "a", 1)
+    sha = next(iter(files))
+
+    record = ctx.transfer_svc.create(
+        TransferSpec(kind=KIND_FILES, targets=["b"], shas=[sha.upper(), sha])
+    )
+
+    assert record.spec.shas == [sha] and record.status == STATUS_QUEUED

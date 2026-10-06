@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ToastProvider } from '../../ui/ToastProvider'
 import { MemoryRouter } from 'react-router'
 import { TasksTab } from './TasksTab'
 
@@ -88,6 +89,9 @@ beforeEach(() => {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined
       calls.push({ method, path: url.pathname, body })
       const p = url.pathname
+      // The Tasks tab also lists exports and the saved filters they start from.
+      if (p === '/api/file-access/exports' || p === '/api/views')
+        return json([])
       if (p === '/api/store/volumes') return json([volume('a'), volume('b')])
       if (p === '/api/collections') return json([])
       if (p === '/api/settings/ui') return json({ show_advanced: false })
@@ -119,9 +123,11 @@ function renderTab(preset?: { source?: string }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter>
-        <TasksTab preset={preset} />
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter>
+          <TasksTab preset={preset} />
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   )
 }

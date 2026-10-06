@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import csv
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 
 from civex.context import AppContext
-from civex.domain import geo as geo_domain
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.query import RecordQuery
 from civex.server.background import run_pending_jobs
@@ -27,6 +25,7 @@ from civex.server.models import (
 )
 from civex.server.query_params import record_query
 from civex.services.archive import write_zip
+from civex.services.table_files import write_table
 
 router = APIRouter(tags=["records"])
 
@@ -434,7 +433,9 @@ def export_records_csv(
     ctx: AppContext = Depends(get_ctx),
 ):
     """Export records in a collection as a CSV file, honoring the same
-    filters as the record list endpoint."""
+    filters as the record list endpoint. One table for everything listed; to
+    choose the columns and format, or to take the files too, use
+    POST /file-access/zip with a `table`."""
     query.dataset = collection_name
 
     def pages():
@@ -460,25 +461,22 @@ def export_records_csv(
 
     # Second pass: rows go page by page into a temp file that is then served
     # from disk, so the export's size is bounded by disk, not memory.
+    def rows():
+        for page in pages():
+            yield [
+                {
+                    "id": str(r.id),
+                    "schema": r.schema_name,
+                    "created_at": r.created_at.isoformat(),
+                    "updated_at": r.updated_at.isoformat(),
+                    **r.data,
+                }
+                for r in page
+            ]
+
     with temp_paths() as tmp:
         path = new_temp_path(".csv")
         tmp.append(path)
-        with path.open("w", encoding="utf-8", newline="") as out:
-            writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")
-            writer.writeheader()
-            for page in pages():
-                for r in page:
-                    row: dict = {
-                        "id": str(r.id),
-                        "schema": r.schema_name,
-                        "created_at": r.created_at.isoformat(),
-                        "updated_at": r.updated_at.isoformat(),
-                    }
-                    for k, v in r.data.items():
-                        if geo_domain.is_geometry(v):
-                            row[k] = geo_domain.to_text(v)
-                        else:
-                            row[k] = v if not isinstance(v, (list, dict)) else str(v)
-                    writer.writerow(row)
+        write_table(path, "csv", columns, rows())
         tmp.remove(path)
         return serve(path, "text/csv", f"{collection_name}.csv")

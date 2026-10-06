@@ -7,12 +7,20 @@ const BASE = '/api'
 export class ApiError extends Error {
   status: number
   detail: unknown
+  /** The whole response body, for answers that say more than `detail` (a
+   * refusal that carries the plan it was based on). */
+  body: Record<string, unknown>
 
-  constructor(detail: unknown, status: number) {
+  constructor(
+    detail: unknown,
+    status: number,
+    body: Record<string, unknown> = {},
+  ) {
     super(typeof detail === 'string' ? detail : `HTTP ${status}`)
     this.name = 'ApiError'
     this.status = status
     this.detail = detail
+    this.body = body
   }
 }
 
@@ -30,7 +38,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    throw new ApiError(body.detail, res.status)
+    throw new ApiError(body.detail, res.status, body)
   }
   if (res.status === 204) return undefined as T
   return res.json()

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.server.deps import get_ctx
-from civex.server.downloads import new_temp_path, serve, temp_paths
+from civex.server.downloads import new_temp_dir, serve, temp_paths
 from civex.server.models import (
     CreateViewRequest,
     PreviewViewRequest,
@@ -13,9 +13,8 @@ from civex.server.models import (
     UpdateViewRequest,
     ViewResponse,
 )
-from civex.services.archive import write_zip
+from civex.services.archive import build_download
 from civex.domain.naming import safe_filename
-from civex.services.view_service import write_csv, write_json
 
 router = APIRouter(prefix="/schemas/{schema_name}/views", tags=["views"])
 all_views_router = APIRouter(prefix="/views", tags=["views"])
@@ -42,7 +41,9 @@ def create_view(
     schema_name: str, body: CreateViewRequest, ctx: AppContext = Depends(get_ctx)
 ):
     """Create a saved column/filter/sort view against a schema's own fields,
-    with columns optionally joining one hop through a reference field."""
+    with columns optionally joining one hop through a reference field.
+    `files_layout` says how its files are arranged when it is exported as a
+    folder or zip."""
     try:
         dto = ctx.view_svc.create(
             schema_name,
@@ -50,6 +51,7 @@ def create_view(
             columns=body.columns,
             filter_tree=body.filter_tree,
             sort=body.sort,
+            files_layout=body.files_layout,
         )
         ctx.commit()
     except NotFoundError as e:
@@ -99,7 +101,7 @@ def update_view(
     body: UpdateViewRequest,
     ctx: AppContext = Depends(get_ctx),
 ):
-    """Rename a view and/or replace its columns/filter_tree/sort."""
+    """Rename a view and/or replace its columns/filter_tree/sort/files_layout."""
     # Present-but-null vs. absent matters here: an absent key means "leave
     # unchanged", an explicit null clears filter_tree (columns/sort keep
     # their prior value instead, since [] already means "no columns").
@@ -114,6 +116,7 @@ def update_view(
             columns=columns,
             filter_tree=filter_tree,
             sort=sort,
+            files_layout=(body.files_layout if body.files_layout is not None else ...),
         )
         ctx.commit()
     except NotFoundError as e:
@@ -139,65 +142,40 @@ def delete_view(schema_name: str, view_name: str, ctx: AppContext = Depends(get_
 def export_view(
     schema_name: str,
     view_name: str,
-    format: str = Query(default="csv", pattern="^(csv|json)$"),
+    format: str = Query(default="csv", pattern="^(csv|tsv|xlsx|json|jsonl)$"),
     ctx: AppContext = Depends(get_ctx),
 ):
-    """Export a view's rows as CSV or JSON, honoring its saved filter/sort
-    and flattening `columns` (CSV headers use the dotted
-    "ref_field.target_field" join convention; JSON nests joined columns
-    instead). Any file/file_list column gets bundled into a zip alongside
-    the CSV/JSON, reusing the same resolved-filename + collision-suffix
-    logic as the per-record files.zip export."""
+    """Export a view's rows as csv, tsv, xlsx, json or jsonl, honoring its saved
+    filter and sort and flattening `columns` (joined columns are dotted headers
+    "ref_field.target_field" in the text formats; json nests them). Any
+    file/file_list column gets bundled into a zip alongside the table, laid out as
+    the view's `files_layout` says -- the same paths as the Files menu -- and each
+    file cell holds that path. Files that can't be reached (a drive that isn't
+    connected) are left out and listed in MISSING.txt. This is the same export as
+    POST /file-access/zip with `view`, which also takes a collection or record to
+    run it in."""
+    svc = ctx.file_access_svc
     try:
-        stream = ctx.view_svc.export_stream(schema_name, view_name)
+        selection = ctx.view_svc.table_selection(schema_name, view_name, format)
+        plan = svc.plan(selection)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
 
-    if format == "csv":
-        data_filename, media_type = f"{safe_filename(view_name)}.csv", "text/csv"
-    else:
-        data_filename, media_type = (
-            f"{safe_filename(view_name)}.json",
-            "application/json",
-        )
-
-    file_entries: list = []
-
-    def row_batches():
-        for batch in stream.batches:
-            file_entries.extend(batch.file_entries)
-            yield batch.rows
-
-    # Rows are paged out of the DB straight into a temp file, then the file is
-    # served (or zipped) from disk: memory stays O(page), not O(export).
     with temp_paths() as tmp:
-        data_path = new_temp_path(".export")
-        tmp.append(data_path)
-        with data_path.open("w", encoding="utf-8", newline="") as out:
-            if format == "csv":
-                write_csv(out, stream.view.columns, row_batches())
-            else:
-                write_json(out, row_batches())
-
-        if not file_entries:
-            tmp.remove(data_path)
-            return serve(data_path, media_type, data_filename)
-
-        zip_path = new_temp_path(".zip")
-        tmp.append(zip_path)
+        scratch = new_temp_dir()
+        tmp.append(scratch)
         try:
-            write_zip(
-                zip_path,
+            download = build_download(
+                svc,
                 ctx.file_svc,
-                file_entries,
-                data_member=(data_filename, data_path),
+                selection,
+                plan,
+                scratch,
+                name=safe_filename(view_name),
             )
         except FileNotFoundError as e:
             raise HTTPException(404, detail=f"Export file not found: {e}")
-        tmp.remove(zip_path)
-        tmp.remove(data_path)
-        return serve(
-            zip_path, "application/zip", f"{safe_filename(view_name)}.zip", data_path
-        )
+        tmp.remove(scratch)
+        return serve(download.path, download.media_type, download.filename, scratch)

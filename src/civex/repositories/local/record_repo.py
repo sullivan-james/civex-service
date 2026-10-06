@@ -401,6 +401,17 @@ class LocalRecordRepository:
             q = q.filter(Record.deleted_at.is_(None))
         return [_to_dto(r) for r in q.all()]
 
+    def list_children_of(self, parent_ids: list[uuid.UUID]) -> list[RecordDTO]:
+        """The live direct children of all of these records, in a query per chunk
+        of ids (an index lookup on parent), not one per record."""
+        return [
+            _to_dto(r)
+            for chunk in _chunks(parent_ids)
+            for r in self._s.query(Record)
+            .filter(Record.parent_record_id.in_(chunk), Record.deleted_at.is_(None))
+            .all()
+        ]
+
     def referrers_of(
         self, target_ids: list[uuid.UUID], field_ids: list[uuid.UUID]
     ) -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]:

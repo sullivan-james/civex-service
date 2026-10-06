@@ -29,6 +29,8 @@ const DELETED_VIEW = `/activity?activity.filter=${encodeURIComponent(
   }),
 )}`
 const ActivityPage = lazy(() => import('./pages/ActivityPage'))
+const ExportsPage = lazy(() => import('./pages/ExportsPage'))
+const ExportEditorPage = lazy(() => import('./pages/ExportEditorPage'))
 const JobDetailPage = lazy(() => import('./pages/JobDetailPage'))
 const TerminalPage = lazy(() => import('./pages/TerminalPage'))
 const AiPage = lazy(() => import('./pages/AiPage'))
@@ -103,6 +105,12 @@ export default function App() {
             <Route path="/runs/:id" element={<JobDetailPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/activity" element={<ActivityPage />} />
+            <Route path="/exports" element={<ExportsPage />} />
+            <Route path="/exports/new" element={<ExportEditorPage />} />
+            <Route
+              path="/exports/:schema/:name"
+              element={<ExportEditorPage />}
+            />
             {/* Legacy redirects */}
             <Route path="/jobs" element={<Navigate to="/runs" replace />} />
             <Route path="/jobs/:id" element={<Navigate to="/runs" replace />} />

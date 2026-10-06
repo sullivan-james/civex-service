@@ -3,10 +3,25 @@ definitions against a base schema's own fields."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from civex.context import AppContext
+from civex.domain.dtos import ViewDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
+
+
+def export_view(ctx: AppContext, schema: str, view: str) -> SimpleNamespace:
+    """The rows a view's table export holds, and the file plan when it takes
+    files: what `civex view export` writes, before it is put in a file."""
+    selection = ctx.view_svc.table_selection(schema, view)
+    plan = ctx.file_access_svc.plan(selection)
+    rows: list[dict] = []
+    for table in plan.tables:
+        for page in ctx.file_access_svc.table_rows(selection, plan, table):
+            rows.extend(page)
+    return SimpleNamespace(rows=rows, files=plan if selection.files else None)
 
 
 def test_create_view_returns_defaults_for_omitted_fields(ctx: AppContext, make_schema):
@@ -602,13 +617,13 @@ def test_export_joins_filters_and_sorts(ctx: AppContext, make_schema, make_colle
     )
     ctx.commit()
 
-    export = ctx.view_svc.export("invoice", "big_orders")
+    export = export_view(ctx, "invoice", "big_orders")
 
     assert export.rows == [
         {"amount": 100, "customer.email": "a@example.com"},
         {"amount": 300, "customer.email": "a@example.com"},
     ]
-    assert export.file_entries == []
+    assert export.files is None
 
 
 def test_export_spans_every_dataset_for_the_schema(
@@ -624,7 +639,7 @@ def test_export_spans_every_dataset_for_the_schema(
     ctx.view_svc.create("trial", "all", columns=["subject"])
     ctx.commit()
 
-    export = ctx.view_svc.export("trial", "all")
+    export = export_view(ctx, "trial", "all")
 
     assert {row["subject"] for row in export.rows} == {"S01", "S02"}
 
@@ -650,13 +665,18 @@ def test_export_bundles_file_columns_and_uses_resolved_filename(
     ctx.view_svc.create("invoice", "with_scan", columns=["invoice_number", "scan"])
     ctx.commit()
 
-    export = ctx.view_svc.export("invoice", "with_scan")
+    export = export_view(ctx, "invoice", "with_scan")
 
-    assert export.rows == [{"invoice_number": "INV-1", "scan": "INV-1.pdf"}]
-    assert len(export.file_entries) == 1
-    path, ref = export.file_entries[0]
-    assert path == f"{record.id}/INV-1.pdf"
-    assert ref.sha256 == "a" * 64
+    # The cell says where the file is in the folder or zip: the record's name,
+    # then the file's resolved name -- the same path the Files menu gives it.
+    assert export.rows == [{"invoice_number": "INV-1", "scan": "INV-1/INV-1.pdf"}]
+    assert export.files is not None and len(export.files.items) == 1
+    item = export.files.items[0]
+    assert (item.path, item.sha256, item.record_id) == (
+        "INV-1/INV-1.pdf",
+        "a" * 64,
+        str(record.id),
+    )
 
 
 def test_export_ignores_joined_file_columns_for_zip_bundling(
@@ -677,9 +697,9 @@ def test_export_ignores_joined_file_columns_for_zip_bundling(
     ctx.view_svc.create("invoice", "with_avatar", columns=["amount", "customer.avatar"])
     ctx.commit()
 
-    export = ctx.view_svc.export("invoice", "with_avatar")
+    export = export_view(ctx, "invoice", "with_avatar")
 
-    assert export.file_entries == []
+    assert export.files is None
 
 
 # --- views over the record hierarchy ---
@@ -714,7 +734,7 @@ def test_view_filter_may_test_a_descendants_field(
         "encounter", columns=view.columns, filter_tree=view.filter_tree
     )
     assert (rows, total) == ([{"site": "B"}], 1)
-    exported = ctx.view_svc.export("encounter", "missing_table")
+    exported = export_view(ctx, "encounter", "missing_table")
     assert exported.rows == [{"site": "B"}]
 
 
@@ -744,3 +764,226 @@ def test_view_rejects_a_condition_on_an_unrelated_schema(ctx: AppContext, make_s
         ctx.view_svc.create(
             "a", "v", filter_tree={"schema": "b", "field": "y", "op": "eq", "value": 1}
         )
+
+
+# --- a view's saved files layout: the preset for how its files are exported ---
+
+
+def _invoices_with_scans(ctx: AppContext, make_schema, make_collection, names):
+    make_schema("invoice", fields=[("invoice_number", "string"), ("scan", "file")])
+    make_collection("study")
+    ctx.commit()
+    for i, name in enumerate(names):
+        ctx.record_svc.add(
+            "study",
+            "invoice",
+            {"invoice_number": f"INV-{i}", "scan": _file_ref(f"{i}" * 64, name)},
+        )
+    ctx.commit()
+
+
+def test_a_view_has_a_tree_layout_unless_told_otherwise(
+    ctx: AppContext, make_schema, make_collection
+) -> None:
+    make_schema("trial", fields=[("subject", "string")])
+
+    made = ctx.view_svc.create("trial", "all", columns=["subject"])
+    flat = ctx.view_svc.create("trial", "flat_one", files_layout="flat")
+
+    assert made.files_layout == "tree" and flat.files_layout == "flat"
+    assert ctx.view_svc.get("trial", "flat_one").files_layout == "flat"
+
+
+def test_a_layout_can_be_changed_and_is_checked(ctx: AppContext, make_schema) -> None:
+    make_schema("trial", fields=[("subject", "string")])
+    ctx.view_svc.create("trial", "all", columns=["subject"])
+
+    updated = ctx.view_svc.update("trial", "all", files_layout="flat")
+    untouched = ctx.view_svc.update("trial", "all", new_name="everything")
+
+    assert updated.files_layout == "flat"
+    assert untouched.files_layout == "flat"  # renaming leaves it alone
+    with pytest.raises(ValidationError, match="layout"):
+        ctx.view_svc.create("trial", "bad", files_layout="spiral")
+    with pytest.raises(ValidationError, match="layout"):
+        ctx.view_svc.update("trial", "everything", files_layout="spiral")
+
+
+def test_the_layout_is_part_of_a_views_audit_entry(
+    ctx: AppContext, make_schema
+) -> None:
+    make_schema("trial", fields=[("subject", "string")])
+    view = ctx.view_svc.create("trial", "all", files_layout="flat")
+
+    assert view.to_dict()["files_layout"] == "flat"
+    assert ViewDTO.from_dict(view.to_dict()).files_layout == "flat"
+    old = {k: v for k, v in view.to_dict().items() if k != "files_layout"}
+    assert ViewDTO.from_dict(old).files_layout == "tree"  # an entry from before
+
+
+def test_a_views_file_selection_is_its_query_its_file_columns_and_its_layout(
+    ctx: AppContext, make_schema, make_collection
+) -> None:
+    _invoices_with_scans(ctx, make_schema, make_collection, ["a.pdf"])
+    ctx.view_svc.create(
+        "invoice",
+        "tables",
+        columns=["invoice_number", "scan"],
+        filter_tree={"field": "invoice_number", "op": "eq", "value": "INV-0"},
+        files_layout="flat",
+    )
+    ctx.view_svc.create("invoice", "no_files", columns=["invoice_number"])
+
+    selection = ctx.view_svc.file_selection("invoice", "tables")
+
+    assert selection is not None
+    assert selection.fields == ["scan"] and selection.layout == "flat"
+    assert selection.query.schema == "invoice" and selection.query.filter_tree
+    assert ctx.view_svc.file_selection("invoice", "no_files") is None
+
+
+def test_a_flat_view_puts_every_file_in_one_folder_and_the_cells_say_so(
+    ctx: AppContext, make_schema, make_collection
+) -> None:
+    _invoices_with_scans(ctx, make_schema, make_collection, ["a.pdf", "b.pdf"])
+    ctx.view_svc.create(
+        "invoice", "flat", columns=["invoice_number", "scan"], files_layout="flat"
+    )
+    ctx.view_svc.create("invoice", "tree", columns=["invoice_number", "scan"])
+
+    flat = export_view(ctx, "invoice", "flat")
+    tree = export_view(ctx, "invoice", "tree")
+
+    assert sorted(r["scan"] for r in flat.rows) == ["a.pdf", "b.pdf"]
+    assert sorted(i.path for i in flat.files.items) == ["a.pdf", "b.pdf"]
+    assert sorted(r["scan"] for r in tree.rows) == ["INV-0/a.pdf", "INV-1/b.pdf"]
+
+
+def test_flat_names_that_clash_are_told_apart_in_the_cells_too(
+    ctx: AppContext, make_schema, make_collection
+) -> None:
+    _invoices_with_scans(ctx, make_schema, make_collection, ["same.pdf", "same.pdf"])
+    ctx.view_svc.create(
+        "invoice", "flat", columns=["invoice_number", "scan"], files_layout="flat"
+    )
+
+    export = export_view(ctx, "invoice", "flat")
+
+    # Two different files called same.pdf in one folder: each is named for the
+    # record that owns it.
+    cells = sorted(r["scan"] for r in export.rows)
+    assert cells == ["INV-0 - same.pdf", "INV-1 - same.pdf"]
+    assert sorted(i.path for i in export.files.items) == cells
+
+
+def test_the_same_file_on_two_records_is_one_file_but_both_cells_point_at_it(
+    ctx: AppContext, make_schema, make_collection
+) -> None:
+    make_schema("invoice", fields=[("invoice_number", "string"), ("scan", "file")])
+    make_collection("study")
+    ctx.commit()
+    for n in ("INV-1", "INV-2"):
+        ctx.record_svc.add(
+            "study",
+            "invoice",
+            {"invoice_number": n, "scan": _file_ref("c" * 64, "shared.pdf")},
+        )
+    ctx.commit()
+    ctx.view_svc.create(
+        "invoice", "flat", columns=["invoice_number", "scan"], files_layout="flat"
+    )
+
+    export = export_view(ctx, "invoice", "flat")
+
+    assert [r["scan"] for r in export.rows] == ["shared.pdf", "shared.pdf"]
+    assert len(export.files.items) == 1 and export.files.duplicates_dropped == 1
+
+
+def test_a_file_list_cell_holds_every_path(
+    ctx: AppContext, make_schema, make_collection
+) -> None:
+    make_schema("batch", fields=[("label", "string"), ("scans", "file_list")])
+    make_collection("study")
+    ctx.commit()
+    ctx.record_svc.add(
+        "study",
+        "batch",
+        {
+            "label": "B1",
+            "scans": [_file_ref("1" * 64, "x.pdf"), _file_ref("2" * 64, "y.pdf")],
+        },
+    )
+    ctx.commit()
+    ctx.view_svc.create("batch", "all", columns=["label", "scans"])
+
+    (row,) = export_view(ctx, "batch", "all").rows
+
+    assert row["scans"] == ["B1/x.pdf", "B1/y.pdf"]
+
+
+def test_a_view_export_does_not_look_files_up_record_by_record(
+    ctx: AppContext, make_schema, make_collection
+) -> None:
+    import hashlib
+
+    from sqlalchemy import event
+
+    make_schema("invoice", fields=[("invoice_number", "string"), ("scan", "file")])
+    make_collection("study")
+    ctx.view_svc.create("invoice", "all", columns=["invoice_number", "scan"])
+    ctx.commit()
+
+    def add(start: int, count: int) -> None:
+        for i in range(start, start + count):
+            sha = hashlib.sha256(str(i).encode()).hexdigest()
+            ctx.record_svc.add(
+                "study",
+                "invoice",
+                {"invoice_number": f"INV-{i}", "scan": _file_ref(sha, f"{i}.pdf")},
+            )
+        ctx.commit()
+
+    def statements() -> int:
+        seen: list[str] = []
+        engine = ctx._session.get_bind()
+
+        def count(conn, cursor, statement, *a):
+            seen.append(statement)
+
+        event.listen(engine, "before_cursor_execute", count)
+        try:
+            export_view(ctx, "invoice", "all")
+        finally:
+            event.remove(engine, "before_cursor_execute", count)
+        return len(seen)
+
+    add(0, 3)
+    few = statements()
+    add(3, 27)
+    many = statements()
+
+    assert many == few  # not a lookup per record, per file or per ancestor
+
+
+# --- layouts on views ---
+
+
+def _hierarchy(ctx: AppContext, make_schema) -> None:
+    make_schema("encounter", fields=[("site", "string")])
+    make_schema("recording", fields=[("rate", "integer")], parent="encounter")
+    make_schema(
+        "selection",
+        fields=[("sname", "string"), ("contour", "file"), ("extras", "file_list")],
+        parent="recording",
+    )
+
+
+def test_a_view_can_have_the_grouped_layout(ctx: AppContext, make_schema) -> None:
+    _hierarchy(ctx, make_schema)
+
+    made = ctx.view_svc.create(
+        "selection", "g", columns=["contour"], files_layout="grouped"
+    )
+
+    assert ctx.view_svc.get("selection", "g").files_layout == "grouped"
+    assert made.files_layout == "grouped"

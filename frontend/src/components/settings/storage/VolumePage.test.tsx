@@ -85,6 +85,9 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const p = new URL(String(input), 'http://x').pathname
+      // The Tasks tab also lists exports and the saved filters they start from.
+      if (p === '/api/file-access/exports' || p === '/api/views')
+        return json([])
       const method = init?.method ?? 'GET'
       calls.push({
         method,

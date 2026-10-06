@@ -96,6 +96,7 @@ describe('saved views', () => {
     schema_id: 's',
     schema_name: 'selection',
     name: 'missing',
+    files_layout: 'tree',
     columns: [],
     filter_tree: { field: 't', op: 'is_null', value: true },
     sort: [{ field: 'begin', direction: 'asc' }],

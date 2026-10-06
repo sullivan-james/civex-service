@@ -20,7 +20,15 @@ KIND_DRAIN = "drain"
 # Move the files of some collections onto a chosen volume, repairing a
 # collection that has ended up split across drives.
 KIND_CONSOLIDATE = "consolidate"
-KINDS = (KIND_DRAIN, KIND_CONSOLIDATE)
+# Move exactly these files (by hash) onto a chosen volume, whatever collection
+# they belong to: what a selection needs to be gathered onto one drive without
+# moving anything else.
+KIND_FILES = "files"
+KINDS = (KIND_DRAIN, KIND_CONSOLIDATE, KIND_FILES)
+
+# The most files one "files" transfer names: the list is kept on its record, so
+# a selection beyond this is better narrowed (or gathered by collection).
+MAX_TRANSFER_FILES = 100_000
 
 # How a copy is checked before the original is removed.
 # "copy": the file is hashed as it is copied and must match its recorded hash
@@ -88,6 +96,8 @@ class TransferSpec:
     # volume, use as well. Left alone by default, since one copy can only be in
     # one place and moving it would just split those collections instead.
     include_shared: bool = False
+    # files: the content to move, by sha256. Files already on a target stay put.
+    shas: list[str] = field(default_factory=list)
     verify: str = VERIFY_COPY
     # drain: stop new files being written to the sources while it runs, and put
     # them back as they were afterwards (otherwise a busy volume never empties).

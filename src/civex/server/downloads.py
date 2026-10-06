@@ -9,6 +9,7 @@ dependencies have closed it.
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -24,15 +25,27 @@ def new_temp_path(suffix: str = "") -> Path:
     return Path(name)
 
 
+def new_temp_dir() -> Path:
+    return Path(tempfile.mkdtemp(prefix="civex-export-"))
+
+
+def _remove(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        path.unlink(missing_ok=True)
+
+
 @contextmanager
 def temp_paths() -> Iterator[list[Path]]:
-    """Temp files that are removed on exit unless handed to `serve()`."""
+    """Temp files (or folders) that are removed on exit unless handed to
+    `serve()`."""
     paths: list[Path] = []
     try:
         yield paths
     finally:
         for p in paths:
-            p.unlink(missing_ok=True)
+            _remove(p)
 
 
 def serve(path: Path, media_type: str, filename: str, *cleanup: Path) -> FileResponse:
@@ -41,7 +54,7 @@ def serve(path: Path, media_type: str, filename: str, *cleanup: Path) -> FileRes
 
     def _cleanup() -> None:
         for p in doomed:
-            p.unlink(missing_ok=True)
+            _remove(p)
 
     return FileResponse(
         path,

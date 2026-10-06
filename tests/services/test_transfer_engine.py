@@ -18,6 +18,7 @@ import pytest
 from civex.context import AppContext
 from civex.domain.transfers import (
     KIND_CONSOLIDATE,
+    KIND_FILES,
     KIND_DRAIN,
     STATUS_CANCELLED,
     STATUS_COMPLETED,
@@ -797,3 +798,61 @@ def test_a_copy_flushing_a_large_file_gets_longer_before_it_counts_as_stalled() 
     assert job.stall_limit() > file_store_module.STALL_SECONDS
     job.size = 1024
     assert job.stall_limit() == file_store_module.STALL_SECONDS
+
+
+def test_a_files_transfer_moves_exactly_the_named_files(
+    ctx: AppContext, tmp_path: Path, make_schema, make_collection, make_record
+) -> None:
+    _volumes(ctx, tmp_path, "a", "home")
+    make_schema("doc", fields=[("scan", "file")])
+    ctx.store_svc.set_queue(["a"])
+    refs = _collection_with_files(
+        ctx,
+        make_schema,
+        make_collection,
+        make_record,
+        "mine",
+        [b"one" * 99, b"two" * 99, b"three" * 99],
+    )
+    chosen = [refs[0].sha256, refs[2].sha256]
+
+    outcome = _run(ctx, TransferSpec(kind=KIND_FILES, targets=["home"], shas=chosen))
+
+    # The rest of the collection stays where it was.
+    assert outcome.status == STATUS_COMPLETED and outcome.progress.files_done == 2
+    assert _catalog(ctx, [r.sha256 for r in refs]) == {
+        refs[0].sha256: "home",
+        refs[1].sha256: "a",
+        refs[2].sha256: "home",
+    }
+    assert ctx.file_svc._store.get(refs[2].sha256) == b"three" * 99
+
+
+def test_a_files_transfer_leaves_files_already_on_the_target_alone(
+    ctx: AppContext, tmp_path: Path, make_schema, make_collection, make_record
+) -> None:
+    _volumes(ctx, tmp_path, "a", "home")
+    make_schema("doc", fields=[("scan", "file")])
+    ctx.store_svc.set_queue(["home"])
+    refs = _collection_with_files(
+        ctx, make_schema, make_collection, make_record, "mine", [b"x" * 90]
+    )
+
+    outcome = _run(
+        ctx,
+        TransferSpec(kind=KIND_FILES, targets=["home"], shas=[refs[0].sha256]),
+    )
+
+    assert outcome.progress.files_done == 0 and outcome.progress.files_skipped == 1
+
+
+def test_a_files_transfer_ignores_content_that_is_stored_nowhere(
+    ctx: AppContext, tmp_path: Path
+) -> None:
+    _volumes(ctx, tmp_path, "a", "home")
+
+    outcome = _run(
+        ctx, TransferSpec(kind=KIND_FILES, targets=["home"], shas=["ab" * 32])
+    )
+
+    assert outcome.status == STATUS_COMPLETED and outcome.progress.files_done == 0

@@ -1,54 +1,18 @@
 from __future__ import annotations
 
-import csv
-import io
-import json
-from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any
 
-from civex.domain.dtos import FileRef, RecordDTO, SchemaDTO, ViewDTO
-from civex.domain.exceptions import AlreadyExistsError, NotFoundError
+from civex.domain.dtos import RecordDTO, SchemaDTO, ViewDTO
+from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
+from civex.domain.file_access import LAYOUTS, FileSelection
 from civex.domain.naming import validate_free_name
 from civex.domain.query import RecordQuery
+from civex.domain.tables import DEFAULT_FORMAT, TableSpec
 from civex.repositories.protocols import AuditRepository, ViewRepository
 from civex.services.record_service import RecordService
 from civex.services.schema_service import SchemaService
 
 SORT_DIRECTIONS = frozenset({"asc", "desc"})
-
-# Records per page when an export walks a view's full result set.
-EXPORT_PAGE_SIZE = 500
-
-
-@dataclass
-class ExportBatch:
-    """One page of an export: flattened rows plus the files to bundle."""
-
-    rows: list[dict[str, Any]]
-    # (zip entry path, blob) for every file/file_list value in a file-bearing
-    # column of these rows -- empty when the view has no such columns.
-    file_entries: list[tuple[str, FileRef]]
-
-
-@dataclass
-class ViewExportStream:
-    """A view export that yields its rows page by page, so neither the rows
-    nor the record DTOs behind them are ever all in memory at once."""
-
-    view: ViewDTO
-    batches: Iterator[ExportBatch]
-
-
-@dataclass
-class ViewExport:
-    """Fully materialised export -- convenient for small views and tests;
-    large exports should consume `ViewExportStream` instead."""
-
-    view: ViewDTO
-    rows: list[dict[str, Any]]
-    # (zip entry path, blob) for every file/file_list value in a file-bearing
-    # column -- empty when the view has no such columns.
-    file_entries: list[tuple[str, FileRef]]
 
 
 class ViewService:
@@ -94,15 +58,20 @@ class ViewService:
         columns: list[str] | None = None,
         filter_tree: dict[str, Any] | None = None,
         sort: list[dict[str, Any]] | None = None,
+        files_layout: str = "tree",
     ) -> ViewDTO:
         schema = self._schemas.get(schema_name)
         name = validate_free_name(name, "view name")
+        _check_layout(files_layout)
         if self._views.get_by_name(schema.id, name):
             raise AlreadyExistsError(
                 f"View '{name}' already exists on schema '{schema_name}'"
             )
         dto = self._views.create(
-            schema.id, name, *self._validate(schema, columns, filter_tree, sort)
+            schema.id,
+            name,
+            *self._validate(schema, columns, filter_tree, sort),
+            files_layout=files_layout,
         )
         if self._audit:
             self._audit.log_change("create", "view", dto.id, None, dto.to_dict())
@@ -134,6 +103,7 @@ class ViewService:
         columns=...,
         filter_tree=...,
         sort=...,
+        files_layout=...,
     ) -> ViewDTO:
         schema = self._schemas.get(schema_name)
         view = self._views.get_by_name(schema.id, view_name)
@@ -155,6 +125,9 @@ class ViewService:
             extra["filter_tree"] = self._validate(schema, filter_tree=filter_tree)[1]
         if sort is not ...:
             extra["sort"] = self._validate(schema, sort=sort)[2]
+        if files_layout is not ...:
+            _check_layout(files_layout)
+            extra["files_layout"] = files_layout
         old_dict = view.to_dict()
         updated = self._views.update(view.id, name=new_name, **extra)
         if self._audit:
@@ -228,123 +201,35 @@ class ViewService:
             and f.dtype in ("file", "file_list")
         ]
 
-    def export_stream(self, schema_name: str, view_name: str) -> ViewExportStream:
-        """Every record the view matches (across all datasets -- a view isn't
-        dataset-scoped), flattened into `columns` and yielded in pages of
-        EXPORT_PAGE_SIZE. When any column is a file/file_list field, its row
-        value is swapped for the same `resolved_filename` the record API
-        stamps on file values (falling back to the original filename), and
-        each batch's `file_entries` carries the matching zip path (record id +
-        collision-suffixed name, via RecordService.files_for_zip) and FileRef
-        for every file to bundle alongside the CSV/JSON."""
+    def file_selection(self, schema_name: str, view_name: str) -> FileSelection | None:
+        """The view's files as a selection (its query, its file columns, its
+        saved layout), the one description the Files menu, the folder export
+        and the zip all take. None when the view has no file columns."""
         view = self.get(schema_name, view_name)
-        schema = self._schemas.get(schema_name)
-        file_columns = self._file_columns(schema, view.columns)
-
-        def batches() -> Iterator[ExportBatch]:
-            for records in self._record_svc.stream_records(
-                self.query_for(schema_name, view_name),
-                page_size=EXPORT_PAGE_SIZE,
-                columns=view.columns,
-            ):
-                rows = self._rows(view.columns, records)
-                file_entries: list[tuple[str, FileRef]] = []
-                if file_columns:
-                    for record, row in zip(records, rows):
-                        entries = self._record_svc.files_for_zip(
-                            str(record.id), field_names=file_columns
-                        )
-                        for name, ref in entries:
-                            file_entries.append((f"{record.id}/{name}", ref))
-                        for col in file_columns:
-                            row[col] = _display_filename(row.get(col))
-                yield ExportBatch(rows=rows, file_entries=file_entries)
-
-        return ViewExportStream(view=view, batches=batches())
-
-    def export(self, schema_name: str, view_name: str) -> ViewExport:
-        """`export_stream()` collected into memory."""
-        stream = self.export_stream(schema_name, view_name)
-        rows: list[dict[str, Any]] = []
-        file_entries: list[tuple[str, FileRef]] = []
-        for batch in stream.batches:
-            rows.extend(batch.rows)
-            file_entries.extend(batch.file_entries)
-        return ViewExport(view=stream.view, rows=rows, file_entries=file_entries)
-
-
-def _display_filename(value: Any) -> Any:
-    """A file/file_list cell's raw FileRef dict(s) -> the resolved
-    filename(s) already stamped on them by RecordService -- rows are
-    display/export data, not a second copy of the file metadata."""
-    if isinstance(value, dict):
-        return value.get("resolved_filename") or value.get("filename")
-    if isinstance(value, list):
-        return [
-            v.get("resolved_filename") or v.get("filename")
-            for v in value
-            if isinstance(v, dict)
-        ]
-    return value
-
-
-def _nest_row(row: dict[str, Any]) -> dict[str, Any]:
-    """{"amount": 100, "customer.email": "a@x"} -> {"amount": 100, "customer":
-    {"email": "a@x"}} -- JSON export keeps joined columns nested instead of
-    repeating the CSV's flat dotted-header convention."""
-    nested: dict[str, Any] = {}
-    for key, value in row.items():
-        if "." in key:
-            head, _, tail = key.partition(".")
-            nested.setdefault(head, {})[tail] = value
-        else:
-            nested[key] = value
-    return nested
-
-
-def rows_to_csv(columns: list[str], rows: list[dict[str, Any]]) -> str:
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
-    writer.writeheader()
-    for row in rows:
-        writer.writerow(
-            {
-                k: v if not isinstance(v, (list, dict)) else json.dumps(v)
-                for k, v in row.items()
-            }
+        file_columns = self._file_columns(self._schemas.get(schema_name), view.columns)
+        if not file_columns:
+            return None
+        return FileSelection(
+            query=self.query_for(schema_name, view_name),
+            fields=file_columns,
+            layout=view.files_layout,
         )
-    return buf.getvalue()
+
+    def table_selection(
+        self, schema_name: str, view_name: str, fmt: str = DEFAULT_FORMAT
+    ) -> FileSelection:
+        """The view as a table to export (its columns, filter and sort), with its
+        files beside it when it has file columns: the same selection the Files
+        menu takes, so the table's file cells and the folder agree. Make it with
+        `FileAccessService` like any other export."""
+        view = self.get(schema_name, view_name)
+        selection = self.file_selection(schema_name, view_name) or FileSelection(
+            query=self.query_for(schema_name, view_name), files=False
+        )
+        selection.tables = [TableSpec(fmt, list(view.columns), name=view.name)]
+        return selection
 
 
-def rows_to_json(rows: list[dict[str, Any]]) -> str:
-    return json.dumps([_nest_row(r) for r in rows], indent=2, default=str)
-
-
-def write_csv(
-    out: Any, columns: list[str], batches: Iterator[list[dict[str, Any]]]
-) -> None:
-    """Stream rows to a text file object as CSV, batch by batch."""
-    writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")
-    writer.writeheader()
-    for rows in batches:
-        for row in rows:
-            writer.writerow(
-                {
-                    k: v if not isinstance(v, (list, dict)) else json.dumps(v)
-                    for k, v in row.items()
-                }
-            )
-
-
-def write_json(out: Any, batches: Iterator[list[dict[str, Any]]]) -> None:
-    """Stream rows to a text file object as a JSON array, batch by batch --
-    byte-identical to `rows_to_json` (2-space indent), without building the
-    whole array in memory."""
-    first = True
-    for rows in batches:
-        for row in rows:
-            body = json.dumps(_nest_row(row), indent=2, default=str)
-            out.write("[\n" if first else ",\n")
-            out.write("  " + body.replace("\n", "\n  "))
-            first = False
-    out.write("[]" if first else "\n]")
+def _check_layout(layout: str) -> None:
+    if layout not in LAYOUTS:
+        raise ValidationError(f"A files layout is one of: {', '.join(LAYOUTS)}.")

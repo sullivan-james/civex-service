@@ -275,6 +275,9 @@ class ViewDTO:
     filter_tree: dict[str, Any] | None  # civex.domain.filters wire shape
     sort: list[dict[str, Any]]  # [{"field": <name>, "direction": "asc"|"desc"}, ...]
     created_at: datetime
+    # How the view's files are arranged when exported: "tree" or "flat"
+    # (civex.domain.file_access.LAYOUTS).
+    files_layout: str = "tree"
 
     def to_dict(self) -> dict[str, Any]:
         # schema_name excluded -- denormalized display field, not stored on the entity
@@ -285,6 +288,7 @@ class ViewDTO:
             "columns": self.columns,
             "filter_tree": self.filter_tree,
             "sort": self.sort,
+            "files_layout": self.files_layout,
             "created_at": self.created_at.isoformat(),
         }
 
@@ -299,7 +303,46 @@ class ViewDTO:
             filter_tree=d.get("filter_tree"),
             sort=d.get("sort") or [],
             created_at=datetime.fromisoformat(d["created_at"]),
+            files_layout=d.get("files_layout") or "tree",
         )
+
+
+@dataclass
+class ExportDefinitionDTO:
+    """An export saved with a schema (`schema_name`): which kind of record holds
+    the files (`holder`, None = any kind beneath), which file fields (empty =
+    every one), a filter on those records, and a layout
+    (civex.domain.file_access.LAYOUTS). Which collection or record it runs on is
+    not part of it."""
+
+    id: uuid.UUID
+    schema_id: uuid.UUID
+    schema_name: str  # denormalised for display, resolved by the repo
+    name: str
+    holder_id: uuid.UUID | None
+    holder: str | None  # the holder's schema name, resolved by the repo
+    fields: list[str]
+    filter_tree: dict[str, Any] | None
+    files_layout: str
+    created_at: datetime
+    # Whether the files are exported (False: tables alone), and the tables to
+    # make beside them (`civex.domain.tables.TableSpec`s as dicts).
+    include_files: bool = True
+    tables: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": str(self.id),
+            "schema_id": str(self.schema_id),
+            "name": self.name,
+            "holder_id": str(self.holder_id) if self.holder_id else None,
+            "fields": self.fields,
+            "filter_tree": self.filter_tree,
+            "files_layout": self.files_layout,
+            "include_files": self.include_files,
+            "tables": self.tables,
+            "created_at": self.created_at.isoformat(),
+        }
 
 
 @dataclass

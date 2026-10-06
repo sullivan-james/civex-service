@@ -34,6 +34,7 @@ from civex.domain.transfers import (
     KIND_CONSOLIDATE,
     CopyResult,
     KIND_DRAIN,
+    KIND_FILES,
     MAX_RECORDED_FAILURES,
     STATUS_CANCELLED,
     STATUS_COMPLETED,
@@ -270,8 +271,28 @@ def _items(
                 raise VolumeNotResponding(source, status.reason)
     elif spec.kind == KIND_CONSOLIDATE:
         yield from _consolidation_items(store, refs, spec, placements, run)
+    elif spec.kind == KIND_FILES:
+        yield from _file_items(store, spec, run)
     else:
         raise ValueError(f"Unknown transfer kind '{spec.kind}'")
+
+
+def _file_items(
+    store: FileObjectStore, spec: TransferSpec, run: _Run
+) -> Iterator[_Item]:
+    """The named files that aren't on a target yet. Work is re-found from where
+    each file is now, so a resumed transfer carries on with what is left."""
+    for start in range(0, len(spec.shas), PAGE):
+        shas = spec.shas[start : start + PAGE]
+        where = store.locate_volumes(shas)
+        for sha in shas:
+            volume = where.get(sha)
+            if volume is None:
+                continue  # not stored on any volume we know of: nothing to move
+            if volume in spec.targets:
+                run.p.files_skipped += 1
+                continue
+            yield _Item(sha, volume)
 
 
 def _consolidation_items(

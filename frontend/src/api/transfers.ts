@@ -1,10 +1,12 @@
 import { api } from './client'
 
 export interface TransferSpec {
-  kind: 'drain' | 'consolidate'
+  kind: 'drain' | 'consolidate' | 'files'
   targets: string[]
   sources: string[]
   collection_ids: string[]
+  /** files: the content moved, by hash. */
+  shas?: string[]
   include_shared: boolean
   verify: 'copy' | 'full'
   freeze_sources: boolean
@@ -53,7 +55,7 @@ export type TransferStatus =
 
 export interface Transfer {
   id: string
-  kind: 'drain' | 'consolidate'
+  kind: 'drain' | 'consolidate' | 'files'
   status: TransferStatus
   spec: TransferSpec
   plan: TransferPlan | null

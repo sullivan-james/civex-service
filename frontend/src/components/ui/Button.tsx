@@ -2,7 +2,7 @@ import { Link, type LinkProps } from 'react-router'
 
 type Variant =
   'primary' | 'default' | 'danger' | 'ghost' | 'link' | 'nav' | 'navActive'
-type Size = 'sm' | 'md'
+type Size = 'sm' | 'md' | 'lg'
 
 interface CommonProps {
   variant?: Variant
@@ -48,6 +48,7 @@ const variants: Record<Variant, string> = {
 const sizes: Record<Size, string> = {
   sm: 'h-8 px-3 text-sm',
   md: 'h-9 px-4 text-sm',
+  lg: 'h-11 px-6 text-base',
 }
 
 /** The one button. Pass `to` to render a router link with the same look, so

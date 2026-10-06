@@ -193,6 +193,125 @@ civex store gc --volume archive --apply
 === "Web UI"
     On a new record's form, file fields show a file picker, and the files are attached when you save the form. On an existing record's detail page, a field has a drop zone: choose a file or drop one on it and it is uploaded and attached at once, with progress, like any other edit. There is nothing to approve. A file the field won't take (the wrong type, or over its size limit) is refused before anything is uploaded, with the reason. The only time you are asked first is when a file would go: **removing** one, or **replacing** the one in a single-file field (which removes the current file). Adding to a `file_list` field asks nothing. Because attaching saves the record, workflows that watch the field run when the file is attached. A removed file stays in the object store until garbage collection removes it. Multiple files can be attached to a `file_list` field at once.
 
+## Finding files by name and folder
+
+Files are stored by their content hash, but you don't have to browse them that way. Every file can be reached by the path its records give it: the names of the records above it, then the file's own name. A selection table on a selection in a recording in an encounter is `Encounter 7/Recording A/Selection 3/table.txt`. A record's name is the one you see in the UI; if two records in the same place would share a name, only those two get a short id added (`Recording A~3f9c01ab`).
+
+There are two ways to get a folder of them, and you choose:
+
+- **Open in folder** makes a folder of *links* on the drive that holds the files. Nothing is copied, so it is instant and takes no space. A link is the stored file under another name, so Windows and other programs treat it as an ordinary file. The catch: a linked folder has to be on the same drive as its files, so files spread over **more than one drive can't be gathered this way** (you're told, and offered a copy instead), and a drive that can't make links (exFAT, FAT32) is refused before anything is built. Don't edit a linked file in place: saving over it changes the stored file.
+- **Copy to a drive** makes real copies on one drive you choose, wherever the files are now. They take space (you're shown how much, and refused if it won't fit) and are yours to edit.
+
+When the files you want are on several drives, you don't have to move whole collections to get a linked folder. **Move these files…** (or `civex files gather --to <drive>`) moves *only the files in your current selection*, and only the ones not already there, onto one drive. It is an ordinary move: each file is checked before the original is removed, it queues behind any other move, and you can pause it. When it has finished, **Open in folder** links the whole selection.
+
+=== "Web UI"
+    The **Export** menu is on a record's page (an Encounter offers every file beneath it), on any list of records (beside **Columns**, so it takes exactly the rows the filters leave, or the rows you have ticked), and on a collection's **Exports** tab. It offers the exports saved for that kind of record, **Export…** for a one-off, **Set up exports…** and **Manage exports…**.
+
+    From a list, **Export…** starts as just the table you're looking at (its format and file name, ready to download) with **Add files or more tables…** to expand it. Saved exports and the other **Export…** buttons open the same builder as the **Exports** page: What, Layout, then Finish, where you choose how to get the result: **Open as folder** (links), **Copy to a drive** (pick the drive), or **Download** (a zip, or the table itself when that is all there is). From a list, the table starts as the columns and order you are looking at. A saved export opens already filled in, on the last step.
+
+    Choosing does the work straight away, in the background. If it takes more than a second, the bar at the bottom of the screen shows "Preparing files…", and moves show how far they are. When nothing is in the way the folder simply opens.
+
+    When something needs a decision, **one** dialog opens with everything in it: what the selection holds and where; any files that can't be reached, with **Check again** once you've plugged the drive in; and how you'd like the folder: *link them where they are*, *move them onto one drive, then link* (only when they're on several drives; it moves just these files, queues like any move, and opens the folder when it has finished), or *copy them onto a drive*. Nothing is built or opened until you choose.
+
+=== "CLI"
+    ```bash
+    # Every selection table under one encounter; paths start below it
+    civex files list --under <encounter id> --schema selection --field selection_table
+
+    # Where those files are on disk right now, one path per line, for scripts
+    civex files list --under <encounter id> --schema selection --paths
+
+    # A linked folder, on the drive that holds them
+    civex files export --under <encounter id> --schema selection --name tables
+
+    # Real copies on one drive (civex store list shows the drives)
+    civex files export --under <encounter id> --schema selection --name tables \
+        --mode copy --to archive
+    ```
+
+    Add `--table csv` (or `tsv`, `xlsx`, `json`, `jsonl`) to put a table of the records in the folder too, `--column` (repeatable) to choose its columns, and `--no-files` for the table alone. `civex files download <file>` writes the same thing as one file: a zip, or the table itself.
+
+    Running `export` again with the same name updates that folder: new files are added and files no longer selected are removed. A folder holding other files is refused, so nothing of yours is touched. If some files can't be reached, they are listed first and nothing is made unless you agree (or pass `--allow-partial`); the folder then holds a `MISSING.txt`, and the command exits with status 2.
+
+### Tables beside the files
+
+An export can also make a **table** of the records its files belong to, in the same folder (or zip) as the files. Tick **Table of the records** in the builder's first step, choose a format, and, when the rows are of one kind of record, which columns:
+
+| Format | Good for |
+|---|---|
+| CSV | Opens anywhere. |
+| Excel (`.xlsx`) | A spreadsheet, numbers kept as numbers. |
+| TSV | Like CSV, tab-separated. |
+| JSON | Programs; joined values nest inside their record. |
+| JSON Lines | One record per line, for very large tables. |
+
+There is one table for each kind of record, named for the kind (`Selections.csv`). Columns are the record's fields, one hop through a reference (`customer.email`), and the record's `id`, `created_at` and `updated_at`; left alone, a table has the id and every field. A column that holds files says **where each file is in the export** (`Encounter 7/Recording A/table.txt`), so the table and the folder always agree. A list or point is written the same way in every format (a point as `lat, lon`, a list as JSON), never as program text. Untick **Files** to make the table alone: from a list of records that hold no files that is all there is.
+
+A table is part of the export, so it is rewritten when you run the export again, and removed with the folder.
+
+#### Choosing which tables, and where they go
+
+The first step of the builder shows each kind of record (Encounter, then the Recording inside it, then the Selection inside that) as a card of its own, saying where it sits ("Inside Encounter › Recording"). Each card has the **files** to take and the **tables** to write, as rows you tick (click anywhere on the row):
+
+- **Files**: one row per file field that kind defines. Untick the ones you don't want; untick them all to make tables alone.
+- **All Recordings in one table**: a single file at the top with a row for every recording.
+- **A details sheet for each Recording**: in each recording's folder, its fields (and those of the kinds above it, such as its encounter's site) one per line, as field and value.
+- **A table of each Recording's Selections**: in each recording's folder, a table with a row for every selection inside it.
+
+When a table is ticked, its own **Format** (CSV, Excel, …) and **File name** appear on the same row. The name is optional; left empty, a table is named for what it holds (`Recordings`, `Metadata`). A name may use `{schema}`, `{id}` and fields of the folder's record, like `{rname} selections`, for tables written in folders. Columns start as every field.
+
+A table written in each folder needs the layout with a folder per record, so ticking one switches the layout to that and the other two are not offered. A recording with no selections gets no list.
+
+**Columns** are chosen on the table's own row: **All columns** opens one list. The columns shown are at the top in the order they will have (drag, or use the arrows, to move one; untick to take it out), and the ones not shown are below with a search, grouped by where they come from (the record itself, the kinds above it, linked records). Shift-click picks a run. **Only some Selections…** (inside the card whose files you're taking, when they all come from one kind) narrows which records the files come from. A list in each folder can also be made for folders with nothing to list. Any table the rows above don't stand for (an older export's table of "each kind taken") appears under **Other tables**, where it can be changed or removed.
+
+### Saved exports
+
+The **Exports** page (in the sidebar) lists every saved export as a table, like the other lists: search it, narrow it with **Starts from…**, sort by a column, and choose a collection under **Run on…** to enable **Run…** on each row. An export **starts from** a kind of record, such as an Encounter: it takes that kind and everything inside it, and is offered on every Encounter, Recording and Selection page and on collections that use them. **New export** opens the builder, whose first question is **Starts from** (the kinds are shown as they nest, and a sentence under it says what that means), then three steps:
+
+1. **What**: your folders, level by level, with the **files** to take and the **tables** to write ticked at each (see above).
+2. **Layout**: three pictures of the folder each layout makes.
+    - **A folder per record**: a folder for every level, then the files.
+    - **Grouped by kind**: the folders above are kept, but the records that hold the files share one folder named for their kind (`Parent 1/Child 1/Items/…`).
+    - **All in one folder**: just the files.
+
+    Where several records share a folder and two different files have the same name, each is named for its record (`Item 2 - file.txt`).
+3. **Finish**: a name, a summary, and what it makes: the folder as a tree you can open and close, worked out against your data as soon as you arrive and kept up to date as you change things. Each table sits in the folder it will be written in, with its row count.
+
+An export doesn't say which collection or record it runs on. It is offered where you are: on the **Exports** page (choose a collection to run on) and a **collection's Exports tab** (run on the whole collection), and in the **Files menu** of every record of that schema and the schemas below it, down to the kind that holds the files, run on the record you're looking at. Save "Contour files, in one folder" with Encounter, and every Encounter, Recording and Selection page offers it.
+
+On the command line:
+
+```bash
+civex schema exports add encounter "Contour files" --kind selection --field contour --layout flat
+civex schema exports add encounter "Selection tables" --kind selection --table xlsx --column sname --column quality --no-files
+# A table of each recording's selections, and a metadata sheet for each selection
+civex schema exports add encounter "Sheets" --kind selection --tables-json \
+  '[{"format": "csv", "kind": "selection", "where": "recording"},
+    {"format": "csv", "kind": "selection", "where": "selection", "shape": "fields"}]'
+civex schema exports list encounter            # add --available for every export that runs within an encounter
+civex schema exports set encounter "Contour files" --layout grouped
+civex schema exports remove encounter "Contour files"
+
+# Run one on a collection, or within a record
+civex files export --export encounter/"Contour files" --in my-collection --name contours
+civex files list --export encounter/"Contour files" --under <encounter id>
+```
+
+`--filter` takes a JSON filter tree; `--layout` on `civex files` overrides a saved export's layout. A saved view works the same way with `--view schema/view`.
+
+### Cleaning up exports
+
+Exports are folders civex made in its own places: `_civex/exports` in the project, or `_exports` inside a drive. The **Made** tab of the **Exports** page (reached from **Files → Manage exports…**, or `civex files exports`) lists them with where they are and what space they use, and removes them:
+
+```bash
+civex files exports list
+civex files exports remove archive/tables       # one, as listed: where/name
+civex files exports remove --older-than 30      # anything not updated in a month
+civex files exports remove --all
+```
+
+Removing a linked folder gives back no space and never touches the stored files. Removing a copied folder gives back its space. Anything of your own that you put inside an export folder is left, with the folder. Exports on a drive that isn't connected are listed once it is plugged in again.
+
 ## Downloading files
 
 In the UI, each file field shows a download link next to the filename. Via the API:

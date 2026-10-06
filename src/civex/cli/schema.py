@@ -794,3 +794,8 @@ def schema_lint() -> None:
         "Renaming is safe for stored records (record data is keyed by field "
         "UUID), but update any workflow YAML that references the old name."
     )
+
+
+from civex.cli import export_defs as _export_defs  # noqa: E402
+
+app.add_typer(_export_defs.app, name="exports")

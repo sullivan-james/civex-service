@@ -171,9 +171,6 @@ export const recordsApi = {
       `/collections/${encodeURIComponent(datasetName)}/records${recordQueryString(params)}`,
     ),
 
-  exportCsvUrl: (datasetName: string, params?: RecordQueryParams) =>
-    `/api/collections/${encodeURIComponent(datasetName)}/export.csv${recordQueryString(params)}`,
-
   /** `reachableFrom` (a collection name) limits results to records a record
    * there may reference: its own collection's and global collections'. */
   searchBySchema: (

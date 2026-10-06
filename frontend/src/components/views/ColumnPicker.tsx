@@ -1,22 +1,35 @@
+import { useState } from 'react'
 import { useRangeSelect } from '../../hooks/useRangeSelect'
-import { Checkbox, IconButton, Subheading } from '../ui'
-import { ChevronUp, ChevronDown, X } from '../ui/icons'
 import { displayLabel } from '../../utils/naming'
-import type { ResolvedField } from '../../utils/viewFields'
-import type { JoinableColumn } from '../../utils/viewFields'
+import type { JoinableColumn, ResolvedField } from '../../utils/viewFields'
+import { Button, Checkbox, Input, SortableList } from '../ui'
+
+/** A column that is not a field: the record's own id and dates. */
+export interface ExtraColumn {
+  name: string
+  label: string
+}
 
 interface ColumnPickerProps {
+  /** The columns shown, in order. */
   columns: string[]
   onChange: (columns: string[]) => void
   baseFields: ResolvedField[]
   joinable: JoinableColumn[]
+  /** Columns beyond the fields (a table of records has the id, created, updated). */
+  extra?: ExtraColumn[]
+  /** Offer "Hide all" (off where an empty list means the default columns). */
+  allowHideAll?: boolean
 }
 
 export function columnLabel(
   col: string,
   baseFields: ResolvedField[],
   joinable: JoinableColumn[],
+  extra: ExtraColumn[] = [],
 ): string {
+  const known = extra.find((e) => e.name === col)
+  if (known) return known.label
   if (!col.includes('.')) {
     const field = baseFields.find((f) => f.name === col)
     return field ? displayLabel(field.name, field.label) : col
@@ -25,148 +38,176 @@ export function columnLabel(
   return join ? join.label : col
 }
 
-/** Base schema fields (own + inherited) plus one hop of reference-field
- * joins -- toggled on the left, ordered on the right. */
+interface Group {
+  /** null: no heading (everything is of one kind). */
+  title: string | null
+  items: { value: string; label: string }[]
+}
+
+/** Which columns, and in what order: one list. The columns shown are at the top
+ * in the order they will have, each with a box to take it out and arrows or a
+ * drag handle to move it; the ones not shown are below, grouped by where they come
+ * from, with a search, to put in. Boxes in the not-shown list pick a run with shift-click. */
 export function ColumnPicker({
   columns,
   onChange,
   baseFields,
   joinable,
+  extra = [],
+  allowHideAll = true,
 }: ColumnPickerProps) {
-  const joinsByRef = new Map<string, JoinableColumn[]>()
-  for (const join of joinable) {
-    const key = join.refField.name
-    joinsByRef.set(key, [...(joinsByRef.get(key) ?? []), join])
-  }
+  const [search, setSearch] = useState('')
 
-  // Every box in the order drawn: the fields, then each reference's columns.
-  const shown = [
-    ...baseFields.map((f) => f.name),
-    ...[...joinsByRef.values()].flatMap((joins) => joins.map((j) => j.value)),
-  ]
-  const range = useRangeSelect(shown)
+  // Everything that could be shown, grouped by where it comes from.
+  const groups: Group[] = []
+  if (extra.length > 0)
+    groups.push({
+      title: 'The record',
+      items: extra.map((e) => ({ value: e.name, label: e.label })),
+    })
+  const sources = [...new Set(baseFields.map((f) => f.sourceSchemaName))]
+  for (const source of sources)
+    groups.push({
+      title: sources.length > 1 ? `Fields from ${displayLabel(source)}` : null,
+      items: baseFields
+        .filter((f) => f.sourceSchemaName === source)
+        .map((f) => ({
+          value: f.name,
+          label: displayLabel(f.name, f.label),
+        })),
+    })
+  const byRef = new Map<string, JoinableColumn[]>()
+  for (const j of joinable)
+    byRef.set(j.refField.name, [...(byRef.get(j.refField.name) ?? []), j])
+  for (const [ref, joins] of byRef)
+    groups.push({
+      title: `From the linked ${displayLabel(ref, joins[0].refField.label)}`,
+      items: joins.map((j) => ({
+        value: j.value,
+        label: displayLabel(j.targetField.name, j.targetField.label),
+      })),
+    })
 
-  function toggle(col: string) {
-    // Shift-click: everything from the last box clicked to this one takes the
-    // state this one is going to.
-    const ids = range.rangeFor(col)
-    const on = !columns.includes(col)
-    if (!ids) {
-      onChange(on ? [...columns, col] : columns.filter((c) => c !== col))
-      return
-    }
-    onChange(
-      on
-        ? [...columns, ...ids.filter((c) => !columns.includes(c))]
-        : columns.filter((c) => !ids.includes(c)),
-    )
-  }
+  const wanted = search.trim().toLowerCase()
+  const notShown = groups
+    .map((g) => ({
+      ...g,
+      items: g.items.filter(
+        (i) =>
+          !columns.includes(i.value) &&
+          (!wanted || i.label.toLowerCase().includes(wanted)),
+      ),
+    }))
+    .filter((g) => g.items.length > 0)
+  const range = useRangeSelect(
+    notShown.flatMap((g) => g.items.map((i) => i.value)),
+  )
 
-  function move(index: number, direction: 'up' | 'down') {
-    const target = direction === 'up' ? index - 1 : index + 1
-    if (target < 0 || target >= columns.length) return
-    const next = [...columns]
-    ;[next[index], next[target]] = [next[target], next[index]]
-    onChange(next)
+  function add(col: string) {
+    // Shift-click: everything from the last box clicked to this one comes in.
+    const ids = range.rangeFor(col) ?? [col]
+    onChange([...columns, ...ids.filter((c) => !columns.includes(c))])
   }
+  const label = (col: string) => columnLabel(col, baseFields, joinable, extra)
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div className="border border-border rounded-md p-3 max-h-80 overflow-y-auto">
-        <Subheading className="mb-2">Available columns</Subheading>
-        <div className="flex flex-col gap-1">
-          {baseFields.map((field) => (
-            <label
-              key={field.name}
-              onClick={range.onClick}
-              className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none py-0.5"
+    <div className="space-y-4">
+      <section className="space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="text-sm font-semibold text-fg">
+            Shown ({columns.length}){' '}
+            <span className="font-normal text-fg-muted">in this order</span>
+          </h4>
+          <span className="flex gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onChange(baseFields.map((f) => f.name))}
             >
-              <Checkbox
-                checked={columns.includes(field.name)}
-                onClick={range.onClick}
-                onChange={() => toggle(field.name)}
-              />
-              {displayLabel(field.name, field.label)}
-            </label>
-          ))}
+              Show every field
+            </Button>
+            {allowHideAll && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={columns.length === 0}
+                onClick={() => onChange([])}
+              >
+                Hide all
+              </Button>
+            )}
+          </span>
         </div>
-
-        {joinsByRef.size > 0 && (
-          <div className="mt-3 flex flex-col gap-3">
-            {[...joinsByRef.entries()].map(([refName, joins]) => (
-              <div key={refName}>
-                <h4 className="text-xs font-medium text-fg-subtle mb-1">
-                  via {displayLabel(refName, joins[0].refField.label)}
-                </h4>
-                <div className="flex flex-col gap-1 pl-2">
-                  {joins.map((join) => (
-                    <label
-                      key={join.value}
-                      onClick={range.onClick}
-                      className="flex items-center gap-2 text-sm text-fg cursor-pointer select-none py-0.5"
-                    >
-                      <Checkbox
-                        checked={columns.includes(join.value)}
-                        onClick={range.onClick}
-                        onChange={() => toggle(join.value)}
-                      />
-                      {displayLabel(
-                        join.targetField.name,
-                        join.targetField.label,
-                      )}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="border border-border rounded-md p-3 max-h-80 overflow-y-auto">
-        <Subheading as="h3">Selected columns</Subheading>
         {columns.length === 0 ? (
-          <p className="text-sm text-fg-subtle italic">
-            No columns selected yet — pick some on the left.
+          <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-fg-muted">
+            No columns shown yet. Pick some below.
           </p>
         ) : (
-          <ul className="flex flex-col gap-1">
-            {columns.map((col, index) => (
-              <li
-                key={col}
-                className="flex items-center gap-2 text-sm text-fg bg-canvas-subtle rounded-md px-2 py-1"
-              >
-                <span className="flex-1 truncate">
-                  {columnLabel(col, baseFields, joinable)}
-                </span>
-                <IconButton
-                  icon={ChevronUp}
-                  aria-label={`Move ${col} earlier`}
-                  variant="subtle"
-                  size="sm"
-                  disabled={index === 0}
-                  onClick={() => move(index, 'up')}
-                />
-                <IconButton
-                  icon={ChevronDown}
-                  aria-label={`Move ${col} later`}
-                  variant="subtle"
-                  size="sm"
-                  disabled={index === columns.length - 1}
-                  onClick={() => move(index, 'down')}
-                />
-                <IconButton
-                  icon={X}
-                  aria-label={`Remove ${col}`}
-                  variant="subtle"
-                  size="sm"
-                  onClick={() => toggle(col)}
-                />
-              </li>
-            ))}
-          </ul>
+          <div className="max-h-64 overflow-y-auto rounded-md border border-border bg-canvas">
+            <SortableList
+              label="Shown columns"
+              items={columns}
+              getKey={(c) => c}
+              getLabel={label}
+              moveButtons="always"
+              onReorder={(next) => onChange(next)}
+              renderItem={(col) => (
+                <label className="flex cursor-pointer select-none items-center gap-2 px-2 py-2 text-sm text-fg">
+                  <Checkbox
+                    checked
+                    aria-label={`Show ${label(col)}`}
+                    onChange={() => onChange(columns.filter((c) => c !== col))}
+                  />
+                  {label(col)}
+                </label>
+              )}
+            />
+          </div>
         )}
-      </div>
+      </section>
+
+      <section className="space-y-1.5">
+        <h4 className="text-sm font-semibold text-fg">Not shown</h4>
+        <Input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Find a column to add…"
+          aria-label="Find a column to add"
+          className="w-full"
+        />
+        <div className="max-h-64 space-y-3 overflow-y-auto rounded-md border border-border bg-canvas p-2">
+          {notShown.length === 0 && (
+            <p className="px-1 py-2 text-sm text-fg-muted">
+              {wanted ? 'Nothing matches.' : 'Every column is shown.'}
+            </p>
+          )}
+          {notShown.map((g) => (
+            <div key={g.title ?? ''}>
+              {g.title && (
+                <h5 className="mb-1 px-1 text-xs font-medium text-fg-subtle">
+                  {g.title}
+                </h5>
+              )}
+              {g.items.map((i) => (
+                <label
+                  key={i.value}
+                  onClick={range.onClick}
+                  className="flex cursor-pointer select-none items-center gap-2 rounded px-2 py-1.5 text-sm text-fg hover:bg-canvas-subtle"
+                >
+                  <Checkbox
+                    checked={false}
+                    aria-label={`Show ${i.label}`}
+                    onClick={range.onClick}
+                    onChange={() => add(i.value)}
+                  />
+                  {i.label}
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   )
 }

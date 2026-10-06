@@ -24,7 +24,9 @@ from civex.domain.transfers import (
     FINISHED,
     KIND_CONSOLIDATE,
     KIND_DRAIN,
+    KIND_FILES,
     KINDS,
+    MAX_TRANSFER_FILES,
     RESUMABLE,
     STARTABLE,
     STATUS_CANCELLED,
@@ -197,6 +199,14 @@ class TransferService:
                 )
         if spec.kind == KIND_CONSOLIDATE:
             plan.problems += self._check_collections(spec)
+        if spec.kind == KIND_FILES:
+            if not spec.shas:
+                plan.problems.append("Choose which files to move.")
+            elif len(spec.shas) > MAX_TRANSFER_FILES:
+                plan.problems.append(
+                    f"That is {len(spec.shas):,} files; one move takes up to "
+                    f"{MAX_TRANSFER_FILES:,}. Narrow the selection."
+                )
         if plan.problems:
             return plan
 
@@ -224,6 +234,8 @@ class TransferService:
                     + ", ".join(f"'{s}'" for s in spec.sources)
                     + ", so there is nothing to move."
                 )
+        elif spec.kind == KIND_FILES:
+            self._size_files(spec, plan)
         else:
             self._size_consolidation(spec, plan)
 
@@ -255,6 +267,28 @@ class TransferService:
             if dataset is None:
                 problems.append("A chosen collection no longer exists.")
         return problems
+
+    def _size_files(self, spec: TransferSpec, plan: TransferPlan) -> None:
+        """Count what moving the named files would do, from the catalog."""
+        unknown = 0
+        for start in range(0, len(spec.shas), PAGE):
+            rows = self._store.inventory_rows(spec.shas[start : start + PAGE])
+            for sha in spec.shas[start : start + PAGE]:
+                row = rows.get(sha)
+                if row is None:
+                    unknown += 1
+                    continue
+                volume, size = row
+                if volume in spec.targets:
+                    plan.already_there += 1
+                else:
+                    plan.files += 1
+                    plan.bytes += size
+        if unknown:
+            plan.warnings.append(
+                f"{unknown} of these file(s) aren't in the catalog, so they aren't "
+                "counted here; the transfer moves what it finds."
+            )
 
     def _size_consolidation(self, spec: TransferSpec, plan: TransferPlan) -> None:
         """Count what consolidating would move, skip and leave, the way the
@@ -358,6 +392,7 @@ class TransferService:
         queue (the server's worker, or the CLI that made it) starts it when its
         turn comes. Raises ValidationError, saying why, if it can't be done."""
         spec.collection_ids = [str(uuid.UUID(c)) for c in spec.collection_ids]
+        spec.shas = list(dict.fromkeys(sha.lower() for sha in spec.shas))
         plan = self.plan(spec)
         if not plan.can_proceed:
             raise ValidationError(" ".join(plan.problems))
