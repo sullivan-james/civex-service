@@ -52,32 +52,27 @@ describe('syncNotice', () => {
     expect(syncNotice(before, after, false)).toBeNull()
     expect(syncNotice(before, after, true)?.message).toBe('Already up to date')
   })
-  it('flags conflicts', () => {
-    const n = syncNotice(
-      before,
-      status({ last_synced_at: 'T2', last_result: result({ conflicts: 2 }) }),
-      false,
-    )
-    expect(n?.variant).toBe('error')
-    expect(n?.message).toContain('2 values to review')
+  it('leaves values to review, and refusals, to the status bar', () => {
+    const only = status({
+      last_synced_at: 'T2',
+      last_result: result({ conflicts: 2, rejected: 1 }),
+    })
+    expect(syncNotice(before, only, false)).toBeNull()
+    // Even one that was asked for: the bar shows it, with its Review action.
+    expect(syncNotice(before, only, true)).toBeNull()
+    // What else the sync did is still good news, said without the trouble.
+    const mixed = status({
+      last_synced_at: 'T2',
+      last_result: result({ pulled: 3, conflicts: 2 }),
+    })
+    expect(syncNotice(before, mixed, false)).toEqual({
+      variant: 'success',
+      message: 'Synced: received 3 changes',
+    })
   })
-  it('tells a new failure once, not at every retry', () => {
+  it('does not toast a failure, which stays in the status bar', () => {
     const failed = status({ last_error: 'down', last_error_at: 'E1' })
-    expect(syncNotice(before, failed, false)?.variant).toBe('error')
-    const again = status({ last_error: 'down', last_error_at: 'E2' })
-    expect(
-      syncNotice(
-        { ...before, last_error: 'down', last_error_at: 'E1' },
-        again,
-        false,
-      ),
-    ).toBeNull()
-    expect(
-      syncNotice(
-        { ...before, last_error: 'down', last_error_at: 'E1' },
-        again,
-        true,
-      )?.variant,
-    ).toBe('error')
+    expect(syncNotice(before, failed, false)).toBeNull()
+    expect(syncNotice(before, failed, true)).toBeNull()
   })
 })

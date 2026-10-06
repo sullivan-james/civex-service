@@ -21,6 +21,7 @@ import {
 } from '../ui'
 import { AuditChangeList } from './AuditChanges'
 import { EntrySubject } from './EntrySubject'
+import { SyncOutcome } from './SyncOutcome'
 
 const REVERTIBLE_ACTIONS = ['update', 'create']
 
@@ -68,6 +69,7 @@ export function AuditEntryDialog({
               {new Date(entry.timestamp).toLocaleString()}
               {entry.actor ? ` · by ${entry.actor}` : ''}
             </p>
+            <SyncOutcome entry={entry} />
             <AuditChangeList changes={entry.changes} action={entry.action} />
           </ModalBody>
           <ModalFooter>

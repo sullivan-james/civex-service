@@ -11,15 +11,14 @@ const GIVE_UP_MS = 60_000
 
 interface Asked {
   synced: string | null
-  error: string | null
   errorAt: string | null
   at: number
 }
 
 /** The top-bar sync button's behaviour: pressing it asks for a sync and `spinning`
- * stays true until that sync has finished (it is answered by a toast); syncs that
- * run by themselves are told only when they did something or went wrong (see
- * `syncNotice`). */
+ * stays true until that sync has finished (a good result is answered by a toast;
+ * a failure or values to review are the status bar's, see `syncNotice`); syncs
+ * that run by themselves are told only when they did something. */
 export function useManualSync() {
   const { data } = useRemoteStatus()
   const syncNow = useSyncNow()
@@ -29,9 +28,7 @@ export function useManualSync() {
 
   const tell = useCallback(
     (notice: ReturnType<typeof syncNotice>) => {
-      if (!notice) return
-      if (notice.variant === 'error') toast.error(notice.message)
-      else toast.success(notice.message)
+      if (notice) toast.success(notice.message)
     },
     [toast],
   )
@@ -58,17 +55,7 @@ export function useManualSync() {
     if (!asked || !answered || !data) return
     const timer = setTimeout(
       () => {
-        tell(
-          syncNotice(
-            {
-              last_synced_at: asked.synced,
-              last_error: asked.error,
-              last_error_at: asked.errorAt,
-            },
-            data,
-            true,
-          ),
-        )
+        tell(syncNotice({ last_synced_at: asked.synced }, data, true))
         setAsked(null)
       },
       Math.max(0, asked.at + MIN_SPIN_MS - Date.now()),
@@ -86,7 +73,6 @@ export function useManualSync() {
     (after?: () => void) => {
       setAsked({
         synced: data?.last_synced_at ?? null,
-        error: data?.last_error ?? null,
         errorAt: data?.last_error_at ?? null,
         at: Date.now(),
       })

@@ -333,7 +333,7 @@ class SyncConflictDTO:
     status: str  # open | resolved
     created_at: str
     resolved_at: str | None
-    resolution: str | None  # mine | theirs | value | delete | retry
+    resolution: str | None  # mine | theirs | value | edited | delete | retry
     # What the value was before either side changed it, and who wrote the one that
     # stayed, and when.
     base: Any = None
@@ -356,6 +356,12 @@ class SyncConflictDTO:
     # The other values the same edit set that did go in: what a person checking a
     # clash wants to see is that nothing else of theirs was lost.
     also_saved: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    # For a refused change or an edit/delete that met its opposite: what was
+    # attempted (create | update | delete) and the fields it set, each with the
+    # value before, the value it set and the value on the record now, so the
+    # record page can show the change in place of describing it.
+    attempted: str | None = None
+    changes: list[dict[str, Any]] = dataclasses.field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -386,6 +392,8 @@ class SyncConflictDTO:
             "record_deleted": self.record_deleted,
             "takes": self.takes,
             "also_saved": self.also_saved,
+            "attempted": self.attempted,
+            "changes": self.changes,
         }
 
 

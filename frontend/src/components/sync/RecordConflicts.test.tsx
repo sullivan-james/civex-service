@@ -1,99 +1,82 @@
 import { render, screen } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { SyncConflict } from '../../api/remote'
+import { layoutConflicts } from '../../utils/syncConflicts'
 import { RecordConflicts } from './RecordConflicts'
 
-let conflictCalls: number
+const FIELDS = [{ id: 'f1', name: 'site' }]
 
-function conflict(id: string, entity: string) {
+function conflict(extra: Partial<SyncConflict> = {}): SyncConflict {
   return {
-    id,
+    id: 'c1',
     kind: 'conflict',
     entity_type: 'record',
-    entity_id: entity,
+    entity_id: 'r1',
     field: 'data.f1',
-    yours: 'a',
-    theirs: 'b',
-    base: null,
     theirs_actor: null,
     theirs_at: null,
-    device_name: null,
     message: null,
-    status: 'open',
-    created_at: '2026-10-05T10:00:00Z',
-    resolved_at: null,
-    resolution: null,
-    record_name: 'Dive',
-    dataset_name: 'study',
-    schema_name: 'encounter',
-    field_label: 'Site',
-    dtype: 'string',
-    current: 'b',
-    stale: false,
-    record_deleted: false,
-    takes: ['theirs', 'mine'],
-    also_saved: [],
-  }
+    attempted: null,
+    changes: [],
+    ...extra,
+  } as SyncConflict
 }
 
-function serve(open: number) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (url: string) => {
-      const path = String(url)
-      const json = (b: unknown) =>
-        new Response(JSON.stringify(b), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      if (path.includes('/conflicts?')) {
-        conflictCalls++
-        return json([conflict('c1', 'r1'), conflict('c2', 'other')])
-      }
-      return json({
-        configured: true,
-        open_conflicts: open,
-        pending: 0,
-        running: false,
-      })
-    }),
+function show(conflicts: SyncConflict[], onResolve = vi.fn()) {
+  render(
+    <MemoryRouter>
+      <RecordConflicts
+        layout={layoutConflicts(conflicts, FIELDS)}
+        onResolve={onResolve}
+      />
+    </MemoryRouter>,
   )
+  return onResolve
 }
-
-function show() {
-  return render(
-    <QueryClientProvider client={new QueryClient()}>
-      <MemoryRouter>
-        <RecordConflicts recordId="r1" />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  )
-}
-
-beforeEach(() => {
-  conflictCalls = 0
-})
-afterEach(() => vi.unstubAllGlobals())
 
 describe('RecordConflicts', () => {
-  it('shows only this record’s conflicts, with the choices inline', async () => {
-    serve(2)
-    show()
-    expect(
-      await screen.findByText(
-        '1 of your changes to this record was not applied',
-      ),
-    ).toBeInTheDocument()
-    expect(screen.getAllByRole('article')).toHaveLength(1)
-    expect(screen.getByRole('button', { name: 'Use mine' })).toBeInTheDocument()
+  it('says nothing while there is nothing to review', () => {
+    show([])
+    expect(screen.queryByRole('region')).toBeNull()
   })
 
-  it('says nothing, and asks for nothing, while there is nothing to review', async () => {
-    serve(0)
-    show()
-    await new Promise((r) => setTimeout(r, 50))
-    expect(screen.queryByRole('region')).toBeNull()
-    expect(conflictCalls).toBe(0)
+  it('counts them and opens the side-by-side view', async () => {
+    const open = show([conflict(), conflict({ id: 'c2' })])
+    expect(
+      screen.getByText('2 of your changes to this record were not applied'),
+    ).toBeInTheDocument()
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Resolve side by side' }),
+    )
+    expect(open).toHaveBeenCalled()
+  })
+
+  it('says why a refused change was refused', () => {
+    show([
+      conflict({
+        kind: 'rejected',
+        field: null,
+        attempted: 'create',
+        message: 'site "z" is already used',
+      }),
+    ])
+    expect(
+      screen.getByText(/This record was refused when it was sent/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/already used/)).toBeInTheDocument()
+  })
+
+  it('says who deleted what an edit met', () => {
+    show([
+      conflict({
+        kind: 'edit_vs_delete',
+        field: null,
+        attempted: 'update',
+        theirs_actor: 'laptop',
+      }),
+    ])
+    expect(screen.getByText(/deleted elsewhere \(laptop/)).toBeInTheDocument()
   })
 })

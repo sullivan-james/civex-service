@@ -707,6 +707,11 @@ class AuditLogDTO:
     # Who made the change, as the machine that made it reported it (the OS
     # user). None for entries from before this was recorded.
     actor: str | None = None
+    # Response-only, like `changes`: what became of this change when it was sent
+    # to the authority, if it did not go in as made -- `SyncConflictDTO.to_dict()`
+    # rows (clashes, a refusal, an edit against a delete), open or settled. Never
+    # stored, and never in a sync bundle.
+    sync: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {

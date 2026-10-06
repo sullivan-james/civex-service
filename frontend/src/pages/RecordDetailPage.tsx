@@ -48,10 +48,19 @@ import { ActivityFeed } from '../components/audit/ActivityFeed'
 import { underRecord } from '../utils/auditFilter'
 import { DeletedFieldValues } from '../components/records/DeletedFieldValues'
 import { RecordFieldGrid } from '../components/records/RecordFieldGrid'
+import { MergeView } from '../components/sync/MergeView'
+import { ReviewStepper } from '../components/sync/ReviewStepper'
 import { RecordConflicts } from '../components/sync/RecordConflicts'
+import { layoutConflicts } from '../utils/syncConflicts'
+import {
+  useConflictsAbout,
+  useMergeConflicts,
+  useResolveConflict,
+} from '../hooks/useRemote'
 
 const RECORD_TABS = [
   { id: 'fields' },
+  { id: 'resolve' },
   { id: 'contains' },
   { id: 'referenced' },
   { id: 'runs' },
@@ -76,6 +85,15 @@ export default function RecordDetailPage() {
   // quiet: the field itself shows the outcome (new value, or the error under it)
   const updateRecord = useUpdateRecord({ quiet: true })
   const deleteRecord = useDeleteRecord(collection?.name ?? '')
+  // What the authority did not take of this record's changes (nothing, and not
+  // even asked for, while there is nothing to review).
+  const conflictsAbout = useConflictsAbout(id ?? '')
+  const settleConflict = useResolveConflict()
+  // The Resolve tab's rows: the open ones and those settled since it opened.
+  const { data: mergeConflicts } = useMergeConflicts(
+    id ?? '',
+    tab === 'resolve',
+  )
 
   // Everything below this record (children, grandchildren, …) -- the
   // explorer lists it; this total is what deleting the record would take too.
@@ -129,12 +147,26 @@ export default function RecordDetailPage() {
     (wf) => !wf.record_schema || wf.record_schema === record.schema_name,
   )
   const showContains = (hasChildSchemas || descendantTotal > 0) && !!collection
-  const shownTab = tab === 'contains' && !showContains ? 'fields' : tab
+  // The Resolve tab is there while there is something to settle, and stays while
+  // the rows just settled are still on screen.
+  const showResolve =
+    conflictsAbout.length > 0 || (mergeConflicts?.length ?? 0) > 0
+  const shownTab =
+    (tab === 'contains' && !showContains) || (tab === 'resolve' && !showResolve)
+      ? 'fields'
+      : tab
   // A failed save is shown under the field it was for.
   const saveErrors = fieldSaveErrors(
     updateRecord.error,
     (schema?.fields ?? []).map((f) => f.name),
     savingField,
+  )
+
+  // Where the conflicts are shown: a clash under its field, a refused change
+  // beside the fields it set, the rest in the banner.
+  const conflictLayout = layoutConflicts(
+    conflictsAbout,
+    (schema?.fields ?? []).map((f) => ({ id: f.id, name: f.name })),
   )
 
   // PATCH replaces the whole data object, so send this field on top of the
@@ -144,7 +176,17 @@ export default function RecordDetailPage() {
     const next = { ...record!.data }
     if (value === undefined) delete next[name]
     else next[name] = value
-    updateRecord.mutate({ id: record!.id, data: next })
+    updateRecord.mutate(
+      { id: record!.id, data: next },
+      {
+        // Setting a field that clashed by hand settles the clash: the person
+        // has chosen, and it is an edit like any other.
+        onSuccess: () => {
+          for (const c of conflictLayout.clashes.get(name) ?? [])
+            settleConflict.mutate({ id: c.id, take: 'edited' })
+        },
+      },
+    )
   }
 
   return (
@@ -220,6 +262,14 @@ export default function RecordDetailPage() {
             onChange={setTab}
             tabs={[
               { id: 'fields' as const, label: 'Fields' },
+              ...(showResolve
+                ? [
+                    {
+                      id: 'resolve' as const,
+                      label: `Resolve (${conflictsAbout.length})`,
+                    },
+                  ]
+                : []),
               ...(showContains
                 ? [
                     {
@@ -242,7 +292,25 @@ export default function RecordDetailPage() {
           </>
         }
       >
-        <RecordConflicts recordId={record.id} />
+        <ReviewStepper recordId={record.id} active={shownTab === 'resolve'} />
+        {shownTab === 'fields' && (
+          <RecordConflicts
+            layout={conflictLayout}
+            onResolve={() => setTab('resolve')}
+          />
+        )}
+        <TabPanel id="resolve" value={shownTab}>
+          <MergeView
+            recordId={record.id}
+            fields={schema?.fields ?? []}
+            data={record.data}
+            conflicts={mergeConflicts ?? []}
+            referenceLabels={record.reference_labels}
+            referenceCollections={record.reference_collections}
+            onSave={saveField}
+            onClose={() => setTab('fields')}
+          />
+        </TabPanel>
         <TabPanel id="fields" value={shownTab}>
           <UploadCollectionContext.Provider value={record.dataset_id}>
             <div className="mb-3">
@@ -268,6 +336,7 @@ export default function RecordDetailPage() {
               onSave={saveField}
               errors={saveErrors}
               onDismissError={() => updateRecord.reset()}
+              marked={conflictLayout.marked}
             />
             <DeletedFieldValues fields={record.deleted_fields ?? []} />
           </UploadCollectionContext.Provider>

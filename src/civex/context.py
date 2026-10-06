@@ -242,7 +242,13 @@ def build_local_context(
         LocalExportDefinitionRepository(session), schema_svc, record_svc
     )
     history_svc = AuditService(
-        audit_repo, schema_svc, record_svc, dataset_svc, file_store
+        audit_repo,
+        schema_svc,
+        record_svc,
+        dataset_svc,
+        file_store,
+        # `sync_svc` is built below; history only asks for it when it is read.
+        sync_conflicts=lambda ids: sync_svc.conflicts_of_entries(ids),
     )
 
     retention_svc = RetentionService(

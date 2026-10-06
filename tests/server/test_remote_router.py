@@ -63,3 +63,27 @@ def test_a_conflict_that_moved_on_answers_409_with_what_is_there_now(
     from civex.server.errors import _status_for
 
     assert _status_for(ConflictMovedError("moved", "newer")) == 409
+
+
+def test_settling_many_with_nothing_open_settles_nothing(client: TestClient) -> None:
+    body = client.post("/api/remote/conflicts/resolve-many", json={"take": "theirs"})
+    assert body.status_code == 200, body.text
+    assert body.json() == {"done": 0, "settled_ids": [], "not_offered": 0, "failed": []}
+    assert (
+        client.post(
+            "/api/remote/conflicts/resolve-many", json={"take": "theirs", "ids": ["no"]}
+        ).status_code
+        == 422
+    )
+    # A typed value is one per conflict, so it is not a bulk way.
+    assert (
+        client.post(
+            "/api/remote/conflicts/resolve-many", json={"take": "value"}
+        ).status_code
+        == 422
+    )
+
+
+def test_reopening_nothing_reopens_nothing(client: TestClient) -> None:
+    resp = client.post("/api/remote/conflicts/reopen", json={"ids": []})
+    assert resp.json() == {"reopened": 0}

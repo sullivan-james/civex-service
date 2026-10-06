@@ -25,6 +25,7 @@ from civex import user_state
 from civex.config import Config, save_config
 from civex.domain import hlc
 from civex.domain.exceptions import (
+    CivexError,
     ConflictMovedError,
     ValidationError,
     VolumeUnavailableError,
@@ -57,6 +58,9 @@ FILE_CHECK_PAGE = 1000
 FEED_PAGE = 200
 SNAPSHOT_PAGE = 200
 
+# Stands for "the value on the record now" in an attempt's fields, until it is read.
+_NOW: Any = object()
+
 TransportFactory = Callable[[str, str, str], SyncTransport]
 
 
@@ -79,6 +83,16 @@ class SyncReport:
     @property
     def changed(self) -> bool:
         return bool(self.pulled or self.pushed or self.files_sent)
+
+
+@dataclass
+class ResolveManyReport:
+    """What settling several conflicts at once did."""
+
+    done: int = 0  # settled (or, for a dry run, that would be)
+    settled: list[uuid.UUID] = field(default_factory=list)  # which (not a dry run)
+    not_offered: int = 0  # left open: this way of settling isn't theirs to take
+    failed: list[tuple[uuid.UUID, str]] = field(default_factory=list)  # left open
 
 
 @dataclass
@@ -147,9 +161,25 @@ class SyncService:
             serving=self._config.sync.serve,
         )
 
-    def conflicts(self, status: str | None = "open") -> list[SyncConflictDTO]:
-        """The conflicts, each described for a person (`_describe`)."""
-        return self._describe(self._repo.list_conflicts(status))
+    def conflicts(
+        self, status: str | None = "open", entity_id: uuid.UUID | None = None
+    ) -> list[SyncConflictDTO]:
+        """The conflicts (of one thing, if `entity_id`), each described for a
+        person (`_describe`)."""
+        return self._describe(self._repo.list_conflicts(status, entity_id=entity_id))
+
+    def conflicts_of_entries(
+        self, entry_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, list[SyncConflictDTO]]:
+        """The conflicts, open or settled, each history entry gave rise to (an
+        entry is the change that was sent, and a conflict remembers which), so
+        history can show that a change did not go in as made and how it ended.
+        One lookup for the whole page."""
+        out: dict[uuid.UUID, list[SyncConflictDTO]] = {}
+        for c in self._describe(self._repo.conflicts_of_ops(entry_ids)):
+            if c.op_id is not None:
+                out.setdefault(c.op_id, []).append(c)
+        return out
 
     def _describe(self, found: list[SyncConflictDTO]) -> list[SyncConflictDTO]:
         """Add what a row needs to be recognised and acted on: the record's name
@@ -158,11 +188,16 @@ class SyncService:
         else the same edit saved. Worked out when read, so a rename shows and
         nothing is copied into the row."""
         saved = {c.id: self._also_saved(c, found) for c in found}
+        attempts = {c.id: self._attempt(c) for c in found}
         pairs = [
             (str(c.entity_id), fid)
             for c in found
             if c.entity_type == "record"
-            for fid in [_field_id(c) or "", *saved[c.id]]
+            for fid in [
+                _field_id(c) or "",
+                *saved[c.id],
+                *attempts[c.id][1],
+            ]
         ]
         values = self._records.field_values(pairs)
         out = []
@@ -193,9 +228,56 @@ class SyncService:
                     record_deleted=v.record_deleted,
                     takes=takes,
                     also_saved=also,
+                    attempted=attempts[c.id][0],
+                    changes=[
+                        {
+                            "field_id": fid,
+                            "field_name": w.field_name,
+                            "field_label": w.field_label,
+                            "dtype": w.dtype,
+                            "before": without_file_locations(before),
+                            "after": without_file_locations(
+                                w.value if after is _NOW else after
+                            ),
+                            "current": without_file_locations(w.value),
+                        }
+                        for fid, (before, after) in attempts[c.id][1].items()
+                        if (w := values.get((str(c.entity_id), fid)))
+                        and w.field_label
+                        and (
+                            after is not _NOW
+                            or without_file_locations(before)
+                            != without_file_locations(w.value)
+                        )
+                    ],
                 )
             )
         return out
+
+    def _attempt(
+        self, conflict: SyncConflictDTO
+    ) -> tuple[str | None, dict[str, tuple[Any, Any]]]:
+        """What the change behind a refusal, or an edit that met a delete, was
+        trying to do: its action and, field id by field id, the value before and
+        the value it set (only those it changed). `(None, {})` for a clash (which
+        names its own field) or when the entry is not there."""
+        if conflict.kind == "conflict" or conflict.entity_type != "record":
+            return None, {}
+        entry = self._repo.get_entry(conflict.op_id) if conflict.op_id else None
+        if entry is None:
+            return None, {}
+        before = (entry.old_data or {}).get("data") or {}
+        after = (entry.new_data or {}).get("data") or {}
+        if entry.action == "delete":
+            # A delete sets nothing. What there is to see is what the other side
+            # did meanwhile (the reason it was not applied): the record as it was
+            # when it was deleted, and as it is now. `_describe` fills in "now".
+            return entry.action, {fid: (before[fid], _NOW) for fid in sorted(before)}
+        return entry.action, {
+            fid: (before.get(fid), after.get(fid))
+            for fid in sorted(set(before) | set(after))
+            if before.get(fid) != after.get(fid)
+        }
 
     def _also_saved(
         self, conflict: SyncConflictDTO, rows: list[SyncConflictDTO]
@@ -772,8 +854,10 @@ class SyncService:
         """Settle a conflict. What can be done depends on what it is:
 
         - a clashing value: `theirs` keeps what the authority has (nothing to do:
-          this project already agrees), `mine` puts this device's value back and
-          `value` puts another one;
+          this project already agrees), `mine` puts this device's value back,
+          `value` puts another one, and `edited` closes it because the person
+          has just set the field on the record page themselves (an ordinary edit
+          there, so nothing is put back here);
         - an edit to something deleted there: `theirs` keeps it as it is,
           `delete` deletes it;
         - a refused change: `retry` sends it again from the thing as it is now
@@ -786,7 +870,11 @@ class SyncService:
         conflict = self._repo.get_conflict(conflict_id)
         if conflict is None or conflict.status != "open":
             raise ValidationError("That conflict is not open")
-        if take not in _takes_for(conflict):
+        # `edited` is not a choice to offer: the record page sends it once the
+        # person has set the field themselves, so a clash is all it closes.
+        if take not in _takes_for(conflict) and not (
+            take == "edited" and conflict.kind == "conflict"
+        ):
             raise ValidationError(f"A {conflict.kind} can't be settled with '{take}'")
         if take in ("mine", "value"):
             self._put_value(
@@ -798,6 +886,60 @@ class SyncService:
             self._resend(conflict)
         self._repo.resolve_conflict(conflict_id, take)
         self._commit()
+
+    def resolve_many(
+        self,
+        take: str,
+        *,
+        ids: list[uuid.UUID] | None = None,
+        kind: str | None = None,
+        entity_id: uuid.UUID | None = None,
+        force: bool = False,
+        dry_run: bool = False,
+    ) -> ResolveManyReport:
+        """Settle every open conflict matching all that is given (`ids`, `kind`,
+        the record it is about; nothing given = all of them) the same way.
+
+        A conflict that doesn't offer `take` is left open and counted in
+        `not_offered`; one that fails its checks (a value that changed again, a
+        field that is gone) is left open and listed in `failed`, and the rest still
+        go. `theirs` is bookkeeping (this project already holds the authority's
+        value), so it is one statement and one commit however many there are; any
+        other way is an ordinary edit per conflict. `dry_run` only counts."""
+        report = ResolveManyReport()
+        offered: list[SyncConflictDTO] = []
+        for c in self._repo.find_open_conflicts(
+            ids=ids, kind=kind, entity_id=entity_id
+        ):
+            if take in _takes_for(c):
+                offered.append(c)
+            else:
+                report.not_offered += 1
+        if dry_run:
+            report.done = len(offered)
+            return report
+        if take == "theirs":
+            report.settled = [c.id for c in offered]
+            report.done = self._repo.resolve_conflicts(report.settled, take)
+            self._commit()
+            return report
+        for c in offered:
+            try:
+                self.resolve_conflict(c.id, take, force=force)
+                report.done += 1
+                report.settled.append(c.id)
+            except CivexError as e:
+                report.failed.append((c.id, str(e)))
+        return report
+
+    def reopen_conflicts(self, ids: list[uuid.UUID]) -> int:
+        """Take back conflicts settled with `theirs`: that choice changed nothing
+        in the data, so the row can simply be open again. Putting a value back,
+        deleting or sending again each made an edit, which is undone from
+        Activity (they are not reopened here). Returns how many were reopened."""
+        n = self._repo.reopen_conflicts(ids, "theirs")
+        self._commit()
+        return n
 
     def _put_value(self, conflict: SyncConflictDTO, value: Any, force: bool) -> None:
         field_id = _field_id(conflict)

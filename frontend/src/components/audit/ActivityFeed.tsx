@@ -30,6 +30,7 @@ import { RestoreDialog } from '../trash/RestoreDialog'
 import { AuditEntryDialog } from './AuditEntryDialog'
 import { BatchDialog } from './BatchDialog'
 import { EntrySubject } from './EntrySubject'
+import { SyncBadge } from './SyncOutcome'
 
 type Variant = 'default' | 'accent' | 'success' | 'danger' | 'attention'
 
@@ -229,6 +230,7 @@ export function ActivityFeed({
                     </Badge>
                     {title}
                     <Now event={e} />
+                    {e.entry && <SyncBadge entry={e.entry} />}
                   </span>
                   {e.entry && <EntrySubject entry={e.entry} />}
                   {detail && (

@@ -81,18 +81,45 @@ them under the device's name.
 
 ### Reviewing conflicts
 
-A conflict shows the record and field by name, what the value was before either of
-you changed it, the value that stayed (and who wrote it, and when), and yours. It
-also lists the other values of the same edit that did go in, so you can see
-nothing else was lost.
+Settling happens on the **record's own page**, in a side-by-side view like a
+version-control merge. **Review** (the status bar, or Settings → Sync) is the inbox
+that gets you there: every change that did not go in as made, which record it was,
+and a **Resolve** link on each row; **Start review** takes you through them record
+by record.
 
-- On the **record's page**, a banner lists that record's conflicts with the choices
-  beside them.
-- **Review** (the status bar, or Settings → Sync) opens them one at a time: ← →
-  to move, `1` and `2` for the first two buttons. **List** shows them all, with
-  tick boxes (shift-click for a range) to settle many at once.
+On a record with something to settle, a **Resolve** tab opens the merge view:
 
-Each is settled with one of:
+- **Left** is the other side (what the authority kept), **right** is yours, and the
+  **middle** is what the record is now. Words, list items and values that differ are
+  marked on each side, and what it was before either of you changed it is shown
+  above.
+- **Accept theirs** / **Accept yours** settles one field; **Accept all theirs** /
+  **Accept all yours** settles every clash on the record. Or click the result and
+  set the value yourself, with the field's usual input: that settles it too.
+- A change the authority **refused** has its own block with the reason, what each
+  field was before and what you set it to, and **Send again** once you have fixed
+  the values in the middle. An edit that met a **delete** says who deleted the record
+  and offers **Keep it** or **Delete it**; either way nothing was lost to get here.
+  A delete that met an **edit** shows what the other side changed.
+- Rows you settle stay on screen, marked, until you leave: **Undo** takes back
+  *Keep theirs*.
+- While you review, a **stepper** at the top of each record page shows every record
+  you are going through (ticked once settled), with **Next** to the next one still to
+  do. **Exit review** ends it.
+
+The **Fields** tab marks the fields that clashed, and a banner there takes you to
+the merge view.
+
+The review page narrows by kind (**Show**), settles ticked rows, and has **Keep
+theirs for all**: it counts first and says what goes (your parked values; your data
+doesn't change), and **Undo** is there straight afterwards.
+
+In **Activity**, a change that did not go in as made carries a badge (*Clashed*,
+*Refused*, *Met a delete*, or *Sync: settled*), and its window shows both sides the
+same way, how it ended, and a link to settle it while it is open.
+
+Each is settled with one of these (the merge view words the first two *Accept
+theirs* and *Accept yours*):
 
 | Choice | What it does |
 | --- | --- |
@@ -107,7 +134,9 @@ name, like any change.
 
 From a terminal, `civex sync conflicts` lists them and `civex sync resolve <id>
 --take theirs|mine|delete|retry` settles one (`--force` puts yours back even though
-the value has changed again).
+the value has changed again). `civex sync resolve --all --take theirs` settles every
+open one, `--kind rejected` (or `conflict`, `edit_vs_delete`) only that kind; those
+that can't be settled that way, or fail their checks, stay open and are listed.
 
 ## If the network fails
 

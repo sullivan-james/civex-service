@@ -254,7 +254,7 @@ def conflicts(
 
 @app.command("resolve")
 def resolve(
-    conflict_id: str = typer.Argument(help="The conflict's id."),
+    conflict_id: str = typer.Argument(None, help="The conflict's id (not with --all)."),
     take: str = typer.Option(
         ...,
         "--take",
@@ -268,8 +268,41 @@ def resolve(
         help="Put your value back even though the record's value has changed again "
         "since the conflict was recorded.",
     ),
+    all_: bool = typer.Option(
+        False,
+        "--all",
+        help="Settle every open conflict that offers this way (narrow it with "
+        "--kind), not one. Those that don't, or fail their checks, stay open.",
+    ),
+    kind: str = typer.Option(
+        None,
+        "--kind",
+        help="With --all: only this kind (conflict, rejected or edit_vs_delete).",
+    ),
 ) -> None:
-    """Settle a conflict."""
+    """Settle a conflict, or with --all every open one."""
+    if all_ == (conflict_id is not None):
+        raise _fail(ValueError("Give a conflict id, or --all"))
+    if kind and not all_:
+        raise _fail(ValueError("--kind goes with --all"))
+    if all_:
+        c = _ctx()
+        try:
+            report = c.sync_svc.resolve_many(take, kind=kind, force=force)
+        except CivexError as e:
+            raise _fail(e)
+        finally:
+            c.close()
+        console.print(f"Settled {report.done}.")
+        if report.not_offered:
+            console.print(
+                f"{report.not_offered} left open: they can't be settled with '{take}'."
+            )
+        for cid, message in report.failed:
+            console.print(f"Left open {cid}: {escape(message)}")
+        if report.failed:
+            raise typer.Exit(1)
+        return
     try:
         cid = uuid.UUID(conflict_id)
     except ValueError:

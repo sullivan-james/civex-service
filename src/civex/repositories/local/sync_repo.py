@@ -311,11 +311,17 @@ class LocalSyncRepository:
         )
 
     def list_conflicts(
-        self, status: str | None = "open", limit: int = 200, offset: int = 0
+        self,
+        status: str | None = "open",
+        limit: int = 200,
+        offset: int = 0,
+        entity_id: uuid.UUID | None = None,
     ) -> list[SyncConflictDTO]:
         q = self._s.query(SyncConflict)
         if status:
             q = q.filter_by(status=status)
+        if entity_id:
+            q = q.filter(SyncConflict.entity_id == entity_id)
         rows = q.order_by(SyncConflict.created_at.desc()).offset(offset).limit(limit)
         return [_conflict_dto(r) for r in rows]
 
@@ -364,6 +370,74 @@ class LocalSyncRepository:
         row.resolution = resolution
         row.resolved_at = datetime.now(timezone.utc)
         self._s.flush()
+
+    def conflicts_of_ops(self, op_ids: list[uuid.UUID]) -> list[SyncConflictDTO]:
+        """Every conflict, open or settled, that came from one of these changes."""
+        if not op_ids:
+            return []
+        rows = (
+            self._s.query(SyncConflict)
+            .filter(SyncConflict.op_id.in_(op_ids))
+            .order_by(SyncConflict.created_at)
+        )
+        return [_conflict_dto(r) for r in rows]
+
+    def find_open_conflicts(
+        self,
+        *,
+        ids: list[uuid.UUID] | None = None,
+        kind: str | None = None,
+        entity_id: uuid.UUID | None = None,
+    ) -> list[SyncConflictDTO]:
+        """Every open conflict matching all that is given, oldest first and with no
+        page limit (a bulk settle must reach them all, not the first screenful)."""
+        q = self._s.query(SyncConflict).filter_by(status="open")
+        if ids is not None:
+            q = q.filter(SyncConflict.id.in_(ids))
+        if kind:
+            q = q.filter(SyncConflict.kind == kind)
+        if entity_id:
+            q = q.filter(SyncConflict.entity_id == entity_id)
+        return [_conflict_dto(r) for r in q.order_by(SyncConflict.created_at)]
+
+    def resolve_conflicts(self, ids: list[uuid.UUID], resolution: str) -> int:
+        """Mark open conflicts settled, in one statement. Returns how many were."""
+        if not ids:
+            return 0
+        n = (
+            self._s.query(SyncConflict)
+            .filter(SyncConflict.id.in_(ids), SyncConflict.status == "open")
+            .update(
+                {
+                    "status": "resolved",
+                    "resolution": resolution,
+                    "resolved_at": datetime.now(timezone.utc),
+                },
+                synchronize_session=False,
+            )
+        )
+        self._s.flush()
+        return n
+
+    def reopen_conflicts(self, ids: list[uuid.UUID], resolution: str) -> int:
+        """Open conflicts that were settled with `resolution` again. Returns how
+        many were."""
+        if not ids:
+            return 0
+        n = (
+            self._s.query(SyncConflict)
+            .filter(
+                SyncConflict.id.in_(ids),
+                SyncConflict.status == "resolved",
+                SyncConflict.resolution == resolution,
+            )
+            .update(
+                {"status": "open", "resolution": None, "resolved_at": None},
+                synchronize_session=False,
+            )
+        )
+        self._s.flush()
+        return n
 
     # ------------------------------------------------------------------
     # Things, by snapshot

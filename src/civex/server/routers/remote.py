@@ -92,7 +92,7 @@ class ConflictResponse(BaseModel):
     created_at: str
     resolved_at: str | None
     resolution: str | None = Field(
-        description="mine, theirs, value, delete or retry, once resolved."
+        description="mine, theirs, value, edited, delete or retry, once resolved."
     )
     record_name: str | None = Field(
         default=None, description="The record's name as it is now (records only)."
@@ -114,11 +114,22 @@ class ConflictResponse(BaseModel):
     )
     takes: list[str] = Field(
         default_factory=list,
-        description="What this can be settled with: theirs, mine, value, delete, retry.",
+        description="What this can be settled with: theirs, mine, value, delete, retry "
+        "(`edited` is also accepted for a clash, but is not a choice to offer).",
     )
     also_saved: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Other values the same edit set that did go in: field_label, value.",
+    )
+    attempted: str | None = Field(
+        default=None,
+        description="For a refused change or an edit that met a delete: what was "
+        "tried (create, update or delete).",
+    )
+    changes: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="The fields that attempt set, for showing it on the record: "
+        "field_id, field_name, field_label, dtype, before, after and current.",
     )
 
 
@@ -127,7 +138,8 @@ class ResolveRequest(BaseModel):
         description="`theirs` keeps what the authority has (or lets a refused change "
         "go); `mine` puts your value back as a new edit; `value` puts the one in "
         "`value`; `delete` deletes a record that was deleted there; `retry` sends a "
-        "refused change again from the record as it is now."
+        "refused change again from the record as it is now; `edited` closes a clash "
+        "because the field was just set by hand on the record."
     )
     value: Any = Field(default=None, description="The value, for `take: value`.")
     force: bool = Field(
@@ -135,6 +147,69 @@ class ResolveRequest(BaseModel):
         description="Put the value back even though the record's value changed "
         "since the conflict was recorded.",
     )
+
+
+class ResolveManyRequest(BaseModel):
+    take: str = Field(
+        description="How to settle each one: `theirs`, `mine`, `delete` or `retry` "
+        "(see the single resolve). `value` is not offered: it needs a value each."
+    )
+    ids: list[str] | None = Field(
+        default=None, description="Only these conflicts. Omit for all that match."
+    )
+    kind: str | None = Field(
+        default=None,
+        description="Only this kind: conflict, rejected or edit_vs_delete.",
+    )
+    record_id: str | None = Field(
+        default=None, description="Only conflicts about this record."
+    )
+    force: bool = Field(
+        default=False,
+        description="For `mine`: put values back even where the record's value "
+        "changed since.",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="Only count what would be settled; change nothing.",
+    )
+
+
+class ResolveFailure(BaseModel):
+    id: str
+    message: str
+
+
+class ResolveManyResponse(BaseModel):
+    done: int = Field(description="Settled (with `dry_run`, how many would be).")
+    settled_ids: list[str] = Field(
+        description="Which were settled (empty for `dry_run`); `reopen` takes them "
+        "back if the way was `theirs`."
+    )
+    not_offered: int = Field(
+        description="Left open because they don't offer that way of settling."
+    )
+    failed: list[ResolveFailure] = Field(
+        description="Left open because they failed their checks; the rest were settled."
+    )
+
+
+class ReopenRequest(BaseModel):
+    ids: list[str] = Field(description="Conflicts to open again.")
+
+
+class ReopenResponse(BaseModel):
+    reopened: int = Field(
+        description="How many were opened again. Only conflicts settled with "
+        "`theirs` can be: that changed nothing, so it can be taken back."
+    )
+
+
+def _uuids(values: list[str]) -> list[uuid.UUID]:
+    try:
+        return [uuid.UUID(v) for v in values]
+    except ValueError:
+        raise HTTPException(422, detail="Not a conflict id")
 
 
 def _last_result() -> SyncResultResponse | None:
@@ -223,10 +298,16 @@ def update(body: RemoteUpdateRequest, ctx: AppContext = Depends(get_ctx)):
 @router.get("/conflicts", response_model=list[ConflictResponse])
 def conflicts(
     status: str | None = Query(default="open", description="open, resolved, or all."),
+    record: str | None = Query(
+        default=None, description="Only conflicts about this record or thing."
+    ),
     ctx: AppContext = Depends(get_ctx),
 ):
     """Values that did not go in as made, with both sides."""
-    found = ctx.sync_svc.conflicts(None if status in (None, "all") else status)
+    found = ctx.sync_svc.conflicts(
+        None if status in (None, "all") else status,
+        _uuids([record])[0] if record else None,
+    )
     return [ConflictResponse(**c.to_dict()) for c in found]
 
 
@@ -242,3 +323,37 @@ def resolve(conflict_id: str, body: ResolveRequest, ctx: AppContext = Depends(ge
     ctx.sync_svc.resolve_conflict(cid, body.take, body.value, body.force)
     ctx.commit()
     return _status(ctx)
+
+
+@router.post("/conflicts/resolve-many", response_model=ResolveManyResponse)
+def resolve_many(body: ResolveManyRequest, ctx: AppContext = Depends(get_ctx)):
+    """Settle every open conflict that matches (the given ids, kind and record; all
+    of them if none is given) the same way, in one request. Conflicts that don't
+    offer that way, or fail their checks, stay open and are counted or listed: the
+    rest are still settled. `dry_run` only counts."""
+    if body.take == "value":
+        raise HTTPException(422, detail="`value` needs a value for each conflict")
+    report = ctx.sync_svc.resolve_many(
+        body.take,
+        ids=_uuids(body.ids) if body.ids is not None else None,
+        kind=body.kind,
+        entity_id=_uuids([body.record_id])[0] if body.record_id else None,
+        force=body.force,
+        dry_run=body.dry_run,
+    )
+    ctx.commit()
+    return ResolveManyResponse(
+        done=report.done,
+        settled_ids=[str(i) for i in report.settled],
+        not_offered=report.not_offered,
+        failed=[ResolveFailure(id=str(i), message=m) for i, m in report.failed],
+    )
+
+
+@router.post("/conflicts/reopen", response_model=ReopenResponse)
+def reopen(body: ReopenRequest, ctx: AppContext = Depends(get_ctx)):
+    """Open conflicts again that were settled with `theirs` (an undo: that choice
+    changed nothing). Others are ignored; undo those from Activity."""
+    n = ctx.sync_svc.reopen_conflicts(_uuids(body.ids))
+    ctx.commit()
+    return ReopenResponse(reopened=n)

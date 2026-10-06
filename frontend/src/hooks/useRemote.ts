@@ -1,6 +1,11 @@
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { errorMessage } from '../lib/errors'
-import { remoteApi, type ResolveBody, type SyncConflict } from '../api/remote'
+import {
+  remoteApi,
+  type ResolveBody,
+  type ResolveManyBody,
+  type SyncConflict,
+} from '../api/remote'
 
 const KEY = ['remote']
 
@@ -42,6 +47,30 @@ export function useConflictsAbout(entityId: string) {
   return data ?? NONE
 }
 
+/** A moment as a time, reading one with no zone as UTC (the server's). */
+function utcMs(iso: string): number {
+  return Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`)
+}
+
+/** A record's conflicts for its merge view: the ones still open, and the ones
+ * settled since the page was opened (so a row stays on screen, marked settled,
+ * instead of vanishing under the person's hand). */
+export function useMergeConflicts(entityId: string, enabled: boolean) {
+  // A minute early, so a clock a little behind the server's still shows them.
+  const [since] = useState(() => Date.now() - 60_000)
+  return useQuery({
+    queryKey: [...KEY, 'conflicts', 'record', entityId],
+    queryFn: () => remoteApi.conflicts('all', entityId),
+    enabled,
+    select: (all) =>
+      all.filter(
+        (c) =>
+          c.status === 'open' ||
+          (c.resolved_at !== null && utcMs(c.resolved_at) >= since),
+      ),
+  })
+}
+
 /** Everything that changes what a sync shows: the status, the conflicts, and the
  * data itself, which a sync may have changed under the page. */
 function useRefreshing() {
@@ -81,28 +110,26 @@ export function useUpdateRemote() {
   return useMutation({ mutationFn: remoteApi.update, onSuccess: refresh })
 }
 
-/** Settle several at once, one after another, and say which could not be:
- * a value that has changed again since is refused, and the others still go. */
+/** Settle many in one request: the ticked ones (`ids`) or everything matching
+ * (`kind`, `record_id`, or all). Those that fail their checks stay open and are
+ * listed in the answer; the rest still go. A `dry_run` only counts, and changes
+ * nothing, so it does not refresh. */
 export function useResolveMany() {
   const refresh = useRefreshing()
   return useMutation({
-    mutationFn: async ({
-      ids,
-      take,
-    }: {
-      ids: string[]
-      take: ResolveBody['take']
-    }) => {
-      const failed: { id: string; message: string }[] = []
-      for (const id of ids) {
-        try {
-          await remoteApi.resolve(id, { take })
-        } catch (e) {
-          failed.push({ id, message: errorMessage(e) })
-        }
-      }
-      return { done: ids.length - failed.length, failed }
+    mutationFn: (body: ResolveManyBody) => remoteApi.resolveMany(body),
+    onSettled: (_data, _error, body) => {
+      if (!body.dry_run) refresh()
     },
+  })
+}
+
+/** Take back what was settled with "keep theirs": it changed nothing, so the
+ * conflicts simply open again. */
+export function useReopenConflicts() {
+  const refresh = useRefreshing()
+  return useMutation({
+    mutationFn: (ids: string[]) => remoteApi.reopen(ids),
     onSettled: refresh,
   })
 }

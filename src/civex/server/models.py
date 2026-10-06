@@ -1396,6 +1396,15 @@ class AuditLogResponse(BaseModel):
         description="Where the record this entry is about is now, so a lost one "
         "can be told from one that was edited, deleted or purged.",
     )
+    sync: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="What became of this change when it was sent to the authority, "
+        "if it did not go in as made: one row per clash, refusal or edit against a "
+        "delete (kind, field_label, yours, theirs, base, theirs_actor, status, "
+        "resolution, message, attempted, changes; the same rows as "
+        "`/remote/conflicts`), open or settled. Empty for a change that went in as "
+        "made, and when the project follows no authority.",
+    )
     timestamp: datetime
 
     @classmethod
@@ -1410,6 +1419,7 @@ class AuditLogResponse(BaseModel):
             new_data=dto.new_data,
             changes=[AuditChange(**c) for c in dto.changes],
             now=AuditNow(**dto.now) if dto.now else None,
+            sync=dto.sync,
             timestamp=dto.timestamp,
         )
 
