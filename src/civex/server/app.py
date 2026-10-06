@@ -292,9 +292,19 @@ def _migrate_on_startup() -> None:
 
         ensure_schema_current(_get_engine(load_config().db.url))
     except Exception as exc:
-        structlog.get_logger("civex.server").warning(
-            "startup_migration_skipped", error=str(exc)
-        )
+        from civex.domain.exceptions import DatabaseTooNewError
+
+        log = structlog.get_logger("civex.server")
+        if isinstance(exc, DatabaseTooNewError):
+            log.error(
+                "database_too_new",
+                error=str(exc),
+                database=exc.database,
+                revisions=exc.revisions,
+                civex_version=exc.civex_version,
+            )
+        else:
+            log.warning("startup_migration_skipped", error=str(exc))
 
 
 @asynccontextmanager

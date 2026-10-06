@@ -30,6 +30,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect
 from sqlalchemy.engine import Connection, Engine
 
@@ -69,6 +70,26 @@ def ensure_schema_current(engine: Engine) -> None:
         _migrated_engines.add(engine)
 
 
+def too_new_error(database: str, revisions: list[str]) -> Exception:
+    """The error for a database at `revisions` this civex doesn't know.
+
+    The one place its wording is made, shared by the migration check and the
+    `civex serve` pre-flight."""
+    from civex import __version__
+    from civex.domain.exceptions import DatabaseTooNewError
+
+    return DatabaseTooNewError(
+        f"This project's database ({database}) was last used by a newer version "
+        f"of civex: it is at revision {', '.join(revisions)}, which civex "
+        f"{__version__} doesn't know. Update civex with `civex update`, then "
+        "try again. Your data hasn't been changed.",
+        database=database,
+        revisions=revisions,
+        civex_version=__version__,
+        known_head=ScriptDirectory(str(_MIGRATIONS_DIR)).get_current_head(),
+    )
+
+
 def _refuse_newer_database(connection: Connection, cfg: Config) -> None:
     """Say so plainly when the database is from a newer civex.
 
@@ -78,11 +99,7 @@ def _refuse_newer_database(connection: Connection, cfg: Config) -> None:
     that was updated and this one wasn't.
     """
     from alembic.runtime.migration import MigrationContext
-    from alembic.script import ScriptDirectory
     from alembic.util.exc import CommandError
-
-    from civex import __version__
-    from civex.domain.exceptions import DatabaseTooNewError
 
     script = ScriptDirectory.from_config(cfg)
     unknown: list[str] = []
@@ -94,12 +111,7 @@ def _refuse_newer_database(connection: Connection, cfg: Config) -> None:
     if not unknown:
         return
     where = connection.engine.url.render_as_string(hide_password=True)
-    raise DatabaseTooNewError(
-        f"This project's database ({where}) was last used by a newer version "
-        f"of civex: it is at revision {', '.join(unknown)}, which civex "
-        f"{__version__} doesn't know. Update civex with `civex update`, then "
-        "try again. Your data hasn't been changed."
-    )
+    raise too_new_error(where, unknown)
 
 
 def _migrate_connection(connection: Connection) -> None:

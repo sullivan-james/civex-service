@@ -60,6 +60,47 @@ def _ensure_container_ready(project_name: str) -> None:
     raise typer.Exit(1)
 
 
+def print_database_too_new(error) -> None:
+    """Lay out a `DatabaseTooNewError` for a person: what was found, then
+    what to do about it."""
+    from rich.console import Group
+    from rich.panel import Panel
+    from rich.table import Table
+
+    facts = Table.grid(padding=(0, 2))
+    facts.add_column(style="bold")
+    facts.add_column(overflow="fold")
+    facts.add_row("Database", error.database)
+    facts.add_row("Its revision", ", ".join(error.revisions))
+    facts.add_row("This civex", error.civex_version)
+    facts.add_row("Newest it knows", error.known_head or "unknown")
+
+    steps = (
+        "[bold]What to do[/bold]\n"
+        "  1. Update this civex: [bold]civex update[/bold] "
+        "(or install the same version as the other copy that last opened "
+        "this project).\n"
+        "  2. Then run your command again.\n\n"
+        "[bold]Your data hasn't been changed.[/bold] Don't point an older civex "
+        'at this project to "fix" it; restore a backup of the database '
+        "only if you need to go back."
+    )
+    console.print(
+        Panel(
+            Group(
+                "This project was last opened by a [bold]newer[/bold] civex than "
+                "the one running now, so it can't be opened safely.\n",
+                facts,
+                "",
+                steps,
+            ),
+            title="[error]Database is from a newer civex[/error]",
+            border_style="red",
+            expand=False,
+        )
+    )
+
+
 def cli_load_config() -> Config:
     try:
         config = load_config()
@@ -81,7 +122,7 @@ def get_ctx() -> AppContext:
     try:
         return build_local_context(config)
     except DatabaseTooNewError as e:
-        console.print(f"[error]{e}[/error]")
+        print_database_too_new(e)
         raise typer.Exit(1)
 
 
