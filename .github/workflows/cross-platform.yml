@@ -6,12 +6,18 @@ name: Cross-platform
 # tests/conftest.py): the ones that touch real files, paths, processes, mounts
 # or the launcher.
 #
-#   Both: PRs that touch OS-sensitive code or tests, nightly, tags, on demand.
-#   (macOS is the costliest runner. To save minutes later, restrict it to the
-#   schedule/tags/dispatch by making the matrix below depend on the event.)
+#   Windows: PRs that touch OS-sensitive code (not draft ones), nightly, tags,
+#            on demand.
+#   macOS:   nightly, tags, on demand only. It bills at ten times the Linux
+#            rate (Windows two), and what it catches that Linux and Windows
+#            don't is rare, so a PR doesn't pay for it: the nightly run does.
+#   `tests/**` is not a trigger: only conftest.py, which is where a test file is
+#   marked OS-sensitive, so a PR that adds or moves one still runs. An edit to an
+#   existing OS-sensitive test alone waits for the nightly run.
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "src/civex/fs_locations.py"
       - "src/civex/launcher.py"
@@ -24,7 +30,7 @@ on:
       - "src/civex/services/db_move_service.py"
       - "src/civex/plugins/**"
       - "src/civex/desktop/**"
-      - "tests/**"
+      - "tests/conftest.py"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/cross-platform.yml"
@@ -41,12 +47,15 @@ concurrency:
 jobs:
   os-sensitive-tests:
     name: os_sensitive tests (${{ matrix.os }})
+    # A draft PR waits until it is ready for review.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        # macOS only when nothing is waiting on the answer (see the top).
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["windows-latest"]' || '["windows-latest","macos-latest"]') }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
