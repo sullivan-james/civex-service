@@ -84,6 +84,10 @@ class FileAccessService:
         self._schemas = schemas
         self._store = store
         self._civex_dir = civex_dir
+        # Downloads files another device added (they are cited here but on no
+        # drive here) from the authority, given their hashes; None when the
+        # project follows none. Injected so this service doesn't know sync.
+        self.fetch_missing: Callable[[list[str]], object] | None = None
 
     # -- planning ------------------------------------------------------------
 
@@ -92,12 +96,28 @@ class FileAccessService:
         selection: FileSelection,
         with_sources: bool = False,
         progress: Progress | None = None,
+        fetch: bool = False,
     ) -> FilePlan:
         """Every file the selection holds, each with the path it would have and
         whether it can be reached now, and the tables it makes with where each is
         written. Reads only; makes nothing. With `with_sources`, each reachable
         file also carries where it is on disk (one stat per file, so only when
-        asked for)."""
+        asked for). With `fetch` (an export about to be made), files another
+        device added that aren't here yet are first downloaded from the server,
+        and the plan is of what is here then."""
+        found = self._plan(selection, with_sources, progress)
+        remote = [i.sha256 for i in found.items if i.state == "remote"]
+        if not (fetch and remote and self.fetch_missing):
+            return found
+        self.fetch_missing(remote)
+        return self._plan(selection, with_sources, progress)
+
+    def _plan(
+        self,
+        selection: FileSelection,
+        with_sources: bool,
+        progress: Progress | None,
+    ) -> FilePlan:
         if selection.layout not in LAYOUTS:
             raise ValidationError(f"layout must be one of: {', '.join(LAYOUTS)}")
         flat = selection.layout == LAYOUT_FLAT
@@ -772,7 +792,7 @@ class FileAccessService:
         `list_exports` / `remove_export`."""
         if mode not in EXPORT_MODES:
             raise ValidationError(f"mode must be one of: {', '.join(EXPORT_MODES)}")
-        plan = plan or self.plan(selection, progress=progress)
+        plan = plan or self.plan(selection, progress=progress, fetch=True)
         if not plan.complete and not allow_partial:
             raise FilesUnavailableError(plan)
         if mode == "link":
@@ -820,7 +840,7 @@ class FileAccessService:
         in place; a copy is yours to change."""
         if mode not in EXPORT_MODES:
             raise ValidationError(f"mode must be one of: {', '.join(EXPORT_MODES)}")
-        plan = plan or self.plan(selection, progress=progress)
+        plan = plan or self.plan(selection, progress=progress, fetch=True)
         if not plan.complete and not allow_partial:
             raise FilesUnavailableError(plan)
         if mode == "link" and plan.scattered:

@@ -291,6 +291,7 @@ class Hello:
 COPYING = "copying"  # a device joining: reading the authority's things
 FILLING = "filling"  # a device filling an empty authority with its own
 HISTORY = "history"  # a joined device fetching the history from before it joined
+FILES = "files"  # a device downloading the files its records cite
 
 
 @dataclass

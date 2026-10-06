@@ -4,8 +4,16 @@ import { api } from './client'
 export interface FileLocation {
   /** The volume holding it; null when it isn't on any volume Civex knows. */
   volume: string | null
+  /** `remote`: another device added it and it isn't on this computer yet;
+   * opening or exporting it downloads it from the server. */
   state:
-    'online' | 'offline' | 'wrong_drive' | 'readonly' | 'retired' | 'unknown'
+    | 'online'
+    | 'offline'
+    | 'wrong_drive'
+    | 'readonly'
+    | 'retired'
+    | 'unknown'
+    | 'remote'
   /** Can be opened right now; null when unknown. */
   available: boolean | null
   /** Why it can't be opened, in plain words (blank when it can). */

@@ -252,7 +252,7 @@ def gather_files(
     every reachable file is already on that drive."""
     svc = ctx.file_access_svc
     try:
-        plan = svc.plan(_selection(body, ctx), progress=progress)
+        plan = svc.plan(_selection(body, ctx), progress=progress, fetch=True)
         shas = svc.files_to_gather(plan, body.volume)
         if not shas:
             raise HTTPException(
@@ -352,7 +352,7 @@ def zip_files(
     svc = ctx.file_access_svc
     selection = _selection(body, ctx)
     try:
-        plan = svc.plan(selection, progress=progress)
+        plan = svc.plan(selection, progress=progress, fetch=True)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except CivexError as e:

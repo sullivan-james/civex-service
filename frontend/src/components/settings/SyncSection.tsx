@@ -18,6 +18,7 @@ import {
   Field,
   Input,
   ProgressBar,
+  SegmentedControl,
   Select,
   Skeleton,
   Spinner,
@@ -124,6 +125,12 @@ function Copying({ s }: { s: RemoteStatus }) {
         {s.progress.phase === 'history' && (
           <p className="mt-2 text-xs text-fg-muted">
             The project is ready to use; this only fills in Activity.
+          </p>
+        )}
+        {s.progress.phase === 'files' && (
+          <p className="mt-2 text-xs text-fg-muted">
+            Everything else works meanwhile; a file opened now is downloaded
+            first.
           </p>
         )}
       </Card>
@@ -234,6 +241,7 @@ function Following({ s }: { s: RemoteStatus }) {
           </Button>
         </div>
       </Card>
+      <FilesCard s={s} />
       <Conflicts count={s.open_conflicts} />
       {confirm && (
         <ConfirmDialog
@@ -249,6 +257,40 @@ function Following({ s }: { s: RemoteStatus }) {
         />
       )}
     </div>
+  )
+}
+
+/** Which files this computer keeps a copy of, and how many aren't here yet. */
+function FilesCard({ s }: { s: RemoteStatus }) {
+  const update = useUpdateRemote()
+  const all = s.download_files === 'all'
+  const n = s.files_to_fetch
+  return (
+    <Card title="Files">
+      <SegmentedControl
+        size="sm"
+        label="Which files this computer keeps"
+        value={s.download_files}
+        onChange={(v) => update.mutate({ download_files: v })}
+        options={[
+          { value: 'all', label: 'Keep every file' },
+          { value: 'opened', label: 'Only files I open' },
+        ]}
+      />
+      <p className="mt-2 text-sm text-fg-muted">
+        {n === 0
+          ? 'Every file the records here use is on this computer.'
+          : `${n.toLocaleString()} file${n === 1 ? '' : 's'} not downloaded yet. ` +
+            (all
+              ? 'They download in the background while Civex is running.'
+              : 'Each downloads when it is opened or exported.')}
+      </p>
+      {update.error && (
+        <p role="alert" className="mt-1 text-xs text-danger">
+          {errorMessage(update.error)}
+        </p>
+      )}
+    </Card>
   )
 }
 

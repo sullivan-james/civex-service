@@ -10,7 +10,9 @@ Whoever hosts it (the server on a thread, `civex sync watch` in a terminal) call
 
 With the interval set to never, only a request syncs. A project that joined an
 authority fetches the history from before it joined a few pages per tick after
-that, so it never holds up a sync. A failure backs off (doubling, up to 15 minutes) so a server that is down is not
+that, so it never holds up a sync, and then (with `[sync] download_files` at
+"all", the default) the files its records cite that aren't here, for up to
+`FILES_SECONDS` a tick. A failure backs off (doubling, up to 15 minutes) so a server that is down is not
 hammered; a refusal that waiting cannot fix (a revoked token, a different
 project) waits the full 15 minutes and keeps saying why. Pausing stops all of it.
 The sync itself is `SyncService.sync`, which is safe to repeat and holds a lock so
@@ -26,7 +28,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from civex.config import Config
-from civex.domain.sync import SyncError, SyncProgress
+from civex.domain.sync import FILES, SyncError, SyncProgress
 from civex.services.sync_lock import SyncBusy
 
 if TYPE_CHECKING:
@@ -43,6 +45,9 @@ BASE_BACKOFF = 5.0
 MAX_BACKOFF = 900.0
 # Pages of history from before joining fetched per tick (200 entries a page).
 HISTORY_PAGES = 10
+# How long a tick spends downloading files before it lets a sync run again (it
+# stops between files, so one large file can take longer).
+FILES_SECONDS = 20.0
 
 ProgressSink = Callable[[SyncProgress | None], None]
 
@@ -66,6 +71,14 @@ class SyncWorker:
         self._next_interval = 0.0
         self._last_attempt = -DEBOUNCE
         self._last_file_check = -FILE_CHECK_EVERY
+        # Files the authority didn't have when asked (the device that added
+        # them hasn't sent them yet): not asked for again until the next look
+        # for files. And how far the current run of downloads has got, for the
+        # progress shown (the number to fetch when it began, and done since).
+        self._absent: set[str] = set()
+        self._absent_since = 0.0
+        self._files_total = 0
+        self._files_done = 0
         # What the last sync run here did, for the app to report. Kept in memory:
         # it is a notice, not state anyone needs after a restart.
         self.last_report: SyncReport | None = None
@@ -89,6 +102,8 @@ class SyncWorker:
             report = self._maybe_sync(ctx, config)
             if not config.sync.paused:
                 self._fetch_history(ctx)
+                if config.sync.download_files == "all":
+                    self._fetch_files(ctx)
             return report
         finally:
             ctx.close()
@@ -107,6 +122,42 @@ class SyncWorker:
             return
         except SyncError as e:
             log.info("fetching history failed (%s); it carries on later", e)
+
+    def _fetch_files(self, ctx: AppContext) -> None:
+        """Download files this project's records cite that aren't here, for a
+        while, while the authority is answering."""
+        now = self._clock()
+        if now < self._backoff_until or ctx.sync_repo.meta().history_from:
+            return
+        if now - self._absent_since >= FILE_CHECK_EVERY:
+            self._absent.clear()
+            self._absent_since = now
+        left = ctx.sync_svc.files_to_fetch() - len(self._absent)
+        if left <= 0:
+            if self._files_total:
+                self._files_total = self._files_done = 0
+                self._on_progress(None)
+            return
+        if not self._files_total:
+            self._files_total, self._files_done = left, 0
+        base = self._files_done
+
+        def tell(done: int) -> None:
+            self._files_done = base + done
+            total = max(self._files_total, self._files_done)
+            self._on_progress(SyncProgress(FILES, self._files_done, total))
+
+        try:
+            report = ctx.sync_svc.fetch_files(
+                skip=self._absent, seconds=FILES_SECONDS, progress=tell
+            )
+        except SyncError as e:
+            log.info("downloading files failed (%s); it carries on later", e)
+            return
+        self._absent.update(report.absent)
+        if not report.stopped:  # all that could be fetched now is here
+            self._files_total = self._files_done = 0
+            self._on_progress(None)
 
     def _maybe_sync(self, ctx: AppContext, config: Config) -> SyncReport | None:
         now = self._clock()

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
@@ -22,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from civex import user_state
-from civex.config import Config, save_config
+from civex.config import DOWNLOAD_MODES, Config, save_config
 from civex.domain import hlc
 from civex.domain.audit_diff import BEFORE, apply_delta, entry_snapshots
 from civex.domain.exceptions import (
@@ -106,6 +107,14 @@ class ResolveManyReport:
 
 
 @dataclass
+class FileFetchReport:
+    attempted: int = 0
+    fetched: int = 0
+    absent: list[str] = field(default_factory=list)  # the authority lacks them
+    stopped: bool = False  # ran out of `limit` or `seconds` with more to do
+
+
+@dataclass
 class SyncStatus:
     configured: bool
     remote: str | None
@@ -120,6 +129,8 @@ class SyncStatus:
     running: bool  # a sync is in progress right now
     interval_seconds: int = 60
     serving: bool = False  # this project is itself an authority
+    download_files: str = "all"
+    files_to_fetch: int = 0  # files records here cite that no drive here holds
 
 
 class SyncService:
@@ -169,6 +180,8 @@ class SyncService:
             running=sync_running(self._config.civex_dir),
             interval_seconds=self._config.sync.interval_seconds,
             serving=self._config.sync.serve,
+            download_files=self._config.sync.download_files,
+            files_to_fetch=self.files_to_fetch(),
         )
 
     def conflicts(
@@ -996,6 +1009,95 @@ class SyncService:
                 self._commit()
                 return True
             return False
+
+    # -- files from the authority ----------------------------------------
+
+    @property
+    def fetches_files(self) -> bool:
+        """Whether files missing here can come from an authority: this project
+        follows one (an authority itself has nobody to fetch from)."""
+        return self.configured and not self._config.sync.serve
+
+    def files_to_fetch(self) -> int:
+        """How many files the records here cite that no drive here holds."""
+        return self._repo.count_files_not_here() if self.fetches_files else 0
+
+    def set_download_files(self, mode: str) -> None:
+        """Which files this device keeps a copy of: `all` (fetched in the
+        background) or `opened` (only when opened or exported)."""
+        if mode not in DOWNLOAD_MODES:
+            raise ValidationError(
+                f"Choose one of: {', '.join(DOWNLOAD_MODES)} (got '{mode}')"
+            )
+        self._config.sync.download_files = mode
+        save_config(self._config)
+
+    def fetch_file(self, sha256: str) -> bool:
+        """Download one file a record here cites from the authority, onto the
+        drive its collection's files go to. True once it is here (it may have
+        been already); False when the authority hasn't got it either (the device
+        that added it hasn't sent it yet). Raises `SyncError` when the authority
+        can't be reached. Doesn't take the sync lock: a download changes no
+        record, and two of the same file store the same content once."""
+        return self.fetch_files(shas=[sha256]).fetched == 1 or self._files.exists(
+            sha256
+        )
+
+    def fetch_files(
+        self,
+        shas: list[str] | None = None,
+        limit: int | None = None,
+        skip: set[str] | None = None,
+        seconds: float | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> FileFetchReport:
+        """Download files the records here cite that no drive here holds (all
+        of them, or those of `shas`), each checked against its hash and saved
+        as it arrives. `limit` files or `seconds` at most (a background pass
+        stops between files once either is spent); `skip` names files not to
+        ask for again (the authority hadn't got them a moment ago). `progress`
+        is told each file done. What the authority hasn't got is in `absent`."""
+        report = FileFetchReport()
+        if not self.fetches_files:
+            return report
+        transport = self._transport()
+        started = time.monotonic()
+        scratch = self._config.civex_dir / "tmp" / "sync-files"
+        after = ""
+        while True:
+            page = self._repo.files_not_here(after, FILE_CHECK_PAGE, shas)
+            if not page:
+                break
+            after = page[-1][0]
+            for sha, collection in page:
+                if skip and sha in skip:
+                    continue
+                if (limit is not None and report.attempted >= limit) or (
+                    seconds is not None and time.monotonic() - started >= seconds
+                ):
+                    report.stopped = True
+                    return report
+                report.attempted += 1
+                if self._files.exists(sha):  # on a drive, just not inventoried
+                    report.fetched += 1
+                    continue
+                dest = scratch / sha
+                try:
+                    transport.download_file(sha, dest)
+                except FileNotFoundError:
+                    report.absent.append(sha)
+                    continue
+                try:
+                    self._files.put_path(
+                        dest, collection_id=str(collection) if collection else None
+                    )
+                finally:
+                    dest.unlink(missing_ok=True)
+                self._commit()
+                report.fetched += 1
+                if progress:
+                    progress(report.fetched)
+        return report
 
     def _join_one(
         self,

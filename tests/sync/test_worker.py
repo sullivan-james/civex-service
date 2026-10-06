@@ -17,6 +17,8 @@ class Rig:
         self.pending = 0
         self.outcomes: list[object] = []  # exceptions raise; anything else returns
         self.calls = 0
+        self.to_fetch = 0
+        self.fetches: list[dict] = []
         self.sync_config = SyncConfig(remote="http://a", interval_seconds=60)
         self.worker = SyncWorker(self._config, self._ctx, clock=lambda: self.now)
 
@@ -31,12 +33,24 @@ class Rig:
                 raise out
             return out
 
+        def fetch_files(**kw):
+            self.fetches.append(kw)
+            done = self.to_fetch
+            if kw.get("progress") and done:
+                kw["progress"](done)
+            self.to_fetch = 0
+            return SimpleNamespace(absent=[], stopped=False, fetched=done)
+
         return SimpleNamespace(
             sync_repo=SimpleNamespace(
                 count_pending=lambda: self.pending,
                 meta=lambda: SimpleNamespace(history_from=None),
             ),
-            sync_svc=SimpleNamespace(sync=sync),
+            sync_svc=SimpleNamespace(
+                sync=sync,
+                files_to_fetch=lambda: self.to_fetch,
+                fetch_files=fetch_files,
+            ),
             close=lambda: None,
         )
 
@@ -118,3 +132,14 @@ def test_never_syncs_only_when_asked() -> None:
     r.worker.request()
     assert r.tick() == "report"
     assert r.tick(1000) is None and r.calls == 1
+
+
+def test_files_not_here_are_downloaded_in_the_background_unless_only_opened_ones():
+    r = Rig()
+    r.to_fetch = 3
+    r.tick()
+    assert len(r.fetches) == 1 and r.to_fetch == 0
+    r.sync_config.download_files = "opened"
+    r.to_fetch = 2
+    r.tick(1000)
+    assert len(r.fetches) == 1  # only fetched when opened or exported

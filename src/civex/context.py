@@ -295,7 +295,16 @@ def build_local_context(
         record_svc,
     )
 
-    ctx = AppContext(
+    # Files another device added are fetched from the authority when opened or
+    # exported, and say so meanwhile (asked each time: a project can start
+    # following one while this context is open).
+    def _sync() -> SyncService:
+        return ctx.sync_svc  # whatever stands in for it by then (tests wrap it)
+
+    record_svc.files_from_server = lambda: _sync().fetches_files
+    file_access_svc.fetch_missing = lambda shas: _sync().fetch_files(shas=shas)
+
+    ctx: AppContext = AppContext(
         schema_svc=schema_svc,
         dataset_svc=dataset_svc,
         record_svc=record_svc,

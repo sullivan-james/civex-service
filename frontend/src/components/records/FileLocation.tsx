@@ -90,7 +90,11 @@ function DownloadLink({
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
       return
     e.preventDefault()
-    setNote(null)
+    setNote(
+      file.location?.state === 'remote'
+        ? { error: false, text: 'Downloading it from the server first…' }
+        : null,
+    )
     const abort = new AbortController()
     try {
       const res = await fetch(href, { signal: abort.signal })
@@ -147,6 +151,7 @@ function DownloadLink({
 function chipText(file: FileLike): string {
   const loc = file.location
   if (!loc) return ''
+  if (loc.state === 'remote') return 'on the server'
   if (loc.volume === null) return 'location unknown'
   if (loc.available === false)
     return `${loc.volume} · ${loc.state.replace('_', ' ')}`
@@ -157,6 +162,8 @@ function chipText(file: FileLike): string {
  * is there, and that there is more. */
 function hint(file: FileLike): string {
   const loc = file.location
+  if (loc?.state === 'remote')
+    return 'Not downloaded to this computer yet: opening it downloads it.'
   if (!loc || loc.volume === null)
     return 'Not found on any drive yet. Click for details.'
   if (loc.available === false)
@@ -233,7 +240,12 @@ function FileLocationPanel({
           )}
         </div>
 
-        {loc.volume === null ? (
+        {loc.state === 'remote' ? (
+          <p className="text-fg">
+            Another device added this file and it isn&apos;t on this computer
+            yet. Opening or exporting it downloads it from the server.
+          </p>
+        ) : loc.volume === null ? (
           <p className="text-attention">
             This file isn&apos;t on any drive Civex knows about. It may be on a
             drive that hasn&apos;t been added yet.

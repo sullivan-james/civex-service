@@ -86,6 +86,14 @@ class SyncConfig:
     # How often the background sync looks for changes, in seconds. 0 = never:
     # it syncs only when asked (Sync now, `civex sync`).
     interval_seconds: int = 60
+    # Which files a device keeps a copy of (`DOWNLOAD_MODES`): "all" fetches
+    # every file the project's records cite in the background, a few at a time;
+    # "opened" fetches one only when it is opened or exported (for a computer
+    # short of space). Either way a file is fetched on demand.
+    download_files: str = "all"
+
+
+DOWNLOAD_MODES = ("all", "opened")
 
 
 @dataclass
@@ -368,6 +376,11 @@ def load_config() -> Config:
         serve=bool(sync_data.get("serve", False)),
         paused=bool(sync_data.get("paused", False)),
         interval_seconds=_interval(sync_data.get("interval_seconds", 60)),
+        download_files=(
+            str(sync_data.get("download_files"))
+            if sync_data.get("download_files") in DOWNLOAD_MODES
+            else "all"
+        ),
     )
 
     return Config(
@@ -510,7 +523,13 @@ def save_config(config: Config) -> None:
         lines += ["\n[identity]\n", f"name = {_tv(config.identity.name)}\n"]
 
     sync = config.sync
-    if sync.remote or sync.serve or sync.paused or sync.interval_seconds != 60:
+    if (
+        sync.remote
+        or sync.serve
+        or sync.paused
+        or sync.interval_seconds != 60
+        or sync.download_files != "all"
+    ):
         lines.append("\n[sync]\n")
         if sync.remote:
             lines.append(f"remote = {_tv(sync.remote)}\n")
@@ -520,6 +539,8 @@ def save_config(config: Config) -> None:
             lines.append("paused = true\n")
         if sync.interval_seconds != 60:
             lines.append(f"interval_seconds = {sync.interval_seconds}\n")
+        if sync.download_files != "all":
+            lines.append(f"download_files = {_tv(sync.download_files)}\n")
 
     retention = config.retention
     retention_lines = []

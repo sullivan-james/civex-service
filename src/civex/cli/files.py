@@ -360,7 +360,7 @@ def files_export(
     ctx = get_ctx()
     try:
         svc = ctx.file_access_svc
-        plan = svc.plan(selection)
+        plan = svc.plan(selection, fetch=True)
         if not plan.items and not plan.tables:
             console.print("[dim]Nothing to export.[/dim]")
             return
@@ -461,7 +461,7 @@ def files_download(
     ctx = get_ctx()
     scratch = Path(tempfile.mkdtemp(prefix="civex-download-"))
     try:
-        plan = ctx.file_access_svc.plan(selection)
+        plan = ctx.file_access_svc.plan(selection, fetch=True)
         if not plan.complete:
             _print_unreachable(plan)
             if not allow_partial:
@@ -518,7 +518,7 @@ def files_gather(
     ctx = get_ctx()
     try:
         svc = ctx.file_access_svc
-        plan = svc.plan(selection)
+        plan = svc.plan(selection, fetch=True)
         shas = svc.files_to_gather(plan, to)
     except CivexError as e:
         console.print(f"[error]{escape(str(e))}[/error]")

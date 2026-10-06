@@ -110,6 +110,27 @@ describe('FileLocationChip', () => {
     ).toHaveTextContent('archive')
   })
 
+  it('always says when another device added a file not downloaded yet', async () => {
+    renderIt(
+      <FileLocationChip
+        file={file({
+          location: {
+            volume: null,
+            state: 'remote',
+            available: null,
+            reason: 'Not downloaded to this computer yet.',
+            fix: 'Opening or exporting it downloads it from the server.',
+          },
+        })}
+      />,
+    )
+    const chip = await screen.findByText('on the server')
+    expect(chip.closest('button')).toHaveAttribute(
+      'title',
+      'Not downloaded to this computer yet: opening it downloads it.',
+    )
+  })
+
   it('always says when a file is on a volume that is not available', async () => {
     renderIt(<FileLocationChip file={file({ location: OFFLINE })} />)
 

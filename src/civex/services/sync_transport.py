@@ -78,13 +78,16 @@ class HttpSyncTransport:
         """Fetch a file to `dest`, checking it is the file asked for: bytes that
         hash to something else are discarded, never kept under that name."""
         dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            response = self._open(self._request("GET", f"/files/{sha256}"))
+        except SyncError as e:
+            if e.status == 404:  # the server answered: it doesn't have it
+                raise FileNotFoundError(sha256) from e
+            raise
         fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=".sync-")
         digest = hashlib.sha256()
         try:
-            with (
-                os.fdopen(fd, "wb") as out,
-                self._open(self._request("GET", f"/files/{sha256}")) as response,
-            ):
+            with os.fdopen(fd, "wb") as out, response:
                 while chunk := response.read(_CHUNK):
                     digest.update(chunk)
                     out.write(chunk)
@@ -150,6 +153,7 @@ def _from_status(error: urllib.error.HTTPError) -> SyncError:
         return SyncError(
             "That address is not a civex sync server (or sync is not switched on there)",
             retryable=False,
+            status=404,
         )
     if error.code in (408, 429) or error.code >= 500:
         return SyncError(text, retryable=True)

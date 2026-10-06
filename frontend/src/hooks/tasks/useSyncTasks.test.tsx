@@ -10,6 +10,8 @@ const base = {
   project_id: 'p',
   paused: false,
   interval_seconds: 60,
+  download_files: 'all',
+  files_to_fetch: 0,
   serving: false,
   pending: 0,
   open_conflicts: 0,

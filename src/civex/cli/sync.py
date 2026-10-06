@@ -181,6 +181,79 @@ def interval(
     )
 
 
+@app.command("files")
+def files(
+    mode: str = typer.Argument(
+        None,
+        help="'all' to keep a copy of every file, 'opened' to fetch only what is "
+        "opened or exported. Leave out to see the setting.",
+    ),
+) -> None:
+    """Choose which files this computer keeps a copy of. With 'all' (the
+    default) files other devices add are downloaded in the background while
+    civex is running; with 'opened' a file is downloaded only when it is opened
+    or exported, for a computer short of space."""
+    c = _ctx()
+    try:
+        if mode is not None:
+            c.sync_svc.set_download_files(mode)
+        s = c.sync_svc.status()
+    except CivexError as e:
+        raise _fail(e)
+    finally:
+        c.close()
+    console.print(
+        "Keeps every file." if s.download_files == "all" else "Keeps files opened."
+    )
+    if s.files_to_fetch:
+        console.print(
+            f"{s.files_to_fetch} file(s) not downloaded yet "
+            "(`civex sync fetch` downloads them now)."
+        )
+
+
+@app.command("fetch")
+def fetch() -> None:
+    """Download every file this project's records cite that isn't on this
+    computer yet, now, with a progress bar. Stopping (Ctrl+C) keeps what has
+    arrived; the rest comes later."""
+    from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
+
+    c = _ctx()
+    try:
+        if not c.sync_svc.fetches_files:
+            raise _fail(ValueError("This project doesn't follow an authority."))
+        total = c.sync_svc.files_to_fetch()
+        if not total:
+            console.print("Every file is here.")
+            return
+        with Progress(
+            TextColumn("Downloading files"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            console=console,
+            transient=True,
+        ) as bar:
+            task = bar.add_task("files", total=total)
+            try:
+                report = c.sync_svc.fetch_files(
+                    progress=lambda done: bar.update(task, completed=done)
+                )
+            except KeyboardInterrupt:
+                console.print("Stopped; what arrived is kept.")
+                return
+    except SyncError as e:
+        raise _fail(e)
+    finally:
+        c.close()
+    console.print(f"[success]Downloaded {report.fetched} file(s).[/success]")
+    if report.absent:
+        console.print(
+            f"[warning]{len(report.absent)} haven't reached the server yet: the "
+            "device that added them hasn't sent them.[/warning]"
+        )
+
+
 @app.command("watch")
 def watch() -> None:
     """Keep syncing in this terminal until stopped (Ctrl+C): after edits, on the
@@ -223,6 +296,10 @@ def status() -> None:
     console.print(f"Paused      {'yes' if s.paused else 'no'}")
     console.print(f"Unsent      {s.pending}")
     console.print(f"Conflicts   {s.open_conflicts}")
+    console.print(
+        f"Files       keeps {'every file' if s.download_files == 'all' else 'files opened'}"
+        + (f"; {s.files_to_fetch} not downloaded yet" if s.files_to_fetch else "")
+    )
     console.print(f"Last synced {s.last_synced_at or 'never'}")
     if s.last_error:
         console.print(f"[warning]Last problem  {escape(s.last_error)}[/warning]")

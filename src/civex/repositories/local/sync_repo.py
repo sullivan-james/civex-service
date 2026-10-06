@@ -30,6 +30,7 @@ from civex.db.models import (
     SyncConflict,
     SyncDevice,
     SyncMeta,
+    StoredObject,
     SyncOp,
     View,
     _UTCDateTime,
@@ -161,6 +162,35 @@ class LocalSyncRepository:
             .limit(limit)
         )
         return [sha for (sha,) in rows]
+
+    def _not_here(self):  # type: ignore[no-untyped-def]
+        """Files records here cite that no drive here is recorded to hold."""
+        return (
+            select(FileReference.sha256, func.min(Record.dataset_id))
+            .join(Record, Record.id == FileReference.record_id)
+            .outerjoin(StoredObject, StoredObject.sha256 == FileReference.sha256)
+            .where(StoredObject.sha256.is_(None))
+            .group_by(FileReference.sha256)
+        )
+
+    def files_not_here(
+        self, after: str, limit: int, shas: list[str] | None = None
+    ) -> list[tuple[str, uuid.UUID | None]]:
+        """Files the records here cite that no drive here holds (another device
+        added them), in hash order after `after`, each with a collection that
+        uses it (to choose the drive it is written to). With `shas`, only those."""
+        query = self._not_here().where(FileReference.sha256 > after)
+        if shas is not None:
+            query = query.where(FileReference.sha256.in_(shas))
+        rows = self._s.execute(query.order_by(FileReference.sha256).limit(limit))
+        return [(sha, collection) for sha, collection in rows]
+
+    def count_files_not_here(self) -> int:
+        return int(
+            self._s.execute(
+                select(func.count()).select_from(self._not_here().subquery())
+            ).scalar_one()
+        )
 
     def set_project_id(self, project_id: uuid.UUID) -> None:
         self._meta_row().project_id = project_id

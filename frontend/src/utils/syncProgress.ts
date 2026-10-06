@@ -4,6 +4,7 @@ const PHASES: Record<string, string> = {
   copying: 'Copying the project from the server',
   filling: 'Sending this project to the server',
   history: 'Fetching earlier history',
+  files: 'Downloading files from the server',
 }
 
 const KINDS: Record<string, string> = {
@@ -29,7 +30,12 @@ export function describeSyncProgress(p: SyncProgress): SyncProgressText {
     p.total != null
       ? `${p.done.toLocaleString()} of ${p.total.toLocaleString()}`
       : p.done.toLocaleString()
-  const what = p.phase === 'history' ? 'changes' : (KINDS[p.kind ?? ''] ?? '')
+  const what =
+    p.phase === 'history'
+      ? 'changes'
+      : p.phase === 'files'
+        ? 'files'
+        : (KINDS[p.kind ?? ''] ?? '')
   return {
     title: PHASES[p.phase] ?? 'Syncing',
     detail: what ? `${what} · ${count}` : count,

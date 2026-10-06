@@ -8,6 +8,11 @@ export interface RemoteStatus {
   /** The schedule is stopped; Sync now still works. */
   paused: boolean
   interval_seconds: number
+  /** Which files this computer keeps a copy of: every file (downloaded in the
+   * background), or only those opened or exported. */
+  download_files: 'all' | 'opened'
+  /** Files the records here cite that aren't on this computer yet. */
+  files_to_fetch: number
   /** This project is itself an authority. */
   serving: boolean
   /** Changes made here that have not been sent. */
@@ -179,8 +184,11 @@ export const remoteApi = {
     api.post<{ mode: string }>('/remote/connect', { url, token }),
   disconnect: () => api.post<RemoteStatus>('/remote/disconnect', {}),
   syncNow: () => api.post<{ requested: boolean }>('/remote/sync', {}),
-  update: (body: { paused?: boolean; interval_seconds?: number }) =>
-    api.patch<RemoteStatus>('/remote', body),
+  update: (body: {
+    paused?: boolean
+    interval_seconds?: number
+    download_files?: 'all' | 'opened'
+  }) => api.patch<RemoteStatus>('/remote', body),
   conflicts: (status: 'open' | 'resolved' | 'all' = 'open', record?: string) =>
     api.get<SyncConflict[]>(
       `/remote/conflicts?status=${status}${record ? `&record=${record}` : ''}`,

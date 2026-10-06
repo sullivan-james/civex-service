@@ -22,6 +22,8 @@ const base = {
   project_id: 'p',
   paused: false,
   interval_seconds: 60,
+  download_files: 'all',
+  files_to_fetch: 0,
   serving: false,
   pending: 0,
   open_conflicts: 0,
@@ -156,6 +158,28 @@ describe('SyncSection', () => {
       ).toEqual({ interval_seconds: 0 }),
     )
     expect(await screen.findByText('Up to date')).toBeInTheDocument()
+  })
+
+  it('says how many files are not here yet and lets a person keep only those opened', async () => {
+    status = {
+      ...base,
+      configured: true,
+      remote: 'https://a.example',
+      files_to_fetch: 7,
+    }
+    renderSection()
+    expect(
+      await screen.findByText(/7 files not downloaded yet\. They download/),
+    ).toBeInTheDocument()
+    await userEvent.click(
+      screen.getByRole('radio', { name: 'Only files I open' }),
+    )
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.method === 'PATCH' && c.path === '/api/remote')
+          ?.body,
+      ).toEqual({ download_files: 'opened' }),
+    )
   })
 
   it('says changes are waiting rather than up to date', async () => {

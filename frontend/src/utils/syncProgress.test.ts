@@ -29,6 +29,17 @@ describe('describeSyncProgress', () => {
     expect(text.fraction).toBeNull()
   })
 
+  it('counts files while downloading them', () => {
+    const text = describeSyncProgress({
+      phase: 'files',
+      done: 3,
+      total: 12,
+      kind: null,
+    })
+    expect(text.title).toBe('Downloading files from the server')
+    expect(text.detail).toBe('files · 3 of 12')
+  })
+
   it('never goes past the end', () => {
     expect(
       describeSyncProgress({

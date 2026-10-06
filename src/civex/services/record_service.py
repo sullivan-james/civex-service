@@ -456,6 +456,9 @@ class RecordService:
         self._datasets = dataset_repo
         self._records = record_repo
         self._files = file_store
+        # This project follows an authority, so a file its records cite that no
+        # drive here holds can be fetched from it (set by `build_local_context`).
+        self.files_from_server: Callable[[], bool] = lambda: False
         self._job_svc = job_svc
         self._audit = audit_repo
 
@@ -597,6 +600,7 @@ class RecordService:
             return records
 
         volume_of = self._files.locate_volumes(wanted)
+        from_server = None in volume_of.values() and self.files_from_server()
         status = {
             name: self._files.volume_status(name)
             for name in {v for v in volume_of.values() if v}
@@ -604,6 +608,17 @@ class RecordService:
 
         def location(sha: str | None) -> dict[str, Any]:
             volume = volume_of.get(sha or "")
+            if volume is None and from_server:
+                # Another device added it: it is fetched when opened or
+                # exported (and, unless this device keeps only what it opens,
+                # in the background), so it is neither here nor lost.
+                return {
+                    "volume": None,
+                    "state": "remote",
+                    "available": None,
+                    "reason": "Not downloaded to this computer yet.",
+                    "fix": "Opening or exporting it downloads it from the server.",
+                }
             if volume is None:
                 # Not on any volume we know of (yet): don't claim it is gone --
                 # it may only be on a remote that hasn't been fetched.

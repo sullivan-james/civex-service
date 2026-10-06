@@ -45,6 +45,12 @@ class RemoteStatusResponse(BaseModel):
     )
     last_error_at: str | None
     running: bool = Field(description="A sync is in progress right now.")
+    download_files: str = Field(
+        description="Which files this device keeps a copy of: all, or opened."
+    )
+    files_to_fetch: int = Field(
+        description="Files records here cite that aren't on this computer yet."
+    )
     last_result: SyncResultResponse | None = Field(
         default=None,
         description="What the last sync run by this server did; null after a "
@@ -95,6 +101,11 @@ class RemoteUpdateRequest(BaseModel):
         default=None,
         ge=0,
         description="Seconds between looks for changes; 0 = never (only when asked).",
+    )
+    download_files: str | None = Field(
+        default=None,
+        description="Keep a copy of every file (all), or only of files opened "
+        "or exported (opened).",
     )
 
 
@@ -267,6 +278,8 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         last_error=s.last_error,
         last_error_at=s.last_error_at,
         running=s.running,
+        download_files=s.download_files,
+        files_to_fetch=s.files_to_fetch,
         last_result=_last_result(),
         progress=(
             SyncProgressResponse(**p.to_dict()) if (p := sync_jobs.progress) else None
@@ -323,11 +336,14 @@ def sync_now(ctx: AppContext = Depends(get_ctx)):
 
 @router.patch("", response_model=RemoteStatusResponse)
 def update(body: RemoteUpdateRequest, ctx: AppContext = Depends(get_ctx)):
-    """Pause or resume the schedule, or change how often it looks."""
+    """Pause or resume the schedule, change how often it looks, or choose which
+    files this device keeps a copy of."""
     if body.paused is not None:
         ctx.sync_svc.set_paused(body.paused)
     if body.interval_seconds is not None:
         ctx.sync_svc.set_interval(body.interval_seconds)
+    if body.download_files is not None:
+        ctx.sync_svc.set_download_files(body.download_files)
     return _status(ctx)
 
 
