@@ -53,6 +53,8 @@ const StorageSettings = lazy(
 const RetentionSection = lazy(
   () => import('./components/settings/RetentionSection'),
 )
+const SyncSection = lazy(() => import('./components/settings/SyncSection'))
+const SyncReviewPage = lazy(() => import('./pages/SyncReviewPage'))
 const MapSection = lazy(() => import('./components/settings/MapSection'))
 const AdvancedSection = lazy(
   () => import('./components/settings/AdvancedSection'),
@@ -111,6 +113,7 @@ export default function App() {
               path="/exports/:schema/:name"
               element={<ExportEditorPage />}
             />
+            <Route path="/sync/review" element={<SyncReviewPage />} />
             {/* Legacy redirects */}
             <Route path="/jobs" element={<Navigate to="/runs" replace />} />
             <Route path="/jobs/:id" element={<Navigate to="/runs" replace />} />
@@ -137,6 +140,7 @@ export default function App() {
                 path="recently-deleted"
                 element={<Navigate to="/settings/retention" replace />}
               />
+              <Route path="sync" element={<SyncSection />} />
               <Route path="map" element={<MapSection />} />
               <Route path="advanced" element={<AdvancedSection />} />
             </Route>

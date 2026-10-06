@@ -108,8 +108,41 @@ def populated(ctx: AppContext, make_schema, make_collection) -> Engine:
         AiUsageEvent(provider="anthropic", model="m", input_tokens=1, output_tokens=2)
     )
     _add_storage_transfer(ctx)
+    _add_sync_state(ctx)
     ctx.commit()
     return ctx._session.get_bind()  # type: ignore[return-value]
+
+
+def _add_sync_state(ctx: AppContext) -> None:
+    """A device, a settled change in the ledger and a conflict, so the sync
+    tables (and the project id, which moves with the data) are compared too."""
+    import uuid
+
+    from civex.domain.sync import OpResult, SyncEntry
+
+    ctx.authority_svc.add_device("laptop")
+    record = ctx.record_svc.find("study", "patient")[0]
+    op = SyncEntry(
+        id=uuid.uuid4(),
+        action="update",
+        entity_type="record",
+        entity_id=record.id,
+        old_data=None,
+        new_data={},
+        timestamp="2024-01-01T00:00:00+00:00",
+    )
+    ctx.sync_repo.save_op(op, OpResult(op_id=op.id, status="applied"), None, "laptop")
+    ctx.sync_repo.add_conflict(
+        kind="conflict",
+        entity_type="record",
+        entity_id=record.id,
+        field="name",
+        yours="a",
+        theirs="b",
+        op_id=None,
+        device_name="laptop",
+        message=None,
+    )
 
 
 def _add_storage_transfer(ctx: AppContext) -> None:

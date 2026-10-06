@@ -41,6 +41,18 @@ class ValidationError(CivexError):
     kind = "validation_error"
 
 
+class ConflictMovedError(CivexError):
+    """The value being put back has changed since the conflict was recorded, so
+    what a person was shown is no longer what is there. `current` is what is
+    there now: show it and ask again."""
+
+    kind = "conflict_moved"
+
+    def __init__(self, message: str, current: Any = None) -> None:
+        super().__init__(message)
+        self.current = current
+
+
 class DuplicateRecordError(ValidationError):
     """A write would give two records the same values for a schema's unique
     key. A ValidationError, so every caller that skips or reports a bad row

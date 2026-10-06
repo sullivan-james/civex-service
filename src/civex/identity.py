@@ -16,9 +16,13 @@ import getpass
 _MAX_LEN = 100
 
 
-def local_actor() -> str | None:
-    """The OS user running civex, or None where there isn't one (some
-    containers run as a uid with no name)."""
+def local_actor(configured: str | None = None) -> str | None:
+    """Who to record as the author: the name set for this project
+    (`[identity] name` in its config.toml), else the OS
+    user running civex, or None where there isn't one (some containers run as a
+    uid with no name)."""
+    if configured and configured.strip():
+        return configured.strip()[:_MAX_LEN]
     try:
         name = getpass.getuser().strip()
     except (KeyError, OSError, ImportError):

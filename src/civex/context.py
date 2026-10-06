@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
     from civex.repositories.local.audit_repo import LocalAuditRepository
     from civex.repositories.local.file_store import VolumeAwareFileObjectStore
+    from civex.repositories.local.sync_repo import LocalSyncRepository
     from civex.services.ai.service import AiService
     from civex.services.ai_usage_service import AiUsageService
     from civex.services.analytics_service import AnalyticsService
@@ -40,6 +41,8 @@ if TYPE_CHECKING:
     from civex.services.schema_service import SchemaService
     from civex.services.store_service import StoreService
     from civex.services.export_definition_service import ExportDefinitionService
+    from civex.services.sync_authority import SyncAuthorityService
+    from civex.services.sync_service import SyncService
     from civex.services.view_service import ViewService
     from civex.services.workflow_job_service import WorkflowJobService
     from civex.services.workflow_service import WorkflowService
@@ -93,6 +96,9 @@ class AppContext:
     policy_svc: PolicyService
     view_svc: ViewService
     export_def_svc: ExportDefinitionService
+    sync_repo: LocalSyncRepository
+    authority_svc: SyncAuthorityService
+    sync_svc: SyncService
     _session: Session
 
     def commit(self) -> None:
@@ -169,7 +175,16 @@ def build_local_context(
         session, is_postgres=engine.dialect.name == "postgresql"
     )
     job_repo = LocalWorkflowJobRepository(session)
-    audit_repo = LocalAuditRepository(session, actor=local_actor())
+    device_id = None
+    if config.sync.remote:
+        # Syncing: every entry written here carries which device made it.
+        from civex import user_state
+        from civex.repositories.local.sync_repo import LocalSyncRepository as _Sync
+
+        device_id = user_state.device_id_for(_Sync(session).meta().project_id)
+    audit_repo = LocalAuditRepository(
+        session, actor=local_actor(config.identity.name), device_id=device_id
+    )
     view_repo = LocalViewRepository(session)
     if file_store is None:
         file_store = VolumeAwareFileObjectStore(
@@ -227,7 +242,13 @@ def build_local_context(
         LocalExportDefinitionRepository(session), schema_svc, record_svc
     )
     history_svc = AuditService(
-        audit_repo, schema_svc, record_svc, dataset_svc, file_store
+        audit_repo,
+        schema_svc,
+        record_svc,
+        dataset_svc,
+        file_store,
+        # `sync_svc` is built below; history only asks for it when it is read.
+        sync_conflicts=lambda ids: sync_svc.conflicts_of_entries(ids),
     )
 
     retention_svc = RetentionService(
@@ -237,9 +258,30 @@ def build_local_context(
         audit_repo,
         job_repo,
         config.retention,
-        # No sync exists yet, so no history waits to be pushed. Sync (CIVEX-307)
-        # turns this on while a remote is set.
-        False,
+        # While this project syncs, history the authority hasn't taken yet is
+        # the only copy of those changes, so a clean-up keeps it.
+        config.sync.remote is not None,
+    )
+
+    from civex.repositories.local.sync_repo import LocalSyncRepository
+    from civex.services.sync_applier import SyncApplier
+    from civex.services.sync_authority import SyncAuthorityService
+
+    from civex.services.sync_service import SyncService
+    from civex.services.sync_transport import build_transport
+
+    sync_repo = LocalSyncRepository(session)
+    applier = SyncApplier(sync_repo, audit_repo)
+    authority_svc = SyncAuthorityService(sync_repo, applier, file_store, record_svc)
+    sync_svc = SyncService(
+        config,
+        sync_repo,
+        applier,
+        audit_repo,
+        file_store,
+        session.commit,
+        build_transport,
+        record_svc,
     )
 
     ctx = AppContext(
@@ -265,6 +307,9 @@ def build_local_context(
         policy_svc=policy_svc,
         view_svc=view_svc,
         export_def_svc=export_def_svc,
+        sync_repo=sync_repo,
+        authority_svc=authority_svc,
+        sync_svc=sync_svc,
         _session=session,
     )
     ai_svc._app_ctx = ctx

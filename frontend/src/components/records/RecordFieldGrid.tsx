@@ -229,7 +229,9 @@ function FileControl({
 }
 
 /** One field's value; click it to edit in place. */
-function EditableValue({
+/** One field's value, edited in place: click it, change it, Enter or leave to
+ * save. The record page's grid and the merge view's result column are both it. */
+export function EditableValue({
   field,
   value,
   referenceLabels,
@@ -420,6 +422,7 @@ export function RecordFieldGrid({
   errors,
   onDismissError,
   extra,
+  marked,
 }: {
   fields: Field[]
   data: Record<string, unknown>
@@ -432,6 +435,8 @@ export function RecordFieldGrid({
   onDismissError?: () => void
   /** Extra content under a field's value (e.g. the filename extractor). */
   extra?: (field: Field) => ReactNode
+  /** Fields (by name) to draw attention to, such as ones a sync did not take. */
+  marked?: ReadonlySet<string>
 }) {
   return (
     <dl className="grid grid-cols-[minmax(8rem,14rem)_1fr] items-start gap-x-6 gap-y-3">
@@ -440,7 +445,11 @@ export function RecordFieldGrid({
         const hints = restrictionHints(field)
         return (
           <div key={field.name} className="contents">
-            <dt className="pt-1" title={`${field.name} (${field.type})`}>
+            <dt
+              className={`pt-1 ${marked?.has(field.name) ? '-ml-2 border-l-2 border-attention pl-2' : ''}`}
+              data-marked={marked?.has(field.name) ? 'true' : undefined}
+              title={`${field.name} (${field.type})`}
+            >
               <span className="text-fg-muted">
                 {displayLabel(field.name, field.label)}
               </span>

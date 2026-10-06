@@ -191,6 +191,25 @@ class ResolvedSchema:
 
 
 @dataclass
+class FieldValueDTO:
+    """One value of one record, described for a person: the record's name, where
+    it lives, the field's label and type, and the value as it is now. What a
+    list of changes needs to say "depth on Encounter 12" instead of two ids.
+    Response-only: worked out when read, never stored, so a rename shows."""
+
+    record_id: str
+    record_name: str | None
+    dataset_name: str | None
+    schema_name: str | None
+    field_name: str | None  # what a write names; None when the field is gone
+    field_label: str | None  # None when the field no longer exists
+    dtype: str | None
+    value: Any = None
+    record_deleted: bool = False
+    field_deleted: bool = False
+
+
+@dataclass
 class NameIssue:
     """A schema or field whose `name` predates slug validation.
 
@@ -688,6 +707,11 @@ class AuditLogDTO:
     # Who made the change, as the machine that made it reported it (the OS
     # user). None for entries from before this was recorded.
     actor: str | None = None
+    # Response-only, like `changes`: what became of this change when it was sent
+    # to the authority, if it did not go in as made -- `SyncConflictDTO.to_dict()`
+    # rows (clashes, a refusal, an edit against a delete), open or settled. Never
+    # stored, and never in a sync bundle.
+    sync: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {

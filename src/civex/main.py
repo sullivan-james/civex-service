@@ -14,6 +14,7 @@ from civex.cli import (
     schema,
     files,
     store,
+    sync as sync_cli,
     trash,
     view,
     workflow,
@@ -79,6 +80,8 @@ app.add_typer(plugin.app, name="plugin", rich_help_panel=_WORK)
 app.add_typer(policy.app, name="policy", rich_help_panel=_WORK)
 app.add_typer(worker.app, name="automation", rich_help_panel=_WORK)
 app.add_typer(trash.app, name="trash", rich_help_panel=_WORK)
+app.add_typer(sync_cli.app, name="sync", rich_help_panel=_COLLAB)
+app.command("clone", rich_help_panel=_COLLAB)(sync_cli.clone)
 app.add_typer(retention.app, name="retention", rich_help_panel=_WORK)
 app.add_typer(history.app, name="history", rich_help_panel=_WORK)
 app.add_typer(view.app, name="view", rich_help_panel=_WORK)

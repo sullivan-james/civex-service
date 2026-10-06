@@ -1,3 +1,4 @@
+import type { SyncConflict } from './remote'
 import { api } from './client'
 import type { FilterTreeWire } from '../utils/filterTree'
 import type { Blocker } from './restore'
@@ -55,6 +56,9 @@ export interface AuditLogEntry {
   /** Where the record this is about is now, so a lost one can be told from
    * one that was edited, deleted or purged. Null for anything but a record. */
   now: AuditNow | null
+  /** What became of this change when it was sent to the authority, if it did
+   * not go in as made: the same rows as the sync review, open or settled. */
+  sync?: SyncConflict[]
   timestamp: string
 }
 

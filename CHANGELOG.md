@@ -20,6 +20,44 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## Unreleased — syncing between machines
+
+### Breaking
+
+- Migration `c9e1f4a7b3d2` adds the sync tables, indexes on `audit_log`, and
+  `audit_log.apply_state`. It runs automatically; existing history is kept.
+
+### Added
+
+- **Sync with an authority** (`civex sync`, `civex clone`): a project can follow
+  another civex over HTTP. Changes merge field by field; the authority's value
+  wins a clash and yours is kept as a conflict you can take back. Retries are
+  safe, and a dropped connection resumes. See the Syncing guide.
+- **Sync runs by itself** while the server is up (and with `civex sync watch`):
+  after changes, on an interval, backing off when the authority is unreachable.
+  Settings → Sync connects, shows status, syncs now, pauses and settles
+  conflicts; the status bar shows a failing or waiting sync.
+- `civex sync authority enable` + `civex sync device add` turn a server into an
+  authority; remote hosts reach only `/api/sync/v1/`.
+
+## v1.2.1 — history records every change (2026-10-05)
+
+### Fixes
+
+- **Reordering a schema's fields now appears in history.** It wrote no entry,
+  so the new order was in the database but nowhere in the history (and would
+  never have reached another device once sync exists). Each field that moved is
+  recorded as an edit of that field.
+- **Renaming or deleting a field now records the name templates it rewrites.**
+  A schema's record-name template, or a file field's download-name template,
+  that used the field was updated without an entry; each template changed is
+  now an edit of its schema or field in history.
+
+A new test (`tests/services/test_audit_replay.py`) does everything a person can
+do to schemas, fields, collections, views and records and checks that the last
+history entry about each thing matches the database, so the next change that
+forgets to write history fails it.
+
 ## v1.2.0 — uniqueness policies, recoverable fields, old sync removed (2026-10-05)
 
 ### Added

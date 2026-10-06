@@ -17,6 +17,7 @@ import dataclasses
 import json
 from dataclasses import replace
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from civex.domain.audit_filter import AuditFilter
@@ -60,7 +61,12 @@ class AuditService:
         record_svc: RecordService,
         dataset_svc: DatasetService,
         files: FileObjectStore,
+        sync_conflicts: Callable[[list[uuid.UUID]], dict[uuid.UUID, list[Any]]]
+        | None = None,
     ) -> None:
+        # What became of each change sent to an authority (None: no sync, so
+        # nothing to say). A callable, so history reads it without knowing sync.
+        self._sync_conflicts = sync_conflicts
         self._audit = audit
         self._schema_svc = schema_svc
         self._records = record_svc
@@ -226,11 +232,17 @@ class AuditService:
     def _with_changes(self, entries: list[AuditLogDTO]) -> list[AuditLogDTO]:
         shapes = self._schema_svc.resolver()
         now = self._where_now(entries)
+        sync = (
+            self._sync_conflicts([e.id for e in entries])
+            if self._sync_conflicts and entries
+            else {}
+        )
         return [
             dataclasses.replace(
                 e,
                 changes=[c.to_dict() for c in self._diff(e, shapes)],
                 now=now.get(e.entity_id),
+                sync=[c.to_dict() for c in sync.get(e.id, [])],
             )
             for e in entries
         ]

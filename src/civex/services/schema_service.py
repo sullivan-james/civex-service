@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import uuid
 from typing import Any
 
@@ -550,18 +552,30 @@ class SchemaService:
         rewrite: Any,
     ) -> None:
         """Apply `rewrite(template, via) -> template` to every template in
-        `holders` (`via` as in `_template_holders`; file names use None)."""
+        `holders` (`via` as in `_template_holders`; file names use None).
+
+        Each template changed is a change to its schema or field, so it is in
+        history like any other edit: a device that only reads history would
+        otherwise keep the old name in a template that no longer works."""
         for schema, vias, file_fields in holders:
             if vias:
                 template = schema.display_template or ""
                 for via in vias:
                     template = rewrite(template, via)
-                self._repo.update(
+                updated = self._repo.update(
                     schema.id,
                     name=None,
                     description=None,
                     display_template=template or None,
                 )
+                if self._audit:
+                    self._audit.log_change(
+                        "update",
+                        "schema",
+                        schema.id,
+                        schema.to_dict(),
+                        updated.to_dict(),
+                    )
             for f in file_fields:
                 restrictions = dict(f.restrictions)
                 new_template = rewrite(restrictions["filename_template"], None)
@@ -569,7 +583,11 @@ class SchemaService:
                     restrictions["filename_template"] = new_template
                 else:
                     del restrictions["filename_template"]
-                self._repo.update_field(f.id, restrictions=restrictions)
+                changed = self._repo.update_field(f.id, restrictions=restrictions)
+                if self._audit:
+                    self._audit.log_change(
+                        "update", "field", f.id, f.to_dict(), changed.to_dict()
+                    )
 
     def restore_field_plan(
         self, schema_name: str, field_id: uuid.UUID
@@ -647,9 +665,12 @@ class SchemaService:
         holders = self._template_holders(field)
         # A uniqueness policy can't outlive one of its fields.
         kept_keys = [k for k in schema.unique_keys if str(field.id) not in k]
+        stamp = datetime.now(timezone.utc)
         if self._audit:
-            self._audit.log_change("delete", "field", field.id, field.to_dict(), None)
-        self._repo.delete_field(field.id)
+            self._audit.log_change(
+                "delete", "field", field.id, field.to_dict(), None, timestamp=stamp
+            )
+        self._repo.delete_field(field.id, stamp)
         if len(kept_keys) != len(schema.unique_keys):
             updated = self._repo.update(
                 schema.id, name=None, description=None, unique_keys=kept_keys
@@ -726,7 +747,18 @@ class SchemaService:
                 f"Field IDs not found on schema '{schema_name}': "
                 + ", ".join(str(i) for i in invalid)
             )
-        return self._repo.reorder_fields(schema.id, field_ids)
+        before = {f.id: f for f in schema.fields}
+        ordered = self._repo.reorder_fields(schema.id, field_ids)
+        if self._audit:
+            # A field's place is part of the field, so each one that moved is an
+            # edit of it.
+            for field in ordered:
+                old = before.get(field.id)
+                if old is not None and old.position != field.position:
+                    self._audit.log_change(
+                        "update", "field", field.id, old.to_dict(), field.to_dict()
+                    )
+        return ordered
 
     def _children_by_parent(self) -> dict[uuid.UUID, list[SchemaDTO]]:
         by_parent: dict[uuid.UUID, list[SchemaDTO]] = {}
@@ -799,11 +831,14 @@ class SchemaService:
         Schemas that inherit from this one are left untouched and keep
         resolving its fields; see docs/guides/deleting-and-restoring.md."""
         schema = self.get(name)
+        stamp = datetime.now(
+            timezone.utc
+        )  # the entry's time and the stamp: one instant
         if self._audit:
             self._audit.log_change(
-                "delete", "schema", schema.id, schema.to_dict(), None
+                "delete", "schema", schema.id, schema.to_dict(), None, timestamp=stamp
             )
-        self._repo.delete(schema.id)
+        self._repo.delete(schema.id, stamp)
 
     def list_deleted(self) -> list[SchemaDTO]:
         return self._repo.list_deleted()

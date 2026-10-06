@@ -436,6 +436,14 @@ class AuditLog(Base):
         Index("ix_audit_log_entity", "entity_id", "timestamp"),
         Index("ix_audit_log_timestamp", "timestamp"),
         Index("ix_audit_log_batch", "batch_id"),
+        # Sync: what the authority has numbered, and what a device has yet to send.
+        Index("ix_audit_log_hub_seq", "hub_seq"),
+        Index(
+            "ix_audit_log_unsynced",
+            "timestamp",
+            postgresql_where=text("sync_state = 'pending'"),
+            sqlite_where=text("sync_state = 'pending'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
@@ -469,6 +477,15 @@ class AuditLog(Base):
     hub_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     sync_state: Mapped[str] = mapped_column(
         String(10), nullable=False, default="pending", server_default="pending"
+    )
+    # What became of this entry's state here: `applied` (it is, or was, the
+    # thing's state), `held` (a change from the authority kept but not applied
+    # because this device had its own unsent change to the same thing; applied
+    # later if it is still the latest, see SyncService._catch_up) or
+    # `superseded` (the authority settled on something else, carried by a later
+    # entry, so this one's state is never applied).
+    apply_state: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="applied", server_default="applied"
     )
 
 
@@ -866,3 +883,95 @@ def _job_inserted(mapper: Any, connection: Any, target: WorkflowJob) -> None:
 def _job_updated(mapper: Any, connection: Any, target: WorkflowJob) -> None:
     if _data_changed(target, "input_data"):
         _sync_file_refs(connection, "job_id", target.id, target.input_data)
+
+
+class SyncMeta(Base):
+    """What sync needs to remember about this project, in one row. The remote's
+    address is configuration (`[sync]` in config.toml); this is state."""
+
+    __tablename__ = "sync_meta"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_sync_meta_single_row"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    # Shared by every copy of the project: a device joining takes the
+    # authority's, so a project can't be mistaken for another.
+    project_id: Mapped[uuid.UUID] = mapped_column(nullable=False, default=_uuid)
+    # Authority: the last number handed out.
+    head_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # Device: the last of the authority's numbers applied here.
+    cursor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # The device that put the first data into this authority.
+    seeded_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        _UTCDateTime(), nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_error_at: Mapped[datetime | None] = mapped_column(
+        _UTCDateTime(), nullable=True
+    )
+
+
+class SyncOp(Base):
+    """Authority: a change a device sent, and what became of it. Seen again
+    (the device never got the answer), it is answered from here and not done a
+    second time."""
+
+    __tablename__ = "sync_ops"
+
+    op_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    device_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    device_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(String(12), nullable=False)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    conflicts: Mapped[list[Any]] = mapped_column(_JSON, default=list)
+    hub_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    received_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+
+
+class SyncDevice(Base):
+    """Authority: a device allowed to sync, by the token it was given. The
+    token is shown once and only its hash is kept."""
+
+    __tablename__ = "sync_devices"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    # Bound at first contact: a token can't then claim another device's identity.
+    device_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    last_seen_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+
+
+class SyncConflict(Base):
+    """A change that did not go in as made, kept for a person to look at: a
+    value both sides changed (the authority's stayed), or a change the
+    authority refused. `yours` is what the device sent, `theirs` what stayed."""
+
+    __tablename__ = "sync_conflicts"
+    __table_args__ = (Index("ix_sync_conflicts_status", "status", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    field: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    yours: Mapped[Any | None] = mapped_column(_JSON, nullable=True)
+    theirs: Mapped[Any | None] = mapped_column(_JSON, nullable=True)
+    # What the value was before either side changed it, who wrote `theirs` and
+    # when: what a person needs to judge a clash without going to the history.
+    base: Mapped[Any | None] = mapped_column(_JSON, nullable=True)
+    theirs_actor: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    theirs_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    op_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    device_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="open", server_default="open"
+    )
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    resolved_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    resolution: Mapped[str | None] = mapped_column(String(10), nullable=True)

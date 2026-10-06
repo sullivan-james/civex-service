@@ -53,6 +53,41 @@ class PluginsConfig:
     default_timeout_seconds: float = 60.0
 
 
+def _interval(value: object) -> int:
+    """Seconds between automatic syncs; 0 means never (only when asked)."""
+    seconds = int(value)  # type: ignore[call-overload]
+    return 0 if seconds <= 0 else max(5, seconds)
+
+
+@dataclass
+class IdentityConfig:
+    """Who changes made in this project are recorded as. None: the operating-system user. It is only a label
+    (history says who, unverified); a synced change is attributed by the
+    authority from the device's token."""
+
+    name: str | None = None
+
+
+@dataclass
+class SyncConfig:
+    """Keeping this project in step with other copies of it (CIVEX-305): one
+    instance is the *authority* and every other device follows it."""
+
+    # The authority this project syncs to, e.g. "https://civex.example.org".
+    # None: not synced. The token is not here (config.toml is shared and
+    # backed up); it lives in the user's own state, see `civex.user_state`.
+    remote: str | None = None
+    # This instance is an authority: it accepts changes from devices that hold
+    # a token, and no one else may reach anything but `/api/sync/v1`.
+    serve: bool = False
+    # Stops the background sync (a manual sync still works). Kept here so every
+    # process sees it, like `[automation] paused`.
+    paused: bool = False
+    # How often the background sync looks for changes, in seconds. 0 = never:
+    # it syncs only when asked (Sync now, `civex sync`).
+    interval_seconds: int = 60
+
+
 @dataclass
 class AutomationConfig:
     # The kill switch for workflows. While true nothing new starts: triggers
@@ -167,6 +202,8 @@ class Config:
     map: MapConfig = field(default_factory=MapConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
     automation: AutomationConfig = field(default_factory=AutomationConfig)
+    sync: SyncConfig = field(default_factory=SyncConfig)
+    identity: IdentityConfig = field(default_factory=IdentityConfig)
 
     @property
     def civex_dir(self) -> Path:
@@ -322,6 +359,17 @@ def load_config() -> Config:
         paused=bool(data.get("automation", {}).get("paused", False)),
     )
 
+    identity_name = str(data.get("identity", {}).get("name") or "").strip()[:100]
+    sync_data = data.get("sync", {})
+    sync_cfg = SyncConfig(
+        remote=(str(sync_data["remote"]).rstrip("/") or None)
+        if sync_data.get("remote")
+        else None,
+        serve=bool(sync_data.get("serve", False)),
+        paused=bool(sync_data.get("paused", False)),
+        interval_seconds=_interval(sync_data.get("interval_seconds", 60)),
+    )
+
     return Config(
         project_root=root,
         db=DBConfig(
@@ -337,6 +385,8 @@ def load_config() -> Config:
         map=map_cfg,
         retention=retention_cfg,
         automation=automation_cfg,
+        sync=sync_cfg,
+        identity=IdentityConfig(name=identity_name or None),
     )
 
 
@@ -370,6 +420,17 @@ def read_automation_paused(civex_dir: Path) -> bool:
     except (OSError, tomllib.TOMLDecodeError):
         return False
     return bool(data.get("automation", {}).get("paused", False))
+
+
+def read_sync_flag(civex_dir: Path, key: str) -> bool:
+    """A boolean from `[sync]` (`serve`, `paused`), read straight from
+    `config.toml`: cheap and cwd-independent, for what is asked per request or
+    per background tick."""
+    try:
+        data = tomllib.loads((civex_dir / "config.toml").read_text("utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    return bool(data.get("sync", {}).get(key, False))
 
 
 def save_config(config: Config) -> None:
@@ -444,6 +505,21 @@ def save_config(config: Config) -> None:
 
     if config.automation.paused:
         lines += ["\n[automation]\n", "paused = true\n"]
+
+    if config.identity.name:
+        lines += ["\n[identity]\n", f"name = {_tv(config.identity.name)}\n"]
+
+    sync = config.sync
+    if sync.remote or sync.serve or sync.paused or sync.interval_seconds != 60:
+        lines.append("\n[sync]\n")
+        if sync.remote:
+            lines.append(f"remote = {_tv(sync.remote)}\n")
+        if sync.serve:
+            lines.append("serve = true\n")
+        if sync.paused:
+            lines.append("paused = true\n")
+        if sync.interval_seconds != 60:
+            lines.append(f"interval_seconds = {sync.interval_seconds}\n")
 
     retention = config.retention
     retention_lines = []

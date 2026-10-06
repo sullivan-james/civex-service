@@ -22,6 +22,7 @@ from typing import Iterator
 
 from civex.db.models import AuditBatch, AuditLog, Dataset, Field, Record, Schema
 from civex.domain.audit_diff import tombstone
+from civex.domain.hlc import tick as hlc_tick
 from civex.domain.audit_filter import AuditFilter
 from civex.domain.exceptions import ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode
@@ -171,10 +172,19 @@ def _tree(node: FilterNode):
 
 
 class LocalAuditRepository:
-    def __init__(self, session: Session, actor: str | None = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        actor: str | None = None,
+        device_id: uuid.UUID | None = None,
+    ) -> None:
         self._s = session
         # Who is writing: stamped on every entry made through this repository.
         self._actor = actor
+        # Which device, once this project syncs: stamped with a clock value that
+        # sorts in causal order (see domain/hlc).
+        self._device_id = device_id
+        self._last_hlc: str | None = None
         # The batch the next writes belong to. A batch opened with `batch()` is
         # only created once something is written into it, so one that turns out
         # to touch nothing leaves no trace.
@@ -226,6 +236,16 @@ class LocalAuditRepository:
         row = self._s.get(AuditBatch, batch_id)
         return _batch_dto(row) if row else None
 
+    def _next_hlc(self) -> str | None:
+        """The clock stamp for the next entry: None until this project syncs."""
+        if self._device_id is None:
+            return None
+        if self._last_hlc is None:
+            self._last_hlc = self._s.query(func.max(AuditLog.hlc)).scalar()
+        wall_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        self._last_hlc = hlc_tick(self._last_hlc, wall_ms)
+        return self._last_hlc
+
     def _current_batch(self) -> uuid.UUID | None:
         if self._batch_id is None and self._batch_spec is not None:
             kind, label, ref = self._batch_spec
@@ -243,7 +263,12 @@ class LocalAuditRepository:
         entity_id: uuid.UUID,
         old_data: dict[str, Any] | None,
         new_data: dict[str, Any] | None,
+        timestamp: datetime | None = None,
     ) -> None:
+        """`timestamp` is when it happened, now unless the caller says: a delete
+        passes the moment it stamps what it deletes with, so the entry and the
+        stamp are one instant and every device that applies the entry stamps
+        exactly the same."""
         self._s.add(
             AuditLog(
                 action=action,
@@ -251,9 +276,11 @@ class LocalAuditRepository:
                 entity_id=entity_id,
                 old_data=old_data,
                 new_data=new_data,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=timestamp or datetime.now(timezone.utc),
                 batch_id=self._current_batch(),
                 actor=self._actor,
+                device_id=self._device_id,
+                hlc=self._next_hlc(),
             )
         )
 

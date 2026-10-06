@@ -93,7 +93,11 @@ def is_empty(engine: Engine) -> bool:
     """No rows in any civex table. A database whose tables exist but hold
     nothing (a freshly migrated one) is empty; a database with no tables at
     all is too."""
-    return sum(row_counts(engine).values()) == 0
+    counts = row_counts(engine)
+    # The migration seeds one sync_meta row (the project's id) in every new
+    # database; that is not data.
+    counts.pop("sync_meta", None)
+    return sum(counts.values()) == 0
 
 
 def _columns(table: Table) -> list[Any]:
@@ -197,6 +201,10 @@ def _copy_table(
 ) -> None:
     cols = _columns(table)
     names = [c.name for c in cols]
+    if table.name == "sync_meta":
+        # The project's identity moves with its data: replace the id the new
+        # database was seeded with.
+        dst.execute(table.delete())
     out = _Batcher(dst, table, names, batch, on_rows)
 
     if table.name == "schemas":

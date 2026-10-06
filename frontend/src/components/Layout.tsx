@@ -15,6 +15,9 @@ import {
   useDefaultLayout,
 } from 'react-resizable-panels'
 import { useUISettings } from '../hooks/useUISettings'
+import { useRemoteStatus } from '../hooks/useRemote'
+import { syncButtonState } from '../utils/syncState'
+import { useManualSync } from '../hooks/useSyncToasts'
 import { useFrequentCollections } from '../hooks/useFrequentCollections'
 import { useDialogA11y } from '../hooks/useDialogA11y'
 import { PinnedNav } from './PinnedNav'
@@ -25,7 +28,6 @@ import AiPanel from './ai/AiPanel'
 import { useToast } from './ui/ToastProvider'
 import { Button } from './ui/Button'
 import { IconButton } from './ui/IconButton'
-import { Tooltip } from './ui/Tooltip'
 import { Menu as Dropdown } from './ui/Menu'
 import {
   RefreshCw,
@@ -280,8 +282,32 @@ function NavGroups({
   )
 }
 
-export default function Layout({ children }: { children: ReactNode }) {
+/** The top-bar sync button, once the project follows an authority. It says
+ * whether a sync is needed (changes to send, a failure, conflicts to review) or
+ * when it last synced, and pressing it syncs and refreshes what is on screen. */
+function SyncButton() {
+  const { data } = useRemoteStatus()
+  const { request, spinning } = useManualSync()
   const queryClient = useQueryClient()
+  if (!data?.configured) return null
+  const state = syncButtonState(data, spinning)
+  const busy = state.tone === 'busy'
+  return (
+    <Button
+      variant={state.tone === 'ok' || busy ? 'nav' : 'navActive'}
+      size="sm"
+      disabled={busy}
+      onClick={() =>
+        request(() => queryClient.refetchQueries({ type: 'active' }))
+      }
+    >
+      <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />
+      {state.label}
+    </Button>
+  )
+}
+
+export default function Layout({ children }: { children: ReactNode }) {
   const [aiOpen, setAiOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -371,16 +397,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           </kbd>
         </Button>
 
-        <Tooltip content="Refresh all data" side="bottom">
-          <Button
-            variant="nav"
-            size="sm"
-            onClick={() => queryClient.refetchQueries({ type: 'active' })}
-          >
-            <RefreshCw size={14} />
-            Refresh
-          </Button>
-        </Tooltip>
+        <SyncButton />
 
         <Button
           variant={aiOpen ? 'navActive' : 'nav'}

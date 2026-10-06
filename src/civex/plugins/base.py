@@ -204,11 +204,10 @@ class WorkflowContext:
         nothing. An absent value is simply not in `fields`; it never clears
         anything.
         """
-        current = self._app_ctx.record_svc.get(record_id)
-        existing = without_file_locations(current.data)
-        if all(existing.get(k) == v for k, v in fields.items()):
+        current, data = self._app_ctx.record_svc.patched_data(record_id, fields)
+        if data is None:
             return current  # nothing to change: not touched, so not "affected"
-        return self.update_record(record_id, {**existing, **fields})
+        return self.update_record(record_id, data)
 
     def create_record(
         self,

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from civex.config import load_config, save_config
 from civex import launcher
+from civex.identity import local_actor
 from civex.domain.exceptions import ConfigError
 from civex.server.models import (
     MapSettingsResponse,
@@ -23,6 +25,50 @@ def _load_config():
         return load_config()
     except ConfigError as e:
         raise HTTPException(500, detail=str(e))
+
+
+class IdentityResponse(BaseModel):
+    name: str | None = Field(description="What changes made here are recorded as.")
+    chosen: str | None = Field(
+        description="The name chosen for this project, or null when none is."
+    )
+    default: str | None = Field(
+        description="What is used when none is chosen: the operating-system user."
+    )
+
+
+class UpdateIdentityRequest(BaseModel):
+    name: str | None = Field(
+        default=None,
+        max_length=100,
+        description="The name to record on changes made in this project; blank or null "
+        "goes back to the default (the operating-system user). Saved in the "
+        "project's config.toml.",
+    )
+
+
+def _identity(config) -> IdentityResponse:  # noqa: ANN001 - Config
+    return IdentityResponse(
+        name=local_actor(config.identity.name),
+        chosen=config.identity.name,
+        default=local_actor(),
+    )
+
+
+@router.get("/identity", response_model=IdentityResponse)
+def get_identity():
+    """Who changes made in this project are recorded as."""
+    return _identity(_load_config())
+
+
+@router.patch("/identity", response_model=IdentityResponse)
+def update_identity(body: UpdateIdentityRequest):
+    """Choose the name recorded on changes made in this project. It is saved
+    in this project's config.toml."""
+    config = _load_config()
+    config.identity.name = (body.name or "").strip()[:100] or None
+    save_config(config)
+    return _identity(config)
 
 
 @router.get("/ui", response_model=UISettingsResponse)

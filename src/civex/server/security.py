@@ -45,6 +45,20 @@ def _hostname(value: str) -> str:
     return value.lower()
 
 
+_SYNC_PREFIX = "/api/sync/v1/"
+
+
+def _serving_sync() -> bool:
+    """Whether this project is set to act as a sync authority."""
+    from civex.config import find_project_root, read_sync_flag
+
+    try:
+        root = find_project_root()
+        return bool(root and read_sync_flag(root / "_civex", "serve"))
+    except Exception:
+        return False
+
+
 class LocalGuardMiddleware:
     """Pure-ASGI middleware — inspects request headers only, never touches the
     response body, so it is transparent to SSE/streaming responses."""
@@ -53,7 +67,19 @@ class LocalGuardMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http" or os.environ.get("CIVEX_ALLOW_REMOTE") == "1":
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # An authority's peer API is the one thing remote hosts may reach on a
+        # server set to serve; every call there is checked against a device
+        # token. Everything else on such a server stays local-only, even with
+        # --allow-remote, so exposing the authority never exposes the app.
+        serving = _serving_sync()
+        if serving and scope.get("path", "").startswith(_SYNC_PREFIX):
+            await self.app(scope, receive, send)
+            return
+        if os.environ.get("CIVEX_ALLOW_REMOTE") == "1" and not serving:
             await self.app(scope, receive, send)
             return
 

@@ -24,11 +24,13 @@ from civex.server.routers import (
     legal,
     plugins,
     records,
+    remote,
     retention,
     schemas,
     settings,
     status,
     store,
+    sync_peer,
     terminal,
     transfers,
     views,
@@ -90,6 +92,14 @@ def _init_observability() -> None:
 
 
 _OPENAPI_TAGS = [
+    {
+        "name": "sync",
+        "description": (
+            "What an authority offers to the devices that follow it: handshake, "
+            "push, feed, snapshot and files. For other civex installs, not people; "
+            "only reachable remotely on an instance set to serve."
+        ),
+    },
     {
         "name": "schemas",
         "description": (
@@ -292,11 +302,15 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _migrate_on_startup()
     from civex.services.transfer_jobs import jobs
 
+    from civex.services.sync_jobs import sync_jobs
+
     jobs.ensure_worker()  # picks up anything a restart left waiting
+    sync_jobs.ensure_worker()  # idles unless the project follows an authority
     try:
         yield
     finally:
         jobs.shutdown()
+        sync_jobs.shutdown()
 
 
 def create_app() -> FastAPI:
@@ -343,6 +357,8 @@ def create_app() -> FastAPI:
     app.include_router(audit.router, prefix="/api")
     app.include_router(retention.router, prefix="/api")
     app.include_router(store.router, prefix="/api")
+    app.include_router(sync_peer.router, prefix="/api")
+    app.include_router(remote.router, prefix="/api")
     app.include_router(transfers.router, prefix="/api")
     app.include_router(db.router, prefix="/api")
     app.include_router(legal.router, prefix="/api")

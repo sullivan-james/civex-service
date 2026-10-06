@@ -116,7 +116,7 @@ class LocalSchemaRepository:
         self._s.flush()
         return _schema_to_dto(row)
 
-    def delete(self, id: uuid.UUID) -> None:
+    def delete(self, id: uuid.UUID, stamp: datetime | None = None) -> None:
         """Soft-delete: mark the schema deleted and cascade to every record
         typed by it (across every collection) so it doesn't silently orphan
         its own records. Does not touch records of other schemas that hang
@@ -126,11 +126,16 @@ class LocalSchemaRepository:
         row = self._s.query(Schema).filter_by(id=id).first()
         if row is None or row.deleted_at is not None:
             return
-        now = datetime.now(timezone.utc)
+        now = stamp or datetime.now(timezone.utc)
         row.deleted_at = now
+        # A delete is not an edit: the records keep the date they were last
+        # changed (and so every copy of a synced project agrees on it).
         self._s.query(Record).filter(
             Record.schema_id == id, Record.deleted_at.is_(None)
-        ).update({"deleted_at": now}, synchronize_session=False)
+        ).update(
+            {"deleted_at": now, "updated_at": Record.updated_at},
+            synchronize_session=False,
+        )
         self._s.flush()
 
     def restore(self, id: uuid.UUID) -> SchemaDTO:
@@ -143,7 +148,10 @@ class LocalSchemaRepository:
         cascade = self._cascade_query(id, row.deleted_at)
         row.deleted_at = None
         if cascade is not None:
-            cascade.update({"deleted_at": None}, synchronize_session=False)
+            cascade.update(
+                {"deleted_at": None, "updated_at": Record.updated_at},
+                synchronize_session=False,
+            )
         self._s.flush()
         return _schema_to_dto(row)
 
@@ -232,12 +240,12 @@ class LocalSchemaRepository:
         self._s.flush()
         return _field_to_dto(row)
 
-    def delete_field(self, field_id: uuid.UUID) -> None:
+    def delete_field(self, field_id: uuid.UUID, stamp: datetime | None = None) -> None:
         """Soft-delete: the field disappears from its schema but keeps its row,
         and every record keeps the values it holds for it (keyed by this id)."""
         row = self._s.query(Field).filter_by(id=field_id).first()
         if row and row.deleted_at is None:
-            row.deleted_at = datetime.now(timezone.utc)
+            row.deleted_at = stamp or datetime.now(timezone.utc)
             self._s.flush()
 
     def restore_field(self, field_id: uuid.UUID) -> FieldDTO:

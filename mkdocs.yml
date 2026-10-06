@@ -95,6 +95,7 @@ nav:
       - Views: guides/views.md
       - Deleting & restoring data: guides/deleting-and-restoring.md
       - Files: guides/files.md
+      - Syncing between machines: guides/sync.md
       - Workflows: guides/workflows.md
       - Automation: guides/automation.md
       - Server & web UI: guides/server-and-web-ui.md
@@ -122,6 +123,7 @@ nav:
           - civex retention: reference/cli/retention.md
           - civex schema: reference/cli/schema.md
           - civex store: reference/cli/store.md
+          - civex sync: reference/cli/sync.md
           - civex trash: reference/cli/trash.md
           - civex view: reference/cli/view.md
           - civex workflow: reference/cli/workflow.md
