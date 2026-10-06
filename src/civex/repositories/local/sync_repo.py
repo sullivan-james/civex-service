@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import BigInteger, and_, func, or_, select, text, update
+from sqlalchemy import BigInteger, and_, func, or_, select, update
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -35,6 +35,7 @@ from civex.db.models import (
     _UTCDateTime,
 )
 from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.domain.audit_diff import entry_snapshots
 from civex.domain.merge import value_at
 from civex.domain.sync import (
     OpResult,
@@ -59,6 +60,17 @@ _MODELS: dict[str, Any] = {
 }
 # A column PostgreSQL maintains itself (a trigger); never written from a snapshot.
 _NOT_WRITTEN = frozenset({"search_vector"})
+
+
+# The order changes were made in here: the number the database gave each entry
+# as it was written (`AuditLog.local_seq`), not its time, since a clock can step
+# back and send a child before its parent (refused for good). Entries from
+# before the number existed have none and come first, by time.
+_WRITE_ORDER = (
+    func.coalesce(AuditLog.local_seq, 0),
+    AuditLog.timestamp,
+    AuditLog.id,
+)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -362,14 +374,13 @@ class LocalSyncRepository:
                 # it is nobody's edit.
                 or_(AuditLog.actor.is_(None), AuditLog.actor != "sync"),
             )
-            .order_by(AuditLog.timestamp.desc(), text("rowid desc"))
+            .order_by(*(c.desc() for c in _WRITE_ORDER))
             .limit(50)
             .all()
         )
         for row in rows:
-            if path is None or value_at(row.old_data, path) != value_at(
-                row.new_data, path
-            ):
+            old, new = entry_snapshots(row.old_data, row.new_data, row.delta)
+            if path is None or value_at(old, path) != value_at(new, path):
                 return row.actor, _iso(row.timestamp)
         return None, None
 
@@ -707,7 +718,7 @@ class LocalSyncRepository:
         rows = (
             self._s.query(AuditLog)
             .filter(AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None))
-            .order_by(AuditLog.timestamp, text("rowid"))
+            .order_by(*_WRITE_ORDER)
             .limit(limit)
             .all()
         )
@@ -912,7 +923,7 @@ class LocalSyncRepository:
         rows = (
             self._s.query(AuditLog)
             .filter(AuditLog.hub_seq.is_(None), AuditLog.sync_state == "pending")
-            .order_by(AuditLog.timestamp, text("rowid"))
+            .order_by(*_WRITE_ORDER)
             .all()
         )
         for row in rows:

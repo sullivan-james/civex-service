@@ -36,10 +36,11 @@ from civex.repositories.protocols import AuditEventRow
 def _mentions(text: str):
     """Entries whose stored values name this id: a child's parent, a record's
     collection, a reference. Finds records since purged, which are no longer
-    rows to list by id."""
+    rows to list by id. A delta entry holds a changed value in `delta`."""
     return or_(
         cast(AuditLog.old_data, String).contains(text),
         cast(AuditLog.new_data, String).contains(text),
+        cast(AuditLog.delta, String).contains(text),
     )
 
 
@@ -658,6 +659,7 @@ class LocalAuditRepository:
                     cast(AuditLog.new_data, String).icontains(
                         f.search, autoescape=True
                     ),
+                    cast(AuditLog.delta, String).icontains(f.search, autoescape=True),
                     AuditLog.batch_id.in_(
                         select(AuditBatch.id).where(
                             AuditBatch.label.icontains(f.search, autoescape=True)
@@ -684,6 +686,8 @@ def _audit_dto(r: AuditLog) -> AuditLogDTO:
         new_data=r.new_data,
         timestamp=r.timestamp,
         actor=r.actor,
+        delta=r.delta,
+        format=r.format,
     )
 
 

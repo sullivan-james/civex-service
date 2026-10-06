@@ -21,12 +21,14 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    FetchedValue,
     Float,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
     JSON,
+    SmallInteger,
     String,
     Table,
     Text,
@@ -489,6 +491,22 @@ class AuditLog(Base):
     apply_state: Mapped[str] = mapped_column(
         String(10), nullable=False, default="applied", server_default="applied"
     )
+    # How the change is stored: 1 = whole `old_data`/`new_data` snapshots; 2 =
+    # `delta`, only what changed ({path: {"before", "after"}}, `path` an
+    # attribute or `data.<field id>`), with `new_data` holding the thing's
+    # identity (`audit_diff.IDENTITY_KEYS`). Read either through
+    # `audit_diff.entry_snapshots`, never by looking at the columns directly.
+    delta: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    format: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=1, server_default="1"
+    )
+    # The order entries were written on this machine, numbered by the database
+    # (a sequence on PostgreSQL, a trigger on SQLite; migration e8b4f2c6a917),
+    # so every write path gets one. Changes are sent in this order. None for
+    # entries from before it existed.
+    local_seq: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, server_default=FetchedValue()
+    )
 
 
 class WorkflowJob(Base):
@@ -904,6 +922,14 @@ class SyncMeta(Base):
     cursor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     # The device that put the first data into this authority.
     seeded_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Authority: the oldest number its feed still holds (older entries were
+    # pruned). A device behind it can't catch up from the feed and copies again.
+    feed_floor: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    # Device: the number it was copied at. Its own history starts there; what
+    # came before is the authority's to show.
+    history_from: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(
         _UTCDateTime(), nullable=True
     )

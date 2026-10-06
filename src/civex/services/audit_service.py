@@ -23,7 +23,7 @@ from typing import Any
 from civex.domain.audit_filter import AuditFilter
 from civex.domain.audit_filters import parse_audit_filter
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode
-from civex.domain.audit_diff import Change, diff_entry, strip_derived
+from civex.domain.audit_diff import Change, diff_entry, entry_snapshots, strip_derived
 from civex.domain.dtos import (
     REVERT_APPLY,
     REVERT_CONFLICT,
@@ -260,7 +260,8 @@ class AuditService:
             if record is None:
                 # Gone for good: no name left, but the snapshot still says what
                 # kind of record it was.
-                schema_id = _schema_id(entry.new_data) or _schema_id(entry.old_data)
+                old, new = entry_snapshots(entry.old_data, entry.new_data, entry.delta)
+                schema_id = _schema_id(new) or _schema_id(old)
                 shape = shapes(schema_id) if schema_id else None
                 where[rid] = {
                     "kind": "record",
@@ -322,7 +323,7 @@ class AuditService:
         return where
 
     def _diff(self, entry: AuditLogDTO, shapes) -> list[Change]:
-        old, new = entry.old_data, entry.new_data
+        old, new = entry_snapshots(entry.old_data, entry.new_data, entry.delta)
         shape: ResolvedSchema | None = None
         if entry.entity_type == "record":
             schema_id = _schema_id(new) or _schema_id(old)
