@@ -234,6 +234,25 @@ def device(project, authority, name, *, flaky: bool = False):
     return ctx
 
 
+def follow(ctx, other, name):
+    """Point the device `ctx` (made by `device`) at another authority, with a
+    token of its own there, as a person moving to a new server would."""
+    _, token = other.authority_svc.add_device(name)
+    other.commit()
+    holder = ctx._holder
+    holder.clear()
+
+    def factory(url, tok, device_id):
+        if holder.get("device_id") != device_id:
+            holder["transport"] = holder["inner"] = Loopback(other, tok, device_id)
+            holder["device_id"] = device_id
+        return holder["transport"]
+
+    # The service itself, not the AsDevice wrapper around it.
+    object.__getattribute__(ctx.sync_svc, "_svc")._make_transport = factory
+    ctx._token = token
+
+
 def connect(ctx, authority_url: str = "http://authority.test") -> str:
     return ctx.sync_svc.connect(authority_url, ctx._token)
 

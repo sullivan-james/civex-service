@@ -352,6 +352,13 @@ class SyncService:
         if hello.project_id != meta.project_id:
             self._repo.set_project_id(hello.project_id)
             user_state.move_device(meta.project_id, hello.project_id)
+            # Where this project had got to, and what it was waiting to have
+            # reviewed, were about the authority it followed before.
+            self._repo.set_cursor(0)
+            self._repo.resolve_conflicts(
+                [c.id for c in self._repo.find_open_conflicts()],
+                "followed another server",
+            )
             self._commit()
         user_state.save_token(url, token)
         self._config.sync.remote = url
@@ -828,20 +835,12 @@ class SyncService:
                 return
             after = snapshot_cursor(snaps[-1])
 
-    @staticmethod
-    def _why_refused(problems: list[str]) -> str:
-        """The distinct reasons, most common first, so a thousand records with
-        the same cause read as one line."""
-        counts: dict[str, int] = {}
-        for p in problems:
-            counts[p] = counts.get(p, 0) + 1
-        top = sorted(counts.items(), key=lambda kv: -kv[1])[:3]
-        return " ".join(f"{n} \u00d7 {why}." for why, n in top)
-
     def _seed(self, transport: SyncTransport) -> None:
         """Give an empty authority everything this project holds. Each thing is
         sent as a create with an id made from the project and the thing, so an
-        interrupted seed can simply be run again.
+        interrupted seed can simply be run again. Something the server refuses
+        (a value the field no longer allows, say) is kept for review and does not
+        stop the rest: the project is connected once everything else is in.
 
         The project stays in use meanwhile, so only the changes recorded before
         the first attempt began are counted as sent by it (`begin_seed`): a
@@ -854,8 +853,8 @@ class SyncService:
         meta = self._repo.meta()
         device_id = str(user_state.device_id_for(meta.project_id))
         actor = local_actor(self._config.identity.name)
-        head = meta.cursor
-        problems: list[str] = []
+        head = 0
+        report = SyncReport()
         batch: list[SyncEntry] = []
 
         def flush() -> None:
@@ -871,13 +870,13 @@ class SyncService:
                 )
             result = transport.push(batch)
             head = result.head_seq
-            for r in result.results:
-                if r.status == REJECTED:
-                    problems.append(r.message or "refused")
-                elif r.status == DEFERRED:
-                    raise SyncError(
-                        "The server is still waiting for a file", retryable=True
-                    )
+            if any(r.status == DEFERRED for r in result.results):
+                raise SyncError(
+                    "The server is still waiting for a file", retryable=True
+                )
+            # A refusal is kept for review, like any other (the person keeps what
+            # they made and can fix it and retry); it doesn't stop the rest.
+            self._note(result.results, {e.id: e for e in batch}, report)
             batch = []
 
         for kind in ENTITY_ORDER:
@@ -902,11 +901,10 @@ class SyncService:
                 if len(batch) >= PUSH_BATCH:
                     flush()
         flush()
-        if problems:
-            raise SyncError(
-                f"The server refused {len(problems)} thing(s) while being filled. "
-                f"{self._why_refused(problems)}",
-                retryable=False,
+        if report.rejected:
+            log.warning(
+                "seeding the server: it refused %d thing(s); they are kept for review",
+                report.rejected,
             )
         self._repo.finish_seed()
         self._repo.set_cursor(head)
