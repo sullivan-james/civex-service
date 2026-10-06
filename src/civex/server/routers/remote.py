@@ -10,8 +10,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from civex import user_state
 from civex.context import AppContext
+from civex.domain.exceptions import ValidationError
 from civex.domain.sync import SyncError
 from civex.server.deps import get_ctx
 from civex.services.sync_jobs import sync_jobs
@@ -296,16 +296,11 @@ def connect(body: RemoteConnectRequest, ctx: AppContext = Depends(get_ctx)):
     a mistake is said at once. Copying can take a long time, so it then runs in
     the background: `GET /remote` says how far it has got (`progress`), and why
     it stopped if it did (`connect_error`)."""
-    token = body.token or user_state.token_for(body.url.strip().rstrip("/"))
-    if not token:
-        raise HTTPException(
-            422, detail="A device token is needed: this computer has none for it"
-        )
     try:
-        mode = ctx.sync_svc.check_connect(body.url, token)
+        mode = ctx.sync_svc.check_connect(body.url, body.token)
     except SyncError as e:
         raise _refuse(e)
-    sync_jobs.start_connect(body.url, token)
+    sync_jobs.start_connect(body.url, body.token)
     return RemoteConnectResponse(mode=mode)
 
 
@@ -398,3 +393,84 @@ def reopen(body: ReopenRequest, ctx: AppContext = Depends(get_ctx)):
     n = ctx.sync_svc.reopen_conflicts(_uuids(body.ids))
     ctx.commit()
     return ReopenResponse(reopened=n)
+
+
+# -- this project as an authority ------------------------------------------------
+# What `civex sync authority` and `civex sync device` do, for the app: the same
+# service calls, so the two can't differ.
+
+
+class DeviceResponse(BaseModel):
+    name: str
+    created_at: str
+    last_seen_at: str | None = Field(description="When it last synced; null if never.")
+    revoked: bool = Field(description="Its token no longer works.")
+
+
+class AuthorityResponse(BaseModel):
+    serving: bool = Field(description="This project accepts devices.")
+    devices: list[DeviceResponse] = Field(
+        description="The devices that have been issued a token."
+    )
+
+
+class AuthorityUpdateRequest(BaseModel):
+    serving: bool = Field(description="Accept devices, or stop accepting them.")
+
+
+class DeviceRequest(BaseModel):
+    name: str = Field(description="What to call the device.")
+
+
+class IssuedDeviceResponse(AuthorityResponse):
+    token: str = Field(
+        description="The new device's token. Shown once: only its hash is kept."
+    )
+
+
+def _authority(ctx: AppContext) -> AuthorityResponse:
+    return AuthorityResponse(
+        serving=ctx.sync_svc.status().serving,
+        devices=[
+            DeviceResponse(
+                name=d.name,
+                created_at=d.created_at,
+                last_seen_at=d.last_seen_at,
+                revoked=d.revoked_at is not None,
+            )
+            for d in ctx.authority_svc.list_devices()
+        ],
+    )
+
+
+@router.get("/authority", response_model=AuthorityResponse)
+def authority(ctx: AppContext = Depends(get_ctx)):
+    """Whether this project accepts devices, and the devices issued a token."""
+    return _authority(ctx)
+
+
+@router.patch("/authority", response_model=AuthorityResponse)
+def update_authority(body: AuthorityUpdateRequest, ctx: AppContext = Depends(get_ctx)):
+    """Start or stop accepting devices. Their tokens stay on record."""
+    ctx.sync_svc.set_serving(body.serving)
+    return _authority(ctx)
+
+
+@router.post("/authority/devices", response_model=IssuedDeviceResponse)
+def add_device(body: DeviceRequest, ctx: AppContext = Depends(get_ctx)):
+    """Issue a device a token. The answer is the only time it is shown."""
+    try:
+        _, token = ctx.authority_svc.add_device(body.name)
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    ctx.commit()
+    return IssuedDeviceResponse(**_authority(ctx).model_dump(), token=token)
+
+
+@router.post("/authority/devices/{name}/revoke", response_model=AuthorityResponse)
+def revoke_device(name: str, ctx: AppContext = Depends(get_ctx)):
+    """Stop a device's token working."""
+    if not ctx.authority_svc.revoke_device(name):
+        raise HTTPException(404, detail=f"No active device named {name}")
+    ctx.commit()
+    return _authority(ctx)

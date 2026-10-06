@@ -4,6 +4,7 @@ only ask for it and say what happened."""
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from pathlib import Path
@@ -13,7 +14,6 @@ from rich.markup import escape
 from rich.table import Table
 
 from civex.cli.utils import cli_load_config, get_ctx as _ctx
-from civex.config import save_config
 from civex.console import console
 from civex.domain.exceptions import CivexError
 from civex.domain.sync import COPYING, FILLING, SyncError, SyncProgress
@@ -36,7 +36,7 @@ _PHASES = {
 _KINDS = {"dataset": "collections"}
 
 
-def _connect_showing_progress(c, url: str, token: str) -> str:
+def _connect_showing_progress(c, url: str, token: str | None) -> str:
     """Connect, with a live bar while things are copied either way, then fetch
     the history from before joining with a bar of its own. Stopping that part
     (Ctrl+C) loses nothing: the project is already usable, and whatever syncs
@@ -149,12 +149,11 @@ def user(
     """Show or set the author name recorded on changes in this project. It is
     saved in this project's config.toml; the default is your operating-system
     user."""
-    from civex.identity import local_actor
+    from civex.identity import choose_name, local_actor
 
     config = cli_load_config()
     if reset or name:
-        config.identity.name = None if reset else name.strip()[:100] or None
-        save_config(config)
+        choose_name(config, None if reset else name)
     console.print(
         f"Recorded as {escape(local_actor(config.identity.name) or '(unknown)')}"
     )
@@ -234,11 +233,13 @@ def connect(
     url: str = typer.Argument(
         help="The authority's address, e.g. https://civex.example.com"
     ),
-    token: str = typer.Option(
-        ...,
+    token: str | None = typer.Option(
+        None,
         "--token",
         envvar="CIVEX_SYNC_TOKEN",
-        help="The device token the authority issued.",
+        help="The device token the authority issued. Leave out to use the one "
+        "this computer already holds for that address (connecting again after a "
+        "copy stopped part way).",
     ),
 ) -> None:
     """Point this project at an authority. An empty project becomes a copy of
@@ -291,24 +292,34 @@ def resume() -> None:
 @app.command("conflicts")
 def conflicts(
     all_: bool = typer.Option(False, "--all", help="Include ones already settled."),
+    record: str = typer.Option(
+        None, "--record", help="Only those about this record (its id)."
+    ),
 ) -> None:
     """List values that did not go in as made, with both sides."""
+    entity = None
+    if record:
+        try:
+            entity = uuid.UUID(record)
+        except ValueError:
+            raise _fail(ValueError("That is not a record id"))
     c = _ctx()
     try:
-        found = c.sync_svc.conflicts(None if all_ else "open")
+        found = c.sync_svc.conflicts(None if all_ else "open", entity_id=entity)
     finally:
         c.close()
     if not found:
         console.print("No conflicts.")
         return
     table = Table()
-    for col in ("Id", "What", "Field", "Yours", "Theirs", "State"):
+    for col in ("Id", "Kind", "What", "Field", "Yours", "Theirs", "State"):
         table.add_column(col)
     for f in found:
         table.add_row(
             str(f.id),
+            f.kind,
             escape(f.record_name or f"{f.entity_type} {str(f.entity_id)[:8]}"),
-            escape(f.field_label or f.field or ""),
+            escape(f.field_label or f.field or (f.message or "")),
             escape(str(f.yours)),
             escape(str(f.theirs) + (f" ({f.theirs_actor})" if f.theirs_actor else "")),
             f.resolution or f.status,
@@ -323,8 +334,15 @@ def resolve(
         ...,
         "--take",
         help="'theirs' keeps what the authority has; 'mine' puts your value back as "
-        "a new edit; 'delete' deletes a record that was deleted there; 'retry' sends "
-        "a refused change again from the record as it is now.",
+        "a new edit; 'value' puts the one given with --value; 'delete' deletes a "
+        "record that was deleted there; 'retry' sends a refused change again from "
+        "the record as it is now.",
+    ),
+    value: str = typer.Option(
+        None,
+        "--value",
+        help="With --take value: the value to put in, as JSON (a number, true, a "
+        'list, "quoted text"), or plain text.',
     ),
     force: bool = typer.Option(
         False,
@@ -349,6 +367,10 @@ def resolve(
         raise _fail(ValueError("Give a conflict id, or --all"))
     if kind and not all_:
         raise _fail(ValueError("--kind goes with --all"))
+    if (take == "value") != (value is not None):
+        raise _fail(ValueError("--value goes with --take value, and it needs one"))
+    if take == "value" and all_:
+        raise _fail(ValueError("One value can't settle every conflict: give an id"))
     if all_:
         c = _ctx()
         try:
@@ -373,7 +395,7 @@ def resolve(
         raise _fail(ValueError("That is not a conflict id"))
     c = _ctx()
     try:
-        c.sync_svc.resolve_conflict(cid, take, force=force)
+        c.sync_svc.resolve_conflict(cid, take, value=_read_value(value), force=force)
     except CivexError as e:
         raise _fail(e)
     finally:
@@ -381,12 +403,50 @@ def resolve(
     console.print("Settled.")
 
 
+@app.command("reopen")
+def reopen(
+    conflict_ids: list[str] = typer.Argument(
+        ..., help="The ids of conflicts settled by keeping theirs."
+    ),
+) -> None:
+    """Take back 'keep theirs': the conflicts are open again. (Putting your
+    value back, deleting or sending again made an edit; undo that from history
+    instead.)"""
+    try:
+        ids = [uuid.UUID(i) for i in conflict_ids]
+    except ValueError:
+        raise _fail(ValueError("That is not a conflict id"))
+    c = _ctx()
+    try:
+        n = c.sync_svc.reopen_conflicts(ids)
+    finally:
+        c.close()
+    console.print(f"Opened {n} again.")
+    if n < len(ids):
+        console.print(
+            f"{len(ids) - n} not: only conflicts settled by keeping theirs can be."
+        )
+
+
+def _read_value(text: str | None) -> object:
+    """A value given on the command line: JSON if it reads as JSON, else the
+    text itself."""
+    if text is None:
+        return None
+    try:
+        return json.loads(text)
+    except ValueError:
+        return text
+
+
 @authority_app.command("enable")
 def authority_enable() -> None:
     """Let devices with a token follow this project (serve it with `civex serve`)."""
-    config = cli_load_config()
-    config.sync.serve = True
-    save_config(config)
+    c = _ctx()
+    try:
+        c.sync_svc.set_serving(True)
+    finally:
+        c.close()
     console.print(
         "This project now accepts devices. Issue one a token with "
         "`civex sync device add <name>`."
@@ -396,9 +456,11 @@ def authority_enable() -> None:
 @authority_app.command("disable")
 def authority_disable() -> None:
     """Stop accepting devices. Their tokens stay on record."""
-    config = cli_load_config()
-    config.sync.serve = False
-    save_config(config)
+    c = _ctx()
+    try:
+        c.sync_svc.set_serving(False)
+    finally:
+        c.close()
     console.print("This project no longer accepts devices.")
 
 

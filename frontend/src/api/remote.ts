@@ -27,6 +27,18 @@ export interface RemoteStatus {
   connect_error: string | null
 }
 
+export interface SyncDevice {
+  name: string
+  created_at: string
+  last_seen_at: string | null
+  revoked: boolean
+}
+
+export interface Authority {
+  serving: boolean
+  devices: SyncDevice[]
+}
+
 export interface SyncProgress {
   /** copying: from the authority; filling: an empty authority from here;
    * history: fetching what happened before this project joined. */
@@ -141,6 +153,20 @@ export interface ResolveManyResult {
 
 export const remoteApi = {
   status: () => api.get<RemoteStatus>('/remote'),
+  /** This project as an authority: whether it accepts devices, and which. */
+  authority: () => api.get<Authority>('/remote/authority'),
+  setServing: (serving: boolean) =>
+    api.patch<Authority>('/remote/authority', { serving }),
+  /** The answer carries the new device's token: the only time it is shown. */
+  addDevice: (name: string) =>
+    api.post<Authority & { token: string }>('/remote/authority/devices', {
+      name,
+    }),
+  revokeDevice: (name: string) =>
+    api.post<Authority>(
+      `/remote/authority/devices/${encodeURIComponent(name)}/revoke`,
+      {},
+    ),
   /** Starts connecting: the answer comes once the address and token are
    * checked; copying then runs in the background (see `progress`). Without a
    * token, the one this computer holds for the address is used. */

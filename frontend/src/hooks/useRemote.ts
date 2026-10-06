@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   remoteApi,
+  type Authority,
   type ResolveBody,
   type ResolveManyBody,
   type SyncConflict,
@@ -144,4 +145,34 @@ export function useResolveConflict() {
     // Also when it is refused: the list then says what changed (`stale`).
     onSettled: refresh,
   })
+}
+
+/** This project as an authority (what `civex sync authority|device` do). */
+export function useAuthority() {
+  return useQuery({
+    queryKey: [...KEY, 'authority'],
+    queryFn: remoteApi.authority,
+  })
+}
+
+export function useAuthorityActions() {
+  const qc = useQueryClient()
+  const settle = (data: Authority) => {
+    qc.setQueryData([...KEY, 'authority'], data)
+    qc.invalidateQueries({ queryKey: KEY, exact: true })
+  }
+  return {
+    setServing: useMutation({
+      mutationFn: remoteApi.setServing,
+      onSuccess: settle,
+    }),
+    addDevice: useMutation({
+      mutationFn: remoteApi.addDevice,
+      onSuccess: settle,
+    }),
+    revokeDevice: useMutation({
+      mutationFn: remoteApi.revokeDevice,
+      onSuccess: settle,
+    }),
+  }
 }

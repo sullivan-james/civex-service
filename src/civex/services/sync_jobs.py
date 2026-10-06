@@ -72,7 +72,7 @@ class SyncJobs:
         self.ensure_worker()
         self.worker.request()
 
-    def start_connect(self, url: str, token: str) -> None:
+    def start_connect(self, url: str, token: str | None) -> None:
         """Connect to an authority on a thread of its own (already checked with
         `SyncService.check_connect`), saying how far it has got as it goes, then
         start syncing in the background."""
@@ -89,7 +89,7 @@ class SyncJobs:
             )
             self._connecting.start()
 
-    def _connect(self, url: str, token: str) -> None:
+    def _connect(self, url: str, token: str | None) -> None:
         ctx = build_local_context(load_config())
         try:
             ctx.sync_svc.connect(url, token, progress=self._copied)

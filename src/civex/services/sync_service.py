@@ -314,19 +314,32 @@ class SyncService:
     # Connecting
     # ------------------------------------------------------------------
 
-    def check_connect(self, url: str, token: str) -> str:
+    def check_connect(self, url: str, token: str | None) -> str:
         """What connecting to this authority would do, found out without doing
         it: the address is read, the token and protocol accepted, and who holds
         data decided. Quick, so a mistake is said at once even when the copying
         itself then runs in the background. Returns the mode `connect` would."""
         return self._plan_connect(url, token)[0]
 
-    def _plan_connect(self, url: str, token: str) -> tuple[str, Hello, str]:
+    def _token(self, url: str, token: str | None) -> str:
+        """The token to connect with: the one given, else the one this computer
+        already holds for that address (connecting again after a copy stopped
+        part way). The one rule both the app and the CLI connect through."""
+        held = token or user_state.token_for(url)
+        if not held:
+            raise SyncError(
+                "A device token is needed: this computer has none for that address",
+                retryable=False,
+            )
+        return held
+
+    def _plan_connect(self, url: str, token: str | None) -> tuple[str, Hello, str, str]:
         url = url.strip().rstrip("/")
         if not url.startswith(("http://", "https://")):
             raise SyncError(
                 "The address must start with http:// or https://", retryable=False
             )
+        token = self._token(url, token)
         meta = self._repo.meta()
         probe = self._make_transport(
             url, token, str(user_state.device_id_for(meta.project_id))
@@ -360,9 +373,11 @@ class SyncService:
                 "project to copy the server's, or point an empty server here.",
                 retryable=False,
             )
-        return mode, hello, url
+        return mode, hello, url, token
 
-    def connect(self, url: str, token: str, progress: ProgressFn | None = None) -> str:
+    def connect(
+        self, url: str, token: str | None, progress: ProgressFn | None = None
+    ) -> str:
         """Point this project at an authority. What happens depends on who holds
         data: an empty project **joins** one that has some (it becomes a copy), an
         empty authority is **seeded** from a project that has some, and when both
@@ -374,7 +389,7 @@ class SyncService:
         `progress` hears how far copying has got. A joined project is usable
         once it returns; the history from before it joined is fetched after
         (`fetch_history`), by whatever runs sync next."""
-        mode, hello, url = self._plan_connect(url, token)
+        mode, hello, url, token = self._plan_connect(url, token)
         meta = self._repo.meta()
 
         # The project takes the authority's id; the device keeps its identity.
@@ -415,6 +430,12 @@ class SyncService:
         save_config(self._config)
         if remote:
             user_state.forget_token(remote)
+
+    def set_serving(self, on: bool) -> None:
+        """Whether this project accepts devices (is an authority for them). Their
+        tokens stay on record either way."""
+        self._config.sync.serve = on
+        save_config(self._config)
 
     def set_paused(self, paused: bool) -> None:
         self._config.sync.paused = paused

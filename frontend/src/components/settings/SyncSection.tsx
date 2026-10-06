@@ -23,6 +23,7 @@ import {
   Spinner,
 } from '../ui'
 import { describeSyncProgress } from '../../utils/syncProgress'
+import { SyncServing } from './SyncServing'
 
 const INTERVALS = [
   { seconds: 0, label: 'Never' },
@@ -304,7 +305,8 @@ export default function SyncSection() {
       ) : (
         <ConnectForm />
       )}
-      <div className="max-w-2xl">
+      <div className="max-w-2xl space-y-5">
+        <SyncServing />
         <NameCard />
       </div>
     </div>

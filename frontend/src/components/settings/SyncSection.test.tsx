@@ -56,6 +56,8 @@ beforeEach(() => {
         return json(identity)
       }
       if (url.pathname === '/api/remote/conflicts') return json(conflicts)
+      if (url.pathname === '/api/remote/authority')
+        return json({ serving: false, devices: [] })
       if (url.pathname.endsWith('/resolve')) {
         conflicts = []
         status = { ...status, open_conflicts: 0 }

@@ -50,7 +50,7 @@ describe('HistoryStorageCard', () => {
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent('needs about')
     await userEvent.click(
-      screen.getAllByRole('button', { name: 'Reclaim space' }).at(-1)!,
+      screen.getAllByRole('button', { name: 'Reclaim space' }).slice(-1)[0],
     )
     await waitFor(() => expect(reclaimed).toBe(1))
   })
