@@ -11,6 +11,7 @@ export function Chip({
   removeLabel = 'Remove',
   dashed = false,
   warning = false,
+  size = 'md',
   className = '',
   ...buttonProps
 }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onClick' | 'children'> & {
@@ -24,6 +25,8 @@ export function Chip({
   dashed?: boolean
   /** Something needs attention (an unreachable volume). */
   warning?: boolean
+  /** `lg` for a choice that is the point of the form. */
+  size?: 'md' | 'lg'
   className?: string
 }) {
   const tone = warning
@@ -35,7 +38,8 @@ export function Chip({
         : onClick
           ? 'border-border bg-canvas text-fg hover:bg-canvas-inset'
           : 'border-accent-muted bg-accent-subtle text-accent'
-  const base = `inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm ${tone} ${className}`
+  const dims = size === 'lg' ? 'h-10 px-4 text-sm' : 'h-8 px-3 text-sm'
+  const base = `inline-flex ${dims} items-center gap-1.5 rounded-full border ${tone} ${className}`
 
   if (onClick)
     return (

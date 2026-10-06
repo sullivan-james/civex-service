@@ -44,6 +44,7 @@ export { Card, type CardProps } from './Card'
 export { SortableList, type SortableListProps } from './SortableList'
 export { TimeZoneSelect } from './TimeZoneSelect'
 export { Checkbox, type CheckboxProps } from './Checkbox'
+export { CheckRow } from './CheckRow'
 export { Field, type FieldProps } from './Field'
 export {
   NameLabelFields,

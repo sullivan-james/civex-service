@@ -55,6 +55,13 @@ OS_SENSITIVE = {
     "test_files_stream_router.py",
     "test_records_files_zip_router.py",
     "test_record_files_zip.py",
+    # files by name and folder: export trees, links, copies and a file manager
+    "test_file_access_service.py",
+    "test_file_access_router.py",
+    "test_files.py",
+    "test_export_defs.py",
+    "test_export_definitions_router.py",
+    "test_fs_open.py",
     # the database file and project folder
     "test_migrate.py",
     "test_db_move_service.py",

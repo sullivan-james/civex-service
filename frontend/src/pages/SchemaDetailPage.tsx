@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useParams, useNavigate, Link } from 'react-router'
+import { useEffect, useState } from 'react'
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router'
 import { errorMessage } from '../lib/errors'
 import { SchemaMissing } from '../components/schemas/SchemaMissing'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
@@ -148,6 +148,13 @@ export default function SchemaDetailPage() {
   // Fetch by UUID — name changes don't affect the URL
   const { data: schema, isLoading, error } = useSchema(id!)
   const { data: allSchemas } = useSchemas()
+  // Exports used to be a tab here; a saved link to it goes to the Exports page.
+  const [params] = useSearchParams()
+  const gone = params.get('tab') === 'exports' ? schema?.name : undefined
+  useEffect(() => {
+    if (gone)
+      navigate(`/exports?schema=${encodeURIComponent(gone)}`, { replace: true })
+  }, [gone, navigate])
   const { data: deleteImpact, isLoading: deleteImpactLoading } =
     useSchemaDeleteImpact(schema?.name ?? '', confirmDelete)
   const deleteSchema = useDeleteSchema()

@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Any, cast
 
 from sqlalchemy import (
+    true,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -199,9 +200,59 @@ class View(Base):
     sort: Mapped[list[dict[str, Any]]] = mapped_column(
         _JSON, nullable=False, default=list
     )
+    # How the view's files are arranged when exported as a folder or zip:
+    # "tree" (a folder per record above each file) or "flat" (all in one). The
+    # preset that turns a saved view into "exactly the data I need".
+    files_layout: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="tree", server_default="tree"
+    )
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
     schema: Mapped[Schema] = relationship("Schema")
+
+
+class ExportDefinition(Base):
+    """
+    A saved way of exporting files, attached to a schema like its fields and
+    naming: which kind of record holds the files (`holder_schema_id`, None = any
+    kind beneath), which file fields, a filter on those records (the same tree
+    views and queries use), and how the folder is laid out. Run on a collection,
+    or within a record of the schema (or of a schema between it and the holder);
+    nothing about *which* collection or record is stored here. Names are free
+    text, unique per schema.
+    """
+
+    __tablename__ = "export_definitions"
+    __table_args__ = (UniqueConstraint("schema_id", "name"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    schema_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("schemas.id"), nullable=False
+    )
+    holder_schema_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("schemas.id"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # File field names to export; empty means every file field.
+    fields: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    filter_tree: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    # "tree" | "grouped" | "flat" (civex.domain.file_access.LAYOUTS)
+    files_layout: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="tree", server_default="tree"
+    )
+    # Whether the files themselves are exported; False is a table alone.
+    include_files: Mapped[bool] = mapped_column(
+        nullable=False, default=True, server_default=true()
+    )
+    # The tables made beside the files: a list of `civex.domain.tables.TableSpec`
+    # dicts (what its rows are, where it is written, its columns); None for none.
+    tables: Mapped[list[dict[str, Any]] | None] = mapped_column(_JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+
+    schema: Mapped[Schema] = relationship("Schema", foreign_keys=[schema_id])
+    holder: Mapped[Schema | None] = relationship(
+        "Schema", foreign_keys=[holder_schema_id]
+    )
 
 
 class Dataset(Base):

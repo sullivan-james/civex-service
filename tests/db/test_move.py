@@ -76,6 +76,12 @@ def populated(ctx: AppContext, make_schema, make_collection) -> Engine:
         schemas=["patient", "encounter", "cohort", "recording", "selection", "scan"],
     )
     ctx.view_svc.create("patient", "everyone", columns=["name"])
+    # Exports saved with a schema: one naming a holder (a second foreign key to
+    # schemas) with fields and a layout, one with none (a NULL there).
+    ctx.export_def_svc.create(
+        "scan", "docs", holder="scan", fields=["doc"], files_layout="flat"
+    )
+    ctx.export_def_svc.create("scan", "everything")
     stored = ctx.file_svc.store_bytes(b"hello", "hello.txt")
     ctx.record_svc.add("study", "scan", {"doc": stored.to_dict()})
     job = ctx.job_svc.enqueue_manual("noop", ctx.record_svc.find("study", "patient")[0])

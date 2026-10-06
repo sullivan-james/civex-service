@@ -12,6 +12,7 @@ from civex.cli import (
     record,
     retention,
     schema,
+    files,
     store,
     trash,
     view,
@@ -72,6 +73,7 @@ app.add_typer(schema.app, name="schema", rich_help_panel=_WORK)
 app.add_typer(dataset.app, name="collection", rich_help_panel=_WORK)
 app.add_typer(record.app, name="record", rich_help_panel=_WORK)
 app.add_typer(store.app, name="store", rich_help_panel=_WORK)
+app.add_typer(files.app, name="files", rich_help_panel=_WORK)
 app.add_typer(workflow.app, name="workflow", rich_help_panel=_WORK)
 app.add_typer(plugin.app, name="plugin", rich_help_panel=_WORK)
 app.add_typer(policy.app, name="policy", rich_help_panel=_WORK)

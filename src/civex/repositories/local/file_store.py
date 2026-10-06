@@ -551,6 +551,12 @@ class VolumeAwareFileObjectStore:
         row = self._session.get(StoredObject, sha256)
         return row.volume if row is not None else None
 
+    def path_on(self, sha256: str, volume: str) -> Path:
+        """Where this content would be on `volume`: pure path arithmetic, no
+        disk access, for a caller that already knows the volume (from the
+        inventory) and so needn't search every volume for it."""
+        return self._object_path(sha256, volume)
+
     def object_path(self, sha256: str) -> Path:
         path = self._find_object(sha256)
         if path is None:

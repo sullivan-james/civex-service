@@ -39,6 +39,11 @@ import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
 import { SelectionBar } from './SelectionBar'
 import { BulkRunWorkflow, bulkRunnable } from '../workflows/BulkRunWorkflow'
+import { FileAccessActions } from '../files/FileAccessActions'
+import { selectionFor } from '../../api/fileAccess'
+import { useAvailableExports } from '../../hooks/useExportDefinitions'
+import { describeDefinition } from '../../utils/exportBuilder'
+import { schemaTreeHasFiles } from '../../utils/hierarchy'
 import { useWorkflows } from '../../hooks/useWorkflows'
 import { useExplorer, type ExplorerScope } from './useExplorer'
 import { withRange } from '../../hooks/useRangeSelect'
@@ -124,6 +129,38 @@ export function RecordsExplorer({
   const updateView = useUpdateView(listedName ?? '', x.activeView?.name ?? '')
   const deleteView = useDeleteView(listedName ?? '')
 
+  // Whether the listed records can hold files at all, and what to call the
+  // folder their files are opened in: the same view gives the same folder.
+  // Whether the listed records, or anything beneath them, can hold files: an
+  // Encounter holds none itself but its Recordings and Selections do, so its list
+  // still offers the files (everything beneath each record listed).
+  const canExportFiles = !!x.listed && schemaTreeHasFiles(x.listed, x.schemas)
+  const hasFiles = x.baseFields.some(
+    (f) => f.type === 'file' || f.type === 'file_list',
+  )
+  // The exports saved with the listed kind of record (or one above it), and where
+  // to set more up.
+  const { data: savedExports } = useAvailableExports(
+    listedName ? { schema: listedName } : null,
+  )
+  const exportPresets = (savedExports ?? []).map((d) => ({
+    label: d.name,
+    hint: describeDefinition(d, x.schemas),
+    selection: {
+      export: `${d.schema_name}/${d.name}`,
+      collection: dataset,
+      within: x.rootId ?? undefined,
+    },
+    folderName: [dataset, d.name].filter(Boolean).join('-'),
+    definition: d,
+  }))
+  const builderHref = x.listed
+    ? `/exports?schema=${encodeURIComponent(x.listed.name)}`
+    : undefined
+  const folderName = [dataset, listedName, x.rootId?.slice(0, 8)]
+    .filter(Boolean)
+    .join('-')
+
   const items = x.page.data?.items ?? []
   const total = x.page.data?.total ?? 0
   const rows = toTableRows(items)
@@ -193,12 +230,21 @@ export function RecordsExplorer({
     }),
   )
 
-  const exportHref =
-    dataset && listedName
-      ? recordsApi.exportCsvUrl(dataset, { ...x.query, sort: x.sort })
-      : x.activeView && !x.modified && listedName
-        ? viewsApi.exportUrl(listedName, x.activeView.name, 'csv')
-        : null
+  // What an export from here starts as: the rows and columns shown, in their
+  // order, as a table; and the files too where this kind of record has any.
+  const exportContext = (ids?: string[]) => ({
+    ...selectionFor(x.query, dataset, ids, x.activeView?.files_layout, true),
+    sort: x.sort,
+    tables: [
+      {
+        format: 'csv' as const,
+        columns: x.columnNames,
+        kind: x.listed?.name ?? null,
+      },
+    ],
+    // A list exports as the table of what is shown; files are added from there.
+    files: false,
+  })
 
   const parentIsRoot =
     listed && x.scopeSchema && listed.parent_id === x.scopeSchema.id
@@ -387,10 +433,91 @@ export function RecordsExplorer({
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {toolbarActions}
+            {pinTarget && (
+              <PinButton
+                target={pinTarget}
+                noun={pinTarget.kind === 'view' ? 'filter' : 'place'}
+                size="md"
+              />
+            )}
+            {newMenu}
+          </div>
+        </div>
+
+        {/* The view's own controls: which rows (saved filters and the conditions
+            below), which columns, and Export of what that leaves. */}
+        <div className="flex flex-wrap items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <SavedViewBar
+              views={x.views}
+              activeView={x.activeView}
+              modified={x.modified}
+              hasSelection={x.hasSelection}
+              onApply={(v) => patch(viewPatch(v))}
+              onClear={() =>
+                patch({ view: null, filter: null, sort: [], cols: null })
+              }
+              onSave={() =>
+                updateView.mutate({
+                  columns: x.columnNames,
+                  filter_tree: x.filter,
+                  sort: x.sort,
+                })
+              }
+              onSaveAs={(name, done) =>
+                createView.mutate(
+                  {
+                    name,
+                    columns: x.columnNames,
+                    filter_tree: x.filter,
+                    sort: x.sort,
+                  },
+                  {
+                    onSuccess: (created) => {
+                      done()
+                      patch({ view: created.name })
+                    },
+                  },
+                )
+              }
+              onRename={(name, done) =>
+                updateView.mutate(
+                  { rename: name },
+                  {
+                    onSuccess: (updated) => {
+                      done()
+                      patch({ view: updated.name })
+                    },
+                  },
+                )
+              }
+              onDelete={(done) =>
+                deleteView.mutate(x.activeView!.name, {
+                  onSuccess: () => {
+                    done()
+                    patch({ view: null })
+                  },
+                })
+              }
+              filesLayout={hasFiles ? x.activeView?.files_layout : undefined}
+              onFilesLayout={
+                hasFiles && x.activeView
+                  ? (files_layout) => updateView.mutate({ files_layout })
+                  : undefined
+              }
+              pending={
+                createView.isPending ||
+                updateView.isPending ||
+                deleteView.isPending
+              }
+              error={createView.error ?? updateView.error ?? deleteView.error}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
             <TriggerPopover
               label="Choose columns"
               align="right"
-              panelClassName="w-[36rem] max-w-[90vw]"
+              panelClassName="w-[28rem] max-w-[90vw]"
               trigger={({ toggle, open }) => (
                 <Button size="sm" onClick={toggle} aria-expanded={open}>
                   <Columns3 size={14} /> Columns
@@ -402,6 +529,7 @@ export function RecordsExplorer({
                 onChange={(cols) => patch({ cols })}
                 baseFields={x.baseFields}
                 joinable={x.joinable}
+                allowHideAll={false}
               />
               {x.cols && (
                 <Button
@@ -414,82 +542,16 @@ export function RecordsExplorer({
                 </Button>
               )}
             </TriggerPopover>
-            {exportHref ? (
-              <Button size="sm" href={exportHref} download>
-                <Download size={14} /> Export
-              </Button>
-            ) : (
-              <Button size="sm" disabled title="Save as a view to export">
-                <Download size={14} /> Export
-              </Button>
-            )}
-            {pinTarget && (
-              <PinButton
-                target={pinTarget}
-                noun={pinTarget.kind === 'view' ? 'filter' : 'place'}
-                size="md"
-              />
-            )}
-            {newMenu}
+            <FileAccessActions
+              label="Export"
+              selection={exportContext()}
+              folderName={folderName}
+              presets={canExportFiles ? exportPresets : []}
+              scopeSchema={listedName ?? undefined}
+              builderTo={builderHref}
+            />
           </div>
         </div>
-
-        <SavedViewBar
-          views={x.views}
-          activeView={x.activeView}
-          modified={x.modified}
-          hasSelection={x.hasSelection}
-          onApply={(v) => patch(viewPatch(v))}
-          onClear={() =>
-            patch({ view: null, filter: null, sort: [], cols: null })
-          }
-          onSave={() =>
-            updateView.mutate({
-              columns: x.columnNames,
-              filter_tree: x.filter,
-              sort: x.sort,
-            })
-          }
-          onSaveAs={(name, done) =>
-            createView.mutate(
-              {
-                name,
-                columns: x.columnNames,
-                filter_tree: x.filter,
-                sort: x.sort,
-              },
-              {
-                onSuccess: (created) => {
-                  done()
-                  patch({ view: created.name })
-                },
-              },
-            )
-          }
-          onRename={(name, done) =>
-            updateView.mutate(
-              { rename: name },
-              {
-                onSuccess: (updated) => {
-                  done()
-                  patch({ view: updated.name })
-                },
-              },
-            )
-          }
-          onDelete={(done) =>
-            deleteView.mutate(x.activeView!.name, {
-              onSuccess: () => {
-                done()
-                patch({ view: null })
-              },
-            })
-          }
-          pending={
-            createView.isPending || updateView.isPending || deleteView.isPending
-          }
-          error={createView.error ?? updateView.error ?? deleteView.error}
-        />
 
         {listed && (
           <FilterControls
@@ -508,13 +570,15 @@ export function RecordsExplorer({
         )}
 
         {!x.page.error && (
-          <p className="text-sm text-fg-muted" aria-live="polite">
-            <span className="font-medium text-fg">
-              {total.toLocaleString()}
-            </span>{' '}
-            {listedLabel.toLowerCase()}
-            {state.q && <> matching “{state.q}”</>}
-          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-sm text-fg-muted" aria-live="polite">
+              <span className="font-medium text-fg">
+                {total.toLocaleString()}
+              </span>{' '}
+              {listedLabel.toLowerCase()}
+              {state.q && <> matching “{state.q}”</>}
+            </p>
+          </div>
         )}
 
         {dataset && (
@@ -533,13 +597,23 @@ export function RecordsExplorer({
             // Runs are queued for the records ticked, not for "all matching":
             // that would be every record the filters match, on every page.
             actions={
-              !allMatching && (
-                <BulkRunWorkflow
-                  workflows={runnable}
-                  recordIds={[...selected]}
-                  onStarted={() => setSelected(new Set())}
+              <>
+                <FileAccessActions
+                  selection={exportContext(
+                    allMatching ? undefined : [...selected],
+                  )}
+                  folderName={`${folderName}-selected`}
+                  scopeSchema={listedName ?? undefined}
+                  builderTo={builderHref}
                 />
-              )
+                {!allMatching && (
+                  <BulkRunWorkflow
+                    workflows={runnable}
+                    recordIds={[...selected]}
+                    onStarted={() => setSelected(new Set())}
+                  />
+                )}
+              </>
             }
           />
         )}

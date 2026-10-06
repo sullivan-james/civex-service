@@ -1,8 +1,10 @@
-export type ControlSize = 'sm' | 'md'
+export type ControlSize = 'sm' | 'md' | 'lg'
 
 export const controlSizes: Record<ControlSize, string> = {
   sm: 'h-8 px-2.5 text-sm',
   md: 'h-9 px-3 text-sm',
+  // For the main fields of a form that is the point of the page.
+  lg: 'h-11 px-4 text-base',
 }
 
 export const controlBase =

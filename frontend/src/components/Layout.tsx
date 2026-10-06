@@ -35,6 +35,7 @@ import {
   FolderOpen,
   FolderPlus,
   Folder,
+  FolderTree,
   ChevronDown,
   LayoutGrid,
   Database,
@@ -114,6 +115,7 @@ const navGroups: NavGroupDef[] = [
     heading: 'Data',
     items: [
       { to: '/collections', label: 'Collections', icon: LayoutGrid },
+      { to: '/exports', label: 'Exports', icon: FolderTree },
       { to: '/activity', label: 'Activity', icon: History },
     ],
   },

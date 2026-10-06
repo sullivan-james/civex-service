@@ -12,7 +12,12 @@ export interface View {
   columns: string[]
   filter_tree: FilterTreeWire | null
   sort: ViewSortEntry[]
+  /** How the view's files are arranged when exported as a folder or zip: a
+   * folder per record above each file, or all in one folder. */
+  files_layout: FilesLayout
 }
+
+export type FilesLayout = 'tree' | 'grouped' | 'flat'
 
 export interface ViewPreview {
   rows: Record<string, unknown>[]
@@ -24,6 +29,7 @@ export interface CreateViewBody {
   columns?: string[]
   filter_tree?: FilterTreeWire | null
   sort?: ViewSortEntry[]
+  files_layout?: FilesLayout
 }
 
 export interface UpdateViewBody {
@@ -31,6 +37,7 @@ export interface UpdateViewBody {
   columns?: string[]
   filter_tree?: FilterTreeWire | null
   sort?: ViewSortEntry[]
+  files_layout?: FilesLayout
 }
 
 export interface PreviewViewBody {
@@ -66,9 +73,6 @@ export const viewsApi = {
     api.delete<void>(
       `/schemas/${encodeURIComponent(schemaName)}/views/${encodeURIComponent(viewName)}`,
     ),
-
-  exportUrl: (schemaName: string, viewName: string, format: 'csv' | 'json') =>
-    `/api/schemas/${encodeURIComponent(schemaName)}/views/${encodeURIComponent(viewName)}/export?format=${format}`,
 
   preview: (schemaName: string, body: PreviewViewBody) =>
     api.post<ViewPreview>(

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { api } from './client'
+import { api, ApiError } from './client'
 
 let sent: { url: string; init: RequestInit }[]
 
@@ -64,5 +64,46 @@ describe('api client headers', () => {
   it('a get needs no body type but is still given the default', async () => {
     await api.get('/x')
     expect(sent[0].init.method).toBeUndefined()
+  })
+})
+
+describe('api client errors', () => {
+  it('carry the whole response body, for refusals that explain themselves', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              detail: 'These files are on 2 drives',
+              code: 'files_scattered',
+              plan: { total: 4 },
+            }),
+            { status: 409, headers: { 'Content-Type': 'application/json' } },
+          ),
+      ),
+    )
+
+    const err = (await api.post('/x', {}).catch((e) => e)) as ApiError
+
+    expect(err.status).toBe(409)
+    expect(err.message).toBe('These files are on 2 drives')
+    expect(err.body).toEqual({
+      detail: 'These files are on 2 drives',
+      code: 'files_scattered',
+      plan: { total: 4 },
+    })
+  })
+
+  it('have an empty body when the response had none', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('', { status: 500 })),
+    )
+
+    const err = (await api.get('/x').catch((e) => e)) as ApiError
+
+    expect(err.status).toBe(500)
+    expect(err.body).toEqual({})
   })
 })

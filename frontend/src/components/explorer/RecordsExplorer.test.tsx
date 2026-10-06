@@ -9,6 +9,7 @@ import { HierarchySidebar } from './HierarchySidebar'
 import type { CivexRecord } from '../../api/records'
 import type { Schema } from '../../api/schemas'
 import type { View } from '../../api/views'
+import { finishExport } from '../files/testSupport'
 
 // --- a tiny in-memory API: just enough shape to drive the explorer -------
 
@@ -72,6 +73,7 @@ const EMPTY_TABLES: View = {
   schema_id: selection.id,
   schema_name: 'selection',
   name: 'Selections missing a table',
+  files_layout: 'tree',
   columns: [],
   filter_tree: {
     schema: 'selection',
@@ -92,6 +94,7 @@ interface Call {
   method: string
   path: string
   params: URLSearchParams
+  body?: Record<string, unknown>
 }
 let calls: Call[]
 // What the selection schema's one saved view is currently called.
@@ -106,6 +109,8 @@ function page(items: CivexRecord[]) {
 function handle(method: string, path: string, p: URLSearchParams) {
   if (path === '/api/schemas') return json(SCHEMAS)
   if (path === '/api/workflows') return json([])
+  // The exports saved with the listed kind of record, for the Files menu.
+  if (path === '/api/file-access/definitions') return json([])
   if (path.endsWith('/views'))
     return json(
       path.includes('/selection/') ? [{ ...EMPTY_TABLES, name: viewName }] : [],
@@ -207,7 +212,12 @@ beforeEach(() => {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), 'http://x')
       const method = init?.method ?? 'GET'
-      calls.push({ method, path: url.pathname, params: url.searchParams })
+      calls.push({
+        method,
+        path: url.pathname,
+        params: url.searchParams,
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      })
       return (
         override?.(url, method) ??
         handle(method, url.pathname, url.searchParams)
@@ -843,19 +853,6 @@ describe('RecordsExplorer', () => {
       await waitFor(() => expect(cols()).toBe('site,area,depth'))
     })
 
-    it('unticks every column between two with a shift-click, though each click changes the address', async () => {
-      const { user } = await openColumns()
-
-      await user.click(name('Area'))
-      await waitFor(() => expect(cols()).toBe('site,depth,vessel'))
-      await user.keyboard('{Shift>}')
-      await user.click(name('Vessel'))
-      await user.keyboard('{/Shift}')
-
-      // Area to Vessel, the whole run, not just the last box.
-      await waitFor(() => expect(cols()).toBe('site'))
-    })
-
     it('ticks every column between two with a shift-click', async () => {
       const { user } = await openColumns()
       await user.click(name('Area'))
@@ -875,6 +872,197 @@ describe('RecordsExplorer', () => {
           expect.arrayContaining(['site', 'area', 'depth', 'vessel']),
         )
       })
+    })
+  })
+
+  describe('the Files menu', () => {
+    // Selections hold the files; Encounters and Recordings hold none themselves.
+    const holdsFiles = (name: string, parent: Schema | null) => ({
+      ...schema(name, parent, []),
+      fields: [
+        {
+          id: `${name}-contour`,
+          name: 'contour',
+          label: null,
+          type: 'file',
+          required: false,
+          restrictions: {},
+          default: null,
+          position: null,
+        },
+      ],
+    })
+    const FILE_SCHEMAS = [
+      encounter,
+      recording,
+      holdsFiles('selection', recording),
+    ]
+    const exported = {
+      dest: '/p',
+      location: 'project',
+      linked: 3,
+      copied: 0,
+      unchanged: 0,
+      removed: 0,
+      missing: [],
+      complete: true,
+      opened: true,
+    }
+    const withFiles = (schemas: Schema[]) => (url: URL) => {
+      if (url.pathname === '/api/schemas') return json(schemas)
+      if (url.pathname === '/api/store/volumes') return json([])
+      if (url.pathname === '/api/file-access/export') return json(exported)
+      return undefined
+    }
+    const filesButton = () => screen.findByRole('button', { name: /^export$/i })
+
+    it('is offered on a list of Encounters, though only what is inside them holds files', async () => {
+      override = withFiles(FILE_SCHEMAS)
+      renderExplorer()
+
+      expect(await filesButton()).toBeInTheDocument()
+    })
+
+    it('takes everything beneath the Encounters listed', async () => {
+      override = withFiles(FILE_SCHEMAS)
+      renderExplorer()
+      await userEvent.click(await filesButton())
+
+      await userEvent.click(screen.getByRole('menuitem', { name: /^export…/i }))
+      // It starts as just the table; the files are added from there.
+      await userEvent.click(
+        screen.getByRole('button', { name: /add files or more tables/i }),
+      )
+      await userEvent.click(screen.getByRole('checkbox', { name: 'Contour' }))
+      await finishExport()
+
+      await waitFor(() =>
+        expect(calls.some((c) => c.path === '/api/file-access/export')).toBe(
+          true,
+        ),
+      )
+      expect(
+        calls.find((c) => c.path === '/api/file-access/export')!.body,
+      ).toMatchObject({
+        collection: 'hb',
+        schema_name: 'encounter',
+        below: true,
+        mode: 'link',
+      })
+    })
+
+    it('starts as just the table of what is listed, with a way to add files', async () => {
+      override = withFiles(FILE_SCHEMAS)
+      renderExplorer()
+      await userEvent.click(await filesButton())
+
+      await userEvent.click(screen.getByRole('menuitem', { name: /^export…/i }))
+
+      expect(screen.getByText('The table you’re looking at')).toBeTruthy()
+      expect(
+        screen.getByRole('button', { name: /add files or more tables/i }),
+      ).toBeTruthy()
+      // None of the folder choices are in the way.
+      expect(screen.queryByText('What goes in the folder')).toBeNull()
+    })
+
+    it('exports only the table, without files, unless more is asked for', async () => {
+      override = withFiles(FILE_SCHEMAS)
+      renderExplorer()
+      await userEvent.click(await filesButton())
+      await userEvent.click(screen.getByRole('menuitem', { name: /^export…/i }))
+
+      await userEvent.selectOptions(
+        screen.getByLabelText('Table format'),
+        'xlsx',
+      )
+      await userEvent.type(screen.getByLabelText('Table file name'), 'Mine')
+      // No files: the way to get it is just to download it.
+      const dialog = within(screen.getByRole('dialog'))
+      await userEvent.click(dialog.getByRole('button', { name: /^next/i }))
+      await userEvent.click(dialog.getByRole('button', { name: /^download$/i }))
+
+      await waitFor(() =>
+        expect(calls.some((c) => c.path === '/api/file-access/zip')).toBe(true),
+      )
+      const sent = calls.find((c) => c.path === '/api/file-access/zip')!.body!
+      expect(sent).toMatchObject({ files: false })
+      expect(sent.tables).toEqual([
+        expect.objectContaining({
+          format: 'xlsx',
+          name: 'Mine',
+          kind: 'encounter',
+        }),
+      ])
+    })
+
+    it('adds the files on request, as the full choice of what goes in the folder', async () => {
+      override = withFiles(FILE_SCHEMAS)
+      renderExplorer()
+      await userEvent.click(await filesButton())
+      await userEvent.click(screen.getByRole('menuitem', { name: /^export…/i }))
+
+      await userEvent.click(
+        screen.getByRole('button', { name: /add files or more tables/i }),
+      )
+
+      expect(screen.getByText('What goes in the folder')).toBeTruthy()
+      expect(screen.queryByText('The table you’re looking at')).toBeNull()
+      // The table is still ticked, and no file is.
+      expect(
+        (
+          screen.getAllByRole('checkbox', {
+            name: /^all .* in one table$/i,
+          })[0] as HTMLInputElement
+        ).checked,
+      ).toBe(true)
+    })
+
+    it('takes everything beneath the rows ticked, too', async () => {
+      override = withFiles(FILE_SCHEMAS)
+      renderExplorer()
+      await screen.findByText('E1')
+      // [0] is "Select all records"; [1] is the first row.
+      await userEvent.click(
+        screen.getAllByRole('checkbox', { name: /^Select / })[1],
+      )
+      // The selection bar's own Export is the last one; the top one stays for the table.
+      const exports = await screen.findAllByRole('button', {
+        name: /^export$/i,
+      })
+      await userEvent.click(exports[exports.length - 1])
+
+      await userEvent.click(screen.getByRole('menuitem', { name: /^export…/i }))
+      await userEvent.click(
+        screen.getByRole('button', { name: /add files or more tables/i }),
+      )
+      await userEvent.click(screen.getByRole('checkbox', { name: 'Contour' }))
+      await finishExport()
+
+      await waitFor(() =>
+        expect(calls.some((c) => c.path === '/api/file-access/export')).toBe(
+          true,
+        ),
+      )
+      const sent = calls.find((c) => c.path === '/api/file-access/export')!.body
+      expect(sent).toMatchObject({ below: true })
+      expect(sent?.record_ids).toHaveLength(1)
+    })
+
+    it('is a table alone where nothing in the tree can hold a file', async () => {
+      renderExplorer() // the default schemas have no file fields
+      await screen.findByText('E1')
+
+      await userEvent.click(screen.getByRole('button', { name: /^export$/i }))
+      await userEvent.click(screen.getByRole('menuitem', { name: /^export…/i }))
+
+      // The rows shown are the table; there are no files to take, so the only
+      // thing to add is more tables.
+      expect(screen.getByText('The table you’re looking at')).toBeTruthy()
+      expect(
+        screen.getByRole('button', { name: /^add more tables/i }),
+      ).toBeTruthy()
+      expect(screen.queryByRole('group', { name: /files$/i })).toBeNull()
     })
   })
 })

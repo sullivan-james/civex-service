@@ -13,6 +13,10 @@ import { RecordStorageSummary } from '../components/records/RecordStorageSummary
 import { useSchemas } from '../hooks/useSchemas'
 import { useWorkflows, useJobs } from '../hooks/useWorkflows'
 import { RunWorkflowButton } from '../components/workflows/RunWorkflowButton'
+import { FileAccessActions } from '../components/files/FileAccessActions'
+import { schemaTreeHasFiles } from '../utils/hierarchy'
+import { useAvailableExports } from '../hooks/useExportDefinitions'
+import { describeDefinition } from '../utils/exportBuilder'
 import {
   Badge,
   DetailSkeleton,
@@ -62,6 +66,9 @@ export default function RecordDetailPage() {
   const { data: record, isLoading, error } = useRecord(id, 3000)
   const { data: collection } = useCollection(record?.dataset_id ?? '')
   const { data: schemas } = useSchemas()
+  const { data: presets } = useAvailableExports(
+    record ? { schema: record.schema_name } : null,
+  )
   const { data: workflows } = useWorkflows()
   const { data: recordJobs } = useJobs(undefined, id)
   const [savingField, setSavingField] = useState<string | null>(null)
@@ -167,6 +174,29 @@ export default function RecordDetailPage() {
         }
         action={
           <>
+            {/* Every file under this record, by name and folder: an Encounter
+                holds none itself, but its Recordings and Selections do. */}
+            {schema && schemas && schemaTreeHasFiles(schema, schemas) && (
+              <FileAccessActions
+                selection={{ within: record.id }}
+                folderName={record.natural_name ?? record.id.slice(0, 8)}
+                // The exports saved with this kind of record (or one above it),
+                // run on everything inside this one.
+                presets={(presets ?? []).map((p) => ({
+                  label: p.name,
+                  hint: describeDefinition(p, schemas),
+                  selection: {
+                    export: `${p.schema_name}/${p.name}`,
+                    within: record.id,
+                  },
+                  folderName: `${record.natural_name ?? record.id.slice(0, 8)}-${p.name}`,
+                  definition: p,
+                }))}
+                scopeSchema={record.schema_name}
+                builderTo={`/exports?schema=${encodeURIComponent(schema.name)}`}
+                size="md"
+              />
+            )}
             <RunWorkflowButton
               workflows={applicableWorkflows}
               recordId={record.id}

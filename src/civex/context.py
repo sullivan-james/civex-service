@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from civex.services.dataset_service import DatasetService
     from civex.services.file_service import FileService
     from civex.services.gc_service import GCService
+    from civex.services.file_access_service import FileAccessService
     from civex.services.file_info_service import FileInfoService
     from civex.services.transfer_service import TransferService
     from civex.services.plugin_service import PluginService
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
     from civex.services.retention_service import RetentionService
     from civex.services.schema_service import SchemaService
     from civex.services.store_service import StoreService
+    from civex.services.export_definition_service import ExportDefinitionService
     from civex.services.view_service import ViewService
     from civex.services.workflow_job_service import WorkflowJobService
     from civex.services.workflow_service import WorkflowService
@@ -77,6 +79,7 @@ class AppContext:
     store_svc: StoreService
     gc_svc: GCService
     file_info_svc: FileInfoService
+    file_access_svc: FileAccessService
     transfer_svc: TransferService
     audit_svc: LocalAuditRepository
     history_svc: AuditService
@@ -89,6 +92,7 @@ class AppContext:
     container_plugin_svc: ContainerPluginService
     policy_svc: PolicyService
     view_svc: ViewService
+    export_def_svc: ExportDefinitionService
     _session: Session
 
     def commit(self) -> None:
@@ -129,6 +133,9 @@ def build_local_context(
     from civex.repositories.local.job_repo import LocalWorkflowJobRepository
     from civex.repositories.local.record_repo import LocalRecordRepository
     from civex.repositories.local.schema_repo import LocalSchemaRepository
+    from civex.repositories.local.export_definition_repo import (
+        LocalExportDefinitionRepository,
+    )
     from civex.repositories.local.view_repo import LocalViewRepository
     from civex.services.ai.service import AiService
     from civex.services.ai_usage_service import AiUsageService
@@ -138,6 +145,7 @@ def build_local_context(
     from civex.services.dataset_service import DatasetService
     from civex.services.file_service import FileService
     from civex.services.gc_service import GCService
+    from civex.services.file_access_service import FileAccessService
     from civex.services.file_info_service import FileInfoService
     from civex.repositories.local.transfer_repo import LocalTransferRepository
     from civex.services.transfer_service import TransferService
@@ -147,6 +155,7 @@ def build_local_context(
     from civex.services.retention_service import RetentionService
     from civex.services.schema_service import SchemaService
     from civex.services.store_service import StoreService
+    from civex.services.export_definition_service import ExportDefinitionService
     from civex.services.view_service import ViewService
     from civex.services.workflow_job_service import WorkflowJobService
     from civex.services.workflow_service import WorkflowService
@@ -185,6 +194,9 @@ def build_local_context(
     file_info_svc = FileInfoService(
         file_store, LocalFileReferenceRepository(session), dataset_repo
     )
+    file_access_svc = FileAccessService(
+        record_svc, schema_svc, file_store, config.civex_dir
+    )
     transfer_svc = TransferService(
         config,
         file_store,
@@ -211,6 +223,9 @@ def build_local_context(
     container_plugin_svc = ContainerPluginService(config.civex_dir)
     policy_svc = PolicyService(config.civex_dir)
     view_svc = ViewService(view_repo, schema_svc, record_svc, audit_repo)
+    export_def_svc = ExportDefinitionService(
+        LocalExportDefinitionRepository(session), schema_svc, record_svc
+    )
     history_svc = AuditService(
         audit_repo, schema_svc, record_svc, dataset_svc, file_store
     )
@@ -236,6 +251,7 @@ def build_local_context(
         store_svc=store_svc,
         gc_svc=gc_svc,
         file_info_svc=file_info_svc,
+        file_access_svc=file_access_svc,
         transfer_svc=transfer_svc,
         audit_svc=audit_repo,
         history_svc=history_svc,
@@ -248,6 +264,7 @@ def build_local_context(
         container_plugin_svc=container_plugin_svc,
         policy_svc=policy_svc,
         view_svc=view_svc,
+        export_def_svc=export_def_svc,
         _session=session,
     )
     ai_svc._app_ctx = ctx

@@ -11,6 +11,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from civex.domain.dtos import (
+    ExportDefinitionDTO,
     AuditBatchDTO,
     AuditEventDTO,
     AuditLogDTO,
@@ -283,6 +284,15 @@ class ViewResponse(BaseModel):
         description="Ordered list of {field, direction} entries; direction "
         "is 'asc' or 'desc'."
     )
+    files_layout: Literal["tree", "grouped", "flat"] = Field(
+        default="tree",
+        description="How the view's files are arranged when exported as a "
+        "folder or zip: 'tree' puts each file in a folder per record above it "
+        "(Encounter/Recording/Selection/...), 'grouped' keeps the folders above "
+        "the records that hold the files but gathers those records' files into "
+        "one folder named for their kind (Encounter/Recording/Selections/...), "
+        "'flat' puts every file in one folder.",
+    )
 
     @classmethod
     def from_dto(cls, dto: ViewDTO) -> ViewResponse:
@@ -294,6 +304,7 @@ class ViewResponse(BaseModel):
             columns=dto.columns,
             filter_tree=dto.filter_tree,
             sort=dto.sort,
+            files_layout=dto.files_layout,  # type: ignore[arg-type]
         )
 
 
@@ -321,6 +332,11 @@ class CreateViewRequest(BaseModel):
         description="Ordered list of {field, direction} entries; direction "
         "is 'asc' or 'desc'.",
     )
+    files_layout: Literal["tree", "grouped", "flat"] = Field(
+        default="tree",
+        description="How the view's files are arranged when exported: 'tree' "
+        "(a folder per record above each file) or 'flat' (all in one folder).",
+    )
 
 
 class UpdateViewRequest(BaseModel):
@@ -339,6 +355,11 @@ class UpdateViewRequest(BaseModel):
     sort: list[dict[str, Any]] | None = Field(
         default=None,
         description="Replace the sort order; omit the key to leave it unchanged.",
+    )
+    files_layout: Literal["tree", "grouped", "flat"] | None = Field(
+        default=None,
+        description="Change how the view's files are arranged when exported; "
+        "omit the key to leave it unchanged.",
     )
 
 
@@ -2171,3 +2192,304 @@ class FieldTypesResponse(BaseModel):
             ],
             kinds=[FieldKindResponse.model_validate(asdict(k)) for k in FIELD_KINDS],
         )
+
+
+# --- File access (names and folders for stored files) ---
+
+
+class TableRequest(BaseModel):
+    """A table made beside the files (or instead of them). What it is comes from
+    three choices: which records are its rows ('kind'), where it is written
+    ('where': once at the top, or in the folder of each record of a kind) and its
+    columns. Leave 'kind' out for one table per kind of record the export holds."""
+
+    format: Literal["csv", "tsv", "xlsx", "json", "jsonl"] = Field(
+        default="csv", description="The file format of the table."
+    )
+    columns: list[str] | None = Field(
+        default=None,
+        description="Which columns, in order: field names, 'ref_field.target_field' "
+        "joins, or 'id', 'schema', 'created_at', 'updated_at'. Omit for the id and "
+        "every field. When the records are of several kinds, each kind's table "
+        "takes the columns it has.",
+    )
+    name: str | None = Field(
+        default=None,
+        description="The file's name without its extension. With 'kind' it is a "
+        "template over the folder's record ('{schema}', '{id}' and its fields); "
+        "without, the name when there is just one table. Omit to name it for what "
+        "it holds ('Selections') or, for a record's own fields, 'Metadata'.",
+    )
+    kind: str | None = Field(
+        default=None,
+        description="The schema whose records are the rows: the records the export "
+        "takes, the ones above them, and (with 'below') the ones beneath. Omit for "
+        "one table per kind the export holds, written at the top.",
+    )
+    where: str | None = Field(
+        default=None,
+        description="Write the table in the folder of each record of this schema, "
+        "holding the 'kind' records that are that record or beneath it. The same "
+        "as 'kind' gives each record its own table. Omit to write it once, at the "
+        "top. Needs the 'tree' layout.",
+    )
+    shape: Literal["rows", "fields"] = Field(
+        default="rows",
+        description="'rows': a row per record. 'fields': the fields of one record "
+        "as field/value pairs (a metadata sheet); needs 'where' to equal 'kind'.",
+    )
+    skip_empty: bool = Field(
+        default=True,
+        description="False also writes a table (just its header) in a folder that "
+        "has no rows.",
+    )
+
+
+class FileSelectionRequest(BaseModel):
+    """Which files: the records a query selects, or exactly `record_ids`."""
+
+    collection: str | None = Field(default=None, description="Only this collection.")
+    schema_name: str | None = Field(
+        default=None, description="Only records of this schema."
+    )
+    within: str | None = Field(
+        default=None,
+        description="A record (id or prefix): its files and those of everything "
+        "beneath it. Paths start below it. With 'schema_name', only that schema's "
+        "records under it.",
+    )
+    filter: dict[str, Any] | None = Field(
+        default=None, description="A filter tree, as for listing records."
+    )
+    where: list[str] = Field(default_factory=list, description="'field=value' terms.")
+    search: str | None = Field(default=None, description="Full-text search.")
+    record_ids: list[str] | None = Field(
+        default=None,
+        description="Exactly these records (the rows ticked in a list); the other "
+        "selectors are then ignored.",
+    )
+    fields: list[str] | None = Field(
+        default=None, description="Only these file fields; omit for every one."
+    )
+    below: bool = Field(
+        default=False,
+        description="Also take the files of every record beneath each selected "
+        "one (the selected encounters, and everything inside them). Without it, "
+        "only the selected records' own files.",
+    )
+    kinds: list[str] | None = Field(
+        default=None,
+        description="Only records of these kinds (schema names), when 'schema_name' "
+        "is not given: how a preview of an export that takes any kind beneath a "
+        "schema stays within that schema's own tree.",
+    )
+    base: str | None = Field(
+        default=None,
+        description="A record (id or prefix) that paths start below; defaults to "
+        "'within'.",
+    )
+    layout: Literal["tree", "grouped", "flat"] = Field(
+        default="tree",
+        description="'tree' puts each file in a folder per record above it; "
+        "'grouped' gathers the files of the records that hold them into one "
+        "folder named for their kind (Encounter/Recording/Selections/...); "
+        "'flat' puts every file in one folder. Names that clash in a shared "
+        "folder are told apart by the record that owns each. A saved view "
+        "carries its own (files_layout); sending this with 'view' overrides it.",
+    )
+    view: str | None = Field(
+        default=None,
+        description="A saved view as 'schema/view': its filter, its file columns "
+        "and its layout become the selection ('collection' and 'within' still "
+        "narrow it).",
+    )
+    export: str | None = Field(
+        default=None,
+        description="An export saved with a schema, as 'schema/name': its kind of "
+        "record, file fields, filter, layout and tables become the selection, run in "
+        "'collection' and/or within the record 'within'. Sending 'layout', 'tables' "
+        "or 'files' overrides what it has.",
+    )
+    sort: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="The order of the records, and so of the rows of a table: "
+        "[{'field': name, 'direction': 'asc'|'desc'}, ...].",
+    )
+    tables: list[TableRequest] | None = Field(
+        default=None,
+        description="Also make these tables. Each file column in one says where "
+        "that file is in the export. Sending it overrides the tables a saved "
+        "'export' has; an empty list removes them.",
+    )
+    files: bool = Field(
+        default=True,
+        description="False takes the tables alone, with no files (needs 'tables').",
+    )
+
+
+class FilePlanRequest(FileSelectionRequest):
+    include_items: bool = Field(
+        default=True, description="Send the files too, not just the totals."
+    )
+    offset: int = Field(default=0, ge=0, description="First file to send.")
+    limit: int | None = Field(
+        default=None, ge=1, le=5000, description="How many files to send."
+    )
+
+
+class FileExportRequest(FileSelectionRequest):
+    mode: Literal["link", "copy"] = Field(
+        default="link",
+        description="'link' makes hard links in a folder on the drive that holds "
+        "the files: no copying, no extra space, and refused (409 "
+        "'files_scattered') when the files are on more than one drive. 'copy' "
+        "makes real copies on one drive ('volume'), wherever the files are.",
+    )
+    volume: str | None = Field(
+        default=None,
+        description="For 'copy': the drive to copy onto (a volume name); the "
+        "project folder if omitted. Ignored for 'link', which goes where the "
+        "files are.",
+    )
+    name: str | None = Field(
+        default=None,
+        description="Names the folder: <where>/exports/<name>. The same name "
+        "reuses the same folder.",
+    )
+    dest: str | None = Field(
+        default=None,
+        description="Advanced: a folder to build in, empty or an earlier export, "
+        "instead of civex's own exports folder. Overrides 'name' and 'volume'. "
+        "For 'link' it must be on the drive holding the files.",
+    )
+    allow_partial: bool = Field(
+        default=False,
+        description="Go ahead without files that can't be reached. Without it, "
+        "a selection with unreachable files answers 409 and builds nothing.",
+    )
+    open: bool = Field(
+        default=False,
+        description="Show the folder in the file manager, if the request came "
+        "from the server's own machine.",
+    )
+
+
+class RemoveExportsRequest(BaseModel):
+    paths: list[str] = Field(
+        description="Export folders to delete, as listed by GET /file-access/exports."
+    )
+
+
+class FileGatherRequest(FileSelectionRequest):
+    volume: str = Field(
+        description="The drive (volume name) to gather the selection's files "
+        "onto. Only the files in the selection move, not the rest of their "
+        "collections.",
+    )
+
+
+class FileZipRequest(FileSelectionRequest):
+    name: str | None = Field(
+        default=None, description="Names the download: <name>.zip. Defaults to 'files'."
+    )
+    allow_partial: bool = Field(
+        default=False,
+        description="Zip what can be reached; the archive then holds MISSING.txt.",
+    )
+
+
+# --- Exports saved with a schema ---
+
+
+class ExportDefinitionResponse(BaseModel):
+    id: str
+    schema_id: str
+    schema_name: str = Field(description="The schema the export is saved with.")
+    name: str
+    holder: str | None = Field(
+        default=None,
+        description="The kind of record that holds the files; null means any "
+        "kind beneath the schema.",
+    )
+    fields: list[str] = Field(
+        description="The file fields exported; empty means every file field."
+    )
+    filter_tree: dict[str, Any] | None = Field(
+        default=None,
+        description="A filter on the records that hold the files (same shape as "
+        "the records 'filter' parameter).",
+    )
+    files_layout: Literal["tree", "grouped", "flat"]
+    include_files: bool = Field(
+        default=True, description="False: the export is tables alone."
+    )
+    tables: list[TableRequest] = Field(
+        default_factory=list, description="The tables made beside the files."
+    )
+
+    @classmethod
+    def from_dto(cls, dto: "ExportDefinitionDTO") -> "ExportDefinitionResponse":
+        return cls(
+            id=str(dto.id),
+            schema_id=str(dto.schema_id),
+            schema_name=dto.schema_name,
+            name=dto.name,
+            holder=dto.holder,
+            fields=dto.fields,
+            filter_tree=dto.filter_tree,
+            files_layout=dto.files_layout,  # type: ignore[arg-type]
+            include_files=dto.include_files,
+            tables=[TableRequest(**t) for t in dto.tables],
+        )
+
+
+class CreateExportDefinitionRequest(BaseModel):
+    name: str = Field(description="What the export is called, in your own words.")
+    holder: str | None = Field(
+        default=None,
+        description="The kind of record that holds the files: the schema itself "
+        "or a kind beneath it. Omit for any kind beneath.",
+    )
+    fields: list[str] = Field(
+        default_factory=list,
+        description="File fields to export; empty means every file field.",
+    )
+    filter_tree: dict[str, Any] | None = Field(
+        default=None,
+        description="A filter on the records that hold the files; needs 'holder'.",
+    )
+    files_layout: Literal["tree", "grouped", "flat"] = Field(
+        default="tree",
+        description="'tree': a folder per record above each file; 'grouped': the "
+        "records that hold the files share one folder named for their kind "
+        "(Encounter/Recording/Selections/...); 'flat': every file in one folder.",
+    )
+    include_files: bool = Field(
+        default=True, description="False makes the export tables alone."
+    )
+    tables: list[TableRequest] = Field(
+        default_factory=list, description="Also make these tables."
+    )
+
+
+class UpdateExportDefinitionRequest(BaseModel):
+    rename: str | None = Field(default=None, description="New name.")
+    holder: str | None = Field(
+        default=None, description="Change the kind; send null for 'any beneath'."
+    )
+    fields: list[str] | None = Field(
+        default=None, description="Replace the file fields; omit to leave as is."
+    )
+    filter_tree: dict[str, Any] | None = Field(
+        default=None, description="Replace the filter; send null to clear it."
+    )
+    files_layout: Literal["tree", "grouped", "flat"] | None = Field(
+        default=None, description="Change the layout; omit to leave as is."
+    )
+    include_files: bool | None = Field(
+        default=None, description="Take the files or not; omit to leave as is."
+    )
+    tables: list[TableRequest] | None = Field(
+        default=None,
+        description="Replace the tables; send an empty list to remove them.",
+    )

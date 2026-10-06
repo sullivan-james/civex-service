@@ -17,9 +17,11 @@ import {
 import { Badge, Button, ConfirmDialog, Disclosure } from '../../ui'
 
 export function describeTransfer(t: Transfer): string {
-  return t.kind === 'drain'
-    ? `Empty ${t.spec.sources.join(', ')} onto ${t.spec.targets.join(', ')}`
-    : `Gather ${t.spec.collection_ids.length} collection(s) onto ${t.spec.targets.join(', ')}`
+  if (t.kind === 'drain')
+    return `Empty ${t.spec.sources.join(', ')} onto ${t.spec.targets.join(', ')}`
+  if (t.kind === 'files')
+    return `Move ${(t.spec.shas ?? []).length.toLocaleString()} selected file(s) onto ${t.spec.targets.join(', ')}`
+  return `Gather ${t.spec.collection_ids.length} collection(s) onto ${t.spec.targets.join(', ')}`
 }
 
 /** `ahead` is how many moves must finish before a waiting one starts. */

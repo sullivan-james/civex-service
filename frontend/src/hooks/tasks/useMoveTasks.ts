@@ -9,9 +9,10 @@ import { usePauseTransfer, useTransfers } from '../useTransfers'
 const DETAILS = '/settings/storage?tab=tasks'
 
 function describe(t: Transfer): string {
-  return t.kind === 'drain'
-    ? `Emptying ${t.spec.sources.join(', ')}`
-    : `Gathering ${t.spec.collection_ids.length} collection(s)`
+  if (t.kind === 'drain') return `Emptying ${t.spec.sources.join(', ')}`
+  if (t.kind === 'files')
+    return `Moving ${(t.spec.shas ?? []).length.toLocaleString()} selected file(s) to ${t.spec.targets.join(', ')}`
+  return `Gathering ${t.spec.collection_ids.length} collection(s)`
 }
 
 /** File moves, as tasks: the running one with how far it is, how fast and how

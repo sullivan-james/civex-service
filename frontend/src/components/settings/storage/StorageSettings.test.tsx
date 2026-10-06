@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ToastProvider } from '../../ui/ToastProvider'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import StorageSettings from './StorageSettings'
 
@@ -98,6 +99,9 @@ beforeEach(() => {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined
       calls.push({ method, path: url.pathname + url.search, body })
       const p = url.pathname
+      // The Tasks tab also lists exports and the saved filters they start from.
+      if (p === '/api/file-access/exports' || p === '/api/views')
+        return json([])
 
       if (p === '/api/store/volumes' && method === 'GET') return json(volumes)
       if (p === '/api/store/placement' && method === 'GET')
@@ -156,12 +160,14 @@ function renderAt(path = '/settings/storage') {
   })
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path="/settings/storage" element={<StorageSettings />} />
-        </Routes>
-        <Where />
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/settings/storage" element={<StorageSettings />} />
+          </Routes>
+          <Where />
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   )
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { View } from '../../api/views'
+import type { FilesLayout, View } from '../../api/views'
 import {
   Button,
   ConfirmDialog,
@@ -17,7 +17,15 @@ import {
 } from '../ui'
 import { MoreVertical, Save } from '../ui/icons'
 import { viewNameError } from '../../utils/naming'
+import { LAYOUTS, LAYOUT_SHORT } from '../../utils/exportLayouts'
 import { errorMessage } from '../../lib/errors'
+
+const LAYOUT_HINT: Record<FilesLayout, string> = {
+  tree: 'Arrange this view’s files by the records above them, such as Encounter/Recording/Selection.',
+  grouped:
+    'Keep the folders above, but gather the records that hold the files into one folder named for their kind, such as Encounter/Recording/Selections.',
+  flat: 'Put every file in a single folder.',
+}
 
 /** Asks for a view's name -- free text, in the user's own words. */
 function ViewNameDialog({
@@ -93,6 +101,8 @@ export function SavedViewBar({
   onSaveAs,
   onRename,
   onDelete,
+  filesLayout,
+  onFilesLayout,
   pending,
   error,
 }: {
@@ -107,6 +117,10 @@ export function SavedViewBar({
   onSaveAs: (name: string, done: () => void) => void
   onRename: (name: string, done: () => void) => void
   onDelete: (done: () => void) => void
+  /** How this view's files are laid out when exported, and a way to change it;
+   * given only where the listed records have file fields. */
+  filesLayout?: FilesLayout
+  onFilesLayout?: (layout: FilesLayout) => void
   pending: boolean
   error: unknown
 }) {
@@ -132,6 +146,13 @@ export function SavedViewBar({
         <Menu
           items={[
             { label: 'Rename view…', onClick: () => setDialog('rename') },
+            ...(filesLayout && onFilesLayout
+              ? LAYOUTS.filter((l) => l !== filesLayout).map((l) => ({
+                  label: `Export files: ${LAYOUT_SHORT[l]}`,
+                  hint: LAYOUT_HINT[l],
+                  onClick: () => onFilesLayout(l),
+                }))
+              : []),
             {
               label: 'Delete view…',
               variant: 'danger',

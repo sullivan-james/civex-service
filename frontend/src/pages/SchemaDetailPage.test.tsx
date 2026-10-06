@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { ToastProvider } from '../components/ui'
 import { setFieldTypesForTest } from '../hooks/useFieldTypes'
 import { schemasApi, type Schema } from '../api/schemas'
@@ -20,6 +20,11 @@ const schema = {
   fields: [],
 } as unknown as Schema
 
+function Where() {
+  const { pathname, search } = useLocation()
+  return <p data-testid="where">{pathname + search}</p>
+}
+
 function renderPage(path = '/schemas/s1') {
   return render(
     <QueryClientProvider client={new QueryClient()}>
@@ -27,6 +32,7 @@ function renderPage(path = '/schemas/s1') {
         <MemoryRouter initialEntries={[path]}>
           <Routes>
             <Route path="/schemas/:id" element={<SchemaDetailPage />} />
+            <Route path="/exports" element={<Where />} />
           </Routes>
         </MemoryRouter>
       </ToastProvider>
@@ -47,6 +53,22 @@ describe('SchemaDetailPage', () => {
       name: null,
       error: null,
     })
+  })
+
+  it('has no Exports tab: exports are looked after on their own page', async () => {
+    renderPage()
+
+    await screen.findByRole('tab', { name: 'Fields' })
+
+    expect(screen.queryByRole('tab', { name: 'Exports' })).toBeNull()
+  })
+
+  it('sends a saved link to its old Exports tab to the Exports page for this schema', async () => {
+    renderPage('/schemas/s1?tab=exports')
+
+    expect(await screen.findByTestId('where')).toHaveTextContent(
+      '/exports?schema=trial',
+    )
   })
 
   it('shows the fields tab first, with no Browse records button', async () => {

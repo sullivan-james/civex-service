@@ -36,10 +36,12 @@ import { collectionsApi, type CollectionScope } from '../api/collections'
 import { CollectionScopeFields } from '../components/collections/CollectionScopeFields'
 import { inCollection } from '../utils/auditFilter'
 import { errorMessage } from '../lib/errors'
+import { CollectionExportsSection } from '../components/exports/CollectionExportsSection'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
 
 const COLLECTION_TABS = [
   { id: 'records' },
+  { id: 'exports' },
   { id: 'storage' },
   { id: 'activity' },
 ] as const
@@ -176,6 +178,7 @@ export default function CollectionDetailPage() {
               onChange={setTab}
               tabs={[
                 { id: 'records' as const, label: 'Records' },
+                { id: 'exports' as const, label: 'Exports' },
                 ...(hasStorageTab
                   ? [{ id: 'storage' as const, label: 'Storage' }]
                   : []),
@@ -269,6 +272,10 @@ export default function CollectionDetailPage() {
                 </>
               }
             />
+          </TabPanel>
+
+          <TabPanel id="exports" value={shownTab}>
+            <CollectionExportsSection collection={collection.name} />
           </TabPanel>
 
           <TabPanel id="storage" value={shownTab}>

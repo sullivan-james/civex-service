@@ -17,6 +17,8 @@ from civex.server.routers import (
     datasets,
     db,
     dump,
+    export_definitions,
+    file_access,
     files,
     jobs,
     legal,
@@ -332,6 +334,8 @@ def create_app() -> FastAPI:
     app.include_router(dump.router, prefix="/api")
     app.include_router(plugins.router, prefix="/api")
     app.include_router(records.router, prefix="/api")
+    app.include_router(export_definitions.router, prefix="/api")
+    app.include_router(file_access.router, prefix="/api")
     app.include_router(files.router, prefix="/api")
     app.include_router(workflows.router, prefix="/api")
     app.include_router(jobs.router, prefix="/api")

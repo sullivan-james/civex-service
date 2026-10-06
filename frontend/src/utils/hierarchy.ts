@@ -147,3 +147,34 @@ export function relatedSchemaNames(
 export function defaultColumnNames(schema: Schema): string[] {
   return schema.fields.filter((f) => f.type !== 'file').map((f) => f.name)
 }
+
+const isFileField = (f: { type: string }) =>
+  f.type === 'file' || f.type === 'file_list'
+
+/** Whether records of `schema`, or any record beneath them in the hierarchy,
+ * can hold files: the schema's own and inherited fields, and its descendants'.
+ * Decides whether a record page offers its files as a folder (an Encounter
+ * holds none itself, but its Selections do). */
+export function schemaTreeHasFiles(schema: Schema, all: Schema[]): boolean {
+  const byId = schemasById(all)
+  return [schema, ...ancestorSchemas(schema, byId)]
+    .concat(schemaLevels(all, schema).map((l) => l.schema))
+    .some((s) => s.fields.some(isFileField))
+}
+
+/** Whether a view has a file column, so exporting it has files to take. */
+export function viewHasFileColumns(
+  view: { schema_id: string; columns: string[] },
+  all: Schema[],
+): boolean {
+  const byId = schemasById(all)
+  const schema = byId.get(view.schema_id)
+  if (!schema) return false
+  const fileNames = new Set(
+    [schema, ...ancestorSchemas(schema, byId)]
+      .flatMap((s) => s.fields)
+      .filter(isFileField)
+      .map((f) => f.name),
+  )
+  return view.columns.some((c) => fileNames.has(c))
+}
