@@ -41,6 +41,16 @@ class ValidationError(CivexError):
     kind = "validation_error"
 
 
+class FieldValueError(ValidationError):
+    """A value its field doesn't allow. `path` names the field as a history
+    entry does (`data.<field id>`), so whoever shows the refusal can show the
+    field itself, to be fixed, rather than only a sentence about it."""
+
+    def __init__(self, message: str, path: str) -> None:
+        super().__init__(message)
+        self.path = path
+
+
 class ConflictMovedError(CivexError):
     """The value being put back has changed since the conflict was recorded, so
     what a person was shown is no longer what is there. `current` is what is

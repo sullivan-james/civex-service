@@ -63,7 +63,7 @@ describe('RecordConflicts', () => {
       }),
     ])
     expect(
-      screen.getByText(/This record was refused when it was sent/),
+      screen.getByText(/This record isn't on the server yet/),
     ).toBeInTheDocument()
     expect(screen.getByText(/already used/)).toBeInTheDocument()
   })

@@ -1,4 +1,9 @@
-import type { ConflictChange, ConflictTake, SyncConflict } from '../api/remote'
+import type {
+  ConflictChange,
+  ConflictResolution,
+  ConflictTake,
+  SyncConflict,
+} from '../api/remote'
 
 /** What each button says. Which ones a row has is the server's word
  * (`conflict.takes`); this is only wording. */
@@ -102,22 +107,31 @@ export function describeAttempt(
   if (c.kind === 'not_taken')
     return `Your change was not taken, and this is back as the server has it. ${c.message ?? ''} Make the change again if you still want it.`.trim()
   if (c.kind === 'rejected') {
-    const tried =
+    const why = (c.message ?? '').replace(/\.?$/, '.')
+    if (c.attempted === 'delete')
+      return `Deleting this record was refused. ${why}`.trim()
+    const what =
       c.attempted === 'create'
-        ? 'This record was refused when it was sent.'
-        : c.attempted === 'delete'
-          ? 'Deleting this record was refused.'
-          : 'Your change to this record was refused.'
-    return `${tried} ${c.message ?? ''}`.trim()
+        ? "This record isn't on the server yet."
+        : 'Your change to this record was refused.'
+    return `${what} ${why} Fix it on the Resolve tab: saving sends it again.`.trim()
   }
   if (c.attempted === 'delete')
     return `It was edited elsewhere${who ? ` (${who})` : ''} after you last saw it, so your delete was not applied.`
   return `It was deleted elsewhere${who ? ` (${who})` : ''}, and you edited it. It has been kept here.`
 }
 
-/** How a settled one is described. */
-export function settledLabel(take: ConflictTake | null): string {
+/** How a settled one is described. Besides what a person chose: `sent` (a
+ * refused record went in once fixed) and `replaced` (a later attempt took its
+ * place, so it is not shown). */
+export function settledLabel(take: ConflictResolution | null): string {
   switch (take) {
+    case 'sent':
+      return 'Went in'
+    case 'replaced':
+      return 'Replaced by a later attempt'
+    case 'retrying':
+      return 'Sending again…'
     case 'theirs':
       return 'Kept theirs'
     case 'mine':

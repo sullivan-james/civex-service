@@ -1,4 +1,4 @@
-import type { ConflictTake, SyncConflict } from '../api/remote'
+import type { ConflictResolution, SyncConflict } from '../api/remote'
 import { inReviewOrder } from './syncConflicts'
 
 /** One field in the merge view: the two sides, what each is called, and whether
@@ -17,7 +17,7 @@ export interface MergeRow {
   /** What it was before either side changed it (a clash). */
   base: unknown
   /** How it was settled, once it has been. */
-  settled: ConflictTake | null
+  settled: ConflictResolution | null
 }
 
 /** A group of rows that share a header and a way of settling. */
@@ -40,7 +40,7 @@ export function buildMerge(
   fields: { id: string; name: string }[],
 ): MergeModel {
   const nameOf = new Map(fields.map((f) => [`data.${f.id}`, f.name]))
-  const settled = (c: SyncConflict): ConflictTake | null =>
+  const settled = (c: SyncConflict): ConflictResolution | null =>
     c.status === 'resolved' ? c.resolution : null
   const clashes: MergeRow[] = []
   const sections: MergeSection[] = []

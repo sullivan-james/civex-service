@@ -396,9 +396,12 @@ class SyncService:
         if hello.project_id != meta.project_id:
             self._repo.set_project_id(hello.project_id)
             user_state.move_device(meta.project_id, hello.project_id)
-            # Where this project had got to, and what it was waiting to have
-            # reviewed, were about the authority it followed before.
+            # Where this project had got to, what it was waiting to have
+            # reviewed, and the numbers its history was given, were all the
+            # authority it followed before: kept, they would be read as this
+            # one's (the same number means another change here).
             self._repo.set_cursor(0)
+            self._repo.forget_numbers()
             self._repo.resolve_conflicts(
                 [c.id for c in self._repo.find_open_conflicts()],
                 "followed another server",
@@ -651,19 +654,72 @@ class SyncService:
             pending = self._repo.pending_entries(PUSH_BATCH)
             if not pending:
                 return total
-            ready = self._with_files(transport, pending, report)
+            ready, folded = self._send_whole(pending)
+            ready = self._with_files(transport, ready, report)
             if not ready:
                 report.waiting += len(pending)
                 return total
             result = transport.push(ready)
             sent = {e.id: e for e in ready}
             self._repo.mark_sent(result.results)
-            held = self._note(result.results, sent, report)
+            for r in result.results:
+                if r.op_id in folded and r.status != DEFERRED:
+                    self._repo.mark_folded(
+                        folded[r.op_id],
+                        "rejected" if r.status == REJECTED else "synced",
+                    )
+            held = self._note(result.results, sent, report, set(folded))
             self._commit()
             total += len(result.results) - held
             if held or len(result.results) < len(ready) or len(ready) < len(pending):
                 report.waiting += held + (len(pending) - len(result.results))
                 return total
+
+    def _send_whole(
+        self, pending: list[SyncEntry]
+    ) -> tuple[list[SyncEntry], dict[uuid.UUID, list[uuid.UUID]]]:
+        """What to send for these pending changes. A thing the authority never
+        took (its create was refused, say a value its field no longer allows)
+        can't be edited there: the edits made to it since, fixing it or not, go
+        as one create of the thing as it is now, in place of the first of them.
+        Returns what to send and, for each such create, every entry it stands
+        for (settled together)."""
+        untaken = self._repo.never_taken(
+            {
+                (e.entity_type, e.entity_id)
+                for e in pending
+                if e.action in ("update", "restore")
+            }
+        )
+        if not untaken:
+            return pending, {}
+        ready: list[SyncEntry] = []
+        folded: dict[uuid.UUID, list[uuid.UUID]] = {}
+        first: dict[uuid.UUID, uuid.UUID] = {}
+        for entry in pending:
+            if entry.entity_id not in untaken or entry.action not in (
+                "update",
+                "restore",
+            ):
+                ready.append(entry)
+                continue
+            if entry.entity_id in first:
+                folded[first[entry.entity_id]].append(entry.id)
+                continue
+            current = self._repo.snapshot(entry.entity_type, entry.entity_id)
+            first[entry.entity_id] = entry.id
+            folded[entry.id] = [entry.id]
+            if current is None or current.get("deleted_at"):
+                continue  # gone here too: nothing to send, settled below
+            ready.append(
+                replace(
+                    entry, action="create", old_data=None, new_data=current, delta=None
+                )
+            )
+        for entry_id, entries in folded.items():
+            if not any(e.id == entry_id for e in ready):
+                self._repo.mark_folded(entries, "synced")
+        return ready, {k: v for k, v in folded.items() if any(e.id == k for e in ready)}
 
     def _with_files(
         self, transport: SyncTransport, entries: list[SyncEntry], report: SyncReport
@@ -712,11 +768,18 @@ class SyncService:
             )
 
     def _note(
-        self, results: list[Any], sent: dict[uuid.UUID, SyncEntry], report: SyncReport
+        self,
+        results: list[Any],
+        sent: dict[uuid.UUID, SyncEntry],
+        report: SyncReport,
+        whole: set[uuid.UUID] | None = None,
     ) -> int:
         """Keep what the authority said that a person should see: a clash, or a
-        refusal (the same kind of row, so one path). Returns how many changes it
-        held back."""
+        refusal (the same kind of row, so one path). A thing has at most one
+        refusal waiting: a newer one replaces the one before (the person fixes
+        the thing once, not every attempt), and when a thing never taken before
+        goes in as a whole (`whole`), its refusal is settled by that. Returns
+        how many changes it held back."""
         held = 0
         for result in results:
             entry = sent.get(result.op_id)
@@ -725,13 +788,44 @@ class SyncService:
             if result.status == DEFERRED:
                 held += 1
                 continue
+            waiting = [
+                c
+                for c in self._repo.find_open_conflicts(
+                    kind="rejected", entity_id=entry.entity_id
+                )
+                if c.op_id != result.op_id
+            ]
+            if result.status == REJECTED:
+                if waiting:
+                    # Refused again: the item already open says so (the
+                    # latest change and why), rather than another beside it.
+                    report.rejected += 1
+                    newest, *older = sorted(
+                        waiting, key=lambda c: c.created_at, reverse=True
+                    )
+                    self._repo.renew_refusal(
+                        newest.id,
+                        result.op_id,
+                        result.message,
+                        entry.new_data,
+                        _refused_field(result),
+                    )
+                    self._repo.resolve_conflicts([c.id for c in older], "replaced")
+                    continue
+            elif whole and result.op_id in whole:
+                self._repo.resolve_conflicts([c.id for c in waiting], "sent")
+            else:
+                # A change sent again went in: its refusal is settled.
+                self._repo.resolve_conflicts(
+                    [c.id for c in waiting if c.resolution == "retrying"], "sent"
+                )
             problems = result.conflicts
             if result.status == REJECTED:
                 report.rejected += 1
                 problems = [
                     {
                         "kind": "rejected",
-                        "field": None,
+                        "field": _refused_field(result),
                         "yours": entry.new_data,
                         "message": result.message,
                     }
@@ -1068,7 +1162,12 @@ class SyncService:
         elif take == "delete":
             self._records.delete(str(conflict.entity_id))
         elif take == "retry":
+            # Not settled yet: it is settled by the authority's answer (it goes
+            # in, or the same item says why it was refused again).
             self._resend(conflict)
+            self._repo.mark_retrying(conflict_id)
+            self._commit()
+            return
         self._repo.resolve_conflict(conflict_id, take)
         self._commit()
 
@@ -1156,7 +1255,15 @@ class SyncService:
             )
         original = self._repo.get_entry(conflict.op_id) if conflict.op_id else None
         if original is None:
-            raise ValidationError("The change is no longer held here")
+            # The change itself isn't kept here (a thing sent when the authority
+            # was filled is sent, not recorded). If the authority never took
+            # the thing, sending it again is sending it as it is now.
+            thing = (conflict.entity_type, conflict.entity_id)
+            if conflict.entity_id not in self._repo.never_taken({thing}):
+                raise ValidationError("The change is no longer held here")
+            current = self._repo.snapshot(*thing)
+            self._audit.log_change("create", thing[0], thing[1], None, current)
+            return
         if original.op is None:
             self._resend_entry(original, strict=True, in_action=False)
             return
@@ -1167,14 +1274,9 @@ class SyncService:
                     entry, strict=entry.id == original.id, in_action=True
                 )
         others = {e.id for e in parts} - {original.id}
-        self._repo.resolve_conflicts(
-            [
-                c.id
-                for c in self._repo.find_open_conflicts(kind="rejected")
-                if c.op_id in others
-            ],
-            "retry",
-        )
+        for c in self._repo.find_open_conflicts(kind="rejected"):
+            if c.op_id in others:
+                self._repo.mark_retrying(c.id)
 
     def _resend_entry(self, original: SyncEntry, strict: bool, in_action: bool) -> None:
         """Log `original` again from its thing as it is now. `strict`: say why
@@ -1236,10 +1338,20 @@ _RECORD_ONLY = frozenset({"mine", "value", "delete"})
 
 
 def _takes_for(conflict: SyncConflictDTO) -> tuple[str, ...]:
+    if conflict.status == "open" and conflict.resolution == "retrying":
+        return ("theirs",)  # on its way: only letting it go is left to choose
     takes = _TAKES.get(conflict.kind, ("theirs",))
     if conflict.entity_type == "record":
         return takes
     return tuple(t for t in takes if t not in _RECORD_ONLY)
+
+
+def _refused_field(result: Any) -> str | None:
+    """The field a refusal names (`data.<field id>`), if the authority said."""
+    for problem in result.conflicts or []:
+        if problem.get("field"):
+            return problem["field"]
+    return None
 
 
 def _sits_under(kind: str, snap: dict[str, Any]) -> str | None:

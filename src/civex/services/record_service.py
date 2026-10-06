@@ -30,6 +30,7 @@ from civex.domain import geo as geo_domain
 from civex.domain.audit_diff import tombstone
 from civex.domain import partial_dates, templating, units
 from civex.domain.exceptions import (
+    FieldValueError,
     CoercionError,
     DuplicateRecordError,
     NotFoundError,
@@ -1305,7 +1306,12 @@ class RecordService:
             field = shape.by_name.get(name)
             if field is None or value is None:
                 continue
-            _check_restrictions(value, field.dtype, field.restrictions, name)
+            try:
+                _check_restrictions(value, field.dtype, field.restrictions, name)
+            except FieldValueError:
+                raise
+            except ValidationError as e:
+                raise FieldValueError(str(e), f"data.{field.id}") from e
 
     def validate(self, data: dict[str, Any], fields: list[ResolvedField]) -> None:
         missing = [

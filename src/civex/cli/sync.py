@@ -396,6 +396,21 @@ def resolve(
     c = _ctx()
     try:
         c.sync_svc.resolve_conflict(cid, take, value=_read_value(value), force=force)
+        if take == "retry":
+            # Settled by the authority's answer, so ask for it now (as the app
+            # does): it goes in, or it is refused again and says why.
+            try:
+                c.sync_svc.sync()
+            except SyncError as e:
+                console.print(f"Sent again; it goes with the next sync ({e}).")
+                return
+            left = [x for x in c.sync_svc.conflicts() if x.id == cid]
+            console.print(
+                f"Refused again: {escape(left[0].message or '')}"
+                if left
+                else "Sent again, and it went in."
+            )
+            return
     except CivexError as e:
         raise _fail(e)
     finally:

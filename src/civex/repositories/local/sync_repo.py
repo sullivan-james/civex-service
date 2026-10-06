@@ -409,6 +409,36 @@ class LocalSyncRepository:
         row.resolved_at = datetime.now(timezone.utc)
         self._s.flush()
 
+    def mark_retrying(self, id: uuid.UUID) -> None:
+        """An open refusal whose change has been sent again: still open (it
+        isn't settled until the authority answers), saying it is on its way."""
+        row = self._s.get(SyncConflict, id)
+        if row is None:
+            raise NotFoundError(f"Conflict '{id}' not found")
+        row.resolution = "retrying"
+        self._s.flush()
+
+    def renew_refusal(
+        self,
+        id: uuid.UUID,
+        op_id: uuid.UUID,
+        message: str | None,
+        yours: Any,
+        field: str | None = None,
+    ) -> None:
+        """The same thing refused again: the open item says so (the latest
+        change and why), rather than another item beside it."""
+        row = self._s.get(SyncConflict, id)
+        if row is None:
+            return
+        row.op_id = op_id
+        row.message = message
+        row.yours = yours
+        row.field = field
+        row.resolution = None
+        row.created_at = datetime.now(timezone.utc)
+        self._s.flush()
+
     def conflicts_of_ops(self, op_ids: list[uuid.UUID]) -> list[SyncConflictDTO]:
         """Every conflict, open or settled, that came from one of these changes."""
         if not op_ids:
@@ -788,6 +818,67 @@ class LocalSyncRepository:
                 if result.status in ("merged", "conflict"):
                     row.apply_state = "superseded"
         self._s.flush()
+
+    def forget_numbers(self) -> None:
+        """Clear the numbers another authority gave this project's history (it
+        now follows a different one, whose numbers mean other changes)."""
+        self._s.execute(
+            update(AuditLog)
+            .where(AuditLog.hub_seq.is_not(None))
+            .values(hub_seq=None)
+            .execution_options(synchronize_session=False)
+        )
+        self._s.expire_all()
+
+    def never_taken(self, things: set[tuple[str, uuid.UUID]]) -> set[uuid.UUID]:
+        """Of these things, the ids of those the authority has never taken: its
+        create was refused (made here, or sent when the authority was filled:
+        a refusal whose change isn't held here), and nothing carrying the thing
+        has been numbered since (a delete of something it never had is numbered
+        but takes nothing). An edit to one can't go as an edit."""
+        if not things:
+            return set()
+        ids = {i for _, i in things}
+        refused = {
+            i
+            for (i,) in self._s.query(AuditLog.entity_id).filter(
+                AuditLog.entity_id.in_(ids),
+                AuditLog.action == "create",
+                AuditLog.sync_state == "rejected",
+            )
+        }
+        held = {
+            i for (i,) in self._s.query(AuditLog.id).filter(AuditLog.entity_id.in_(ids))
+        }
+        refused |= {
+            c.entity_id
+            for c in self._s.query(SyncConflict).filter(
+                SyncConflict.entity_id.in_(ids), SyncConflict.kind == "rejected"
+            )
+            if c.op_id is not None and c.op_id not in held  # a seed's refusal
+        }
+        taken = {
+            i
+            for (i,) in self._s.query(AuditLog.entity_id).filter(
+                AuditLog.entity_id.in_(refused),
+                AuditLog.hub_seq.is_not(None),
+                AuditLog.action.in_(("create", "update", "restore")),
+            )
+        }
+        return refused - taken
+
+    def mark_folded(self, entry_ids: list[uuid.UUID], state: str) -> None:
+        """Entries sent as part of one create of the thing as it was (see
+        `SyncService._send_whole`): settled with it (`state`), and never applied
+        as steps of their own, since the create stands for all of them."""
+        if entry_ids:
+            self._s.execute(
+                update(AuditLog)
+                .where(AuditLog.id.in_(entry_ids))
+                .values(sync_state=state, apply_state="superseded")
+                .execution_options(synchronize_session=False)
+            )
+            self._s.expire_all()
 
     def mark_seq(self, entry_id: uuid.UUID, seq: int) -> None:
         """The authority has numbered a change made here: it is theirs now too."""

@@ -61,6 +61,11 @@ export interface SyncResult {
 export type ConflictTake =
   'theirs' | 'mine' | 'value' | 'edited' | 'delete' | 'retry'
 
+/** How a conflict ended: what a person chose, or what settled it by itself:
+ * `sent` (a refused record went in once fixed), `replaced` (a later attempt
+ * took its place). `retrying` is on an open one: sent again, no answer yet. */
+export type ConflictResolution = ConflictTake | 'sent' | 'replaced' | 'retrying'
+
 /** A value that did not go in as made. */
 export interface SyncConflict {
   id: string
@@ -85,7 +90,7 @@ export interface SyncConflict {
   status: 'open' | 'resolved'
   created_at: string
   resolved_at: string | null
-  resolution: ConflictTake | null
+  resolution: ConflictResolution | null
   /** What the value was before either side changed it. */
   base: unknown
   /** Who wrote the value that stayed, and when. */

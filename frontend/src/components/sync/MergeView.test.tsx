@@ -191,34 +191,46 @@ describe('MergeView', () => {
     await waitFor(() => expect(posts[0].path).toContain('/conflicts/reopen'))
   })
 
-  it('shows a refused change as a block with its reason, before and after, and what to do', async () => {
+  it('shows a refused change as the field to fix, not two sides', async () => {
     show([
       conflict('c1', {
         kind: 'rejected',
-        field: null,
-        attempted: 'update',
-        message: 'depth must be under 5',
+        field: 'data.f2',
+        attempted: 'create',
+        message: "Field 'depth': must be under 5",
         takes: ['theirs', 'retry'],
-        changes: [
-          {
-            field_id: 'f2',
-            field_name: 'depth',
-            field_label: 'Depth',
-            dtype: 'float',
-            before: 1,
-            after: 9,
-            current: 9,
-          },
-        ],
+        changes: [],
       }),
     ])
+    expect(screen.getByText('Not on the server yet')).toBeInTheDocument()
+    expect(screen.getByText(/must be under 5/)).toBeInTheDocument()
     expect(
-      screen.getByText(/Your change to this record was refused/),
+      screen.getByText(/Saving sends the record again/),
     ).toBeInTheDocument()
-    expect(screen.getAllByText('Before your change').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Your change').length).toBeGreaterThan(0)
-    await userEvent.click(screen.getByRole('button', { name: 'Send again' }))
+    expect(screen.queryByText('Before your change')).not.toBeInTheDocument()
+    expect(screen.queryByText('Your change')).not.toBeInTheDocument()
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Send unchanged' }),
+    )
     await waitFor(() => expect(posts[0].body).toMatchObject({ take: 'retry' }))
+  })
+
+  it('says a refusal sent again is on its way, and keeps it open', () => {
+    show([
+      conflict('c1', {
+        kind: 'rejected',
+        field: 'data.f2',
+        attempted: 'create',
+        message: 'refused',
+        resolution: 'retrying',
+        takes: ['theirs'],
+        changes: [],
+      }),
+    ])
+    expect(screen.getByText('Sending again…')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Send unchanged' }),
+    ).not.toBeInTheDocument()
   })
 
   it('shows an edit against a delete with its two choices', () => {
