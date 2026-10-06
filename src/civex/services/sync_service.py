@@ -41,6 +41,7 @@ from civex.domain.sync import (
     SyncEntry,
     SyncError,
     SyncTransport,
+    snapshot_cursor,
 )
 from civex.identity import local_actor
 from civex.repositories.protocols import (
@@ -733,25 +734,64 @@ class SyncService:
         """Become a copy of the authority: read everything as it is now, then
         its history. The number is taken before reading, so whatever changes
         meanwhile arrives in the feed, and state-based apply makes any overlap
-        harmless."""
+        harmless. Anything changed here while joining is a change of this
+        device's own and is sent like any other."""
+        # What this project recorded before it joined is about nothing the copy
+        # holds (a joining project is empty), so there is nothing to send.
+        self._repo.mark_all_synced()
+        self._commit()
         head: int | None = None
         for kind in ENTITY_ORDER:
-            offset = 0
+            # Things that sit under another of their kind that has not arrived
+            # yet (it was made later, on a clock that was ahead): the database
+            # refuses them until it has, so they wait for it, by its id.
+            waiting: dict[str, list[dict[str, Any]]] = {}
+            after: str | None = None
             while True:
-                page = transport.snapshot(kind, offset, SNAPSHOT_PAGE)
+                page = transport.snapshot(kind, after, SNAPSHOT_PAGE)
                 head = page.head_seq if head is None else head
+                above = {p for snap in page.items if (p := _sits_under(kind, snap))}
+                present = self._repo.existing_ids(kind, above)
                 for snap in page.items:
-                    self._repo.apply_snapshot(kind, snap)
+                    self._join_one(kind, snap, present, waiting)
                 self._commit()
                 if not page.more:
                     break
-                offset += len(page.items)
+                after = page.next
+            if waiting:
+                # What they sit under was removed for good while the copy was
+                # read, and they went with it there.
+                log.info(
+                    "joining: %d %s(s) whose parent was removed meanwhile were "
+                    "left out",
+                    sum(len(v) for v in waiting.values()),
+                    kind,
+                )
         head = head or 0
         self._backfill_history(transport, head)
         self._repo.set_cursor(head)
-        self._repo.mark_all_synced()
         self._commit()
         self._pull(transport)
+
+    def _join_one(
+        self,
+        kind: str,
+        snap: dict[str, Any],
+        present: set[str],
+        waiting: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        """Write one thing from the copy, or keep it until what it sits under
+        has been written; then whatever was waiting for it."""
+        above = _sits_under(kind, snap)
+        if above and above not in present:
+            waiting.setdefault(above, []).append(snap)
+            return
+        ready = [snap]
+        while ready:
+            item = ready.pop()
+            self._repo.apply_snapshot(kind, item)
+            present.add(item["id"])
+            ready.extend(waiting.pop(item["id"], ()))
 
     def _backfill_history(self, transport: SyncTransport, upto: int) -> None:
         """Keep the authority's history as this project's own, without applying
@@ -780,13 +820,13 @@ class SyncService:
                     order[start : start + SNAPSHOT_PAGE]
                 )
             return
-        offset = 0
+        after: str | None = None
         while True:
-            snaps = self._repo.snapshots_page(kind, offset, SNAPSHOT_PAGE)
+            snaps = self._repo.snapshots_page(kind, after, SNAPSHOT_PAGE)
             yield from snaps
             if len(snaps) < SNAPSHOT_PAGE:
                 return
-            offset += len(snaps)
+            after = snapshot_cursor(snaps[-1])
 
     @staticmethod
     def _why_refused(problems: list[str]) -> str:
@@ -801,7 +841,16 @@ class SyncService:
     def _seed(self, transport: SyncTransport) -> None:
         """Give an empty authority everything this project holds. Each thing is
         sent as a create with an id made from the project and the thing, so an
-        interrupted seed can simply be run again."""
+        interrupted seed can simply be run again.
+
+        The project stays in use meanwhile, so only the changes recorded before
+        the first attempt began are counted as sent by it (`begin_seed`): a
+        change made after a thing's page went is sent afterwards like any other.
+        A run again after an interruption keeps the first attempt's line, since
+        the authority answers a thing it was already sent from its record of
+        that first sending, not from the thing as it is now."""
+        self._repo.begin_seed()
+        self._commit()
         meta = self._repo.meta()
         device_id = str(user_state.device_id_for(meta.project_id))
         actor = local_actor(self._config.identity.name)
@@ -859,7 +908,7 @@ class SyncService:
                 f"{self._why_refused(problems)}",
                 retryable=False,
             )
-        self._repo.mark_all_synced()
+        self._repo.finish_seed()
         self._repo.set_cursor(head)
         self._commit()
 
@@ -1019,6 +1068,13 @@ def _takes_for(conflict: SyncConflictDTO) -> tuple[str, ...]:
     if conflict.entity_type == "record":
         return takes
     return tuple(t for t in takes if t not in _RECORD_ONLY)
+
+
+def _sits_under(kind: str, snap: dict[str, Any]) -> str | None:
+    """The id of the thing of the same kind that `snap` can't exist without:
+    a record's parent record, a schema's parent schema."""
+    key = {"record": "parent_record_id", "schema": "parent_id"}.get(kind)
+    return snap.get(key) if key else None
 
 
 def _field_id(conflict: SyncConflictDTO) -> str | None:

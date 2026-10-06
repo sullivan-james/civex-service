@@ -8,7 +8,14 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from civex.domain.sync import ENTITY_ORDER, OpResult, PushResult, SyncEntry, SyncError
+from civex.domain.sync import (
+    ENTITY_ORDER,
+    OpResult,
+    PushResult,
+    SyncEntry,
+    SyncError,
+    snapshot_cursor,
+)
 
 
 def device_uuid(name: str) -> str:
@@ -24,14 +31,14 @@ def wire(obj: Any) -> Any:
 def join(authority, device) -> None:
     """Make `device` a copy of `authority` as it is now, as joining would."""
     for kind in ENTITY_ORDER:
-        offset = 0
+        after = None
         while True:
-            items = authority.sync_repo.snapshots_page(kind, offset, 200)
+            items = authority.sync_repo.snapshots_page(kind, after, 200)
             for snap in items:
                 device.sync_repo.apply_snapshot(kind, wire(snap))
             if len(items) < 200:
                 break
-            offset += 200
+            after = snapshot_cursor(items[-1])
     device.sync_repo.set_cursor(authority.sync_repo.head_seq())
     device.sync_repo.mark_all_synced()
     device.commit()
@@ -69,7 +76,7 @@ def by_status(result: PushResult, status: str) -> list[OpResult]:
 
 
 def snapshots(ctx) -> dict[str, list[dict]]:
-    return {k: ctx.sync_repo.snapshots_page(k, 0, 1000) for k in ENTITY_ORDER}
+    return {k: ctx.sync_repo.snapshots_page(k, None, 1000) for k in ENTITY_ORDER}
 
 
 def new_id() -> str:
@@ -116,11 +123,11 @@ class Loopback:
         self.calls.append("feed")
         return FeedPage.from_dict(self._done(self._svc().feed(after, limit).to_dict()))
 
-    def snapshot(self, kind, offset, limit):
+    def snapshot(self, kind, after, limit):
         from civex.domain.sync import SnapshotPage
 
         self.calls.append("snapshot")
-        page = self._svc().snapshot(kind, offset, limit)
+        page = self._svc().snapshot(kind, after, limit)
         return SnapshotPage.from_dict(self._done(page.to_dict()))
 
     def missing_files(self, shas):

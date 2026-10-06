@@ -41,6 +41,7 @@ from civex.domain.sync import (
     SyncEntry,
     SyncError,
     problem_with,
+    snapshot_cursor,
 )
 from civex.repositories.protocols import FileObjectStore, SyncRepository
 from civex.services.record_service import RecordService
@@ -135,15 +136,23 @@ class SyncAuthorityService:
             device_name=device.name,
         )
 
-    def snapshot(self, kind: str, offset: int, limit: int) -> SnapshotPage:
-        """A page of one kind as it is now, for a device joining. `head_seq` is
-        read first: what changes while the device reads is in the feed past it."""
+    def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage:
+        """A page of one kind as it is now, for a device joining, continuing
+        after the cursor `after` (None: the first page). `head_seq` is read
+        first: what changes while the device reads is in the feed past it."""
         if kind not in ENTITY_ORDER:
             raise ValidationError(f"Unknown kind '{kind}'")
         head = self._head()
         limit = max(1, min(limit, SNAPSHOT_MAX))
-        items = self._repo.snapshots_page(kind, offset, limit + 1)
-        return SnapshotPage(kind, items[:limit], len(items) > limit, head)
+        try:
+            items = self._repo.snapshots_page(kind, after, limit + 1)
+        except ValueError as e:
+            raise ValidationError(f"Not a page cursor: {after!r}") from e
+        page = items[:limit]
+        more = len(items) > limit
+        return SnapshotPage(
+            kind, page, more, head, snapshot_cursor(page[-1]) if more else None
+        )
 
     def _head(self) -> int:
         """The latest number, after numbering anything changed on this instance
@@ -175,7 +184,13 @@ class SyncAuthorityService:
         self, device: SyncDeviceDTO, device_id: str | None, entries: list[SyncEntry]
     ) -> PushResult:
         """Settle each change, in the order sent. Stops at the first that has
-        to wait (later ones may depend on it); those are simply not answered."""
+        to wait (later ones may depend on it); those are simply not answered.
+
+        One push at a time: each change is merged with what is held and the
+        whole thing written back, so two pushes reading the same thing at once
+        would each overwrite the other. The feed's counter is taken first and
+        held until the answer is saved, which makes every other push wait."""
+        self._repo.lock_feed()
         self._head()  # number this instance's own changes first
         results: list[OpResult] = []
         for entry in entries[:PUSH_MAX]:
@@ -391,6 +406,11 @@ class SyncAuthorityService:
         """Record the change as it was made (numbered), and, when what the
         authority settled on is not what was sent, a second entry carrying the
         settled state, so every device ends where the authority did."""
+        # A change made on this instance itself that was saved while this push
+        # was being merged is already in what was merged with, so it is
+        # numbered first: numbered after, it would carry a state from before
+        # this change and every device would apply it last.
+        self._repo.sequence_local_entries()
         seq = self._repo.next_hub_seq()
         sent = SyncEntry(
             id=entry.id,

@@ -470,7 +470,9 @@ class AuditLog(Base):
     #  - hlc: hybrid logical clock stamp, an opaque string that sorts
     #    correctly; orders changes without trusting wall clocks.
     #  - hub_seq: position in the authority's change feed once it has one.
-    #  - sync_state: `pending` until the authority has acknowledged the entry.
+    #  - sync_state: `pending` until the authority has acknowledged the entry
+    #    (`synced`), or refused it (`rejected`); `seeding` while a seed that
+    #    covers it (sends the thing as it is) has not finished.
     actor: Mapped[str | None] = mapped_column(String(100), nullable=True)
     device_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     hlc: Mapped[str | None] = mapped_column(String(40), nullable=True)

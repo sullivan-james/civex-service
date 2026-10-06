@@ -44,7 +44,7 @@ def live(ctx):
 def deleted(ctx):
     return [
         r
-        for r in ctx.sync_repo.snapshots_page("record", 0, 500)
+        for r in ctx.sync_repo.snapshots_page("record", None, 500)
         if r["deleted_at"] is not None
     ]
 

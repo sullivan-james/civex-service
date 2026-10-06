@@ -265,12 +265,17 @@ class Hello:
 class SnapshotPage:
     """A page of one kind of thing as it is now, for a device joining the
     project. Read with the authority's `head_seq` taken *first*, so anything
-    that changes while a device reads is picked up from the feed afterwards."""
+    that changes while a device reads is picked up from the feed afterwards.
+
+    `next` is where the following page starts (`snapshot_cursor` of the last
+    item): pages follow on from a thing, not from a count, so something removed
+    meanwhile can't shift a page past something that never changed."""
 
     kind: str
     items: list[dict[str, Any]]
     more: bool
     head_seq: int
+    next: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -278,11 +283,32 @@ class SnapshotPage:
             "items": self.items,
             "more": self.more,
             "head_seq": self.head_seq,
+            "next": self.next,
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> SnapshotPage:
-        return cls(d["kind"], list(d["items"]), bool(d["more"]), int(d["head_seq"]))
+        return cls(
+            d["kind"],
+            list(d["items"]),
+            bool(d["more"]),
+            int(d["head_seq"]),
+            d.get("next"),
+        )
+
+
+def snapshot_cursor(snapshot: dict[str, Any]) -> str:
+    """Where a page that ends on `snapshot` continues: things are read in order
+    of when they were made, then id, so this names a place in that order."""
+    return f"{snapshot['created_at']}|{snapshot['id']}"
+
+
+def parse_snapshot_cursor(cursor: str) -> tuple[str, str]:
+    """(created_at, id) from a `snapshot_cursor`, or ValueError."""
+    created_at, sep, id_ = cursor.rpartition("|")
+    if not sep or not created_at or not id_:
+        raise ValueError(f"Not a page cursor: {cursor!r}")
+    return created_at, id_
 
 
 class SyncError(RuntimeError):
@@ -404,7 +430,7 @@ class SyncTransport(Protocol):
     def hello(self) -> Hello: ...
     def push(self, entries: list[SyncEntry]) -> PushResult: ...
     def feed(self, after: int, limit: int) -> FeedPage: ...
-    def snapshot(self, kind: str, offset: int, limit: int) -> SnapshotPage: ...
+    def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage: ...
     def missing_files(self, shas: list[str]) -> list[str]: ...
     def upload_file(self, sha256: str, path: Path) -> None: ...
     def download_file(self, sha256: str, dest: Path) -> None: ...

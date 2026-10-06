@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import BigInteger, func, or_, select, text, update
+from sqlalchemy import BigInteger, and_, func, or_, select, text, update
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -43,6 +43,7 @@ from civex.domain.sync import (
     SyncDeviceDTO,
     SyncEntry,
     SyncMetaDTO,
+    parse_snapshot_cursor,
 )
 from civex.repositories.local.dataset_repo import _to_dtos as _dataset_dtos
 from civex.repositories.local.record_repo import _to_dto as _record_dto
@@ -160,6 +161,15 @@ class LocalSyncRepository:
 
     def head_seq(self) -> int:
         return self._meta_row().head_seq
+
+    def lock_feed(self) -> None:
+        """Hold the feed's counter until this transaction ends, so whoever
+        takes it next waits: a row lock on PostgreSQL, the write lock on
+        SQLite (a write that changes nothing still takes it)."""
+        self._meta_row()
+        self._s.execute(
+            update(SyncMeta).where(SyncMeta.id == 1).values(head_seq=SyncMeta.head_seq)
+        )
 
     def record_outcome(self, error: str | None) -> None:
         row = self._meta_row()
@@ -460,16 +470,22 @@ class LocalSyncRepository:
         return self._dicts(kind, [row])[0]
 
     def snapshots_page(
-        self, kind: str, offset: int, limit: int
+        self, kind: str, after: str | None, limit: int
     ) -> list[dict[str, Any]]:
+        """Up to `limit` things of `kind` in the order they were made, starting
+        after the `snapshot_cursor` `after` (None: from the first)."""
         model = _MODELS[kind]
-        rows = (
-            self._s.query(model)
-            .order_by(model.created_at, model.id)
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
+        query = self._s.query(model)
+        if after:
+            created, id_ = parse_snapshot_cursor(after)
+            at, rid = _parse(created), uuid.UUID(id_)
+            query = query.filter(
+                or_(
+                    model.created_at > at,
+                    and_(model.created_at == at, model.id > rid),
+                )
+            )
+        rows = query.order_by(model.created_at, model.id).limit(limit).all()
         return self._dicts(kind, rows)
 
     def record_seed_order(self) -> list[str]:
@@ -741,6 +757,41 @@ class LocalSyncRepository:
 
     def latest_hlc(self) -> str | None:
         return self._s.query(func.max(AuditLog.hlc)).scalar()
+
+    def existing_ids(self, kind: str, ids: set[str]) -> set[str]:
+        """Which of these ids are things of `kind` here, deleted or not."""
+        if not ids:
+            return set()
+        model = _MODELS[kind]
+        wanted = [uuid.UUID(i) for i in ids]
+        return {str(i) for (i,) in self._s.query(model.id).filter(model.id.in_(wanted))}
+
+    def begin_seed(self) -> None:
+        """Set aside the changes a seed covers: those not yet sent when the
+        first attempt began. A seed run again after an interruption keeps the
+        first attempt's set (any left are still `seeding`), so a change made in
+        between is still sent on its own."""
+        started = (
+            self._s.query(AuditLog.id).filter(AuditLog.sync_state == "seeding").first()
+        )
+        if started is None:
+            self._s.execute(
+                update(AuditLog)
+                .where(AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None))
+                .values(sync_state="seeding")
+                .execution_options(synchronize_session=False)
+            )
+            self._s.expire_all()
+
+    def finish_seed(self) -> None:
+        """The seed went in: what it covered counts as sent."""
+        self._s.execute(
+            update(AuditLog)
+            .where(AuditLog.sync_state == "seeding")
+            .values(sync_state="synced")
+            .execution_options(synchronize_session=False)
+        )
+        self._s.expire_all()
 
     def mark_all_synced(self) -> None:
         """Everything so far is covered by a snapshot the authority holds."""

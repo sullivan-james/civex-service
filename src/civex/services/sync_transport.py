@@ -56,9 +56,10 @@ class HttpSyncTransport:
             self._json("GET", f"/feed?after={after}&limit={limit}")
         )
 
-    def snapshot(self, kind: str, offset: int, limit: int) -> SnapshotPage:
+    def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage:
+        query = {"limit": limit} | ({"after": after} if after else {})
         return SnapshotPage.from_dict(
-            self._json("GET", f"/snapshot/{kind}?offset={offset}&limit={limit}")
+            self._json("GET", f"/snapshot/{kind}?{urllib.parse.urlencode(query)}")
         )
 
     def missing_files(self, shas: list[str]) -> list[str]:

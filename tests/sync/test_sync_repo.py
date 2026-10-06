@@ -38,7 +38,7 @@ def copy_everything(source, target) -> None:
 
     src, dst = repo(source), repo(target)
     for kind in ENTITY_ORDER:
-        for snap in src.snapshots_page(kind, 0, 1000):
+        for snap in src.snapshots_page(kind, None, 1000):
             dst.apply_snapshot(kind, snap)
     target.commit()
 
@@ -50,8 +50,8 @@ def test_a_whole_project_copies_by_snapshot_and_reads_back_identically(populated
     from civex.domain.sync import ENTITY_ORDER
 
     for kind in ENTITY_ORDER:
-        assert repo(a).snapshots_page(kind, 0, 1000) == repo(b).snapshots_page(
-            kind, 0, 1000
+        assert repo(a).snapshots_page(kind, None, 1000) == repo(b).snapshots_page(
+            kind, None, 1000
         ), kind
     # And the copy is a working project, not just rows.
     assert len(b.record_svc.find("study", "encounter")) == 1
@@ -61,9 +61,9 @@ def test_a_whole_project_copies_by_snapshot_and_reads_back_identically(populated
 def test_applying_a_snapshot_again_changes_nothing(populated):
     a, b = populated
     copy_everything(a, b)
-    before = {k: repo(b).snapshots_page(k, 0, 100) for k in ("schema", "record")}
+    before = {k: repo(b).snapshots_page(k, None, 100) for k in ("schema", "record")}
     copy_everything(a, b)
-    assert {k: repo(b).snapshots_page(k, 0, 100) for k in before} == before
+    assert {k: repo(b).snapshots_page(k, None, 100) for k in before} == before
 
 
 def test_a_later_snapshot_updates_the_thing_in_place(populated):

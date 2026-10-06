@@ -290,10 +290,10 @@ def test_a_new_authority_is_empty_until_data_arrives_and_remembers_who_brought_i
 
 def test_a_joining_device_reads_each_kind_in_pages_with_the_head_taken_first(world):
     authority, *_ = world
-    page = authority.authority_svc.snapshot("record", 0, 1)
+    page = authority.authority_svc.snapshot("record", None, 1)
     assert len(page.items) == 1 and page.more is False and page.head_seq > 0
     with pytest.raises(Exception):
-        authority.authority_svc.snapshot("nonsense", 0, 10)
+        authority.authority_svc.snapshot("nonsense", None, 10)
 
 
 # -- a change that can't be read is refused by itself ---------------------------
