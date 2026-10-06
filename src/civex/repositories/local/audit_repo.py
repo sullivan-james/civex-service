@@ -14,6 +14,7 @@ from sqlalchemy import (
     not_,
     or_,
     select,
+    text,
 )
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,7 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from civex.db.models import (
+    _STILL_WHOLE,
     AuditBatch,
     AuditLog,
     Dataset,
@@ -620,28 +622,26 @@ class LocalAuditRepository:
 
     # -- converting whole-snapshot entries to deltas (`HistoryCompactionService`)
 
-    def _whole_edits(self):
+    def _whole_edits(self, *columns):
         """Entries still stored whole that a delta could replace: an edit or a
-        restore (both sides held). Creates and deletes keep one copy anyway."""
-        return self._s.query(AuditLog).filter(
-            AuditLog.format == 1,
-            AuditLog.action.in_(("update", "restore")),
-            AuditLog.old_data.is_not(None),
-            AuditLog.new_data.is_not(None),
-        )
+        restore. Creates and deletes keep one copy anyway. (An empty side is
+        JSON null, not SQL NULL, so it isn't tested here: such an entry is just
+        marked kept whole.) Exactly the condition of `ix_audit_log_still_whole`,
+        so it serves this."""
+        return self._s.query(*(columns or (AuditLog,))).filter(text(_STILL_WHOLE))
 
     def count_whole_edits(self) -> int:
-        return self._whole_edits().count()
+        return self._whole_edits(func.count(AuditLog.id)).scalar() or 0
 
-    def whole_edits(self, limit: int) -> list[AuditLogDTO]:
-        rows = (
-            self._whole_edits()
-            .order_by(
-                func.coalesce(AuditLog.local_seq, 0), AuditLog.timestamp, AuditLog.id
-            )
-            .limit(limit)
-            .all()
-        )
+    def whole_edits(
+        self, limit: int, after: uuid.UUID | None = None
+    ) -> list[AuditLogDTO]:
+        """Up to `limit` of them, by id, after `after`: walking the index, not
+        sorting the table."""
+        q = self._whole_edits()
+        if after is not None:
+            q = q.filter(AuditLog.id > after)
+        rows = q.order_by(AuditLog.id).limit(limit).all()
         return [_audit_dto(r) for r in rows]
 
     def store_as_delta(

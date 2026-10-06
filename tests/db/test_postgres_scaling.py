@@ -62,7 +62,8 @@ def test_indexes_exist(session: Session) -> None:
         "ix_records_live_dataset_created",
         "ix_records_parent",
         "ix_workflow_jobs_status_created",
-        "ix_audit_log_staged",
+        "ix_audit_log_unsynced",  # (ix_audit_log_staged went in a9d3e5f1c708)
+        "ix_audit_log_hub_seq",
     } <= names
     partial = session.execute(
         text(

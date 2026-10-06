@@ -58,7 +58,10 @@ class _UTCDateTime(TypeDecorator):
     value and drops the offset, handing back a naive datetime on SELECT even
     though every value written here (see _now()) is UTC. Reattach the tzinfo
     SQLite dropped so callers never see a naive-but-actually-UTC datetime.
-    PostgreSQL's TIMESTAMPTZ already round-trips tzinfo, so this is a no-op there.
+    PostgreSQL's TIMESTAMPTZ hands values back in the session's time zone (a
+    server set to BST gives +01:00), so those are turned to UTC: the same
+    instant must read the same everywhere, because sync compares snapshots, and
+    their times, between copies on different databases.
     """
 
     impl = DateTime(timezone=True)
@@ -67,9 +70,11 @@ class _UTCDateTime(TypeDecorator):
     def process_result_value(
         self, value: datetime | None, dialect: Any
     ) -> datetime | None:
-        if value is not None and value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 def _now() -> datetime:
@@ -430,6 +435,11 @@ class AuditBatch(Base):
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
 
+# Which audit_log rows `ix_audit_log_still_whole` holds (the same condition the
+# conversion queries use, so the index serves them).
+_STILL_WHOLE = "format = 1 AND action IN ('update', 'restore')"
+
+
 class AuditLog(Base):
     """One row per entity write — create, update, or delete — from any source."""
 
@@ -445,6 +455,14 @@ class AuditLog(Base):
             "timestamp",
             postgresql_where=text("sync_state = 'pending'"),
             sqlite_where=text("sync_state = 'pending'"),
+        ),
+        # The edits still stored whole (written before deltas), for converting
+        # them: empty once they all are (migration a4d9e2c7f310).
+        Index(
+            "ix_audit_log_still_whole",
+            "id",
+            postgresql_where=text(_STILL_WHOLE),
+            sqlite_where=text(_STILL_WHOLE),
         ),
     )
 

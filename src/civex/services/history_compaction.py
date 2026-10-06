@@ -15,6 +15,7 @@ stopping at any point loses nothing and the next run carries on.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 
 from civex.domain.audit_diff import diff_entry, entry_snapshots, stored_form
@@ -37,6 +38,9 @@ class HistoryCompactionService:
     def __init__(self, audit: AuditRepository, space: LocalDbSpace) -> None:
         self._audit = audit
         self._space = space
+        # Where this run has got to (by id). In memory only: what is left is
+        # what is still whole, so a new run simply starts at the beginning.
+        self._after: uuid.UUID | None = None
 
     def space(self) -> DbSpace | None:
         """The database file and the room inside it a reclaim would give back
@@ -54,7 +58,10 @@ class HistoryCompactionService:
     def step(self, limit: int = BATCH) -> CompactionStep:
         """Convert up to `limit` entries (the caller commits)."""
         converted = kept = 0
-        for entry in self._audit.whole_edits(limit):
+        batch = self._audit.whole_edits(limit, self._after)
+        if batch:
+            self._after = batch[-1].id
+        for entry in batch:
             old_data, new_data, delta, form = stored_form(
                 entry.old_data, entry.new_data
             )
