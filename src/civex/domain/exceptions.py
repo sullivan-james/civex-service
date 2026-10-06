@@ -104,7 +104,29 @@ class DatabaseUnavailableError(CivexError):
 
 class DatabaseTooNewError(CivexError):
     """The project's database was migrated by a newer civex than this one, so
-    it holds a schema revision this civex has never heard of."""
+    it holds a schema revision this civex has never heard of.
+
+    Carries the facts a person needs (which database, which revisions, which
+    civex) as fields, so the CLI can lay them out and the API can return them
+    without either parsing the message. `str(error)` is the one-paragraph
+    summary for logs and plain output."""
+
+    kind = "database_too_new"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        database: str = "",
+        revisions: list[str] | None = None,
+        civex_version: str = "",
+        known_head: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.database = database
+        self.revisions = revisions or []
+        self.civex_version = civex_version
+        self.known_head = known_head
 
 
 class JobCancelled(CivexError):

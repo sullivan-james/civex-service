@@ -104,6 +104,26 @@ def _is_loopback_host(host: str) -> bool:
         return False
 
 
+def _refuse_newer_database() -> None:
+    """Stop `civex serve` before it starts when the project's database is from
+    a newer civex, instead of serving a UI where every request fails. Quiet
+    when there is no project or no readable database; the server reports those
+    its own way."""
+    from civex.config import load_config
+    from civex.domain.exceptions import ConfigError
+    from civex.services import db_service
+
+    try:
+        error = db_service.newer_database_error(load_config().db.url)
+    except ConfigError:
+        return
+    if error is not None:
+        from civex.cli.utils import print_database_too_new
+
+        print_database_too_new(error)
+        raise typer.Exit(1)
+
+
 @app.command("serve", rich_help_panel=_COLLAB)
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address"),
@@ -166,6 +186,8 @@ def serve(
     # into remote exposure. Inherited by uvicorn's reload subprocesses.
     if allow_remote:
         os.environ["CIVEX_ALLOW_REMOTE"] = "1"
+
+    _refuse_newer_database()
 
     if open_browser:
         from civex.launcher import is_serving, open_url, open_when_ready

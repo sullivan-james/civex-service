@@ -346,6 +346,12 @@ def status() -> None:
         console.print(
             f"[bold]Schema[/bold]     [success]up to date[/success] at revision {info.migration.current_revision}"
         )
+    elif info.migration.too_new:
+        console.print(
+            f"[bold]Schema[/bold]     [error]from a newer civex[/error] — at revision "
+            f"{info.migration.current_revision}, which this civex doesn't know "
+            "(run `civex update`)"
+        )
     elif info.migration.current_revision is None:
         console.print(
             "[bold]Schema[/bold]     [warning]not yet migrated[/warning] — "
@@ -387,13 +393,9 @@ def current() -> None:
         raise typer.Exit(1)
 
     if info.too_new:
-        from civex import __version__
+        from civex.cli.utils import print_database_too_new
 
-        console.print(
-            f"[error]The database is at revision {info.current_revision}, from "
-            f"a newer civex than this one ({__version__}).[/error] "
-            "Run `civex update`."
-        )
+        print_database_too_new(db_service.newer_database_error(config.db.url))
         raise typer.Exit(1)
 
     if info.current_revision is None:
@@ -417,10 +419,17 @@ def migrate() -> None:
     """Apply any pending migrations now, instead of waiting for the next connect."""
     from civex.config import load_config
 
+    from civex.cli.utils import print_database_too_new
+    from civex.domain.exceptions import DatabaseTooNewError
+
     config = load_config()
     console.print("Applying migrations...", end="    ")
     try:
         db_service.apply_migrations(config.db.url)
+    except DatabaseTooNewError as exc:
+        console.print("[error]FAILED[/error]")
+        print_database_too_new(exc)
+        raise typer.Exit(1)
     except Exception as exc:
         console.print("[error]FAILED[/error]")
         console.print(f"[error]{exc}[/error]")

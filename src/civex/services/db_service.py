@@ -156,6 +156,21 @@ def migration_status(url: str) -> MigrationStatus:
     return MigrationStatus(current, head, up_to_date=current == head)
 
 
+def newer_database_error(url: str):
+    """The DatabaseTooNewError for the database at `url`, or None when it
+    isn't from a newer civex (or can't be read). Cheap and read-only, so
+    `civex serve` can check before it starts."""
+    from sqlalchemy.engine import make_url
+
+    from civex.db.migrate import too_new_error
+
+    info = migration_status(url)
+    if not info.too_new or info.current_revision is None:
+        return None
+    where = make_url(url).render_as_string(hide_password=True)
+    return too_new_error(where, [info.current_revision])
+
+
 def _known_revision(script, revision: str) -> bool:
     from alembic.util.exc import CommandError
 

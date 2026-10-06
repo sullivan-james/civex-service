@@ -26,6 +26,7 @@ from civex.domain.exceptions import (
     CivexError,
     ConfigError,
     ConflictMovedError,
+    DatabaseTooNewError,
     DatabaseUnavailableError,
     GCAlreadyRunningError,
     NotFoundError,
@@ -122,7 +123,7 @@ def _status_for(exc: CivexError) -> int:
         return 400
     if isinstance(exc, (AllVolumesFull, VolumeFullError)):
         return 507
-    if isinstance(exc, DatabaseUnavailableError):
+    if isinstance(exc, (DatabaseUnavailableError, DatabaseTooNewError)):
         return 503
     # Any other CivexError that declares itself retryable (VolumeUnavailableError,
     # PluginTimeoutError, ...) is a transient/environmental failure rather than a
@@ -147,6 +148,14 @@ def register_error_handlers(app: FastAPI) -> None:
         content: dict[str, Any] = {"detail": str(exc)}
         if isinstance(exc, ConflictMovedError):
             content.update(code="conflict_moved", current=exc.current)
+        if isinstance(exc, DatabaseTooNewError):
+            content.update(
+                code="database_too_new",
+                database=exc.database,
+                revisions=exc.revisions,
+                civex_version=exc.civex_version,
+                known_head=exc.known_head,
+            )
         return JSONResponse(status_code=status, content=content)
 
     @app.exception_handler(RequestValidationError)
