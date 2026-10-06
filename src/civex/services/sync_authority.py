@@ -260,7 +260,9 @@ class SyncAuthorityService:
                 entry.entity_type, entry.entity_id
             ):
                 return self._put_back(device, device_id, entry, str(e))
-            return self._refuse(device, device_id, entry, str(e))
+            return self._refuse(
+                device, device_id, entry, str(e), getattr(e, "path", None)
+            )
         except (ValueError, TypeError, KeyError, AttributeError) as e:
             # A value inside the snapshots that can't be read (an id or a date
             # that isn't one). Refused by itself, so it can't hold up the rest
@@ -413,13 +415,24 @@ class SyncAuthorityService:
         return results
 
     def _refuse(
-        self, device: SyncDeviceDTO, device_id: str | None, entry: SyncEntry, why: str
+        self,
+        device: SyncDeviceDTO,
+        device_id: str | None,
+        entry: SyncEntry,
+        why: str,
+        field: str | None = None,
     ) -> OpResult:
         """Answer that a change can never be taken. The answer is remembered, so
         a repeat gets it again; the device that sent it keeps what it made and
         shows it for review (conflicts are held by the device whose change did
-        not go in, not here)."""
-        result = OpResult(entry.id, REJECTED, why)
+        not go in, not here). `field` is the value it was refused for, when it
+        was one (`data.<field id>`), so the device can show that field to fix."""
+        result = OpResult(
+            entry.id,
+            REJECTED,
+            why,
+            [{"kind": "rejected", "field": field}] if field else [],
+        )
         self._repo.save_op(entry, result, device_id, device.name)
         return result
 

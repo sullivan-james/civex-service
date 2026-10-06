@@ -409,6 +409,36 @@ class LocalSyncRepository:
         row.resolved_at = datetime.now(timezone.utc)
         self._s.flush()
 
+    def mark_retrying(self, id: uuid.UUID) -> None:
+        """An open refusal whose change has been sent again: still open (it
+        isn't settled until the authority answers), saying it is on its way."""
+        row = self._s.get(SyncConflict, id)
+        if row is None:
+            raise NotFoundError(f"Conflict '{id}' not found")
+        row.resolution = "retrying"
+        self._s.flush()
+
+    def renew_refusal(
+        self,
+        id: uuid.UUID,
+        op_id: uuid.UUID,
+        message: str | None,
+        yours: Any,
+        field: str | None = None,
+    ) -> None:
+        """The same thing refused again: the open item says so (the latest
+        change and why), rather than another item beside it."""
+        row = self._s.get(SyncConflict, id)
+        if row is None:
+            return
+        row.op_id = op_id
+        row.message = message
+        row.yours = yours
+        row.field = field
+        row.resolution = None
+        row.created_at = datetime.now(timezone.utc)
+        self._s.flush()
+
     def conflicts_of_ops(self, op_ids: list[uuid.UUID]) -> list[SyncConflictDTO]:
         """Every conflict, open or settled, that came from one of these changes."""
         if not op_ids:

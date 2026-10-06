@@ -358,6 +358,8 @@ def resolve(conflict_id: str, body: ResolveRequest, ctx: AppContext = Depends(ge
         raise HTTPException(422, detail="Not a conflict id")
     ctx.sync_svc.resolve_conflict(cid, body.take, body.value, body.force)
     ctx.commit()
+    if body.take == "retry":
+        sync_jobs.sync_now()  # the answer settles it: ask for it now
     return _status(ctx)
 
 

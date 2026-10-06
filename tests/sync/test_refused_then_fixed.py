@@ -88,9 +88,22 @@ def test_a_record_refused_while_filling_a_new_server_can_be_sent_again_and_fixed
     assert connect(laptop) == "seeded"
     (refused,) = _refusals(laptop)
 
+    annotation = next(
+        f for f in laptop.schema_svc.get("call").fields if f.name == "annotation"
+    )
+    assert refused.field == f"data.{annotation.id}"  # which field, to show it
+    assert refused.field_label == "Annotation"
+
     laptop.sync_svc.resolve_conflict(refused.id, "retry")  # not "no longer held"
+    (waiting,) = _refusals(laptop)
+    assert (waiting.id, waiting.status, waiting.resolution) == (
+        refused.id,
+        "open",
+        "retrying",
+    )  # not settled until the server answers
     laptop.sync_svc.sync()
-    assert len(_refusals(laptop)) == 1  # still invalid: refused again, one item
+    (again,) = _refusals(laptop)  # refused again: the same item says so
+    assert (again.id, again.status, again.resolution) == (refused.id, "open", None)
 
     laptop.record_svc.update(str(made.id), {"annotation": "M"})
     laptop.commit()

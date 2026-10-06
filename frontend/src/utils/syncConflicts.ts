@@ -114,7 +114,7 @@ export function describeAttempt(
       c.attempted === 'create'
         ? "This record isn't on the server yet."
         : 'Your change to this record was refused.'
-    return `${what} ${why} Fix it below: saving sends it again.`.trim()
+    return `${what} ${why} Fix it on the Resolve tab: saving sends it again.`.trim()
   }
   if (c.attempted === 'delete')
     return `It was edited elsewhere${who ? ` (${who})` : ''} after you last saw it, so your delete was not applied.`
@@ -130,6 +130,8 @@ export function settledLabel(take: ConflictResolution | null): string {
       return 'Went in'
     case 'replaced':
       return 'Replaced by a later attempt'
+    case 'retrying':
+      return 'Sending again…'
     case 'theirs':
       return 'Kept theirs'
     case 'mine':

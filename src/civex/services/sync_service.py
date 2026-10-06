@@ -788,24 +788,44 @@ class SyncService:
             if result.status == DEFERRED:
                 held += 1
                 continue
-            earlier = [
-                c.id
+            waiting = [
+                c
                 for c in self._repo.find_open_conflicts(
                     kind="rejected", entity_id=entry.entity_id
                 )
                 if c.op_id != result.op_id
             ]
             if result.status == REJECTED:
-                self._repo.resolve_conflicts(earlier, "replaced")
+                if waiting:
+                    # Refused again: the item already open says so (the
+                    # latest change and why), rather than another beside it.
+                    report.rejected += 1
+                    newest, *older = sorted(
+                        waiting, key=lambda c: c.created_at, reverse=True
+                    )
+                    self._repo.renew_refusal(
+                        newest.id,
+                        result.op_id,
+                        result.message,
+                        entry.new_data,
+                        _refused_field(result),
+                    )
+                    self._repo.resolve_conflicts([c.id for c in older], "replaced")
+                    continue
             elif whole and result.op_id in whole:
-                self._repo.resolve_conflicts(earlier, "sent")
+                self._repo.resolve_conflicts([c.id for c in waiting], "sent")
+            else:
+                # A change sent again went in: its refusal is settled.
+                self._repo.resolve_conflicts(
+                    [c.id for c in waiting if c.resolution == "retrying"], "sent"
+                )
             problems = result.conflicts
             if result.status == REJECTED:
                 report.rejected += 1
                 problems = [
                     {
                         "kind": "rejected",
-                        "field": None,
+                        "field": _refused_field(result),
                         "yours": entry.new_data,
                         "message": result.message,
                     }
@@ -1142,7 +1162,12 @@ class SyncService:
         elif take == "delete":
             self._records.delete(str(conflict.entity_id))
         elif take == "retry":
+            # Not settled yet: it is settled by the authority's answer (it goes
+            # in, or the same item says why it was refused again).
             self._resend(conflict)
+            self._repo.mark_retrying(conflict_id)
+            self._commit()
+            return
         self._repo.resolve_conflict(conflict_id, take)
         self._commit()
 
@@ -1249,14 +1274,9 @@ class SyncService:
                     entry, strict=entry.id == original.id, in_action=True
                 )
         others = {e.id for e in parts} - {original.id}
-        self._repo.resolve_conflicts(
-            [
-                c.id
-                for c in self._repo.find_open_conflicts(kind="rejected")
-                if c.op_id in others
-            ],
-            "retry",
-        )
+        for c in self._repo.find_open_conflicts(kind="rejected"):
+            if c.op_id in others:
+                self._repo.mark_retrying(c.id)
 
     def _resend_entry(self, original: SyncEntry, strict: bool, in_action: bool) -> None:
         """Log `original` again from its thing as it is now. `strict`: say why
@@ -1318,10 +1338,20 @@ _RECORD_ONLY = frozenset({"mine", "value", "delete"})
 
 
 def _takes_for(conflict: SyncConflictDTO) -> tuple[str, ...]:
+    if conflict.status == "open" and conflict.resolution == "retrying":
+        return ("theirs",)  # on its way: only letting it go is left to choose
     takes = _TAKES.get(conflict.kind, ("theirs",))
     if conflict.entity_type == "record":
         return takes
     return tuple(t for t in takes if t not in _RECORD_ONLY)
+
+
+def _refused_field(result: Any) -> str | None:
+    """The field a refusal names (`data.<field id>`), if the authority said."""
+    for problem in result.conflicts or []:
+        if problem.get("field"):
+            return problem["field"]
+    return None
 
 
 def _sits_under(kind: str, snap: dict[str, Any]) -> str | None:

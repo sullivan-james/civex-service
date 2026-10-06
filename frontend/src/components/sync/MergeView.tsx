@@ -20,6 +20,7 @@ import {
   settledLabel,
   takeLabel,
 } from '../../utils/syncConflicts'
+import { summarise } from '../../utils/restrictions'
 import { AuditValue } from '../audit/AuditValue'
 import { EditableValue } from '../records/RecordFieldGrid'
 import { Badge, Button, EmptyState } from '../ui'
@@ -188,6 +189,114 @@ function Row({
   )
 }
 
+/** A record (or a change to one) the server refused: not a clash between two
+ * values, so no sides. The reason, the field it names, editable here with what
+ * it allows (saving sends the record again by itself), and the other choices. */
+function RefusedFix({
+  conflict: c,
+  fields,
+  data,
+  referenceLabels,
+  referenceCollections,
+  onSave,
+}: {
+  conflict: SyncConflict
+  fields: Field[]
+  data: Record<string, unknown>
+  referenceLabels?: Record<string, string | null> | null
+  referenceCollections?: Record<string, string> | null
+  onSave: (name: string, value: unknown | undefined) => void
+}) {
+  const resolve = useResolveConflict()
+  const open = c.status === 'open'
+  const sending = open && c.resolution === 'retrying'
+  const named = c.field?.startsWith('data.')
+    ? fields.find((f) => f.id === c.field!.slice(5))
+    : undefined
+  const changed = (c.changes ?? [])
+    .map((ch) => fields.find((f) => f.name === ch.field_name))
+    .filter((f): f is Field => f !== undefined)
+  const shown = named ? [named] : changed
+  return (
+    <div className="space-y-3 rounded-lg border border-attention-muted bg-attention-subtle p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-medium">
+          {c.attempted === 'create'
+            ? 'Not on the server yet'
+            : 'Your change was not taken'}
+        </h2>
+        {sending && <Badge variant="accent">Sending again…</Badge>}
+        {!open && <Badge variant="success">{settledLabel(c.resolution)}</Badge>}
+      </div>
+      <p className="text-sm">
+        The server refused it: {c.message ?? 'no reason was given'}
+      </p>
+      {open && shown.length > 0 && (
+        <div className="space-y-2">
+          {shown.map((f) => {
+            const rules = summarise(f.restrictions, f.type)
+            return (
+              <div
+                key={f.id}
+                className="grid gap-1 rounded-md border border-border bg-canvas p-2 md:grid-cols-[12rem_1fr]"
+              >
+                <div className="text-sm font-medium">
+                  {f.label ?? f.name}
+                  {rules && (
+                    <div className="text-xs font-normal text-fg-muted">
+                      Allowed: {rules.replace(/^choices: /, '')}
+                    </div>
+                  )}
+                </div>
+                <div className="text-sm">
+                  <EditableValue
+                    field={f}
+                    value={data[f.name]}
+                    referenceLabels={referenceLabels}
+                    referenceCollections={referenceCollections}
+                    onSave={(v) => onSave(f.name, v)}
+                  />
+                </div>
+              </div>
+            )
+          })}
+          <p className="text-xs text-fg-muted">
+            Click the value to change it. Saving sends the record again; this
+            closes once the server takes it.
+          </p>
+        </div>
+      )}
+      {open && (
+        <div className="flex flex-wrap items-center gap-2">
+          {!sending && c.takes.includes('retry') && (
+            <Button
+              size="sm"
+              disabled={resolve.isPending}
+              onClick={() => resolve.mutate({ id: c.id, take: 'retry' })}
+            >
+              Send unchanged
+            </Button>
+          )}
+          <Button
+            size="sm"
+            disabled={resolve.isPending}
+            onClick={() => resolve.mutate({ id: c.id, take: 'theirs' })}
+          >
+            {c.attempted === 'create'
+              ? 'Keep it on this device only'
+              : 'Let it go'}
+          </Button>
+        </div>
+      )}
+      {resolve.error && (
+        <p role="alert" className="text-xs text-danger">
+          {errorMessage(resolve.error)}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function AttemptHeader({ conflict: c }: { conflict: SyncConflict }) {
   const resolve = useResolveConflict()
   const open = c.status === 'open'
@@ -321,6 +430,28 @@ export function MergeView({
 
   const section = (s: MergeSection, i: number) => {
     const attempt = s.kind === 'attempt'
+    if (
+      attempt &&
+      s.conflict.kind === 'rejected' &&
+      s.conflict.attempted !== 'delete'
+    )
+      return (
+        <section
+          key={s.conflict.id}
+          aria-label="Refused by the server"
+          className="space-y-2"
+        >
+          <RefusedFix
+            conflict={s.conflict}
+            fields={fields}
+            data={data}
+            referenceLabels={referenceLabels}
+            referenceCollections={referenceCollections}
+            onSave={onSave}
+          />
+          {i < merge.sections.length - 1 && <hr className="border-border" />}
+        </section>
+      )
     const left = attempt ? 'Before your change' : 'Kept (theirs)'
     const right = attempt ? 'Your change' : 'Yours'
     return (

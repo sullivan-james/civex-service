@@ -63,8 +63,8 @@ export type ConflictTake =
 
 /** How a conflict ended: what a person chose, or what settled it by itself:
  * `sent` (a refused record went in once fixed), `replaced` (a later attempt
- * took its place). */
-export type ConflictResolution = ConflictTake | 'sent' | 'replaced'
+ * took its place). `retrying` is on an open one: sent again, no answer yet. */
+export type ConflictResolution = ConflictTake | 'sent' | 'replaced' | 'retrying'
 
 /** A value that did not go in as made. */
 export interface SyncConflict {

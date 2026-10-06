@@ -106,7 +106,7 @@ describe('a refused record', () => {
       (iso) => iso,
     )
     expect(said).toBe(
-      "This record isn't on the server yet. Field 'annotation': 'M (the stepped one)' must be one of: Y, M, N. Fix it below: saving sends it again.",
+      "This record isn't on the server yet. Field 'annotation': 'M (the stepped one)' must be one of: Y, M, N. Fix it on the Resolve tab: saving sends it again.",
     )
   })
 
