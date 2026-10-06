@@ -4,6 +4,7 @@ for one fix, not one per attempt, and fixing it is what sends it."""
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import text
 
 from .peers import connect, device, snapshots
 
@@ -65,3 +66,57 @@ def test_a_refused_record_is_one_item_and_fixing_it_sends_it(calls, authority):
     phone.sync_svc.sync()
     assert phone.record_svc.get(str(made.id)).data["annotation"] == "M"
     assert snapshots(laptop)["record"] == snapshots(authority)["record"]
+
+
+def test_a_record_refused_while_filling_a_new_server_can_be_sent_again_and_fixed(
+    project, authority
+):
+    """The record was made when anything went in its field; the field was
+    narrowed here later (existing records are left as they are). Filling an
+    empty authority sends it, and it is refused there: that change was sent,
+    not kept here, so sending it again sends the record as it is now."""
+    laptop = device(project, authority, "laptop")
+    laptop.schema_svc.create("call")
+    laptop.schema_svc.add_field("call", "annotation", "string")
+    laptop.dataset_svc.create("survey")
+    laptop.dataset_svc.update("survey", schemas=["call"])
+    made = laptop.record_svc.add("survey", "call", {"annotation": "M (bold)"})
+    laptop.schema_svc.update_field(
+        "call", "annotation", restrictions={"choices": ["Y", "M", "N"]}
+    )
+    laptop.commit()
+    assert connect(laptop) == "seeded"
+    (refused,) = _refusals(laptop)
+
+    laptop.sync_svc.resolve_conflict(refused.id, "retry")  # not "no longer held"
+    laptop.sync_svc.sync()
+    assert len(_refusals(laptop)) == 1  # still invalid: refused again, one item
+
+    laptop.record_svc.update(str(made.id), {"annotation": "M"})
+    laptop.commit()
+    laptop.sync_svc.sync()
+    assert authority.record_svc.get(str(made.id)).data["annotation"] == "M"
+    assert _refusals(laptop) == []
+
+
+def test_following_another_server_forgets_the_old_ones_numbers(pair, project):
+    from .peers import follow
+
+    laptop, _, record = pair
+    laptop.record_svc.update(str(record.id), {"site": "first", "depth": 1.0})
+    laptop.commit()
+    laptop.sync_svc.sync()
+    numbered = "SELECT count(*) FROM audit_log WHERE hub_seq IS NOT NULL"
+    assert laptop._session.execute(text(numbered)).scalar_one() > 0
+
+    replacement = project("replacement")
+    follow(laptop, replacement, "laptop")
+    connect(laptop, "http://replacement.test")
+    # Nothing carries a number the old server gave (filling the new one sends
+    # the state, which numbers nothing here).
+    assert laptop._session.execute(text(numbered)).scalar_one() == 0
+
+    laptop.record_svc.update(str(record.id), {"site": "after", "depth": 1.0})
+    laptop.commit()
+    laptop.sync_svc.sync()
+    assert replacement.record_svc.get(str(record.id)).data["site"] == "after"

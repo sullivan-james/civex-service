@@ -789,10 +789,23 @@ class LocalSyncRepository:
                     row.apply_state = "superseded"
         self._s.flush()
 
+    def forget_numbers(self) -> None:
+        """Clear the numbers another authority gave this project's history (it
+        now follows a different one, whose numbers mean other changes)."""
+        self._s.execute(
+            update(AuditLog)
+            .where(AuditLog.hub_seq.is_not(None))
+            .values(hub_seq=None)
+            .execution_options(synchronize_session=False)
+        )
+        self._s.expire_all()
+
     def never_taken(self, things: set[tuple[str, uuid.UUID]]) -> set[uuid.UUID]:
-        """Of these things, the ids of those the authority has never taken: made
-        here, their create refused, and nothing about them numbered since. An
-        edit to one can't go as an edit (there is nothing there to change)."""
+        """Of these things, the ids of those the authority has never taken: its
+        create was refused (made here, or sent when the authority was filled:
+        a refusal whose change isn't held here), and nothing carrying the thing
+        has been numbered since (a delete of something it never had is numbered
+        but takes nothing). An edit to one can't go as an edit."""
         if not things:
             return set()
         ids = {i for _, i in things}
@@ -804,13 +817,25 @@ class LocalSyncRepository:
                 AuditLog.sync_state == "rejected",
             )
         }
-        numbered = {
+        held = {
+            i for (i,) in self._s.query(AuditLog.id).filter(AuditLog.entity_id.in_(ids))
+        }
+        refused |= {
+            c.entity_id
+            for c in self._s.query(SyncConflict).filter(
+                SyncConflict.entity_id.in_(ids), SyncConflict.kind == "rejected"
+            )
+            if c.op_id is not None and c.op_id not in held  # a seed's refusal
+        }
+        taken = {
             i
             for (i,) in self._s.query(AuditLog.entity_id).filter(
-                AuditLog.entity_id.in_(refused), AuditLog.hub_seq.is_not(None)
+                AuditLog.entity_id.in_(refused),
+                AuditLog.hub_seq.is_not(None),
+                AuditLog.action.in_(("create", "update", "restore")),
             )
         }
-        return refused - numbered
+        return refused - taken
 
     def mark_folded(self, entry_ids: list[uuid.UUID], state: str) -> None:
         """Entries sent as part of one create of the thing as it was (see

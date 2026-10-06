@@ -396,9 +396,12 @@ class SyncService:
         if hello.project_id != meta.project_id:
             self._repo.set_project_id(hello.project_id)
             user_state.move_device(meta.project_id, hello.project_id)
-            # Where this project had got to, and what it was waiting to have
-            # reviewed, were about the authority it followed before.
+            # Where this project had got to, what it was waiting to have
+            # reviewed, and the numbers its history was given, were all the
+            # authority it followed before: kept, they would be read as this
+            # one's (the same number means another change here).
             self._repo.set_cursor(0)
+            self._repo.forget_numbers()
             self._repo.resolve_conflicts(
                 [c.id for c in self._repo.find_open_conflicts()],
                 "followed another server",
@@ -1227,7 +1230,15 @@ class SyncService:
             )
         original = self._repo.get_entry(conflict.op_id) if conflict.op_id else None
         if original is None:
-            raise ValidationError("The change is no longer held here")
+            # The change itself isn't kept here (a thing sent when the authority
+            # was filled is sent, not recorded). If the authority never took
+            # the thing, sending it again is sending it as it is now.
+            thing = (conflict.entity_type, conflict.entity_id)
+            if conflict.entity_id not in self._repo.never_taken({thing}):
+                raise ValidationError("The change is no longer held here")
+            current = self._repo.snapshot(*thing)
+            self._audit.log_change("create", thing[0], thing[1], None, current)
+            return
         if original.op is None:
             self._resend_entry(original, strict=True, in_action=False)
             return
