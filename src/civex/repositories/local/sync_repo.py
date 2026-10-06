@@ -789,6 +789,42 @@ class LocalSyncRepository:
                     row.apply_state = "superseded"
         self._s.flush()
 
+    def never_taken(self, things: set[tuple[str, uuid.UUID]]) -> set[uuid.UUID]:
+        """Of these things, the ids of those the authority has never taken: made
+        here, their create refused, and nothing about them numbered since. An
+        edit to one can't go as an edit (there is nothing there to change)."""
+        if not things:
+            return set()
+        ids = {i for _, i in things}
+        refused = {
+            i
+            for (i,) in self._s.query(AuditLog.entity_id).filter(
+                AuditLog.entity_id.in_(ids),
+                AuditLog.action == "create",
+                AuditLog.sync_state == "rejected",
+            )
+        }
+        numbered = {
+            i
+            for (i,) in self._s.query(AuditLog.entity_id).filter(
+                AuditLog.entity_id.in_(refused), AuditLog.hub_seq.is_not(None)
+            )
+        }
+        return refused - numbered
+
+    def mark_folded(self, entry_ids: list[uuid.UUID], state: str) -> None:
+        """Entries sent as part of one create of the thing as it was (see
+        `SyncService._send_whole`): settled with it (`state`), and never applied
+        as steps of their own, since the create stands for all of them."""
+        if entry_ids:
+            self._s.execute(
+                update(AuditLog)
+                .where(AuditLog.id.in_(entry_ids))
+                .values(sync_state=state, apply_state="superseded")
+                .execution_options(synchronize_session=False)
+            )
+            self._s.expire_all()
+
     def mark_seq(self, entry_id: uuid.UUID, seq: int) -> None:
         """The authority has numbered a change made here: it is theirs now too."""
         row = self._s.get(AuditLog, entry_id)

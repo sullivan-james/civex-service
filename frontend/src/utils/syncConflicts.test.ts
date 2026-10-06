@@ -5,6 +5,7 @@ import {
   inReviewOrder,
   kindLabel,
   layoutConflicts,
+  settledLabel,
   takeLabel,
 } from './syncConflicts'
 
@@ -89,5 +90,28 @@ describe('a change that was not taken', () => {
     expect(said).toContain("would use 'code'")
     expect(kindLabel('not_taken')).toBe('Not taken')
     expect(takeLabel('not_taken', 'theirs')).toBe('OK')
+  })
+})
+
+describe('a refused record', () => {
+  it('says it is not on the server yet, why, and that saving a fix sends it', () => {
+    const said = describeAttempt(
+      c('1', {
+        kind: 'rejected',
+        attempted: 'create',
+        field: null,
+        message:
+          "Field 'annotation': 'M (the stepped one)' must be one of: Y, M, N",
+      }),
+      (iso) => iso,
+    )
+    expect(said).toBe(
+      "This record isn't on the server yet. Field 'annotation': 'M (the stepped one)' must be one of: Y, M, N. Fix it below: saving sends it again.",
+    )
+  })
+
+  it('names how it ended by itself', () => {
+    expect(settledLabel('sent')).toBe('Went in')
+    expect(settledLabel('replaced')).toBe('Replaced by a later attempt')
   })
 })

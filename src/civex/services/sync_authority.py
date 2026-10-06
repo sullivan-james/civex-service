@@ -438,7 +438,10 @@ class SyncAuthorityService:
         if entry.action in ("create", "update", "restore"):
             if head is None:
                 if entry.action == "update" or entry.delta is not None:
-                    raise ValidationError("It no longer exists on the server")
+                    raise ValidationError(
+                        "It is not on the server (deleted for good there, or "
+                        "never taken)"
+                    )
                 incoming = entry.new_data or {}
                 final = dict(incoming)
             else:
