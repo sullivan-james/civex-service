@@ -143,9 +143,14 @@ def test_an_empty_project_joins_one_that_has_data_and_keeps_its_history(
 
     assert snapshots(phone) == snapshots(authority)
     assert phone.sync_repo.meta().project_id == authority.sync_repo.meta().project_id
+    assert phone.sync_repo.count_pending() == 0
+    # Usable at once; the history from before it joined follows.
+    assert phone.history_svc.page(limit=500) == []
+    assert phone.sync_repo.meta().history_from == authority.sync_repo.head_seq()
+    assert phone.sync_svc.fetch_history() is True
     history = phone.history_svc.page(limit=500)
     assert len(history) >= 4  # the authority's history, not just its state
-    assert phone.sync_repo.count_pending() == 0
+    assert phone.sync_repo.meta().history_from is None
 
 
 def test_two_projects_that_both_hold_data_are_not_merged(project, authority):

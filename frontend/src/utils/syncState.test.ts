@@ -17,6 +17,9 @@ const base: RemoteStatus = {
   last_error_at: null,
   running: false,
   last_result: null,
+  progress: null,
+  connecting: false,
+  connect_error: null,
 }
 
 describe('syncButtonState', () => {

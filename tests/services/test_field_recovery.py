@@ -10,6 +10,7 @@ import uuid
 
 import pytest
 
+from civex.domain.audit_diff import entry_snapshots
 from civex.context import AppContext
 from civex.domain.exceptions import ValidationError
 
@@ -198,5 +199,6 @@ def test_a_collection_entry_names_its_schemas_by_id(ctx, thing):
     schema = ctx.schema_svc.get("thing")
     entries = ctx.history_svc.page(entity_id=collection.id, limit=10)
     latest = max(entries, key=lambda e: e.timestamp)
-    assert latest.new_data["schemas"] == ["thing"]
-    assert latest.new_data["schema_ids"] == [str(schema.id)]
+    _, new = entry_snapshots(latest.old_data, latest.new_data, latest.delta)
+    assert new["schemas"] == ["thing"]
+    assert new["schema_ids"] == [str(schema.id)]

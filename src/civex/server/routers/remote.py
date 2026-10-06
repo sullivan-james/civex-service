@@ -10,12 +10,22 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from civex import user_state
 from civex.context import AppContext
 from civex.domain.sync import SyncError
 from civex.server.deps import get_ctx
 from civex.services.sync_jobs import sync_jobs
 
 router = APIRouter(prefix="/remote", tags=["sync"])
+
+
+class SyncProgressResponse(BaseModel):
+    phase: str = Field(description="copying, filling or history.")
+    done: int = Field(description="Things (or history entries) done so far.")
+    total: int | None = Field(description="Out of how many; null when not known.")
+    kind: str | None = Field(
+        default=None, description="The kind of thing it is on (schema, record...)."
+    )
 
 
 class RemoteStatusResponse(BaseModel):
@@ -40,6 +50,18 @@ class RemoteStatusResponse(BaseModel):
         description="What the last sync run by this server did; null after a "
         "restart or before the first one.",
     )
+    progress: SyncProgressResponse | None = Field(
+        default=None,
+        description="How far a long step has got while one runs here: copying "
+        "the project from the authority, filling an empty one, or fetching the "
+        "history from before joining.",
+    )
+    connecting: bool = Field(
+        default=False, description="A connect started here is still running."
+    )
+    connect_error: str | None = Field(
+        default=None, description="Why the last connect started here failed."
+    )
 
 
 class SyncResultResponse(BaseModel):
@@ -52,7 +74,12 @@ class SyncResultResponse(BaseModel):
 
 class RemoteConnectRequest(BaseModel):
     url: str = Field(description="The authority's address.")
-    token: str = Field(description="The device token the authority issued.")
+    token: str | None = Field(
+        default=None,
+        description="The device token the authority issued. Leave out to use the "
+        "one this computer already holds for that address (trying a connect "
+        "again).",
+    )
 
 
 class RemoteConnectResponse(BaseModel):
@@ -241,6 +268,11 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         last_error_at=s.last_error_at,
         running=s.running,
         last_result=_last_result(),
+        progress=(
+            SyncProgressResponse(**p.to_dict()) if (p := sync_jobs.progress) else None
+        ),
+        connecting=sync_jobs.connecting,
+        connect_error=sync_jobs.connect_error,
     )
 
 
@@ -255,16 +287,25 @@ def status(ctx: AppContext = Depends(get_ctx)):
     return _status(ctx)
 
 
-@router.post("/connect", response_model=RemoteConnectResponse)
+@router.post("/connect", response_model=RemoteConnectResponse, status_code=202)
 def connect(body: RemoteConnectRequest, ctx: AppContext = Depends(get_ctx)):
     """Point this project at an authority. An empty project becomes a copy of
-    it; a project with data fills an empty authority; two with data are refused."""
+    it; a project with data fills an empty authority; two with data are refused.
+
+    The address, token and who holds data are checked before this answers, so
+    a mistake is said at once. Copying can take a long time, so it then runs in
+    the background: `GET /remote` says how far it has got (`progress`), and why
+    it stopped if it did (`connect_error`)."""
+    token = body.token or user_state.token_for(body.url.strip().rstrip("/"))
+    if not token:
+        raise HTTPException(
+            422, detail="A device token is needed: this computer has none for it"
+        )
     try:
-        mode = ctx.sync_svc.connect(body.url, body.token)
+        mode = ctx.sync_svc.check_connect(body.url, token)
     except SyncError as e:
         raise _refuse(e)
-    ctx.commit()
-    sync_jobs.ensure_worker()
+    sync_jobs.start_connect(body.url, token)
     return RemoteConnectResponse(mode=mode)
 
 

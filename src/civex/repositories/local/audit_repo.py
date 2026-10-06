@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from civex.db.models import AuditBatch, AuditLog, Dataset, Field, Record, Schema
-from civex.domain.audit_diff import tombstone
+from civex.domain.audit_diff import stored_form, tombstone
 from civex.domain.hlc import tick as hlc_tick
 from civex.domain.audit_filter import AuditFilter
 from civex.domain.exceptions import ValidationError
@@ -270,6 +270,7 @@ class LocalAuditRepository:
         passes the moment it stamps what it deletes with, so the entry and the
         stamp are one instant and every device that applies the entry stamps
         exactly the same."""
+        old_data, new_data, delta, form = stored_form(old_data, new_data)
         self._s.add(
             AuditLog(
                 action=action,
@@ -277,6 +278,8 @@ class LocalAuditRepository:
                 entity_id=entity_id,
                 old_data=old_data,
                 new_data=new_data,
+                delta=delta,
+                format=form,
                 timestamp=timestamp or datetime.now(timezone.utc),
                 batch_id=self._current_batch(),
                 actor=self._actor,
@@ -512,7 +515,15 @@ class LocalAuditRepository:
                 snapshot: dict[str, Any] = next(
                     (
                         e.old_data or e.new_data or {}
-                        for e in sorted(entries, key=lambda e: e.action != "purge")
+                        # A purge's tombstone, else a whole snapshot (a create
+                        # or delete) before an edit, which keeps only identity.
+                        for e in sorted(
+                            entries,
+                            key=lambda e: (
+                                e.action != "purge",
+                                e.action not in ("create", "delete"),
+                            ),
+                        )
                         if e.old_data or e.new_data
                     ),
                     {"id": str(record_id)},

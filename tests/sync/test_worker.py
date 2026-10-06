@@ -32,7 +32,10 @@ class Rig:
             return out
 
         return SimpleNamespace(
-            sync_repo=SimpleNamespace(count_pending=lambda: self.pending),
+            sync_repo=SimpleNamespace(
+                count_pending=lambda: self.pending,
+                meta=lambda: SimpleNamespace(history_from=None),
+            ),
             sync_svc=SimpleNamespace(sync=sync),
             close=lambda: None,
         )

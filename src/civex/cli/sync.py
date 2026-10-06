@@ -16,7 +16,7 @@ from civex.cli.utils import cli_load_config, get_ctx as _ctx
 from civex.config import save_config
 from civex.console import console
 from civex.domain.exceptions import CivexError
-from civex.domain.sync import SyncError
+from civex.domain.sync import COPYING, FILLING, SyncError, SyncProgress
 
 app = typer.Typer(
     help="Keep this project in step with an authority: another civex that holds "
@@ -27,6 +27,71 @@ authority_app = typer.Typer(help="Act as the authority for this project.")
 device_app = typer.Typer(help="Devices allowed to follow this authority.")
 app.add_typer(authority_app, name="authority")
 app.add_typer(device_app, name="device")
+
+
+_PHASES = {
+    COPYING: "Copying from the server",
+    FILLING: "Filling the server",
+}
+_KINDS = {"dataset": "collections"}
+
+
+def _connect_showing_progress(c, url: str, token: str) -> str:
+    """Connect, with a live bar while things are copied either way, then fetch
+    the history from before joining with a bar of its own. Stopping that part
+    (Ctrl+C) loses nothing: the project is already usable, and whatever syncs
+    it next (the server, `civex sync watch`) carries on from where it got to."""
+    from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
+
+    columns = (
+        TextColumn("{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+    )
+    with Progress(*columns, console=console, transient=True) as bar:
+        task = bar.add_task("Connecting", total=None)
+
+        def show(p: SyncProgress) -> None:
+            kind = _KINDS.get(p.kind or "", f"{p.kind}s" if p.kind else "")
+            label = _PHASES.get(p.phase, p.phase)
+            bar.update(
+                task,
+                description=f"{label}  {kind}".rstrip(),
+                completed=p.done,
+                total=p.total,
+            )
+
+        mode = c.sync_svc.connect(url, token, progress=show)
+        c.commit()
+    if mode == "joined":
+        _fetch_history_showing_progress(c)
+    return mode
+
+
+def _fetch_history_showing_progress(c) -> None:
+    from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
+
+    with Progress(
+        TextColumn("{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        console=console,
+        transient=True,
+    ) as bar:
+        task = bar.add_task("Fetching history (Ctrl+C to leave it to run later)")
+        try:
+            c.sync_svc.fetch_history(
+                lambda p: bar.update(task, completed=p.done, total=p.total)
+            )
+        except KeyboardInterrupt:
+            console.print(
+                "History from before joining will carry on arriving the next time "
+                "this project syncs."
+            )
+        except SyncError as e:
+            console.print(
+                f"[warning]History not fetched yet: {escape(str(e))}[/warning]"
+            )
 
 
 def _fail(e: Exception) -> typer.Exit:
@@ -181,8 +246,7 @@ def connect(
     hold data are refused."""
     c = _ctx()
     try:
-        mode = c.sync_svc.connect(url, token)
-        c.commit()
+        mode = _connect_showing_progress(c, url, token)
     except (SyncError, CivexError) as e:
         raise _fail(e)
     finally:
@@ -410,8 +474,7 @@ def clone(
     os.chdir(target)
     c = _ctx()
     try:
-        c.sync_svc.connect(url, token)
-        c.commit()
+        _connect_showing_progress(c, url, token)
     except (SyncError, CivexError) as e:
         raise _fail(e)
     finally:

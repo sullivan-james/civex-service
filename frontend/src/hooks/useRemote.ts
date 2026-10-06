@@ -17,6 +17,8 @@ export function useRemoteStatus() {
     queryFn: remoteApi.status,
     refetchInterval: (q) => {
       const s = q.state.data
+      // Copying shows a bar, so it is read often enough to move.
+      if (s?.connecting || s?.progress) return 1000
       if (!s?.configured) return 30_000
       return s.running || s.pending > 0 ? 2000 : 15_000
     },
@@ -86,7 +88,7 @@ export function useConnectRemote() {
   const refresh = useRefreshing()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ url, token }: { url: string; token: string }) =>
+    mutationFn: ({ url, token }: { url: string; token?: string }) =>
       remoteApi.connect(url, token),
     onSuccess: () => {
       refresh()

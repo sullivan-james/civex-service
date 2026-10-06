@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from civex.domain.audit_diff import entry_snapshots
 from civex.context import AppContext
 from civex.domain.exceptions import ValidationError
 
@@ -337,6 +338,9 @@ def test_the_automatic_template_is_recorded_in_the_audit_log(
     entries = ctx.audit_svc.list_audit(entity_id=schema.id)
     assert any(
         e.action == "update"
-        and (e.new_data or {}).get("display_template") == "{subject}"
+        and (entry_snapshots(e.old_data, e.new_data, e.delta)[1] or {}).get(
+            "display_template"
+        )
+        == "{subject}"
         for e in entries
     )

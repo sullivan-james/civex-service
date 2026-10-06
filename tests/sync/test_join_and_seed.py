@@ -33,7 +33,7 @@ def test_a_join_misses_nothing_when_the_authority_removes_something_meanwhile(
 
     original = sync_service.SyncService._join
 
-    def join_and_purge_after_first_page(self, transport):
+    def join_and_purge_after_first_page(self, transport, *rest):
         real = transport.snapshot
 
         def snapshot(kind, after, limit):
@@ -47,7 +47,7 @@ def test_a_join_misses_nothing_when_the_authority_removes_something_meanwhile(
 
         transport.snapshot = snapshot
         try:
-            return original(self, transport)
+            return original(self, transport, *rest)
         finally:
             del transport.snapshot
 
@@ -112,7 +112,7 @@ def test_an_edit_made_while_seeding_is_still_sent(project, authority, monkeypatc
 
     original = sync_service.SyncService._seed
 
-    def seed_and_edit_after_the_record_went(self, transport):
+    def seed_and_edit_after_the_record_went(self, transport, *rest):
         real = transport.push
 
         def push(entries):
@@ -128,7 +128,7 @@ def test_an_edit_made_while_seeding_is_still_sent(project, authority, monkeypatc
 
         transport.push = push
         try:
-            return original(self, transport)
+            return original(self, transport, *rest)
         finally:
             del transport.push
 

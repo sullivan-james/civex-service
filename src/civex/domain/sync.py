@@ -92,6 +92,10 @@ class SyncEntry:
     # value); a later entry carries the state it settled on, so a device skips
     # applying this one.
     superseded: bool = False
+    # An edit or a restore travels as what changed (`audit_diff.make_delta`),
+    # with `new_data` the thing's identity and no `old_data`; a create carries
+    # the thing as made and a delete the thing as it was (`stored_form`).
+    delta: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -108,6 +112,7 @@ class SyncEntry:
             "batch": self.batch.to_dict() if self.batch else None,
             "hub_seq": self.hub_seq,
             "superseded": self.superseded,
+            "delta": self.delta,
         }
 
     @classmethod
@@ -126,6 +131,7 @@ class SyncEntry:
             batch=SyncBatchInfo.from_dict(d["batch"]) if d.get("batch") else None,
             hub_seq=d.get("hub_seq"),
             superseded=bool(d.get("superseded", False)),
+            delta=d.get("delta"),
         )
 
 
@@ -138,10 +144,15 @@ def problem_with(entry: SyncEntry, now: datetime | None = None) -> str | None:
         return f"Unknown kind '{entry.entity_type}'"
     if entry.action not in ACTIONS:
         return f"Unknown action '{entry.action}'"
-    for name in ("old_data", "new_data"):
+    for name in ("old_data", "new_data", "delta"):
         value = getattr(entry, name)
         if value is not None and not isinstance(value, dict):
             return f"{name} is not an object"
+    for path, change in (entry.delta or {}).items():
+        if not isinstance(change, dict) or not set(change) <= {"before", "after"}:
+            return f"The change to {path} is not a before and after"
+    if entry.delta is not None and entry.action not in ("update", "restore"):
+        return f"A '{entry.action}' carries the thing itself, not what changed"
     if entry.action in ("create", "update", "restore") and (
         not entry.new_data or str(entry.new_data.get("id")) != str(entry.entity_id)
     ):
@@ -238,6 +249,9 @@ class Hello:
     empty: bool  # holds none of the project's things yet
     seeded_by: str | None  # the device that put the first data in, if any
     device_name: str  # what the token the caller used is called
+    # How many of each kind it holds (deleted ones too), so a device copying
+    # it can say how far along it is.
+    counts: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -247,6 +261,7 @@ class Hello:
             "empty": self.empty,
             "seeded_by": self.seeded_by,
             "device_name": self.device_name,
+            "counts": self.counts,
         }
 
     @classmethod
@@ -258,7 +273,33 @@ class Hello:
             empty=bool(d["empty"]),
             seeded_by=d.get("seeded_by"),
             device_name=d.get("device_name", ""),
+            counts={k: int(v) for k, v in (d.get("counts") or {}).items()},
         )
+
+
+# What copying a project is doing, for whoever shows how far along it is.
+COPYING = "copying"  # a device joining: reading the authority's things
+FILLING = "filling"  # a device filling an empty authority with its own
+HISTORY = "history"  # a joined device fetching the history from before it joined
+
+
+@dataclass
+class SyncProgress:
+    """How far a long sync step has got: `done` of `total` (None when unknown),
+    and the kind of thing it is on."""
+
+    phase: str
+    done: int
+    total: int | None
+    kind: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "phase": self.phase,
+            "done": self.done,
+            "total": self.total,
+            "kind": self.kind,
+        }
 
 
 @dataclass
@@ -332,6 +373,9 @@ class SyncMetaDTO:
     last_synced_at: str | None
     last_error: str | None
     last_error_at: str | None
+    # Device: history up to this number (where it joined) is still to be
+    # fetched from the authority; None when it holds all of it.
+    history_from: int | None = None
 
 
 @dataclass

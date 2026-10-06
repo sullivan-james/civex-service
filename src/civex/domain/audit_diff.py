@@ -153,6 +153,7 @@ IDENTITY_KEYS = frozenset(
         "dataset_id",
         "parent_id",
         "parent_record_id",
+        "dtype",  # a field's: how its values (and restrictions) read
     }
 )
 BEFORE, AFTER = "before", "after"
@@ -282,3 +283,17 @@ def _set(target: dict[str, Any], key: str, value: Any) -> None:
         target.pop(key, None)
     else:
         target[key] = value
+
+
+def stored_form(
+    old: dict[str, Any] | None, new: dict[str, Any] | None
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None, int]:
+    """How a change from `old` to `new` is stored: `(old_data, new_data, delta,
+    format)`. A change between two states (an edit, a restore) keeps only what
+    changed, plus the thing's identity; a create keeps the thing as made and a
+    delete the thing as it was (one copy, so what was lost can be shown), since
+    there is no other side to take a difference from. The one rule every writer
+    of history follows."""
+    if old is None or new is None:
+        return old, new, None, 1
+    return None, identity(new), make_delta(old, new), 2

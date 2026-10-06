@@ -87,3 +87,11 @@ def test_settling_many_with_nothing_open_settles_nothing(client: TestClient) -> 
 def test_reopening_nothing_reopens_nothing(client: TestClient) -> None:
     resp = client.post("/api/remote/conflicts/reopen", json={"ids": []})
     assert resp.json() == {"reopened": 0}
+
+
+def test_connecting_again_without_a_token_needs_one_held_here(
+    client: TestClient,
+) -> None:
+    resp = client.post("/api/remote/connect", json={"url": "http://127.0.0.1:9"})
+    assert resp.status_code == 422
+    assert "token" in resp.json()["detail"]

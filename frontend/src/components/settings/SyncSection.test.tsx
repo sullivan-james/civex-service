@@ -30,6 +30,9 @@ const base = {
   last_error_at: null,
   running: false,
   last_result: null,
+  progress: null,
+  connecting: false,
+  connect_error: null,
 }
 
 beforeEach(() => {
@@ -177,6 +180,46 @@ describe('SyncSection', () => {
           (c) => c.method === 'PATCH' && c.path === '/api/settings/identity',
         )?.body,
       ).toEqual({ name: 'Dana' }),
+    )
+  })
+})
+
+describe('copying from the server', () => {
+  it('shows how far the copy has got', async () => {
+    status = {
+      ...base,
+      configured: true,
+      remote: 'https://a',
+      connecting: true,
+      progress: { phase: 'copying', done: 30, total: 120, kind: 'record' },
+    }
+    renderSection()
+    expect(
+      await screen.findByText('Copying the project from the server'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('progressbar')).toHaveAttribute(
+      'aria-valuenow',
+      '25',
+    )
+  })
+
+  it('offers to try again when the copy stopped, without asking for the token', async () => {
+    status = {
+      ...base,
+      configured: true,
+      remote: 'https://a',
+      connect_error: 'The connection dropped',
+    }
+    renderSection()
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Try again' }),
+    )
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === '/api/remote/connect')?.body).toEqual(
+        {
+          url: 'https://a',
+        },
+      ),
     )
   })
 })

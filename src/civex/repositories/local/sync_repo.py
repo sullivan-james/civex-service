@@ -130,6 +130,21 @@ class LocalSyncRepository:
             last_synced_at=_iso(row.last_synced_at),
             last_error=row.last_error,
             last_error_at=_iso(row.last_error_at),
+            history_from=row.history_from,
+        )
+
+    def set_history_from(self, seq: int | None) -> None:
+        self._meta_row().history_from = seq
+        self._s.flush()
+
+    def history_fetched_upto(self, upto: int) -> int:
+        """The last number up to `upto` whose entry is held here: where
+        fetching the history from before joining carries on from."""
+        return (
+            self._s.query(func.max(AuditLog.hub_seq))
+            .filter(AuditLog.hub_seq <= upto)
+            .scalar()
+            or 0
         )
 
     def referenced_shas(self, after: str, limit: int) -> list[str]:
@@ -468,10 +483,14 @@ class LocalSyncRepository:
     def entity_count(self) -> int:
         """How many schemas, fields, collections, views and records there are,
         deleted ones included: zero is an empty project."""
-        return sum(
-            self._s.query(func.count(model.id)).scalar() or 0
-            for model in _MODELS.values()
-        )
+        return sum(self.entity_counts().values())
+
+    def entity_counts(self) -> dict[str, int]:
+        """How many of each kind there are, deleted ones included."""
+        return {
+            kind: self._s.query(func.count(model.id)).scalar() or 0
+            for kind, model in _MODELS.items()
+        }
 
     def snapshot(self, kind: str, id: uuid.UUID) -> dict[str, Any] | None:
         """One thing as it is now, in the shape a history entry stores."""
@@ -845,6 +864,8 @@ class LocalSyncRepository:
                 entity_id=entry.entity_id,
                 old_data=entry.old_data,
                 new_data=entry.new_data,
+                delta=entry.delta,
+                format=2 if entry.delta is not None else 1,
                 timestamp=_parse(entry.timestamp),
                 batch_id=batch_id,
                 actor=entry.actor,
@@ -877,45 +898,24 @@ class LocalSyncRepository:
             )
             self._s.expire_all()
 
-    def has_newer_state(self, kind: str, entity_id: uuid.UUID, seq: int) -> bool:
-        """Whether a later-numbered entry that carries a state (one the authority
-        did not supersede) already stands for this thing: a change of this
-        device's own that the authority numbered after the entry in hand. A
-        delete carries none, so it never stands in for an older state."""
-        return (
-            self._s.query(AuditLog.id)
+    def numbered_entries(
+        self, kind: str, entity_id: uuid.UUID, from_seq: int
+    ) -> list[SyncEntry]:
+        """A thing's numbered entries from `from_seq` on that the authority did
+        not supersede, in its order: the steps that take the thing to where the
+        authority has it."""
+        rows = (
+            self._s.query(AuditLog)
             .filter(
                 AuditLog.entity_type == kind,
                 AuditLog.entity_id == entity_id,
-                AuditLog.hub_seq > seq,
+                AuditLog.hub_seq >= from_seq,
                 AuditLog.apply_state != "superseded",
-                AuditLog.action.in_(("create", "update", "restore")),
             )
-            .first()
-            is not None
+            .order_by(AuditLog.hub_seq)
+            .all()
         )
-
-    def effective_entries(
-        self, things: set[tuple[str, uuid.UUID]]
-    ) -> dict[tuple[str, uuid.UUID], list[tuple[uuid.UUID, str, str]]]:
-        """For each thing, its numbered entries the authority did not supersede,
-        oldest first, as (id, action, apply_state): what it ended in is the last
-        that carries a state, then a delete or purge that follows it."""
-        found: dict[tuple[str, uuid.UUID], list[tuple[uuid.UUID, str, str]]] = {}
-        for kind, entity_id in things:
-            rows = (
-                self._s.query(AuditLog.id, AuditLog.action, AuditLog.apply_state)
-                .filter(
-                    AuditLog.entity_type == kind,
-                    AuditLog.entity_id == entity_id,
-                    AuditLog.hub_seq.is_not(None),
-                    AuditLog.apply_state != "superseded",
-                )
-                .order_by(AuditLog.hub_seq)
-                .all()
-            )
-            found[(kind, entity_id)] = [(r[0], r[1], r[2]) for r in rows]
-        return found
+        return self._entries(rows)
 
     def sequence_local_entries(self) -> int:
         """Authority: number the changes made on this instance itself, in the
@@ -986,6 +986,7 @@ class LocalSyncRepository:
                 batch=batches.get(r.batch_id) if r.batch_id else None,
                 hub_seq=r.hub_seq,
                 superseded=r.id in superseded,
+                delta=r.delta,
             )
             for r in rows
         ]

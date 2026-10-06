@@ -93,14 +93,18 @@ def test_edits_to_different_fields_both_survive(world):
     assert set(statuses(push(authority, laptop, "laptop"))) == {"applied"}
     result = push(authority, phone, "phone")
 
-    assert statuses(result) == ["merged"]
+    # A change says only what it changed, so the other's edit to another field
+    # is not in its way: it goes in as made, and needs no settled state after it.
+    assert statuses(result) == ["applied"]
     assert head(authority, record.id) == {"site": "y", "depth": 9.0}
-    # The settled state is in the feed after the change it came from.
     entries, _ = authority.sync_repo.entries_after(0, 100)
     sent = next(e for e in entries if e.id == result.results[0].op_id)
-    assert sent.superseded is True
-    assert entries[-1].action == "update" and entries[-1].actor == "sync"
-    assert entries[-1].new_data["data"] == head_data(authority, record.id)
+    assert sent.superseded is False
+    assert entries[-1].id == sent.id
+    depth = next(
+        f.id for f in authority.schema_svc.get("encounter").fields if f.name == "depth"
+    )
+    assert f"data.{depth}" in sent.delta
 
 
 def head_data(ctx, record_id):
@@ -338,7 +342,7 @@ def test_a_value_that_is_not_an_id_is_refused_not_a_server_error(world):
     phone.record_svc.update(str(record.id), {"site": "a", "depth": 2.0})
     phone.commit()
     (entry,) = _pending(phone)
-    entry.new_data = {**entry.new_data, "dataset_id": "not-a-uuid"}
+    entry.delta = {**entry.delta, "parent_record_id": {"before": None, "after": "not-a-uuid"}}
 
     result = _send(authority, [entry])
 

@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from civex.domain import hlc
+from civex.domain.audit_diff import AFTER, BEFORE, apply_delta
 from civex.domain.exceptions import ValidationError
 from civex.domain.merge import LIFECYCLE_KEYS, DERIVED_KEYS, merge
 from civex.domain.sync import (
@@ -127,13 +128,15 @@ class SyncAuthorityService:
 
     def hello(self, device: SyncDeviceDTO) -> Hello:
         meta = self._repo.meta()
+        counts = self._repo.entity_counts()
         return Hello(
             protocol_version=PROTOCOL_VERSION,
             project_id=meta.project_id,
             head_seq=self._head(),
-            empty=self._repo.entity_count() == 0,
+            empty=sum(counts.values()) == 0,
             seeded_by=meta.seeded_by,
             device_name=device.name,
+            counts=counts,
         )
 
     def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage:
@@ -266,17 +269,19 @@ class SyncAuthorityService:
         head = self._applier.head(kind, eid)
         conflicts: list[dict[str, Any]] = []
         final: dict[str, Any] | None = None  # the state the thing ends in, if it exists
+        incoming: dict[str, Any] | None = None  # what the change made, as a whole
         message: str | None = None
 
         if entry.action in ("create", "update", "restore"):
-            incoming = entry.new_data or {}
             if head is None:
-                if entry.action == "update":
+                if entry.action == "update" or entry.delta is not None:
                     raise ValidationError("It no longer exists on the server")
+                incoming = entry.new_data or {}
                 final = dict(incoming)
             else:
+                base, incoming = _sides(entry, head)
                 merged = merge(
-                    entry.old_data if entry.action != "create" else None, head, incoming
+                    base if entry.action != "create" else None, head, incoming
                 )
                 final = merged.state
                 final["deleted_at"] = (
@@ -339,8 +344,10 @@ class SyncAuthorityService:
             raise ValidationError(f"Unknown action '{entry.action}'")
 
         self._seed(device_id)
-        seq = self._write_entries(device, device_id, entry, head, final, conflicts)
-        status = self._status(entry, final, conflicts)
+        seq = self._write_entries(
+            device, device_id, entry, head, final, conflicts, incoming
+        )
+        status = self._status(entry, final, conflicts, incoming)
         if conflicts and any(c["kind"] == "edit_vs_delete" for c in conflicts):
             message = next(
                 c.get("message") for c in conflicts if c["kind"] == "edit_vs_delete"
@@ -386,11 +393,12 @@ class SyncAuthorityService:
         entry: SyncEntry,
         final: dict[str, Any] | None,
         conflicts: list[dict[str, Any]],
+        incoming: dict[str, Any] | None,
     ) -> str:
         if conflicts:
             return CONFLICT
         if final is not None and entry.action in ("create", "update", "restore"):
-            if _comparable(final) != _comparable(entry.new_data or {}):
+            if _comparable(final) != _comparable(incoming or {}):
                 return MERGED
         return APPLIED
 
@@ -402,6 +410,7 @@ class SyncAuthorityService:
         head: dict[str, Any] | None,
         final: dict[str, Any] | None,
         conflicts: list[dict[str, Any]],
+        incoming: dict[str, Any] | None,
     ) -> int:
         """Record the change as it was made (numbered), and, when what the
         authority settled on is not what was sent, a second entry carrying the
@@ -424,13 +433,19 @@ class SyncAuthorityService:
             device_id=device_id,
             hlc=self._believable(entry.hlc),
             batch=entry.batch,
+            delta=entry.delta,
         )
         self._repo.insert_entry(sent, hub_seq=seq)
         if entry.action in ("create", "update", "restore", "delete") and (
-            conflicts or _differs(entry, final)
+            conflicts or _differs(entry, final, incoming)
         ):
             settled = self._applier.head(entry.entity_type, entry.entity_id)
             if settled is not None:
+                # Whole, not a delta: the device whose change did not go in as
+                # made holds values nobody else does (its own, or the thing
+                # deleted), so a difference from what is held here would leave
+                # them. The whole state puts every copy where this one is. Rare:
+                # only a change that clashed, merged or met a delete has one.
                 self._repo.insert_entry(
                     SyncEntry(
                         id=uuid.uuid4(),
@@ -469,9 +484,30 @@ def _edited_since(base: dict[str, Any] | None, head: dict[str, Any]) -> bool:
     return _comparable(base or {}) != _comparable(head)
 
 
-def _differs(entry: SyncEntry, final: dict[str, Any] | None) -> bool:
+def _differs(
+    entry: SyncEntry, final: dict[str, Any] | None, incoming: dict[str, Any] | None
+) -> bool:
     if entry.action == "delete":
         return final is not None  # the delete was not applied
     if final is None:
         return False
-    return _comparable(final) != _comparable(entry.new_data or {})
+    return _comparable(final) != _comparable(incoming or {})
+
+
+def _sides(
+    entry: SyncEntry, head: dict[str, Any]
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """What an edit started from and what it made, as whole states. An entry of
+    whole snapshots says so itself. A delta says only what it changed, so both
+    sides are the thing as held here with those values put back or put in:
+    everything it didn't touch is the same on all three sides of the merge,
+    which is what "didn't touch" means to it. An edit is made to something that
+    is there, so unless it says otherwise what it made is not deleted (an edit
+    that meets a delete keeps the thing)."""
+    if entry.delta is None:
+        return entry.old_data, entry.new_data or {}
+    base = apply_delta(head, entry.delta, BEFORE)
+    incoming = apply_delta(head, entry.delta, AFTER)
+    if "deleted_at" not in entry.delta:
+        incoming["deleted_at"] = None
+    return base, incoming

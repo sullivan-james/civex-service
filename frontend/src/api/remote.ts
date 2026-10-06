@@ -19,6 +19,21 @@ export interface RemoteStatus {
   running: boolean
   /** What the last sync run by this server did (null until one has run). */
   last_result: SyncResult | null
+  /** How far a long step has got while one runs on this server. */
+  progress: SyncProgress | null
+  /** A connect started here is still running (copying can take a while). */
+  connecting: boolean
+  /** Why the last connect started here failed. */
+  connect_error: string | null
+}
+
+export interface SyncProgress {
+  /** copying: from the authority; filling: an empty authority from here;
+   * history: fetching what happened before this project joined. */
+  phase: 'copying' | 'filling' | 'history' | string
+  done: number
+  total: number | null
+  kind: string | null
 }
 
 export interface SyncResult {
@@ -118,7 +133,10 @@ export interface ResolveManyResult {
 
 export const remoteApi = {
   status: () => api.get<RemoteStatus>('/remote'),
-  connect: (url: string, token: string) =>
+  /** Starts connecting: the answer comes once the address and token are
+   * checked; copying then runs in the background (see `progress`). Without a
+   * token, the one this computer holds for the address is used. */
+  connect: (url: string, token?: string) =>
     api.post<{ mode: string }>('/remote/connect', { url, token }),
   disconnect: () => api.post<RemoteStatus>('/remote/disconnect', {}),
   syncNow: () => api.post<{ requested: boolean }>('/remote/sync', {}),

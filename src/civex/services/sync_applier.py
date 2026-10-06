@@ -15,6 +15,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from civex.domain.audit_diff import AFTER, apply_delta
+from civex.domain.exceptions import ValidationError
 from civex.domain.sync import SyncEntry
 from civex.repositories.protocols import AuditRepository, SyncRepository
 
@@ -62,8 +64,18 @@ class SyncApplier:
         self._repo.purge(kind, entity_id)
 
     def apply_entry(self, entry: SyncEntry) -> None:
-        """Do what an entry from the authority says."""
-        if entry.action in ("create", "update", "restore") and entry.new_data:
+        """Do what an entry from the authority says. An edit that travels as
+        what changed is put onto the thing as it is here."""
+        if entry.action in ("create", "update", "restore") and entry.delta is not None:
+            current = self._repo.snapshot(entry.entity_type, entry.entity_id)
+            if current is None:
+                raise ValidationError("It is not here to change")
+            self.apply_state(
+                entry.entity_type,
+                entry.entity_id,
+                apply_delta(current, entry.delta, AFTER),
+            )
+        elif entry.action in ("create", "update", "restore") and entry.new_data:
             self.apply_state(entry.entity_type, entry.entity_id, entry.new_data)
         elif entry.action == "delete":
             self.apply_delete(entry.entity_type, entry.entity_id, stamp_of(entry))

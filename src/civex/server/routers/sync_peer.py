@@ -43,6 +43,11 @@ class SyncHelloResponse(BaseModel):
         default=None, description="The device that put the first data in, if any."
     )
     device_name: str = Field(description="What the token used is called here.")
+    counts: dict[str, int] = Field(
+        default_factory=dict,
+        description="How many of each kind it holds, deleted ones included, so a "
+        "device copying it can show how far along it is.",
+    )
 
 
 class SyncPushRequest(BaseModel):
