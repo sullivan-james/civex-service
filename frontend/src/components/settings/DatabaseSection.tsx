@@ -3,6 +3,7 @@ import { ErrorState, Skeleton, TabNav, TabPanel, useTabParam } from '../ui'
 import { errorMessage } from '../../lib/errors'
 import { AdvancedDatabase } from './database/AdvancedDatabase'
 import { CurrentDatabaseCard } from './database/CurrentDatabaseCard'
+import { HistoryStorageCard } from './database/HistoryStorageCard'
 import { MoveHistory } from './database/MoveHistory'
 
 const DB_TABS = [
@@ -50,7 +51,10 @@ export default function DatabaseSection() {
         ]}
       />
       <TabPanel id="current" value={shownTab}>
-        <CurrentDatabaseCard />
+        <div className="space-y-5">
+          <CurrentDatabaseCard />
+          <HistoryStorageCard />
+        </div>
       </TabPanel>
       <TabPanel id="history" value={shownTab}>
         <MoveHistory />

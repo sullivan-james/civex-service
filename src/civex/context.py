@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from civex.services.schema_service import SchemaService
     from civex.services.store_service import StoreService
     from civex.services.export_definition_service import ExportDefinitionService
+    from civex.services.history_compaction import HistoryCompactionService
     from civex.services.sync_authority import SyncAuthorityService
     from civex.services.sync_service import SyncService
     from civex.services.view_service import ViewService
@@ -99,6 +100,7 @@ class AppContext:
     sync_repo: LocalSyncRepository
     authority_svc: SyncAuthorityService
     sync_svc: SyncService
+    compaction_svc: HistoryCompactionService
     _session: Session
 
     def commit(self) -> None:
@@ -266,6 +268,8 @@ def build_local_context(
     from civex.repositories.local.sync_repo import LocalSyncRepository
     from civex.services.sync_applier import SyncApplier
     from civex.services.project_rules import ProjectRules
+    from civex.repositories.local.db_space import LocalDbSpace
+    from civex.services.history_compaction import HistoryCompactionService
     from civex.services.sync_authority import SyncAuthorityService
 
     from civex.services.sync_service import SyncService
@@ -304,6 +308,7 @@ def build_local_context(
         transfer_svc=transfer_svc,
         audit_svc=audit_repo,
         history_svc=history_svc,
+        compaction_svc=HistoryCompactionService(audit_repo, LocalDbSpace(engine)),
         retention_svc=retention_svc,
         ai_svc=ai_svc,
         ai_usage_svc=ai_usage_svc,

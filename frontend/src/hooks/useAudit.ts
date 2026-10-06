@@ -82,3 +82,21 @@ export function useBatchEntries(batchId: string, page: number, size: number) {
     placeholderData: keepPreviousData,
   })
 }
+
+/** How history is stored. Read often while it is being converted (a bar moves),
+ * rarely otherwise. */
+export function useHistoryStorage() {
+  return useQuery({
+    queryKey: ['audit', 'storage'],
+    queryFn: auditApi.storage,
+    refetchInterval: (q) => (q.state.data?.converting ? 2000 : 60_000),
+  })
+}
+
+export function useReclaimHistoryStorage() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: auditApi.reclaimStorage,
+    onSuccess: (storage) => qc.setQueryData(['audit', 'storage'], storage),
+  })
+}

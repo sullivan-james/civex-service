@@ -95,3 +95,12 @@ def test_connecting_again_without_a_token_needs_one_held_here(
     resp = client.post("/api/remote/connect", json={"url": "http://127.0.0.1:9"})
     assert resp.status_code == 422
     assert "token" in resp.json()["detail"]
+
+
+def test_history_storage_says_what_is_left_and_reclaims(client: TestClient) -> None:
+    body = client.get("/api/audit/storage").json()
+    assert body["whole_entries"] == 0 and body["converting"] is False
+    assert body["size_bytes"] > 0
+    again = client.post("/api/audit/storage/reclaim")
+    assert again.status_code == 200, again.text
+    assert again.json()["free_bytes"] == 0

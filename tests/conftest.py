@@ -82,6 +82,49 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.os_sensitive)
 
 
+@pytest.fixture(autouse=True)
+def _never_a_real_project(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[None]:
+    """No test may find a real project. Looking for one walks up from the
+    working directory, so a test that loses its temporary folder (an undone
+    chdir) would otherwise open whatever project sits above the checkout and
+    change it, migrations included. Any project found outside pytest's own
+    temporary folders fails the test instead. Installed by hand rather than
+    with `monkeypatch`, so a test's `monkeypatch.undo()` can't remove it."""
+    import sys
+
+    import civex.config as config
+
+    real = config.find_project_root
+    base = tmp_path_factory.getbasetemp().resolve()
+
+    def only_test_projects():
+        root = real()
+        if root is not None:
+            resolved = root.resolve()
+            if resolved != base and base not in resolved.parents:
+                raise RuntimeError(
+                    f"A test reached a real civex project at {root}; tests must "
+                    "only use projects in their own temporary folders"
+                )
+        return root
+
+    patched = [
+        module
+        for name, module in list(sys.modules.items())
+        if name.startswith("civex")
+        and getattr(module, "find_project_root", None) is real
+    ]
+    for module in patched:
+        module.find_project_root = only_test_projects  # type: ignore[attr-defined]
+    try:
+        yield
+    finally:
+        for module in patched:
+            module.find_project_root = real  # type: ignore[attr-defined]
+
+
 @pytest.fixture()
 def strict_schema_lists() -> None:
     """Request this to run a test with the real "a collection only holds

@@ -93,3 +93,30 @@ def test_history_unknown_entry_fails_cleanly(ctx: AppContext) -> None:
     result = runner.invoke(app, ["history", "show", "deadbeef"])
     assert result.exit_code == 1
     assert "not found" in result.output
+
+
+def test_compact_converts_older_history_and_can_give_the_room_back(
+    ctx: AppContext, animal, monkeypatch
+):
+    import civex.repositories.local.audit_repo as audit_repo
+    from civex.db.models import AuditLog
+
+    # Only this patch is undone (`monkeypatch.undo()` would also undo the
+    # fixture's chdir, and the CLI would then work on whatever project it
+    # found above the test's folder).
+    with monkeypatch.context() as patched:
+        patched.setattr(audit_repo, "stored_form", lambda o, n: (o, n, None, 1))
+        for legs in (3, 2, 1):
+            _set_legs(ctx, animal, legs)
+    assert ctx.compaction_svc.remaining() == 3
+
+    result = runner.invoke(app, ["history", "compact", "--vacuum"])
+
+    assert result.exit_code == 0, result.output
+    assert "Converted 3 entries" in result.output
+    ctx._session.expire_all()
+    assert ctx.compaction_svc.remaining() == 0
+    edits = ctx._session.query(AuditLog).filter(
+        AuditLog.entity_id == animal.id, AuditLog.action == "update"
+    )
+    assert [e.format for e in edits] == [2, 2, 2]

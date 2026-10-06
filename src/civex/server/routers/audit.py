@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from civex.context import AppContext
 from civex.domain.audit_filters import AUDIT_FIELDS
@@ -235,6 +236,72 @@ def _audit_id(audit_id: str) -> uuid.UUID:
         return uuid.UUID(audit_id)
     except ValueError:
         raise HTTPException(400, detail="Invalid history entry ID")
+
+
+# -- how history is stored ------------------------------------------------------
+
+
+class HistoryStorageResponse(BaseModel):
+    whole_entries: int = Field(
+        description="Edits still stored as two whole copies (written before "
+        "history stored only what changed); converted in the background."
+    )
+    converting: bool = Field(description="The conversion is running now.")
+    done: int | None = Field(
+        default=None, description="Entries looked at since the conversion began."
+    )
+    total: int | None = Field(
+        default=None, description="What was left when the conversion began."
+    )
+    size_bytes: int | None = Field(
+        default=None,
+        description="The database file's size (SQLite; null where the database "
+        "manages its own space).",
+    )
+    free_bytes: int | None = Field(
+        default=None,
+        description="Room inside the file no longer used: what reclaiming gives "
+        "back. Reclaiming needs about `size_bytes` of free disk while it runs.",
+    )
+
+
+def _storage(ctx: AppContext) -> HistoryStorageResponse:
+    from civex.services.history_jobs import history_jobs
+
+    space = ctx.compaction_svc.space()
+    progress = history_jobs.progress
+    return HistoryStorageResponse(
+        whole_entries=ctx.compaction_svc.remaining(),
+        converting=history_jobs.running and progress is not None,
+        done=progress.done if progress else None,
+        total=progress.total if progress else None,
+        size_bytes=space.size_bytes if space else None,
+        free_bytes=space.free_bytes if space else None,
+    )
+
+
+@router.get("/audit/storage", response_model=HistoryStorageResponse)
+def history_storage(ctx: AppContext = Depends(get_ctx)):
+    """How history is stored: edits still to convert to what-changed form, how
+    far the background conversion has got, and the room a reclaim would give
+    back."""
+    return _storage(ctx)
+
+
+@router.post("/audit/storage/reclaim", response_model=HistoryStorageResponse)
+def reclaim_history_storage(ctx: AppContext = Depends(get_ctx)):
+    """Give unused room in the database file back to the disk (SQLite VACUUM).
+    Refused while history is being converted. It needs about the file's size in
+    free disk while it runs, and the project waits for it."""
+    from civex.services.history_jobs import history_jobs
+
+    if history_jobs.running:
+        raise HTTPException(
+            409, detail="History is still being converted; reclaim once it is done"
+        )
+    ctx.commit()  # nothing of this request may be open while the file is rewritten
+    ctx.compaction_svc.reclaim()
+    return _storage(ctx)
 
 
 @router.get("/audit/{audit_id}", response_model=AuditLogResponse)

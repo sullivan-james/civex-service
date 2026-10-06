@@ -179,10 +179,10 @@ def test_an_edit_on_the_authority_saved_during_a_push_is_numbered_before_it(
         skip = True
         return real_push(*args, **kwargs)
 
-    monkeypatch.setattr(authority.sync_repo, "sequence_local_entries", sequence)
-    monkeypatch.setattr(authority.authority_svc, "push", pushing)
-    push(authority, laptop)  # straight to the push: nothing numbered it first
-    monkeypatch.undo()
+    with monkeypatch.context() as patched:
+        patched.setattr(authority.sync_repo, "sequence_local_entries", sequence)
+        patched.setattr(authority.authority_svc, "push", pushing)
+        push(authority, laptop)  # straight to the push: nothing numbered it first
     phone.sync_svc.sync()
 
     assert snapshots(phone)["record"] == snapshots(authority)["record"]

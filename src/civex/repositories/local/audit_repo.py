@@ -618,6 +618,51 @@ class LocalAuditRepository:
             "kept_unsynced": max(unsynced, 0),
         }
 
+    # -- converting whole-snapshot entries to deltas (`HistoryCompactionService`)
+
+    def _whole_edits(self):
+        """Entries still stored whole that a delta could replace: an edit or a
+        restore (both sides held). Creates and deletes keep one copy anyway."""
+        return self._s.query(AuditLog).filter(
+            AuditLog.format == 1,
+            AuditLog.action.in_(("update", "restore")),
+            AuditLog.old_data.is_not(None),
+            AuditLog.new_data.is_not(None),
+        )
+
+    def count_whole_edits(self) -> int:
+        return self._whole_edits().count()
+
+    def whole_edits(self, limit: int) -> list[AuditLogDTO]:
+        rows = (
+            self._whole_edits()
+            .order_by(
+                func.coalesce(AuditLog.local_seq, 0), AuditLog.timestamp, AuditLog.id
+            )
+            .limit(limit)
+            .all()
+        )
+        return [_audit_dto(r) for r in rows]
+
+    def store_as_delta(
+        self,
+        entry_id: uuid.UUID,
+        new_data: dict[str, Any] | None,
+        delta: dict[str, Any] | None,
+        form: int,
+    ) -> None:
+        """Replace an entry's whole snapshots with what changed (`form` 2), or
+        mark it checked and kept whole (`form` 3, `delta` None)."""
+        row = self._s.get(AuditLog, entry_id)
+        if row is None:
+            return
+        if delta is not None:
+            row.old_data = None
+            row.new_data = new_data
+            row.delta = delta
+        row.format = form
+        self._s.flush()
+
     def prune(self, before: datetime, protect_unsynced: bool) -> tuple[int, int]:
         """Remove the entries `count_prunable` counted, and any batch left with
         none. Returns (entries, batches) removed.

@@ -312,15 +312,18 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _migrate_on_startup()
     from civex.services.transfer_jobs import jobs
 
+    from civex.services.history_jobs import history_jobs
     from civex.services.sync_jobs import sync_jobs
 
     jobs.ensure_worker()  # picks up anything a restart left waiting
     sync_jobs.ensure_worker()  # idles unless the project follows an authority
+    history_jobs.ensure_running()  # converts history from before deltas, if any
     try:
         yield
     finally:
         jobs.shutdown()
         sync_jobs.shutdown()
+        history_jobs.shutdown()
 
 
 def create_app() -> FastAPI:

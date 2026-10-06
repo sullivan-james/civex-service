@@ -25,9 +25,9 @@ def old_survey(ctx: AppContext, make_schema, make_collection, make_record, monke
     """The same, with history written as v1.2.0 wrote it: whole snapshots."""
     import civex.repositories.local.audit_repo as audit_repo
 
-    monkeypatch.setattr(audit_repo, "stored_form", lambda o, n: (o, n, None, 1))
-    made = _survey(ctx, make_schema, make_collection, make_record)
-    monkeypatch.undo()
+    with monkeypatch.context() as patched:  # (not undo(): that undoes the chdir)
+        patched.setattr(audit_repo, "stored_form", lambda o, n: (o, n, None, 1))
+        made = _survey(ctx, make_schema, make_collection, make_record)
     return made
 
 
