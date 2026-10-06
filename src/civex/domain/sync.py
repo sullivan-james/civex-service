@@ -96,6 +96,9 @@ class SyncEntry:
     # with `new_data` the thing's identity and no `old_data`; a create carries
     # the thing as made and a delete the thing as it was (`stored_form`).
     delta: dict[str, Any] | None = None
+    # The action it is part of (`audit_log.op_id`): an authority takes the
+    # entries sharing it together or not at all. None for one on its own.
+    op: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -113,6 +116,7 @@ class SyncEntry:
             "hub_seq": self.hub_seq,
             "superseded": self.superseded,
             "delta": self.delta,
+            "op": self.op,
         }
 
     @classmethod
@@ -132,6 +136,7 @@ class SyncEntry:
             hub_seq=d.get("hub_seq"),
             superseded=bool(d.get("superseded", False)),
             delta=d.get("delta"),
+            op=str(d["op"]) if d.get("op") else None,
         )
 
 

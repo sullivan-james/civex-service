@@ -507,6 +507,10 @@ class AuditLog(Base):
     local_seq: Mapped[int | None] = mapped_column(
         BigInteger, nullable=True, server_default=FetchedValue()
     )
+    # Shared by the entries one action wrote (a field renamed and the templates
+    # it rewrote; a record deleted and everything beneath it), so an authority
+    # takes them, or refuses them, together. None for an entry on its own.
+    op_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
 
 
 class WorkflowJob(Base):

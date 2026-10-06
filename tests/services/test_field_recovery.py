@@ -198,7 +198,13 @@ def test_a_collection_entry_names_its_schemas_by_id(ctx, thing):
     collection = ctx.dataset_svc.get("study")
     schema = ctx.schema_svc.get("thing")
     entries = ctx.history_svc.page(entity_id=collection.id, limit=10)
-    latest = max(entries, key=lambda e: e.timestamp)
+    # The entry that listed the schema (make_record may already have done so).
+    listed = [
+        e
+        for e in entries
+        if "schema_ids" in (entry_snapshots(e.old_data, e.new_data, e.delta)[1] or {})
+    ]
+    latest = max(listed, key=lambda e: e.timestamp)
     _, new = entry_snapshots(latest.old_data, latest.new_data, latest.delta)
     assert new["schemas"] == ["thing"]
     assert new["schema_ids"] == [str(schema.id)]

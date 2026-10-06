@@ -265,6 +265,7 @@ def build_local_context(
 
     from civex.repositories.local.sync_repo import LocalSyncRepository
     from civex.services.sync_applier import SyncApplier
+    from civex.services.project_rules import ProjectRules
     from civex.services.sync_authority import SyncAuthorityService
 
     from civex.services.sync_service import SyncService
@@ -272,7 +273,13 @@ def build_local_context(
 
     sync_repo = LocalSyncRepository(session)
     applier = SyncApplier(sync_repo, audit_repo)
-    authority_svc = SyncAuthorityService(sync_repo, applier, file_store, record_svc)
+    authority_svc = SyncAuthorityService(
+        sync_repo,
+        applier,
+        file_store,
+        record_svc,
+        ProjectRules(schema_svc, dataset_repo, record_repo),
+    )
     sync_svc = SyncService(
         config,
         sync_repo,

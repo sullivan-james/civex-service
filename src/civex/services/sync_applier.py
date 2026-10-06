@@ -41,11 +41,16 @@ class SyncApplier:
     def apply_state(
         self, kind: str, entity_id: uuid.UUID, state: dict[str, Any]
     ) -> None:
-        """Make the thing exactly `state`. If it is deleted here and `state` is
-        not, it is restored first, so what was deleted with it comes back too."""
+        """Make the thing exactly `state`. Deleting and restoring go the way a
+        person's do: if it is deleted here and `state` is not, it is restored
+        first, so what was deleted with it comes back too; if it is live here
+        and `state` is deleted, it is deleted first, so what goes with it (a
+        schema's or collection's records) goes too, stamped the same."""
         current = self._repo.snapshot(kind, entity_id)
         if current and current.get("deleted_at") and not state.get("deleted_at"):
             self._repo.restore(kind, entity_id)
+        elif current and not current.get("deleted_at") and state.get("deleted_at"):
+            self.apply_delete(kind, entity_id, _stamp(state["deleted_at"]))
         self._repo.apply_snapshot(kind, state)
 
     def apply_delete(self, kind: str, entity_id: uuid.UUID, stamp: datetime) -> None:
@@ -81,3 +86,10 @@ class SyncApplier:
             self.apply_delete(entry.entity_type, entry.entity_id, stamp_of(entry))
         elif entry.action == "purge":
             self.apply_purge(entry.entity_type, entry.entity_id)
+
+
+def _stamp(value: str | datetime) -> datetime:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)

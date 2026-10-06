@@ -5,10 +5,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import nulls_last, select
+from civex.repositories.local.record_repo import parent_allows_restore
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from civex.repositories.local._jobs import bulk_delete_jobs
-from civex.db.models import Field, Record, Schema, View, WorkflowJob
+from civex.db.models import DatasetSchema, Field, Record, Schema, View, WorkflowJob
 from civex.domain.dtos import FieldDTO, SchemaDTO
 from civex.domain.exceptions import NotFoundError
 
@@ -162,10 +163,16 @@ class LocalSchemaRepository:
         return cascade.count() if cascade is not None else 0
 
     def _cascade_query(self, id: uuid.UUID, deleted_at: datetime | None):
+        """The records restoring the schema brings back: deleted with it, and
+        not beneath a record that is still deleted (that one was deleted on its
+        own meanwhile; a record can't come back under it, as a restore of the
+        record itself can't)."""
         if deleted_at is None:
             return None
         return self._s.query(Record).filter(
-            Record.schema_id == id, Record.deleted_at == deleted_at
+            Record.schema_id == id,
+            Record.deleted_at == deleted_at,
+            parent_allows_restore(Record, deleted_at),
         )
 
     def purge(self, id: uuid.UUID) -> None:
@@ -186,6 +193,11 @@ class LocalSchemaRepository:
         )
         bulk_delete_jobs(self._s, WorkflowJob.record_id.in_(typed))
         self._s.query(Record).filter_by(schema_id=id).delete(synchronize_session=False)
+        # Collections that list it stop listing it: a purged schema leaves no
+        # trace (and the link would otherwise refuse the delete).
+        self._s.query(DatasetSchema).filter_by(schema_id=id).delete(
+            synchronize_session=False
+        )
         self._s.delete(row)  # cascades to Field rows via ORM relationship
         self._s.flush()
 

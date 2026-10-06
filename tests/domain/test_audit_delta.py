@@ -88,6 +88,7 @@ def test_a_delta_entry_keeps_who_and_where_the_thing_is():
         "dataset_id": "d1",
         "schema_id": "s1",
         "parent_record_id": None,
+        "deleted_at": None,
     }
 
 

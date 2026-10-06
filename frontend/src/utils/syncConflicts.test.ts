@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { SyncConflict } from '../api/remote'
-import { inReviewOrder, layoutConflicts } from './syncConflicts'
+import {
+  describeAttempt,
+  inReviewOrder,
+  kindLabel,
+  layoutConflicts,
+  takeLabel,
+} from './syncConflicts'
 
 function c(id: string, extra: Partial<SyncConflict> = {}): SyncConflict {
   return {
@@ -66,5 +72,22 @@ describe('inReviewOrder', () => {
       c('1', { record_name: 'B', entity_id: 'b' }),
     ]
     expect(inReviewOrder(list).map((x) => x.id)).toEqual(['3', '1', '2'])
+  })
+})
+
+describe('a change that was not taken', () => {
+  it('says it was put back as the server has it, and why', () => {
+    const row = c('1', {
+      kind: 'not_taken',
+      entity_type: 'schema',
+      field: null,
+      message:
+        "Part of one change that could not go in whole: The record name of 'site' would use 'code', which it no longer has",
+    })
+    const said = describeAttempt(row, (iso) => iso)
+    expect(said).toContain('back as the server has it')
+    expect(said).toContain("would use 'code'")
+    expect(kindLabel('not_taken')).toBe('Not taken')
+    expect(takeLabel('not_taken', 'theirs')).toBe('OK')
   })
 })

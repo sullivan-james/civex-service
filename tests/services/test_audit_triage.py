@@ -286,7 +286,8 @@ def test_schema_filter_works_for_a_deleted_schema_and_refuses_an_unknown_one(
     events, _ = ctx.history_svc.events(
         where=_where(leaf("schema", "recording")), limit=200
     )
-    assert any(e.entry.entity_type == "record" for e in events)
+    # (The delete itself, which took records with it, is one batch event.)
+    assert any(e.entry and e.entry.entity_type == "record" for e in events)
     with pytest.raises(NotFoundError):
         ctx.history_svc.events(where=_where(leaf("schema", "nope")))
 

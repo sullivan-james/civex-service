@@ -6,6 +6,7 @@ const LABELS: Record<string, Partial<Record<ConflictTake, string>>> = {
   conflict: { theirs: 'Keep theirs', mine: 'Use mine', value: 'Edit…' },
   edit_vs_delete: { theirs: 'Keep it', delete: 'Delete it' },
   rejected: { theirs: 'Let it go', retry: 'Send again' },
+  not_taken: { theirs: 'OK' },
 }
 
 export function takeLabel(kind: string, take: ConflictTake): string {
@@ -17,6 +18,7 @@ const KINDS: Record<string, string> = {
   conflict: 'Clashes',
   rejected: 'Refused',
   edit_vs_delete: 'Deleted there',
+  not_taken: 'Not taken',
 }
 
 export function kindLabel(kind: string): string {
@@ -97,6 +99,8 @@ export function describeAttempt(
   const who = c.theirs_actor
     ? `${c.theirs_actor}${c.theirs_at ? ` on ${when(c.theirs_at)}` : ''}`
     : null
+  if (c.kind === 'not_taken')
+    return `Your change was not taken, and this is back as the server has it. ${c.message ?? ''} Make the change again if you still want it.`.trim()
   if (c.kind === 'rejected') {
     const tried =
       c.attempted === 'create'

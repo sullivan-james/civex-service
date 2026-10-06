@@ -190,11 +190,28 @@ class LocalAuditRepository:
         # only created once something is written into it, so one that turns out
         # to touch nothing leaves no trace.
         self._batch_id: uuid.UUID | None = None
+        # The action being recorded (`operation`), shared by its entries.
+        self._op_id: uuid.UUID | None = None
         self._batch_spec: tuple[str, str | None, str | None] | None = None
 
     # ------------------------------------------------------------------
     # Batches
     # ------------------------------------------------------------------
+
+    @contextmanager
+    def operation(self) -> Iterator[None]:
+        """Everything logged inside is one action: an authority takes all of
+        it or none (a field renamed with the templates it rewrote). Inside
+        another operation it joins that one. Unlike a batch, which is how
+        history shows a bulk change, this is about what may not be split."""
+        if self._op_id is not None:
+            yield
+            return
+        self._op_id = uuid.uuid4()
+        try:
+            yield
+        finally:
+            self._op_id = None
 
     @contextmanager
     def batch(
@@ -265,8 +282,13 @@ class LocalAuditRepository:
         old_data: dict[str, Any] | None,
         new_data: dict[str, Any] | None,
         timestamp: datetime | None = None,
+        op: uuid.UUID | None = None,
     ) -> None:
-        """`timestamp` is when it happened, now unless the caller says: a delete
+        """`op` names the action it belongs to, when the caller groups entries
+        itself (a delete of several record trees, one action per tree); else the
+        enclosing `operation`, if any.
+
+        `timestamp` is when it happened, now unless the caller says: a delete
         passes the moment it stamps what it deletes with, so the entry and the
         stamp are one instant and every device that applies the entry stamps
         exactly the same."""
@@ -280,6 +302,7 @@ class LocalAuditRepository:
                 new_data=new_data,
                 delta=delta,
                 format=form,
+                op_id=op or self._op_id,
                 timestamp=timestamp or datetime.now(timezone.utc),
                 batch_id=self._current_batch(),
                 actor=self._actor,

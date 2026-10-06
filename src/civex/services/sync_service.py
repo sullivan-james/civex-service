@@ -1079,17 +1079,71 @@ class SyncService:
     def _resend(self, conflict: SyncConflictDTO) -> None:
         """Send a refused change again, from the thing as it is now: the same
         kind of change on the same starting point, new content. A new entry (the
-        authority remembers the old one's answer by its id)."""
-        current = self._repo.snapshot(conflict.entity_type, conflict.entity_id)
-        if current is None:
+        authority remembers the old one's answer by its id). A change that was
+        part of one action (a field renamed with the templates it rewrote) is
+        sent again whole, as one new action, and the review items of its other
+        parts are settled with it: it can't go in by halves."""
+        if self._repo.snapshot(conflict.entity_type, conflict.entity_id) is None:
             raise ValidationError(
                 "It no longer exists here, so there is nothing to send"
             )
         original = self._repo.get_entry(conflict.op_id) if conflict.op_id else None
         if original is None:
             raise ValidationError("The change is no longer held here")
+        if original.op is None:
+            self._resend_entry(original, strict=True, in_action=False)
+            return
+        parts = self._repo.entries_of_action(original.op)
+        with self._audit.operation():
+            for entry in parts:
+                self._resend_entry(
+                    entry, strict=entry.id == original.id, in_action=True
+                )
+        others = {e.id for e in parts} - {original.id}
+        self._repo.resolve_conflicts(
+            [
+                c.id
+                for c in self._repo.find_open_conflicts(kind="rejected")
+                if c.op_id in others
+            ],
+            "retry",
+        )
+
+    def _resend_entry(self, original: SyncEntry, strict: bool, in_action: bool) -> None:
+        """Log `original` again from its thing as it is now. `strict`: say why
+        when it can't be (the part a person chose); a part that went away or
+        changed kind since is just left out."""
+        current = self._repo.snapshot(original.entity_type, original.entity_id)
+        if current is None:
+            if strict:
+                raise ValidationError(
+                    "It no longer exists here, so there is nothing to send"
+                )
+            return
+        if original.action == "delete":
+            # A delete is sent again only as a part of an action sent whole
+            # (its thing still deleted here); alone, it is a delete to make.
+            if current.get("deleted_at") and in_action:
+                self._audit.log_change(
+                    "delete",
+                    original.entity_type,
+                    original.entity_id,
+                    {**current, "deleted_at": None},
+                    None,
+                    timestamp=datetime.fromisoformat(current["deleted_at"]),
+                )
+                return
+            if strict:
+                raise ValidationError(
+                    "Only a created or edited thing can be sent again"
+                )
+            return
         if original.action not in ("create", "update", "restore"):
-            raise ValidationError("Only a created or edited thing can be sent again")
+            if strict:
+                raise ValidationError(
+                    "Only a created or edited thing can be sent again"
+                )
+            return
         start = original.old_data
         if original.delta is not None:
             # Only what the change touched is known of where it started: the
@@ -1097,8 +1151,8 @@ class SyncService:
             start = apply_delta(current, original.delta, BEFORE)
         self._audit.log_change(
             original.action,
-            conflict.entity_type,
-            conflict.entity_id,
+            original.entity_type,
+            original.entity_id,
             start,
             current,
         )

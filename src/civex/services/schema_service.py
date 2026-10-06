@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import functools
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 
 import uuid
@@ -27,6 +29,7 @@ from civex.domain.field_descriptors import (
 from civex.domain.naming import is_slug, slugify, validate_name
 from civex.domain.timezones import validate_timezone
 from civex.domain.uniqueness import UNIQUE_DTYPES, normalise_keys
+from civex.services.cascades import States, log_cascade, record_states
 from civex.repositories.protocols import (
     AuditRepository,
     RecordRepository,
@@ -190,6 +193,27 @@ class SchemaResolver:
         return self._done[schema_id]
 
 
+@contextmanager
+def _both(first, second):
+    with first, second:
+        yield
+
+
+def _one_action(method):
+    """Record everything `method` logs as one action (`AuditRepository.operation`):
+    a field change also rewrites templates and keys on other things, and an
+    authority must take all of that or none of it."""
+
+    @functools.wraps(method)
+    def run(self, *args, **kwargs):
+        if not self._audit:
+            return method(self, *args, **kwargs)
+        with self._audit.operation():
+            return method(self, *args, **kwargs)
+
+    return run
+
+
 class SchemaService:
     def __init__(
         self,
@@ -270,6 +294,7 @@ class SchemaService:
     def list_all(self) -> list[SchemaDTO]:
         return self._repo.list_all()
 
+    @_one_action
     def add_field(
         self,
         schema_name: str,
@@ -613,6 +638,7 @@ class SchemaService:
             )
         return plan
 
+    @_one_action
     def restore_field(self, schema_name: str, field_id: uuid.UUID) -> FieldDTO:
         """Undo delete_field(): the field is back on its schema and every record
         shows the value it held for it again (see SchemaRepository.delete_field)."""
@@ -655,6 +681,7 @@ class SchemaService:
             out[fid] = (field, names[field.schema_id])
         return out
 
+    @_one_action
     def delete_field(self, schema_name: str, field_name: str) -> None:
         schema = self.get(schema_name)
         field = next((f for f in schema.fields if f.name == field_name), None)
@@ -683,6 +710,7 @@ class SchemaService:
             holders, lambda tpl, via: templating.remove_field(tpl, field_name, via)
         )
 
+    @_one_action
     def update_field(
         self,
         schema_name: str,
@@ -736,6 +764,7 @@ class SchemaService:
             )
         return updated
 
+    @_one_action
     def reorder_fields(
         self, schema_name: str, field_ids: list[uuid.UUID]
     ) -> list[FieldDTO]:
@@ -766,6 +795,11 @@ class SchemaService:
             if s.parent_id:
                 by_parent.setdefault(s.parent_id, []).append(s)
         return by_parent
+
+    def get_by_id(
+        self, schema_id: uuid.UUID, include_deleted: bool = False
+    ) -> SchemaDTO | None:
+        return self._repo.get_by_id(schema_id, include_deleted=include_deleted)
 
     def ancestors(self, schema: SchemaDTO) -> list[SchemaDTO]:
         """Parent, grandparent, ... -- nearest first. A soft-deleted ancestor
@@ -834,11 +868,45 @@ class SchemaService:
         stamp = datetime.now(
             timezone.utc
         )  # the entry's time and the stamp: one instant
-        if self._audit:
-            self._audit.log_change(
-                "delete", "schema", schema.id, schema.to_dict(), None, timestamp=stamp
-            )
-        self._repo.delete(schema.id, stamp)
+        before = self._cascade_before(schema.id)
+        with self._one_event("delete", before, None):
+            if self._audit:
+                self._audit.log_change(
+                    "delete",
+                    "schema",
+                    schema.id,
+                    schema.to_dict(),
+                    None,
+                    timestamp=stamp,
+                )
+            self._repo.delete(schema.id, stamp)
+            self._log_cascade(schema.id, before)
+
+    def _cascade_before(self, schema_id: uuid.UUID) -> States:
+        return (
+            record_states(self._records, schema_id=schema_id) if self._records else {}
+        )
+
+    def _log_cascade(self, schema_id: uuid.UUID, before: States) -> None:
+        """An entry for each of the schema's records its delete or restore
+        changed (`services/cascades`)."""
+        if self._records:
+            log_cascade(self._records, self._audit, before, schema_id=schema_id)
+
+    def _one_event(self, kind: str, before: States, stamp: datetime | None):
+        """One action, shown as one event: a schema's delete or restore and
+        what it does to its records."""
+        if not self._audit:
+            return nullcontext()
+        # Shown as one event only when it takes records with it.
+        many = any(
+            (at is None) if kind == "delete" else (stamp is not None and at == stamp)
+            for at in before.values()
+        )
+        return _both(
+            self._audit.operation(),
+            self._audit.batch(kind) if many else nullcontext(),
+        )
 
     def list_deleted(self) -> list[SchemaDTO]:
         return self._repo.list_deleted()
@@ -894,11 +962,18 @@ class SchemaService:
             raise NotFoundError(f"Schema '{name}' not found")
         if schema.deleted_at is None:
             raise ValidationError(f"Schema '{name}' is not deleted")
-        restored = self._repo.restore(schema.id)
-        if self._audit:
-            self._audit.log_change(
-                "restore", "schema", restored.id, schema.to_dict(), restored.to_dict()
-            )
+        before = self._cascade_before(schema.id)
+        with self._one_event("restore", before, schema.deleted_at):
+            restored = self._repo.restore(schema.id)
+            if self._audit:
+                self._audit.log_change(
+                    "restore",
+                    "schema",
+                    restored.id,
+                    schema.to_dict(),
+                    restored.to_dict(),
+                )
+            self._log_cascade(schema.id, before)
         return restored
 
     def purge(self, name: str) -> None:

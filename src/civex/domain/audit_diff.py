@@ -154,6 +154,10 @@ IDENTITY_KEYS = frozenset(
         "parent_id",
         "parent_record_id",
         "dtype",  # a field's: how its values (and restrictions) read
+        # Whether it was deleted when changed: an edit to something live that
+        # meets a delete elsewhere keeps it; one made to something already
+        # deleted (a template rewritten in a deleted schema) must not revive it.
+        "deleted_at",
     }
 )
 BEFORE, AFTER = "before", "after"

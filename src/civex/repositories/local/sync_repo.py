@@ -639,7 +639,17 @@ class LocalSyncRepository:
         """Delete as a person's delete does, but stamped `stamp`: a schema or
         collection takes its live records with it, stamped the same."""
         row = self._s.get(_MODELS[kind], id)
-        if row is None or getattr(row, "deleted_at", None) is not None:
+        if row is None:
+            return
+        if getattr(row, "deleted_at", None) is not None:
+            # Already deleted here (by a cascade worked out from what this copy
+            # held): take the stamp it was deleted with where the entry is
+            # from, so every copy ends with the same one. What went with it
+            # stays as it is: its own entries say where it stands.
+            if kind == "record" and _parse(row.deleted_at.isoformat()) != stamp:
+                row.deleted_at = stamp
+                flag_modified(row, "updated_at")
+                self._s.flush()
             return
         row.deleted_at = stamp
         if kind == "record":
@@ -665,28 +675,22 @@ class LocalSyncRepository:
 
     def restore(self, kind: str, id: uuid.UUID) -> None:
         """Undo a delete as a person's restore does: a schema or collection
-        brings back the records stamped with its own moment, and no others."""
+        brings back what its own restore brings back (the other repositories
+        own those rules, so they are used rather than repeated)."""
+        from civex.repositories.local.dataset_repo import LocalDatasetRepository
+        from civex.repositories.local.schema_repo import LocalSchemaRepository
+
         row = self._s.get(_MODELS[kind], id)
         if row is None:
             return
-        stamp = getattr(row, "deleted_at", None)
-        row.deleted_at = None
-        if kind == "record":
-            flag_modified(row, "updated_at")
-        if stamp is not None and kind == "schema":
-            self._s.query(Record).filter(
-                Record.schema_id == id, Record.deleted_at == stamp
-            ).update(
-                {"deleted_at": None, "updated_at": Record.updated_at},
-                synchronize_session=False,
-            )
-        elif stamp is not None and kind == "dataset":
-            self._s.query(Record).filter(
-                Record.dataset_id == id, Record.deleted_at == stamp
-            ).update(
-                {"deleted_at": None, "updated_at": Record.updated_at},
-                synchronize_session=False,
-            )
+        if kind == "schema":
+            LocalSchemaRepository(self._s).restore(id)
+        elif kind == "dataset":
+            LocalDatasetRepository(self._s).restore(id)
+        else:
+            row.deleted_at = None
+            if kind == "record":
+                flag_modified(row, "updated_at")
         self._s.flush()
         self._s.expire_all()
 
@@ -733,14 +737,22 @@ class LocalSyncRepository:
         return self._s.get(AuditLog, id) is not None
 
     def pending_entries(self, limit: int) -> list[SyncEntry]:
-        """Changes made here that the authority has not been sent, oldest first."""
-        rows = (
-            self._s.query(AuditLog)
-            .filter(AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None))
-            .order_by(*_WRITE_ORDER)
-            .limit(limit)
-            .all()
+        """Changes made here that the authority has not been sent, oldest first:
+        `limit` of them, and the rest of the action the last one belongs to, so
+        an action is never split across two pushes (it is taken whole or not)."""
+        pending = self._s.query(AuditLog).filter(
+            AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None)
         )
+        rows = pending.order_by(*_WRITE_ORDER).limit(limit).all()
+        if len(rows) == limit and rows[-1].op_id is not None:
+            seen = {r.id for r in rows}
+            rows += [
+                r
+                for r in pending.filter(AuditLog.op_id == rows[-1].op_id)
+                .order_by(*_WRITE_ORDER)
+                .all()
+                if r.id not in seen
+            ]
         return self._entries(rows)
 
     def count_pending(self) -> int:
@@ -866,6 +878,7 @@ class LocalSyncRepository:
                 new_data=entry.new_data,
                 delta=entry.delta,
                 format=2 if entry.delta is not None else 1,
+                op_id=uuid.UUID(entry.op) if entry.op else None,
                 timestamp=_parse(entry.timestamp),
                 batch_id=batch_id,
                 actor=entry.actor,
@@ -897,6 +910,16 @@ class LocalSyncRepository:
                 .execution_options(synchronize_session=False)
             )
             self._s.expire_all()
+
+    def entries_of_action(self, op: str) -> list[SyncEntry]:
+        """The entries one action wrote here, in the order written."""
+        rows = (
+            self._s.query(AuditLog)
+            .filter(AuditLog.op_id == uuid.UUID(op))
+            .order_by(*_WRITE_ORDER)
+            .all()
+        )
+        return self._entries(rows)
 
     def numbered_entries(
         self, kind: str, entity_id: uuid.UUID, from_seq: int
@@ -987,6 +1010,7 @@ class LocalSyncRepository:
                 hub_seq=r.hub_seq,
                 superseded=r.id in superseded,
                 delta=r.delta,
+                op=str(r.op_id) if r.op_id else None,
             )
             for r in rows
         ]

@@ -178,6 +178,16 @@ def make_record(ctx: AppContext):
         data: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> RecordDTO:
+        # As in the app, a collection holds only records of the schemas it
+        # lists, so list this one (and those above it) first. The check itself
+        # is off for most tests, but restoring follows the list.
+        listed = ctx.dataset_svc.get(collection_name).schemas
+        schema = ctx.schema_svc.get(schema_name)
+        wanted = [schema_name] + [a.name for a in ctx.schema_svc.ancestors(schema)]
+        if any(name not in listed for name in wanted):
+            ctx.dataset_svc.update(
+                collection_name, schemas=sorted(set(listed) | set(wanted))
+            )
         record = ctx.record_svc.add(collection_name, schema_name, data or {}, **kwargs)
         ctx.commit()
         return record

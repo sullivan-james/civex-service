@@ -52,7 +52,15 @@ export type ConflictTake =
 /** A value that did not go in as made. */
 export interface SyncConflict {
   id: string
-  kind: 'conflict' | 'rejected' | 'edit_vs_delete' | 'not_applied' | string
+  /** not_taken: a change to the project's structure (or part of one action)
+   * the server did not take; this copy was put back as the server has it. */
+  kind:
+    | 'conflict'
+    | 'rejected'
+    | 'edit_vs_delete'
+    | 'not_taken'
+    | 'not_applied'
+    | string
   entity_type: string
   entity_id: string
   field: string | null
