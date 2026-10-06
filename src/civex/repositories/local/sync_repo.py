@@ -25,6 +25,7 @@ from civex.db.models import (
     Field,
     FileReference,
     Record,
+    RecordReference,
     Schema,
     SyncConflict,
     SyncDevice,
@@ -470,6 +471,72 @@ class LocalSyncRepository:
             .all()
         )
         return self._dicts(kind, rows)
+
+    def record_seed_order(self) -> list[str]:
+        """Every record's id, each after the records it needs to exist first: the
+        one it sits under and the ones it refers to. Ties (and any records that
+        refer to each other in a circle, which nothing can put first) keep
+        creation order. A record that is deleted needs only its parent: nothing
+        checks what it points at."""
+        rows = (
+            self._s.query(Record.id, Record.parent_record_id, Record.deleted_at)
+            .order_by(Record.created_at, Record.id)
+            .yield_per(2000)
+        )
+        position: dict[uuid.UUID, int] = {}
+        parent: dict[uuid.UUID, uuid.UUID | None] = {}
+        deleted: set[uuid.UUID] = set()
+        for rid, parent_id, deleted_at in rows:
+            position[rid] = len(position)
+            parent[rid] = parent_id
+            if deleted_at is not None:
+                deleted.add(rid)
+
+        needs: dict[uuid.UUID, set[uuid.UUID]] = {rid: set() for rid in position}
+        for rid, parent_id in parent.items():
+            if parent_id in position:
+                needs[rid].add(parent_id)
+        for rid, target in self._s.query(
+            RecordReference.record_id, RecordReference.target_id
+        ).yield_per(5000):
+            if rid in position and rid not in deleted and target in position:
+                needs[rid].add(target)
+            # (a reference to itself, or to nothing here, needs nothing)
+        for rid in position:
+            needs[rid].discard(rid)
+
+        waiting_on: dict[uuid.UUID, int] = {r: len(n) for r, n in needs.items()}
+        needed_by: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for rid, n in needs.items():
+            for dep in n:
+                needed_by.setdefault(dep, []).append(rid)
+
+        import heapq
+
+        ready = [position[r] for r, w in waiting_on.items() if w == 0]
+        heapq.heapify(ready)
+        by_position = {i: r for r, i in position.items()}
+        order: list[uuid.UUID] = []
+        placed: set[uuid.UUID] = set()
+        while ready:
+            rid = by_position[heapq.heappop(ready)]
+            order.append(rid)
+            placed.add(rid)
+            for dependant in needed_by.get(rid, ()):
+                waiting_on[dependant] -= 1
+                if waiting_on[dependant] == 0:
+                    heapq.heappush(ready, position[dependant])
+        # A circle of references: nothing can go first, so send them as made.
+        order.extend(r for r in sorted(position, key=position.get) if r not in placed)  # type: ignore[arg-type]
+        return [str(r) for r in order]
+
+    def record_snapshots(self, ids: list[str]) -> list[dict[str, Any]]:
+        """The records with these ids, as snapshots, in the order given."""
+        wanted = [uuid.UUID(i) for i in ids]
+        found = {
+            r.id: r for r in self._s.query(Record).filter(Record.id.in_(wanted)).all()
+        }
+        return self._dicts("record", [found[i] for i in wanted if i in found])
 
     def _dicts(self, kind: str, rows: list[Any]) -> list[dict[str, Any]]:
         if kind == "schema":

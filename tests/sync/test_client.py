@@ -34,6 +34,44 @@ def test_a_project_with_data_fills_an_empty_authority_and_agrees_on_the_project(
     assert data(authority, record)["site"] == "x"
 
 
+def test_seeding_sends_what_a_record_needs_before_the_record(project, authority):
+    """An encounter made first, then given a reference to a species made later,
+    with recordings beneath it: sent in creation order the authority would refuse
+    the encounter (its target isn't there yet), and, remembering that for good,
+    everything beneath it too."""
+    laptop = device(project, authority, "laptop")
+    laptop.schema_svc.create("species")
+    laptop.schema_svc.add_field("species", "latin", "string")
+    laptop.schema_svc.create("encounter")
+    laptop.schema_svc.add_field(
+        "encounter", "species_ref", "reference", restrictions={"schema": "species"}
+    )
+    laptop.schema_svc.create("recording", parent="encounter")
+    laptop.schema_svc.add_field("recording", "label", "string")
+    laptop.dataset_svc.create("taxonomy", scope="global")
+    laptop.dataset_svc.update("taxonomy", schemas=["species"])
+    laptop.dataset_svc.create("study")
+    laptop.dataset_svc.update("study", schemas=["encounter", "recording"])
+
+    encounter = laptop.record_svc.add("study", "encounter", {})
+    species = laptop.record_svc.add("taxonomy", "species", {"latin": "orcinus"})
+    laptop.record_svc.update(str(encounter.id), {"species_ref": str(species.id)})
+    kept = laptop.record_svc.add(
+        "study", "recording", {"label": "a"}, parent_record_id=str(encounter.id)
+    )
+    gone = laptop.record_svc.add(
+        "study", "recording", {"label": "b"}, parent_record_id=str(encounter.id)
+    )
+    laptop.record_svc.delete(str(gone.id))
+    laptop.commit()
+
+    assert connect(laptop) == "seeded"
+
+    assert snapshots(authority) == snapshots(laptop)
+    assert data(authority, kept)["label"] == "a"
+    assert laptop.sync_repo.count_pending() == 0
+
+
 def test_an_empty_project_joins_one_that_has_data_and_keeps_its_history(
     project, authority
 ):

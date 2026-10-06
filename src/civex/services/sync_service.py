@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
@@ -769,6 +769,35 @@ class SyncService:
             if not page.more:
                 return
 
+    def _seed_snapshots(self, kind: str) -> Iterator[dict[str, Any]]:
+        """What to send for `kind`, in an order the authority can accept: a
+        record only after the one it sits under and the ones it refers to, since
+        the authority checks both and remembers a refusal for good."""
+        if kind == "record":
+            order = self._repo.record_seed_order()
+            for start in range(0, len(order), SNAPSHOT_PAGE):
+                yield from self._repo.record_snapshots(
+                    order[start : start + SNAPSHOT_PAGE]
+                )
+            return
+        offset = 0
+        while True:
+            snaps = self._repo.snapshots_page(kind, offset, SNAPSHOT_PAGE)
+            yield from snaps
+            if len(snaps) < SNAPSHOT_PAGE:
+                return
+            offset += len(snaps)
+
+    @staticmethod
+    def _why_refused(problems: list[str]) -> str:
+        """The distinct reasons, most common first, so a thousand records with
+        the same cause read as one line."""
+        counts: dict[str, int] = {}
+        for p in problems:
+            counts[p] = counts.get(p, 0) + 1
+        top = sorted(counts.items(), key=lambda kv: -kv[1])[:3]
+        return " ".join(f"{n} \u00d7 {why}." for why, n in top)
+
     def _seed(self, transport: SyncTransport) -> None:
         """Give an empty authority everything this project holds. Each thing is
         sent as a create with an id made from the project and the thing, so an
@@ -803,37 +832,31 @@ class SyncService:
             batch = []
 
         for kind in ENTITY_ORDER:
-            offset = 0
-            while True:
-                snaps = self._repo.snapshots_page(kind, offset, SNAPSHOT_PAGE)
-                for snap in snaps:
-                    now = datetime.now(timezone.utc)
-                    batch.append(
-                        SyncEntry(
-                            id=uuid.uuid5(meta.project_id, f"seed:{kind}:{snap['id']}"),
-                            action="create",
-                            entity_type=kind,
-                            entity_id=uuid.UUID(snap["id"]),
-                            old_data=None,
-                            new_data=snap,
-                            timestamp=now.isoformat(),
-                            actor=actor,
-                            device_id=device_id,
-                            hlc=hlc.tick(
-                                self._repo.latest_hlc(), int(now.timestamp() * 1000)
-                            ),
-                        )
+            for snap in self._seed_snapshots(kind):
+                now = datetime.now(timezone.utc)
+                batch.append(
+                    SyncEntry(
+                        id=uuid.uuid5(meta.project_id, f"seed:{kind}:{snap['id']}"),
+                        action="create",
+                        entity_type=kind,
+                        entity_id=uuid.UUID(snap["id"]),
+                        old_data=None,
+                        new_data=snap,
+                        timestamp=now.isoformat(),
+                        actor=actor,
+                        device_id=device_id,
+                        hlc=hlc.tick(
+                            self._repo.latest_hlc(), int(now.timestamp() * 1000)
+                        ),
                     )
-                    if len(batch) >= PUSH_BATCH:
-                        flush()
-                if len(snaps) < SNAPSHOT_PAGE:
-                    break
-                offset += len(snaps)
+                )
+                if len(batch) >= PUSH_BATCH:
+                    flush()
         flush()
         if problems:
             raise SyncError(
-                f"The server refused {len(problems)} thing(s) while being filled: "
-                f"{problems[0]}",
+                f"The server refused {len(problems)} thing(s) while being filled. "
+                f"{self._why_refused(problems)}",
                 retryable=False,
             )
         self._repo.mark_all_synced()
