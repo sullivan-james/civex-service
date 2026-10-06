@@ -63,7 +63,12 @@ now fails the job.
 |---|---|
 | `DOCS_PUSH_TOKEN` | A **fine-grained** PAT scoped to `CivexData/civex-docs` only, permission `Contents: Read and write`. Not a classic token, not org-wide. |
 
-Set with `gh secret set DOCS_PUSH_TOKEN --repo CivexData/civex-service`.
+Set with `gh secret set DOCS_PUSH_TOKEN --repo sullivan-james/civex-service`.
+
+`civex-service` lives under a personal account while `civex-docs` stays in the
+`CivexData` org, so when creating the token set its **resource owner** to
+`CivexData` (the org must allow fine-grained tokens, and the token's creator
+needs write access to `civex-docs`).
 
 ## What is excluded from the published site
 

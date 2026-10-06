@@ -5,7 +5,7 @@
 Dependencies and the venv are managed by [uv](https://docs.astral.sh/uv/) — it reads `pyproject.toml`, resolves against the committed `uv.lock`, and provisions a matching Python 3.12 itself (see `.python-version`) if the system doesn't have one.
 
 ```bash
-git clone https://github.com/CivexData/civex-service
+git clone https://github.com/sullivan-james/civex-service
 cd civex-service
 make install           # uv sync --extra server --extra workflows --extra dev --extra docs
 make frontend-install  # cd frontend && npm ci
