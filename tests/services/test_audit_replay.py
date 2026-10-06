@@ -1,19 +1,20 @@
-"""History is complete: the last entry about anything says what it is now.
+"""History is complete: replaying the entries about anything gives what it is now.
 
 Sync will send these entries and nothing else, so a change that wrote no entry
 (or a stale one) would never reach another device. This does everything a
-person can do to schemas, fields, collections, views and records, then checks
-that for every thing the last history entry matches what is in the database."""
+person can do to schemas, fields, collections, views and records, then, for
+every thing, starts from its create and applies each entry in the order written
+(an edit stores only what changed) and checks the result is what is in the
+database."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
 
-from sqlalchemy import text
-
 from civex.context import AppContext
 from civex.db.models import AuditLog
+from civex.domain.audit_diff import AFTER, apply_delta, entry_snapshots
 
 
 def _json(value: Any) -> Any:
@@ -21,9 +22,7 @@ def _json(value: Any) -> Any:
 
 
 def _entries(ctx: AppContext) -> dict[tuple[str, Any], list[AuditLog]]:
-    rows = (
-        ctx._session.query(AuditLog).order_by(AuditLog.timestamp, text("rowid")).all()
-    )
+    rows = ctx._session.query(AuditLog).order_by(AuditLog.local_seq).all()
     by_thing: dict[tuple[str, Any], list[AuditLog]] = {}
     for row in rows:
         by_thing.setdefault((row.entity_type, row.entity_id), []).append(row)
@@ -49,6 +48,25 @@ def _current(ctx: AppContext, kind: str, entity_id: Any) -> dict[str, Any] | Non
     return _json(found.to_dict()) if found is not None else None
 
 
+def _replayed(rows: list[AuditLog]) -> tuple[dict[str, Any] | None, str | None]:
+    """A thing as its entries leave it, from its create on, and what is wrong
+    with the history if it can't be replayed."""
+    state: dict[str, Any] | None = None
+    for row in rows:
+        if row.action == "create":
+            state = dict(row.new_data or {})
+        elif row.action in ("update", "restore"):
+            if row.delta is None:
+                state = dict(row.new_data or {})
+            elif state is None:
+                return None, f"an {row.action} with nothing before it"
+            else:
+                state = apply_delta(state, row.delta, AFTER)
+        elif row.action == "delete" and state is not None:
+            state = {**state, "deleted_at": row.timestamp.isoformat()}
+    return state, None
+
+
 def _wrong(ctx: AppContext) -> list[str]:
     problems: list[str] = []
     entries = _entries(ctx)
@@ -71,7 +89,7 @@ def _wrong(ctx: AppContext) -> list[str]:
             continue
         if now is None:
             # Purging a schema takes its fields with it; its entry says so.
-            snapshot = last.new_data or last.old_data or {}
+            snapshot = last.new_data or last.old_data or {}  # (identity is enough)
             if kind == "field" and snapshot.get("schema_id") in purged_schemas:
                 continue
             problems.append(f"{kind} {entity_id} is gone with no purge entry")
@@ -80,7 +98,11 @@ def _wrong(ctx: AppContext) -> list[str]:
             if now.get("deleted_at") is None:
                 problems.append(f"{kind} {entity_id}: deleted in history, live now")
             continue
-        expected = _json(last.new_data)
+        replayed, broken = _replayed(rows)
+        if broken:
+            problems.append(f"{kind} {entity_id}: {broken}")
+            continue
+        expected = _json(replayed)
         # A schema or collection delete stamps (and a restore clears) its
         # records in one statement, with no entry each: that cascade is what the
         # entry about the schema means, so a record's own clock isn't compared.
@@ -97,8 +119,8 @@ def _wrong(ctx: AppContext) -> list[str]:
                 k for k in set(expected) | set(now) if expected.get(k) != now.get(k)
             )
             problems.append(
-                f"{kind} {entity_id}: last entry ({last.action}) is out of date "
-                f"on {differs}"
+                f"{kind} {entity_id}: replaying its history (last: {last.action}) "
+                f"gives something else on {differs}"
             )
     return problems
 
@@ -196,7 +218,8 @@ def test_reordering_fields_is_an_edit_of_each_field_that_moved(ctx: AppContext) 
     for field in ctx.schema_svc.get("thing").fields:
         last = entries[("field", field.id)][-1]
         assert last.action == "update"
-        assert last.new_data["position"] == field.position
+        _, new = entry_snapshots(last.old_data, last.new_data, last.delta)
+        assert new["position"] == field.position
 
 
 def test_renaming_a_field_is_recorded_for_the_templates_it_rewrites(
@@ -216,5 +239,6 @@ def test_renaming_a_field_is_recorded_for_the_templates_it_rewrites(
     assert child.display_template == "{place} {rate}"
     last = _entries(ctx)[("schema", child.id)][-1]
     assert last.action == "update"
-    assert last.old_data["display_template"] == "{site} {rate}"
-    assert last.new_data["display_template"] == "{place} {rate}"
+    old, new = entry_snapshots(last.old_data, last.new_data, last.delta)
+    assert old["display_template"] == "{site} {rate}"
+    assert new["display_template"] == "{place} {rate}"

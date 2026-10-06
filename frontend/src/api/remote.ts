@@ -19,6 +19,33 @@ export interface RemoteStatus {
   running: boolean
   /** What the last sync run by this server did (null until one has run). */
   last_result: SyncResult | null
+  /** How far a long step has got while one runs on this server. */
+  progress: SyncProgress | null
+  /** A connect started here is still running (copying can take a while). */
+  connecting: boolean
+  /** Why the last connect started here failed. */
+  connect_error: string | null
+}
+
+export interface SyncDevice {
+  name: string
+  created_at: string
+  last_seen_at: string | null
+  revoked: boolean
+}
+
+export interface Authority {
+  serving: boolean
+  devices: SyncDevice[]
+}
+
+export interface SyncProgress {
+  /** copying: from the authority; filling: an empty authority from here;
+   * history: fetching what happened before this project joined. */
+  phase: 'copying' | 'filling' | 'history' | string
+  done: number
+  total: number | null
+  kind: string | null
 }
 
 export interface SyncResult {
@@ -37,7 +64,15 @@ export type ConflictTake =
 /** A value that did not go in as made. */
 export interface SyncConflict {
   id: string
-  kind: 'conflict' | 'rejected' | 'edit_vs_delete' | 'not_applied' | string
+  /** not_taken: a change to the project's structure (or part of one action)
+   * the server did not take; this copy was put back as the server has it. */
+  kind:
+    | 'conflict'
+    | 'rejected'
+    | 'edit_vs_delete'
+    | 'not_taken'
+    | 'not_applied'
+    | string
   entity_type: string
   entity_id: string
   field: string | null
@@ -118,7 +153,24 @@ export interface ResolveManyResult {
 
 export const remoteApi = {
   status: () => api.get<RemoteStatus>('/remote'),
-  connect: (url: string, token: string) =>
+  /** This project as an authority: whether it accepts devices, and which. */
+  authority: () => api.get<Authority>('/remote/authority'),
+  setServing: (serving: boolean) =>
+    api.patch<Authority>('/remote/authority', { serving }),
+  /** The answer carries the new device's token: the only time it is shown. */
+  addDevice: (name: string) =>
+    api.post<Authority & { token: string }>('/remote/authority/devices', {
+      name,
+    }),
+  revokeDevice: (name: string) =>
+    api.post<Authority>(
+      `/remote/authority/devices/${encodeURIComponent(name)}/revoke`,
+      {},
+    ),
+  /** Starts connecting: the answer comes once the address and token are
+   * checked; copying then runs in the background (see `progress`). Without a
+   * token, the one this computer holds for the address is used. */
+  connect: (url: string, token?: string) =>
     api.post<{ mode: string }>('/remote/connect', { url, token }),
   disconnect: () => api.post<RemoteStatus>('/remote/disconnect', {}),
   syncNow: () => api.post<{ requested: boolean }>('/remote/sync', {}),

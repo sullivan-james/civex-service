@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 def _setup(client: TestClient) -> list[str]:
     client.post("/api/schemas", json={"name": "trial"})
-    client.post("/api/collections", json={"name": "study"})
+    client.post("/api/collections", json={"name": "study", "schemas": ["trial"]})
     ids = []
     for _ in range(3):
         r = client.post(

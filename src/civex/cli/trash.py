@@ -9,6 +9,7 @@ from rich.table import Table
 
 from civex.cli.utils import cli_load_config, get_ctx as _ctx
 from civex.console import console
+from civex.domain.audit_diff import entry_snapshots
 from civex.domain.dtos import DatasetDTO, RecordDTO, SchemaDTO
 from civex.domain.exceptions import NotFoundError
 
@@ -87,7 +88,13 @@ def trash_list(
         if event.entry is not None:
             entry = event.entry
             now = entry.now or {}
-            name = now.get("name") or (entry.old_data or {}).get("name") or "-"
+            old, new = entry_snapshots(entry.old_data, entry.new_data, entry.delta)
+            name = (
+                now.get("name")
+                or (old or {}).get("name")
+                or (new or {}).get("name")
+                or "-"
+            )
             place = now.get("collection") or (
                 f"schema {now['schema_name']}"
                 if now.get("kind") == "field" and now.get("schema_name")

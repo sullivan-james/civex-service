@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import func
+from civex.repositories.local.record_repo import parent_allows_restore
 from sqlalchemy.orm import Session
 
 from civex.repositories.local._jobs import bulk_delete_jobs
@@ -175,10 +176,16 @@ class LocalDatasetRepository:
         return cascade.count() if cascade is not None else 0
 
     def _cascade_query(self, id: uuid.UUID, deleted_at: datetime | None):
+        """The records restoring the collection brings back: deleted with it,
+        and not beneath a record still deleted on its own (see
+        `parent_allows_restore`). A parent deleted with the collection comes
+        back with it, so its children may too."""
         if deleted_at is None:
             return None
         return self._s.query(Record).filter(
-            Record.dataset_id == id, Record.deleted_at == deleted_at
+            Record.dataset_id == id,
+            Record.deleted_at == deleted_at,
+            parent_allows_restore(Record, deleted_at),
         )
 
     def purge(self, id: uuid.UUID) -> None:

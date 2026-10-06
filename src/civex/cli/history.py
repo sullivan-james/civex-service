@@ -223,3 +223,70 @@ def history_revert(
         console.print(f"[success]Put back: {', '.join(result.applied)}.[/success]")
     else:
         console.print("[success]Reverted.[/success]")
+
+
+@app.command("compact")
+def compact(
+    vacuum: bool = typer.Option(
+        False,
+        "--vacuum",
+        help="Afterwards, give the room this frees back to the disk (SQLite). "
+        "Needs about the database file's size in free disk while it runs.",
+    ),
+) -> None:
+    """Store history written before this version as what changed rather than
+    two whole copies of a thing per edit. The server does this by itself in the
+    background; this does it now, with a progress bar. Each entry is checked to
+    read the same before it is rewritten, and stopping (Ctrl+C) loses nothing:
+    running it again carries on."""
+    from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
+
+    from civex.cli.utils import format_bytes
+
+    c = _ctx()
+    try:
+        total = c.compaction_svc.remaining()
+        converted = kept = 0
+        if total:
+            with Progress(
+                TextColumn("Converting history"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                console=console,
+                transient=True,
+            ) as bar:
+                task = bar.add_task("history", total=total)
+                while True:
+                    step = c.compaction_svc.step()
+                    c.commit()
+                    converted += step.converted
+                    kept += step.kept
+                    bar.update(task, completed=total - step.remaining)
+                    if step.remaining == 0 or step.converted + step.kept == 0:
+                        break
+        console.print(
+            f"Converted {converted} entr{'y' if converted == 1 else 'ies'}"
+            + (f"; {kept} kept whole (they would not read the same)" if kept else "")
+            + "."
+        )
+        space = c.compaction_svc.space()
+        if vacuum and space is not None:
+            console.print("Giving the free room back to the disk…")
+            c.commit()
+            c.compaction_svc.reclaim()
+            after = c.compaction_svc.space()
+            if after is not None:
+                console.print(
+                    f"[success]The database is now {format_bytes(after.size_bytes)} "
+                    f"(was {format_bytes(space.size_bytes)}).[/success]"
+                )
+        elif space is not None and space.free_bytes:
+            console.print(
+                f"{format_bytes(space.free_bytes)} of the database file is now unused; "
+                "`civex history compact --vacuum` gives it back to the disk."
+            )
+    except CivexError as e:
+        console.print(f"[error]{escape(str(e))}[/error]")
+        raise typer.Exit(1)
+    finally:
+        c.close()

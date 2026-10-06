@@ -15,6 +15,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from civex.domain.audit_diff import AFTER, apply_delta
+from civex.domain.exceptions import ValidationError
 from civex.domain.sync import SyncEntry
 from civex.repositories.protocols import AuditRepository, SyncRepository
 
@@ -39,11 +41,16 @@ class SyncApplier:
     def apply_state(
         self, kind: str, entity_id: uuid.UUID, state: dict[str, Any]
     ) -> None:
-        """Make the thing exactly `state`. If it is deleted here and `state` is
-        not, it is restored first, so what was deleted with it comes back too."""
+        """Make the thing exactly `state`. Deleting and restoring go the way a
+        person's do: if it is deleted here and `state` is not, it is restored
+        first, so what was deleted with it comes back too; if it is live here
+        and `state` is deleted, it is deleted first, so what goes with it (a
+        schema's or collection's records) goes too, stamped the same."""
         current = self._repo.snapshot(kind, entity_id)
         if current and current.get("deleted_at") and not state.get("deleted_at"):
             self._repo.restore(kind, entity_id)
+        elif current and not current.get("deleted_at") and state.get("deleted_at"):
+            self.apply_delete(kind, entity_id, _stamp(state["deleted_at"]))
         self._repo.apply_snapshot(kind, state)
 
     def apply_delete(self, kind: str, entity_id: uuid.UUID, stamp: datetime) -> None:
@@ -62,10 +69,27 @@ class SyncApplier:
         self._repo.purge(kind, entity_id)
 
     def apply_entry(self, entry: SyncEntry) -> None:
-        """Do what an entry from the authority says."""
-        if entry.action in ("create", "update", "restore") and entry.new_data:
+        """Do what an entry from the authority says. An edit that travels as
+        what changed is put onto the thing as it is here."""
+        if entry.action in ("create", "update", "restore") and entry.delta is not None:
+            current = self._repo.snapshot(entry.entity_type, entry.entity_id)
+            if current is None:
+                raise ValidationError("It is not here to change")
+            self.apply_state(
+                entry.entity_type,
+                entry.entity_id,
+                apply_delta(current, entry.delta, AFTER),
+            )
+        elif entry.action in ("create", "update", "restore") and entry.new_data:
             self.apply_state(entry.entity_type, entry.entity_id, entry.new_data)
         elif entry.action == "delete":
             self.apply_delete(entry.entity_type, entry.entity_id, stamp_of(entry))
         elif entry.action == "purge":
             self.apply_purge(entry.entity_type, entry.entity_id)
+
+
+def _stamp(value: str | datetime) -> datetime:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)

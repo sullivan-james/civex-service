@@ -1,11 +1,7 @@
 import { Link } from 'react-router'
 import { useBackgroundTasks } from '../../hooks/useBackgroundTasks'
-import {
-  barPercent,
-  type BackgroundTask,
-  type TaskAction,
-} from '../../utils/backgroundTasks'
-import { Button } from '../ui'
+import type { BackgroundTask, TaskAction } from '../../utils/backgroundTasks'
+import { Button, ProgressBar } from '../ui'
 
 function Action({ action }: { action: TaskAction }) {
   if (action.to)
@@ -29,7 +25,6 @@ function Action({ action }: { action: TaskAction }) {
 function TaskRow({ task }: { task: BackgroundTask }) {
   const Icon = task.icon
   const attention = task.tone === 'attention'
-  const pct = task.progress ? barPercent(task.progress.fraction) : null
   return (
     <div
       className={`px-4 py-2 text-sm ${
@@ -45,20 +40,11 @@ function TaskRow({ task }: { task: BackgroundTask }) {
           aria-hidden="true"
         />
         <p className={task.progress ? 'font-medium' : ''}>{task.title}</p>
-        {task.progress && pct !== null && (
-          <div
-            role="progressbar"
-            aria-label={task.progress.label}
-            aria-valuenow={pct}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            className="h-2 w-40 overflow-hidden rounded-full bg-canvas-inset sm:w-64"
-          >
-            <div
-              className="h-full bg-accent transition-[width]"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
+        {task.progress && (
+          <ProgressBar
+            fraction={task.progress.fraction}
+            label={task.progress.label}
+          />
         )}
         {task.detail && <p className="text-fg-muted">{task.detail}</p>}
         {task.note && <span className="text-fg-muted">{task.note}</span>}

@@ -18,6 +18,9 @@ const base = {
   last_error_at: null,
   running: false,
   last_result: null,
+  progress: null,
+  connecting: false,
+  connect_error: null,
 }
 
 function tasksFor(status: Record<string, unknown>) {
@@ -73,5 +76,31 @@ describe('useSyncTasks', () => {
     expect(result.current[0].actions).toEqual([
       { label: 'Review', to: '/sync/review' },
     ])
+  })
+
+  it('shows a copy from the server with a bar and what it is on', async () => {
+    const { result } = tasksFor({
+      ...base,
+      configured: false,
+      connecting: true,
+      progress: { phase: 'copying', done: 50, total: 200, kind: 'record' },
+    })
+    await waitFor(() => expect(result.current).toHaveLength(1))
+    expect(result.current[0]).toMatchObject({
+      title: 'Copying the project from the server',
+      progress: { fraction: 0.25 },
+      tone: 'info',
+    })
+    expect(result.current[0].detail).toContain('records')
+  })
+
+  it('says when connecting stopped', async () => {
+    const { result } = tasksFor({ ...base, connect_error: 'Server went away' })
+    await waitFor(() => expect(result.current).toHaveLength(1))
+    expect(result.current[0]).toMatchObject({
+      title: 'Could not connect',
+      tone: 'attention',
+      detail: 'Server went away',
+    })
   })
 })

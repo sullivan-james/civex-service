@@ -92,6 +92,13 @@ class SyncEntry:
     # value); a later entry carries the state it settled on, so a device skips
     # applying this one.
     superseded: bool = False
+    # An edit or a restore travels as what changed (`audit_diff.make_delta`),
+    # with `new_data` the thing's identity and no `old_data`; a create carries
+    # the thing as made and a delete the thing as it was (`stored_form`).
+    delta: dict[str, Any] | None = None
+    # The action it is part of (`audit_log.op_id`): an authority takes the
+    # entries sharing it together or not at all. None for one on its own.
+    op: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -108,6 +115,8 @@ class SyncEntry:
             "batch": self.batch.to_dict() if self.batch else None,
             "hub_seq": self.hub_seq,
             "superseded": self.superseded,
+            "delta": self.delta,
+            "op": self.op,
         }
 
     @classmethod
@@ -126,6 +135,8 @@ class SyncEntry:
             batch=SyncBatchInfo.from_dict(d["batch"]) if d.get("batch") else None,
             hub_seq=d.get("hub_seq"),
             superseded=bool(d.get("superseded", False)),
+            delta=d.get("delta"),
+            op=str(d["op"]) if d.get("op") else None,
         )
 
 
@@ -138,10 +149,15 @@ def problem_with(entry: SyncEntry, now: datetime | None = None) -> str | None:
         return f"Unknown kind '{entry.entity_type}'"
     if entry.action not in ACTIONS:
         return f"Unknown action '{entry.action}'"
-    for name in ("old_data", "new_data"):
+    for name in ("old_data", "new_data", "delta"):
         value = getattr(entry, name)
         if value is not None and not isinstance(value, dict):
             return f"{name} is not an object"
+    for path, change in (entry.delta or {}).items():
+        if not isinstance(change, dict) or not set(change) <= {"before", "after"}:
+            return f"The change to {path} is not a before and after"
+    if entry.delta is not None and entry.action not in ("update", "restore"):
+        return f"A '{entry.action}' carries the thing itself, not what changed"
     if entry.action in ("create", "update", "restore") and (
         not entry.new_data or str(entry.new_data.get("id")) != str(entry.entity_id)
     ):
@@ -238,6 +254,12 @@ class Hello:
     empty: bool  # holds none of the project's things yet
     seeded_by: str | None  # the device that put the first data in, if any
     device_name: str  # what the token the caller used is called
+    # How many of each kind it holds (deleted ones too), so a device copying
+    # it can say how far along it is.
+    counts: dict[str, int] = field(default_factory=dict)
+    # The highest number its feed no longer holds (pruned): a device that has
+    # not read past it can't catch up from the feed, and copies again.
+    feed_floor: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -247,6 +269,8 @@ class Hello:
             "empty": self.empty,
             "seeded_by": self.seeded_by,
             "device_name": self.device_name,
+            "counts": self.counts,
+            "feed_floor": self.feed_floor,
         }
 
     @classmethod
@@ -258,19 +282,51 @@ class Hello:
             empty=bool(d["empty"]),
             seeded_by=d.get("seeded_by"),
             device_name=d.get("device_name", ""),
+            counts={k: int(v) for k, v in (d.get("counts") or {}).items()},
+            feed_floor=int(d.get("feed_floor") or 0),
         )
+
+
+# What copying a project is doing, for whoever shows how far along it is.
+COPYING = "copying"  # a device joining: reading the authority's things
+FILLING = "filling"  # a device filling an empty authority with its own
+HISTORY = "history"  # a joined device fetching the history from before it joined
+
+
+@dataclass
+class SyncProgress:
+    """How far a long sync step has got: `done` of `total` (None when unknown),
+    and the kind of thing it is on."""
+
+    phase: str
+    done: int
+    total: int | None
+    kind: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "phase": self.phase,
+            "done": self.done,
+            "total": self.total,
+            "kind": self.kind,
+        }
 
 
 @dataclass
 class SnapshotPage:
     """A page of one kind of thing as it is now, for a device joining the
     project. Read with the authority's `head_seq` taken *first*, so anything
-    that changes while a device reads is picked up from the feed afterwards."""
+    that changes while a device reads is picked up from the feed afterwards.
+
+    `next` is where the following page starts (`snapshot_cursor` of the last
+    item): pages follow on from a thing, not from a count, so something removed
+    meanwhile can't shift a page past something that never changed."""
 
     kind: str
     items: list[dict[str, Any]]
     more: bool
     head_seq: int
+    next: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -278,11 +334,32 @@ class SnapshotPage:
             "items": self.items,
             "more": self.more,
             "head_seq": self.head_seq,
+            "next": self.next,
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> SnapshotPage:
-        return cls(d["kind"], list(d["items"]), bool(d["more"]), int(d["head_seq"]))
+        return cls(
+            d["kind"],
+            list(d["items"]),
+            bool(d["more"]),
+            int(d["head_seq"]),
+            d.get("next"),
+        )
+
+
+def snapshot_cursor(snapshot: dict[str, Any]) -> str:
+    """Where a page that ends on `snapshot` continues: things are read in order
+    of when they were made, then id, so this names a place in that order."""
+    return f"{snapshot['created_at']}|{snapshot['id']}"
+
+
+def parse_snapshot_cursor(cursor: str) -> tuple[str, str]:
+    """(created_at, id) from a `snapshot_cursor`, or ValueError."""
+    created_at, sep, id_ = cursor.rpartition("|")
+    if not sep or not created_at or not id_:
+        raise ValueError(f"Not a page cursor: {cursor!r}")
+    return created_at, id_
 
 
 class SyncError(RuntimeError):
@@ -306,6 +383,11 @@ class SyncMetaDTO:
     last_synced_at: str | None
     last_error: str | None
     last_error_at: str | None
+    # Authority: the highest number its feed no longer holds (pruned).
+    feed_floor: int = 0
+    # Device: history up to this number (where it joined) is still to be
+    # fetched from the authority; None when it holds all of it.
+    history_from: int | None = None
 
 
 @dataclass
@@ -404,7 +486,7 @@ class SyncTransport(Protocol):
     def hello(self) -> Hello: ...
     def push(self, entries: list[SyncEntry]) -> PushResult: ...
     def feed(self, after: int, limit: int) -> FeedPage: ...
-    def snapshot(self, kind: str, offset: int, limit: int) -> SnapshotPage: ...
+    def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage: ...
     def missing_files(self, shas: list[str]) -> list[str]: ...
     def upload_file(self, sha256: str, path: Path) -> None: ...
     def download_file(self, sha256: str, dest: Path) -> None: ...

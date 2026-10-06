@@ -67,7 +67,9 @@ def test_a_restore_has_no_changes(ctx: AppContext, thing):
     entry = _entries(ctx, thing, "restore")[0]
     assert entry.changes == []
     ids = {f.name: str(f.id) for f in ctx.schema_svc.get("thing").fields}
-    assert set(entry.old_data["data"]) == {ids["title"], ids["count"]}
+    # The delete before it holds the record whole, by field id.
+    deleted = _entries(ctx, thing, "delete")[0]
+    assert set(deleted.old_data["data"]) == {ids["title"], ids["count"]}
 
 
 def test_a_snapshot_keyed_by_field_id_is_read_by_name(ctx: AppContext, thing):

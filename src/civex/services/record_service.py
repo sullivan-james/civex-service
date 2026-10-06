@@ -1248,8 +1248,28 @@ class RecordService:
         )
         if dataset is None or dataset.deleted_at is not None:
             raise ValidationError("The record's collection does not exist here")
+        # A record can't be live inside something deleted: an edit that meets
+        # a delete keeps the record itself, never brings it back into a
+        # deleted schema or under a deleted parent (restore says the same:
+        # `restore_plan` is blocked by them).
+        if shape.schema.deleted_at is not None:
+            raise ValidationError(
+                f"Its schema '{shape.schema.name}' was deleted on the server"
+            )
+        coming_back = head is None or bool(head.get("deleted_at"))
+        if parent_id is not None and coming_back:
+            # Made, or brought back, under a record that is deleted: what a
+            # person's add or restore here would be refused. (A record already
+            # live under one, left by deleting a parent schema, can still be
+            # edited, as it can here.)
+            above = self._records.get_by_id(parent_id, include_deleted=True)
+            if above is not None and above.deleted_at is not None:
+                raise ValidationError(
+                    "The record it sits under was deleted on the server"
+                )
 
-        if head is None:
+        if head is None or head.get("deleted_at"):
+            # Made, or brought back: only where it could be added.
             self._check_schema_allowed(dataset, shape.schema)
             if shape.schema.parent_id:
                 parent = self._records.get_by_id(parent_id) if parent_id else None
@@ -2298,6 +2318,10 @@ class RecordService:
         # with, so every device that applies these entries stamps them alike.
         stamp = _dt.now(timezone.utc)
         if self._audit:
+            # Each tree is one action: a record and everything beneath it go
+            # together or not at all (a child left live under a deleted parent
+            # is not a project), but separate trees deleted at once don't.
+            tree = _tree_actions(records)
             with _audit_batch(self._audit, "delete", len(records) > 1):
                 for record in records:
                     self._audit.log_change(
@@ -2307,6 +2331,7 @@ class RecordService:
                         self._snapshot(record),
                         None,
                         timestamp=stamp,
+                        op=tree[record.id],
                     )
         self._records.delete_many(every, stamp)
         requested = set(ids)
@@ -2603,16 +2628,7 @@ class RecordService:
         if every:
             before = {r.id: self._snapshot(r) for r in self._records.list_by_ids(every)}
             self._records.restore_many(every)
-            if self._audit:
-                with _audit_batch(self._audit, "restore", len(every) > 1):
-                    for restored in self._records.list_by_ids(every):
-                        self._audit.log_change(
-                            "restore",
-                            "record",
-                            restored.id,
-                            before[restored.id],
-                            self._snapshot(restored),
-                        )
+            self._log_restored(every, before)
         back = set(every)
         # Held back, or waiting for a parent that was not deleted with them:
         # whatever is not live now is left for the next round.
@@ -2679,16 +2695,7 @@ class RecordService:
         if every:
             before = {r.id: self._snapshot(r) for r in self._records.list_by_ids(every)}
             self._records.restore_many(every)
-            if self._audit:
-                with _audit_batch(self._audit, "restore", len(every) > 1):
-                    for restored in self._records.list_by_ids(every):
-                        self._audit.log_change(
-                            "restore",
-                            "record",
-                            restored.id,
-                            before[restored.id],
-                            self._snapshot(restored),
-                        )
+            self._log_restored(every, before)
         return RestoreSetResultDTO(
             restored=len([rid for rid in every if rid in chosen]),
             came_back=len(every),
@@ -2812,17 +2819,36 @@ class RecordService:
             )
         before = {r.id: self._snapshot(r) for r in self._records.list_by_ids(every)}
         self._records.restore_many(every)
-        if self._audit:
-            with _audit_batch(self._audit, "restore", len(every) > 1):
-                for restored in self._records.list_by_ids(every):
-                    self._audit.log_change(
-                        "restore",
-                        "record",
-                        restored.id,
-                        before[restored.id],
-                        self._snapshot(restored),
-                    )
+        self._log_restored(every, before)
         return self.get(str(record.id))
+
+    def _log_restored(
+        self, every: list[uuid.UUID], before: dict[uuid.UUID, dict[str, Any]]
+    ) -> None:
+        """History for records just brought back: parents before what sits
+        under them (a child can't come back under a parent still deleted, here
+        or wherever the entries are applied next), each tree one action."""
+        if not self._audit:
+            return
+        restored = _parents_first(self._records.list_by_ids(every))
+        tree = _tree_actions(restored)
+        with _audit_batch(self._audit, "restore", len(every) > 1):
+            for record in restored:
+                self._audit.log_change(
+                    "restore",
+                    "record",
+                    record.id,
+                    before[record.id],
+                    self._snapshot(record),
+                    op=tree[record.id],
+                )
+
+    @property
+    def records_repo(self) -> RecordRepository:
+        """The repository records are stored in, for the services whose actions
+        change records as a side effect (a collection's delete takes its
+        records) and say so in history (`services/cascades`)."""
+        return self._records
 
     def purgeable_deleted(
         self, cutoff: _dt
@@ -2958,3 +2984,37 @@ class RecordService:
                 self._records.dangling_references([uuid.UUID(f) for f in field_map])
             )
         ]
+
+
+def _tree_actions(records: list[RecordDTO]) -> dict[uuid.UUID, uuid.UUID]:
+    """An action id per tree among `records`: each record gets the id of the
+    topmost of them it sits under (or its own), so a tree is one action."""
+    parent_of = {r.id: r.parent_record_id for r in records}
+    ops: dict[uuid.UUID, uuid.UUID] = {}
+    out: dict[uuid.UUID, uuid.UUID] = {}
+    for record in records:
+        root = record.id
+        while parent_of.get(root) in parent_of:
+            root = parent_of[root]  # type: ignore[assignment]
+        out[record.id] = ops.setdefault(root, uuid.uuid4())
+    return out
+
+
+def _parents_first(records: list[RecordDTO]) -> list[RecordDTO]:
+    """`records` with each after the one among them it sits under."""
+    by_id = {r.id: r for r in records}
+    placed: set[uuid.UUID] = set()
+    out: list[RecordDTO] = []
+
+    def place(record: RecordDTO) -> None:
+        if record.id in placed:
+            return
+        above = by_id.get(record.parent_record_id) if record.parent_record_id else None
+        if above is not None:
+            place(above)
+        placed.add(record.id)
+        out.append(record)
+
+    for record in records:
+        place(record)
+    return out

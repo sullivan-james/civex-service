@@ -43,6 +43,16 @@ class SyncHelloResponse(BaseModel):
         default=None, description="The device that put the first data in, if any."
     )
     device_name: str = Field(description="What the token used is called here.")
+    feed_floor: int = Field(
+        default=0,
+        description="The highest number the feed no longer holds (history pruned "
+        "here). A device whose cursor is below it copies the project again.",
+    )
+    counts: dict[str, int] = Field(
+        default_factory=dict,
+        description="How many of each kind it holds, deleted ones included, so a "
+        "device copying it can show how far along it is.",
+    )
 
 
 class SyncPushRequest(BaseModel):
@@ -97,6 +107,10 @@ class SyncSnapshotResponse(BaseModel):
     head_seq: int = Field(
         description="Taken before reading: what changes meanwhile is in the feed past it."
     )
+    next: str | None = Field(
+        default=None,
+        description="Pass as `after` for the next page; null on the last page.",
+    )
 
 
 class SyncFilesRequest(BaseModel):
@@ -116,7 +130,14 @@ class Peer:
     device_id: str | None
 
 
-def peer(request: Request, ctx: AppContext = Depends(get_ctx)) -> Peer:
+def peer(
+    request: Request,
+    # scope="function": the work is committed before the answer is sent. With
+    # the default, the commit runs after, and a commit that then fails (the
+    # database busy, a full disk) would still have told the device "done": it
+    # would never send those changes again, and they would be lost.
+    ctx: AppContext = Depends(get_ctx, scope="function"),
+) -> Peer:
     """Who is calling: a device with a valid token, on a server set to serve."""
     root = find_project_root()
     if root is None or not read_sync_flag(root / "_civex", "serve"):
@@ -177,7 +198,9 @@ def feed(
 @router.get("/snapshot/{kind}", response_model=SyncSnapshotResponse)
 def snapshot(
     kind: str,
-    offset: int = Query(default=0, ge=0),
+    after: str | None = Query(
+        default=None, description="The previous page's `next`; omit for the first."
+    ),
     limit: int = Query(default=200, ge=1, le=500),
     who: Peer = Depends(peer),
 ):
@@ -185,7 +208,7 @@ def snapshot(
     the project: schema, field, dataset, view, record (in that order)."""
     try:
         return SyncSnapshotResponse(
-            **who.ctx.authority_svc.snapshot(kind, offset, limit).to_dict()
+            **who.ctx.authority_svc.snapshot(kind, after, limit).to_dict()
         )
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))

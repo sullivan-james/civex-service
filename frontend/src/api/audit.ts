@@ -128,7 +128,23 @@ export interface RevertResult {
   applied: string[]
 }
 
+/** How history is stored: what is left to convert to what-changed form, how far
+ * the background conversion has got, and the room a reclaim would give back. */
+export interface HistoryStorage {
+  whole_entries: number
+  converting: boolean
+  done: number | null
+  total: number | null
+  /** SQLite only; null where the database manages its own space. */
+  size_bytes: number | null
+  free_bytes: number | null
+}
+
 export const auditApi = {
+  storage: () => api.get<HistoryStorage>('/audit/storage'),
+  /** Give unused room back to the disk (SQLite VACUUM). */
+  reclaimStorage: () => api.post<HistoryStorage>('/audit/storage/reclaim', {}),
+
   /** The fields a history filter may test, with their types and operators. */
   filterFields: () => api.get<RunFilterField[]>('/audit/filter-fields'),
 

@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
@@ -24,6 +24,7 @@ from typing import Any
 from civex import user_state
 from civex.config import Config, save_config
 from civex.domain import hlc
+from civex.domain.audit_diff import BEFORE, apply_delta, entry_snapshots
 from civex.domain.exceptions import (
     CivexError,
     ConflictMovedError,
@@ -35,12 +36,17 @@ from civex.domain.sync import (
     DEFERRED,
     ENTITY_ORDER,
     PROTOCOL_VERSION,
+    COPYING,
+    FILLING,
+    HISTORY,
     REJECTED,
     Hello,
     SyncConflictDTO,
     SyncEntry,
     SyncError,
+    SyncProgress,
     SyncTransport,
+    snapshot_cursor,
 )
 from civex.identity import local_actor
 from civex.repositories.protocols import (
@@ -62,6 +68,10 @@ SNAPSHOT_PAGE = 200
 _NOW: Any = object()
 
 TransportFactory = Callable[[str, str, str], SyncTransport]
+# The cursor while a copy from the authority is being made (`_join`).
+JOINING = -1
+# Told how far a long step (copying, filling, fetching history) has got.
+ProgressFn = Callable[[SyncProgress], None]
 
 
 log = logging.getLogger(__name__)
@@ -266,8 +276,9 @@ class SyncService:
         entry = self._repo.get_entry(conflict.op_id) if conflict.op_id else None
         if entry is None:
             return None, {}
-        before = (entry.old_data or {}).get("data") or {}
-        after = (entry.new_data or {}).get("data") or {}
+        old, new = entry_snapshots(entry.old_data, entry.new_data, entry.delta)
+        before = (old or {}).get("data") or {}
+        after = (new or {}).get("data") or {}
         if entry.action == "delete":
             # A delete sets nothing. What there is to see is what the other side
             # did meanwhile (the reason it was not applied): the record as it was
@@ -289,8 +300,9 @@ class SyncService:
         entry = self._repo.get_entry(conflict.op_id) if conflict.op_id else None
         if entry is None:
             return []
-        before = (entry.old_data or {}).get("data") or {}
-        after = (entry.new_data or {}).get("data") or {}
+        old, new = entry_snapshots(entry.old_data, entry.new_data, entry.delta)
+        before = (old or {}).get("data") or {}
+        after = (new or {}).get("data") or {}
         clashing = {_field_id(c) for c in rows if c.op_id == conflict.op_id}
         return [
             fid
@@ -302,19 +314,32 @@ class SyncService:
     # Connecting
     # ------------------------------------------------------------------
 
-    def connect(self, url: str, token: str) -> str:
-        """Point this project at an authority. What happens depends on who holds
-        data: an empty project **joins** one that has some (it becomes a copy), an
-        empty authority is **seeded** from a project that has some, and when both
-        are empty they simply agree on a project id. Both holding data is refused:
-        merging two histories needs a person to say which names are the same
-        things, and that is not offered yet. Returns `joined`, `seeded`, `empty` or
-        `resumed`."""
+    def check_connect(self, url: str, token: str | None) -> str:
+        """What connecting to this authority would do, found out without doing
+        it: the address is read, the token and protocol accepted, and who holds
+        data decided. Quick, so a mistake is said at once even when the copying
+        itself then runs in the background. Returns the mode `connect` would."""
+        return self._plan_connect(url, token)[0]
+
+    def _token(self, url: str, token: str | None) -> str:
+        """The token to connect with: the one given, else the one this computer
+        already holds for that address (connecting again after a copy stopped
+        part way). The one rule both the app and the CLI connect through."""
+        held = token or user_state.token_for(url)
+        if not held:
+            raise SyncError(
+                "A device token is needed: this computer has none for that address",
+                retryable=False,
+            )
+        return held
+
+    def _plan_connect(self, url: str, token: str | None) -> tuple[str, Hello, str, str]:
         url = url.strip().rstrip("/")
         if not url.startswith(("http://", "https://")):
             raise SyncError(
                 "The address must start with http:// or https://", retryable=False
             )
+        token = self._token(url, token)
         meta = self._repo.meta()
         probe = self._make_transport(
             url, token, str(user_state.device_id_for(meta.project_id))
@@ -326,13 +351,15 @@ class SyncService:
         mine = str(user_state.device_id_for(meta.project_id))
         if hello.project_id == meta.project_id:
             # Connected before. A first push that never finished leaves the
-            # cursor at zero with this device named as the one that began it.
+            # cursor at zero with this device named as the one that began it;
+            # a copy that never finished leaves it at JOINING (or nothing here).
             unfinished = hello.seeded_by == mine and meta.cursor == 0
-            mode = (
-                "seeded"
-                if not local_empty and (hello.empty or unfinished)
-                else "resumed"
-            )
+            if meta.cursor == JOINING or (local_empty and not hello.empty):
+                mode = "joined"
+            elif not local_empty and (hello.empty or unfinished):
+                mode = "seeded"
+            else:
+                mode = "resumed"
         elif local_empty and hello.empty:
             mode = "empty"
         elif local_empty:
@@ -346,11 +373,36 @@ class SyncService:
                 "project to copy the server's, or point an empty server here.",
                 retryable=False,
             )
+        return mode, hello, url, token
+
+    def connect(
+        self, url: str, token: str | None, progress: ProgressFn | None = None
+    ) -> str:
+        """Point this project at an authority. What happens depends on who holds
+        data: an empty project **joins** one that has some (it becomes a copy), an
+        empty authority is **seeded** from a project that has some, and when both
+        are empty they simply agree on a project id. Both holding data is refused:
+        merging two histories needs a person to say which names are the same
+        things, and that is not offered yet. Returns `joined`, `seeded`, `empty` or
+        `resumed`.
+
+        `progress` hears how far copying has got. A joined project is usable
+        once it returns; the history from before it joined is fetched after
+        (`fetch_history`), by whatever runs sync next."""
+        mode, hello, url, token = self._plan_connect(url, token)
+        meta = self._repo.meta()
 
         # The project takes the authority's id; the device keeps its identity.
         if hello.project_id != meta.project_id:
             self._repo.set_project_id(hello.project_id)
             user_state.move_device(meta.project_id, hello.project_id)
+            # Where this project had got to, and what it was waiting to have
+            # reviewed, were about the authority it followed before.
+            self._repo.set_cursor(0)
+            self._repo.resolve_conflicts(
+                [c.id for c in self._repo.find_open_conflicts()],
+                "followed another server",
+            )
             self._commit()
         user_state.save_token(url, token)
         self._config.sync.remote = url
@@ -359,9 +411,9 @@ class SyncService:
         with sync_lock(self._config.civex_dir):
             transport = self._transport()
             if mode == "joined":
-                self._join(transport)
+                self._join(transport, hello, progress)
             elif mode == "seeded":
-                self._seed(transport)
+                self._seed(transport, progress)
             else:
                 self._repo.set_cursor(
                     hello.head_seq if mode == "empty" else self._repo.meta().cursor
@@ -378,6 +430,12 @@ class SyncService:
         save_config(self._config)
         if remote:
             user_state.forget_token(remote)
+
+    def set_serving(self, on: bool) -> None:
+        """Whether this project accepts devices (is an authority for them). Their
+        tokens stay on record either way."""
+        self._config.sync.serve = on
+        save_config(self._config)
 
     def set_paused(self, paused: bool) -> None:
         self._config.sync.paused = paused
@@ -471,7 +529,15 @@ class SyncService:
             raise SyncError(
                 "The server holds a different project from this one", retryable=False
             )
+        if meta.cursor == JOINING:
+            raise SyncError(
+                "Copying the project from the server did not finish. Connect again "
+                "to finish it.",
+                retryable=False,
+            )
         report = SyncReport()
+        if meta.cursor < hello.feed_floor:
+            self._copy_again(transport, hello, report)
         report.pulled += self._pull(transport)
         report.pushed += self._push(transport, report)
         if check_files:
@@ -514,37 +580,28 @@ class SyncService:
         and caught up once the push has settled the thing, whatever the outcome
         (merged, or refused): applying it then is what keeps this device from
         being left behind."""
-        waiting = (entry.entity_type, entry.entity_id) in dirty
-        if entry.superseded or self._repo.has_newer_state(
-            entry.entity_type, entry.entity_id, entry.hub_seq or 0
-        ):
-            # Not where the thing ended up: the authority settled on something
-            # else, or a change of ours that it numbered later already stands.
-            # Applying it would roll the thing back.
+        thing = (entry.entity_type, entry.entity_id)
+        if entry.superseded:
             state = "superseded"
-        elif waiting:
+        elif thing in dirty:
             state = "held"
         else:
             state = "applied"
-            self._apply(entry)
         self._repo.insert_entry(entry, hub_seq=entry.hub_seq, apply_state=state)
-        if state == "applied" and entry.action in ("create", "update", "restore"):
-            self._reapply_later_delete(entry)
+        if state == "applied":
+            self._replay(thing, entry.hub_seq or 0)
 
-    def _reapply_later_delete(self, entry: SyncEntry) -> None:
-        """A change can reach this device after a delete the authority numbered
-        later (the delete was ours, and its answer came first). The state just
-        applied would undo it, so the delete is applied again: it is the end."""
-        thing = (entry.entity_type, entry.entity_id)
-        entries = self._repo.effective_entries({thing}).get(thing) or []
-        if (
-            entries
-            and entries[-1][1] in ("delete", "purge")
-            and entries[-1][0] != entry.id
-        ):
-            last = self._repo.get_entry(entries[-1][0])
-            if last is not None:
-                self._apply(last)
+    def _replay(self, thing: tuple[str, uuid.UUID], from_seq: int) -> None:
+        """Bring a thing to where the authority's numbered changes leave it,
+        from `from_seq` on: each in turn, in the authority's order. Every
+        numbered change it did not supersede is a step the authority took (an
+        edit as made, the state it settled on, its own edits), so taking the
+        same steps in the same order ends in the same place. Changes of this
+        device's own that were numbered later are already applied here, but
+        they are taken again after the one arriving now, since that is their
+        order; taking a step twice is harmless."""
+        for step in self._repo.numbered_entries(thing[0], thing[1], from_seq):
+            self._apply(step)
 
     def _apply(self, entry: SyncEntry) -> None:
         try:
@@ -564,12 +621,10 @@ class SyncService:
             )
 
     def _catch_up(self) -> set[tuple[str, uuid.UUID]]:
-        """Apply what was held back for things that are free now, but only
-        where a held change is still where the thing ended up. An entry carries a
-        whole state, so applying an old one over a newer would roll the thing
-        back; if this device has since made (and sent) a change of its own, or
-        the authority has settled on something later, the held entries are just
-        history. Returns the things still waiting on a push of this device's own."""
+        """Apply what was held back for things that are free now: each from its
+        first held change on, in the authority's order, together with this
+        device's own changes numbered among them (`_replay`). Returns the things
+        still waiting on a push of this device's own."""
         dirty = self._repo.dirty_entities()
         held = [
             e
@@ -578,34 +633,12 @@ class SyncService:
         ]
         if not held:
             return dirty
-        things = {(e.entity_type, e.entity_id) for e in held}
-        effective = self._repo.effective_entries(things)
-        by_id = {e.id: e for e in held}
-        for thing in things:
-            entries = effective.get(thing) or []
-            # Where it ended up: the last entry that carries a state, and a delete
-            # or purge after it. Each is applied if it is still held; one this
-            # device already has (its own, say) is where the thing already is.
-            carrier = next(
-                (
-                    e
-                    for e in reversed(entries)
-                    if e[1] in ("create", "update", "restore")
-                ),
-                None,
-            )
-            reapplied = bool(carrier and carrier[2] == "held")
-            if reapplied and carrier:
-                self._apply(by_id[carrier[0]])
-            if entries and entries[-1][1] in ("delete", "purge"):
-                last_id, _, last_state = entries[-1]
-                # Applying a state can undo a delete (a restore brings the thing
-                # back), so the delete after it is applied again even when it was
-                # already applied before: it is idempotent, and it is the end.
-                if reapplied or last_state == "held":
-                    last = by_id.get(last_id) or self._repo.get_entry(last_id)
-                    if last is not None:
-                        self._apply(last)
+        first: dict[tuple[str, uuid.UUID], int] = {}
+        for e in held:
+            thing = (e.entity_type, e.entity_id)
+            first[thing] = min(first.get(thing, e.hub_seq or 0), e.hub_seq or 0)
+        for thing, seq in first.items():
+            self._replay(thing, seq)
         self._repo.mark_applied([e.id for e in held])
         self._commit()
         return dirty
@@ -729,59 +762,214 @@ class SyncService:
     # Joining and seeding
     # ------------------------------------------------------------------
 
-    def _join(self, transport: SyncTransport) -> None:
-        """Become a copy of the authority: read everything as it is now, then
-        its history. The number is taken before reading, so whatever changes
-        meanwhile arrives in the feed, and state-based apply makes any overlap
-        harmless."""
-        head: int | None = None
-        for kind in ENTITY_ORDER:
-            offset = 0
-            while True:
-                page = transport.snapshot(kind, offset, SNAPSHOT_PAGE)
-                head = page.head_seq if head is None else head
-                for snap in page.items:
-                    self._repo.apply_snapshot(kind, snap)
-                self._commit()
-                if not page.more:
-                    break
-                offset += len(page.items)
-        head = head or 0
-        self._backfill_history(transport, head)
-        self._repo.set_cursor(head)
+    def _join(
+        self,
+        transport: SyncTransport,
+        hello: Hello,
+        progress: ProgressFn | None = None,
+    ) -> None:
+        """Become a copy of the authority: read everything as it is now. The
+        number is taken before reading, so whatever changes meanwhile arrives in
+        the feed, and applying it over the copy is harmless. Anything changed
+        here while joining is a change of this device's own and is sent like any
+        other. The history from before is not read here: the copy is usable
+        without it, and `fetch_history` brings it after."""
+        # What this project recorded before it joined is about nothing the copy
+        # holds (a joining project is empty), so there is nothing to send. Until
+        # the copy is whole the cursor says so (JOINING): syncing is refused and
+        # connecting again copies again, never a feed applied to half a copy.
         self._repo.mark_all_synced()
+        self._repo.set_cursor(JOINING)
+        self._commit()
+        head, _ = self._copy_state(transport, hello, progress)
+        head = head or 0
+        self._repo.set_cursor(head)
+        self._repo.set_history_from(head or None)
         self._commit()
         self._pull(transport)
 
-    def _backfill_history(self, transport: SyncTransport, upto: int) -> None:
-        """Keep the authority's history as this project's own, without applying
-        it (the snapshot already holds where it all ended up)."""
-        after = 0
-        while after < upto:
-            page = transport.feed(after, FEED_PAGE)
-            for entry in page.entries:
-                if entry.hub_seq is None or entry.hub_seq > upto:
-                    return
-                if not self._repo.has_entry(entry.id):
-                    self._repo.insert_entry(entry, hub_seq=entry.hub_seq)
-                after = entry.hub_seq
-            self._commit()
-            if not page.more:
-                return
+    def _copy_state(
+        self,
+        transport: SyncTransport,
+        hello: Hello,
+        progress: ProgressFn | None = None,
+    ) -> tuple[int, dict[str, set[str]]]:
+        """Write everything the authority holds as it is now, kind by kind.
+        Returns the number taken before reading (what changes meanwhile is in
+        the feed past it) and, by kind, the ids it holds."""
+        total = sum(hello.counts.get(k, 0) for k in ENTITY_ORDER) or None
+        done = 0
+        head: int | None = None
+        held: dict[str, set[str]] = {}
+        for kind in ENTITY_ORDER:
+            # Things that sit under another of their kind that has not arrived
+            # yet (it was made later, on a clock that was ahead): the database
+            # refuses them until it has, so they wait for it, by its id.
+            waiting: dict[str, list[dict[str, Any]]] = {}
+            seen = held.setdefault(kind, set())
+            after: str | None = None
+            while True:
+                page = transport.snapshot(kind, after, SNAPSHOT_PAGE)
+                head = page.head_seq if head is None else head
+                above = {p for snap in page.items if (p := _sits_under(kind, snap))}
+                present = self._repo.existing_ids(kind, above)
+                for snap in page.items:
+                    seen.add(snap["id"])
+                    self._join_one(kind, snap, present, waiting)
+                self._commit()
+                done += len(page.items)
+                if progress:
+                    # Things made while copying can take it past the count.
+                    progress(
+                        SyncProgress(COPYING, done, total and max(total, done), kind)
+                    )
+                if not page.more:
+                    break
+                after = page.next
+            if waiting:
+                # What they sit under was removed for good while the copy was
+                # read, and they went with it there.
+                log.info(
+                    "copying: %d %s(s) whose parent was removed meanwhile were "
+                    "left out",
+                    sum(len(v) for v in waiting.values()),
+                    kind,
+                )
+        return head or 0, held
 
-    def _seed(self, transport: SyncTransport) -> None:
+    def _copy_again(
+        self, transport: SyncTransport, hello: Hello, report: SyncReport
+    ) -> None:
+        """Catch up by copying, when the feed no longer holds what this device
+        has yet to read (the authority pruned its history past its cursor). What
+        this device made and hasn't sent goes first, as in any sync; then
+        everything is written as the authority holds it, and what it no longer
+        holds is removed here, except what this device is still waiting on (a
+        change not sent, or one a person has yet to settle)."""
+        log.info(
+            "sync: the server's history starts after %d and this copy read up to "
+            "%d; copying it again",
+            hello.feed_floor,
+            self._repo.meta().cursor,
+        )
+        report.pushed += self._push(transport, report)
+        head, held = self._copy_state(transport, hello)
+        keep = {(kind, str(i)) for kind, i in self._repo.dirty_entities()} | {
+            (c.entity_type, str(c.entity_id)) for c in self._repo.find_open_conflicts()
+        }
+        for kind in reversed(ENTITY_ORDER):
+            gone = self._repo.all_ids(kind) - held.get(kind, set())
+            for thing in sorted(gone):
+                if (kind, thing) not in keep:
+                    self._applier.apply_purge(kind, uuid.UUID(thing))
+            self._commit()
+        self._repo.set_cursor(head)
+        self._commit()
+
+    def fetch_history(
+        self, progress: ProgressFn | None = None, pages: int | None = None
+    ) -> bool:
+        """Fetch the history from before this project joined, oldest first, a
+        page at a time (each saved as it arrives, so stopping loses nothing and
+        the next call carries on). `pages` limits how much one call does, for a
+        background sync that shouldn't hold the lock for long. Returns True once
+        all of it is here. It is history only: nothing is applied, since the
+        copy already holds where it all ended up."""
+        upto = self._repo.meta().history_from
+        if not upto:
+            return True
+        with sync_lock(self._config.civex_dir):
+            transport = self._transport()
+            after = self._repo.history_fetched_upto(upto)
+            read = 0
+            while after < upto and (pages is None or read < pages):
+                page = transport.feed(after, FEED_PAGE)
+                read += 1
+                for entry in page.entries:
+                    if entry.hub_seq is None or entry.hub_seq > upto:
+                        break
+                    if not self._repo.has_entry(entry.id):
+                        self._repo.insert_entry(entry, hub_seq=entry.hub_seq)
+                    after = entry.hub_seq
+                self._commit()
+                if progress:
+                    progress(SyncProgress(HISTORY, min(after, upto), upto))
+                last = page.entries[-1].hub_seq if page.entries else None
+                if not page.more or last is None or last > upto:
+                    after = upto  # nothing more up to it (some may be pruned)
+            if after >= upto:
+                self._repo.set_history_from(None)
+                self._commit()
+                return True
+            return False
+
+    def _join_one(
+        self,
+        kind: str,
+        snap: dict[str, Any],
+        present: set[str],
+        waiting: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        """Write one thing from the copy, or keep it until what it sits under
+        has been written; then whatever was waiting for it."""
+        above = _sits_under(kind, snap)
+        if above and above not in present:
+            waiting.setdefault(above, []).append(snap)
+            return
+        ready = [snap]
+        while ready:
+            item = ready.pop()
+            self._repo.apply_snapshot(kind, item)
+            present.add(item["id"])
+            ready.extend(waiting.pop(item["id"], ()))
+
+    def _seed_snapshots(self, kind: str) -> Iterator[dict[str, Any]]:
+        """What to send for `kind`, in an order the authority can accept: a
+        record only after the one it sits under and the ones it refers to, since
+        the authority checks both and remembers a refusal for good."""
+        if kind == "record":
+            order = self._repo.record_seed_order()
+            for start in range(0, len(order), SNAPSHOT_PAGE):
+                yield from self._repo.record_snapshots(
+                    order[start : start + SNAPSHOT_PAGE]
+                )
+            return
+        after: str | None = None
+        while True:
+            snaps = self._repo.snapshots_page(kind, after, SNAPSHOT_PAGE)
+            yield from snaps
+            if len(snaps) < SNAPSHOT_PAGE:
+                return
+            after = snapshot_cursor(snaps[-1])
+
+    def _seed(
+        self, transport: SyncTransport, progress: ProgressFn | None = None
+    ) -> None:
         """Give an empty authority everything this project holds. Each thing is
         sent as a create with an id made from the project and the thing, so an
-        interrupted seed can simply be run again."""
+        interrupted seed can simply be run again. Something the server refuses
+        (a value the field no longer allows, say) is kept for review and does not
+        stop the rest: the project is connected once everything else is in.
+
+        The project stays in use meanwhile, so only the changes recorded before
+        the first attempt began are counted as sent by it (`begin_seed`): a
+        change made after a thing's page went is sent afterwards like any other.
+        A run again after an interruption keeps the first attempt's line, since
+        the authority answers a thing it was already sent from its record of
+        that first sending, not from the thing as it is now."""
+        self._repo.begin_seed()
+        self._commit()
         meta = self._repo.meta()
         device_id = str(user_state.device_id_for(meta.project_id))
         actor = local_actor(self._config.identity.name)
-        head = meta.cursor
-        problems: list[str] = []
+        head = 0
+        report = SyncReport()
         batch: list[SyncEntry] = []
+        total = self._repo.entity_count() or None
+        sent = 0
 
         def flush() -> None:
-            nonlocal head, batch
+            nonlocal head, batch, sent
             if not batch:
                 return
             ready = self._with_files(transport, batch, SyncReport())
@@ -793,50 +981,47 @@ class SyncService:
                 )
             result = transport.push(batch)
             head = result.head_seq
-            for r in result.results:
-                if r.status == REJECTED:
-                    problems.append(r.message or "refused")
-                elif r.status == DEFERRED:
-                    raise SyncError(
-                        "The server is still waiting for a file", retryable=True
-                    )
+            if any(r.status == DEFERRED for r in result.results):
+                raise SyncError(
+                    "The server is still waiting for a file", retryable=True
+                )
+            # A refusal is kept for review, like any other (the person keeps what
+            # they made and can fix it and retry); it doesn't stop the rest.
+            self._note(result.results, {e.id: e for e in batch}, report)
+            sent += len(batch)
+            if progress:
+                kind = batch[-1].entity_type
+                progress(SyncProgress(FILLING, sent, total and max(total, sent), kind))
             batch = []
 
         for kind in ENTITY_ORDER:
-            offset = 0
-            while True:
-                snaps = self._repo.snapshots_page(kind, offset, SNAPSHOT_PAGE)
-                for snap in snaps:
-                    now = datetime.now(timezone.utc)
-                    batch.append(
-                        SyncEntry(
-                            id=uuid.uuid5(meta.project_id, f"seed:{kind}:{snap['id']}"),
-                            action="create",
-                            entity_type=kind,
-                            entity_id=uuid.UUID(snap["id"]),
-                            old_data=None,
-                            new_data=snap,
-                            timestamp=now.isoformat(),
-                            actor=actor,
-                            device_id=device_id,
-                            hlc=hlc.tick(
-                                self._repo.latest_hlc(), int(now.timestamp() * 1000)
-                            ),
-                        )
+            for snap in self._seed_snapshots(kind):
+                now = datetime.now(timezone.utc)
+                batch.append(
+                    SyncEntry(
+                        id=uuid.uuid5(meta.project_id, f"seed:{kind}:{snap['id']}"),
+                        action="create",
+                        entity_type=kind,
+                        entity_id=uuid.UUID(snap["id"]),
+                        old_data=None,
+                        new_data=snap,
+                        timestamp=now.isoformat(),
+                        actor=actor,
+                        device_id=device_id,
+                        hlc=hlc.tick(
+                            self._repo.latest_hlc(), int(now.timestamp() * 1000)
+                        ),
                     )
-                    if len(batch) >= PUSH_BATCH:
-                        flush()
-                if len(snaps) < SNAPSHOT_PAGE:
-                    break
-                offset += len(snaps)
+                )
+                if len(batch) >= PUSH_BATCH:
+                    flush()
         flush()
-        if problems:
-            raise SyncError(
-                f"The server refused {len(problems)} thing(s) while being filled: "
-                f"{problems[0]}",
-                retryable=False,
+        if report.rejected:
+            log.warning(
+                "seeding the server: it refused %d thing(s); they are kept for review",
+                report.rejected,
             )
-        self._repo.mark_all_synced()
+        self._repo.finish_seed()
         self._repo.set_cursor(head)
         self._commit()
 
@@ -961,22 +1146,81 @@ class SyncService:
     def _resend(self, conflict: SyncConflictDTO) -> None:
         """Send a refused change again, from the thing as it is now: the same
         kind of change on the same starting point, new content. A new entry (the
-        authority remembers the old one's answer by its id)."""
-        current = self._repo.snapshot(conflict.entity_type, conflict.entity_id)
-        if current is None:
+        authority remembers the old one's answer by its id). A change that was
+        part of one action (a field renamed with the templates it rewrote) is
+        sent again whole, as one new action, and the review items of its other
+        parts are settled with it: it can't go in by halves."""
+        if self._repo.snapshot(conflict.entity_type, conflict.entity_id) is None:
             raise ValidationError(
                 "It no longer exists here, so there is nothing to send"
             )
         original = self._repo.get_entry(conflict.op_id) if conflict.op_id else None
         if original is None:
             raise ValidationError("The change is no longer held here")
+        if original.op is None:
+            self._resend_entry(original, strict=True, in_action=False)
+            return
+        parts = self._repo.entries_of_action(original.op)
+        with self._audit.operation():
+            for entry in parts:
+                self._resend_entry(
+                    entry, strict=entry.id == original.id, in_action=True
+                )
+        others = {e.id for e in parts} - {original.id}
+        self._repo.resolve_conflicts(
+            [
+                c.id
+                for c in self._repo.find_open_conflicts(kind="rejected")
+                if c.op_id in others
+            ],
+            "retry",
+        )
+
+    def _resend_entry(self, original: SyncEntry, strict: bool, in_action: bool) -> None:
+        """Log `original` again from its thing as it is now. `strict`: say why
+        when it can't be (the part a person chose); a part that went away or
+        changed kind since is just left out."""
+        current = self._repo.snapshot(original.entity_type, original.entity_id)
+        if current is None:
+            if strict:
+                raise ValidationError(
+                    "It no longer exists here, so there is nothing to send"
+                )
+            return
+        if original.action == "delete":
+            # A delete is sent again only as a part of an action sent whole
+            # (its thing still deleted here); alone, it is a delete to make.
+            if current.get("deleted_at") and in_action:
+                self._audit.log_change(
+                    "delete",
+                    original.entity_type,
+                    original.entity_id,
+                    {**current, "deleted_at": None},
+                    None,
+                    timestamp=datetime.fromisoformat(current["deleted_at"]),
+                )
+                return
+            if strict:
+                raise ValidationError(
+                    "Only a created or edited thing can be sent again"
+                )
+            return
         if original.action not in ("create", "update", "restore"):
-            raise ValidationError("Only a created or edited thing can be sent again")
+            if strict:
+                raise ValidationError(
+                    "Only a created or edited thing can be sent again"
+                )
+            return
+        start = original.old_data
+        if original.delta is not None:
+            # Only what the change touched is known of where it started: the
+            # thing as it is, with those values as they were before it.
+            start = apply_delta(current, original.delta, BEFORE)
         self._audit.log_change(
             original.action,
-            conflict.entity_type,
-            conflict.entity_id,
-            original.old_data,
+            original.entity_type,
+            original.entity_id,
+            start,
             current,
         )
 
@@ -996,6 +1240,13 @@ def _takes_for(conflict: SyncConflictDTO) -> tuple[str, ...]:
     if conflict.entity_type == "record":
         return takes
     return tuple(t for t in takes if t not in _RECORD_ONLY)
+
+
+def _sits_under(kind: str, snap: dict[str, Any]) -> str | None:
+    """The id of the thing of the same kind that `snap` can't exist without:
+    a record's parent record, a schema's parent schema."""
+    key = {"record": "parent_record_id", "schema": "parent_id"}.get(kind)
+    return snap.get(key) if key else None
 
 
 def _field_id(conflict: SyncConflictDTO) -> str | None:

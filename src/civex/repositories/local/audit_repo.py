@@ -14,14 +14,24 @@ from sqlalchemy import (
     not_,
     or_,
     select,
+    text,
 )
 from sqlalchemy.orm import Session
 
 from contextlib import contextmanager
 from typing import Iterator
 
-from civex.db.models import AuditBatch, AuditLog, Dataset, Field, Record, Schema
-from civex.domain.audit_diff import tombstone
+from civex.db.models import (
+    _STILL_WHOLE,
+    AuditBatch,
+    AuditLog,
+    Dataset,
+    Field,
+    Record,
+    Schema,
+    SyncMeta,
+)
+from civex.domain.audit_diff import stored_form, tombstone
 from civex.domain.hlc import tick as hlc_tick
 from civex.domain.audit_filter import AuditFilter
 from civex.domain.exceptions import ValidationError
@@ -36,10 +46,11 @@ from civex.repositories.protocols import AuditEventRow
 def _mentions(text: str):
     """Entries whose stored values name this id: a child's parent, a record's
     collection, a reference. Finds records since purged, which are no longer
-    rows to list by id."""
+    rows to list by id. A delta entry holds a changed value in `delta`."""
     return or_(
         cast(AuditLog.old_data, String).contains(text),
         cast(AuditLog.new_data, String).contains(text),
+        cast(AuditLog.delta, String).contains(text),
     )
 
 
@@ -189,11 +200,28 @@ class LocalAuditRepository:
         # only created once something is written into it, so one that turns out
         # to touch nothing leaves no trace.
         self._batch_id: uuid.UUID | None = None
+        # The action being recorded (`operation`), shared by its entries.
+        self._op_id: uuid.UUID | None = None
         self._batch_spec: tuple[str, str | None, str | None] | None = None
 
     # ------------------------------------------------------------------
     # Batches
     # ------------------------------------------------------------------
+
+    @contextmanager
+    def operation(self) -> Iterator[None]:
+        """Everything logged inside is one action: an authority takes all of
+        it or none (a field renamed with the templates it rewrote). Inside
+        another operation it joins that one. Unlike a batch, which is how
+        history shows a bulk change, this is about what may not be split."""
+        if self._op_id is not None:
+            yield
+            return
+        self._op_id = uuid.uuid4()
+        try:
+            yield
+        finally:
+            self._op_id = None
 
     @contextmanager
     def batch(
@@ -264,11 +292,17 @@ class LocalAuditRepository:
         old_data: dict[str, Any] | None,
         new_data: dict[str, Any] | None,
         timestamp: datetime | None = None,
+        op: uuid.UUID | None = None,
     ) -> None:
-        """`timestamp` is when it happened, now unless the caller says: a delete
+        """`op` names the action it belongs to, when the caller groups entries
+        itself (a delete of several record trees, one action per tree); else the
+        enclosing `operation`, if any.
+
+        `timestamp` is when it happened, now unless the caller says: a delete
         passes the moment it stamps what it deletes with, so the entry and the
         stamp are one instant and every device that applies the entry stamps
         exactly the same."""
+        old_data, new_data, delta, form = stored_form(old_data, new_data)
         self._s.add(
             AuditLog(
                 action=action,
@@ -276,6 +310,9 @@ class LocalAuditRepository:
                 entity_id=entity_id,
                 old_data=old_data,
                 new_data=new_data,
+                delta=delta,
+                format=form,
+                op_id=op or self._op_id,
                 timestamp=timestamp or datetime.now(timezone.utc),
                 batch_id=self._current_batch(),
                 actor=self._actor,
@@ -511,7 +548,15 @@ class LocalAuditRepository:
                 snapshot: dict[str, Any] = next(
                     (
                         e.old_data or e.new_data or {}
-                        for e in sorted(entries, key=lambda e: e.action != "purge")
+                        # A purge's tombstone, else a whole snapshot (a create
+                        # or delete) before an edit, which keeps only identity.
+                        for e in sorted(
+                            entries,
+                            key=lambda e: (
+                                e.action != "purge",
+                                e.action not in ("create", "delete"),
+                            ),
+                        )
                         if e.old_data or e.new_data
                     ),
                     {"id": str(record_id)},
@@ -575,10 +620,64 @@ class LocalAuditRepository:
             "kept_unsynced": max(unsynced, 0),
         }
 
+    # -- converting whole-snapshot entries to deltas (`HistoryCompactionService`)
+
+    def _whole_edits(self, *columns):
+        """Entries still stored whole that a delta could replace: an edit or a
+        restore. Creates and deletes keep one copy anyway. (An empty side is
+        JSON null, not SQL NULL, so it isn't tested here: such an entry is just
+        marked kept whole.) Exactly the condition of `ix_audit_log_still_whole`,
+        so it serves this."""
+        return self._s.query(*(columns or (AuditLog,))).filter(text(_STILL_WHOLE))
+
+    def count_whole_edits(self) -> int:
+        return self._whole_edits(func.count(AuditLog.id)).scalar() or 0
+
+    def whole_edits(
+        self, limit: int, after: uuid.UUID | None = None
+    ) -> list[AuditLogDTO]:
+        """Up to `limit` of them, by id, after `after`: walking the index, not
+        sorting the table."""
+        q = self._whole_edits()
+        if after is not None:
+            q = q.filter(AuditLog.id > after)
+        rows = q.order_by(AuditLog.id).limit(limit).all()
+        return [_audit_dto(r) for r in rows]
+
+    def store_as_delta(
+        self,
+        entry_id: uuid.UUID,
+        new_data: dict[str, Any] | None,
+        delta: dict[str, Any] | None,
+        form: int,
+    ) -> None:
+        """Replace an entry's whole snapshots with what changed (`form` 2), or
+        mark it checked and kept whole (`form` 3, `delta` None)."""
+        row = self._s.get(AuditLog, entry_id)
+        if row is None:
+            return
+        if delta is not None:
+            row.old_data = None
+            row.new_data = new_data
+            row.delta = delta
+        row.format = form
+        self._s.flush()
+
     def prune(self, before: datetime, protect_unsynced: bool) -> tuple[int, int]:
         """Remove the entries `count_prunable` counted, and any batch left with
-        none. Returns (entries, batches) removed."""
-        ids = select(AuditLog.id).where(*self._prunable(before, protect_unsynced))
+        none. Returns (entries, batches) removed.
+
+        A numbered entry removed here is gone from the feed an authority serves,
+        so the feed's floor moves up past it (`sync_meta.feed_floor`): a device
+        that had not read that far can't catch up from the feed any more, and
+        copies the project again instead of skipping what it missed."""
+        conditions = self._prunable(before, protect_unsynced)
+        top = self._s.query(func.max(AuditLog.hub_seq)).filter(*conditions).scalar()
+        ids = select(AuditLog.id).where(*conditions)
+        if top:
+            meta = self._s.get(SyncMeta, 1)
+            if meta is not None and (meta.feed_floor or 0) < top:
+                meta.feed_floor = top
         entries = self._s.execute(
             delete(AuditLog)
             .where(AuditLog.id.in_(ids))
@@ -658,6 +757,7 @@ class LocalAuditRepository:
                     cast(AuditLog.new_data, String).icontains(
                         f.search, autoescape=True
                     ),
+                    cast(AuditLog.delta, String).icontains(f.search, autoescape=True),
                     AuditLog.batch_id.in_(
                         select(AuditBatch.id).where(
                             AuditBatch.label.icontains(f.search, autoescape=True)
@@ -684,6 +784,8 @@ def _audit_dto(r: AuditLog) -> AuditLogDTO:
         new_data=r.new_data,
         timestamp=r.timestamp,
         actor=r.actor,
+        delta=r.delta,
+        format=r.format,
     )
 
 

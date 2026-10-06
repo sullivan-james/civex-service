@@ -1,6 +1,7 @@
 import type { BackgroundTask } from '../utils/backgroundTasks'
 import { useAutomationTasks } from './tasks/useAutomationTasks'
 import { useFileJobTasks } from './tasks/useFileJobTasks'
+import { useHistoryTasks } from './tasks/useHistoryTasks'
 import { useMoveTasks } from './tasks/useMoveTasks'
 import { useSyncTasks } from './tasks/useSyncTasks'
 
@@ -14,5 +15,6 @@ export function useBackgroundTasks(): BackgroundTask[] {
     ...useMoveTasks(),
     ...useSyncTasks(),
     ...useAutomationTasks(),
+    ...useHistoryTasks(),
   ]
 }

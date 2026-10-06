@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import BigInteger, func, or_, select, text, update
+from sqlalchemy import BigInteger, and_, func, or_, select, update
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -25,6 +25,7 @@ from civex.db.models import (
     Field,
     FileReference,
     Record,
+    RecordReference,
     Schema,
     SyncConflict,
     SyncDevice,
@@ -34,6 +35,7 @@ from civex.db.models import (
     _UTCDateTime,
 )
 from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.domain.audit_diff import entry_snapshots
 from civex.domain.merge import value_at
 from civex.domain.sync import (
     OpResult,
@@ -42,6 +44,7 @@ from civex.domain.sync import (
     SyncDeviceDTO,
     SyncEntry,
     SyncMetaDTO,
+    parse_snapshot_cursor,
 )
 from civex.repositories.local.dataset_repo import _to_dtos as _dataset_dtos
 from civex.repositories.local.record_repo import _to_dto as _record_dto
@@ -57,6 +60,17 @@ _MODELS: dict[str, Any] = {
 }
 # A column PostgreSQL maintains itself (a trigger); never written from a snapshot.
 _NOT_WRITTEN = frozenset({"search_vector"})
+
+
+# The order changes were made in here: the number the database gave each entry
+# as it was written (`AuditLog.local_seq`), not its time, since a clock can step
+# back and send a child before its parent (refused for good). Entries from
+# before the number existed have none and come first, by time.
+_WRITE_ORDER = (
+    func.coalesce(AuditLog.local_seq, 0),
+    AuditLog.timestamp,
+    AuditLog.id,
+)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -116,6 +130,22 @@ class LocalSyncRepository:
             last_synced_at=_iso(row.last_synced_at),
             last_error=row.last_error,
             last_error_at=_iso(row.last_error_at),
+            history_from=row.history_from,
+            feed_floor=row.feed_floor or 0,
+        )
+
+    def set_history_from(self, seq: int | None) -> None:
+        self._meta_row().history_from = seq
+        self._s.flush()
+
+    def history_fetched_upto(self, upto: int) -> int:
+        """The last number up to `upto` whose entry is held here: where
+        fetching the history from before joining carries on from."""
+        return (
+            self._s.query(func.max(AuditLog.hub_seq))
+            .filter(AuditLog.hub_seq <= upto)
+            .scalar()
+            or 0
         )
 
     def referenced_shas(self, after: str, limit: int) -> list[str]:
@@ -159,6 +189,15 @@ class LocalSyncRepository:
 
     def head_seq(self) -> int:
         return self._meta_row().head_seq
+
+    def lock_feed(self) -> None:
+        """Hold the feed's counter until this transaction ends, so whoever
+        takes it next waits: a row lock on PostgreSQL, the write lock on
+        SQLite (a write that changes nothing still takes it)."""
+        self._meta_row()
+        self._s.execute(
+            update(SyncMeta).where(SyncMeta.id == 1).values(head_seq=SyncMeta.head_seq)
+        )
 
     def record_outcome(self, error: str | None) -> None:
         row = self._meta_row()
@@ -351,14 +390,13 @@ class LocalSyncRepository:
                 # it is nobody's edit.
                 or_(AuditLog.actor.is_(None), AuditLog.actor != "sync"),
             )
-            .order_by(AuditLog.timestamp.desc(), text("rowid desc"))
+            .order_by(*(c.desc() for c in _WRITE_ORDER))
             .limit(50)
             .all()
         )
         for row in rows:
-            if path is None or value_at(row.old_data, path) != value_at(
-                row.new_data, path
-            ):
+            old, new = entry_snapshots(row.old_data, row.new_data, row.delta)
+            if path is None or value_at(old, path) != value_at(new, path):
                 return row.actor, _iso(row.timestamp)
         return None, None
 
@@ -446,10 +484,14 @@ class LocalSyncRepository:
     def entity_count(self) -> int:
         """How many schemas, fields, collections, views and records there are,
         deleted ones included: zero is an empty project."""
-        return sum(
-            self._s.query(func.count(model.id)).scalar() or 0
-            for model in _MODELS.values()
-        )
+        return sum(self.entity_counts().values())
+
+    def entity_counts(self) -> dict[str, int]:
+        """How many of each kind there are, deleted ones included."""
+        return {
+            kind: self._s.query(func.count(model.id)).scalar() or 0
+            for kind, model in _MODELS.items()
+        }
 
     def snapshot(self, kind: str, id: uuid.UUID) -> dict[str, Any] | None:
         """One thing as it is now, in the shape a history entry stores."""
@@ -459,17 +501,89 @@ class LocalSyncRepository:
         return self._dicts(kind, [row])[0]
 
     def snapshots_page(
-        self, kind: str, offset: int, limit: int
+        self, kind: str, after: str | None, limit: int
     ) -> list[dict[str, Any]]:
+        """Up to `limit` things of `kind` in the order they were made, starting
+        after the `snapshot_cursor` `after` (None: from the first)."""
         model = _MODELS[kind]
-        rows = (
-            self._s.query(model)
-            .order_by(model.created_at, model.id)
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
+        query = self._s.query(model)
+        if after:
+            created, id_ = parse_snapshot_cursor(after)
+            at, rid = _parse(created), uuid.UUID(id_)
+            query = query.filter(
+                or_(
+                    model.created_at > at,
+                    and_(model.created_at == at, model.id > rid),
+                )
+            )
+        rows = query.order_by(model.created_at, model.id).limit(limit).all()
         return self._dicts(kind, rows)
+
+    def record_seed_order(self) -> list[str]:
+        """Every record's id, each after the records it needs to exist first: the
+        one it sits under and the ones it refers to. Ties (and any records that
+        refer to each other in a circle, which nothing can put first) keep
+        creation order. A record that is deleted needs only its parent: nothing
+        checks what it points at."""
+        rows = (
+            self._s.query(Record.id, Record.parent_record_id, Record.deleted_at)
+            .order_by(Record.created_at, Record.id)
+            .yield_per(2000)
+        )
+        position: dict[uuid.UUID, int] = {}
+        parent: dict[uuid.UUID, uuid.UUID | None] = {}
+        deleted: set[uuid.UUID] = set()
+        for rid, parent_id, deleted_at in rows:
+            position[rid] = len(position)
+            parent[rid] = parent_id
+            if deleted_at is not None:
+                deleted.add(rid)
+
+        needs: dict[uuid.UUID, set[uuid.UUID]] = {rid: set() for rid in position}
+        for rid, parent_id in parent.items():
+            if parent_id in position:
+                needs[rid].add(parent_id)
+        for rid, target in self._s.query(
+            RecordReference.record_id, RecordReference.target_id
+        ).yield_per(5000):
+            if rid in position and rid not in deleted and target in position:
+                needs[rid].add(target)
+            # (a reference to itself, or to nothing here, needs nothing)
+        for rid in position:
+            needs[rid].discard(rid)
+
+        waiting_on: dict[uuid.UUID, int] = {r: len(n) for r, n in needs.items()}
+        needed_by: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for rid, n in needs.items():
+            for dep in n:
+                needed_by.setdefault(dep, []).append(rid)
+
+        import heapq
+
+        ready = [position[r] for r, w in waiting_on.items() if w == 0]
+        heapq.heapify(ready)
+        by_position = {i: r for r, i in position.items()}
+        order: list[uuid.UUID] = []
+        placed: set[uuid.UUID] = set()
+        while ready:
+            rid = by_position[heapq.heappop(ready)]
+            order.append(rid)
+            placed.add(rid)
+            for dependant in needed_by.get(rid, ()):
+                waiting_on[dependant] -= 1
+                if waiting_on[dependant] == 0:
+                    heapq.heappush(ready, position[dependant])
+        # A circle of references: nothing can go first, so send them as made.
+        order.extend(r for r in sorted(position, key=position.get) if r not in placed)  # type: ignore[arg-type]
+        return [str(r) for r in order]
+
+    def record_snapshots(self, ids: list[str]) -> list[dict[str, Any]]:
+        """The records with these ids, as snapshots, in the order given."""
+        wanted = [uuid.UUID(i) for i in ids]
+        found = {
+            r.id: r for r in self._s.query(Record).filter(Record.id.in_(wanted)).all()
+        }
+        return self._dicts("record", [found[i] for i in wanted if i in found])
 
     def _dicts(self, kind: str, rows: list[Any]) -> list[dict[str, Any]]:
         if kind == "schema":
@@ -526,7 +640,17 @@ class LocalSyncRepository:
         """Delete as a person's delete does, but stamped `stamp`: a schema or
         collection takes its live records with it, stamped the same."""
         row = self._s.get(_MODELS[kind], id)
-        if row is None or getattr(row, "deleted_at", None) is not None:
+        if row is None:
+            return
+        if getattr(row, "deleted_at", None) is not None:
+            # Already deleted here (by a cascade worked out from what this copy
+            # held): take the stamp it was deleted with where the entry is
+            # from, so every copy ends with the same one. What went with it
+            # stays as it is: its own entries say where it stands.
+            if kind == "record" and _parse(row.deleted_at.isoformat()) != stamp:
+                row.deleted_at = stamp
+                flag_modified(row, "updated_at")
+                self._s.flush()
             return
         row.deleted_at = stamp
         if kind == "record":
@@ -552,28 +676,22 @@ class LocalSyncRepository:
 
     def restore(self, kind: str, id: uuid.UUID) -> None:
         """Undo a delete as a person's restore does: a schema or collection
-        brings back the records stamped with its own moment, and no others."""
+        brings back what its own restore brings back (the other repositories
+        own those rules, so they are used rather than repeated)."""
+        from civex.repositories.local.dataset_repo import LocalDatasetRepository
+        from civex.repositories.local.schema_repo import LocalSchemaRepository
+
         row = self._s.get(_MODELS[kind], id)
         if row is None:
             return
-        stamp = getattr(row, "deleted_at", None)
-        row.deleted_at = None
-        if kind == "record":
-            flag_modified(row, "updated_at")
-        if stamp is not None and kind == "schema":
-            self._s.query(Record).filter(
-                Record.schema_id == id, Record.deleted_at == stamp
-            ).update(
-                {"deleted_at": None, "updated_at": Record.updated_at},
-                synchronize_session=False,
-            )
-        elif stamp is not None and kind == "dataset":
-            self._s.query(Record).filter(
-                Record.dataset_id == id, Record.deleted_at == stamp
-            ).update(
-                {"deleted_at": None, "updated_at": Record.updated_at},
-                synchronize_session=False,
-            )
+        if kind == "schema":
+            LocalSchemaRepository(self._s).restore(id)
+        elif kind == "dataset":
+            LocalDatasetRepository(self._s).restore(id)
+        else:
+            row.deleted_at = None
+            if kind == "record":
+                flag_modified(row, "updated_at")
         self._s.flush()
         self._s.expire_all()
 
@@ -620,14 +738,22 @@ class LocalSyncRepository:
         return self._s.get(AuditLog, id) is not None
 
     def pending_entries(self, limit: int) -> list[SyncEntry]:
-        """Changes made here that the authority has not been sent, oldest first."""
-        rows = (
-            self._s.query(AuditLog)
-            .filter(AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None))
-            .order_by(AuditLog.timestamp, text("rowid"))
-            .limit(limit)
-            .all()
+        """Changes made here that the authority has not been sent, oldest first:
+        `limit` of them, and the rest of the action the last one belongs to, so
+        an action is never split across two pushes (it is taken whole or not)."""
+        pending = self._s.query(AuditLog).filter(
+            AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None)
         )
+        rows = pending.order_by(*_WRITE_ORDER).limit(limit).all()
+        if len(rows) == limit and rows[-1].op_id is not None:
+            seen = {r.id for r in rows}
+            rows += [
+                r
+                for r in pending.filter(AuditLog.op_id == rows[-1].op_id)
+                .order_by(*_WRITE_ORDER)
+                .all()
+                if r.id not in seen
+            ]
         return self._entries(rows)
 
     def count_pending(self) -> int:
@@ -675,6 +801,46 @@ class LocalSyncRepository:
     def latest_hlc(self) -> str | None:
         return self._s.query(func.max(AuditLog.hlc)).scalar()
 
+    def all_ids(self, kind: str) -> set[str]:
+        """Every id of `kind` held here, deleted ones included."""
+        model = _MODELS[kind]
+        return {str(i) for (i,) in self._s.query(model.id)}
+
+    def existing_ids(self, kind: str, ids: set[str]) -> set[str]:
+        """Which of these ids are things of `kind` here, deleted or not."""
+        if not ids:
+            return set()
+        model = _MODELS[kind]
+        wanted = [uuid.UUID(i) for i in ids]
+        return {str(i) for (i,) in self._s.query(model.id).filter(model.id.in_(wanted))}
+
+    def begin_seed(self) -> None:
+        """Set aside the changes a seed covers: those not yet sent when the
+        first attempt began. A seed run again after an interruption keeps the
+        first attempt's set (any left are still `seeding`), so a change made in
+        between is still sent on its own."""
+        started = (
+            self._s.query(AuditLog.id).filter(AuditLog.sync_state == "seeding").first()
+        )
+        if started is None:
+            self._s.execute(
+                update(AuditLog)
+                .where(AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None))
+                .values(sync_state="seeding")
+                .execution_options(synchronize_session=False)
+            )
+            self._s.expire_all()
+
+    def finish_seed(self) -> None:
+        """The seed went in: what it covered counts as sent."""
+        self._s.execute(
+            update(AuditLog)
+            .where(AuditLog.sync_state == "seeding")
+            .values(sync_state="synced")
+            .execution_options(synchronize_session=False)
+        )
+        self._s.expire_all()
+
     def mark_all_synced(self) -> None:
         """Everything so far is covered by a snapshot the authority holds."""
         self._s.execute(
@@ -716,6 +882,9 @@ class LocalSyncRepository:
                 entity_id=entry.entity_id,
                 old_data=entry.old_data,
                 new_data=entry.new_data,
+                delta=entry.delta,
+                format=2 if entry.delta is not None else 1,
+                op_id=uuid.UUID(entry.op) if entry.op else None,
                 timestamp=_parse(entry.timestamp),
                 batch_id=batch_id,
                 actor=entry.actor,
@@ -748,45 +917,34 @@ class LocalSyncRepository:
             )
             self._s.expire_all()
 
-    def has_newer_state(self, kind: str, entity_id: uuid.UUID, seq: int) -> bool:
-        """Whether a later-numbered entry that carries a state (one the authority
-        did not supersede) already stands for this thing: a change of this
-        device's own that the authority numbered after the entry in hand. A
-        delete carries none, so it never stands in for an older state."""
-        return (
-            self._s.query(AuditLog.id)
+    def entries_of_action(self, op: str) -> list[SyncEntry]:
+        """The entries one action wrote here, in the order written."""
+        rows = (
+            self._s.query(AuditLog)
+            .filter(AuditLog.op_id == uuid.UUID(op))
+            .order_by(*_WRITE_ORDER)
+            .all()
+        )
+        return self._entries(rows)
+
+    def numbered_entries(
+        self, kind: str, entity_id: uuid.UUID, from_seq: int
+    ) -> list[SyncEntry]:
+        """A thing's numbered entries from `from_seq` on that the authority did
+        not supersede, in its order: the steps that take the thing to where the
+        authority has it."""
+        rows = (
+            self._s.query(AuditLog)
             .filter(
                 AuditLog.entity_type == kind,
                 AuditLog.entity_id == entity_id,
-                AuditLog.hub_seq > seq,
+                AuditLog.hub_seq >= from_seq,
                 AuditLog.apply_state != "superseded",
-                AuditLog.action.in_(("create", "update", "restore")),
             )
-            .first()
-            is not None
+            .order_by(AuditLog.hub_seq)
+            .all()
         )
-
-    def effective_entries(
-        self, things: set[tuple[str, uuid.UUID]]
-    ) -> dict[tuple[str, uuid.UUID], list[tuple[uuid.UUID, str, str]]]:
-        """For each thing, its numbered entries the authority did not supersede,
-        oldest first, as (id, action, apply_state): what it ended in is the last
-        that carries a state, then a delete or purge that follows it."""
-        found: dict[tuple[str, uuid.UUID], list[tuple[uuid.UUID, str, str]]] = {}
-        for kind, entity_id in things:
-            rows = (
-                self._s.query(AuditLog.id, AuditLog.action, AuditLog.apply_state)
-                .filter(
-                    AuditLog.entity_type == kind,
-                    AuditLog.entity_id == entity_id,
-                    AuditLog.hub_seq.is_not(None),
-                    AuditLog.apply_state != "superseded",
-                )
-                .order_by(AuditLog.hub_seq)
-                .all()
-            )
-            found[(kind, entity_id)] = [(r[0], r[1], r[2]) for r in rows]
-        return found
+        return self._entries(rows)
 
     def sequence_local_entries(self) -> int:
         """Authority: number the changes made on this instance itself, in the
@@ -794,7 +952,7 @@ class LocalSyncRepository:
         rows = (
             self._s.query(AuditLog)
             .filter(AuditLog.hub_seq.is_(None), AuditLog.sync_state == "pending")
-            .order_by(AuditLog.timestamp, text("rowid"))
+            .order_by(*_WRITE_ORDER)
             .all()
         )
         for row in rows:
@@ -857,6 +1015,8 @@ class LocalSyncRepository:
                 batch=batches.get(r.batch_id) if r.batch_id else None,
                 hub_seq=r.hub_seq,
                 superseded=r.id in superseded,
+                delta=r.delta,
+                op=str(r.op_id) if r.op_id else None,
             )
             for r in rows
         ]

@@ -21,12 +21,14 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    FetchedValue,
     Float,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
     JSON,
+    SmallInteger,
     String,
     Table,
     Text,
@@ -56,7 +58,10 @@ class _UTCDateTime(TypeDecorator):
     value and drops the offset, handing back a naive datetime on SELECT even
     though every value written here (see _now()) is UTC. Reattach the tzinfo
     SQLite dropped so callers never see a naive-but-actually-UTC datetime.
-    PostgreSQL's TIMESTAMPTZ already round-trips tzinfo, so this is a no-op there.
+    PostgreSQL's TIMESTAMPTZ hands values back in the session's time zone (a
+    server set to BST gives +01:00), so those are turned to UTC: the same
+    instant must read the same everywhere, because sync compares snapshots, and
+    their times, between copies on different databases.
     """
 
     impl = DateTime(timezone=True)
@@ -65,9 +70,11 @@ class _UTCDateTime(TypeDecorator):
     def process_result_value(
         self, value: datetime | None, dialect: Any
     ) -> datetime | None:
-        if value is not None and value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 def _now() -> datetime:
@@ -428,6 +435,11 @@ class AuditBatch(Base):
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
 
+# Which audit_log rows `ix_audit_log_still_whole` holds (the same condition the
+# conversion queries use, so the index serves them).
+_STILL_WHOLE = "format = 1 AND action IN ('update', 'restore')"
+
+
 class AuditLog(Base):
     """One row per entity write — create, update, or delete — from any source."""
 
@@ -443,6 +455,14 @@ class AuditLog(Base):
             "timestamp",
             postgresql_where=text("sync_state = 'pending'"),
             sqlite_where=text("sync_state = 'pending'"),
+        ),
+        # The edits still stored whole (written before deltas), for converting
+        # them: empty once they all are (migration a4d9e2c7f310).
+        Index(
+            "ix_audit_log_still_whole",
+            "id",
+            postgresql_where=text(_STILL_WHOLE),
+            sqlite_where=text(_STILL_WHOLE),
         ),
     )
 
@@ -470,7 +490,9 @@ class AuditLog(Base):
     #  - hlc: hybrid logical clock stamp, an opaque string that sorts
     #    correctly; orders changes without trusting wall clocks.
     #  - hub_seq: position in the authority's change feed once it has one.
-    #  - sync_state: `pending` until the authority has acknowledged the entry.
+    #  - sync_state: `pending` until the authority has acknowledged the entry
+    #    (`synced`), or refused it (`rejected`); `seeding` while a seed that
+    #    covers it (sends the thing as it is) has not finished.
     actor: Mapped[str | None] = mapped_column(String(100), nullable=True)
     device_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     hlc: Mapped[str | None] = mapped_column(String(40), nullable=True)
@@ -487,6 +509,26 @@ class AuditLog(Base):
     apply_state: Mapped[str] = mapped_column(
         String(10), nullable=False, default="applied", server_default="applied"
     )
+    # How the change is stored: 1 = whole `old_data`/`new_data` snapshots; 2 =
+    # `delta`, only what changed ({path: {"before", "after"}}, `path` an
+    # attribute or `data.<field id>`), with `new_data` holding the thing's
+    # identity (`audit_diff.IDENTITY_KEYS`). Read either through
+    # `audit_diff.entry_snapshots`, never by looking at the columns directly.
+    delta: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    format: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=1, server_default="1"
+    )
+    # The order entries were written on this machine, numbered by the database
+    # (a sequence on PostgreSQL, a trigger on SQLite; migration e8b4f2c6a917),
+    # so every write path gets one. Changes are sent in this order. None for
+    # entries from before it existed.
+    local_seq: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, server_default=FetchedValue()
+    )
+    # Shared by the entries one action wrote (a field renamed and the templates
+    # it rewrote; a record deleted and everything beneath it), so an authority
+    # takes them, or refuses them, together. None for an entry on its own.
+    op_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
 
 
 class WorkflowJob(Base):
@@ -902,6 +944,14 @@ class SyncMeta(Base):
     cursor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     # The device that put the first data into this authority.
     seeded_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Authority: the oldest number its feed still holds (older entries were
+    # pruned). A device behind it can't catch up from the feed and copies again.
+    feed_floor: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    # Device: the number it was copied at. Its own history starts there; what
+    # came before is the authority's to show.
+    history_from: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(
         _UTCDateTime(), nullable=True
     )

@@ -632,6 +632,32 @@ class LocalRecordRepository:
         row = q.order_by(Record.created_at).first()
         return _to_dto(row) if row else None
 
+    def deleted_states(
+        self,
+        *,
+        schema_id: uuid.UUID | None = None,
+        dataset_id: uuid.UUID | None = None,
+    ) -> dict[uuid.UUID, datetime | None]:
+        """When each record of a schema or a collection was deleted (None for a
+        live one): what a schema's or collection's delete or restore changes."""
+        q = select(Record.id, Record.deleted_at)
+        if schema_id is not None:
+            q = q.where(Record.schema_id == schema_id)
+        if dataset_id is not None:
+            q = q.where(Record.dataset_id == dataset_id)
+        return {rid: at for rid, at in self._s.execute(q)}
+
+    def live_schema_ids(self, dataset_id: uuid.UUID) -> set[uuid.UUID]:
+        """The schemas of the live records in a collection."""
+        return {
+            sid
+            for (sid,) in self._s.execute(
+                select(Record.schema_id)
+                .where(Record.dataset_id == dataset_id, Record.deleted_at.is_(None))
+                .distinct()
+            )
+        }
+
     def key_duplicates(
         self, schema_id: uuid.UUID, field_ids: list[str]
     ) -> list[list[uuid.UUID]]:
@@ -871,4 +897,32 @@ def _to_dto(row: Record) -> RecordDTO:
         created_at=row.created_at,
         updated_at=row.updated_at,
         deleted_at=row.deleted_at,
+    )
+
+
+def parent_allows_restore(record_model, stamp):
+    """A condition on records being brought back by a schema's or collection's
+    restore: none above it, or the one above is live, or it was deleted at the
+    same moment (and so comes back in the same restore); and its collection
+    still lists its schema (it may have been taken off the list while the
+    record was deleted). The one rule both restores (and sync, which uses
+    them) follow: a record comes back only where it could be added."""
+    from sqlalchemy import and_, exists, or_
+    from sqlalchemy.orm import aliased
+
+    from civex.db.models import DatasetSchema
+
+    above = aliased(record_model)
+    return and_(
+        or_(
+            record_model.parent_record_id.is_(None),
+            exists().where(
+                above.id == record_model.parent_record_id,
+                or_(above.deleted_at.is_(None), above.deleted_at == stamp),
+            ),
+        ),
+        exists().where(
+            DatasetSchema.dataset_id == record_model.dataset_id,
+            DatasetSchema.schema_id == record_model.schema_id,
+        ),
     )

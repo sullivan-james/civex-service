@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 import uuid
 from typing import TYPE_CHECKING, Callable
 
+from contextlib import contextmanager, nullcontext
+
+from civex.services.cascades import States, log_cascade, record_states
 from civex.domain.dtos import DatasetDTO, RestorePlanDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.domain.scopes import GLOBAL, LOCAL, validate_scope
@@ -14,6 +17,12 @@ from civex.repositories.protocols import AuditRepository, DatasetRepository
 if TYPE_CHECKING:
     from civex.services.record_service import RecordService
     from civex.services.schema_service import SchemaService
+
+
+@contextmanager
+def _both(first, second):
+    with first, second:
+        yield
 
 
 class DatasetService:
@@ -212,16 +221,46 @@ class DatasetService:
         stamp = datetime.now(
             timezone.utc
         )  # the entry's time and the stamp: one instant
-        if self._audit:
-            self._audit.log_change(
-                "delete",
-                "dataset",
-                dataset.id,
-                dataset.to_dict(),
-                None,
-                timestamp=stamp,
-            )
-        self._datasets.delete(dataset.id, stamp)
+        before = self._cascade_before(dataset.id)
+        with self._one_event("delete", before, None):
+            if self._audit:
+                self._audit.log_change(
+                    "delete",
+                    "dataset",
+                    dataset.id,
+                    dataset.to_dict(),
+                    None,
+                    timestamp=stamp,
+                )
+            self._datasets.delete(dataset.id, stamp)
+            self._log_cascade(dataset.id, before)
+
+    def _records_repo(self):
+        return self._record_svc.records_repo if self._record_svc else None
+
+    def _cascade_before(self, dataset_id: uuid.UUID) -> States:
+        records = self._records_repo()
+        return record_states(records, dataset_id=dataset_id) if records else {}
+
+    def _log_cascade(self, dataset_id: uuid.UUID, before: States) -> None:
+        """An entry for each of the collection's records its delete or restore
+        changed (`services/cascades`)."""
+        records = self._records_repo()
+        if records:
+            log_cascade(records, self._audit, before, dataset_id=dataset_id)
+
+    def _one_event(self, kind: str, before: States, stamp: datetime | None):
+        if not self._audit:
+            return nullcontext()
+        # Shown as one event only when it takes records with it.
+        many = any(
+            (at is None) if kind == "delete" else (stamp is not None and at == stamp)
+            for at in before.values()
+        )
+        return _both(
+            self._audit.operation(),
+            self._audit.batch(kind) if many else nullcontext(),
+        )
 
     def list_deleted(self) -> list[DatasetDTO]:
         return self._datasets.list_deleted()
@@ -254,15 +293,18 @@ class DatasetService:
             raise NotFoundError(f"Dataset '{name}' not found")
         if dataset.deleted_at is None:
             raise ValidationError(f"Dataset '{name}' is not deleted")
-        restored = self._datasets.restore(dataset.id)
-        if self._audit:
-            self._audit.log_change(
-                "restore",
-                "dataset",
-                restored.id,
-                dataset.to_dict(),
-                restored.to_dict(),
-            )
+        before = self._cascade_before(dataset.id)
+        with self._one_event("restore", before, dataset.deleted_at):
+            restored = self._datasets.restore(dataset.id)
+            if self._audit:
+                self._audit.log_change(
+                    "restore",
+                    "dataset",
+                    restored.id,
+                    dataset.to_dict(),
+                    restored.to_dict(),
+                )
+            self._log_cascade(dataset.id, before)
         return restored
 
     def purge(self, name: str) -> None:

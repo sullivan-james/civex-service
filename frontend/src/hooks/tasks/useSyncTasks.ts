@@ -1,6 +1,7 @@
 import { RefreshCw } from '../../components/ui/icons'
 import type { BackgroundTask } from '../../utils/backgroundTasks'
 import { useRemoteStatus, useSyncNow } from '../useRemote'
+import { describeSyncProgress } from '../../utils/syncProgress'
 
 const DETAILS = '/settings/sync'
 const REVIEW = '/sync/review'
@@ -11,8 +12,51 @@ const REVIEW = '/sync/review'
 export function useSyncTasks(): BackgroundTask[] {
   const { data } = useRemoteStatus()
   const syncNow = useSyncNow()
-  if (!data?.configured) return []
+  if (!data || (!data.configured && !data.connecting)) return []
   const details = { label: 'Details', to: DETAILS }
+
+  if (data.progress) {
+    const text = describeSyncProgress(data.progress)
+    return [
+      {
+        id: 'sync',
+        tone: 'info',
+        icon: RefreshCw,
+        spinning: true,
+        title: text.title,
+        progress:
+          text.fraction != null
+            ? { fraction: text.fraction, label: text.title }
+            : undefined,
+        detail: text.detail,
+        actions: [details],
+      },
+    ]
+  }
+
+  if (data.connecting)
+    return [
+      {
+        id: 'sync',
+        tone: 'info',
+        icon: RefreshCw,
+        spinning: true,
+        title: 'Connecting to the server…',
+        actions: [details],
+      },
+    ]
+
+  if (data.connect_error)
+    return [
+      {
+        id: 'sync',
+        tone: 'attention',
+        icon: RefreshCw,
+        title: 'Could not connect',
+        detail: data.connect_error,
+        actions: [details],
+      },
+    ]
 
   if (data.running)
     return [

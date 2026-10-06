@@ -87,3 +87,34 @@ def test_settling_many_with_nothing_open_settles_nothing(client: TestClient) -> 
 def test_reopening_nothing_reopens_nothing(client: TestClient) -> None:
     resp = client.post("/api/remote/conflicts/reopen", json={"ids": []})
     assert resp.json() == {"reopened": 0}
+
+
+def test_connecting_again_without_a_token_needs_one_held_here(
+    client: TestClient,
+) -> None:
+    resp = client.post("/api/remote/connect", json={"url": "http://127.0.0.1:9"})
+    assert resp.status_code == 400
+    assert "token" in resp.json()["detail"]
+
+
+def test_history_storage_says_what_is_left_and_reclaims(client: TestClient) -> None:
+    body = client.get("/api/audit/storage").json()
+    assert body["whole_entries"] == 0 and body["converting"] is False
+    assert body["size_bytes"] > 0
+    again = client.post("/api/audit/storage/reclaim")
+    assert again.status_code == 200, again.text
+    assert again.json()["free_bytes"] == 0
+
+
+def test_the_app_serves_and_issues_tokens_as_the_cli_does(client: TestClient) -> None:
+    on = client.patch("/api/remote/authority", json={"serving": True}).json()
+    assert on["serving"] is True and on["devices"] == []
+    issued = client.post("/api/remote/authority/devices", json={"name": "laptop"})
+    assert issued.status_code == 200, issued.text
+    assert issued.json()["token"] and issued.json()["devices"][0]["name"] == "laptop"
+    again = client.post("/api/remote/authority/devices", json={"name": "laptop"})
+    assert again.status_code == 422
+    revoked = client.post("/api/remote/authority/devices/laptop/revoke").json()
+    assert revoked["devices"][0]["revoked"] is True
+    assert client.post("/api/remote/authority/devices/laptop/revoke").status_code == 404
+    assert client.get("/api/remote").json()["serving"] is True

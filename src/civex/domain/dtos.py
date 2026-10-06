@@ -707,6 +707,11 @@ class AuditLogDTO:
     # Who made the change, as the machine that made it reported it (the OS
     # user). None for entries from before this was recorded.
     actor: str | None = None
+    # How the change is stored (`AuditLog.format`): 1 = whole `old_data` and
+    # `new_data`; 2 = `delta` (only what changed) with `new_data` the thing's
+    # identity. Read the two sides with `audit_diff.entry_snapshots`.
+    delta: dict[str, Any] | None = None
+    format: int = 1
     # Response-only, like `changes`: what became of this change when it was sent
     # to the authority, if it did not go in as made -- `SyncConflictDTO.to_dict()`
     # rows (clashes, a refusal, an edit against a delete), open or settled. Never
@@ -722,6 +727,7 @@ class AuditLogDTO:
             "old_data": self.old_data,
             "new_data": self.new_data,
             "timestamp": self.timestamp.isoformat(),
+            **({"delta": self.delta, "format": self.format} if self.delta else {}),
         }
 
     @classmethod
@@ -734,6 +740,8 @@ class AuditLogDTO:
             old_data=d.get("old_data"),
             new_data=d.get("new_data"),
             timestamp=datetime.fromisoformat(d["timestamp"]),
+            delta=d.get("delta"),
+            format=int(d.get("format") or 1),
         )
 
 

@@ -6,7 +6,7 @@ import pytest
 
 from civex.domain.sync import SyncError
 
-from .peers import build_study, connect, device, flaky, snapshots
+from .peers import build_study, connect, device, flaky, follow, snapshots
 
 
 def data(ctx, record):
@@ -34,6 +34,103 @@ def test_a_project_with_data_fills_an_empty_authority_and_agrees_on_the_project(
     assert data(authority, record)["site"] == "x"
 
 
+def test_seeding_sends_what_a_record_needs_before_the_record(project, authority):
+    """An encounter made first, then given a reference to a species made later,
+    with recordings beneath it: sent in creation order the authority would refuse
+    the encounter (its target isn't there yet), and, remembering that for good,
+    everything beneath it too."""
+    laptop = device(project, authority, "laptop")
+    laptop.schema_svc.create("species")
+    laptop.schema_svc.add_field("species", "latin", "string")
+    laptop.schema_svc.create("encounter")
+    laptop.schema_svc.add_field(
+        "encounter", "species_ref", "reference", restrictions={"schema": "species"}
+    )
+    laptop.schema_svc.create("recording", parent="encounter")
+    laptop.schema_svc.add_field("recording", "label", "string")
+    laptop.dataset_svc.create("taxonomy", scope="global")
+    laptop.dataset_svc.update("taxonomy", schemas=["species"])
+    laptop.dataset_svc.create("study")
+    laptop.dataset_svc.update("study", schemas=["encounter", "recording"])
+
+    encounter = laptop.record_svc.add("study", "encounter", {})
+    species = laptop.record_svc.add("taxonomy", "species", {"latin": "orcinus"})
+    laptop.record_svc.update(str(encounter.id), {"species_ref": str(species.id)})
+    kept = laptop.record_svc.add(
+        "study", "recording", {"label": "a"}, parent_record_id=str(encounter.id)
+    )
+    gone = laptop.record_svc.add(
+        "study", "recording", {"label": "b"}, parent_record_id=str(encounter.id)
+    )
+    laptop.record_svc.delete(str(gone.id))
+    laptop.commit()
+
+    assert connect(laptop) == "seeded"
+
+    assert snapshots(authority) == snapshots(laptop)
+    assert data(authority, kept)["label"] == "a"
+    assert laptop.sync_repo.count_pending() == 0
+
+
+def test_something_the_server_refuses_while_seeding_is_kept_for_review(
+    project, authority
+):
+    """A value its field no longer allows is refused on the server. That must not
+    strand the project half way (the cursor unset, a retry skipping the seed): the
+    rest goes in, the project is connected, and the refusal waits for a person."""
+    laptop = device(project, authority, "laptop")
+    laptop.schema_svc.create("item")
+    laptop.schema_svc.add_field(
+        "item", "grade", "string", restrictions={"choices": ["a", "b"]}
+    )
+    laptop.dataset_svc.create("things")
+    laptop.dataset_svc.update("things", schemas=["item"])
+    fine = laptop.record_svc.add("things", "item", {"grade": "b"})
+    odd = laptop.record_svc.add("things", "item", {"grade": "a"})
+    laptop.schema_svc.update_field("item", "grade", restrictions={"choices": ["b"]})
+    laptop.commit()
+
+    assert connect(laptop) == "seeded"
+
+    assert data(authority, fine)["grade"] == "b"
+    assert authority.sync_repo.snapshot("record", odd.id) is None
+    assert laptop.sync_repo.meta().cursor == authority.sync_repo.head_seq()
+    assert laptop.sync_repo.count_pending() == 0
+    refused = laptop.sync_svc.conflicts()
+    assert [c.kind for c in refused] == ["rejected"]
+    assert refused[0].entity_id == odd.id
+    assert "must be one of" in (refused[0].message or "")
+    assert connect(laptop) == "resumed"  # connected, not stranded
+
+
+def test_following_a_different_authority_forgets_the_old_ones_cursor_and_items(
+    project, authority
+):
+    laptop = device(project, authority, "laptop")
+    laptop.schema_svc.create("item")
+    laptop.schema_svc.add_field(
+        "item", "grade", "string", restrictions={"choices": ["a", "b"]}
+    )
+    laptop.dataset_svc.create("things")
+    laptop.dataset_svc.update("things", schemas=["item"])
+    kept = laptop.record_svc.add("things", "item", {"grade": "b"})
+    laptop.record_svc.add("things", "item", {"grade": "a"})
+    laptop.schema_svc.update_field("item", "grade", restrictions={"choices": ["b"]})
+    laptop.commit()
+    connect(laptop)
+    assert len(laptop.sync_svc.conflicts()) == 1
+
+    replacement = project("replacement")
+    follow(laptop, replacement, "laptop")
+
+    assert connect(laptop, "http://replacement.test") == "seeded"
+
+    assert laptop.sync_repo.meta().cursor == replacement.sync_repo.head_seq()
+    assert [r["id"] for r in snapshots(replacement)["record"]] == [str(kept.id)]
+    # the one it refused before is refused again by the new server: one item, not two
+    assert len(laptop.sync_svc.conflicts()) == 1
+
+
 def test_an_empty_project_joins_one_that_has_data_and_keeps_its_history(
     project, authority
 ):
@@ -46,9 +143,14 @@ def test_an_empty_project_joins_one_that_has_data_and_keeps_its_history(
 
     assert snapshots(phone) == snapshots(authority)
     assert phone.sync_repo.meta().project_id == authority.sync_repo.meta().project_id
+    assert phone.sync_repo.count_pending() == 0
+    # Usable at once; the history from before it joined follows.
+    assert phone.history_svc.page(limit=500) == []
+    assert phone.sync_repo.meta().history_from == authority.sync_repo.head_seq()
+    assert phone.sync_svc.fetch_history() is True
     history = phone.history_svc.page(limit=500)
     assert len(history) >= 4  # the authority's history, not just its state
-    assert phone.sync_repo.count_pending() == 0
+    assert phone.sync_repo.meta().history_from is None
 
 
 def test_two_projects_that_both_hold_data_are_not_merged(project, authority):

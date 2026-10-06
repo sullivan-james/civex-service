@@ -8,7 +8,9 @@ Whoever hosts it (the server on a thread, `civex sync watch` in a terminal) call
   seconds after the last attempt (so a burst of edits goes in one round), or
 - the interval has passed, to bring in other people's changes.
 
-With the interval set to never, only a request syncs. A failure backs off (doubling, up to 15 minutes) so a server that is down is not
+With the interval set to never, only a request syncs. A project that joined an
+authority fetches the history from before it joined a few pages per tick after
+that, so it never holds up a sync. A failure backs off (doubling, up to 15 minutes) so a server that is down is not
 hammered; a refusal that waiting cannot fix (a revoked token, a different
 project) waits the full 15 minutes and keeps saying why. Pausing stops all of it.
 The sync itself is `SyncService.sync`, which is safe to repeat and holds a lock so
@@ -24,7 +26,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from civex.config import Config
-from civex.domain.sync import SyncError
+from civex.domain.sync import SyncError, SyncProgress
 from civex.services.sync_lock import SyncBusy
 
 if TYPE_CHECKING:
@@ -39,6 +41,10 @@ DEBOUNCE = 3.0
 FILE_CHECK_EVERY = 600.0
 BASE_BACKOFF = 5.0
 MAX_BACKOFF = 900.0
+# Pages of history from before joining fetched per tick (200 entries a page).
+HISTORY_PAGES = 10
+
+ProgressSink = Callable[[SyncProgress | None], None]
 
 
 class SyncWorker:
@@ -47,10 +53,13 @@ class SyncWorker:
         load_config: Callable[[], Config],
         open_context: Callable[[Config], AppContext],
         clock: Callable[[], float] = time.monotonic,
+        on_progress: ProgressSink | None = None,
     ) -> None:
         self._load_config = load_config
         self._open = open_context
         self._clock = clock
+        # Told how far a long step has got, and None when it is done.
+        self._on_progress = on_progress or (lambda _: None)
         self._requested = threading.Event()
         self._failures = 0
         self._backoff_until = 0.0
@@ -77,9 +86,27 @@ class SyncWorker:
             return None  # pausing stops the schedule; asking for one still works
         ctx = self._open(config)
         try:
-            return self._maybe_sync(ctx, config)
+            report = self._maybe_sync(ctx, config)
+            if not config.sync.paused:
+                self._fetch_history(ctx)
+            return report
         finally:
             ctx.close()
+
+    def _fetch_history(self, ctx: AppContext) -> None:
+        """A few pages of the history from before this project joined, while
+        any is still to come and the authority is answering."""
+        if not ctx.sync_repo.meta().history_from:
+            return
+        if self._clock() < self._backoff_until:
+            return
+        try:
+            if ctx.sync_svc.fetch_history(self._on_progress, pages=HISTORY_PAGES):
+                self._on_progress(None)
+        except SyncBusy:
+            return
+        except SyncError as e:
+            log.info("fetching history failed (%s); it carries on later", e)
 
     def _maybe_sync(self, ctx: AppContext, config: Config) -> SyncReport | None:
         now = self._clock()

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   remoteApi,
+  type Authority,
   type ResolveBody,
   type ResolveManyBody,
   type SyncConflict,
@@ -17,6 +18,8 @@ export function useRemoteStatus() {
     queryFn: remoteApi.status,
     refetchInterval: (q) => {
       const s = q.state.data
+      // Copying shows a bar, so it is read often enough to move.
+      if (s?.connecting || s?.progress) return 1000
       if (!s?.configured) return 30_000
       return s.running || s.pending > 0 ? 2000 : 15_000
     },
@@ -86,7 +89,7 @@ export function useConnectRemote() {
   const refresh = useRefreshing()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ url, token }: { url: string; token: string }) =>
+    mutationFn: ({ url, token }: { url: string; token?: string }) =>
       remoteApi.connect(url, token),
     onSuccess: () => {
       refresh()
@@ -142,4 +145,34 @@ export function useResolveConflict() {
     // Also when it is refused: the list then says what changed (`stale`).
     onSettled: refresh,
   })
+}
+
+/** This project as an authority (what `civex sync authority|device` do). */
+export function useAuthority() {
+  return useQuery({
+    queryKey: [...KEY, 'authority'],
+    queryFn: remoteApi.authority,
+  })
+}
+
+export function useAuthorityActions() {
+  const qc = useQueryClient()
+  const settle = (data: Authority) => {
+    qc.setQueryData([...KEY, 'authority'], data)
+    qc.invalidateQueries({ queryKey: KEY, exact: true })
+  }
+  return {
+    setServing: useMutation({
+      mutationFn: remoteApi.setServing,
+      onSuccess: settle,
+    }),
+    addDevice: useMutation({
+      mutationFn: remoteApi.addDevice,
+      onSuccess: settle,
+    }),
+    revokeDevice: useMutation({
+      mutationFn: remoteApi.revokeDevice,
+      onSuccess: settle,
+    }),
+  }
 }

@@ -17,9 +17,13 @@ import {
   ConfirmDialog,
   Field,
   Input,
+  ProgressBar,
   Select,
   Skeleton,
+  Spinner,
 } from '../ui'
+import { describeSyncProgress } from '../../utils/syncProgress'
+import { SyncServing } from './SyncServing'
 
 const INTERVALS = [
   { seconds: 0, label: 'Never' },
@@ -97,6 +101,63 @@ function Conflicts({ count }: { count: number }) {
   )
 }
 
+/** A copy going on (or one that stopped), above everything else: until it is
+ * done the rest of the page describes a project that isn't whole yet. */
+function Copying({ s }: { s: RemoteStatus }) {
+  const again = useConnectRemote()
+  if (s.progress) {
+    const text = describeSyncProgress(s.progress)
+    return (
+      <Card title={text.title}>
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          {text.fraction != null ? (
+            <ProgressBar
+              fraction={text.fraction}
+              label={text.title}
+              className="w-64"
+            />
+          ) : (
+            <Spinner />
+          )}
+          <span className="text-fg-muted">{text.detail}</span>
+        </div>
+        {s.progress.phase === 'history' && (
+          <p className="mt-2 text-xs text-fg-muted">
+            The project is ready to use; this only fills in Activity.
+          </p>
+        )}
+      </Card>
+    )
+  }
+  if (s.connecting)
+    return (
+      <Card title="Connecting to the server">
+        <Spinner />
+      </Card>
+    )
+  if (!s.connect_error) return null
+  return (
+    <Card title="Connecting did not finish">
+      <p role="alert" className="text-sm text-attention">
+        {s.connect_error}
+      </p>
+      {again.error && (
+        <p role="alert" className="mt-1 text-xs text-danger">
+          {errorMessage(again.error)}
+        </p>
+      )}
+      <Button
+        size="sm"
+        className="mt-3"
+        disabled={again.isPending || !s.remote}
+        onClick={() => s.remote && again.mutate({ url: s.remote })}
+      >
+        Try again
+      </Button>
+    </Card>
+  )
+}
+
 function Following({ s }: { s: RemoteStatus }) {
   const syncNow = useSyncNow()
   const update = useUpdateRemote()
@@ -107,6 +168,7 @@ function Following({ s }: { s: RemoteStatus }) {
     : 60
   return (
     <div className="max-w-2xl space-y-5">
+      <Copying s={s} />
       <Card title="Authority">
         <dl className="grid grid-cols-[8rem_1fr] gap-y-1 text-sm">
           <dt className="text-fg-muted">Address</dt>
@@ -238,8 +300,13 @@ export default function SyncSection() {
   if (!data) return <Skeleton className="h-9 w-80" />
   return (
     <div className="space-y-5">
-      {data.configured ? <Following s={data} /> : <ConnectForm />}
-      <div className="max-w-2xl">
+      {data.configured || data.connecting ? (
+        <Following s={data} />
+      ) : (
+        <ConnectForm />
+      )}
+      <div className="max-w-2xl space-y-5">
+        <SyncServing />
         <NameCard />
       </div>
     </div>

@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from civex.domain.audit_diff import entry_snapshots
 from civex.domain.dtos import (
     ExportDefinitionDTO,
     AuditBatchDTO,
@@ -1376,14 +1377,18 @@ class AuditLogResponse(BaseModel):
     entity_id: str
     old_data: dict[str, Any] | None = Field(
         default=None,
-        description="Full entity snapshot before the change, as stored. A record's "
-        "values are keyed by field id, so an entry survives a rename; `changes` "
-        "has them by current name. Null on create.",
+        description="The thing before the change. A delete has it whole; an edit "
+        "or restore, which is stored as only what changed, has the thing's "
+        "identity (id, name, label, where it sits) and the values it changed, so "
+        "anything absent was not changed. A record's values are keyed by field "
+        "id, so an entry survives a rename; `changes` has them by current name. "
+        "Null on create.",
     )
     new_data: dict[str, Any] | None = Field(
         default=None,
-        description="Full entity snapshot after the change, as stored (see "
-        "`old_data`). Null on delete.",
+        description="The thing after the change: whole for a create, identity "
+        "and the changed values for an edit or restore (see `old_data`). Null on "
+        "delete.",
     )
     changes: list[AuditChange] = Field(
         default_factory=list,
@@ -1409,14 +1414,17 @@ class AuditLogResponse(BaseModel):
 
     @classmethod
     def from_dto(cls, dto: AuditLogDTO) -> AuditLogResponse:
+        sides = entry_snapshots(dto.old_data, dto.new_data, dto.delta)
         return cls(
             id=str(dto.id),
             action=dto.action,
             actor=dto.actor,
             entity_type=dto.entity_type,
             entity_id=str(dto.entity_id),
-            old_data=dto.old_data,
-            new_data=dto.new_data,
+            # Both sides however the entry was stored, so a reader comparing
+            # old with new sees only what changed.
+            old_data=sides[0],
+            new_data=sides[1],
             changes=[AuditChange(**c) for c in dto.changes],
             now=AuditNow(**dto.now) if dto.now else None,
             sync=dto.sync,
