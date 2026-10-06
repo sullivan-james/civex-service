@@ -12,7 +12,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
-_PRE = "a3d8f0b6c125"
+_PRE = "f4b8d2a6c139"
 _POST = "c9e1f4a7b3d2"
 
 

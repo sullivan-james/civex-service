@@ -10,7 +10,7 @@ Every existing project gets a `project_id` of its own: until it syncs, it is
 nobody else's copy.
 
 Revision ID: c9e1f4a7b3d2
-Revises: a3d8f0b6c125
+Revises: f4b8d2a6c139
 Create Date: 2026-10-05 00:00:00.000000
 """
 
@@ -25,7 +25,7 @@ import sqlalchemy as sa
 import civex.db.models
 
 revision: str = "c9e1f4a7b3d2"
-down_revision: Union[str, None] = "a3d8f0b6c125"
+down_revision: Union[str, None] = "f4b8d2a6c139"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
