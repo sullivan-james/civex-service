@@ -1,15 +1,7 @@
-import {
-  useCallback,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react'
+import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useAnchoredPosition } from '../../hooks/useAnchoredPosition'
 import { useDismiss } from '../../hooks/useDismiss'
-
-const GAP = 4
-const VIEWPORT_MARGIN = 8
 
 interface PopoverProps {
   /** Element the popover hangs off (a table cell, a button, ...). Clicks on
@@ -46,51 +38,12 @@ export function Popover({
 }: PopoverProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   const anchorRef = useRef<HTMLElement | null>(anchor)
-  const [pos, setPos] = useState<{
-    top: number
-    left: number
-    minWidth: number
-  } | null>(null)
-
   useLayoutEffect(() => {
     anchorRef.current = anchor
   }, [anchor])
 
   useDismiss(true, [panelRef, anchorRef], onClose)
-
-  const reposition = useCallback(() => {
-    const a = anchorRef.current
-    const panel = panelRef.current
-    if (!a || !panel) return
-    const r = a.getBoundingClientRect()
-    const height = panel.offsetHeight
-    const width = panel.offsetWidth
-    const below = r.bottom + GAP
-    const fitsBelow = below + height <= window.innerHeight - VIEWPORT_MARGIN
-    const top = fitsBelow
-      ? below
-      : Math.max(VIEWPORT_MARGIN, r.top - GAP - height)
-    const wanted = align === 'right' ? r.right - width : r.left
-    const left = Math.min(
-      Math.max(VIEWPORT_MARGIN, wanted),
-      Math.max(VIEWPORT_MARGIN, window.innerWidth - width - VIEWPORT_MARGIN),
-    )
-    setPos({ top, left, minWidth: minWidth ?? r.width })
-  }, [minWidth, align])
-
-  useLayoutEffect(() => {
-    reposition()
-    // Capture phase so scrolling *any* ancestor (not just the window) moves us.
-    window.addEventListener('scroll', reposition, true)
-    window.addEventListener('resize', reposition)
-    const observer = new ResizeObserver(reposition)
-    if (panelRef.current) observer.observe(panelRef.current)
-    return () => {
-      window.removeEventListener('scroll', reposition, true)
-      window.removeEventListener('resize', reposition)
-      observer.disconnect()
-    }
-  }, [reposition])
+  const pos = useAnchoredPosition(anchorRef, panelRef, align)
 
   // Focus in on open, back to the anchor on close.
   useLayoutEffect(() => {
@@ -113,11 +66,12 @@ export function Popover({
         position: 'fixed',
         top: pos?.top ?? 0,
         left: pos?.left ?? 0,
-        minWidth: pos?.minWidth,
+        minWidth: minWidth ?? pos?.anchorWidth,
+        maxHeight: pos?.maxHeight,
         // Invisible until measured so it never flashes at 0,0.
         visibility: pos ? 'visible' : 'hidden',
       }}
-      className={`z-50 bg-canvas border border-border rounded-md shadow-lg p-3 ${
+      className={`z-50 overflow-y-auto bg-canvas border border-border rounded-md shadow-lg p-3 ${
         /\bmax-w-/.test(className) ? '' : 'max-w-[min(32rem,calc(100vw-1rem))]'
       } ${className}`}
     >

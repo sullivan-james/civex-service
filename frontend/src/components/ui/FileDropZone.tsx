@@ -51,7 +51,7 @@ export function FileDropZone({
       }}
       onDragLeave={() => setOver(false)}
       onDrop={drop}
-      className={`flex min-h-12 items-center justify-center rounded-md border-2 border-dashed px-4 py-3 text-center text-sm transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent ${
+      className={`relative flex min-h-12 items-center justify-center rounded-md border-2 border-dashed px-4 py-3 text-center text-sm transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent ${
         disabled
           ? 'cursor-not-allowed border-border text-fg-subtle opacity-60'
           : over
