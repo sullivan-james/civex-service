@@ -320,6 +320,12 @@ In the UI, each file field shows a download link next to the filename. Via the A
 GET /api/files/<sha256>
 ```
 
+
+!!! note "On a project that syncs"
+    A file another device added is downloaded from the authority the first time it
+    is opened or exported, and in the background unless this computer keeps only
+    the files it opens. See [Files](sync.md#files) in the sync guide.
+
 ## Restricting accepted files
 
 File fields support two restrictions, added the same way as any other field restriction — see [Schemas & fields](schemas-and-fields.md#adding-fields):
