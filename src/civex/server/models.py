@@ -1368,8 +1368,15 @@ class AuditLogResponse(BaseModel):
     actor: str | None = Field(
         default=None,
         description="Who made the change, as reported by the machine that made "
-        "it (the operating-system user). Not verified. Null for entries from "
-        "before this was recorded.",
+        "it (the name chosen in the project, else the operating-system user). "
+        "Not verified. Null for entries from before this was recorded.",
+    )
+    device: str | None = Field(
+        default=None,
+        description="For a synced change, the device it came through, as the "
+        "authority stamped it from that device's token (verified). Null for a "
+        "change made on the authority, not synced yet, or synced before this "
+        "was kept.",
     )
     entity_type: str = Field(
         description="One of: record, schema, field, dataset, view."
@@ -1419,6 +1426,7 @@ class AuditLogResponse(BaseModel):
             id=str(dto.id),
             action=dto.action,
             actor=dto.actor,
+            device=dto.device,
             entity_type=dto.entity_type,
             entity_id=str(dto.entity_id),
             # Both sides however the entry was stored, so a reader comparing
@@ -1472,9 +1480,13 @@ class AuditEventResponse(BaseModel):
     )
     actor: str | None = Field(
         default=None,
-        description="Who made it, as reported by the machine that made it (the "
-        "operating-system user); for a batch, who made its changes. Null when "
-        "it was not recorded.",
+        description="Who made it, as reported by the machine that made it; for "
+        "a batch, who made its changes. Null when it was not recorded.",
+    )
+    device: str | None = Field(
+        default=None,
+        description="For a synced change, the device it came through (verified "
+        "by the authority).",
     )
 
     @classmethod
@@ -1488,6 +1500,7 @@ class AuditEventResponse(BaseModel):
             batch=AuditBatchResponse.from_dto(dto.batch) if dto.batch else None,
             parts=[AuditPart(**p) for p in dto.parts],
             actor=dto.actor,
+            device=dto.device,
         )
 
 

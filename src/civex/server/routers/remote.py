@@ -123,6 +123,11 @@ class ConflictResponse(BaseModel):
     theirs_actor: str | None = Field(
         default=None, description="Who wrote the value that stayed."
     )
+    theirs_device: str | None = Field(
+        default=None,
+        description="The device their change came through (verified by the "
+        "authority), when it came through one.",
+    )
     theirs_at: str | None = Field(default=None, description="When they wrote it.")
     device_name: str | None
     message: str | None

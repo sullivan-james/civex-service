@@ -102,7 +102,7 @@ export function describeAttempt(
   when: (iso: string) => string,
 ): string {
   const who = c.theirs_actor
-    ? `${c.theirs_actor}${c.theirs_at ? ` on ${when(c.theirs_at)}` : ''}`
+    ? `${byWhom(c.theirs_actor, c.theirs_device)}${c.theirs_at ? ` on ${when(c.theirs_at)}` : ''}`
     : null
   if (c.kind === 'not_taken')
     return `Your change was not taken, and this is back as the server has it. ${c.message ?? ''} Make the change again if you still want it.`.trim()
@@ -119,6 +119,16 @@ export function describeAttempt(
   if (c.attempted === 'delete')
     return `It was edited elsewhere${who ? ` (${who})` : ''} after you last saw it, so your delete was not applied.`
   return `It was deleted elsewhere${who ? ` (${who})` : ''}, and you edited it. It has been kept here.`
+}
+
+/** Who made a change, and the device it came through when that says more:
+ * "l2 via backup". The one wording for a synced change's author. */
+export function byWhom(
+  actor: string | null | undefined,
+  device: string | null | undefined,
+): string {
+  if (!actor) return device ?? ''
+  return device && device !== actor ? `${actor} via ${device}` : actor
 }
 
 /** How a settled one is described. Besides what a person chose: `sent` (a

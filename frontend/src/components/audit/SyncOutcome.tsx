@@ -2,6 +2,7 @@ import type { AuditLogEntry } from '../../api/audit'
 import type { SyncConflict } from '../../api/remote'
 import { formatDate } from '../../lib/utils'
 import {
+  byWhom,
   describeAttempt,
   kindLabel,
   settledLabel,
@@ -41,7 +42,10 @@ function Clash({ c }: { c: SyncConflict }) {
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="min-w-0 rounded-md border border-accent-subtle-border bg-accent-subtle p-2 text-sm">
           <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-muted">
-            Kept (theirs){c.theirs_actor ? ` · ${c.theirs_actor}` : ''}
+            Kept (theirs)
+            {c.theirs_actor
+              ? ` · ${byWhom(c.theirs_actor, c.theirs_device)}`
+              : ''}
           </div>
           <DiffValue
             value={c.theirs}

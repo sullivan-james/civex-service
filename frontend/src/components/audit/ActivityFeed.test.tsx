@@ -323,6 +323,19 @@ describe('ActivityFeed', () => {
     expect(screen.getByText('—')).toBeInTheDocument()
   })
 
+  it('says which device a synced change came through, under who made it', async () => {
+    events = [
+      {
+        ...single,
+        id: 's',
+        entry: entry({ id: 's', actor: 'l2', device: 'backup' }),
+      },
+    ]
+    renderFeed()
+    expect(await screen.findByText('l2')).toBeInTheDocument()
+    expect(screen.getByText('via backup')).toBeInTheDocument()
+  })
+
   it('restores a deleted field from its row, on the schema it came from', async () => {
     events = [
       {

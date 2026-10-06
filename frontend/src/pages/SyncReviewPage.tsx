@@ -6,7 +6,12 @@ import type {
   SyncConflict,
 } from '../api/remote'
 import { ConflictSubject } from '../components/sync/ConflictSubject'
-import { inReviewOrder, kindLabel, takeLabel } from '../utils/syncConflicts'
+import {
+  byWhom,
+  inReviewOrder,
+  kindLabel,
+  takeLabel,
+} from '../utils/syncConflicts'
 import { saveReview, stepsFrom } from '../utils/reviewSession'
 import {
   Button,
@@ -342,7 +347,10 @@ export default function SyncReviewPage() {
                   <span>
                     <AuditValue value={c.theirs} dtype={c.dtype} compact />
                     {c.theirs_actor && (
-                      <span className="text-fg-muted"> · {c.theirs_actor}</span>
+                      <span className="text-fg-muted">
+                        {' '}
+                        · {byWhom(c.theirs_actor, c.theirs_device)}
+                      </span>
                     )}
                   </span>
                 ) : (

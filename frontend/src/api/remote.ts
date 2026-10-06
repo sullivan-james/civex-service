@@ -100,6 +100,8 @@ export interface SyncConflict {
   base: unknown
   /** Who wrote the value that stayed, and when. */
   theirs_actor: string | null
+  /** The device their change came through (verified by the server). */
+  theirs_device?: string | null
   theirs_at: string | null
   /** Worked out when read (records only): what a person recognises. */
   record_name: string | null

@@ -704,9 +704,14 @@ class AuditLogDTO:
     # -- {kind, status: live|deleted|gone, name, collection, deleted_at} -- so a
     # lost record can be told from one that was edited, deleted or purged.
     now: dict[str, Any] | None = None
-    # Who made the change, as the machine that made it reported it (the OS
-    # user). None for entries from before this was recorded.
+    # Who made the change, as the machine that made it reported it (the name
+    # chosen in the project, else the OS user). None for entries from before
+    # this was recorded.
     actor: str | None = None
+    # The device a synced change came through, as the authority stamped it
+    # from the device's token (None: made on the authority, not synced yet, or
+    # synced before this was kept).
+    device: str | None = None
     # How the change is stored (`AuditLog.format`): 1 = whole `old_data` and
     # `new_data`; 2 = `delta` (only what changed) with `new_data` the thing's
     # identity. Read the two sides with `audit_diff.entry_snapshots`.
@@ -1130,6 +1135,8 @@ class AuditEventDTO:
     # Who made it: the entry's actor, or for a batch the one its changes were
     # made by. None when it was not recorded.
     actor: str | None = None
+    # The device it came through, when synced (see AuditLogDTO.device).
+    device: str | None = None
 
 
 @dataclass

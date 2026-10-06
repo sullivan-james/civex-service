@@ -398,7 +398,18 @@ def conflicts(
             escape(f.record_name or f"{f.entity_type} {str(f.entity_id)[:8]}"),
             escape(f.field_label or f.field or (f.message or "")),
             escape(str(f.yours)),
-            escape(str(f.theirs) + (f" ({f.theirs_actor})" if f.theirs_actor else "")),
+            escape(
+                str(f.theirs)
+                + (f" ({f.theirs_actor}" if f.theirs_actor else "")
+                + (
+                    f" via {f.theirs_device}"
+                    if f.theirs_actor
+                    and f.theirs_device
+                    and f.theirs_device != f.theirs_actor
+                    else ""
+                )
+                + (")" if f.theirs_actor else "")
+            ),
             f.resolution or f.status,
         )
     console.print(table)

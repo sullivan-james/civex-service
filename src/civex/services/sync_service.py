@@ -578,7 +578,8 @@ class SyncService:
                 if entry.hub_seq is None:
                     raise SyncError("The server sent a change without a number")
                 if self._repo.has_entry(entry.id):
-                    self._repo.mark_seq(entry.id, entry.hub_seq)  # ours, now numbered
+                    # Ours, now numbered, and stamped with the device it came through.
+                    self._repo.mark_seq(entry.id, entry.hub_seq, entry.device)
                 else:
                     self._take(entry, dirty)
                     applied += 1
@@ -858,6 +859,7 @@ class SyncService:
                     theirs=problem.get("theirs"),
                     base=problem.get("base"),
                     theirs_actor=problem.get("theirs_actor"),
+                    theirs_device=problem.get("theirs_device"),
                     theirs_at=problem.get("theirs_at"),
                     op_id=result.op_id,
                     device_name=None,

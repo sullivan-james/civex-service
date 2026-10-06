@@ -352,6 +352,7 @@ class LocalSyncRepository:
         base: Any = None,
         theirs_actor: str | None = None,
         theirs_at: str | None = None,
+        theirs_device: str | None = None,
     ) -> SyncConflictDTO:
         row = SyncConflict(
             kind=kind,
@@ -362,6 +363,7 @@ class LocalSyncRepository:
             theirs=theirs,
             base=base,
             theirs_actor=theirs_actor,
+            theirs_device=theirs_device,
             theirs_at=_parse(theirs_at),
             op_id=op_id,
             device_name=device_name,
@@ -406,8 +408,9 @@ class LocalSyncRepository:
 
     def last_change(
         self, kind: str, entity_id: uuid.UUID, path: str | None
-    ) -> tuple[str | None, str | None]:
-        """Who last changed a value of a thing, and when (actor, ISO time): the
+    ) -> tuple[str | None, str | None, str | None]:
+        """Who last changed a value of a thing, through which device, and when
+        (actor, device, ISO time): the
         latest numbered entry whose before and after differ at `path`, or the
         latest entry of any kind when `path` is None. What a conflict says about
         the value that stayed."""
@@ -427,8 +430,8 @@ class LocalSyncRepository:
         for row in rows:
             old, new = entry_snapshots(row.old_data, row.new_data, row.delta)
             if path is None or value_at(old, path) != value_at(new, path):
-                return row.actor, _iso(row.timestamp)
-        return None, None
+                return row.actor, row.device, _iso(row.timestamp)
+        return None, None, None
 
     def resolve_conflict(self, id: uuid.UUID, resolution: str) -> None:
         row = self._s.get(SyncConflict, id)
@@ -910,11 +913,16 @@ class LocalSyncRepository:
             )
             self._s.expire_all()
 
-    def mark_seq(self, entry_id: uuid.UUID, seq: int) -> None:
-        """The authority has numbered a change made here: it is theirs now too."""
+    def mark_seq(
+        self, entry_id: uuid.UUID, seq: int, device: str | None = None
+    ) -> None:
+        """The authority has numbered a change made here: it is theirs now too,
+        and says which device it came through (this one, by its token's name)."""
         row = self._s.get(AuditLog, entry_id)
         if row is not None:
             row.hub_seq = seq
+            if device:
+                row.device = device
             if row.sync_state == "pending":
                 row.sync_state = "synced"
             self._s.flush()
@@ -1009,6 +1017,7 @@ class LocalSyncRepository:
                 timestamp=_parse(entry.timestamp),
                 batch_id=batch_id,
                 actor=entry.actor,
+                device=entry.device,
                 device_id=uuid.UUID(entry.device_id) if entry.device_id else None,
                 hlc=entry.hlc,
                 hub_seq=hub_seq,
@@ -1131,6 +1140,7 @@ class LocalSyncRepository:
                 new_data=r.new_data,
                 timestamp=_iso(r.timestamp) or "",
                 actor=r.actor,
+                device=r.device,
                 device_id=str(r.device_id) if r.device_id else None,
                 hlc=r.hlc,
                 batch=batches.get(r.batch_id) if r.batch_id else None,
@@ -1188,6 +1198,7 @@ def _conflict_dto(row: SyncConflict) -> SyncConflictDTO:
         message=row.message,
         base=row.base,
         theirs_actor=row.theirs_actor,
+        theirs_device=row.theirs_device,
         theirs_at=_iso(row.theirs_at),
         status=row.status,
         created_at=_iso(row.created_at) or "",

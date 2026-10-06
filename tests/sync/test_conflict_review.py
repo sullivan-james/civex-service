@@ -33,7 +33,7 @@ def test_a_conflict_says_what_it_was_who_changed_it_and_which_record_and_field(p
     c = clash(laptop, phone, record)
 
     assert (c.base, c.theirs, c.yours) == ("x", "laptop", "phone")
-    assert c.theirs_actor == "laptop" and c.theirs_at
+    assert c.theirs_device == "laptop" and c.theirs_actor and c.theirs_at
     assert c.field_label.lower() == "site" and c.dtype == "string"
     assert c.record_name and c.dataset_name == "study" and c.schema_name == "encounter"
     assert c.current == "laptop" and c.stale is False
@@ -161,7 +161,7 @@ def test_an_edit_to_a_record_deleted_elsewhere_can_keep_it_or_delete_it(pair):
     laptop, phone, record = pair
     c = delete_vs_edit(laptop, phone, record)
 
-    assert c.theirs_actor == "laptop"
+    assert c.theirs_device == "laptop"
     with pytest.raises(ValidationError):
         phone.sync_svc.resolve_conflict(c.id, "mine")  # not a thing to do here
     phone.sync_svc.resolve_conflict(c.id, "delete")
@@ -459,7 +459,7 @@ def test_history_says_what_became_of_a_change_that_did_not_go_in_as_made(pair):
     (about,) = entry.sync
     assert about["kind"] == "conflict" and about["status"] == "open"
     assert about["theirs"] == "laptop" and about["yours"] == "phone"
-    assert about["field_label"] and about["theirs_actor"] == "laptop"
+    assert about["field_label"] and about["theirs_device"] == "laptop"
     # An entry that went in as made says nothing.
     assert all(
         e.sync == [] for e in phone.history_svc.page(limit=50) if e.id != c.op_id

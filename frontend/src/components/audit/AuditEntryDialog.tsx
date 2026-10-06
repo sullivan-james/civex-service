@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { byWhom } from '../../utils/syncConflicts'
 import type { AuditLogEntry, RevertField, RevertPlan } from '../../api/audit'
 import { blockerTarget } from '../../api/restore'
 import { useRevertEntry, useRevertPlan } from '../../hooks/useAudit'
@@ -67,7 +68,7 @@ export function AuditEntryDialog({
             <EntrySubject entry={entry} full />
             <p className="text-xs text-fg-muted">
               {new Date(entry.timestamp).toLocaleString()}
-              {entry.actor ? ` · by ${entry.actor}` : ''}
+              {entry.actor ? ` · by ${byWhom(entry.actor, entry.device)}` : ''}
             </p>
             <SyncOutcome entry={entry} />
             <AuditChangeList changes={entry.changes} action={entry.action} />

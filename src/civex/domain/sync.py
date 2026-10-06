@@ -83,6 +83,9 @@ class SyncEntry:
     new_data: dict[str, Any] | None
     timestamp: str  # ISO 8601, when it was made
     actor: str | None = None
+    # The device whose token sent it: stamped by the authority, never taken
+    # from what a device sends.
+    device: str | None = None
     device_id: str | None = None
     hlc: str | None = None
     batch: SyncBatchInfo | None = None
@@ -110,6 +113,7 @@ class SyncEntry:
             "new_data": self.new_data,
             "timestamp": self.timestamp,
             "actor": self.actor,
+            "device": self.device,
             "device_id": self.device_id,
             "hlc": self.hlc,
             "batch": self.batch.to_dict() if self.batch else None,
@@ -130,6 +134,7 @@ class SyncEntry:
             new_data=d.get("new_data"),
             timestamp=d["timestamp"],
             actor=d.get("actor"),
+            device=d.get("device"),
             device_id=d.get("device_id"),
             hlc=d.get("hlc"),
             batch=SyncBatchInfo.from_dict(d["batch"]) if d.get("batch") else None,
@@ -421,6 +426,7 @@ class SyncConflictDTO:
     # stayed, and when.
     base: Any = None
     theirs_actor: str | None = None
+    theirs_device: str | None = None
     theirs_at: str | None = None
     # Response-only, worked out when read (see `FieldValueDTO`): what a person
     # needs to recognise the record and the field, and whether the value they are
@@ -464,6 +470,7 @@ class SyncConflictDTO:
             "resolution": self.resolution,
             "base": self.base,
             "theirs_actor": self.theirs_actor,
+            "theirs_device": self.theirs_device,
             "theirs_at": self.theirs_at,
             "record_name": self.record_name,
             "dataset_name": self.dataset_name,

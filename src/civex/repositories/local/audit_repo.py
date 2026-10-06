@@ -422,14 +422,18 @@ class LocalAuditRepository:
         }
         parts = self._parts(base, list(batches))
         # A batch is made in one go by one person: any of its entries' actors.
-        batch_actor: dict[uuid.UUID | None, str | None] = {}
+        batch_actor: dict[uuid.UUID | None, tuple[str | None, str | None]] = {}
         if batches:
-            for bid, who in (
-                self._s.query(AuditLog.batch_id, func.min(AuditLog.actor))
+            for bid, who, via in (
+                self._s.query(
+                    AuditLog.batch_id,
+                    func.min(AuditLog.actor),
+                    func.min(AuditLog.device),
+                )
                 .filter(AuditLog.batch_id.in_(list(batches)))
                 .group_by(AuditLog.batch_id)
             ):
-                batch_actor[bid] = who
+                batch_actor[bid] = (who, via)
         events = [
             AuditEventDTO(
                 id=key,
@@ -438,7 +442,16 @@ class LocalAuditRepository:
                 entry=entries.get(key),
                 batch=batches.get(key),
                 parts=parts.get(key, []),
-                actor=(entries[key].actor if key in entries else batch_actor.get(key)),
+                actor=(
+                    entries[key].actor
+                    if key in entries
+                    else batch_actor.get(key, (None, None))[0]
+                ),
+                device=(
+                    entries[key].device
+                    if key in entries
+                    else batch_actor.get(key, (None, None))[1]
+                ),
             )
             for key, ts, n in rows
         ]
@@ -784,6 +797,7 @@ def _audit_dto(r: AuditLog) -> AuditLogDTO:
         new_data=r.new_data,
         timestamp=r.timestamp,
         actor=r.actor,
+        device=r.device,
         delta=r.delta,
         format=r.format,
     )

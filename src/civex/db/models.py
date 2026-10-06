@@ -484,8 +484,13 @@ class AuditLog(Base):
     # Sync bookkeeping (sync is CIVEX-305). Only `actor` is written so far; the rest are
     # here so the one rebuild of this table that dropping `commit_id` forces
     # also covers them, instead of a second one on a large table later.
-    #  - actor: who made the change: the OS user on that machine, unverified
-    #    (None for entries from before it was recorded).
+    #  - actor: who made the change: the name chosen in that project (else the
+    #    OS user on that machine), as given, unverified (None for entries from
+    #    before it was recorded).
+    #  - device: for a change that came through the authority, the name of the
+    #    device whose token sent it, stamped by the authority (the part it can
+    #    vouch for). None for a change made on the authority itself, one not
+    #    synced yet, or one synced before this was kept.
     #  - device_id: which installation made it.
     #  - hlc: hybrid logical clock stamp, an opaque string that sorts
     #    correctly; orders changes without trusting wall clocks.
@@ -494,6 +499,7 @@ class AuditLog(Base):
     #    (`synced`), or refused it (`rejected`); `seeding` while a seed that
     #    covers it (sends the thing as it is) has not finished.
     actor: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    device: Mapped[str | None] = mapped_column(String(100), nullable=True)
     device_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     hlc: Mapped[str | None] = mapped_column(String(40), nullable=True)
     hub_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -1015,6 +1021,8 @@ class SyncConflict(Base):
     # when: what a person needs to judge a clash without going to the history.
     base: Mapped[Any | None] = mapped_column(_JSON, nullable=True)
     theirs_actor: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # The device that change came through (see AuditLog.device).
+    theirs_device: Mapped[str | None] = mapped_column(String(100), nullable=True)
     theirs_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     op_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     device_name: Mapped[str | None] = mapped_column(String(100), nullable=True)

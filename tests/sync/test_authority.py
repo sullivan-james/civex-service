@@ -70,7 +70,7 @@ def test_sending_the_same_changes_twice_does_nothing_more(project):
     assert len(authority.sync_repo.entries_after(0, 100)[0]) == len(entries)
 
 
-def test_a_change_is_credited_to_the_device_not_to_what_it_claims(project):
+def test_a_change_keeps_its_author_and_is_stamped_with_the_sending_device(project):
     authority, laptop = project("authority"), project("laptop")
     laptop.schema_svc.create("thing")
     laptop.commit()
@@ -80,7 +80,8 @@ def test_a_change_is_credited_to_the_device_not_to_what_it_claims(project):
     laptop.commit()
     push(authority, laptop, "lab-laptop")
     (entry,), _ = authority.sync_repo.entries_after(0, 10)
-    assert entry.actor == "lab-laptop"
+    # The name is a label, kept as given; the device is what the token proves.
+    assert (entry.actor, entry.device) == ("mallory", "lab-laptop")
 
 
 def test_edits_to_different_fields_both_survive(world):
