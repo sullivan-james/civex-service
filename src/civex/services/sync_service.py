@@ -515,6 +515,8 @@ class SyncService:
                 retryable=False,
             )
         report = SyncReport()
+        if meta.cursor < hello.feed_floor:
+            self._copy_again(transport, hello, report)
         report.pulled += self._pull(transport)
         report.pushed += self._push(transport, report)
         if check_files:
@@ -758,14 +760,32 @@ class SyncService:
         self._repo.mark_all_synced()
         self._repo.set_cursor(JOINING)
         self._commit()
+        head, _ = self._copy_state(transport, hello, progress)
+        head = head or 0
+        self._repo.set_cursor(head)
+        self._repo.set_history_from(head or None)
+        self._commit()
+        self._pull(transport)
+
+    def _copy_state(
+        self,
+        transport: SyncTransport,
+        hello: Hello,
+        progress: ProgressFn | None = None,
+    ) -> tuple[int, dict[str, set[str]]]:
+        """Write everything the authority holds as it is now, kind by kind.
+        Returns the number taken before reading (what changes meanwhile is in
+        the feed past it) and, by kind, the ids it holds."""
         total = sum(hello.counts.get(k, 0) for k in ENTITY_ORDER) or None
         done = 0
         head: int | None = None
+        held: dict[str, set[str]] = {}
         for kind in ENTITY_ORDER:
             # Things that sit under another of their kind that has not arrived
             # yet (it was made later, on a clock that was ahead): the database
             # refuses them until it has, so they wait for it, by its id.
             waiting: dict[str, list[dict[str, Any]]] = {}
+            seen = held.setdefault(kind, set())
             after: str | None = None
             while True:
                 page = transport.snapshot(kind, after, SNAPSHOT_PAGE)
@@ -773,6 +793,7 @@ class SyncService:
                 above = {p for snap in page.items if (p := _sits_under(kind, snap))}
                 present = self._repo.existing_ids(kind, above)
                 for snap in page.items:
+                    seen.add(snap["id"])
                     self._join_one(kind, snap, present, waiting)
                 self._commit()
                 done += len(page.items)
@@ -788,16 +809,41 @@ class SyncService:
                 # What they sit under was removed for good while the copy was
                 # read, and they went with it there.
                 log.info(
-                    "joining: %d %s(s) whose parent was removed meanwhile were "
+                    "copying: %d %s(s) whose parent was removed meanwhile were "
                     "left out",
                     sum(len(v) for v in waiting.values()),
                     kind,
                 )
-        head = head or 0
+        return head or 0, held
+
+    def _copy_again(
+        self, transport: SyncTransport, hello: Hello, report: SyncReport
+    ) -> None:
+        """Catch up by copying, when the feed no longer holds what this device
+        has yet to read (the authority pruned its history past its cursor). What
+        this device made and hasn't sent goes first, as in any sync; then
+        everything is written as the authority holds it, and what it no longer
+        holds is removed here, except what this device is still waiting on (a
+        change not sent, or one a person has yet to settle)."""
+        log.info(
+            "sync: the server's history starts after %d and this copy read up to "
+            "%d; copying it again",
+            hello.feed_floor,
+            self._repo.meta().cursor,
+        )
+        report.pushed += self._push(transport, report)
+        head, held = self._copy_state(transport, hello)
+        keep = {(kind, str(i)) for kind, i in self._repo.dirty_entities()} | {
+            (c.entity_type, str(c.entity_id)) for c in self._repo.find_open_conflicts()
+        }
+        for kind in reversed(ENTITY_ORDER):
+            gone = self._repo.all_ids(kind) - held.get(kind, set())
+            for thing in sorted(gone):
+                if (kind, thing) not in keep:
+                    self._applier.apply_purge(kind, uuid.UUID(thing))
+            self._commit()
         self._repo.set_cursor(head)
-        self._repo.set_history_from(head or None)
         self._commit()
-        self._pull(transport)
 
     def fetch_history(
         self, progress: ProgressFn | None = None, pages: int | None = None

@@ -257,6 +257,9 @@ class Hello:
     # How many of each kind it holds (deleted ones too), so a device copying
     # it can say how far along it is.
     counts: dict[str, int] = field(default_factory=dict)
+    # The highest number its feed no longer holds (pruned): a device that has
+    # not read past it can't catch up from the feed, and copies again.
+    feed_floor: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -267,6 +270,7 @@ class Hello:
             "seeded_by": self.seeded_by,
             "device_name": self.device_name,
             "counts": self.counts,
+            "feed_floor": self.feed_floor,
         }
 
     @classmethod
@@ -279,6 +283,7 @@ class Hello:
             seeded_by=d.get("seeded_by"),
             device_name=d.get("device_name", ""),
             counts={k: int(v) for k, v in (d.get("counts") or {}).items()},
+            feed_floor=int(d.get("feed_floor") or 0),
         )
 
 
@@ -378,6 +383,8 @@ class SyncMetaDTO:
     last_synced_at: str | None
     last_error: str | None
     last_error_at: str | None
+    # Authority: the highest number its feed no longer holds (pruned).
+    feed_floor: int = 0
     # Device: history up to this number (where it joined) is still to be
     # fetched from the authority; None when it holds all of it.
     history_from: int | None = None

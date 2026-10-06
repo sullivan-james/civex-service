@@ -20,7 +20,15 @@ from sqlalchemy.orm import Session
 from contextlib import contextmanager
 from typing import Iterator
 
-from civex.db.models import AuditBatch, AuditLog, Dataset, Field, Record, Schema
+from civex.db.models import (
+    AuditBatch,
+    AuditLog,
+    Dataset,
+    Field,
+    Record,
+    Schema,
+    SyncMeta,
+)
 from civex.domain.audit_diff import stored_form, tombstone
 from civex.domain.hlc import tick as hlc_tick
 from civex.domain.audit_filter import AuditFilter
@@ -612,8 +620,19 @@ class LocalAuditRepository:
 
     def prune(self, before: datetime, protect_unsynced: bool) -> tuple[int, int]:
         """Remove the entries `count_prunable` counted, and any batch left with
-        none. Returns (entries, batches) removed."""
-        ids = select(AuditLog.id).where(*self._prunable(before, protect_unsynced))
+        none. Returns (entries, batches) removed.
+
+        A numbered entry removed here is gone from the feed an authority serves,
+        so the feed's floor moves up past it (`sync_meta.feed_floor`): a device
+        that had not read that far can't catch up from the feed any more, and
+        copies the project again instead of skipping what it missed."""
+        conditions = self._prunable(before, protect_unsynced)
+        top = self._s.query(func.max(AuditLog.hub_seq)).filter(*conditions).scalar()
+        ids = select(AuditLog.id).where(*conditions)
+        if top:
+            meta = self._s.get(SyncMeta, 1)
+            if meta is not None and (meta.feed_floor or 0) < top:
+                meta.feed_floor = top
         entries = self._s.execute(
             delete(AuditLog)
             .where(AuditLog.id.in_(ids))

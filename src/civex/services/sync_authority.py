@@ -145,6 +145,7 @@ class SyncAuthorityService:
             seeded_by=meta.seeded_by,
             device_name=device.name,
             counts=counts,
+            feed_floor=meta.feed_floor,
         )
 
     def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage:

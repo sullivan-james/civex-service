@@ -131,6 +131,7 @@ class LocalSyncRepository:
             last_error=row.last_error,
             last_error_at=_iso(row.last_error_at),
             history_from=row.history_from,
+            feed_floor=row.feed_floor or 0,
         )
 
     def set_history_from(self, seq: int | None) -> None:
@@ -799,6 +800,11 @@ class LocalSyncRepository:
 
     def latest_hlc(self) -> str | None:
         return self._s.query(func.max(AuditLog.hlc)).scalar()
+
+    def all_ids(self, kind: str) -> set[str]:
+        """Every id of `kind` held here, deleted ones included."""
+        model = _MODELS[kind]
+        return {str(i) for (i,) in self._s.query(model.id)}
 
     def existing_ids(self, kind: str, ids: set[str]) -> set[str]:
         """Which of these ids are things of `kind` here, deleted or not."""

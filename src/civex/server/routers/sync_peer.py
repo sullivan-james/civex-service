@@ -43,6 +43,11 @@ class SyncHelloResponse(BaseModel):
         default=None, description="The device that put the first data in, if any."
     )
     device_name: str = Field(description="What the token used is called here.")
+    feed_floor: int = Field(
+        default=0,
+        description="The highest number the feed no longer holds (history pruned "
+        "here). A device whose cursor is below it copies the project again.",
+    )
     counts: dict[str, int] = Field(
         default_factory=dict,
         description="How many of each kind it holds, deleted ones included, so a "
