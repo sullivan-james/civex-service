@@ -90,8 +90,11 @@ export function ReviewStepper({
   /** The person is on the Resolve tab, which starts a review if none is going. */
   active: boolean
 }) {
-  const { data } = useSyncConflicts(true)
-  if (!data) return null
+  // Nothing is asked for unless a review is going or is being started here: a
+  // record page of a project with no sync pays nothing for the stepper.
+  const wanted = active || readReview() !== null
+  const { data } = useSyncConflicts(wanted)
+  if (!wanted || !Array.isArray(data)) return null
   return <Session recordId={recordId} active={active} conflicts={data} />
 }
 

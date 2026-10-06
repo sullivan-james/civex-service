@@ -46,6 +46,12 @@ describe('ReviewStepper', () => {
     expect(screen.queryByRole('navigation')).toBeNull()
   })
 
+  it('asks for nothing while no review is going and the Resolve tab is not open', async () => {
+    show(['a'], 'a')
+    await new Promise((r) => setTimeout(r, 30))
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled()
+  })
+
   it('starts one on the Resolve tab, with every record that has something to settle as a step', async () => {
     show(['a', 'b', 'c'], 'b', true)
     expect(await screen.findByLabelText('Review progress')).toBeInTheDocument()
