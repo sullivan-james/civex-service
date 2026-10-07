@@ -1156,18 +1156,19 @@ class FileAccessService:
         selection: FileSelection,
         place: str | None = None,
         name: str | None = None,
-        shas: list[str] | None = None,
+        paths: list[str] | None = None,
     ) -> tuple[FilePlan, list[FileItem]]:
         """The files a person has picked: a selection's files, narrowed to its
         kinds of file (`selection.fields`), a place (`in_place`), a name (in
-        the file's or its record's), and ticked content (`shas`). The one rule
+        the file's or its record's), and ticked rows (`paths`: a file of one
+        record each, so a file others share is picked for these alone). The one rule
         behind the file list and every action on it, so what is listed is what
         is acted on. The plan returned is of every kind (what the list's
         choices are counted from)."""
         plan = self.plan(dataclasses.replace(selection, fields=None))
         kinds = set(selection.fields) if selection.fields else None
         needle = (name or "").strip().casefold()
-        wanted = set(shas) if shas is not None else None
+        wanted = set(paths) if paths is not None else None
         items = [
             i
             for i in plan.items
@@ -1178,7 +1179,7 @@ class FileAccessService:
                 or needle in i.filename.casefold()
                 or needle in i.record_name.casefold()
             )
-            and (wanted is None or i.sha256 in wanted)
+            and (wanted is None or i.path in wanted)
         ]
         return plan, items
 

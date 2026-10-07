@@ -118,7 +118,11 @@ describe('FilesView', () => {
     await waitFor(() =>
       expect(
         calls.find((c) => c.path === '/api/file-access/download')?.body,
-      ).toMatchObject({ collection: 'hb', shas: ['bbb'], place: 'server' }),
+      ).toMatchObject({
+        collection: 'hb',
+        paths: ['Encounter 7/s2/table.txt'],
+        place: 'server',
+      }),
     )
   })
 
@@ -149,7 +153,7 @@ describe('FilesView', () => {
     })
     // The filters as they are, not the ticked rows of one page.
     expect(sent).toMatchObject({ collection: 'hb', place: 'server' })
-    expect(sent).not.toHaveProperty('shas')
+    expect(sent).not.toHaveProperty('paths')
   })
 
   it('narrows to kinds of file, several at once, counted for each kind', async () => {

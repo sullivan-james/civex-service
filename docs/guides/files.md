@@ -331,8 +331,13 @@ Tick files (ticking a whole page offers every file that matches, on every
 page), then:
 
 - **Move to drive…** moves just those files onto one drive, in the background.
-  Files not on this computer are downloaded first, and files on a drive that
-  isn't plugged in stay where they are.
+  Files not on this computer are downloaded straight onto it, and files on a
+  drive that isn't plugged in stay where they are. A file is stored once
+  however many records use it, so moving it moves it for all of them: a file
+  that records you didn't tick also use (its row says "also used by 3 other
+  records") stays where it is, unless you choose **Also move** in the dialog,
+  which says how many there are before anything moves
+  (`civex files gather --include-shared`).
 - **Download to this computer** fetches the ones not on this computer from
   the server. Any the server hasn't got yet (the device that added them
   hasn't sent them) are named.

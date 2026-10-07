@@ -315,7 +315,7 @@ def _picked(body: FilePickRequest, ctx: AppContext):
     if body.sort:
         selection.query.sort = body.sort
     try:
-        return ctx.file_access_svc.chosen(selection, body.place, body.name, body.shas)[
+        return ctx.file_access_svc.chosen(selection, body.place, body.name, body.paths)[
             1
         ]
     except NotFoundError as e:

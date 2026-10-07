@@ -281,7 +281,9 @@ export function selectionFor(
 export interface FilePick extends FileSelection {
   place?: string
   name?: string
-  shas?: string[]
+  /** Only these rows (a file of one record each, by `path`): the ticked ones.
+   * A file other records also use is picked for these records alone. */
+  paths?: string[]
   /** Moving: also move files records not picked use (for them too). */
   include_shared?: boolean
 }

@@ -398,11 +398,11 @@ describe('moving and downloading picked files', () => {
     })
     const { ctx, toast } = context()
 
-    await downloadFiles(ctx, { within: 'r1', shas: ['a', 'b'] })
+    await downloadFiles(ctx, { within: 'r1', paths: ['a', 'b'] })
 
     expect(calls[0].body).toMatchObject({
       within: 'r1',
-      shas: ['a', 'b'],
+      paths: ['a', 'b'],
       place: 'server',
     })
     expect(calls[0].headers['x-civex-progress']).toBeTruthy()

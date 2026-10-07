@@ -10,6 +10,7 @@ import { useListParams } from '../../hooks/useListParams'
 import { useFollowsServer } from '../../hooks/useRemote'
 import { useSchemas } from '../../hooks/useSchemas'
 import { PROJECT, useDriveChoice } from '../../hooks/useDriveChoice'
+import { useVolumes } from '../../hooks/useStore'
 import { useQueryClient } from '@tanstack/react-query'
 import { useFileListing, useFreeUpFiles } from '../../hooks/useFileListing'
 import { useQuery } from '@tanstack/react-query'
@@ -86,13 +87,11 @@ export function FilesView({ selection }: { selection: FileSelection }) {
     rows.map((r) => r.path),
     JSON.stringify([pick, order, list.page, list.size]),
   )
-  const shas = [
-    ...new Set(
-      rows.filter((r) => picked.selected.has(r.path)).map((r) => r.sha256),
-    ),
-  ]
-  // "All matching" takes the filters as they are; ticks take those files.
-  const target: FilePick = picked.allMatching ? pick : { ...pick, shas }
+  // "All matching" takes the filters as they are; ticks take those rows (a
+  // file of one record each: a file others share is theirs to keep).
+  const target: FilePick = picked.allMatching
+    ? pick
+    : { ...pick, paths: [...picked.selected] }
   const count = picked.count(total)
   const what = `${count.toLocaleString()} file${count === 1 ? '' : 's'}`
 
@@ -405,11 +404,21 @@ function MoveDialog({
   onClose: () => void
   onMove: (volume: string, includeShared: boolean) => void
 }) {
-  const holding = summary.find((p) => p.kind === 'drive')?.place
+  // Suggest somewhere else: the drive the files are on (the place being
+  // looked at, else the one holding most) is where they would move from.
+  const from =
+    pick.place ??
+    [...summary]
+      .filter((p) => p.kind === 'drive')
+      .sort((a, b) => b.files - a.files)[0]?.place
+  const { data: volumes = [] } = useVolumes()
+  const elsewhere = volumes.find(
+    (v) => v.available && v.state === 'online' && v.name !== from,
+  )?.name
   const [chosen, setChosen] = useState<string | null>(null)
   const [includeShared, setIncludeShared] = useState(false)
   const drive = useDriveChoice({
-    holding,
+    holding: elsewhere,
     need: 0,
     allowProject: false,
     chosen,

@@ -2452,10 +2452,12 @@ class FilePickRequest(FileSelectionRequest):
         default=None,
         description="Only files whose name, or whose record's name, contains this.",
     )
-    shas: list[str] | None = Field(
+    paths: list[str] | None = Field(
         default=None,
         max_length=100_000,
-        description="Only these files (by content hash), e.g. the ticked rows.",
+        description="Only these rows (each a file of one record, by its `path` "
+        "in the list), e.g. the ticked ones. A file other records also use is "
+        "picked for these records only.",
     )
 
 

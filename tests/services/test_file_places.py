@@ -135,3 +135,22 @@ def test_a_file_other_records_use_stays_put_unless_asked(ctx, study, archive):  
     with_shared = svc.plan_move(items, "archive", include_shared=True)
     assert (with_shared.files, with_shared.shared_left) == (2, 0)
     assert shared and own
+
+
+def test_ticked_rows_pick_those_records_files_not_every_record_sharing_them(
+    ctx, study, archive  # noqa: F811
+):
+    """Two records use one file; ticking one row picks that record's file
+    only, so the other record's makes it "shared with records not picked"."""
+    svc = ctx.file_access_svc
+    study.selection(study.rec_a, "s1", b"the same table")
+    study.selection(study.rec_b, "s2", b"the same table")
+    ctx.commit()
+    everything = _within(study.e7)
+    rows = svc.listing(everything).items
+    assert len(rows) == 2 and rows[0].sha256 == rows[1].sha256
+
+    _, picked = svc.chosen(everything, paths=[rows[0].path])
+    assert len(picked) == 1
+    plan = svc.plan_move(picked, "archive")
+    assert (plan.files, plan.shared_left) == (0, 1)  # stays: rec_b uses it
