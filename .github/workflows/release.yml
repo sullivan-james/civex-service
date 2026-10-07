@@ -108,16 +108,21 @@ jobs:
       - name: Run it
         shell: bash
         run: |
-          civex="$(uv tool dir --bin)/civex$([ "$RUNNER_OS" = Windows ] && echo .exe)"
+          # Not `$([ ... ] && echo .exe)`: off Windows that test fails, and in
+          # an assignment its failure is the line's, so `bash -e` stops here.
+          exe=""; if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
+          civex="$(uv tool dir --bin)/civex$exe"
           uv run --no-project python scripts/smoke_civex.py "$civex" \
             --expect-version "${{ needs.build.outputs.version }}"
 
   # The desktop app is a small launcher carrying uv (desktop-launcher/): it
   # installs civex[desktop] on first start and updates it with uv. Build it,
-  # then run it as a person's first start would, against the tested wheel.
+  # package it as people download it (a Windows installer, a macOS disk image
+  # for Intel and Apple silicon alike), install that, and run it as a person's
+  # first start would, against the tested wheel.
   desktop:
     needs: build
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -127,10 +132,12 @@ jobs:
           - os: macos-latest
             asset: civex-macos.dmg
           - os: windows-latest
-            asset: civex-windows.zip
+            asset: civex-setup-windows.exe
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
+    env:
+      CIVEX_APP_VERSION: ${{ needs.build.outputs.version }}
 
     steps:
       - uses: actions/checkout@v7
@@ -147,43 +154,114 @@ jobs:
           name: wheel
           path: dist
 
+      # One app for Intel and Apple silicon: python.org's Python is universal2
+      # (the runner's is arm64 only), and uv is joined from its two builds.
+      - name: Universal Python and uv (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          curl -fsSLo python.pkg https://www.python.org/ftp/python/3.12.10/python-3.12.10-macos11.pkg
+          sudo installer -pkg python.pkg -target /
+          echo "BUILD_PYTHON=/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12" >> "$GITHUB_ENV"
+          v="$(uv --version | cut -d' ' -f2)"
+          for arch in aarch64 x86_64; do
+            curl -fsSL "https://github.com/astral-sh/uv/releases/download/$v/uv-$arch-apple-darwin.tar.gz" | tar -xz
+          done
+          lipo -create uv-aarch64-apple-darwin/uv uv-x86_64-apple-darwin/uv -output uv-universal
+          echo "CIVEX_LAUNCHER_UV=$PWD/uv-universal" >> "$GITHUB_ENV"
+          echo "CIVEX_LAUNCHER_ARCH=universal2" >> "$GITHUB_ENV"
+          # To run the Intel half below.
+          softwareupdate --install-rosetta --agree-to-license || true
+
       - name: Build the app
         shell: bash
         run: |
-          pip install pyinstaller
-          CIVEX_LAUNCHER_UV="$(command -v uv)" pyinstaller desktop-launcher/launcher.spec \
+          py="${BUILD_PYTHON:-python}"
+          "$py" -m pip install pyinstaller
+          # Git Bash names Windows programs without `.exe`; PyInstaller needs it.
+          CIVEX_LAUNCHER_UV="${CIVEX_LAUNCHER_UV:-$(command -v uv.exe || command -v uv)}" \
+            "$py" -m PyInstaller desktop-launcher/launcher.spec \
             --distpath app-dist --workpath app-build
 
-      - name: Run it as a first start would, then use the civex it installed
-        shell: bash
+      - name: Check the app runs on Intel and Apple silicon (macOS)
+        if: runner.os == 'macOS'
         run: |
-          case "$RUNNER_OS" in
-            macOS)   app=app-dist/civex.app/Contents/MacOS/civex ;;
-            Windows) app=app-dist/civex.exe ;;
-            *)       app=app-dist/civex ;;
-          esac
-          wheel="$(ls "$PWD"/dist/*.whl)"
-          [ "$RUNNER_OS" = Windows ] && wheel="$(cygpath -m "$wheel")"
-          home="$RUNNER_TEMP/civex-app"
-          CIVEX_APP_HOME="$home" \
-            CIVEX_LAUNCHER_SOURCE="civex[desktop] @ file:///${wheel#/}" \
-            "$app" --install-only
-          python scripts/smoke_civex.py \
-            "$home/bin/civex$([ "$RUNNER_OS" = Windows ] && echo .exe)" \
-            --expect-version "${{ needs.build.outputs.version }}"
+          for binary in app-dist/civex.app/Contents/MacOS/civex \
+                        "$(find app-dist/civex.app -type f -name uv | head -1)"; do
+            archs="$(lipo -archs "$binary")"
+            echo "$binary: $archs"
+            [[ "$archs" == *x86_64* && "$archs" == *arm64* ]] || exit 1
+          done
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: tar -czf ${{ matrix.asset }} -C app-dist civex
 
+      # The window people know: the app beside a link to Applications.
       - name: Package (macOS)
         if: runner.os == 'macOS'
-        run: hdiutil create -volname civex -srcfolder app-dist/civex.app -ov -format UDZO ${{ matrix.asset }}
+        run: |
+          mkdir dmg
+          cp -R app-dist/civex.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname civex -srcfolder dmg -ov -format UDZO ${{ matrix.asset }}
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path app-dist\civex.exe -DestinationPath ${{ matrix.asset }}
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $version = if ($env:CIVEX_APP_VERSION) { $env:CIVEX_APP_VERSION } else { "0.0.0" }
+          & $iscc "/DAppVersion=$version" "/DAppSource=$PWD\app-dist\civex" "/O$PWD" desktop-launcher\windows\civex.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Windows: run the installer as a person would (silently here), so what
+      # is tested is what was installed.
+      - name: Install it (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Start-Process -Wait -FilePath .\${{ matrix.asset }} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+          $app = "$env:LOCALAPPDATA\Programs\civex\civex.exe"
+          if (-not (Test-Path $app)) { throw "The installer didn't install $app" }
+          "APP=$app" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Run it as a first start would, then use the civex it installed
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            macOS)   app="$PWD/dmg/civex.app/Contents/MacOS/civex" ;;
+            Windows) app="$APP" ;;
+            *)       app="$PWD/app-dist/civex" ;;
+          esac
+          wheel="$(ls "$PWD"/dist/*.whl)"
+          [ "$RUNNER_OS" = Windows ] && wheel="$(cygpath -m "$wheel")"
+          source="civex[desktop] @ file:///${wheel#/}"
+          exe=""; if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
+
+          home="$RUNNER_TEMP/civex-app"
+          CIVEX_APP_HOME="$home" CIVEX_LAUNCHER_SOURCE="$source" "$app" --install-only
+          python scripts/smoke_civex.py "$home/bin/civex$exe" \
+            --expect-version "$CIVEX_APP_VERSION"
+
+          if [ "$RUNNER_OS" = macOS ]; then
+            echo "Again as an Intel Mac runs it (Rosetta):"
+            intel="$RUNNER_TEMP/civex-app-intel"
+            CIVEX_APP_HOME="$intel" CIVEX_LAUNCHER_SOURCE="$source" arch -x86_64 "$app" --install-only
+            file "$intel"/python/*/bin/python3.* | head -3
+            arch -x86_64 "$BUILD_PYTHON" scripts/smoke_civex.py "$intel/bin/civex" \
+              --expect-version "$CIVEX_APP_VERSION"
+          fi
+
+      - name: Uninstall it (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = "$env:LOCALAPPDATA\Programs\civex"
+          Start-Process -Wait -FilePath "$dir\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+          # The uninstaller hands over to a copy of itself and finishes there.
+          for ($i = 0; $i -lt 60 -and (Test-Path "$dir\civex.exe"); $i++) { Start-Sleep 1 }
+          if (Test-Path "$dir\civex.exe") { throw "Uninstalling left $dir\civex.exe" }
 
       - uses: actions/upload-artifact@v7
         with:

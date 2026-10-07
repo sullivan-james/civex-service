@@ -64,8 +64,26 @@ they're now no-ops — so existing scripts and installs keep working.)
 ## The desktop app
 
 For people who'd rather not use a terminal at all, the desktop app opens civex
-in its own window with a project picker. Download it from the release page
-(`civex-windows.zip` or `civex-macos.dmg`) and open it.
+in its own window with a project picker. Download it from the release page:
+
+=== "Windows"
+
+    `civex-setup-windows.exe`. Run it: it installs for you only, so it doesn't
+    ask for an administrator, and adds civex to the Start menu (and, if you
+    tick it, the Desktop). Uninstall it from **Settings → Apps**.
+
+    The installer isn't signed yet, so Windows may say *Windows protected your
+    PC*: choose **More info**, then **Run anyway**.
+
+=== "macOS"
+
+    `civex-macos.dmg`, one download for Intel and Apple silicon Macs (macOS 11
+    or later). Open it and drag **civex** into **Applications**.
+
+    The app isn't signed yet, so the first time you open it macOS says it
+    can't check it. Click **Done**, then open **System Settings → Privacy &
+    Security**, scroll to *civex was blocked*, and click **Open Anyway**. You
+    only do this once.
 
 The first time it starts it sets civex up, which needs an internet connection
 and takes a minute or two: it downloads civex and the Python it runs on into a

@@ -64,6 +64,10 @@ from the next tag forward.
   with its own `uv` the first time it starts, then keeps it up to date. It no
   longer contains civex, so it never needs downloading again for a new
   version. Custom plugins work in it without anything else installed.
+- **The desktop app installs properly**: a Windows installer
+  (`civex-setup-windows.exe`: Start menu, uninstaller, no administrator
+  needed) and a macOS disk image with one app for Intel and Apple silicon
+  Macs. Neither is signed yet; the install guide says how to open them.
 - Install with `uv tool install civex`, which needs no Python on the computer.
 
 ### Fixes
