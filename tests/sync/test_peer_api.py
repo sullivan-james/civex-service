@@ -3,25 +3,24 @@ joining device reads pages that follow on from a thing, not from a count."""
 
 from __future__ import annotations
 
-import uuid
 
 import pytest
 
 from civex.config import load_config, save_config
 from civex.context import AppContext
+from civex.domain.sync import protocol_header
 
 
 @pytest.fixture()
-def serving(ctx, client):
+def serving(ctx, client, sign_in_over_http):
     config = load_config()
     config.sync.serve = True
     save_config(config)
-    _, token = ctx.authority_svc.add_device("laptop")
+    _, invite = ctx.device_keys.invite("laptop")
     ctx.commit()
     headers = {
-        "Authorization": f"Bearer {token}",
-        "X-Civex-Device": str(uuid.uuid4()),
-        "X-Civex-Protocol": "1",
+        "Authorization": f"Bearer {sign_in_over_http(client, invite)}",
+        "X-Civex-Protocol": protocol_header(),
     }
     return client, headers
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from civex.domain.sync import SyncError
@@ -123,7 +125,7 @@ def test_following_a_different_authority_forgets_the_old_ones_cursor_and_items(
     replacement = project("replacement")
     follow(laptop, replacement, "laptop")
 
-    assert connect(laptop, "http://replacement.test") == "seeded"
+    assert connect(laptop, "https://replacement.test") == "seeded"
 
     assert laptop.sync_repo.meta().cursor == replacement.sync_repo.head_seq()
     assert [r["id"] for r in snapshots(replacement)["record"]] == [str(kept.id)]
@@ -384,25 +386,60 @@ def test_a_pull_that_fails_part_way_resumes_where_it_stopped(project, authority)
     assert data(phone, record) == data(laptop, record)
 
 
-def test_a_refused_token_is_not_something_to_retry(project, authority):
+def test_a_revoked_device_is_not_something_to_retry(project, authority):
     laptop = device(project, authority, "laptop")
     build_study(laptop)
     connect(laptop)
-    authority.authority_svc.revoke_device("laptop")
+    authority.device_keys.revoke_device("laptop")
     authority.commit()
     with pytest.raises(SyncError, match="revoked") as raised:
         laptop.sync_svc.sync()
     assert raised.value.retryable is False
 
 
-def test_a_server_on_another_protocol_is_refused_clearly(
+def test_a_server_on_an_older_protocol_is_refused_saying_to_update_it(
     project, authority, monkeypatch
 ):
     laptop = device(project, authority, "laptop")
-    monkeypatch.setattr("civex.services.sync_service.PROTOCOL_VERSION", 99)
-    with pytest.raises(SyncError, match="protocol") as raised:
+    # This computer is the newer side: the authority stays on today's range.
+    monkeypatch.setattr("civex.domain.sync.PROTOCOL_MIN", 99)
+    monkeypatch.setattr("civex.domain.sync.PROTOCOL_MAX", 99)
+    with pytest.raises(SyncError, match="Update civex on the server") as raised:
         connect(laptop)
     assert raised.value.retryable is False
+
+
+def test_a_change_of_a_kind_this_civex_does_not_know_stops_sync_before_anything_is_applied(
+    pair, authority, monkeypatch
+):
+    laptop, phone, record = pair
+    laptop.record_svc.update(str(record.id), {"site": "x"})
+    laptop.commit()
+    laptop.sync_svc.sync()
+    before = phone.sync_repo.meta().cursor
+    real = authority.sync_repo.entries_after
+
+    def newer(seq, limit):
+        entries, more = real(seq, limit)
+        return [replace(e, entity_type="notebook") for e in entries], more
+
+    monkeypatch.setattr(authority.sync_repo, "entries_after", newer)
+    with pytest.raises(SyncError, match="Update civex here") as raised:
+        phone.sync_svc.sync()
+    assert raised.value.retryable is False
+    assert phone.sync_repo.meta().cursor == before
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["http://civex.example.org", "ftp://civex.example.org", "civex.example.org"],
+)
+def test_an_authority_is_reached_over_https_unless_it_is_this_computer(
+    project, authority, address
+):
+    laptop = device(project, authority, "laptop")
+    with pytest.raises(SyncError, match="https://"):
+        laptop.sync_svc.check_connect(address, "civex_dev_x")
 
 
 def test_one_sync_at_a_time(pair):

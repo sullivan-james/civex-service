@@ -37,8 +37,19 @@ from the next tag forward.
   after changes, on an interval, backing off when the authority is unreachable.
   Settings → Sync connects, shows status, syncs now, pauses and settles
   conflicts; the status bar shows a failing or waiting sync.
-- `civex sync authority enable` + `civex sync device add` turn a server into an
+- `civex sync authority enable` + `civex sync device invite` turn a server into an
   authority; remote hosts reach only `/api/sync/v1/`.
+- **Devices join by invite and sign in with a key.** An invite works once and
+  expires (24 hours by default). The device makes a key of its own, which never
+  leaves it, and signs in for a session of a few minutes; a server that isn't the
+  one it joined is refused before anything is sent. `civex sync connect --invite`,
+  `civex sync device invite|list|cancel|revoke`; Settings → Sync. Adds the
+  `cryptography` dependency and migration `a8c4e2f6b1d9`.
+- `civex serve --sync-only` serves only the sync API, for an authority behind an
+  HTTPS proxy. Devices connect over `https://` only (`http://` for this computer).
+- Sync protocol 2. A device and the authority use the newest version both speak,
+  and one that can't says which side to update.
+- Invites start with `civex_inv_`, recognised by gitleaks and secret scanners.
 
 ## v1.2.1 — history records every change (2026-10-05)
 

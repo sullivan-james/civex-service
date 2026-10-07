@@ -34,14 +34,27 @@ export interface RemoteStatus {
 
 export interface SyncDevice {
   name: string
+  /** Its key's short code. */
+  fingerprint: string
   created_at: string
   last_seen_at: string | null
   revoked: boolean
 }
 
+export interface SyncInvite {
+  /** The device it is for. */
+  name: string
+  created_at: string
+  expires_at: string
+}
+
 export interface Authority {
   serving: boolean
+  /** This authority's key's short code; null until it first invites. */
+  fingerprint: string | null
   devices: SyncDevice[]
+  /** Invites not used yet and not expired. */
+  invites: SyncInvite[]
 }
 
 export interface SyncProgress {
@@ -211,21 +224,27 @@ export const remoteApi = {
   authority: () => api.get<Authority>('/remote/authority'),
   setServing: (serving: boolean) =>
     api.patch<Authority>('/remote/authority', { serving }),
-  /** The answer carries the new device's token: the only time it is shown. */
-  addDevice: (name: string) =>
-    api.post<Authority & { token: string }>('/remote/authority/devices', {
+  /** The answer carries the invite: the only time it is shown. */
+  invite: (name: string) =>
+    api.post<Authority & { invite: string }>('/remote/authority/invites', {
       name,
     }),
+  cancelInvite: (name: string) =>
+    api.post<Authority>(
+      `/remote/authority/invites/${encodeURIComponent(name)}/cancel`,
+      {},
+    ),
   revokeDevice: (name: string) =>
     api.post<Authority>(
       `/remote/authority/devices/${encodeURIComponent(name)}/revoke`,
       {},
     ),
-  /** Starts connecting: the answer comes once the address and token are
-   * checked; copying then runs in the background (see `progress`). Without a
-   * token, the one this computer holds for the address is used. */
-  connect: (url: string, token?: string) =>
-    api.post<{ mode: string }>('/remote/connect', { url, token }),
+  /** Starts connecting: the answer comes once the address and invite are
+   * checked (this computer joins with the invite then); copying then runs in
+   * the background (see `progress`). Without an invite, this computer must
+   * have joined that address before. */
+  connect: (url: string, invite?: string) =>
+    api.post<{ mode: string }>('/remote/connect', { url, invite }),
   disconnect: () => api.post<RemoteStatus>('/remote/disconnect', {}),
   syncNow: () => api.post<{ requested: boolean }>('/remote/sync', {}),
   update: (body: {

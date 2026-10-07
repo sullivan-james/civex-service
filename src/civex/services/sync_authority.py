@@ -3,8 +3,8 @@
 Devices send the changes they made; the authority checks each against what it
 holds, merges it (see `domain/merge`), numbers what it accepts and serves
 everyone's changes back in that order. Nothing a device says about *when* or
-*who* is trusted: the order is the authority's, and the author of an accepted
-change is the device whose token sent it.
+*which device* is trusted: the order is the authority's, and the device is the
+one the caller's credentials prove (`Principal`, from an `Authenticator`).
 
 Sending a change twice is harmless: each is recorded by its id, and a repeat is
 answered with the first answer. A change that cannot be taken yet (a file has
@@ -15,32 +15,34 @@ from __future__ import annotations
 
 import logging
 
-import hashlib
-import secrets
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from civex import __version__
 from civex.domain import hlc
 from civex.domain.audit_diff import AFTER, BEFORE, apply_delta, identity
 from civex.domain.exceptions import ValidationError
 from civex.domain.merge import LIFECYCLE_KEYS, DERIVED_KEYS, merge
 from civex.domain.sync import (
     APPLIED,
+    CAPABILITIES,
     CONFLICT,
     DEFERRED,
     ENTITY_ORDER,
     MERGED,
-    PROTOCOL_VERSION,
+    PROTOCOL_MAX,
+    PROTOCOL_MIN,
     REJECTED,
     FeedPage,
     Hello,
     OpResult,
     PushResult,
     SnapshotPage,
-    SyncDeviceDTO,
+    Authenticator,
+    Principal,
     SyncEntry,
-    SyncError,
+    SyncPolicy,
     problem_with,
     snapshot_cursor,
 )
@@ -55,10 +57,6 @@ SNAPSHOT_MAX = 500
 PUSH_MAX = 500
 
 
-def hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
 log = logging.getLogger(__name__)
 
 
@@ -70,8 +68,13 @@ class SyncAuthorityService:
         files: FileObjectStore,
         records: RecordService,
         rules: ProjectRules,
+        authenticator: Authenticator,
+        policy: SyncPolicy | None = None,
     ) -> None:
         self._repo = repo
+        self._authenticator = authenticator
+        # What each caller may change; None: every change a rule allows.
+        self._policy = policy
         self._applier = applier
         self._files = files
         # What a project must still be after a change, asked of what it touched
@@ -84,68 +87,32 @@ class SyncAuthorityService:
         self._records = records
 
     # ------------------------------------------------------------------
-    # Who may sync
+    # Who is calling
     # ------------------------------------------------------------------
 
-    def add_device(self, name: str) -> tuple[SyncDeviceDTO, str]:
-        """Allow a device, returning the token it must present. The token is
-        shown once: only its hash is kept."""
-        name = name.strip()
-        if not name:
-            raise ValidationError("A device needs a name")
-        if self._repo.device_named(name) is not None:
-            raise ValidationError(f"A device called '{name}' already exists")
-        token = secrets.token_urlsafe(32)
-        return self._repo.add_device(name, hash_token(token)), token
-
-    def list_devices(self) -> list[SyncDeviceDTO]:
-        return self._repo.list_devices()
-
-    def revoke_device(self, name: str) -> bool:
-        return self._repo.revoke_device(name)
-
-    def authenticate(self, token: str, device_id: str | None) -> SyncDeviceDTO:
-        """The device a token belongs to. It is bound to the first device id it
-        is used with, and refused from any other afterwards."""
-        device = self._repo.device_by_token_hash(hash_token(token))
-        if device is None:
-            raise SyncError(
-                "That token is not valid, or has been revoked",
-                retryable=False,
-                status=401,
-            )
-        if device_id:
-            try:
-                uuid.UUID(device_id)
-            except ValueError:
-                raise SyncError("The device id is not valid", retryable=False)
-            if device.device_id and device.device_id != device_id:
-                raise SyncError(
-                    "That token belongs to another device",
-                    retryable=False,
-                    status=403,
-                )
-            if not device.device_id:
-                self._repo.bind_device(device.id, device_id)
-        self._repo.touch_device(device.id)
-        return device
+    def authenticate(self, token: str) -> Principal:
+        return self._authenticator.authenticate(token)
 
     # ------------------------------------------------------------------
     # Joining
     # ------------------------------------------------------------------
 
-    def hello(self, device: SyncDeviceDTO) -> Hello:
+    def hello(self, who: Principal, protocol: int) -> Hello:
         meta = self._repo.meta()
         counts = self._repo.entity_counts()
         return Hello(
-            protocol_version=PROTOCOL_VERSION,
+            protocol_version=protocol,
             project_id=meta.project_id,
             head_seq=self._head(),
             empty=sum(counts.values()) == 0,
             seeded_by=meta.seeded_by,
-            device_name=device.name,
+            device_name=who.name,
             counts=counts,
             feed_floor=meta.feed_floor,
+            protocol_min=PROTOCOL_MIN,
+            protocol_max=PROTOCOL_MAX,
+            server_version=__version__,
+            capabilities=list(CAPABILITIES),
         )
 
     def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage:
@@ -192,9 +159,7 @@ class SyncAuthorityService:
     # Accepting changes
     # ------------------------------------------------------------------
 
-    def push(
-        self, device: SyncDeviceDTO, device_id: str | None, entries: list[SyncEntry]
-    ) -> PushResult:
+    def push(self, who: Principal, entries: list[SyncEntry]) -> PushResult:
         """Settle each change, in the order sent. Stops at the first that has
         to wait (later ones may depend on it); those are simply not answered.
 
@@ -207,19 +172,19 @@ class SyncAuthorityService:
         results: list[OpResult] = []
         for action in _actions(_at_most(entries, PUSH_MAX)):
             settled = (
-                [self._settle(device, device_id, action[0])]
+                [self._settle(who, action[0])]
                 if len(action) == 1
-                else self._settle_action(device, device_id, action)
+                else self._settle_action(who, action)
             )
             results += settled
             if any(r.status == DEFERRED for r in settled):
                 break
-        self._log_push(device, entries, results)
+        self._log_push(who, entries, results)
         return PushResult(results, self._repo.head_seq())
 
     @staticmethod
     def _log_push(
-        device: SyncDeviceDTO, entries: list[SyncEntry], results: list[OpResult]
+        who: Principal, entries: list[SyncEntry], results: list[OpResult]
     ) -> None:
         """One line per push saying what became of the changes, and one per
         change that was not simply taken, naming the thing."""
@@ -227,7 +192,7 @@ class SyncAuthorityService:
         for r in results:
             counts[r.status] = counts.get(r.status, 0) + 1
         summary = ", ".join(f"{n} {s}" for s, n in sorted(counts.items())) or "nothing"
-        log.info("sync push from %s: %d sent, %s", device.name, len(entries), summary)
+        log.info("sync push from %s: %d sent, %s", who.name, len(entries), summary)
         by_id = {e.id: e for e in entries}
         for r in results:
             if r.status in ("conflict", "rejected", "deferred", "merged"):
@@ -235,45 +200,45 @@ class SyncAuthorityService:
                 what = f"{e.entity_type} {e.entity_id}" if e else str(r.op_id)
                 log.warning(
                     "sync push from %s: %s %s%s",
-                    device.name,
+                    who.name,
                     what,
                     r.status,
                     f" ({r.message})" if r.message else "",
                 )
 
-    def _settle(
-        self, device: SyncDeviceDTO, device_id: str | None, entry: SyncEntry
-    ) -> OpResult:
+    def _settle(self, who: Principal, entry: SyncEntry) -> OpResult:
         prior = self._repo.get_op(entry.id)
         if prior is not None:
             return prior  # sent before: the same answer, nothing done again
         self._covered = {(entry.entity_type, entry.entity_id)}
-        problem = problem_with(entry)
-        if problem:
-            return self._refuse(device, device_id, entry, problem)
+        if problem := self._problem(who, entry):
+            return self._refuse(who, entry, problem)
         try:
             with self._repo.savepoint():
-                result = self._take(device, device_id, entry)
+                result = self._take(who, entry)
                 self._rules.check(_changed([entry]))
         except ValidationError as e:
             if entry.entity_type != "record" and self._applier.head(
                 entry.entity_type, entry.entity_id
             ):
-                return self._put_back(device, device_id, entry, str(e))
-            return self._refuse(
-                device, device_id, entry, str(e), getattr(e, "path", None)
-            )
+                return self._put_back(who, entry, str(e))
+            return self._refuse(who, entry, str(e), getattr(e, "path", None))
         except (ValueError, TypeError, KeyError, AttributeError) as e:
             # A value inside the snapshots that can't be read (an id or a date
             # that isn't one). Refused by itself, so it can't hold up the rest
             # of the push or be sent again for ever.
-            return self._refuse(device, device_id, entry, f"A value is not valid: {e}")
-        self._repo.save_op(entry, result, device_id, device.name)
+            return self._refuse(who, entry, f"A value is not valid: {e}")
+        self._repo.save_op(entry, result, who.device_id, who.name)
         return result
 
-    def _settle_action(
-        self, device: SyncDeviceDTO, device_id: str | None, action: list[SyncEntry]
-    ) -> list[OpResult]:
+    def _problem(self, who: Principal, entry: SyncEntry) -> str | None:
+        """Why a change can't be taken whatever is held: its shape, or what
+        the caller may change."""
+        return problem_with(entry) or (
+            self._policy.refuses(who, entry) if self._policy else None
+        )
+
+    def _settle_action(self, who: Principal, action: list[SyncEntry]) -> list[OpResult]:
         """Settle the entries one action wrote (a field renamed with the
         templates it rewrote, a record deleted with everything beneath it) as
         one: all go in, or none does. Each is merged as it would be alone, then
@@ -295,55 +260,47 @@ class SyncAuthorityService:
             return [p for p in priors if p is not None]  # sent before
         self._covered = {(e.entity_type, e.entity_id) for e in action}
         for entry in action:
-            if problem := problem_with(entry):
-                return self._refuse_action(device, device_id, action, problem)
+            if problem := self._problem(who, entry):
+                return self._refuse_action(who, action, problem)
         try:
             with self._repo.savepoint():
-                results = [self._take(device, device_id, e) for e in action]
+                results = [self._take(who, e) for e in action]
                 failed = [r for r in results if r.status not in (APPLIED, MERGED)]
                 if failed:
                     raise _NotWhole(results)
                 self._rules.check(_changed(action))
         except _NotWhole as e:
             if all(_kept_from_delete(e.results, action)):
-                return self._keep_instead_of_delete(
-                    device, device_id, action, e.results
-                )
+                return self._keep_instead_of_delete(who, action, e.results)
             why = next((r.message for r in e.results if r.message), None)
             return self._refuse_action(
-                device,
-                device_id,
+                who,
                 action,
                 why or "Something it changes was changed on the server meanwhile",
             )
         except ValidationError as e:
-            return self._refuse_action(device, device_id, action, str(e))
+            return self._refuse_action(who, action, str(e))
         except (ValueError, TypeError, KeyError, AttributeError) as e:
-            return self._refuse_action(
-                device, device_id, action, f"A value is not valid: {e}"
-            )
+            return self._refuse_action(who, action, f"A value is not valid: {e}")
         for entry, result in zip(action, results):
-            self._repo.save_op(entry, result, device_id, device.name)
+            self._repo.save_op(entry, result, who.device_id, who.name)
         return results
 
     def _refuse_action(
         self,
-        device: SyncDeviceDTO,
-        device_id: str | None,
+        who: Principal,
         action: list[SyncEntry],
         why: str,
     ) -> list[OpResult]:
         message = f"Part of one change that could not go in whole: {why}"
         return [
-            self._put_back(device, device_id, entry, message)
+            self._put_back(who, entry, message)
             if self._applier.head(entry.entity_type, entry.entity_id) is not None
-            else self._refuse(device, device_id, entry, message)
+            else self._refuse(who, entry, message)
             for entry in action
         ]
 
-    def _put_back(
-        self, device: SyncDeviceDTO, device_id: str | None, entry: SyncEntry, why: str
-    ) -> OpResult:
+    def _put_back(self, who: Principal, entry: SyncEntry, why: str) -> OpResult:
         """Answer that a change was not taken, and send what is here instead,
         so the device that made it ends where this copy is. For the project's
         structure (and the parts of an action), where a change left in place on
@@ -361,15 +318,14 @@ class SyncAuthorityService:
                 why,
             )
         ]
-        seq = self._write_entries(device, device_id, entry, head, head, conflicts, None)
+        seq = self._write_entries(who, entry, head, head, conflicts, None)
         result = OpResult(entry.id, CONFLICT, why, conflicts, seq)
-        self._repo.save_op(entry, result, device_id, device.name)
+        self._repo.save_op(entry, result, who.device_id, who.name)
         return result
 
     def _keep_instead_of_delete(
         self,
-        device: SyncDeviceDTO,
-        device_id: str | None,
+        who: Principal,
         action: list[SyncEntry],
         tried: list[OpResult],
     ) -> list[OpResult]:
@@ -406,18 +362,15 @@ class SyncAuthorityService:
                     message,
                 )
             ]
-            seq = self._write_entries(
-                device, device_id, entry, head, head, conflicts, None
-            )
+            seq = self._write_entries(who, entry, head, head, conflicts, None)
             result = OpResult(entry.id, CONFLICT, message, conflicts, seq)
-            self._repo.save_op(entry, result, device_id, device.name)
+            self._repo.save_op(entry, result, who.device_id, who.name)
             results.append(result)
         return results
 
     def _refuse(
         self,
-        device: SyncDeviceDTO,
-        device_id: str | None,
+        who: Principal,
         entry: SyncEntry,
         why: str,
         field: str | None = None,
@@ -433,12 +386,10 @@ class SyncAuthorityService:
             why,
             [{"kind": "rejected", "field": field}] if field else [],
         )
-        self._repo.save_op(entry, result, device_id, device.name)
+        self._repo.save_op(entry, result, who.device_id, who.name)
         return result
 
-    def _take(
-        self, device: SyncDeviceDTO, device_id: str | None, entry: SyncEntry
-    ) -> OpResult:
+    def _take(self, who: Principal, entry: SyncEntry) -> OpResult:
         """Merge the change into what is held, write it, and record it."""
         kind, eid = entry.entity_type, entry.entity_id
         head = self._applier.head(kind, eid)
@@ -546,10 +497,8 @@ class SyncAuthorityService:
         else:
             raise ValidationError(f"Unknown action '{entry.action}'")
 
-        self._seed(device_id)
-        seq = self._write_entries(
-            device, device_id, entry, head, final, conflicts, incoming
-        )
+        self._seed(who.device_id)
+        seq = self._write_entries(who, entry, head, final, conflicts, incoming)
         if cascade is not None:
             self._write_cascade(entry, cascade)
         status = self._status(entry, final, conflicts, incoming)
@@ -678,8 +627,7 @@ class SyncAuthorityService:
 
     def _write_entries(
         self,
-        device: SyncDeviceDTO,
-        device_id: str | None,
+        who: Principal,
         entry: SyncEntry,
         head: dict[str, Any] | None,
         final: dict[str, Any] | None,
@@ -703,12 +651,11 @@ class SyncAuthorityService:
             old_data=entry.old_data,
             new_data=entry.new_data,
             timestamp=entry.timestamp,
-            # Who made it is what the device says, as given (the name a person
-            # chose; a token proves a device, not a person). Which device sent
-            # it is what the token says, never what was claimed.
-            actor=_claimed_author(entry.actor) or device.name,
-            device=device.name,
-            device_id=device_id,
+            # Which device sent it is what the token says, never what was
+            # claimed; who made it is `_author`.
+            actor=_author(who, entry),
+            device=who.name,
+            device_id=who.device_id,
             hlc=self._believable(entry.hlc),
             batch=entry.batch,
             delta=entry.delta,
@@ -847,6 +794,13 @@ def _sides(
     if "deleted_at" not in entry.delta:
         incoming["deleted_at"] = (entry.new_data or {}).get("deleted_at")
     return base, incoming
+
+
+def _author(who: Principal, entry: SyncEntry) -> str:
+    """Who made a change: the person the authenticator proved, else the name
+    the device gives (a label: a token proves a device, not a person), else
+    the token's name."""
+    return who.person or _claimed_author(entry.actor) or who.name
 
 
 def _claimed_author(name: str | None) -> str | None:

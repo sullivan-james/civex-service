@@ -189,15 +189,32 @@ def test_an_entry_from_elsewhere_is_kept_as_it_was_with_its_batch(project):
     assert r.pending_entries(10) == []  # it is not ours to send
 
 
-def test_devices_are_found_by_the_hash_of_their_token_until_revoked(project):
+def test_a_revoked_device_frees_its_name_and_id_for_one_invited_afresh(project):
     r = repo(project("auth"))
-    r.add_device("lab-laptop", "h1")
-    assert r.device_by_token_hash("h1").name == "lab-laptop"
-    assert r.device_by_token_hash("nope") is None
+    first = r.add_device("lab-laptop", "d1", "key1")
+    assert r.live_device("d1").id == first.id
     assert r.revoke_device("lab-laptop") is True
-    assert r.device_by_token_hash("h1") is None
+    assert r.live_device("d1") is None and r.device_named("lab-laptop") is None
     assert r.revoke_device("lab-laptop") is False
-    assert r.revoke_device("never-existed") is False
+    again = r.add_device("lab-laptop", "d1", "key2")
+    assert r.device_named("lab-laptop").id == again.id
+    assert [d.revoked_at is None for d in r.list_devices()] == [False, True]
+
+
+def test_invites_wait_until_used_cancelled_or_expired(project):
+    from datetime import datetime, timedelta, timezone
+
+    r = repo(project("auth"))
+    soon = datetime.now(timezone.utc) + timedelta(hours=1)
+    used = r.add_invite("a", "h1", soon)
+    r.add_invite("b", "h2", soon)
+    r.add_invite("c", "h3", datetime.now(timezone.utc) - timedelta(minutes=1))
+    assert r.use_invite(used.id) is True
+    assert r.use_invite(used.id) is False
+    assert r.invite_by_hash("h1").used_at is not None
+    assert [i.name for i in r.pending_invites()] == ["b"]
+    assert r.cancel_invite("b") is True and r.pending_invites() == []
+    assert r.cancel_invite("b") is False
 
 
 def test_conflicts_are_listed_until_resolved(project):

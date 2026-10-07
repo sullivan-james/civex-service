@@ -21,14 +21,14 @@ def test_sync_now_without_an_authority_explains(project_dir: Path) -> None:
     assert "civex sync connect" in result.output
 
 
-def test_authority_devices_get_tokens_that_can_be_revoked(project_dir: Path) -> None:
+def test_devices_are_invited_listed_cancelled_and_revoked(project_dir: Path) -> None:
     assert runner.invoke(app, ["sync", "authority", "enable"]).exit_code == 0
-    added = runner.invoke(app, ["sync", "device", "add", "laptop"])
-    assert added.exit_code == 0, added.output
-    listed = runner.invoke(app, ["sync", "device", "list"])
-    assert "laptop" in listed.output and "active" in listed.output
-    assert runner.invoke(app, ["sync", "device", "revoke", "laptop"]).exit_code == 0
-    assert "revoked" in runner.invoke(app, ["sync", "device", "list"]).output
+    invited = runner.invoke(app, ["sync", "device", "invite", "laptop"])
+    assert invited.exit_code == 0, invited.output
+    assert "civex_inv_" in invited.output and "This authority's key" in invited.output
+    assert "invited, until" in runner.invoke(app, ["sync", "device", "list"]).output
+    assert runner.invoke(app, ["sync", "device", "cancel", "laptop"]).exit_code == 0
+    assert runner.invoke(app, ["sync", "device", "cancel", "laptop"]).exit_code == 1
     assert runner.invoke(app, ["sync", "device", "revoke", "laptop"]).exit_code == 1
 
 
@@ -114,10 +114,10 @@ def test_conflicts_can_be_narrowed_to_one_record(
     assert "No conflicts" in other.output
 
 
-def test_connecting_without_a_token_needs_one_held_here(project_dir: Path) -> None:
+def test_connecting_without_an_invite_needs_to_have_joined(project_dir: Path) -> None:
     result = runner.invoke(app, ["sync", "connect", "http://127.0.0.1:9"])
     assert result.exit_code == 1
-    assert "token is needed" in result.output
+    assert "invite" in result.output
 
 
 def test_serving_is_switched_the_same_way_as_in_the_app(project_dir: Path) -> None:

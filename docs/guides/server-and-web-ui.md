@@ -37,6 +37,8 @@ civex serve --host 0.0.0.0 --allow-remote
 
 `--allow-remote` stands the guard down and prints a warning instead of exiting. Because there is still no authentication, only do this on a trusted network **behind a reverse proxy or firewall**.
 
+For other civex installs to sync with this project, don't expose the app: serve them with `civex serve --sync-only` (see [Syncing between machines](sync.md#set-up-the-authority)).
+
 ## Web UI
 
 Opening [http://localhost:8000](http://localhost:8000) (or wherever you configured it) loads the web interface. The main sections are:

@@ -28,7 +28,7 @@ def test_syncing_now_needs_an_authority(client: TestClient) -> None:
 
 def test_connecting_to_nothing_is_a_bad_gateway(client: TestClient) -> None:
     resp = client.post(
-        "/api/remote/connect", json={"url": "http://127.0.0.1:9", "token": "x"}
+        "/api/remote/connect", json={"url": "http://127.0.0.1:9", "invite": "civex_inv_x"}
     )
     assert resp.status_code == 502
 
@@ -89,12 +89,12 @@ def test_reopening_nothing_reopens_nothing(client: TestClient) -> None:
     assert resp.json() == {"reopened": 0}
 
 
-def test_connecting_again_without_a_token_needs_one_held_here(
+def test_connecting_again_without_an_invite_needs_to_have_joined(
     client: TestClient,
 ) -> None:
     resp = client.post("/api/remote/connect", json={"url": "http://127.0.0.1:9"})
     assert resp.status_code == 400
-    assert "token" in resp.json()["detail"]
+    assert "invite" in resp.json()["detail"]
 
 
 def test_history_storage_says_what_is_left_and_reclaims(client: TestClient) -> None:
@@ -106,18 +106,31 @@ def test_history_storage_says_what_is_left_and_reclaims(client: TestClient) -> N
     assert again.json()["free_bytes"] == 0
 
 
-def test_the_app_serves_and_issues_tokens_as_the_cli_does(client: TestClient) -> None:
+def test_the_app_serves_and_invites_as_the_cli_does(
+    client: TestClient, sign_in_over_http
+) -> None:
     on = client.patch("/api/remote/authority", json={"serving": True}).json()
-    assert on["serving"] is True and on["devices"] == []
-    issued = client.post("/api/remote/authority/devices", json={"name": "laptop"})
-    assert issued.status_code == 200, issued.text
-    assert issued.json()["token"] and issued.json()["devices"][0]["name"] == "laptop"
-    again = client.post("/api/remote/authority/devices", json={"name": "laptop"})
+    assert on["serving"] is True and on["devices"] == [] and on["fingerprint"] is None
+    invited = client.post("/api/remote/authority/invites", json={"name": "laptop"})
+    assert invited.status_code == 200, invited.text
+    body = invited.json()
+    assert body["invite"].startswith("civex_inv_") and body["fingerprint"]
+    assert [i["name"] for i in body["invites"]] == ["laptop"]
+    again = client.post("/api/remote/authority/invites", json={"name": "laptop"})
     assert again.status_code == 422
+
+    sign_in_over_http(client, body["invite"])
+    joined = client.get("/api/remote/authority").json()
+    assert joined["invites"] == [] and joined["devices"][0]["name"] == "laptop"
+    assert joined["devices"][0]["fingerprint"]
     revoked = client.post("/api/remote/authority/devices/laptop/revoke").json()
     assert revoked["devices"][0]["revoked"] is True
     assert client.post("/api/remote/authority/devices/laptop/revoke").status_code == 404
-    assert client.get("/api/remote").json()["serving"] is True
+
+    client.post("/api/remote/authority/invites", json={"name": "phone"})
+    cancelled = client.post("/api/remote/authority/invites/phone/cancel").json()
+    assert cancelled["invites"] == []
+    assert client.post("/api/remote/authority/invites/phone/cancel").status_code == 404
 
 
 def test_files_on_this_computer_per_collection(client, make_collection):
