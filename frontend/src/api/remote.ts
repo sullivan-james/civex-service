@@ -51,6 +51,9 @@ export interface SyncProgress {
   done: number
   total: number | null
   kind: string | null
+  /** Downloading files: bytes so far, and how fast (bytes a second). */
+  bytes_done?: number
+  rate?: number
 }
 
 export interface SyncResult {

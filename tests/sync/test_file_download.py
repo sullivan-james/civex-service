@@ -131,13 +131,20 @@ def test_a_preview_counts_files_to_download_and_the_export_says_it_is_downloadin
     progress = registry.start("p-download-test")
     phases = []
     real_phase = progress.phase
-    progress.phase = lambda label, total=0: (
+    states = []
+    # Each stage as it ends: the state just before the next one begins.
+    progress.phase = lambda label, total=0, total_bytes=0: (
+        states.append(registry.get("p-download-test")),
         phases.append(label),
-        real_phase(label, total),
+        real_phase(label, total, total_bytes),
     )  # type: ignore[method-assign]
     plan = phone.file_access_svc.plan(selection, progress=progress, fetch=True)
     assert plan.complete and plan.available == 1
     assert "Downloading 1 file from the server" in phases
+    # The bytes it expected, from the record, and that they all came.
+    ended = states[phases.index("Downloading 1 file from the server") + 1]
+    size = len(b"to fetch")
+    assert (ended["bytes_done"], ended["bytes_total"]) == (size, size)
 
 
 def test_a_file_the_server_lacks_is_unreachable_once_the_export_has_tried(

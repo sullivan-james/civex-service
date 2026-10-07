@@ -491,6 +491,10 @@ def test_a_tagged_request_can_be_followed_while_and_after_it_runs(
         "total": 2,
         "finished": True,
         "error": None,
+        "bytes_done": 0,
+        "bytes_total": 0,
+        "rate": 0.0,
+        "eta": None,
     }
 
 

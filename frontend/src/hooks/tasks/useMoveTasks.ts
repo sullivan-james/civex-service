@@ -1,7 +1,6 @@
 import type { Transfer } from '../../api/transfers'
 import { HardDrive } from '../../components/ui/icons'
-import { formatEstimate } from '../../utils/dbFormat'
-import { formatSize } from '../../utils/storage'
+import { describeAmounts } from '../../utils/amounts'
 import type { BackgroundTask, TaskAction } from '../../utils/backgroundTasks'
 import { isBusy, percentDone } from '../../utils/transfers'
 import { usePauseTransfer, useTransfers } from '../useTransfers'
@@ -41,16 +40,19 @@ export function useMoveTasks(): BackgroundTask[] {
         tone: 'info',
         icon: HardDrive,
         title: describe(running),
-        progress: { fraction: pct / 100, label: 'Move progress' },
-        detail:
-          `${pct}% · ${p.files_done} of ${p.files_total} files · ` +
-          `${formatSize(p.bytes_done)} of ${formatSize(p.bytes_total)}` +
-          (p.rate_bytes_per_second > 0
-            ? ` · ${formatSize(p.rate_bytes_per_second)}/s`
-            : '') +
-          (p.eta_seconds != null
-            ? ` · ${formatEstimate(p.eta_seconds)} left`
-            : ''),
+        progress: {
+          fraction: pct / 100,
+          label: 'Move progress',
+          count: describeAmounts({
+            done: p.files_done,
+            total: p.files_total,
+            unit: 'files',
+            bytesDone: p.bytes_done,
+            bytesTotal: p.bytes_total,
+            rate: p.rate_bytes_per_second,
+            eta: p.eta_seconds,
+          }),
+        },
         note: more,
         actions: [
           {

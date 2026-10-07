@@ -11,6 +11,7 @@ import {
 import { transfersApi } from '../../api/transfers'
 import { runFileJob, type JobHandle } from '../../hooks/fileJobs'
 import { errorMessage } from '../../lib/errors'
+import { describeAmounts } from '../../utils/amounts'
 import { percentDone } from '../../utils/transfers'
 import { reportExport } from './reportExport'
 
@@ -88,7 +89,15 @@ function watchProgress(j: JobHandle, id: string, every: number): () => void {
             ? {
                 fraction: Math.min(1, p.done / p.total),
                 label: p.phase || 'Progress',
-                count: `${p.done.toLocaleString()} of ${p.total.toLocaleString()}`,
+                count: describeAmounts({
+                  done: p.done,
+                  total: p.total,
+                  unit: p.bytes_total ? 'files' : undefined,
+                  bytesDone: p.bytes_done,
+                  bytesTotal: p.bytes_total,
+                  rate: p.rate,
+                  eta: p.eta,
+                }),
               }
             : undefined,
       })
@@ -372,6 +381,23 @@ async function waitForMove(
   title: string,
 ): Promise<void> {
   const wait = ctx.pollMs ?? 1000
+  // The move shows itself in the status bar (with pause, speed and time left):
+  // this job keeps out of sight while it waits, and is back after.
+  j.update({ waiting: true })
+  try {
+    return await followMove(ctx, j, id, title, wait)
+  } finally {
+    j.update({ waiting: false })
+  }
+}
+
+async function followMove(
+  ctx: FlowContext,
+  j: JobHandle,
+  id: string,
+  title: string,
+  wait: number,
+): Promise<void> {
   for (;;) {
     const t = await transfersApi.get(id)
     const pct = percentDone(t.progress)

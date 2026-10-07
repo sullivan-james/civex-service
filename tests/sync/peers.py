@@ -141,11 +141,14 @@ class Loopback:
         assert stored.sha256 == sha256
         self._authority.commit()
 
-    def download_file(self, sha256, dest):
+    def download_file(self, sha256, dest, on_bytes=None):
         self.calls.append("download_file")
         self._svc()
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(self._authority.file_svc.retrieve(sha256))
+        data = self._authority.file_svc.retrieve(sha256)
+        dest.write_bytes(data)
+        if on_bytes:
+            on_bytes(len(data))
 
 
 class Flaky:

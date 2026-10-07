@@ -96,7 +96,16 @@ class FileAccessService:
         # how many have arrived; None when the project follows none. Injected
         # so this service doesn't know sync.
         self.fetch_missing: (
-            Callable[[list[str], Callable[[int], None] | None, str | None], Any] | None
+            Callable[
+                [
+                    list[str],
+                    Callable[[int], None] | None,
+                    str | None,
+                    Callable[[int], None] | None,
+                ],
+                Any,
+            ]
+            | None
         ) = None
         # Removes this computer's copies of content the server holds (given the
         # hashes and whether only to count); None when the project follows no
@@ -129,7 +138,7 @@ class FileAccessService:
         remote = [i.sha256 for i in found.to_fetch]
         if not (fetch and remote and self.fetch_missing):
             return found
-        self._fetch(remote, progress)
+        self._fetch(remote, progress, sizes=_sizes(found.to_fetch))
         return self._absent_now(self._plan(selection, with_sources, progress))
 
     def _absent_now(self, plan: FilePlan) -> FilePlan:
@@ -150,11 +159,17 @@ class FileAccessService:
         return plan
 
     def _fetch(
-        self, shas: list[str], progress: Progress | None, volume: str | None = None
+        self,
+        shas: list[str],
+        progress: Progress | None,
+        volume: str | None = None,
+        sizes: dict[str, int] | None = None,
     ) -> Any:
         """Download these files from the server, as a stage of the work a
-        person is watching (the same progress as the rest of it); onto
-        `volume` when they are being fetched to go there."""
+        person is watching (the same progress as the rest of it: how many
+        files, how many bytes of how many, how fast); onto `volume` when they
+        are being fetched to go there. `sizes` are the files' sizes as their
+        records say, for the bytes to expect."""
         shas = list(dict.fromkeys(shas))
         if not shas or not self.fetch_missing:
             return None
@@ -163,8 +178,14 @@ class FileAccessService:
                 f"Downloading {len(shas)} file{'s' if len(shas) != 1 else ''} "
                 "from the server",
                 len(shas),
+                sum((sizes or {}).get(sha, 0) for sha in shas),
             )
-        return self.fetch_missing(shas, progress.advance if progress else None, volume)
+        return self.fetch_missing(
+            shas,
+            progress.advance if progress else None,
+            volume,
+            progress.add_bytes if progress else None,
+        )
 
     def _plan(
         self,
@@ -1207,8 +1228,9 @@ class FileAccessService:
         if volume not in self._store.volume_names():
             raise NotFoundError(f"There is no drive called '{volume}'.")
         movable = [i for i in items if place_of(i)[1] in ("drive", "server")]
+        remote = [i for i in movable if place_of(i)[1] == "server"]
         fetched = self._fetch(
-            [i.sha256 for i in movable if place_of(i)[1] == "server"], progress, volume
+            [i.sha256 for i in remote], progress, volume, _sizes(remote)
         )
         located = self._store.locate_volumes(i.sha256 for i in movable)
         elsewhere = [sha for sha, on in located.items() if on and on != volume]
@@ -1221,10 +1243,9 @@ class FileAccessService:
         many came, how many of the listed rows that covers (records that share
         a file share its download), and, for any the server hasn't got either,
         where they still are, grouped by that."""
-        wanted = list(
-            dict.fromkeys(i.sha256 for i in items if place_of(i)[1] == "server")
-        )
-        report = self._fetch(wanted, progress)
+        remote = [i for i in items if place_of(i)[1] == "server"]
+        wanted = list(dict.fromkeys(i.sha256 for i in remote))
+        report = self._fetch(wanted, progress, sizes=_sizes(remote))
         here = self._store.locate_volumes(wanted)
         absent = report.absent if report else []
         why = self.why_not_here(absent) if (absent and self.why_not_here) else {}
@@ -1573,3 +1594,9 @@ def _kinds(items: list[FileItem]) -> list[dict[str, Any]]:
         row["files"] += 1
         row["bytes"] += item.size
     return sorted(out.values(), key=lambda r: (-r["files"], r["field"]))
+
+
+def _sizes(items: list[FileItem]) -> dict[str, int]:
+    """Each file's size, as its records say, for how many bytes a download
+    has to bring."""
+    return {i.sha256: i.size for i in items}

@@ -303,8 +303,10 @@ def build_local_context(
 
     record_svc.files_from_server = lambda: _sync().fetches_files
     file_info_svc.files_from_server = lambda: _sync().fetches_files
-    file_access_svc.fetch_missing = lambda shas, on_file=None, volume=None: (
-        _sync().fetch_files(shas=shas, progress=on_file, volume=volume)
+    file_access_svc.fetch_missing = (
+        lambda shas, on_file=None, volume=None, on_bytes=None: _sync().fetch_files(
+            shas=shas, progress=on_file, volume=volume, on_bytes=on_bytes
+        )
     )
     file_access_svc.free_files = lambda shas, dry: _sync().free_up_files(
         shas, dry_run=dry

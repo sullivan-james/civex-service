@@ -1239,6 +1239,7 @@ class SyncService:
         seconds: float | None = None,
         progress: Callable[[int], None] | None = None,
         volume: str | None = None,
+        on_bytes: Callable[[int], None] | None = None,
     ) -> FileFetchReport:
         """Download files the records here cite that no drive here holds (all
         of them, or those of `shas`), each checked against its hash and saved
@@ -1276,7 +1277,7 @@ class SyncService:
                     continue
                 dest = scratch / sha
                 try:
-                    transport.download_file(sha, dest)
+                    transport.download_file(sha, dest, on_bytes)
                 except FileNotFoundError:
                     report.absent.append(sha)
                     continue

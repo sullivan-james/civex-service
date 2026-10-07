@@ -26,6 +26,10 @@ class SyncProgressResponse(BaseModel):
     kind: str | None = Field(
         default=None, description="The kind of thing it is on (schema, record...)."
     )
+    bytes_done: int = Field(default=0, description="Downloading files: bytes so far.")
+    rate: float = Field(
+        default=0.0, description="Downloading files: bytes per second, lately."
+    )
 
 
 class RemoteStatusResponse(BaseModel):

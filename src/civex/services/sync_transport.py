@@ -16,6 +16,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +75,12 @@ class HttpSyncTransport:
             request.add_header("Content-Type", "application/octet-stream")
             self._open(request).close()
 
-    def download_file(self, sha256: str, dest: Path) -> None:
+    def download_file(
+        self,
+        sha256: str,
+        dest: Path,
+        on_bytes: Callable[[int], None] | None = None,
+    ) -> None:
         """Fetch a file to `dest`, checking it is the file asked for: bytes that
         hash to something else are discarded, never kept under that name."""
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -91,6 +97,8 @@ class HttpSyncTransport:
                 while chunk := response.read(_CHUNK):
                     digest.update(chunk)
                     out.write(chunk)
+                    if on_bytes:
+                        on_bytes(len(chunk))
             if digest.hexdigest() != sha256:
                 raise SyncError("The server sent the wrong content for that file")
             os.replace(tmp_name, dest)

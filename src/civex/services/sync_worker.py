@@ -28,6 +28,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from civex.config import Config
+from civex.domain.rates import RateWindow
 from civex.domain.sync import FILES, SyncError, SyncProgress
 from civex.services.sync_lock import SyncBusy
 
@@ -172,14 +173,35 @@ class SyncWorker:
         # sees at once that it is under way and how many there are.
         self._on_progress(SyncProgress(FILES, base, max(self._files_total, base)))
 
+        rate = RateWindow()
+        got = [0]  # bytes so far in this pass
+
+        def say() -> None:
+            total = max(self._files_total, self._files_done)
+            self._on_progress(
+                SyncProgress(
+                    FILES,
+                    self._files_done,
+                    total,
+                    bytes_done=got[0],
+                    rate=rate.add(self._clock(), got[0]),
+                )
+            )
+
         def tell(done: int) -> None:
             self._files_done = base + done
-            total = max(self._files_total, self._files_done)
-            self._on_progress(SyncProgress(FILES, self._files_done, total))
+            say()
+
+        def arrived(n: int) -> None:
+            got[0] += n
+            say()
 
         try:
             report = ctx.sync_svc.fetch_files(
-                skip=self._absent, seconds=FILES_SECONDS, progress=tell
+                skip=self._absent,
+                seconds=FILES_SECONDS,
+                progress=tell,
+                on_bytes=arrived,
             )
         except SyncError as e:
             log.info("downloading files failed (%s); it carries on later", e)

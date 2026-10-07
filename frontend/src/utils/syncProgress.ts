@@ -1,4 +1,5 @@
 import type { SyncProgress } from '../api/remote'
+import { describeAmounts } from './amounts'
 
 const PHASES: Record<string, string> = {
   copying: 'Copying the project from the server',
@@ -41,7 +42,13 @@ export function describeSyncProgress(p: SyncProgress): SyncProgressText {
   return {
     title: PHASES[p.phase] ?? 'Syncing',
     detail: what ? `${what} · ${count}` : count,
-    count: what ? `${count} ${what}` : count,
+    count: describeAmounts({
+      done: p.done,
+      total: p.total,
+      unit: what || undefined,
+      bytesDone: p.bytes_done,
+      rate: p.rate,
+    }),
     fraction:
       p.total != null && p.total > 0 ? Math.min(1, p.done / p.total) : null,
   }

@@ -226,6 +226,12 @@ export interface FileProgress {
   total: number
   finished: boolean
   error: string | null
+  /** A stage that moves bytes (downloading): so far, of how many, how fast
+   * (bytes a second), seconds left. */
+  bytes_done?: number
+  bytes_total?: number
+  rate?: number
+  eta?: number | null
 }
 
 const PROGRESS_HEADER = 'X-Civex-Progress'

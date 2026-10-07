@@ -36,6 +36,27 @@ describe('file jobs in the status bar', () => {
     expect(result.current).toEqual([])
   })
 
+  it('keep out of sight while waiting on a move, which shows itself', async () => {
+    const { result } = renderHook(() => useFileJobTasks())
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    let done!: Promise<void>
+
+    act(() => {
+      done = runFileJob({ title: 'Moving 3 files…' }, async (j) => {
+        j.update({ waiting: true })
+        await gate
+      })
+    })
+    act(() => vi.advanceTimersByTime(FILE_JOB_SHOW_AFTER_MS * 2))
+    expect(result.current).toEqual([]) // one move, one row: the move's own
+
+    await act(async () => {
+      release()
+      await done
+    })
+  })
+
   it('never appear at all for a job that is over within the second', async () => {
     const { result } = renderHook(() => useFileJobTasks())
 

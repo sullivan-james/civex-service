@@ -26,10 +26,10 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Iterator
 
+from civex.domain.rates import RateWindow, eta_seconds
 from civex.domain.transfers import (
     KIND_CONSOLIDATE,
     CopyResult,
@@ -61,7 +61,6 @@ FLUSH_SECONDS = 1.0
 LARGE_FILE = 8 * 1024 * 1024  # a file this big is committed on its own
 RETRIES = 2  # extra attempts at a file whose copy failed in a way that may pass
 RETRY_DELAY = 0.5
-RATE_WINDOW = 15.0  # seconds of history the speed is averaged over
 PAGE = 1000  # references read per query when consolidating
 
 ProgressFn = Callable[[TransferProgress], None]
@@ -162,7 +161,7 @@ class _Run:
         self.pending_files = 0  # counted files in the batch, not yet in files_done
         self.last_flush = clock()
         self.last_emit = 0.0
-        self.window: deque[tuple[float, int]] = deque()
+        self.window = RateWindow()
         # Bytes written to targets in the current batch, per target, so room is
         # judged against what is already promised, not just what is committed.
         self.pending: dict[str, int] = {}
@@ -184,14 +183,9 @@ class _Run:
         self.last_emit = now
         self.store.touch_transfer_lock()  # proof of life, so the lock isn't taken for stale
         done = self.p.bytes_done + self.p.current_bytes
-        self.window.append((now, done))
-        while len(self.window) > 2 and now - self.window[0][0] > RATE_WINDOW:
-            self.window.popleft()
-        t0, b0 = self.window[0]
-        rate = (done - b0) / (now - t0) if now - t0 > 0 else 0.0
-        self.p.rate_bytes_per_second = max(rate, 0.0)
-        remaining = max(self.p.bytes_total - done, 0)
-        self.p.eta_seconds = remaining / rate if rate > 0 and remaining else None
+        rate = self.window.add(now, done)
+        self.p.rate_bytes_per_second = rate
+        self.p.eta_seconds = eta_seconds(rate, done, self.p.bytes_total)
         self.hook(TransferProgress(**vars(self.p)))
 
     def check_stop(self) -> None:
