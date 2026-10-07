@@ -328,7 +328,10 @@ records use it, so a file three records use is one row, and every count and
 size is of real files on disk. The **Record** column shows where the file sits
 ("Encounter 7 › Recording 2 › Selection 11"). **Used by N records** opens every
 record that uses it, with the records above each, including those outside
-this list. The search box at the top searches the files (their names and the
+this list. Deleted records still keep a file while they can be restored, but
+they don't count as using it: the list says how many there are, apart. Inside
+a record, its own files are listed with those of what it contains, so the
+count matches the record's storage line. The search box at the top searches the files (their names and the
 names of the records they sit under), **Kinds of file** narrows to some file
 fields, and **Used by** to files that so many records use. Each record names a
 file by its own name template: when they differ, the row says what else it is

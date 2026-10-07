@@ -59,6 +59,9 @@ export interface FileInfo {
   collections: { id: string; name: string | null; records: number }[]
   /** The live records that use it, named, with the records above each
    * (at most 200; `records` is the full count). */
+  /** Deleted records that still reference it: they keep it while they can
+   * be restored, but don't count as using it. */
+  deleted_records?: number
   uses?: {
     id: string
     name: string

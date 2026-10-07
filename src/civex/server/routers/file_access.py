@@ -140,6 +140,7 @@ def _base_selection(body: FileSelectionRequest, ctx: AppContext) -> FileSelectio
         layout=body.layout,
         schemas=body.kinds,
         below=body.below,
+        with_within=body.with_within,
     )
 
 

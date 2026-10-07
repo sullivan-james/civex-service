@@ -518,11 +518,14 @@ class FileInfo:
     sha256: str
     size: int | None
     copies: list[FileCopy]
-    records: int  # records that reference it
+    records: int  # live records that use it
     jobs: int  # workflow runs that took it as an input
     collections: list[CollectionUse]
     # The live records that use it, named (at most RECORD_USES_SHOWN).
     uses: list[RecordUse] = field(default_factory=list)
+    # Deleted records that still reference it: they keep it while they can be
+    # restored, but don't count as using it until they are.
+    deleted_records: int = 0
 
 
 @dataclass

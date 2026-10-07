@@ -121,6 +121,7 @@ export function FileInfoPanel({ sha256 }: { sha256: string }) {
           {data.jobs > 0 &&
             `, ${data.jobs} workflow ${data.jobs === 1 ? 'run' : 'runs'}`}
         </p>
+        <DeletedKeepers count={data.deleted_records} />
         {data.collections.length > 0 && (
           <ul className="mt-1 space-y-0.5">
             {data.collections.map((c) => (
@@ -149,5 +150,18 @@ export function FileInfoPanel({ sha256 }: { sha256: string }) {
         Storage settings
       </Link>
     </div>
+  )
+}
+
+/** Deleted records that still hold a file: said apart from the records that
+ * use it, since they don't count until they are restored. */
+export function DeletedKeepers({ count }: { count?: number }) {
+  if (!count) return null
+  return (
+    <p className="text-xs text-fg-subtle">
+      Also kept by {count.toLocaleString()} deleted{' '}
+      {count === 1 ? 'record' : 'records'}, while {count === 1 ? 'it' : 'they'}{' '}
+      can be restored.
+    </p>
   )
 }

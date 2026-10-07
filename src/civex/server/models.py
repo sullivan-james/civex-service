@@ -825,7 +825,12 @@ class FileInfoResponse(BaseModel):
         description="Every place the content is, or is recorded to be."
     )
     records: int = Field(
-        description="Records that use this file, across all collections."
+        description="Live records that use this file, across all collections."
+    )
+    deleted_records: int = Field(
+        default=0,
+        description="Deleted records that still reference it: they keep it "
+        "while they can be restored, but don't count as using it.",
     )
     jobs: int = Field(description="Workflow runs that took it as an input.")
     collections: list[CollectionUseResponse]
@@ -2345,6 +2350,12 @@ class FileSelectionRequest(BaseModel):
         description="Also take the files of every record beneath each selected "
         "one (the selected encounters, and everything inside them). Without it, "
         "only the selected records' own files.",
+    )
+    with_within: bool = Field(
+        default=False,
+        description="With `within` and `schema_name`: also the files of the "
+        "`within` record itself (a list of what a record contains, taking the "
+        "record's own files too).",
     )
     kinds: list[str] | None = Field(
         default=None,

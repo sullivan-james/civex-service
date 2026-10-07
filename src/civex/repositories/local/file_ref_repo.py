@@ -33,27 +33,34 @@ class LocalFileReferenceRepository:
         )
         return {sha for (sha,) in rows}
 
-    def usage(self, sha256: str) -> tuple[dict[uuid.UUID | None, int], int]:
-        """What uses a blob: the number of records that reference it in each
-        collection, and the number of workflow runs that took it as input."""
-        by_collection = {
-            dataset_id: n
-            for dataset_id, n in self._s.execute(
-                select(
-                    Record.dataset_id,
-                    func.count(func.distinct(FileReference.record_id)),
-                )
-                .join(Record, Record.id == FileReference.record_id)
-                .where(FileReference.sha256 == sha256)
-                .group_by(Record.dataset_id)
+    def usage(self, sha256: str) -> tuple[dict[uuid.UUID | None, int], int, int]:
+        """What uses a blob: the number of live records that reference it in
+        each collection, the number of workflow runs that took it as input,
+        and the number of deleted records that still reference it (they keep
+        it while they can be restored, but don't count as using it)."""
+        live = Record.deleted_at.is_(None)
+        by_collection: dict[uuid.UUID | None, int] = {}
+        deleted = 0
+        for dataset_id, is_live, n in self._s.execute(
+            select(
+                Record.dataset_id,
+                live,
+                func.count(func.distinct(FileReference.record_id)),
             )
-        }
+            .join(Record, Record.id == FileReference.record_id)
+            .where(FileReference.sha256 == sha256)
+            .group_by(Record.dataset_id, live)
+        ):
+            if is_live:
+                by_collection[dataset_id] = int(n)
+            else:
+                deleted += int(n)
         jobs = self._s.execute(
             select(func.count(func.distinct(FileReference.job_id))).where(
                 FileReference.sha256 == sha256, FileReference.job_id.is_not(None)
             )
         ).scalar_one()
-        return by_collection, int(jobs)
+        return by_collection, int(jobs), deleted
 
     def shas_for_collections(
         self, collection_ids: list[str], after: str | None, limit: int

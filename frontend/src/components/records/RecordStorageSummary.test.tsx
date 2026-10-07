@@ -67,9 +67,8 @@ describe('RecordStorageSummary', () => {
       name: "Where this record's files are stored",
     })
     expect(note).toHaveTextContent(
-      '12 files, with what it contains, on archive (10)',
+      "12 files here and in what it contains: 10 on archive · 2 on field, which can't be reached",
     )
-    expect(note).toHaveTextContent("2 can't be opened right now")
     expect(
       within(note).getByRole('link', { name: 'Show all files' }),
     ).toHaveAttribute('href', '/?tab=contains&show=files')

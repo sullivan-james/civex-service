@@ -182,3 +182,33 @@ def test_a_files_info_names_every_record_that_uses_it(ctx, study):  # noqa: F811
     assert info.records == 2
     assert sorted(u.name for u in info.uses) == ["s1", "s2"]
     assert all(u.trail for u in info.uses)  # the records above each
+
+
+def test_a_records_list_of_what_it_contains_can_take_its_own_files_too(
+    ctx,
+    study,  # noqa: F811
+):
+    """A record's Contains tab lists its children; its files there are theirs
+    and, with `with_within`, the record's own (as the record's storage line
+    counts them)."""
+    import dataclasses
+
+    ctx.schema_svc.add_field("recording", "audio", "file")
+    study.selection(study.rec_a, "s1", b"one")
+    ctx.commit()
+    rec_a = ctx.record_svc.get(str(study.rec_a.id))
+    ctx.record_svc.update(
+        str(rec_a.id),
+        {**rec_a.data, "audio": study.file(b"the recording", "rec.wav")},
+    )
+    ctx.commit()
+    children = FileSelection(
+        query=RecordQuery(schema="selection", within=str(study.rec_a.id)),
+        below=True,
+    )
+    svc = ctx.file_access_svc
+    assert [i.filename for i in svc.listing(children).items] == ["s1.txt"]
+    both = dataclasses.replace(children, with_within=True)
+    assert sorted(i.filename for i in svc.listing(both).items) == ["rec.wav", "s1.txt"]
+    everything = svc.listing(_within(study.rec_a)).total
+    assert svc.listing(both).total == everything

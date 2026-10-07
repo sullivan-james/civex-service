@@ -53,6 +53,9 @@ export interface FileSelection {
   kinds?: string[]
   /** Also the files of every record beneath each selected one. */
   below?: boolean
+  /** With `within` and a kind: also the files of the `within` record itself
+   * (the record a list of what it contains is inside). */
+  with_within?: boolean
   /** Also make these tables. */
   tables?: TableSpec[]
   /** false takes the table alone, with no files (needs `table`). */

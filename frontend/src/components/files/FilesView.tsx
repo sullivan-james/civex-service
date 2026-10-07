@@ -18,6 +18,7 @@ import { displayLabel } from '../../utils/naming'
 import { placeLabel } from '../../utils/places'
 import { formatSize } from '../../utils/storage'
 import { FileLink } from '../records/FileLocation'
+import { DeletedKeepers } from '../records/FileInfoPanel'
 import { SelectionBar } from '../explorer/SelectionBar'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { FreeUpDialog } from '../settings/storage/ComputerFiles'
@@ -411,6 +412,9 @@ function RecordsUsing({ sha256, here }: { sha256: string; here: FileUse[] }) {
           and {(data.records - all.length).toLocaleString()} more
         </p>
       )}
+      <div className="px-2">
+        <DeletedKeepers count={data?.deleted_records} />
+      </div>
     </div>
   )
 }

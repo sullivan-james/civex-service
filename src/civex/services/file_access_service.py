@@ -772,6 +772,9 @@ class FileAccessService:
             ]
         else:
             queries = [query]
+            if selection.with_within and query.within and query.schema:
+                # The record the list is inside: its own files too.
+                found.append(self._records.get(query.within))
         if progress:
             # How many records there are to go through, so it can say how far.
             progress.phase(

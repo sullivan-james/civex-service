@@ -121,6 +121,10 @@ class FileSelection:
     # encounters, and everything inside them". Without it, only the selected
     # records' own files.
     below: bool = False
+    # With `query.within` and a `query.schema`: also the files of the `within`
+    # record itself (the record a list of what it contains is inside), so
+    # "its files" means all of them, not only its children's.
+    with_within: bool = False
     # The tables made beside the files (`tables`; each says what its rows are,
     # where it is written and its columns), and whether the files themselves are
     # taken (`files`: False is tables alone).

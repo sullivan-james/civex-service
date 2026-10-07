@@ -491,6 +491,11 @@ def store_where(
             + (f": {used}" if used else "")
             + (f"; {info.jobs} workflow run(s)" if info.jobs else "")
         )
+        if info.deleted_records:
+            console.print(
+                f"  [dim]and kept by {info.deleted_records} deleted record(s), "
+                "while they can be restored[/dim]"
+            )
 
 
 @app.command("set-state")

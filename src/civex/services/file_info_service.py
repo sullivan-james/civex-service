@@ -106,8 +106,8 @@ class FileInfoService:
         and workflow runs that use it. Raises NotFoundError for content that is
         neither stored anywhere nor used by anything."""
         copies = self._store.copies_of(sha256)
-        by_collection, jobs = self._refs.usage(sha256)
-        if not copies and not by_collection and not jobs:
+        by_collection, jobs, deleted = self._refs.usage(sha256)
+        if not copies and not by_collection and not jobs and not deleted:
             raise NotFoundError(f"No file with hash {sha256} is stored or used.")
 
         collections = []
@@ -141,4 +141,5 @@ class FileInfoService:
             jobs=jobs,
             collections=collections,
             uses=uses,
+            deleted_records=deleted,
         )

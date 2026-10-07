@@ -609,13 +609,17 @@ export function RecordsExplorer({
           <FilesView
             // The search box looks for files here (their names, and the
             // records they sit under), not for the records listed above them.
-            selection={selectionFor(
-              { ...x.query, search: undefined },
-              dataset,
-              undefined,
-              undefined,
-              true,
-            )}
+            // Inside a record, its own files are among "their files" too.
+            selection={{
+              ...selectionFor(
+                { ...x.query, search: undefined },
+                dataset,
+                undefined,
+                undefined,
+                true,
+              ),
+              with_within: !!x.query.within,
+            }}
             search={state.q || undefined}
           />
         ) : (
