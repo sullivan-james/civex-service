@@ -439,8 +439,12 @@ export const fileAccessApi = {
 
 /** What starting a move of a selection's files answers. */
 export interface GatherResult {
-  transfer_id: string
+  /** Null when nothing had to move: the files only on the server were
+   * downloaded straight onto the drive (`downloaded`). */
+  transfer_id: string | null
   volume: string
   files: number
   bytes: number
+  /** How many came from the server straight onto the drive. */
+  downloaded?: number
 }

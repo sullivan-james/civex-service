@@ -135,3 +135,26 @@ def test_picked_files_are_downloaded_and_freed_by_the_same_rules(pair):
     phone.sync_svc.set_collection_mode("study", "opened")
     freed = svc.free_up(here, dry_run=False)
     assert freed.files == 1 and not phone.file_svc.exists(ref.sha256)
+
+
+def test_moving_a_file_only_on_the_server_downloads_it_onto_that_drive(pair, tmp_path):
+    """It goes straight there (not to its collection's drive and then moved),
+    and that is the whole move."""
+    from civex.domain.file_access import FileSelection
+    from civex.domain.query import RecordQuery
+
+    laptop, phone, record = pair
+    ref = _with_file(laptop, record, b"to the archive")
+    phone.sync_svc.sync()
+    drive = tmp_path / "archive-drive"
+    drive.mkdir()
+    phone.store_svc.add_volume("archive", str(drive))
+    phone.commit()
+    svc = phone.file_access_svc
+    _, items = svc.chosen(FileSelection(query=RecordQuery(dataset="study")))
+
+    shas, downloaded = svc.to_move(items, "archive")
+    phone.commit()
+
+    assert (shas, downloaded) == ([], 1)
+    assert phone.file_svc._store.locate_volumes([ref.sha256]) == {ref.sha256: "archive"}

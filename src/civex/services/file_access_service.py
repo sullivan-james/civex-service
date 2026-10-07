@@ -93,7 +93,7 @@ class FileAccessService:
         # how many have arrived; None when the project follows none. Injected
         # so this service doesn't know sync.
         self.fetch_missing: (
-            Callable[[list[str], Callable[[int], None] | None], Any] | None
+            Callable[[list[str], Callable[[int], None] | None, str | None], Any] | None
         ) = None
         # Removes this computer's copies of content the server holds (given the
         # hashes and whether only to count); None when the project follows no
@@ -123,9 +123,12 @@ class FileAccessService:
         self._fetch(remote, progress)
         return _absent_now(self._plan(selection, with_sources, progress))
 
-    def _fetch(self, shas: list[str], progress: Progress | None) -> Any:
+    def _fetch(
+        self, shas: list[str], progress: Progress | None, volume: str | None = None
+    ) -> Any:
         """Download these files from the server, as a stage of the work a
-        person is watching (the same progress as the rest of it)."""
+        person is watching (the same progress as the rest of it); onto
+        `volume` when they are being fetched to go there."""
         shas = list(dict.fromkeys(shas))
         if not shas or not self.fetch_missing:
             return None
@@ -135,7 +138,7 @@ class FileAccessService:
                 "from the server",
                 len(shas),
             )
-        return self.fetch_missing(shas, progress.advance if progress else None)
+        return self.fetch_missing(shas, progress.advance if progress else None, volume)
 
     def _plan(
         self,
@@ -1136,17 +1139,21 @@ class FileAccessService:
 
     def to_move(
         self, items: list[FileItem], volume: str, progress: Progress | None = None
-    ) -> list[str]:
-        """The content that has to move for these files to be on `volume`: each
-        not there yet, once; a file only on the server is downloaded first (it
-        then moves like any other). Unreachable and missing files can't move
-        and are left out (the plan the caller showed already said so)."""
+    ) -> tuple[list[str], int]:
+        """Get these files onto `volume`: those only on the server are
+        downloaded straight onto it; returns the content still elsewhere that a
+        move has to carry (each once), and how many were downloaded there.
+        Unreachable and missing files can't move and are left out (the plan the
+        caller showed already said so)."""
         if volume not in self._store.volume_names():
             raise NotFoundError(f"There is no drive called '{volume}'.")
         movable = [i for i in items if place_of(i)[1] in ("drive", "server")]
-        self._fetch([i.sha256 for i in movable if place_of(i)[1] == "server"], progress)
+        fetched = self._fetch(
+            [i.sha256 for i in movable if place_of(i)[1] == "server"], progress, volume
+        )
         located = self._store.locate_volumes(i.sha256 for i in movable)
-        return [sha for sha, on in located.items() if on and on != volume]
+        elsewhere = [sha for sha, on in located.items() if on and on != volume]
+        return elsewhere, fetched.fetched if fetched else 0
 
     def download(self, items: list[FileItem], progress: Progress | None = None) -> Any:
         """Fetch the files among these that are only on the server."""

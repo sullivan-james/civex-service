@@ -1229,6 +1229,7 @@ class SyncService:
         skip: set[str] | None = None,
         seconds: float | None = None,
         progress: Callable[[int], None] | None = None,
+        volume: str | None = None,
     ) -> FileFetchReport:
         """Download files the records here cite that no drive here holds (all
         of them, or those of `shas`), each checked against its hash and saved
@@ -1271,8 +1272,12 @@ class SyncService:
                     report.absent.append(sha)
                     continue
                 try:
+                    # Onto the drive asked for (downloading to move it there),
+                    # else where its collection's files go.
                     self._files.put_path(
-                        dest, collection_id=str(collection) if collection else None
+                        dest,
+                        collection_id=str(collection) if collection else None,
+                        volume=volume,
                     )
                 finally:
                     dest.unlink(missing_ok=True)

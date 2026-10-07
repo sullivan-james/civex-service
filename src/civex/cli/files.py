@@ -540,17 +540,22 @@ def files_gather(
     try:
         svc = ctx.file_access_svc
         _, items = svc.chosen(selection, on, name)
-        shas = svc.to_move(items, to)
+        shas, downloaded = svc.to_move(items, to)
         ctx.commit()
     except CivexError as e:
         console.print(f"[error]{escape(str(e))}[/error]")
         raise typer.Exit(1)
     finally:
         ctx.close()
-    if not shas:
+    if downloaded:
         console.print(
-            f"[dim]Every file that can move is already on '{escape(to)}'.[/dim]"
+            f"Downloaded {downloaded} file(s) from the server onto '{escape(to)}'."
         )
+    if not shas:
+        if not downloaded:
+            console.print(
+                f"[dim]Every file that can move is already on '{escape(to)}'.[/dim]"
+            )
         return
     _start(
         TransferSpec(kind=KIND_FILES, targets=[to], shas=shas, freeze_sources=False),

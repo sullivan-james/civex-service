@@ -253,16 +253,29 @@ def gather_files(
     collections stay where they are. Files only on the server are downloaded
     first; files on a drive that can't be reached, or missing, are left out. It
     runs like any other move (one at a time, safe to pause, cancel or lose
-    power; see /store/transfers). 422 when they are all already there."""
+    power; see /store/transfers). Files downloaded straight onto the drive need
+    no move: when nothing else has to move, `transfer_id` is null and
+    `downloaded` says how many came. 422 when they are all already there."""
     items = _picked(body, ctx)
     try:
-        shas = ctx.file_access_svc.to_move(items, body.volume, progress)
+        shas, downloaded = ctx.file_access_svc.to_move(items, body.volume, progress)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except CivexError as e:
         raise HTTPException(422, detail=str(e))
     ctx.commit()
     if not shas:
+        if downloaded:  # those only on the server came straight there
+            return JSONResponse(
+                {
+                    "transfer_id": None,
+                    "volume": body.volume,
+                    "files": 0,
+                    "bytes": 0,
+                    "downloaded": downloaded,
+                },
+                status_code=200,
+            )
         raise HTTPException(
             422, detail=f"Every file that can move is already on '{body.volume}'."
         )
@@ -276,6 +289,7 @@ def gather_files(
         "volume": body.volume,
         "files": record.plan.files if record.plan else len(shas),
         "bytes": record.plan.bytes if record.plan else 0,
+        "downloaded": downloaded,
     }
 
 

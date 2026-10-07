@@ -268,9 +268,11 @@ export function moveThenOpen(
       fileAccessApi.gather(selection, volume, progressId),
     )
     void ctx.qc.invalidateQueries({ queryKey: ['store'] })
-    const title = `Moving ${plural(started.files, 'file')} to ${volume}…`
-    j.update({ title })
-    await waitForMove(ctx, j, started.transfer_id, title)
+    if (started.transfer_id) {
+      const title = `Moving ${plural(started.files, 'file')} to ${volume}…`
+      j.update({ title })
+      await waitForMove(ctx, j, started.transfer_id, title)
+    }
 
     j.update({
       title: 'Opening folder…',
@@ -306,11 +308,23 @@ export function moveFiles(ctx: FlowContext, pick: FilePick, volume: string) {
       fileAccessApi.gather(pick, volume, progressId),
     )
     refreshPlaces(ctx)
-    const title = `Moving ${plural(started.files, 'file')} to ${volume}…`
-    j.update({ title, detail: undefined, progress: undefined })
-    await waitForMove(ctx, j, started.transfer_id, title)
-    refreshPlaces(ctx)
-    ctx.toast.success(`Moved ${plural(started.files, 'file')} to ${volume}.`)
+    const fetched = started.downloaded ?? 0
+    if (started.transfer_id) {
+      const title = `Moving ${plural(started.files, 'file')} to ${volume}…`
+      j.update({ title, detail: undefined, progress: undefined })
+      await waitForMove(ctx, j, started.transfer_id, title)
+      refreshPlaces(ctx)
+    }
+    ctx.toast.success(
+      [
+        started.files ? `Moved ${plural(started.files, 'file')}` : null,
+        fetched
+          ? `${started.files ? 'downloaded' : 'Downloaded'} ${plural(fetched, 'file')} from the server`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' and ') + ` onto ${volume}.`,
+    )
   })
 }
 

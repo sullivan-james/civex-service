@@ -281,15 +281,19 @@ class VolumeAwareFileObjectStore:
         path: Path,
         original_filename: str | None = None,
         collection_id: str | None = None,
+        volume: str | None = None,
     ) -> FileRef:
         """Store a file from disk by copying it in fixed-size chunks, so a
         multi-GB file never has to fit in memory (put(path.read_bytes())
         would). Unlike put_stream, the source is replayable, so a volume that
-        runs out of space partway through falls through to the next one."""
+        runs out of space partway through falls through to the next one.
+        `volume` names the one drive to write to (a person chose it, e.g. a
+        file downloaded to be moved there), instead of the collection's."""
         name = original_filename or path.name
         size = path.stat().st_size
         reasons: list[str] = []
-        for vol_name in self._write_candidates(collection_id):
+        candidates = [volume] if volume else self._write_candidates(collection_id)
+        for vol_name in candidates:
             can, reason = self._can_write(vol_name, size)
             if not can:
                 reasons.append(f"{vol_name}: {reason}")

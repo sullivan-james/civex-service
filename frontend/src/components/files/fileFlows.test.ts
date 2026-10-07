@@ -356,7 +356,28 @@ describe('moving and downloading picked files', () => {
     })
     // Tagged, so whatever it does first (downloading) shows as its progress.
     expect(calls[0].headers['x-civex-progress']).toBeTruthy()
-    expect(toast.success).toHaveBeenCalledWith('Moved 3 files to archive.')
+    expect(toast.success).toHaveBeenCalledWith('Moved 3 files onto archive.')
+  })
+
+  it('says files came straight from the server when nothing else had to move', async () => {
+    const calls = fakeServer({
+      '/api/file-access/gather': {
+        transfer_id: null,
+        volume: 'default',
+        files: 0,
+        bytes: 0,
+        downloaded: 2,
+      },
+    })
+    const { ctx, toast } = context()
+
+    await moveFiles(ctx, { within: 'r1' }, 'default')
+
+    expect(calls.map((c) => c.path)).toEqual(['/api/file-access/gather'])
+    expect(toast.success).toHaveBeenCalledWith(
+      'Downloaded 2 files from the server onto default.',
+    )
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('downloads only what is on the server, with its progress followed', async () => {

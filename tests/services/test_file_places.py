@@ -56,7 +56,7 @@ def test_moving_names_only_what_is_elsewhere_and_reachable(ctx, study, spread, a
     svc = ctx.file_access_svc
     _, items = svc.chosen(_within(study.e7))
     s1 = next(i for i in items if i.filename == "s1.txt")
-    assert svc.to_move(items, "archive") == [s1.sha256]  # s2 is there already
+    assert svc.to_move(items, "archive") == ([s1.sha256], 0)  # s2 is there
     _unplug(archive)
     _, items = svc.chosen(_within(study.e7))
-    assert svc.to_move(items, "default") == []  # s2 can't be read to move
+    assert svc.to_move(items, "default") == ([], 0)  # s2 can't be read to move
