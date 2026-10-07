@@ -107,3 +107,23 @@ describe('api client errors', () => {
     expect(err.body).toEqual({})
   })
 })
+
+describe('an answer that is a web page, not data', () => {
+  it('says the server may be older than the page, instead of a parse error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response('<!doctype html><html></html>', {
+            status: 200,
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          }),
+      ),
+    )
+    const error = (await api
+      .get('/remote/files')
+      .catch((e: unknown) => e)) as ApiError
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error.message).toMatch(/older version of civex than this page/)
+  })
+})

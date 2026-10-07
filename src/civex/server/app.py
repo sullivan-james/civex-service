@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import HTTPException, FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -393,6 +393,16 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         def spa_fallback(full_path: str):
+            # Pages of the app are the app; an address under /api that no
+            # router has is a request this server doesn't know (often a page
+            # newer than the running server), which must say so as data,
+            # never answer with the app's HTML.
+            if full_path == "api" or full_path.startswith("api/"):
+                raise HTTPException(
+                    404,
+                    detail=f"This server has no /{full_path}. If civex was just "
+                    "updated, restart it.",
+                )
             return FileResponse(str(_DIST / "index.html"))
     else:
 

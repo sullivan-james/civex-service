@@ -41,8 +41,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(body.detail, res.status, body)
   }
   if (res.status === 204) return undefined as T
+  // A web page where data was expected: something answered that isn't this
+  // API (an older server that serves the app for addresses it doesn't know,
+  // or a proxy's error page). Say that, rather than a JSON parse error.
+  if ((res.headers.get('content-type') ?? '').includes('text/html'))
+    throw new ApiError(NOT_THE_API, res.status)
   return res.json()
 }
+
+export const NOT_THE_API =
+  "The server didn't understand this request: it may be running an older " +
+  'version of civex than this page. Restart civex, then reload the page.'
 
 export const api = {
   get: <T>(path: string) => request<T>(path),
