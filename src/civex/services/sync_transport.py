@@ -37,6 +37,7 @@ from civex.domain.sync import (
     session_answer,
     session_request,
 )
+from civex.tls import certificate_problem, ssl_context
 
 _CHUNK = 1024 * 1024
 API = "/api/sync/v1"
@@ -200,10 +201,19 @@ class HttpSyncTransport:
 
     def _open(self, request: urllib.request.Request):
         try:
-            return urllib.request.urlopen(request, timeout=self._timeout)
+            return urllib.request.urlopen(
+                request, timeout=self._timeout, context=ssl_context()
+            )
         except urllib.error.HTTPError as e:
             raise _from_status(e) from e
         except (urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
+            problem = certificate_problem(e)
+            if problem:
+                # Waiting won't fix a certificate; trying again every few
+                # seconds would only fill the status bar.
+                raise SyncError(
+                    f"Could not reach the server: {problem}", retryable=False
+                ) from e
             raise SyncError(f"Could not reach the server: {_reason(e)}") from e
 
 

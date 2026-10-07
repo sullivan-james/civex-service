@@ -50,7 +50,11 @@ SERVE_ARGS_ENV = "CIVEX_SERVE_ARGS"
 def latest_version(pre: bool = False, timeout: float = 10.0) -> str:
     """Latest civex version published on PyPI: the latest stable one, or with
     `pre` the newest of all, release candidates and betas included."""
-    with urllib.request.urlopen(_PYPI_URL, timeout=timeout) as resp:  # noqa: S310
+    from civex.tls import ssl_context
+
+    with urllib.request.urlopen(  # noqa: S310
+        _PYPI_URL, timeout=timeout, context=ssl_context()
+    ) as resp:
         data = json.load(resp)
     if not pre:
         return data["info"]["version"]
