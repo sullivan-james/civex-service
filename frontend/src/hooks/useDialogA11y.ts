@@ -12,19 +12,35 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
 // Marks every element outside `root`'s ancestor chain (up to <body>) as
 // inert, so background content is unreachable by Tab and hidden from
 // assistive tech while the overlay is open -- the manual equivalent of what
-// a native <dialog>'s showModal() gives Modal.tsx for free.
-function setSiblingsInert(root: HTMLElement, inert: boolean) {
+// a native <dialog>'s showModal() gives Modal.tsx for free. Returns exactly
+// the elements it changed (not those already inert), for `restoreInert`.
+function makeSiblingsInert(root: HTMLElement): HTMLElement[] {
+  const changed: HTMLElement[] = []
   let node: HTMLElement | null = root
   while (node && node !== document.body) {
     const parent: HTMLElement | null = node.parentElement
     if (!parent) break
     for (const sibling of Array.from(parent.children)) {
-      if (sibling !== node && sibling instanceof HTMLElement) {
-        sibling.inert = inert
+      if (
+        sibling !== node &&
+        sibling instanceof HTMLElement &&
+        !sibling.inert
+      ) {
+        sibling.inert = true
+        changed.push(sibling)
       }
     }
     node = parent
   }
+  return changed
+}
+
+// Undoes `makeSiblingsInert` from the list it returned, never by walking up
+// from `root` again: an overlay mounted only while open (the navigation
+// drawer) has left the page by the time the cleanup runs, so that walk found
+// nothing and the whole page stayed inert -- frozen, with no error.
+function restoreInert(changed: HTMLElement[]) {
+  for (const element of changed) element.inert = false
 }
 
 interface UseDialogA11yOptions {
@@ -68,7 +84,7 @@ export function useDialogA11y({
     const focusable = getFocusable(dialog)
     ;(focusable[0] ?? dialog).focus()
 
-    setSiblingsInert(root, true)
+    const madeInert = makeSiblingsInert(root)
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
 
@@ -98,7 +114,7 @@ export function useDialogA11y({
     return () => {
       document.removeEventListener('keydown', onKeyDown)
       document.body.style.overflow = previousOverflow
-      setSiblingsInert(root, false)
+      restoreInert(madeInert)
       if (triggerRef.current instanceof HTMLElement) triggerRef.current.focus()
     }
   }, [open, rootRef, dialogRef])
