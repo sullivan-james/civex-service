@@ -153,7 +153,7 @@ def test_moving_a_file_only_on_the_server_downloads_it_onto_that_drive(pair, tmp
     svc = phone.file_access_svc
     _, items = svc.chosen(FileSelection(query=RecordQuery(dataset="study")))
 
-    shas, downloaded = svc.to_move(items, "archive")
+    shas, downloaded, _ = svc.to_move(items, "archive")
     phone.commit()
 
     assert (shas, downloaded) == ([], 1)
@@ -226,3 +226,24 @@ def test_a_deleted_records_files_are_not_counted_as_the_collections(pair):
     phone.record_svc.restore(str(record.id))  # counted again once it is back
     phone.commit()
     assert _row(phone).files_on_server == 1
+
+
+def test_freeing_space_removes_every_copy_on_this_computer(pair, tmp_path):
+    """A file kept on two homes here goes from both, and both copies count."""
+    laptop, phone, record = pair
+    ref = _with_file(laptop, record, b"kept twice")
+    phone.sync_svc.sync()
+    phone.sync_svc.fetch_files()
+    drive = tmp_path / "second-home"
+    drive.mkdir()
+    phone.store_svc.add_volume("second", str(drive))
+    phone.file_svc._store._register("second", ref.sha256, len(b"kept twice"))
+    (drive / ref.sha256[:2]).mkdir()
+    (drive / ref.sha256[:2] / ref.sha256[2:]).write_bytes(b"kept twice")
+    phone.commit()
+
+    counted = phone.sync_svc.free_up("study")
+    assert (counted.files, counted.bytes) == (1, 2 * len(b"kept twice"))
+    phone.sync_svc.free_up("study", dry_run=False)
+    assert phone.file_svc._store.copies([ref.sha256]) == {}
+    assert not (drive / ref.sha256[:2] / ref.sha256[2:]).exists()

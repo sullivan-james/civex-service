@@ -67,7 +67,7 @@ class FileInfoService:
     ) -> dict[str, CollectionStorage]:
         """The same for several collections (all, if none are named), in a few
         queries. A collection with no files is still answered, with none."""
-        found = self._refs.volume_breakdowns(collection_ids)
+        found = self._refs.volume_breakdowns(collection_ids, self._store.homes())
         status: dict[str, tuple[str, bool]] = {}  # a volume's state, asked once
 
         def state(volume: str) -> tuple[str, bool]:

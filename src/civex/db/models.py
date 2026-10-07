@@ -732,8 +732,10 @@ class StorageTransfer(Base):
 
 
 class StoredObject(Base):
-    """Inventory of blobs in the object store: one row per sha256, written
-    when the blob lands on disk and removed when it is deleted. Exists so
+    """Inventory of blobs in the object store: one row per copy (sha256 and
+    the volume holding it; a file may be on several), written when the blob
+    lands on disk and removed when it is deleted. The one answer to "where is
+    this file on this computer": reads look here, not on every drive. Exists so
     per-volume usage is `SUM(size)` over an indexed column instead of a walk
     of the whole volume, and so GC never has to hold the store listing in
     memory. Disk is the source of truth -- GC reconciles this table against
@@ -743,7 +745,7 @@ class StoredObject(Base):
     __table_args__ = (Index("ix_stored_objects_volume", "volume"),)
 
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
-    volume: Mapped[str] = mapped_column(String(255), nullable=False)
+    volume: Mapped[str] = mapped_column(String(255), primary_key=True)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 

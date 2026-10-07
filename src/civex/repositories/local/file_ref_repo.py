@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Iterable
 
-from sqlalchemy import case, delete, func, insert, select
+from sqlalchemy import case, delete, func, insert, null, select
 from sqlalchemy.orm import Session
 
 from civex.db.models import FileReference, Record, WorkflowJob
@@ -105,12 +105,15 @@ class LocalFileReferenceRepository:
         return {v: (int(a), int(b), int(c), int(d)) for v, a, b, c, d in rows}
 
     def volume_breakdowns(
-        self, collection_ids: list[str] | None
+        self, collection_ids: list[str] | None, homes: dict[str, str] | None = None
     ) -> dict[str, tuple[int, list[tuple[str, int, int, int]]]]:
         """Where collections' files are, from the catalog in a few grouped
         queries (no file is read), for the given collections or all of them.
         Per collection id: the number of distinct files its records use, and per
-        volume (volume, files, bytes, files another collection also uses)."""
+        volume (volume, files, bytes, files another collection also uses). A
+        file stored on several drives counts once, on the collection's home
+        (`homes`: collection id -> drive) when a copy is there, else on the
+        first drive by name that holds it."""
         from civex.db.models import StoredObject
 
         wanted = (
@@ -151,17 +154,40 @@ class LocalFileReferenceRepository:
             .group_by(FileReference.sha256)
             .subquery()
         )
-        rows = self._s.execute(
+        # each (collection, file) once, on the copy that counts for it
+        home: Any = (
+            case(
+                {uuid.UUID(c): v for c, v in homes.items()},
+                value=mine.c.cid,
+                else_=None,
+            )
+            if homes
+            else null()
+        )
+        counted = (
             select(
-                mine.c.cid,
-                StoredObject.volume,
-                func.count(),
-                func.coalesce(func.sum(StoredObject.size), 0),
-                func.coalesce(func.sum(case((users.c.n > 1, 1), else_=0)), 0),
+                mine.c.cid.label("cid"),
+                mine.c.sha.label("sha"),
+                func.coalesce(
+                    func.max(case((StoredObject.volume == home, StoredObject.volume))),
+                    func.min(StoredObject.volume),
+                ).label("volume"),
+                func.max(StoredObject.size).label("size"),
             )
             .join(StoredObject, StoredObject.sha256 == mine.c.sha)
-            .join(users, users.c.sha == mine.c.sha)
-            .group_by(mine.c.cid, StoredObject.volume)
+            .group_by(mine.c.cid, mine.c.sha)
+            .subquery()
+        )
+        rows = self._s.execute(
+            select(
+                counted.c.cid,
+                counted.c.volume,
+                func.count(),
+                func.coalesce(func.sum(counted.c.size), 0),
+                func.coalesce(func.sum(case((users.c.n > 1, 1), else_=0)), 0),
+            )
+            .join(users, users.c.sha == counted.c.sha)
+            .group_by(counted.c.cid, counted.c.volume)
         )
         for cid, volume, files, size, shared in rows:
             out[str(cid)][1].append((volume, int(files), int(size), int(shared)))

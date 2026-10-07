@@ -949,14 +949,6 @@ class TransferRequest(BaseModel):
     collection_ids: list[str] = Field(
         default_factory=list, description="consolidate: ids of the collections to move."
     )
-    include_shared: bool = Field(
-        default=False,
-        description=(
-            "consolidate: also move files that collections kept on a different "
-            "volume use as well. They stay where they are by default, since moving "
-            "one would only split those collections instead."
-        ),
-    )
     verify: str = Field(
         default="copy",
         description=(
@@ -988,10 +980,12 @@ class TransferPlanResponse(BaseModel):
     )
     bytes: int
     already_there: int = Field(description="Files already on a target, left alone.")
-    shared_left: int = Field(
-        description="consolidate: files left because collections kept elsewhere use them too."
+    copied: int = Field(
+        description="Of `files`, those copied rather than moved: the drive they "
+        "come from is the home of another collection that uses them, and keeps "
+        "its copy."
     )
-    shared_left_bytes: int
+    copied_bytes: int
     targets: list[TargetShareResponse]
     problems: list[str] = Field(description="Reasons the transfer can't start.")
     warnings: list[str] = Field(description="Things worth knowing; they don't stop it.")

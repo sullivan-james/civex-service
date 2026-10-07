@@ -10,13 +10,9 @@ import type {
 import { useListParams } from '../../hooks/useListParams'
 import { useFollowsServer } from '../../hooks/useRemote'
 import { useSchemas } from '../../hooks/useSchemas'
-import { PROJECT, useDriveChoice } from '../../hooks/useDriveChoice'
-import { useVolumes } from '../../hooks/useStore'
 import { useQueryClient } from '@tanstack/react-query'
 import { useFileListing, useFreeUpFiles } from '../../hooks/useFileListing'
 import { useFileInfo } from '../../hooks/useFiles'
-import { useQuery } from '@tanstack/react-query'
-import { fileAccessApi } from '../../api/fileAccess'
 import { errorMessage } from '../../lib/errors'
 import { displayLabel } from '../../utils/naming'
 import { placeLabel } from '../../utils/places'
@@ -27,21 +23,15 @@ import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { FreeUpDialog } from '../settings/storage/ComputerFiles'
 import {
   Button,
-  CheckRow,
   Chip,
   DataTable,
   MultiPick,
-  Modal,
-  ModalBody,
-  ModalFooter,
-  ModalHeader,
   Pagination,
   TriggerPopover,
   useToast,
 } from '../ui'
-import { DrivePicker } from './DrivePicker'
-import { downloadFiles, moveFiles, type FlowContext } from './fileFlows'
-import { ToDownloadNotice } from './ToDownloadNotice'
+import { downloadFiles, type FlowContext } from './fileFlows'
+import { MoveToDriveButton } from './MoveDialog'
 
 const NS = 'files.'
 
@@ -64,7 +54,7 @@ export function FilesView({
   const list = useListParams(NS, ['place', 'kind', 'used'], 50)
   const { data: schemas = [] } = useSchemas()
   const followsServer = useFollowsServer()
-  const [acting, setActing] = useState<'move' | 'free' | null>(null)
+  const [acting, setActing] = useState<'free' | null>(null)
   const toast = useToast()
   const qc = useQueryClient()
   // Moving and downloading run as file jobs: progress in the status bar, and
@@ -170,9 +160,11 @@ export function FilesView({
         onSelectAllMatching={picked.selectAllMatching}
         actions={
           <>
-            <Button size="sm" onClick={() => setActing('move')}>
-              Move to drive…
-            </Button>
+            <MoveToDriveButton
+              what={what}
+              pick={target}
+              onStarted={picked.clear}
+            />
             {followsServer && (
               <>
                 <Button
@@ -274,19 +266,6 @@ export function FilesView({
         )}
       </div>
 
-      {acting === 'move' && (
-        <MoveDialog
-          what={what}
-          pick={target}
-          summary={data?.summary ?? []}
-          onClose={() => setActing(null)}
-          onMove={(volume, includeShared) => {
-            void moveFiles(flow, target, volume, includeShared)
-            picked.clear()
-            setActing(null)
-          }}
-        />
-      )}
       {acting === 'free' && (
         <FreeUpDialog
           what={what}
@@ -508,120 +487,5 @@ function PlacesBar({ summary }: { summary: PlaceSummary[] }) {
         </p>
       ))}
     </>
-  )
-}
-
-/** Move the picked files onto one drive: the drive and whether they fit
- * (the shared drive-and-free-space rule), what has to be downloaded first and
- * what can't move; the move itself then runs as a job in the status bar. */
-function MoveDialog({
-  what,
-  pick,
-  summary,
-  onClose,
-  onMove,
-}: {
-  what: string
-  pick: FilePick
-  summary: PlaceSummary[]
-  onClose: () => void
-  onMove: (volume: string, includeShared: boolean) => void
-}) {
-  // Suggest somewhere else: the drive the files are on (the place being
-  // looked at, else the one holding most) is where they would move from.
-  const from =
-    pick.place ??
-    [...summary]
-      .filter((p) => p.kind === 'drive')
-      .sort((a, b) => b.files - a.files)[0]?.place
-  const { data: volumes = [] } = useVolumes()
-  const elsewhere = volumes.find(
-    (v) => v.available && v.state === 'online' && v.name !== from,
-  )?.name
-  const [chosen, setChosen] = useState<string | null>(null)
-  const [includeShared, setIncludeShared] = useState(false)
-  const drive = useDriveChoice({
-    holding: elsewhere,
-    need: 0,
-    allowProject: false,
-    chosen,
-  })
-  // What it would do, asked of the server for the drive chosen: the same
-  // rule the move itself follows.
-  const { data: preview } = useQuery({
-    queryKey: ['move-plan', pick, drive.target, includeShared],
-    queryFn: () => fileAccessApi.planMove(pick, drive.target, includeShared),
-    enabled: !!drive.target && drive.target !== PROJECT,
-  })
-  const plan = preview?.plan
-  const stuck = summary.filter(
-    (p) => p.kind === 'unreachable' || p.kind === 'missing',
-  )
-  return (
-    <Modal onClose={onClose}>
-      <ModalHeader onClose={onClose}>Move {what} to a drive</ModalHeader>
-      <ModalBody className="space-y-3 text-sm">
-        <DrivePicker
-          label="Move them onto"
-          value={drive.target}
-          targets={drive.targets}
-          allowProject={false}
-          need={plan?.bytes ?? 0}
-          free={drive.free}
-          tooBig={drive.free != null && (plan?.bytes ?? 0) > drive.free}
-          onChange={setChosen}
-        />
-        {plan && (
-          <p>
-            {plan.files === 0 && plan.from_server === 0
-              ? 'Nothing to move: they are there already.'
-              : `Moves ${plan.files.toLocaleString()} file${plan.files === 1 ? '' : 's'} (${formatSize(plan.bytes)}).`}
-            {plan.already_there > 0 &&
-              ` ${plan.already_there.toLocaleString()} are there already.`}
-          </p>
-        )}
-        {plan && plan.from_server > 0 && (
-          <ToDownloadNotice toFetch={{ files: plan.from_server, bytes: 0 }} />
-        )}
-        {plan && (plan.shared_left > 0 || includeShared) && (
-          <CheckRow
-            checked={includeShared}
-            onChange={setIncludeShared}
-            title={
-              includeShared
-                ? 'Moving the files other records also use too'
-                : `Also move ${plan.shared_left.toLocaleString()} file${plan.shared_left === 1 ? '' : 's'} other records use (${formatSize(plan.shared_bytes)})`
-            }
-            description="Some of these files are also used by records you didn't pick. They stay where they are unless you tick this; ticked, they move for those records too."
-          />
-        )}
-        {stuck.length > 0 && (
-          <p className="text-attention">
-            Left where they are:{' '}
-            {stuck
-              .map((p) => `${p.files} ${placeLabel(p).toLowerCase()}`)
-              .join(', ')}
-            .
-          </p>
-        )}
-      </ModalBody>
-      <ModalFooter>
-        <Button variant="ghost" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          variant="primary"
-          disabled={
-            !drive.target ||
-            drive.target === PROJECT ||
-            !plan ||
-            (plan.files === 0 && plan.from_server === 0)
-          }
-          onClick={() => onMove(drive.target, includeShared)}
-        >
-          Move
-        </Button>
-      </ModalFooter>
-    </Modal>
   )
 }

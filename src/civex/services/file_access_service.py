@@ -33,6 +33,9 @@ from civex.domain import tables as table_rules
 from civex.domain import templating
 from civex.domain.naming import display_label
 from civex.domain.query import RecordQuery
+from civex.domain.placement import STEP_COPY, STEP_MOVE, STEP_THERE
+from civex.domain.transfers import KIND_FILES, TransferSpec
+from civex.services.transfer_engine import Step, plan_steps
 from civex.domain.file_access import (
     MovePlan,
     FileListing,
@@ -1279,35 +1282,48 @@ class FileAccessService:
     def plan_move(
         self, items: list[FileItem], volume: str, include_shared: bool = False
     ) -> MovePlan:
-        """What moving these files onto `volume` would do: what moves from
-        another drive, what comes from the server straight there, and what
-        stays because records not among them also use it (unless
-        `include_shared`: then it moves for them too). The one rule behind
-        the move dialog's preview and the move itself. Unreachable and
-        missing files can't move and are left out."""
+        """What moving these files onto `volume` would do: what moves or is
+        copied from another drive (the transfer's own steps, `plan_steps`: a
+        file stays on a drive that is the home of a collection using it, so it
+        is copied), what comes from the server straight there, and what stays
+        because records not among them also use it (unless `include_shared`:
+        then it moves for them too). The one rule behind the move dialog's
+        preview and the move itself. Unreachable and missing files can't move
+        and are left out."""
         if volume not in self._store.volume_names():
             raise NotFoundError(f"There is no drive called '{volume}'.")
         shared = {} if include_shared else self.shared_with_others(items)
         size = {i.sha256: i.size for i in items}
-        here: set[str] = set()
-        remote: set[str] = set()
-        there: set[str] = set()
-        for i in items:
-            kind = place_of(i)[1]
-            if kind == "server":
-                remote.add(i.sha256)
-            elif kind == "drive":
-                (there if i.volume == volume else here).add(i.sha256)
-        moving = here - set(shared)
-        left = here & set(shared)
-        return MovePlan(
-            files=len(moving),
-            bytes=sum(size[s] for s in moving),
+        on_drives = {i.sha256 for i in items if place_of(i)[1] == "drive"}
+        remote = {i.sha256 for i in items if place_of(i)[1] == "server"}
+        plan = MovePlan(
+            files=0,
+            bytes=0,
             from_server=len(remote),
-            shared_left=len(left),
-            shared_bytes=sum(size[s] for s in left),
-            already_there=len(there),
+            shared_left=0,
+            shared_bytes=0,
+            already_there=0,
         )
+        for step in self._steps(sorted(on_drives), volume):
+            if step.step == STEP_THERE:
+                plan.already_there += 1
+            elif step.sha256 in shared:
+                plan.shared_left += 1
+                plan.shared_bytes += size[step.sha256]
+            elif step.step in (STEP_MOVE, STEP_COPY):
+                plan.files += 1
+                plan.bytes += size[step.sha256]
+                if step.step == STEP_COPY:
+                    plan.copied += 1
+        return plan
+
+    def _steps(self, shas: list[str], volume: str) -> Iterator[Step]:
+        """What gathering these files onto `volume` does with each (the
+        transfer's own rule)."""
+        if self.refs is None:
+            return iter(())
+        spec = TransferSpec(kind=KIND_FILES, targets=[volume], shas=shas)
+        return plan_steps(self._store, self.refs, spec, self._store.homes())
 
     def to_move(
         self,
@@ -1336,11 +1352,12 @@ class FileAccessService:
         each file not there yet, once, without those records not among these
         also use unless `include_shared`. Downloads nothing."""
         shared = {} if include_shared else self.shared_with_others(items)
-        movable = [
-            i for i in items if place_of(i)[1] == "drive" and i.sha256 not in shared
+        on_drives = sorted({i.sha256 for i in items if place_of(i)[1] == "drive"})
+        return [
+            step.sha256
+            for step in self._steps(on_drives, volume)
+            if step.step in (STEP_MOVE, STEP_COPY) and step.sha256 not in shared
         ]
-        located = self._store.locate_volumes(i.sha256 for i in movable)
-        return [sha for sha, on in located.items() if on and on != volume]
 
     def download(
         self, items: list[FileItem], progress: Progress | None = None

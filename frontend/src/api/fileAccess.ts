@@ -348,6 +348,9 @@ export interface MovePlan {
   shared_left: number
   shared_bytes: number
   already_there: number
+  /** Of `files`, those copied, not moved: their drive is the home of a
+   * collection that uses them, and keeps its copy. */
+  copied: number
 }
 
 export interface FileListing {

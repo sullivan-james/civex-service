@@ -1148,7 +1148,7 @@ class SyncService:
         fetch them straight back."""
         self._can_free_up()
         cid = self._collection_id(collection)
-        here = self._repo.files_here_of(cid)
+        here = self._room_of(list(self._repo.files_here_of(cid)))
         report = self._free(here, self._kept_collections() - {cid}, dry_run=True)
         if dry_run:
             return report
@@ -1164,9 +1164,15 @@ class SyncService:
         `opened` first). Counts only unless `dry_run` is False. Holds the
         store's clean-up lock, so no clean-up or file move runs meanwhile."""
         self._can_free_up()
-        rows = self._files.inventory_rows(shas)
-        here = {sha: size for sha, (_volume, size) in rows.items()}
-        return self._free(here, self._kept_collections(), dry_run)
+        return self._free(self._room_of(shas), self._kept_collections(), dry_run)
+
+    def _room_of(self, shas: list[str]) -> dict[str, int]:
+        """Of these files, those on a drive here, with the room removing them
+        frees: every copy goes, so each copy's bytes count."""
+        return {
+            sha: sum(size for _volume, size in rows)
+            for sha, rows in self._files.copies(shas).items()
+        }
 
     def _can_free_up(self) -> None:
         if not self.fetches_files:

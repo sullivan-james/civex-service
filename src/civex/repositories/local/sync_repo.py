@@ -31,7 +31,6 @@ from civex.db.models import (
     SyncConflict,
     SyncDevice,
     SyncMeta,
-    StoredObject,
     SyncOp,
     View,
     _UTCDateTime,
@@ -48,6 +47,7 @@ from civex.domain.sync import (
     SyncMetaDTO,
     parse_snapshot_cursor,
 )
+from civex.repositories.local.inventory import stored_files
 from civex.repositories.local.dataset_repo import _to_dtos as _dataset_dtos
 from civex.repositories.local.record_repo import _to_dto as _record_dto
 from civex.repositories.local.schema_repo import _field_to_dto, _schema_to_dto
@@ -170,11 +170,12 @@ class LocalSyncRepository:
         """Files live records here cite that no drive here is recorded to hold
         (a deleted record's files are fetched if it comes back and is opened,
         not in the background)."""
+        stored = stored_files()
         return (
             select(FileReference.sha256, func.min(Record.dataset_id))
             .join(Record, Record.id == FileReference.record_id)
-            .outerjoin(StoredObject, StoredObject.sha256 == FileReference.sha256)
-            .where(StoredObject.sha256.is_(None), Record.deleted_at.is_(None))
+            .outerjoin(stored, stored.c.sha == FileReference.sha256)
+            .where(stored.c.sha.is_(None), Record.deleted_at.is_(None))
             .group_by(FileReference.sha256)
         )
 
@@ -249,16 +250,17 @@ class LocalSyncRepository:
             .distinct()
             .subquery()
         )
-        here = StoredObject.sha256.is_not(None)
+        stored = stored_files()
+        here = stored.c.sha.is_not(None)
         rows = self._s.execute(
             select(
                 pairs.c.cid,
                 func.count().filter(here),
-                func.coalesce(func.sum(StoredObject.size).filter(here), 0),
-                func.count().filter(StoredObject.sha256.is_(None)),
+                func.coalesce(func.sum(stored.c.size).filter(here), 0),
+                func.count().filter(stored.c.sha.is_(None)),
             )
             .select_from(pairs)
-            .outerjoin(StoredObject, StoredObject.sha256 == pairs.c.sha)
+            .outerjoin(stored, stored.c.sha == pairs.c.sha)
             .group_by(pairs.c.cid)
         )
         return {cid: (int(n), int(b), int(r)) for cid, n, b, r in rows}
@@ -275,10 +277,11 @@ class LocalSyncRepository:
     def files_here_of(self, collection: uuid.UUID) -> dict[str, int]:
         """The files a collection's records use that a drive here holds, with
         their size."""
+        stored = stored_files()
         rows = self._s.execute(
-            select(FileReference.sha256, StoredObject.size)
+            select(FileReference.sha256, stored.c.size)
             .join(Record, Record.id == FileReference.record_id)
-            .join(StoredObject, StoredObject.sha256 == FileReference.sha256)
+            .join(stored, stored.c.sha == FileReference.sha256)
             .where(Record.dataset_id == collection)
             .distinct()
         )

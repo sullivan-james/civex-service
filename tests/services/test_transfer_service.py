@@ -198,15 +198,16 @@ def test_draining_a_volume_with_nothing_on_it_warns(
     assert any("nothing to move" in w for w in plan.warnings)
 
 
-def test_consolidating_is_sized_and_says_what_stays(
+def test_consolidating_is_sized_and_says_what_is_copied(
     ctx: AppContext, tmp_path: Path, make_schema, make_collection, make_record
 ) -> None:
     _volumes(ctx, tmp_path, "a", "home", "elsewhere")
     make_schema("doc", fields=[("scan", "file")])
-    ctx.store_svc.set_queue(["a"])
     make_collection("mine")
     make_collection("theirs")
+    ctx.store_svc.set_queue(["elsewhere"])
     shared = ctx.file_svc.store_bytes(b"shared " * 40, "s.txt")
+    ctx.store_svc.set_queue(["a"])
     private = ctx.file_svc.store_bytes(b"private " * 40, "p.txt")
     make_record("mine", "doc", {"scan": shared.to_dict()})
     make_record("mine", "doc", {"scan": private.to_dict()})
@@ -221,10 +222,8 @@ def test_consolidating_is_sized_and_says_what_stays(
     spec = TransferSpec(kind=KIND_CONSOLIDATE, targets=["home"], collection_ids=[mine])
     plan = ctx.transfer_svc.plan(spec)
 
-    assert plan.files == 1 and plan.shared_left == 1
-    assert any("kept elsewhere" in w for w in plan.warnings)
-    spec.include_shared = True
-    assert ctx.transfer_svc.plan(spec).files == 2
+    assert (plan.files, plan.copied) == (2, 1)
+    assert any("copied, not moved" in w for w in plan.warnings)
 
 
 def test_a_deleted_records_files_stay_put_but_still_leave_a_drive_being_emptied(
@@ -323,8 +322,10 @@ def test_queued_transfers_run_one_after_another_oldest_first(
     assert ctx.transfer_svc.next_runnable() is None
     store = ctx.file_svc._store
     assert all(store.get(sha) == data for sha, data in files.items())
-    rows = store.inventory_rows(list(files))
-    assert {sha: rows[sha][0] for sha in files} == {sha: "c" for sha in files}
+    rows = store.copies(list(files))
+    assert {sha: rows[sha] and rows[sha][0][0] for sha in files} == {
+        sha: "c" for sha in files
+    }
 
 
 def test_a_queued_transfer_can_be_paused_and_cancelled_before_it_starts(

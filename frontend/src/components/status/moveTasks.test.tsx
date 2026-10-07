@@ -36,7 +36,6 @@ const transfer = (over = {}) => ({
     targets: ['b'],
     sources: ['a'],
     collection_ids: [],
-    include_shared: false,
     verify: 'copy',
     freeze_sources: true,
   },

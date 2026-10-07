@@ -5,7 +5,7 @@
 Civex uses a content-addressed object store: when you attach a file to a record, the file's bytes are stored in `_civex/objects/<sha256[:2]>/<sha256[2:]>` — the same layout as Git's object store. The record stores a lightweight reference: `{sha256, filename, size}`.
 
 This means:
-- **Identical files are stored once.** Attaching the same file to ten records uses disk space once.
+- **Identical files are stored once.** Attaching the same file to ten records uses disk space once. The one exception is a collection's home drive (below): it keeps its own copy of every file the collection uses.
 - **Files are immutable.** The SHA-256 hash is the address; the content never changes.
 - **Filenames are cosmetic.** The stored filename is the original name you uploaded, but retrieval is always by hash.
 
@@ -84,7 +84,9 @@ civex store place clear study
 
 A home need not be in the write queue. If the home can't take a file (unplugged, full, the wrong drive), the file goes to the write queue by default (`spill`), so an unplugged drive doesn't stop uploads; with `--on-unavailable fail` the upload is refused instead, so the collection's data is never written anywhere else.
 
-A home only decides where **new** files are written. Deduplication always wins: a file whose content is already stored on any volume is reused where it lives and is never copied to the home — including when the only copy is on a volume that is currently unplugged. Two collections with different homes that attach the same file therefore share one stored copy.
+**A home keeps a copy of every file its collection uses.** When two collections have different homes and use the same file, each home holds a copy, so each collection is whole on its own drive: unplug one drive and the other collection still opens everything. A file that is already stored somewhere is written again only onto a home that hasn't got it, never onto any other drive. Gathering a collection onto its home copies a file another collection keeps on its own home (that home keeps its copy) and moves everything else; the preview says how many are copied. Opening a file uses a copy on a drive that is plugged in.
+
+Civex knows where every copy is from its own inventory of this computer, so opening a file never searches the drives. Where a file is stored belongs to this computer: it is not part of the record and doesn't sync (another computer may hold the same record's file on a different drive, or only on the server). **Clean up** checks the inventory against what is on the drives and repairs it. Clearing a collection's home doesn't remove the copies that home was keeping.
 
 Homes are stored in `_civex/config.toml` by collection id (`[store.placement.<id>]`), so renaming a collection changes nothing, and they belong to this machine alongside the volumes they name. Removing a volume that is a home needs `--force` (in the app, the removal dialog says what will happen and asks you to type the volume's name when it holds files), which clears those homes. Nothing is ever deleted from the drive.
 

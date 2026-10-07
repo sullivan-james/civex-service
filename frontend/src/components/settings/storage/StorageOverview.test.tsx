@@ -102,7 +102,6 @@ const running = {
     targets: ['archive'],
     sources: ['default'],
     collection_ids: [],
-    include_shared: false,
     verify: 'copy',
     freeze_sources: true,
   },

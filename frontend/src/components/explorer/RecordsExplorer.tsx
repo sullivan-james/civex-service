@@ -40,6 +40,7 @@ import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
 import { SelectionBar } from './SelectionBar'
 import { FilesView } from '../files/FilesView'
+import { MoveToDriveButton } from '../files/MoveDialog'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { BulkRunWorkflow, bulkRunnable } from '../workflows/BulkRunWorkflow'
 import { FileAccessActions } from '../files/FileAccessActions'
@@ -640,6 +641,22 @@ export function RecordsExplorer({
                       scopeSchema={listedName ?? undefined}
                       builderTo={builderHref}
                     />
+                    {canExportFiles && (
+                      // The files of the records ticked and of everything in
+                      // them: the one move dialog.
+                      <MoveToDriveButton
+                        label="Move files to drive…"
+                        what={`the files of ${bulkCount.toLocaleString()} record${bulkCount === 1 ? '' : 's'}`}
+                        pick={selectionFor(
+                          x.query,
+                          dataset,
+                          allMatching ? undefined : [...selected],
+                          undefined,
+                          true,
+                        )}
+                        onStarted={picked.clear}
+                      />
+                    )}
                     {!allMatching && (
                       <BulkRunWorkflow
                         workflows={runnable}

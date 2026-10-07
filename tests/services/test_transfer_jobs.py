@@ -295,8 +295,8 @@ def test_a_second_transfer_queues_and_runs_after_the_first(
     assert done_second.progress.files_done == 20
     ctx2 = build_local_context(load_config())
     try:
-        rows = ctx2.file_svc._store.inventory_rows(list(files))
-        assert {rows[sha][0] for sha in files} == {"c"}
+        rows = ctx2.file_svc._store.copies(list(files))
+        assert {v for sha in files for v, _ in rows[sha]} == {"c"}
     finally:
         ctx2.close()
     assert _contents_intact(files)

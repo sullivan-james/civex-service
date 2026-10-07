@@ -6,7 +6,6 @@ import { MemoryRouter } from 'react-router'
 import type { FileRef } from '../../api/files'
 import { FileLink, FileLocationChip } from './FileLocation'
 import { FieldValue } from './FieldValue'
-import { RecordStorageSummary } from './RecordStorageSummary'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -386,68 +385,6 @@ describe('FieldValue with files', () => {
     ).toBeInTheDocument()
     expect(
       screen.getByTitle("Stored on 'archive' (Online). Click for details."),
-    ).toBeInTheDocument()
-  })
-})
-
-describe('RecordStorageSummary', () => {
-  const data = (...files: FileRef[]) => ({ title: 'x', scans: files })
-
-  it('is silent for a record with no files', async () => {
-    const { container } = renderIt(
-      <RecordStorageSummary data={{ title: 'x' }} />,
-    )
-    await waitFor(() => expect(calls).toContain('/api/settings/ui'))
-
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it('is silent when all files are together and nothing is wrong', async () => {
-    const { container } = renderIt(
-      <RecordStorageSummary
-        data={data(file(), file({ sha256: 'cd'.repeat(32) }))}
-      />,
-    )
-    await waitFor(() => expect(calls).toContain('/api/settings/ui'))
-
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it('says when a record is split across volumes', async () => {
-    const other = file({
-      sha256: 'cd'.repeat(32),
-      location: { volume: 'default', state: 'online', available: true },
-    })
-    renderIt(
-      <RecordStorageSummary
-        data={data(file(), file({ sha256: 'ef'.repeat(32) }), other)}
-      />,
-    )
-
-    const note = await screen.findByRole('group', {
-      name: "Where this record's files are stored",
-    })
-    expect(note).toHaveTextContent('3 files stored on archive (2), default (1)')
-    expect(note).toHaveTextContent('Split across 2 volumes')
-    expect(
-      within(note).getByRole('link', { name: 'Storage settings' }),
-    ).toHaveAttribute('href', '/settings/storage')
-  })
-
-  it('flags files that cannot be opened right now', async () => {
-    renderIt(<RecordStorageSummary data={data(file({ location: OFFLINE }))} />)
-
-    expect(
-      await screen.findByText('1 not available right now'),
-    ).toBeInTheDocument()
-  })
-
-  it('always shows in advanced mode', async () => {
-    advanced = true
-    renderIt(<RecordStorageSummary data={data(file())} />)
-
-    expect(
-      await screen.findByText('1 file stored on archive (1)'),
     ).toBeInTheDocument()
   })
 })

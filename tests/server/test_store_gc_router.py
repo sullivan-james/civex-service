@@ -123,12 +123,12 @@ def test_placement_endpoints_and_uploads_follow_the_home(
     assert homed.status_code == 201 and homed.json()["volume"] == "archive"
     assert plain.json()["volume"] == "default"
 
-    # Dedup beats placement: the same bytes uploaded for the homed collection
-    # are the existing copy on `default`, not a second one on `archive`.
+    # A home keeps a copy of every file its collection uses: the same bytes
+    # uploaded for the homed collection get a copy on `archive` too.
     again = client.put(
         f"/api/files/stream?filename=c.txt&collection={cid}", content=b"queue bytes"
     )
-    assert again.json()["volume"] == "default"
+    assert again.json()["volume"] == "archive"
     multipart = client.post(
         f"/api/files?collection={cid}", files={"file": ("d.txt", b"homed bytes")}
     )

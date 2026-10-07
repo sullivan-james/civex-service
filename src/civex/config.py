@@ -195,6 +195,14 @@ class StoreConfig:
     # it lives here and not on the collection (which dump/sync carry elsewhere).
     placement: dict[str, PlacementConfig] = field(default_factory=dict)
 
+    def homes(self) -> dict[str, str]:
+        """Collection id -> its home drive, for drives that exist."""
+        return {
+            cid: place.volume
+            for cid, place in self.placement.items()
+            if place.volume in self.volumes
+        }
+
 
 def _default_store(project_root: Path) -> StoreConfig:
     default_vol = VolumeConfig(name="default", path="_civex/objects")
