@@ -225,3 +225,22 @@ def test_the_window_is_civex_s_own_python_running_the_desktop_module(
 def test_the_app_logs_beside_the_launcher(tmp_path: Path) -> None:
     env = launcher.environment(tmp_path, Path("/u/uv"))
     assert env["CIVEX_LOG_DIR"] == str(tmp_path / "logs")
+
+
+def test_an_explicit_source_is_installed_even_over_an_install(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """How a test build's wheel is tried in its app: CIVEX_LAUNCHER_SOURCE."""
+    home = tmp_path / "app"
+    launcher.desktop_app(home).parent.mkdir(parents=True)
+    launcher.desktop_app(home).touch()
+    monkeypatch.setattr(launcher, "civex_version", lambda h, env: "1.2.0")
+    monkeypatch.setattr(launcher, "older_than_release", lambda h, env, v: False)
+    monkeypatch.setattr(launcher, "with_progress", lambda title, msg, work: work())
+    ran: list[list[str]] = []
+    monkeypatch.setattr(
+        launcher, "run_logged", lambda cmd, env, log: ran.append(cmd) or 0
+    )
+    monkeypatch.setenv("CIVEX_LAUNCHER_SOURCE", "civex[desktop] @ file:///w.whl")
+    launcher.ensure_installed(home, Path("/u/uv"), {}, tmp_path / "log")
+    assert ran and ran[0][-1].endswith("w.whl")

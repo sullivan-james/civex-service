@@ -21,7 +21,9 @@ import civex. Built by desktop-launcher/launcher.spec.
 Environment, for CI and testing only:
     CIVEX_APP_HOME         where to keep civex instead of the per-user folder
     CIVEX_LAUNCHER_SOURCE  what to install instead of civex[desktop] from PyPI
-                           (e.g. "civex[desktop] @ file:///.../civex.whl")
+                           (e.g. "civex[desktop] @ file:///.../civex.whl"),
+                           every time it starts: how a test build's own wheel
+                           is tried in its app
 """
 
 from __future__ import annotations
@@ -375,7 +377,10 @@ def older_than_release(home: Path, env: dict[str, str], installed: str) -> bool:
 
 def ensure_installed(home: Path, uv: Path, env: dict[str, str], log: Path) -> None:
     installed = civex_version(home, env) if desktop_app(home).exists() else None
-    if installed and not older_than_release(home, env, installed):
+    # An explicit source (a wheel from a test build) is installed every time:
+    # it is what was asked for, whatever is there already.
+    explicit = bool(os.environ.get("CIVEX_LAUNCHER_SOURCE"))
+    if installed and not explicit and not older_than_release(home, env, installed):
         return
 
     def _install() -> None:

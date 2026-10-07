@@ -112,6 +112,33 @@ by `make_icons.py`). None of the downloads is signed yet.
 A run started by hand (**Run workflow** in Actions) is a dry run: every build
 and test on that branch, and nothing published.
 
+## Trying a test build's desktop app
+
+A dry run's desktop app has no release version in it, so on its own it
+installs the newest *stable* civex from PyPI, not the code that run built.
+To try that code, download the run's `wheel` artifact beside its installer and
+point the app at it with `CIVEX_LAUNCHER_SOURCE` (an explicit source is
+installed every time the app starts, over whatever is there):
+
+=== "Windows (PowerShell)"
+
+    ```powershell
+    $env:CIVEX_LAUNCHER_SOURCE = "civex[desktop] @ file:///C:/Users/you/Downloads/civex-1.2.0.post120-py3-none-any.whl"
+    .\civex-setup-windows.exe
+    ```
+
+=== "macOS"
+
+    ```bash
+    CIVEX_LAUNCHER_SOURCE="civex[desktop] @ file:///Users/you/Downloads/civex-1.2.0.post120-py3-none-any.whl" \
+      /Applications/civex.app/Contents/MacOS/civex
+    ```
+
+That install then keeps to that wheel: to go back, install a released app over
+it (it brings civex up to its own version) or delete the app's folder. For a
+build people install for real, tag a pre-release instead (below): its app
+installs that pre-release from PyPI and updates normally.
+
 ## Pre-releases
 
 Tag a release candidate to try a release on the real PyPI before it is final:
