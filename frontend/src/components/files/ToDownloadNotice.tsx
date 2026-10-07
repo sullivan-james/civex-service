@@ -19,8 +19,7 @@ export function ToDownloadNotice({
       {n.toLocaleString()} file{n === 1 ? '' : 's'}
       {toFetch.bytes > 0 ? ` (${formatSize(toFetch.bytes)})` : ''}{' '}
       {n === 1 ? "isn't" : "aren't"} on this computer yet:{' '}
-      {n === 1 ? 'it is' : 'they are'} downloaded from the server first. You can
-      follow the download in the status bar.
+      {n === 1 ? 'it is' : 'they are'} downloaded from the server first.
     </p>
   )
 }

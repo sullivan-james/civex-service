@@ -15,15 +15,8 @@ export function StopAutomationDialog({ onClose }: { onClose: () => void }) {
       body={
         <div className="space-y-2 text-sm">
           <p>
-            This cancels every workflow run that is waiting, stops the ones
-            running before their next step, and pauses automation: edits
-            won&apos;t start workflows and manual runs are refused until you
-            resume.
-          </p>
-          <p className="text-fg-muted">
-            Use it when workflows keep triggering each other. A step already in
-            progress finishes (or times out) first. Nothing already done is
-            undone.
+            Cancels waiting runs, stops running ones before their next step, and
+            pauses automation until you resume. Nothing already done is undone.
           </p>
         </div>
       }

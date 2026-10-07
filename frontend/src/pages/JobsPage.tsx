@@ -70,9 +70,7 @@ export default function JobsPage() {
           role="status"
           className="rounded-md border border-attention-muted bg-attention-subtle px-4 py-3 text-sm text-attention"
         >
-          Automation is paused, so nothing new will run: edits don&apos;t start
-          workflows, and manual runs are refused. Resume once you have fixed
-          whatever was triggering itself.
+          Automation is paused: nothing new will run until you resume.
         </p>
       )}
       {/* `?status=failed` from a dashboard link is just the status dropdown. */}

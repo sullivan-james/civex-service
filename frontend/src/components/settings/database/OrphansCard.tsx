@@ -12,13 +12,11 @@ export function OrphansCard() {
   if (isLoading) return <Skeleton className="h-24 w-full" />
   if (!data?.total || !data.items) return null
   return (
-    <Card title="Records under a deleted record">
-      <p className="mb-3 text-sm text-fg-muted">
-        {data.total.toLocaleString()} record{data.total === 1 ? '' : 's'} sit
-        {data.total === 1 ? 's' : ''} under a record that is deleted, so nothing
-        above lists them and a sync server won&apos;t take them. Restore what
-        each sits under, or open it and delete it.
-      </p>
+    <Card
+      title="Records under a deleted record"
+      count={data.total}
+      info="Nothing above lists them, and a sync server won't take them. Restore what each sits under, or open it and delete it."
+    >
       <ul className="divide-y divide-border-muted">
         {data.items.map((o) => (
           <OrphanRow key={o.record.id} orphan={o} />

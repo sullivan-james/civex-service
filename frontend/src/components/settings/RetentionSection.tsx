@@ -13,6 +13,7 @@ import {
   Input,
   Skeleton,
   Subheading,
+  InfoTip,
 } from '../ui'
 import {
   useForgetPurgedHistory,
@@ -230,10 +231,6 @@ function CleanUp({ settings }: { settings: RetentionSettings }) {
             Preview…
           </Button>
         </div>
-        <p className="text-xs text-fg-muted">
-          Leave a date empty to leave that kind alone. You see what would go
-          before anything does.
-        </p>
       </div>
 
       {request && (
@@ -260,9 +257,11 @@ function PurgedHistory() {
       <p className="text-sm text-fg-muted">
         {data.entries.toLocaleString()} history{' '}
         {data.entries === 1 ? 'entry still holds' : 'entries still hold'} the
-        values of records that were permanently deleted. Permanently deleting a
-        record now removes its history and leaves only a note that it was
-        deleted.
+        values of records that were permanently deleted.
+        <InfoTip>
+          Permanently deleting a record now removes its history and leaves only
+          a note that it was deleted.
+        </InfoTip>
       </p>
       <Button size="sm" variant="danger" onClick={() => setConfirming(true)}>
         Delete that history…

@@ -260,10 +260,6 @@ function RefusedFix({
               </div>
             )
           })}
-          <p className="text-xs text-fg-muted">
-            Click the value to change it. Saving sends the record again; this
-            closes once the server takes it.
-          </p>
         </div>
       )}
       {open && !sending && (c.sits_under ?? []).length > 0 && (

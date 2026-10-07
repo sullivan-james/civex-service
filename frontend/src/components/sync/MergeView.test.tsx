@@ -204,9 +204,6 @@ describe('MergeView', () => {
     ])
     expect(screen.getByText('Not on the server yet')).toBeInTheDocument()
     expect(screen.getByText(/must be under 5/)).toBeInTheDocument()
-    expect(
-      screen.getByText(/Saving sends the record again/),
-    ).toBeInTheDocument()
     expect(screen.queryByText('Before your change')).not.toBeInTheDocument()
     expect(screen.queryByText('Your change')).not.toBeInTheDocument()
     await userEvent.click(

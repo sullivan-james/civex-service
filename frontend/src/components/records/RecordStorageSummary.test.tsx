@@ -98,9 +98,7 @@ describe('RecordStorageSummary', () => {
     await userEvent.click(
       await screen.findByRole('button', { name: 'Move to drive…' }),
     )
-    expect(
-      await screen.findByText(/1 of them is copied, not moved/),
-    ).toBeInTheDocument()
+    expect(await screen.findByText(/1 copied, not moved/)).toBeInTheDocument()
     const preview = calls.find((c) => c.path === '/api/file-access/gather')
     expect(preview?.body).toMatchObject({ within: 'enc7', volume: 'archive' })
   })

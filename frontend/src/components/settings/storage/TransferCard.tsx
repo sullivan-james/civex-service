@@ -154,10 +154,7 @@ export function TransferCard({
           variant="danger"
           isPending={cancel.isPending}
           body={
-            <p className="text-sm">
-              Files already moved stay where they are, and nothing is lost.
-              Volumes made read-only for the move are put back as they were.
-            </p>
+            <p className="text-sm">Files already moved stay where they are.</p>
           }
           onConfirm={() =>
             cancel.mutate(t.id, { onSuccess: () => setConfirming(false) })

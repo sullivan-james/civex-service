@@ -20,33 +20,23 @@ export function TasksTab({ preset }: { preset?: TransferPreset }) {
       <div className="grid gap-4 md:grid-cols-2">
         <Card
           title="Move files"
+          info="Empty a drive before you unplug it, or gather a collection onto one. Moves run one at a time, and every file is checked before its original is removed."
           action={
             <Button size="sm" variant="primary" onClick={() => setMoving({})}>
               Move files…
             </Button>
           }
-        >
-          <p className="text-sm text-fg-muted">
-            Empty a volume before you unplug it, or gather a collection onto one
-            drive. Moves run one at a time, in the order you ask for them, and
-            every file is checked before the original is removed.
-          </p>
-        </Card>
+        />
         <Card
           title="Clean up unused files"
+          info="Files no record or workflow uses. You see what would go before anything is deleted."
+          count={unused > 0 ? `about ${formatSize(unused)}` : undefined}
           action={
             <Button size="sm" onClick={() => setCleaning(true)}>
               Clean up…
             </Button>
           }
-        >
-          <p className="text-sm text-fg-muted">
-            {unused > 0
-              ? `About ${formatSize(unused)} is stored that no record or workflow uses. `
-              : 'Free the space taken by files that no record or workflow uses. '}
-            You see exactly what would go before anything is deleted.
-          </p>
-        </Card>
+        />
       </div>
 
       <TransfersTab />

@@ -43,11 +43,10 @@ function ConnectForm() {
   const [token, setToken] = useState('')
   return (
     <div className="max-w-xl space-y-3">
-      <p className="text-sm text-fg-muted">
-        Not following an authority. An empty project becomes a copy of it; a
-        project with data fills an empty one.
-      </p>
-      <Field label="Authority address">
+      <Field
+        label="Authority address"
+        info="An empty project becomes a copy of the authority; a project with data fills an empty authority."
+      >
         <Input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
@@ -86,18 +85,14 @@ function Conflicts({ count }: { count: number }) {
   return (
     <Card
       title="Needs a look"
+      info="Values that didn't go in as you made them. The authority's value was kept; yours is saved until you choose."
       count={count}
       action={
         <Button size="sm" variant="primary" to="/sync/review">
           Review
         </Button>
       }
-    >
-      <p className="text-xs text-fg-muted">
-        These values did not go in as you made them. The authority’s value was
-        kept; yours is saved here until you choose.
-      </p>
-    </Card>
+    />
   )
 }
 
@@ -241,15 +236,7 @@ function Following({ s }: { s: RemoteStatus }) {
         </div>
       </Card>
       <Card title="Files">
-        <p className="text-sm text-fg-muted">
-          Which files this computer keeps, per collection, and freeing space are
-          with the rest of storage.
-        </p>
-        <Button
-          size="sm"
-          className="mt-2"
-          to="/settings/storage?tab=collections"
-        >
+        <Button size="sm" to="/settings/storage?tab=collections">
           Files on this computer
         </Button>
       </Card>

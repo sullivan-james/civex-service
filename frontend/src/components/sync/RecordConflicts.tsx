@@ -36,8 +36,7 @@ export function RecordConflicts({
       ))}
       {layout.count > layout.recordLevel.length && (
         <p className="text-xs text-fg-muted">
-          The fields that clashed are marked below. The other side’s value was
-          kept; yours is saved until you choose.
+          The fields that clashed are marked below.
         </p>
       )}
     </section>

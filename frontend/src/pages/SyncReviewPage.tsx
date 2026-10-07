@@ -385,10 +385,8 @@ export default function SyncReviewPage() {
               <>
                 <p>
                   Keep the other side’s value for {count.data.done}{' '}
-                  {count.data.done === 1 ? 'change' : 'changes'}? This project
-                  already has those values, so nothing in your data changes.
-                  What goes is your own value for each, and a refused change
-                  that was only ever saved here.
+                  {count.data.done === 1 ? 'change' : 'changes'}? Your data
+                  doesn’t change: your own values are let go.
                 </p>
                 {count.data.not_offered > 0 && (
                   <p className="mt-2 text-fg-muted">

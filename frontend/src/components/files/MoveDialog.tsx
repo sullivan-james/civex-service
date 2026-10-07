@@ -9,6 +9,7 @@ import { formatSize } from '../../utils/storage'
 import {
   Button,
   CheckRow,
+  InfoTip,
   Modal,
   ModalBody,
   ModalFooter,
@@ -121,8 +122,15 @@ export function MoveDialog({
             {plan.files === 0 && plan.from_server === 0
               ? 'Nothing to move: they are there already.'
               : `Moves ${plan.files.toLocaleString()} file${plan.files === 1 ? '' : 's'} (${formatSize(plan.bytes)}).`}
-            {plan.copied > 0 &&
-              ` ${plan.copied.toLocaleString()} of them ${plan.copied === 1 ? 'is' : 'are'} copied, not moved: ${plan.copied === 1 ? 'its' : 'their'} drive is the home of a collection that uses ${plan.copied === 1 ? 'it' : 'them'}, and keeps ${plan.copied === 1 ? 'its copy' : 'its copies'}.`}
+            {plan.copied > 0 && (
+              <>
+                {` ${plan.copied.toLocaleString()} copied, not moved.`}
+                <InfoTip>
+                  Their drive is the home of a collection that uses them, and
+                  keeps its copies.
+                </InfoTip>
+              </>
+            )}
             {plan.already_there > 0 &&
               ` ${plan.already_there.toLocaleString()} are there already.`}
           </p>

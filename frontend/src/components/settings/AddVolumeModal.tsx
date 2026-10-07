@@ -162,7 +162,7 @@ export function AddVolumeModal({
         <Step
           n={2}
           title="Location"
-          info="A drive that is plugged in, or a network share that is already mounted on this computer."
+          info="A drive that is plugged in, or a network share already mounted on this computer (Civex doesn't mount shares itself)."
         >
           <div className="flex items-end gap-2">
             <Field label="Folder" className="flex-1" required>
@@ -194,10 +194,6 @@ export function AddVolumeModal({
                 : null
             }
           />
-          <p className="text-xs text-fg-muted">
-            Civex doesn&apos;t mount network drives itself. Mount the share
-            first, then choose the folder it appears as.
-          </p>
         </Step>
 
         <Step n={3} title="How it is used">
@@ -237,12 +233,11 @@ export function AddVolumeModal({
                 onChange={(e) => setJoinQueue(e.target.checked)}
               />
               Use it for new files in general
+              <InfoTip>
+                Adds it to the write queue. Leave it off for a drive kept for
+                particular collections (their home).
+              </InfoTip>
             </label>
-            <p className="ml-6 text-xs text-fg-muted">
-              Adds it to the write queue. Leave this off for a volume reserved
-              for particular collections — choose a collection&apos;s home
-              volume on the collection&apos;s own page.
-            </p>
           </div>
         </Step>
 

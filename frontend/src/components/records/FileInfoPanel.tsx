@@ -54,11 +54,7 @@ export function FileInfoPanel({ sha256 }: { sha256: string }) {
       <section aria-label="Stored on">
         <h3 className="mb-1 font-semibold text-fg">Stored on</h3>
         {data.copies.length === 0 ? (
-          <p className="text-attention">
-            Not found on any volume. It may only exist on a remote that
-            hasn&apos;t been fetched, or the drive holding it hasn&apos;t been
-            added.
-          </p>
+          <p className="text-attention">Not on any drive here.</p>
         ) : (
           <ul className="space-y-2">
             {data.copies.map((copy) => (

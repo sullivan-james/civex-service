@@ -9,7 +9,13 @@ import {
 } from '../../../hooks/useRemote'
 import { errorMessage } from '../../../lib/errors'
 import { formatSize } from '../../../utils/storage'
-import { Button, ConfirmDialog, SegmentedControl, Select } from '../../ui'
+import {
+  Button,
+  ConfirmDialog,
+  InfoTip,
+  SegmentedControl,
+  Select,
+} from '../../ui'
 
 /** The project's default for which files this computer keeps, and how many
  * kept files aren't downloaded yet. */
@@ -142,15 +148,14 @@ export function FreeUpDialog({
         <p>
           Removes this computer&apos;s copies of {c.files.toLocaleString()} file
           {c.files === 1 ? '' : 's'} ({formatSize(c.bytes)}). The server keeps
-          them, and each comes back when it is opened or exported.
+          them.
+          <InfoTip>
+            Each comes back when it is opened or exported.
+            {willSwitch &&
+              ` ${what} is then set to fetch files when opened, so they aren't downloaded again in the background.`}
+          </InfoTip>
         </p>
         {kept.length > 0 && <p>Keeps {kept.join('; ')}.</p>}
-        {willSwitch && (
-          <p>
-            {what} is then set to fetch files when opened, so they aren&apos;t
-            downloaded again in the background.
-          </p>
-        )}
       </div>
     )
   return (

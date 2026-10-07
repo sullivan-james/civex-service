@@ -1,3 +1,4 @@
+import { InfoTip } from './Tooltip'
 import { Link } from 'react-router'
 import { type ReactNode } from 'react'
 
@@ -17,7 +18,7 @@ export interface CardProps {
   variant?: Variant
   title?: ReactNode
   /** Shown beside the title, e.g. a total. */
-  count?: number
+  count?: number | string
   /** Trailing header content (buttons, a menu). Not part of the click target
    * of an interactive card. */
   action?: ReactNode
@@ -27,6 +28,8 @@ export interface CardProps {
   /** For a card that chooses one of several options. */
   selected?: boolean
   /** Drop the body padding for content that brings its own (tables). */
+  /** What the card is for, as a tooltip beside its title (as `Page info`). */
+  info?: ReactNode
   flush?: boolean
   className?: string
   children?: ReactNode
@@ -37,6 +40,7 @@ export interface CardProps {
 export function Card({
   variant,
   title,
+  info,
   count,
   action,
   to,
@@ -60,6 +64,7 @@ export function Card({
       >
         <h2 className="flex items-center gap-2 text-base font-semibold text-fg">
           {title}
+          {info && <InfoTip>{info}</InfoTip>}
           {count !== undefined && (
             <span className="text-sm font-normal text-fg-muted">{count}</span>
           )}

@@ -111,9 +111,6 @@ describe('files on this computer', () => {
     expect(
       screen.getByText(/Keeps 1 in a collection kept on this computer/),
     ).toBeInTheDocument()
-    expect(
-      screen.getByText(/Humpbacks is then set to fetch files when opened/),
-    ).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Remove 3.0 MB' }))
     await waitFor(() =>
       expect(

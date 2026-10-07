@@ -23,10 +23,7 @@ export function TransfersTab() {
           ))}
         </ul>
       ) : (
-        <p className="text-sm text-fg-muted">
-          No moves yet. One you start appears here, and across the bottom of the
-          screen while it runs.
-        </p>
+        <p className="text-sm text-fg-muted">No moves yet.</p>
       )}
     </section>
   )
