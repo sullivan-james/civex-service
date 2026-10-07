@@ -108,7 +108,10 @@ jobs:
       - name: Run it
         shell: bash
         run: |
-          civex="$(uv tool dir --bin)/civex$([ "$RUNNER_OS" = Windows ] && echo .exe)"
+          # Not `$([ ... ] && echo .exe)`: off Windows that test fails, and in
+          # an assignment its failure is the line's, so `bash -e` stops here.
+          exe=""; if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
+          civex="$(uv tool dir --bin)/civex$exe"
           uv run --no-project python scripts/smoke_civex.py "$civex" \
             --expect-version "${{ needs.build.outputs.version }}"
 
@@ -151,7 +154,9 @@ jobs:
         shell: bash
         run: |
           pip install pyinstaller
-          CIVEX_LAUNCHER_UV="$(command -v uv)" pyinstaller desktop-launcher/launcher.spec \
+          # Git Bash names Windows programs without `.exe`; PyInstaller needs it.
+          CIVEX_LAUNCHER_UV="$(command -v uv.exe || command -v uv)" \
+            pyinstaller desktop-launcher/launcher.spec \
             --distpath app-dist --workpath app-build
 
       - name: Run it as a first start would, then use the civex it installed
@@ -164,12 +169,13 @@ jobs:
           esac
           wheel="$(ls "$PWD"/dist/*.whl)"
           [ "$RUNNER_OS" = Windows ] && wheel="$(cygpath -m "$wheel")"
+          exe=""; if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
           home="$RUNNER_TEMP/civex-app"
           CIVEX_APP_HOME="$home" \
             CIVEX_LAUNCHER_SOURCE="civex[desktop] @ file:///${wheel#/}" \
             "$app" --install-only
           python scripts/smoke_civex.py \
-            "$home/bin/civex$([ "$RUNNER_OS" = Windows ] && echo .exe)" \
+            "$home/bin/civex$exe" \
             --expect-version "${{ needs.build.outputs.version }}"
 
       - name: Package (Linux)
