@@ -66,6 +66,11 @@ class SyncWorker:
         # Told how far a long step has got, and None when it is done.
         self._on_progress = on_progress or (lambda _: None)
         self._requested = threading.Event()
+        # Downloading what this computer keeps was asked for (a collection was
+        # just set to keep its files here): done first, before any sync.
+        self._files_asked = threading.Event()
+        # Set by either request, so the loop doesn't sleep through it.
+        self._wake = threading.Event()
         self._failures = 0
         self._backoff_until = 0.0
         self._next_interval = 0.0
@@ -83,9 +88,21 @@ class SyncWorker:
         # it is a notice, not state anyone needs after a restart.
         self.last_report: SyncReport | None = None
 
+    def request_files(self, total: int = 0) -> None:
+        """Start downloading what this computer keeps now, ahead of any sync.
+        With `total` (how many are missing), the progress is published at once,
+        before the worker has woken, so the status bar shows it on its next
+        read rather than after the first file has arrived."""
+        if total > 0:
+            self._files_total, self._files_done = total, 0
+            self._on_progress(SyncProgress(FILES, 0, total))
+        self._files_asked.set()
+        self._wake.set()
+
     def request(self) -> None:
         """Ask for a sync at the next tick, whatever the schedule says."""
         self._requested.set()
+        self._wake.set()
 
     def tick(self) -> SyncReport | None:
         """Sync if one is due. Returns what it did, or None when nothing ran
@@ -94,7 +111,15 @@ class SyncWorker:
         config = self._load_config()
         if not config.sync.remote:
             self._requested.clear()
+            self._files_asked.clear()
             return None
+        if self._files_asked.is_set():
+            self._files_asked.clear()
+            ctx = self._open(config)
+            try:
+                self._fetch_files(ctx, asked=True)
+            finally:
+                ctx.close()
         if config.sync.paused and not self._requested.is_set():
             return None  # pausing stops the schedule; asking for one still works
         ctx = self._open(config)
@@ -124,11 +149,12 @@ class SyncWorker:
         except SyncError as e:
             log.info("fetching history failed (%s); it carries on later", e)
 
-    def _fetch_files(self, ctx: AppContext) -> None:
+    def _fetch_files(self, ctx: AppContext, asked: bool = False) -> None:
         """Download files this project's records cite that aren't here, for a
-        while, while the authority is answering."""
+        while, while the authority is answering (or at once, when `asked`)."""
         now = self._clock()
-        if now < self._backoff_until or ctx.sync_repo.meta().history_from:
+        waiting = now < self._backoff_until and not asked
+        if waiting or ctx.sync_repo.meta().history_from:
             return
         if now - self._absent_since >= FILE_CHECK_EVERY:
             self._absent.clear()
@@ -142,6 +168,9 @@ class SyncWorker:
         if not self._files_total:
             self._files_total, self._files_done = left, 0
         base = self._files_done
+        # Said before the first file starts (one can take minutes), so a person
+        # sees at once that it is under way and how many there are.
+        self._on_progress(SyncProgress(FILES, base, max(self._files_total, base)))
 
         def tell(done: int) -> None:
             self._files_done = base + done
@@ -154,6 +183,10 @@ class SyncWorker:
             )
         except SyncError as e:
             log.info("downloading files failed (%s); it carries on later", e)
+            # Nothing is moving: no bar stuck where it was. The failure is
+            # what the next sync reports.
+            self._files_total = self._files_done = 0
+            self._on_progress(None)
             return
         self._absent.update(report.absent)
         if not report.stopped:  # all that could be fetched now is here
@@ -211,4 +244,6 @@ class SyncWorker:
                 self.tick()
             except Exception:  # noqa: BLE001 - one bad tick must not end syncing
                 log.exception("sync tick failed")
-            stop.wait(poll)
+            # Sleep until the next look, or until someone asks for something.
+            self._wake.wait(poll)
+            self._wake.clear()

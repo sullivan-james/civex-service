@@ -19,6 +19,7 @@ class Rig:
         self.calls = 0
         self.to_fetch = 0
         self.fetches: list[dict] = []
+        self.fail_fetch: Exception | None = None
         self.sync_config = SyncConfig(remote="http://a", interval_seconds=60)
         self.worker = SyncWorker(self._config, self._ctx, clock=lambda: self.now)
 
@@ -35,6 +36,8 @@ class Rig:
 
         def fetch_files(**kw):
             self.fetches.append(kw)
+            if self.fail_fetch:
+                raise self.fail_fetch
             done = self.to_fetch
             if kw.get("progress") and done:
                 kw["progress"](done)
@@ -141,3 +144,33 @@ def test_files_kept_here_are_downloaded_in_the_background_and_nothing_else():
     assert len(r.fetches) == 1 and r.to_fetch == 0
     r.tick(1000)  # nothing left to fetch (none kept, or all here): no call
     assert len(r.fetches) == 1
+
+
+def test_asking_for_downloads_shows_progress_at_once_and_runs_before_any_sync():
+    seen: list = []
+    r = Rig()
+    r.worker._on_progress = seen.append
+    r.to_fetch = 4
+    r.worker.request_files(4)
+    # Shown the moment it is asked for, before the worker has done anything.
+    assert seen and (seen[0].phase, seen[0].done, seen[0].total) == ("files", 0, 4)
+
+    r.worker._backoff_until = r.now + 500  # an earlier sync failed
+    r.sync_config.paused = True
+    r.tick()
+    assert len(r.fetches) == 1  # asked for: not held by the back-off or a pause
+    assert r.calls == 0  # and no sync was needed first
+    assert seen[-1] is None  # all here: the bar goes
+
+
+def test_a_download_that_cannot_reach_the_server_does_not_leave_a_bar():
+    from civex.domain.sync import SyncError
+
+    seen: list = []
+    r = Rig()
+    r.worker._on_progress = seen.append
+    r.to_fetch = 2
+    r.fail_fetch = SyncError("no server")
+    r.worker.request_files(2)
+    r.tick()
+    assert seen[-1] is None

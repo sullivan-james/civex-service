@@ -357,6 +357,8 @@ def update(body: RemoteUpdateRequest, ctx: AppContext = Depends(get_ctx)):
         ctx.sync_svc.set_interval(body.interval_seconds)
     if body.download_files is not None:
         ctx.sync_svc.set_download_files(body.download_files)
+        if body.download_files == "all" and ctx.sync_svc.fetches_files:
+            sync_jobs.fetch_now(ctx.sync_svc.files_to_fetch())
     return _status(ctx)
 
 
@@ -561,8 +563,8 @@ def set_collection_mode(
     opened, or follow the project's setting. Keeping starts the background
     download of what is missing."""
     mode = ctx.sync_svc.set_collection_mode(collection, body.mode)
-    if mode == "keep" and ctx.sync_svc.configured:
-        sync_jobs.sync_now()
+    if mode == "keep" and ctx.sync_svc.fetches_files:
+        sync_jobs.fetch_now(ctx.sync_svc.files_to_fetch())
     return [CollectionFilesResponse(**vars(c)) for c in ctx.sync_svc.collection_files()]
 
 
