@@ -68,6 +68,8 @@ from the next tag forward.
   (`civex-setup-windows.exe`: Start menu, uninstaller, no administrator
   needed) and a macOS disk image with one app for Intel and Apple silicon
   Macs. Neither is signed yet; the install guide says how to open them.
+- On Intel Macs civex uses `cryptography` 48, the last version with Intel macOS
+  builds: newer ones could only be installed there by compiling Rust.
 - Install with `uv tool install civex`, which needs no Python on the computer.
 
 ### Fixes
