@@ -101,6 +101,10 @@ def test_applying_the_settings_only_touches_what_is_switched_on(
     client: TestClient,
 ) -> None:
     ids = _setup(client)
+    # Two edits: the first is neither the schema's creation nor its latest
+    # entry (both of which are kept however old), so it can be pruned.
+    client.patch("/api/schemas/trial", json={"label": "Trial"})
+    client.patch("/api/schemas/trial", json={"label": "Trials"})
     client.post("/api/records/bulk-delete", json={"ids": ids})
     # Nothing is switched on: applying the settings removes nothing.
     nothing = client.post(
