@@ -1141,25 +1141,47 @@ class SyncService:
         return self.collection_mode(cid)
 
     def free_up(self, collection: str, dry_run: bool = True) -> FreeUpReport:
-        """Remove this computer's copies of a collection's files, to free
-        space; they are fetched again when opened or exported. Safe by
-        construction: only files the server says it holds, asked at that
-        moment (one never sent stays), and never one a collection kept here
-        also uses. Done for real, the collection is set to `opened` first, so
-        the background download doesn't fetch them straight back. Counts only
-        unless `dry_run` is False. Holds the store's clean-up lock, so no
-        clean-up or file move runs meanwhile."""
+        """Remove this computer's copies of a collection's files, to free space
+        (see `free_up_files` for what is kept and why). Done for real, the
+        collection is set to `opened` first, so the background download doesn't
+        fetch them straight back."""
+        self._can_free_up()
+        cid = self._collection_id(collection)
+        here = self._repo.files_here_of(cid)
+        report = self._free(here, self._kept_collections() - {cid}, dry_run=True)
+        if dry_run:
+            return report
+        self.set_collection_mode(str(cid), "opened")
+        return self._free(here, self._kept_collections(), dry_run=False)
+
+    def free_up_files(self, shas: list[str], dry_run: bool = True) -> FreeUpReport:
+        """Remove this computer's copies of these files, to free space; each is
+        fetched again when opened or exported. Safe by construction: only
+        files the server says it holds, asked at that moment (one never sent
+        stays), and never one a collection kept on this computer uses (the
+        background download would only fetch it back: switch that collection to
+        `opened` first). Counts only unless `dry_run` is False. Holds the
+        store's clean-up lock, so no clean-up or file move runs meanwhile."""
+        self._can_free_up()
+        rows = self._files.inventory_rows(shas)
+        here = {sha: size for sha, (_volume, size) in rows.items()}
+        return self._free(here, self._kept_collections(), dry_run)
+
+    def _can_free_up(self) -> None:
         if not self.fetches_files:
             raise ValidationError(
                 "This project doesn't follow a server, so its files have nowhere "
                 "else to come from: they can't be removed to free space."
             )
-        cid = self._collection_id(collection)
-        here = self._repo.files_here_of(cid)
-        kept_elsewhere = self._repo.used_by(
-            list(here), self._kept_collections() - {cid}
-        )
-        candidates = [sha for sha in here if sha not in kept_elsewhere]
+
+    def _free(
+        self, here: dict[str, int], kept: set[uuid.UUID], dry_run: bool
+    ) -> FreeUpReport:
+        """The one rule for removing copies: of these files on this computer
+        (sha -> size), all but those a kept collection uses and those the
+        server hasn't got."""
+        kept_shared = self._repo.used_by(list(here), kept)
+        candidates = [sha for sha in here if sha not in kept_shared]
         transport = self._transport()
         missing: set[str] = set()
         for i in range(0, len(candidates), FILE_CHECK_PAGE):
@@ -1168,12 +1190,11 @@ class SyncService:
         report = FreeUpReport(
             files=len(removable),
             bytes=sum(here[sha] for sha in removable),
-            kept_shared=len(kept_elsewhere),
+            kept_shared=len(kept_shared),
             not_on_server=len(missing),
         )
         if dry_run:
             return report
-        self.set_collection_mode(str(cid), "opened")
         with self._files.gc_lock():
             for sha in removable:
                 self._files.delete(sha)

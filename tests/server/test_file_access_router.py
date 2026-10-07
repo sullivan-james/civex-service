@@ -685,3 +685,39 @@ def test_a_table_that_breaks_its_own_rules_is_refused(client, study) -> None:
     )
 
     assert resp.status_code == 422
+
+
+def test_files_of_a_selection_are_listed_by_place_and_acted_on(
+    client, ctx, make_schema, make_collection, make_record
+):
+    make_schema("doc", fields=[("title", "string"), ("scan", "file")])
+    make_collection("papers")
+    ref = ctx.file_svc.store_bytes(b"pages", "scan.pdf")
+    make_record("papers", "doc", {"title": "A", "scan": ref.to_dict()})
+    ctx.commit()
+
+    listed = client.post("/api/file-access/files", json={"collection": "papers"}).json()
+    assert listed["total"] == 1
+    assert listed["summary"] == [
+        {
+            "place": "default",
+            "kind": "drive",
+            "files": 1,
+            "bytes": 5,
+            "reason": "",
+            "fix": "",
+        }
+    ]
+    assert listed["items"][0]["place"] == "default"
+    assert listed["items"][0]["place_kind"] == "drive"
+    empty = client.post(
+        "/api/file-access/files", json={"collection": "papers", "place": "server"}
+    ).json()
+    assert empty["total"] == 0
+
+    already = client.post(
+        "/api/file-access/gather", json={"collection": "papers", "volume": "default"}
+    )
+    assert already.status_code == 422
+    nowhere = client.post("/api/file-access/free-up", json={"collection": "papers"})
+    assert nowhere.status_code == 422  # follows no server

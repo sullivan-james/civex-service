@@ -10,6 +10,7 @@ from civex import fs_open
 from civex.context import AppContext
 from civex.domain.exceptions import CivexError, NotFoundError, ValidationError
 from civex.domain.file_access import (
+    place_of,
     FileSelection,
     FilesScatteredError,
     FilesUnavailableError,
@@ -17,6 +18,7 @@ from civex.domain.file_access import (
 )
 from civex.domain.naming import safe_filename
 from civex.domain.query import RecordQuery
+from civex.domain.sync import SyncError
 from civex.domain.tables import TableSpec
 from civex.domain.transfers import KIND_FILES, TransferSpec
 from civex.server.deps import get_ctx
@@ -24,6 +26,8 @@ from civex.server.downloads import new_temp_dir, serve, temp_paths
 from civex.server.models import (
     FileExportRequest,
     FileGatherRequest,
+    FileListRequest,
+    FilePickRequest,
     FilePlanRequest,
     FileSelectionRequest,
     FileZipRequest,
@@ -239,44 +243,117 @@ def export_files(
 
 
 @router.post("/gather", status_code=202)
-def gather_files(
-    body: FileGatherRequest,
-    ctx: AppContext = Depends(get_ctx),
-    progress: Progress | None = Depends(report_progress),
-):
-    """Queue a move of just the files in a selection onto one drive, so a linked
-    folder can hold them all. Only those files move; the rest of their
-    collections stay where they are. It runs like any other move (one at a
-    time, safe to pause, cancel or lose power; see /store/transfers), and the
-    selection can be opened as a linked folder once it has finished. 422 when
-    every reachable file is already on that drive."""
-    svc = ctx.file_access_svc
+def gather_files(body: FileGatherRequest, ctx: AppContext = Depends(get_ctx)):
+    """Move the picked files onto one drive: a selection's files, narrowed by
+    place, name or ticked files (`shas`). Only those move; the rest of their
+    collections stay where they are. Files only on the server are downloaded
+    first; files on a drive that can't be reached, or missing, are left out. It
+    runs like any other move (one at a time, safe to pause, cancel or lose
+    power; see /store/transfers). 422 when they are all already there."""
+    items = _picked(body, ctx)
     try:
-        plan = svc.plan(_selection(body, ctx), progress=progress, fetch=True)
-        shas = svc.files_to_gather(plan, body.volume)
-        if not shas:
-            raise HTTPException(
-                422,
-                detail=f"Every reachable file is already on '{body.volume}'.",
-            )
-        record = jobs.start(
-            TransferSpec(
-                kind=KIND_FILES,
-                targets=[body.volume],
-                shas=shas,
-                freeze_sources=False,
-            )
-        )
+        shas = ctx.file_access_svc.to_move(items, body.volume)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except CivexError as e:
         raise HTTPException(422, detail=str(e))
+    ctx.commit()
+    if not shas:
+        raise HTTPException(
+            422, detail=f"Every file that can move is already on '{body.volume}'."
+        )
+    record = jobs.start(
+        TransferSpec(
+            kind=KIND_FILES, targets=[body.volume], shas=shas, freeze_sources=False
+        )
+    )
     return {
         "transfer_id": record.id,
         "volume": body.volume,
         "files": record.plan.files if record.plan else len(shas),
         "bytes": record.plan.bytes if record.plan else 0,
     }
+
+
+def _picked(body: FilePickRequest, ctx: AppContext):
+    selection = _base_selection(body, ctx)
+    if body.sort:
+        selection.query.sort = body.sort
+    try:
+        return ctx.file_access_svc.chosen(selection, body.place, body.name, body.shas)[
+            1
+        ]
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+
+
+@router.post("/files")
+def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
+    """A page of a selection's files, each with where it is (`place`: a
+    drive's name, `server` or `missing`; `place_kind`: drive, unreachable,
+    server or missing), narrowed by place, name and the selection's own
+    filter; and `summary`, where all of the selection's files are, by place."""
+    selection = _base_selection(body, ctx)
+    if body.sort:
+        selection.query.sort = body.sort
+    try:
+        listing = ctx.file_access_svc.listing(
+            selection, body.place, body.name, body.order, body.offset, body.limit
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return {
+        "total": listing.total,
+        "summary": [vars(p) for p in listing.summary],
+        "items": [
+            {
+                **i.to_dict(),
+                "place": place_of(i)[0],
+                "place_kind": place_of(i)[1],
+            }
+            for i in listing.items
+        ],
+    }
+
+
+@router.post("/download")
+def download_files(body: FilePickRequest, ctx: AppContext = Depends(get_ctx)):
+    """Download the picked files that are only on the server to this computer
+    (onto their collection's drive). Answers when they have arrived: how many
+    came and which the server hasn't got yet."""
+    items = _picked(body, ctx)
+    try:
+        report = ctx.file_access_svc.download(items)
+    except SyncError as e:
+        raise HTTPException(503, detail=f"The server can't be reached: {e}")
+    ctx.commit()
+    return {
+        "fetched": report.fetched if report else 0,
+        "absent": len(report.absent) if report else 0,
+    }
+
+
+@router.post("/free-up")
+def free_up_files(
+    body: FilePickRequest,
+    dry_run: bool = Query(default=True, description="Only count (the default)."),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Remove this computer's copies of the picked files to free space; each
+    comes back when opened or exported. Only files the server confirms it
+    holds, and never one a collection kept on this computer uses (switch that
+    collection to fetch when opened first). Counts unless `dry_run=false`."""
+    items = _picked(body, ctx)
+    try:
+        report = ctx.file_access_svc.free_up(items, dry_run=dry_run)
+    except SyncError as e:
+        raise HTTPException(503, detail=f"The server can't be reached to check: {e}")
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    ctx.commit()
+    return {**vars(report), "done": not dry_run}
 
 
 @router.get("/definitions", response_model=list[ExportDefinitionResponse])

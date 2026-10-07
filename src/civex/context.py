@@ -303,6 +303,9 @@ def build_local_context(
 
     record_svc.files_from_server = lambda: _sync().fetches_files
     file_access_svc.fetch_missing = lambda shas: _sync().fetch_files(shas=shas)
+    file_access_svc.free_files = lambda shas, dry: _sync().free_up_files(
+        shas, dry_run=dry
+    )
 
     ctx: AppContext = AppContext(
         schema_svc=schema_svc,

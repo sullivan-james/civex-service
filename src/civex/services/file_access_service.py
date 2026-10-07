@@ -29,6 +29,10 @@ from civex.domain import tables as table_rules
 from civex.domain import templating
 from civex.domain.naming import display_label
 from civex.domain.file_access import (
+    FileListing,
+    PlaceSummary,
+    in_place,
+    place_of,
     EXPORT_MODES,
     LAYOUT_FLAT,
     LAYOUT_GROUPED,
@@ -88,6 +92,10 @@ class FileAccessService:
         # drive here) from the authority, given their hashes; None when the
         # project follows none. Injected so this service doesn't know sync.
         self.fetch_missing: Callable[[list[str]], object] | None = None
+        # Removes this computer's copies of content the server holds (given the
+        # hashes and whether only to count); None when the project follows no
+        # server. Injected like `fetch_missing`.
+        self.free_files: Callable[[list[str], bool], object] | None = None
 
     # -- planning ------------------------------------------------------------
 
@@ -1049,18 +1057,99 @@ class FileAccessService:
             removed_folder = not folder.exists()
         return RemoveResult(str(folder), removed, freed, kept, removed_folder)
 
-    def files_to_gather(self, plan: FilePlan, volume: str) -> list[str]:
-        """The content a selection would need moved so that every reachable file
-        is on `volume`: each file not already there, once. Just the selection's
-        files, never the rest of their collections. Feed it to a "files"
-        transfer; once it has run, a linked folder can hold the whole selection."""
+    # -- the files of a selection, by place (the Files tab) -----------------
+
+    def chosen(
+        self,
+        selection: FileSelection,
+        place: str | None = None,
+        name: str | None = None,
+        shas: list[str] | None = None,
+    ) -> tuple[FilePlan, list[FileItem]]:
+        """The files a person has picked: a selection's files, narrowed to a
+        place (`in_place`), a name (in the file's or its record's), and ticked
+        content (`shas`). The one rule behind the Files tab's list and every
+        action on it, so what is listed is what is acted on."""
+        plan = self.plan(selection)
+        needle = (name or "").strip().casefold()
+        wanted = set(shas) if shas is not None else None
+        items = [
+            i
+            for i in plan.items
+            if (place is None or in_place(i, place))
+            and (
+                not needle
+                or needle in i.filename.casefold()
+                or needle in i.record_name.casefold()
+            )
+            and (wanted is None or i.sha256 in wanted)
+        ]
+        return plan, items
+
+    def listing(
+        self,
+        selection: FileSelection,
+        place: str | None = None,
+        name: str | None = None,
+        sort: str = "path",
+        offset: int = 0,
+        limit: int = 100,
+    ) -> FileListing:
+        """A page of a selection's files, narrowed like `chosen`, with where all
+        of the selection's files are (`summary`, before narrowing, so the
+        places a person can pick stay in view). `sort`: path, name, size,
+        record or place; a leading "-" reverses it."""
+        plan, items = self.chosen(selection, place, name)
+        key, reverse = sort.lstrip("-"), sort.startswith("-")
+        order: dict[str, Callable[[FileItem], Any]] = {
+            "path": lambda i: i.path.casefold(),
+            "name": lambda i: i.filename.casefold(),
+            "size": lambda i: i.size,
+            "record": lambda i: (i.record_name.casefold(), i.path.casefold()),
+            "place": lambda i: (place_of(i)[0].casefold(), i.path.casefold()),
+        }
+        if key not in order:
+            raise ValidationError(f"sort must be one of: {', '.join(order)}")
+        items.sort(key=order[key], reverse=reverse)
+        return FileListing(
+            total=len(items),
+            summary=_places(plan.items),
+            items=items[offset : offset + limit],
+        )
+
+    def to_move(self, items: list[FileItem], volume: str) -> list[str]:
+        """The content that has to move for these files to be on `volume`: each
+        not there yet, once; a file only on the server is downloaded first (it
+        then moves like any other). Unreachable and missing files can't move
+        and are left out (the plan the caller showed already said so)."""
         if volume not in self._store.volume_names():
             raise NotFoundError(f"There is no drive called '{volume}'.")
-        return list(
-            dict.fromkeys(
-                i.sha256 for i in plan.items if i.available and i.volume != volume
-            )
+        movable = [i for i in items if place_of(i)[1] in ("drive", "server")]
+        remote = [i.sha256 for i in movable if place_of(i)[1] == "server"]
+        if remote and self.fetch_missing:
+            self.fetch_missing(remote)
+        located = self._store.locate_volumes(i.sha256 for i in movable)
+        return [sha for sha, on in located.items() if on and on != volume]
+
+    def download(self, items: list[FileItem]) -> Any:
+        """Fetch the files among these that are only on the server."""
+        remote = list(
+            dict.fromkeys(i.sha256 for i in items if place_of(i)[1] == "server")
         )
+        if not remote or not self.fetch_missing:
+            return None
+        return self.fetch_missing(remote)
+
+    def free_up(self, items: list[FileItem], dry_run: bool = True) -> Any:
+        """Remove this computer's copies of these files, where the server holds
+        them (see `SyncService.free_up_files` for what is kept and why)."""
+        if not self.free_files:
+            raise ValidationError(
+                "This project doesn't follow a server, so its files have nowhere "
+                "else to come from: they can't be removed to free space."
+            )
+        here = list(dict.fromkeys(i.sha256 for i in items if place_of(i)[1] == "drive"))
+        return self.free_files(here, dry_run)
 
     def missing_note(self, plan: FilePlan) -> str | None:
         """The text for a zip's MISSING.txt: the files that couldn't be reached
@@ -1349,3 +1438,26 @@ def _remove(dest: Path, path: str) -> None:
         return
     target.unlink(missing_ok=True)
     _prune_empty(dest, target.parent)
+
+
+def _places(items: list[FileItem]) -> list[PlaceSummary]:
+    """Every file of a selection by place, readable drives first, then
+    unreachable drives, the server, and missing (biggest first within each)."""
+    out: dict[tuple[str, str], PlaceSummary] = {}
+    for item in items:
+        place, kind = place_of(item)
+        row = out.setdefault(
+            (place, kind),
+            PlaceSummary(
+                place,
+                kind,
+                0,
+                0,
+                item.reason if kind == "unreachable" else "",
+                item.fix if kind == "unreachable" else "",
+            ),
+        )
+        row.files += 1
+        row.bytes += item.size
+    rank = {"drive": 0, "unreachable": 1, "server": 2, "missing": 3}
+    return sorted(out.values(), key=lambda r: (rank[r.kind], -r.bytes, r.place))

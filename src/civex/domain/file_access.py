@@ -164,6 +164,59 @@ class FileItem:
         }
 
 
+# Where a file is, as one word a person can filter by: the name of the drive
+# that holds it (reachable or not), or one of these.
+PLACE_SERVER = "server"  # another device added it; only the server has it
+PLACE_MISSING = "missing"  # on no drive this project knows, and no server
+# Filters that group places.
+PLACE_HERE = "here"  # on a drive of this computer that can be read now
+PLACE_UNREACHABLE = "unreachable"  # on a drive of this computer that can't
+
+
+def place_of(item: FileItem) -> tuple[str, str]:
+    """(place, kind) of a file: the drive holding it and whether it can be read
+    now (`drive` / `unreachable`), or `server` / `missing`. The one rule for
+    where a file is, behind the Files tab's summary, its Where filter and the
+    actions that pick files by place."""
+    if item.volume:
+        return item.volume, ("drive" if item.available else "unreachable")
+    if item.state == "remote":
+        return PLACE_SERVER, "server"
+    return PLACE_MISSING, "missing"
+
+
+def in_place(item: FileItem, wanted: str) -> bool:
+    """Whether a file is in `wanted`: a drive's name, `server`, `missing`, or
+    the groups `here` (any readable drive) and `unreachable`."""
+    place, kind = place_of(item)
+    if wanted == PLACE_HERE:
+        return kind == "drive"
+    if wanted == PLACE_UNREACHABLE:
+        return kind == "unreachable"
+    return place == wanted
+
+
+@dataclass
+class PlaceSummary:
+    """How much of a selection is in one place."""
+
+    place: str
+    kind: str  # drive | unreachable | server | missing
+    files: int
+    bytes: int
+    reason: str = ""  # for an unreachable drive: why, in its own words
+    fix: str = ""
+
+
+@dataclass
+class FileListing:
+    """One page of a selection's files, with where all of them are."""
+
+    total: int  # files matching (after the place and name filters)
+    summary: list[PlaceSummary]  # every file of the selection, by place
+    items: list[FileItem]
+
+
 @dataclass
 class UnavailableGroup:
     """The files a selection holds on one drive that can't be reached."""

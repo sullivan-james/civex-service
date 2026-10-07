@@ -707,18 +707,18 @@ def test_an_exports_folder_inside_a_drive_is_invisible_to_the_object_scan(
 # -- gathering just a selection onto one drive ----------------------------------------
 
 
-def test_files_to_gather_names_only_what_is_not_on_the_drive_already(
+def test_a_move_names_only_what_is_not_on_the_drive_already(
     ctx: AppContext, study: Study, archive: Path
 ) -> None:
     selection = _both_drives(ctx, study, archive)
     plan = ctx.file_access_svc.plan(selection)
 
-    shas = ctx.file_access_svc.files_to_gather(plan, "archive")
+    shas = ctx.file_access_svc.to_move(plan.items, "archive")
 
     on_default = [i.sha256 for i in plan.items if i.volume == "default"]
     assert shas == on_default and len(shas) == 1
     with pytest.raises(NotFoundError):
-        ctx.file_access_svc.files_to_gather(plan, "nowhere")
+        ctx.file_access_svc.to_move(plan.items, "nowhere")
 
 
 def test_gathering_the_selection_makes_it_linkable_without_moving_anything_else(
@@ -728,8 +728,8 @@ def test_gathering_the_selection_makes_it_linkable_without_moving_anything_else(
     # Same collection, another encounter: not in the selection, so it must not move.
     bystander = study.selection(study.rec_c, "other", b"not selected")
     assert ctx.file_access_svc.plan(selection).scattered
-    shas = ctx.file_access_svc.files_to_gather(
-        ctx.file_access_svc.plan(selection), "archive"
+    shas = ctx.file_access_svc.to_move(
+        ctx.file_access_svc.plan(selection).items, "archive"
     )
 
     outcome = run_transfer(

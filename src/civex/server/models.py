@@ -2436,7 +2436,34 @@ class RemoveExportsRequest(BaseModel):
     )
 
 
-class FileGatherRequest(FileSelectionRequest):
+class FilePickRequest(FileSelectionRequest):
+    place: str | None = Field(
+        default=None,
+        description="Only files in this place: a drive's name, `server` (only on "
+        "the server), `missing`, or the groups `here` (on a drive that can be read "
+        "now) and `unreachable` (on one that can't).",
+    )
+    name: str | None = Field(
+        default=None,
+        description="Only files whose name, or whose record's name, contains this.",
+    )
+    shas: list[str] | None = Field(
+        default=None,
+        max_length=100_000,
+        description="Only these files (by content hash), e.g. the ticked rows.",
+    )
+
+
+class FileListRequest(FilePickRequest):
+    order: str = Field(
+        default="path",
+        description="path, name, size, record or place; a leading '-' reverses it.",
+    )
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=1000)
+
+
+class FileGatherRequest(FilePickRequest):
     volume: str = Field(
         description="The drive (volume name) to gather the selection's files "
         "onto. Only the files in the selection move, not the rest of their "

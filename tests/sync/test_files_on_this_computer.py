@@ -107,3 +107,31 @@ def test_without_a_server_there_is_nothing_to_free_up_to(authority):
 
     with pytest.raises(ValidationError, match="nowhere else"):
         authority.sync_svc.free_up("study")
+
+
+def test_picked_files_are_downloaded_and_freed_by_the_same_rules(pair):
+    from civex.domain.file_access import FileSelection
+    from civex.domain.query import RecordQuery
+
+    laptop, phone, record = pair
+    ref = _with_file(laptop, record, b"picked")
+    phone.sync_svc.sync()
+    svc = phone.file_access_svc
+    everything = FileSelection(query=RecordQuery(dataset="study"))
+
+    _, on_server = svc.chosen(everything, place="server")
+    assert [i.sha256 for i in on_server] == [ref.sha256]
+    assert svc.download(on_server).fetched == 1
+    phone.commit()
+    _, here = svc.chosen(everything, place="here")
+    assert [i.sha256 for i in here] == [ref.sha256]
+
+    # A kept collection's files aren't freed one by one: the background
+    # download would only fetch them back.
+    kept = svc.free_up(here, dry_run=False)
+    assert (kept.files, kept.kept_shared) == (0, 1)
+    assert phone.file_svc.exists(ref.sha256)
+
+    phone.sync_svc.set_collection_mode("study", "opened")
+    freed = svc.free_up(here, dry_run=False)
+    assert freed.files == 1 and not phone.file_svc.exists(ref.sha256)
