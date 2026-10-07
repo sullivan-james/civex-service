@@ -8,10 +8,12 @@ import type {
 } from '../../api/fileAccess'
 import { useListParams } from '../../hooks/useListParams'
 import { useFollowsServer } from '../../hooks/useRemote'
+import { useSchemas } from '../../hooks/useSchemas'
 import { PROJECT, useDriveChoice } from '../../hooks/useDriveChoice'
 import { useQueryClient } from '@tanstack/react-query'
 import { useFileListing, useFreeUpFiles } from '../../hooks/useFileListing'
 import { errorMessage } from '../../lib/errors'
+import { displayLabel } from '../../utils/naming'
 import { placeLabel } from '../../utils/places'
 import { formatSize } from '../../utils/storage'
 import { FileLink } from '../records/FileLocation'
@@ -22,6 +24,7 @@ import {
   Button,
   Chip,
   DataTable,
+  ListToolbar,
   Modal,
   ModalBody,
   ModalFooter,
@@ -44,7 +47,8 @@ const NS = 'files.'
  * listed is exactly what an action takes (the server picks both by the same
  * rule). */
 export function FilesView({ selection }: { selection: FileSelection }) {
-  const list = useListParams(NS, ['place'], 50)
+  const list = useListParams(NS, ['place', 'kind'], 50)
+  const { data: schemas = [] } = useSchemas()
   const followsServer = useFollowsServer()
   const [acting, setActing] = useState<'move' | 'free' | null>(null)
   const toast = useToast()
@@ -56,6 +60,7 @@ export function FilesView({ selection }: { selection: FileSelection }) {
 
   const pick: FilePick = {
     ...selection,
+    fields: list.picks.kind ? [list.picks.kind] : selection.fields,
     place: list.picks.place || undefined,
   }
   const order = list.sort
@@ -86,8 +91,33 @@ export function FilesView({ selection }: { selection: FileSelection }) {
   const count = picked.count(total)
   const what = `${count.toLocaleString()} file${count === 1 ? '' : 's'}`
 
+  // A kind of file is a file field ("Selection table"): named as the field is.
+  const kindLabel = (name: string) => {
+    const f = schemas.flatMap((s) => s.fields).find((x) => x.name === name)
+    return displayLabel(name, f?.label)
+  }
+  const kinds = data?.kinds ?? []
+
   return (
     <div className="space-y-4">
+      {kinds.length > 1 && (
+        <ListToolbar
+          picks={[
+            {
+              label: 'Kind of file',
+              value: list.picks.kind,
+              options: [
+                { value: '', label: 'Kind of file' },
+                ...kinds.map((k) => ({
+                  value: k.field,
+                  label: `${kindLabel(k.field)} (${k.files.toLocaleString()})`,
+                })),
+              ],
+              onChange: (kind) => list.set({ kind: kind || undefined }),
+            },
+          ]}
+        />
+      )}
       <Places
         summary={data?.summary ?? []}
         value={list.picks.place}

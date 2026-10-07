@@ -313,9 +313,11 @@ export interface ListedFile {
 export interface FileListing {
   /** Files matching the place and name. */
   total: number
-  /** Every file of the selection, by place (before narrowing). */
+  /** Every file of the kinds chosen, by place (before narrowing by place). */
   summary: PlaceSummary[]
   items: ListedFile[]
+  /** How many files of each kind (file field) the selection holds. */
+  kinds?: { field: string; files: number; bytes: number }[]
 }
 
 /** What a download from the server did. */

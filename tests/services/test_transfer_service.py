@@ -227,6 +227,34 @@ def test_consolidating_is_sized_and_says_what_stays(
     assert ctx.transfer_svc.plan(spec).files == 2
 
 
+def test_a_deleted_records_files_stay_put_but_still_leave_a_drive_being_emptied(
+    ctx: AppContext, tmp_path: Path, make_schema, make_collection, make_record
+) -> None:
+    """Planning where a collection's files go is about its live records; a
+    deleted record's file is left where it is. Emptying a drive takes
+    everything on it, so a file Recently Deleted can still bring back is
+    never left behind on a drive being retired."""
+    _volumes(ctx, tmp_path, "a", "home")
+    make_schema("doc", fields=[("scan", "file")])
+    ctx.store_svc.set_queue(["a"])
+    make_collection("mine")
+    kept = ctx.file_svc.store_bytes(b"kept " * 40, "k.txt")
+    gone = ctx.file_svc.store_bytes(b"gone " * 40, "g.txt")
+    make_record("mine", "doc", {"scan": kept.to_dict()})
+    deleted = make_record("mine", "doc", {"scan": gone.to_dict()})
+    ctx.record_svc.delete(str(deleted.id))
+    ctx.commit()
+    mine = str(ctx.dataset_svc.get("mine").id)
+
+    gather = ctx.transfer_svc.plan(
+        TransferSpec(kind=KIND_CONSOLIDATE, targets=["home"], collection_ids=[mine])
+    )
+    assert gather.files == 1  # only the live record's
+
+    empty = ctx.transfer_svc.plan(_drain(["a"], ["home"]))
+    assert empty.files == 2  # everything on the drive
+
+
 # -- the saved record -------------------------------------------------------------
 
 

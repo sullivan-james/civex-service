@@ -60,3 +60,21 @@ def test_moving_names_only_what_is_elsewhere_and_reachable(ctx, study, spread, a
     _unplug(archive)
     _, items = svc.chosen(_within(study.e7))
     assert svc.to_move(items, "default") == ([], 0)  # s2 can't be read to move
+
+
+def test_files_are_picked_by_kind_and_every_kind_is_still_counted(ctx, study, spread):  # noqa: F811
+    notes = study.file(b"field notes", "notes.txt")
+    ctx.record_svc.update(str(study.e7.id), {"name": "Encounter 7", "notes": notes})
+    ctx.commit()
+    svc = ctx.file_access_svc
+    every = svc.listing(_within(study.e7))
+    assert {k["field"]: k["files"] for k in every.kinds} == {"table": 2, "notes": 1}
+
+    tables = _within(study.e7)
+    tables.fields = ["table"]
+    listing = svc.listing(tables)
+    assert sorted(i.filename for i in listing.items) == ["s1.txt", "s2.txt"]
+    assert sum(p.files for p in listing.summary) == 2  # where the tables are
+    assert len(listing.kinds) == 2  # the other kind can still be picked
+    _, picked = svc.chosen(tables)
+    assert {i.field for i in picked} == {"table"}  # and actions take the same

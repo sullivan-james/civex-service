@@ -1110,17 +1110,21 @@ class FileAccessService:
         name: str | None = None,
         shas: list[str] | None = None,
     ) -> tuple[FilePlan, list[FileItem]]:
-        """The files a person has picked: a selection's files, narrowed to a
-        place (`in_place`), a name (in the file's or its record's), and ticked
-        content (`shas`). The one rule behind the Files tab's list and every
-        action on it, so what is listed is what is acted on."""
-        plan = self.plan(selection)
+        """The files a person has picked: a selection's files, narrowed to its
+        kinds of file (`selection.fields`), a place (`in_place`), a name (in
+        the file's or its record's), and ticked content (`shas`). The one rule
+        behind the file list and every action on it, so what is listed is what
+        is acted on. The plan returned is of every kind (what the list's
+        choices are counted from)."""
+        plan = self.plan(dataclasses.replace(selection, fields=None))
+        kinds = set(selection.fields) if selection.fields else None
         needle = (name or "").strip().casefold()
         wanted = set(shas) if shas is not None else None
         items = [
             i
             for i in plan.items
-            if (place is None or in_place(i, place))
+            if (kinds is None or i.field in kinds)
+            and (place is None or in_place(i, place))
             and (
                 not needle
                 or needle in i.filename.casefold()
@@ -1139,11 +1143,18 @@ class FileAccessService:
         offset: int = 0,
         limit: int = 100,
     ) -> FileListing:
-        """A page of a selection's files, narrowed like `chosen`, with where all
-        of the selection's files are (`summary`, before narrowing, so the
-        places a person can pick stay in view). `sort`: path, name, size,
-        record or place; a leading "-" reverses it."""
+        """A page of a selection's files, narrowed like `chosen`, with where
+        the files of the kinds chosen are (`summary`, before narrowing by
+        place, so the places a person can pick stay in view) and how many of
+        each kind the selection holds (`kinds`, before narrowing by kind).
+        `sort`: path, name, size, record or place; a leading "-" reverses
+        it."""
         plan, items = self.chosen(selection, place, name)
+        of_kind = (
+            [i for i in plan.items if i.field in set(selection.fields)]
+            if selection.fields
+            else plan.items
+        )
         key, reverse = sort.lstrip("-"), sort.startswith("-")
         order: dict[str, Callable[[FileItem], Any]] = {
             "path": lambda i: i.path.casefold(),
@@ -1157,8 +1168,9 @@ class FileAccessService:
         items.sort(key=order[key], reverse=reverse)
         return FileListing(
             total=len(items),
-            summary=_places(plan.items),
+            summary=_places(of_kind),
             items=items[offset : offset + limit],
+            kinds=_kinds(plan.items),
         )
 
     def to_move(
@@ -1527,3 +1539,14 @@ def _places(items: list[FileItem]) -> list[PlaceSummary]:
         row.bytes += item.size
     rank = {"drive": 0, "unreachable": 1, "server": 2, "missing": 3}
     return sorted(out.values(), key=lambda r: (rank[r.kind], -r.bytes, r.place))
+
+
+def _kinds(items: list[FileItem]) -> list[dict[str, Any]]:
+    """How many files of each kind (file field) a selection holds, most
+    first: the choices of the list's "kind of file" pick."""
+    out: dict[str, dict[str, Any]] = {}
+    for item in items:
+        row = out.setdefault(item.field, {"field": item.field, "files": 0, "bytes": 0})
+        row["files"] += 1
+        row["bytes"] += item.size
+    return sorted(out.values(), key=lambda r: (-r["files"], r["field"]))

@@ -215,6 +215,8 @@ class FileListing:
     total: int  # files matching (after the place and name filters)
     summary: list[PlaceSummary]  # every file of the selection, by place
     items: list[FileItem]
+    # How many files of each kind (file field): {field, files, bytes}.
+    kinds: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

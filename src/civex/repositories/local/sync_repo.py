@@ -151,13 +151,15 @@ class LocalSyncRepository:
         )
 
     def referenced_shas(self, after: str, limit: int) -> list[str]:
-        """Hashes of the files live records cite, in hash order, `limit` of them
+        """Hashes of the files live records cite (a deleted record's are sent if
+        it is restored), in hash order, `limit` of them
         after `after`. The catalog is kept up to date as records are written, so
         what a device still owes its authority is worked out from it each time
         rather than remembered."""
         rows = self._s.execute(
             select(FileReference.sha256)
-            .where(FileReference.record_id.is_not(None), FileReference.sha256 > after)
+            .join(Record, Record.id == FileReference.record_id)
+            .where(FileReference.sha256 > after, Record.deleted_at.is_(None))
             .distinct()
             .order_by(FileReference.sha256)
             .limit(limit)

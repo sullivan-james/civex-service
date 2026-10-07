@@ -325,6 +325,7 @@ def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
     return {
         "total": listing.total,
         "summary": [vars(p) for p in listing.summary],
+        "kinds": listing.kinds,
         "items": [
             {
                 **i.to_dict(),

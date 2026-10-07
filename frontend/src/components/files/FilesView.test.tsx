@@ -151,4 +151,34 @@ describe('FilesView', () => {
     expect(sent).toMatchObject({ collection: 'hb', place: 'server' })
     expect(sent).not.toHaveProperty('shas')
   })
+
+  it('narrows to one kind of file, counted for each kind', async () => {
+    const calls = fakeServer({
+      '/api/file-access/files': {
+        ...LISTING,
+        kinds: [
+          { field: 'selection_table', files: 120, bytes: 0 },
+          { field: 'contour_file', files: 64, bytes: 0 },
+        ],
+      },
+      '/api/schemas': [],
+      '/api/remote': { configured: true, serving: false },
+      '/api/store/volumes': [],
+    })
+    show()
+    const kind = await screen.findByRole('combobox', { name: 'Kind of file' })
+    expect(
+      within(kind).getByRole('option', { name: 'Kind of file' }),
+    ).toBeInTheDocument()
+    await userEvent.selectOptions(kind, 'selection_table')
+    await waitFor(() =>
+      expect(
+        calls.filter((c) => c.path === '/api/file-access/files').slice(-1)[0]
+          ?.body,
+      ).toMatchObject({ fields: ['selection_table'] }),
+    )
+    expect(
+      within(kind).getByRole('option', { name: 'Selection Table (120)' }),
+    ).toBeInTheDocument()
+  })
 })

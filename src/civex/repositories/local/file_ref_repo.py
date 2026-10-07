@@ -65,7 +65,9 @@ class LocalFileReferenceRepository:
         query = (
             select(FileReference.sha256)
             .join(Record, Record.id == FileReference.record_id)
-            .where(Record.dataset_id.in_(ids))
+            # Live records: a deleted record's files are left where they are
+            # (moving a drive's contents still takes them).
+            .where(Record.dataset_id.in_(ids), Record.deleted_at.is_(None))
             .distinct()
             .order_by(FileReference.sha256)
             .limit(limit)
@@ -174,7 +176,7 @@ class LocalFileReferenceRepository:
         rows = self._s.execute(
             select(FileReference.sha256, Record.dataset_id)
             .join(Record, Record.id == FileReference.record_id)
-            .where(FileReference.sha256.in_(wanted))
+            .where(FileReference.sha256.in_(wanted), Record.deleted_at.is_(None))
             .distinct()
         )
         for sha, dataset_id in rows:
