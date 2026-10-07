@@ -260,6 +260,26 @@ def serve(
     )
 
 
+@app.command("desktop", rich_help_panel=_START)
+def desktop() -> None:
+    """Open civex in a window of its own, with a project picker.
+
+    Needs the desktop extra: `uv tool install --force "civex[desktop]"`.
+    """
+    try:
+        import webview  # noqa: F401
+    except ImportError:
+        typer.secho(
+            "The desktop window needs the desktop extra: "
+            'uv tool install --force "civex[desktop]"',
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    from civex.desktop.tray import main as open_window
+
+    open_window()
+
+
 @app.command("shortcut", rich_help_panel=_START)
 def shortcut() -> None:
     """Put a Desktop shortcut that starts civex for this project and opens it."""

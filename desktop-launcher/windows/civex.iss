@@ -28,6 +28,7 @@ DefaultDirName={localappdata}\Programs\civex
 DisableDirPage=auto
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
+; The release workflow names it for its version (iscc /F).
 OutputBaseFilename=civex-setup-windows
 SetupIconFile=..\assets\civex.ico
 UninstallDisplayIcon={app}\civex.exe
@@ -40,9 +41,13 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Close a running civex before replacing it (an upgrade).
 CloseApplications=yes
+; Tell Windows when PATH changes (the "add to PATH" option), so new terminals
+; see it.
+ChangesEnvironment=yes
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "addtopath"; Description: "Add the civex command to PATH, for terminals"; GroupDescription: "Command line:"
 
 [Files]
 Source: "{#AppSource}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -52,9 +57,56 @@ Name: "{autoprograms}\civex"; Filename: "{app}\civex.exe"
 Name: "{autodesktop}\civex"; Filename: "{app}\civex.exe"; Tasks: desktopicon
 
 [Run]
+; Set civex up now, inside the wizard, so its first start opens straight into
+; the app. Without a connection this fails quietly and the first start does
+; it instead.
+Filename: "{app}\civex.exe"; Parameters: "--install-only"; StatusMsg: "Setting up civex..."; Flags: runhidden waituntilterminated
 Filename: "{app}\civex.exe"; Description: "{cm:LaunchProgram,civex}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+// The civex command the app sets up lives in the launcher's folder. Putting
+// that folder on the *user* PATH is the same entry Settings > Updates in the
+// app reads and changes (civex/command_line.py), so the two always agree.
+function CivexBin: String;
+begin
+  Result := ExpandConstant('{localappdata}\civex\app\bin');
+end;
+
+procedure AddCivexToPath;
+var
+  Paths: String;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Paths) then
+    Paths := '';
+  if Pos(';' + Uppercase(CivexBin) + ';', ';' + Uppercase(Paths) + ';') > 0 then
+    exit;
+  if (Paths <> '') and (Copy(Paths, Length(Paths), 1) <> ';') then
+    Paths := Paths + ';';
+  RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Paths + CivexBin);
+end;
+
+procedure RemoveCivexFromPath;
+var
+  Paths: String;
+  At: Integer;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Paths) then
+    exit;
+  Paths := ';' + Paths + ';';
+  At := Pos(';' + Uppercase(CivexBin) + ';', Uppercase(Paths));
+  if At = 0 then
+    exit;
+  Delete(Paths, At, Length(CivexBin) + 1);
+  RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path',
+    Copy(Paths, 2, Length(Paths) - 2));
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('addtopath') then
+    AddCivexToPath;
+end;
+
 // After uninstalling, offer to remove what the launcher downloaded (civex
 // and its Python). Projects live wherever their folders are and are never
 // touched. A silent uninstall keeps it, so a scripted one never deletes more
@@ -63,6 +115,9 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Downloaded: String;
 begin
+  // The command goes with the app, whoever put it on PATH.
+  if CurUninstallStep = usUninstall then
+    RemoveCivexFromPath;
   if (CurUninstallStep = usPostUninstall) and not UninstallSilent then
   begin
     Downloaded := ExpandConstant('{localappdata}\civex\app');

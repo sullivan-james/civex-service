@@ -65,9 +65,16 @@ from the next tag forward.
   longer contains civex, so it never needs downloading again for a new
   version. Custom plugins work in it without anything else installed.
 - **The desktop app installs properly**: a Windows installer
-  (`civex-setup-windows.exe`: Start menu, uninstaller, no administrator
+  (`civex-<version>-windows-setup.exe`: Start menu, uninstaller, no administrator
   needed) and a macOS disk image with one app for Intel and Apple silicon
   Macs. Neither is signed yet; the install guide says how to open them.
+- **The desktop app's civex can be a terminal command**: the Windows
+  installer's *Add the civex command to PATH* (on by default; uninstalling
+  removes it), or Settings → Updates → *Command line* on any system.
+- The desktop app no longer opens a terminal window, keeps its logs in its own
+  folder (AppData on Windows), and installs the civex it was released with.
+  There is no `civex-desktop` command any more; `civex desktop` opens the
+  window from a terminal.
 - On Intel Macs civex uses `cryptography` 48, the last version with Intel macOS
   builds: newer ones could only be installed there by compiling Rust.
 - Install with `uv tool install civex`, which needs no Python on the computer.

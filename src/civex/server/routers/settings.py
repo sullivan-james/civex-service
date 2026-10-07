@@ -180,3 +180,69 @@ def update_retention_settings(body: UpdateRetentionSettingsRequest):
         r.run_days = body.run_days
     save_config(config)
     return _retention_response(config)
+
+
+class CommandLineResponse(BaseModel):
+    available: bool = Field(
+        description="Whether this is the desktop app's civex, the only one this "
+        "applies to (a uv, pipx or pip install is already a command)."
+    )
+    on_path: bool = Field(
+        description="Whether a new terminal finds this civex as `civex`."
+    )
+    where: str | None = Field(
+        description="The folder put on PATH (Windows) or the link made (macOS, Linux)."
+    )
+    shadowed_by: str | None = Field(
+        description="Another civex a terminal would find first, if there is one."
+    )
+    note: str = Field(
+        description="What is still to do, or why it can't be done; blank if nothing."
+    )
+
+
+def _command_line(found) -> CommandLineResponse:
+    return CommandLineResponse(
+        available=found.available,
+        on_path=found.on_path,
+        where=found.where,
+        shadowed_by=found.shadowed_by,
+        note=found.note,
+    )
+
+
+@router.get("/command-line", response_model=CommandLineResponse)
+def get_command_line():
+    """Whether the desktop app's `civex` can be typed in a terminal."""
+    from civex import command_line
+
+    return _command_line(command_line.state())
+
+
+@router.post("/command-line", response_model=CommandLineResponse)
+def add_command_line():
+    """Put the desktop app's `civex` on PATH: the user PATH on Windows (no
+    administrator), a link in ~/.local/bin on macOS and Linux. 409 when this
+    isn't the desktop app's civex, or the link's place is taken."""
+    from civex import command_line
+
+    try:
+        return _command_line(command_line.add())
+    except command_line.CommandLineError as e:
+        raise HTTPException(409, detail=str(e))
+    except OSError as e:
+        raise HTTPException(500, detail=f"Could not change PATH: {e}")
+
+
+@router.delete("/command-line", response_model=CommandLineResponse)
+def remove_command_line():
+    """Take the desktop app's `civex` off PATH again (only ever its own entry
+    or link)."""
+    from civex import command_line
+
+    try:
+        return _command_line(command_line.remove())
+    except command_line.CommandLineError as e:
+        raise HTTPException(409, detail=str(e))
+    except OSError as e:
+        raise HTTPException(500, detail=f"Could not change PATH: {e}")

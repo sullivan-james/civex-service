@@ -81,7 +81,10 @@ Documentation = "https://civexdata.github.io/civex-docs/"
 
 [project.scripts]
 civex = "civex.main:app"
-civex-desktop = "civex.desktop.tray:main"
+# No `civex-desktop` command: every install would get it, and it only works
+# with the desktop extra. `civex desktop` opens the window from a terminal;
+# the desktop app's launcher runs `civex.desktop.tray` itself (with pythonw on
+# Windows, so no console window).
 
 [project.optional-dependencies]
 # pywebview stays optional: it pulls platform-specific GUI packages (pyobjc on

@@ -68,7 +68,7 @@ in its own window with a project picker. Download it from the release page:
 
 === "Windows"
 
-    `civex-setup-windows.exe`. Run it: it installs for you only, so it doesn't
+    `civex-<version>-windows-setup.exe`. Run it: it installs for you only, so it doesn't
     ask for an administrator, and adds civex to the Start menu (and, if you
     tick it, the Desktop). Uninstall it from **Settings → Apps**.
 
@@ -77,7 +77,7 @@ in its own window with a project picker. Download it from the release page:
 
 === "macOS"
 
-    `civex-macos.dmg`, one download for Intel and Apple silicon Macs (macOS 11
+    `civex-<version>-macos.dmg`, one download for Intel and Apple silicon Macs (macOS 11
     or later). Open it and drag **civex** into **Applications**.
 
     The app isn't signed yet, so the first time you open it macOS says it
@@ -90,7 +90,16 @@ and takes a minute or two: it downloads civex and the Python it runs on into a
 folder of its own (`%LOCALAPPDATA%\civex\app` on Windows,
 `~/Library/Application Support/civex/app` on macOS, `~/.local/share/civex/app`
 on Linux), separate from any civex you installed yourself. After that it starts
-straight away, and keeps itself up to date from **Settings → Updates**.
+straight away, and keeps itself up to date from **Settings → Updates**. On
+Windows the installer does this setup, so the first start opens straight into
+the app. Its logs are in the `logs` folder inside that folder.
+
+To use the app's civex in a terminal too, tick **Add the civex command to
+PATH** in the Windows installer (on by default), or use **Settings → Updates →
+Command line** in the app on any system: it adds the app's `civex` to your PATH
+on Windows, or links it into `~/.local/bin` on macOS and Linux. Open a new
+terminal afterwards. If you also installed civex with uv, the section says
+which copy a terminal would find first.
 
 !!! warning "Linux"
     The desktop window doesn't open on Linux yet: it needs a GTK or Qt window
@@ -102,7 +111,7 @@ The desktop window can also be installed alongside the command line:
 
 ```bash
 uv tool install "civex[desktop]"
-civex-desktop
+civex desktop
 ```
 
 Verify the install:

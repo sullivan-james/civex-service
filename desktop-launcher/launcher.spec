@@ -35,11 +35,24 @@ numbers = [int(n) for n in re.findall(r"\d+", version.split("rc")[0])][:3]
 numbers += [0] * (3 - len(numbers))
 plain = ".".join(str(n) for n in numbers)
 
+# The civex version this app is released with, inside the app: the launcher
+# installs at least that one (`civex[desktop]>=<it>`), not whatever is newest
+# and stable on PyPI, which for a pre-release's app was an older civex.
+# Left out for a build without one (a dry run): it then takes the newest.
+released = []
+if os.environ.get("CIVEX_APP_VERSION"):
+    os.makedirs(workpath, exist_ok=True)  # noqa: F821 (PyInstaller sets workpath)
+    stamp = os.path.join(workpath, "civex_version.txt")  # noqa: F821
+    with open(stamp, "w", encoding="utf-8") as f:
+        f.write(os.environ["CIVEX_APP_VERSION"])
+    released = [(stamp, ".")]
+
 a = Analysis(
     [os.path.join(HERE, "civex_launcher.py")],
     pathex=[],
     binaries=[(uv, "uv")],
-    datas=[],
+    # The logo the launcher's window shows (and uses as its icon).
+    datas=released + [(os.path.join(ASSETS, "civex.png"), ".")],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

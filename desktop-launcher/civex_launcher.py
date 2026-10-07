@@ -21,7 +21,9 @@ import civex. Built by desktop-launcher/launcher.spec.
 Environment, for CI and testing only:
     CIVEX_APP_HOME         where to keep civex instead of the per-user folder
     CIVEX_LAUNCHER_SOURCE  what to install instead of civex[desktop] from PyPI
-                           (e.g. "civex[desktop] @ file:///.../civex.whl")
+                           (e.g. "civex[desktop] @ file:///.../civex.whl"),
+                           every time it starts: how a test build's own wheel
+                           is tried in its app
 """
 
 from __future__ import annotations
@@ -60,6 +62,12 @@ def app_home() -> Path:
     return base / "civex" / "app"
 
 
+def log_dir() -> Path:
+    """Where the launcher and the desktop app keep their logs: inside the
+    launcher's own folder (in AppData on Windows)."""
+    return app_home() / "logs"
+
+
 def bundled_uv() -> Path:
     """The uv inside this app (or, run from source, the one on PATH).
 
@@ -75,8 +83,20 @@ def bundled_uv() -> Path:
     raise RuntimeError(f"This copy of the civex app is missing its uv ({inside}).")
 
 
+def tool_python(home: Path, windowed: bool = False) -> Path:
+    """The Python civex is installed in. `windowed`: on Windows the one that
+    never opens a console window (pythonw), for the desktop window."""
+    tool = home / "tools" / "civex"
+    if sys.platform == "win32":
+        return tool / "Scripts" / ("pythonw.exe" if windowed else "python.exe")
+    return tool / "bin" / "python"
+
+
 def desktop_app(home: Path) -> Path:
-    return home / "bin" / f"civex-desktop{EXE}"
+    """What starts the desktop window: civex's own Python, running
+    `civex.desktop.tray` (there is no `civex-desktop` command, so that a
+    plain `uv tool install civex` doesn't get one that can't work)."""
+    return tool_python(home, windowed=True)
 
 
 def environment(home: Path, uv: Path) -> dict[str, str]:
@@ -102,6 +122,8 @@ def environment(home: Path, uv: Path) -> dict[str, str]:
             "UV_PYTHON_PREFERENCE": "only-managed",
             # civex runs custom plugins with uv (plugins/subprocess_runtime.py).
             "CIVEX_UV_BIN": str(uv),
+            # The desktop app's log goes beside this one (desktop/tray.py).
+            "CIVEX_LOG_DIR": str(home / "logs"),
         }
     )
     return env
@@ -110,8 +132,29 @@ def environment(home: Path, uv: Path) -> dict[str, str]:
 # -- Installing and updating -------------------------------------------------
 
 
+def released_with() -> str | None:
+    """The civex version this app was released with (launcher.spec puts it
+    in the app), or None for a build without one."""
+    here = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    try:
+        version = (here / "civex_version.txt").read_text("utf-8").strip()
+    except OSError:
+        return None
+    return version or None
+
+
+def requirement() -> str:
+    """What to install: at least the civex this app was released with. Not
+    `==`: uv keeps a tool to the requirement it was installed with, so that
+    would stop every update. A bound that names a pre-release lets uv take
+    pre-releases of civex, so a release candidate's app gets that candidate
+    (plain `civex[desktop]` took the newest *stable* civex: an older one)."""
+    version = released_with()
+    return f"{REQUIREMENT}>={version}" if version else REQUIREMENT
+
+
 def install_command(uv: Path) -> list[str]:
-    source = os.environ.get("CIVEX_LAUNCHER_SOURCE", REQUIREMENT)
+    source = os.environ.get("CIVEX_LAUNCHER_SOURCE") or requirement()
     return [str(uv), "tool", "install", "--force", source]
 
 
@@ -161,13 +204,6 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _tail(log: Path, lines: int = 15) -> str:
-    try:
-        return "\n".join(log.read_text("utf-8", errors="replace").splitlines()[-lines:])
-    except OSError:
-        return ""
-
-
 def write_result(path: str, **outcome: object) -> None:
     """The same record `civex.updates.last_result` reads."""
     target = Path(path)
@@ -191,32 +227,92 @@ def take_request(path: Path) -> dict | None:
 # -- The progress window -----------------------------------------------------
 
 
-def with_progress(title: str, message: str, work: Callable[[], None]) -> None:
-    """Run `work` with a small window saying what is happening; without a
-    display (CI, a terminal), just run it."""
-    if HEADLESS:
-        print(message, flush=True)
-        work()
-        return
+def _asset(name: str) -> Path:
+    """A file bundled with the app (launcher.spec), or beside this script."""
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / name
+    return Path(__file__).resolve().parent / "assets" / name
+
+
+def _new_window():  # -> tkinter.Tk, or None without a display
+    """A Tk root dressed as a native window: sharp text on high-resolution
+    Windows screens, the platform's own theme, civex's icon."""
+    if sys.platform == "win32":
+        try:  # before the first window, or Windows scales a blurry bitmap
+            import ctypes
+
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            pass
     try:
         import tkinter as tk
         from tkinter import ttk
 
         root = tk.Tk()
-    except Exception:  # no tkinter or no display
+    except Exception:  # no tkinter, or no display
+        return None
+    style = ttk.Style(root)
+    native = {"win32": "vista", "darwin": "aqua"}.get(sys.platform, "clam")
+    if native in style.theme_names():
+        style.theme_use(native)
+    try:
+        icon = tk.PhotoImage(file=str(_asset("civex.png")))
+        root.iconphoto(True, icon)
+        root._civex_icon = icon  # keep a reference, or Tk drops the image
+    except Exception:
+        pass
+    return root
+
+
+def _centre(root) -> None:
+    root.update_idletasks()
+    width, height = root.winfo_reqwidth(), root.winfo_reqheight()
+    x = (root.winfo_screenwidth() - width) // 2
+    y = (root.winfo_screenheight() - height) // 3
+    root.geometry(f"+{x}+{y}")
+
+
+def with_progress(title: str, message: str, work: Callable[[], None]) -> None:
+    """Run `work` with a window saying what is happening (the logo, `title`
+    as a heading, `message`, a moving bar); without a display (CI, a
+    terminal), just run it."""
+    root = None if HEADLESS else _new_window()
+    if root is None:
         print(message, flush=True)
         work()
         return
 
-    root.title(title)
+    import tkinter as tk
+    from tkinter import font, ttk
+
+    root.title("civex")
     root.resizable(False, False)
-    frame = ttk.Frame(root, padding=20)
+    frame = ttk.Frame(root, padding=(28, 24, 28, 24))
     frame.pack(fill="both", expand=True)
-    ttk.Label(frame, text=message, wraplength=360).pack(anchor="w")
+    try:
+        logo = tk.PhotoImage(file=str(_asset("civex.png"))).subsample(16)  # 64 px
+        ttk.Label(frame, image=logo).grid(row=0, column=0, rowspan=3, sticky="n")
+        frame._civex_logo = logo  # keep a reference
+        text_column = 1
+    except Exception:
+        text_column = 0
+    heading = font.nametofont("TkDefaultFont").copy()
+    heading.configure(size=heading.cget("size") + 4, weight="bold")
+    padx = (18, 0) if text_column else 0
+    ttk.Label(frame, text=title, font=heading).grid(
+        row=0, column=text_column, sticky="w", padx=padx
+    )
+    ttk.Label(frame, text=message, wraplength=360, justify="left").grid(
+        row=1, column=text_column, sticky="w", padx=padx, pady=(6, 14)
+    )
     bar = ttk.Progressbar(frame, mode="indeterminate", length=360)
-    bar.pack(pady=(12, 0))
+    bar.grid(row=2, column=text_column, sticky="we", padx=padx)
     bar.start(12)
     root.protocol("WM_DELETE_WINDOW", lambda: None)  # finish what was started
+    _centre(root)
+    root.lift()
+    root.attributes("-topmost", True)  # in front of the installer or Finder
+    root.after(500, lambda: root.attributes("-topmost", False))
     failure: list[BaseException] = []
 
     def _run() -> None:
@@ -237,16 +333,15 @@ def show_error(title: str, message: str) -> None:
     if HEADLESS:
         print(f"{title}: {message}", file=sys.stderr)
         return
-    try:
-        import tkinter as tk
-        from tkinter import messagebox
-
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror(title, message)
-        root.destroy()
-    except Exception:
+    root = _new_window()
+    if root is None:
         print(f"{title}: {message}", file=sys.stderr)
+        return
+    from tkinter import messagebox
+
+    root.withdraw()
+    messagebox.showerror(title, message, parent=root)
+    root.destroy()
 
 
 # -- Starting civex ----------------------------------------------------------
@@ -256,23 +351,50 @@ class SetupFailed(Exception):
     pass
 
 
+def older_than_release(home: Path, env: dict[str, str], installed: str) -> bool:
+    """Whether the civex installed here is older than the one this app was
+    released with (a newer app installed over an older one). Asked of the
+    installed civex's own Python, which has `packaging`; this launcher keeps
+    to the standard library."""
+    wanted = released_with()
+    if not wanted or installed == wanted:
+        return False
+    result = subprocess.run(
+        [
+            str(tool_python(home)),
+            "-c",
+            "import sys; from packaging.version import Version as V; "
+            "sys.exit(0 if V(sys.argv[1]) < V(sys.argv[2]) else 1)",
+            installed,
+            wanted,
+        ],
+        env=env,
+        capture_output=True,
+        **_no_window(),
+    )
+    return result.returncode == 0
+
+
 def ensure_installed(home: Path, uv: Path, env: dict[str, str], log: Path) -> None:
-    if desktop_app(home).exists() and civex_version(home, env):
+    installed = civex_version(home, env) if desktop_app(home).exists() else None
+    # An explicit source (a wheel from a test build) is installed every time:
+    # it is what was asked for, whatever is there already.
+    explicit = bool(os.environ.get("CIVEX_LAUNCHER_SOURCE"))
+    if installed and not explicit and not older_than_release(home, env, installed):
         return
 
     def _install() -> None:
         if run_logged(install_command(uv), env, log) != 0:
             raise SetupFailed(
-                "civex couldn't be installed. It needs an internet connection "
-                "the first time it starts.\n\n" + _tail(log)
+                "civex couldn't be set up. Check the internet connection and "
+                f"try again.\n\nDetails: {log}"
             )
 
-    with_progress(
-        "Setting up civex",
-        "Setting up civex for the first time. This downloads civex and the "
-        "Python it runs on, once, and can take a minute or two.",
-        _install,
-    )
+    if installed:
+        title, message = "Updating civex", "This takes a minute."
+    else:
+        title, message = "Setting up civex", "This takes a minute or two."
+    with_progress(title, message, _install)
 
 
 def update(home: Path, uv: Path, env: dict[str, str], log: Path, request: dict) -> None:
@@ -281,7 +403,7 @@ def update(home: Path, uv: Path, env: dict[str, str], log: Path, request: dict) 
     code: list[int] = []
     with_progress(
         "Updating civex",
-        "Updating civex. It will open again when it's done.",
+        "civex opens again when it's done.",
         lambda: code.append(
             run_logged(upgrade_command(uv, bool(request.get("pre"))), env, log)
         ),
@@ -302,7 +424,11 @@ def update(home: Path, uv: Path, env: dict[str, str], log: Path, request: dict) 
 
 def run_app(home: Path, args: list[str], env: dict[str, str]) -> None:
     """Start the civex desktop app and wait until it closes."""
-    subprocess.run([str(desktop_app(home)), *args], env=env)
+    subprocess.run(
+        [str(desktop_app(home)), "-m", "civex.desktop.tray", *args],
+        env=env,
+        **_no_window(),
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -310,7 +436,8 @@ def main(argv: list[str]) -> int:
     HEADLESS = "--install-only" in argv
     home = app_home()
     home.mkdir(parents=True, exist_ok=True)
-    log = home / "launcher.log"
+    log_dir().mkdir(parents=True, exist_ok=True)
+    log = log_dir() / "launcher.log"
     try:
         uv = bundled_uv()
         env = environment(home, uv)
