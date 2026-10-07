@@ -809,6 +809,15 @@ class CollectionUseResponse(BaseModel):
     records: int = Field(description="Records in that collection that use the file.")
 
 
+class RecordUseResponse(BaseModel):
+    id: str
+    name: str = Field(description="The record's name, as the app shows it.")
+    collection: str | None = Field(description="The collection it is in.")
+    trail: list[str] = Field(
+        description="The names of the records above it, outermost first."
+    )
+
+
 class FileInfoResponse(BaseModel):
     sha256: str
     size: int | None = Field(description="Size in bytes, if known.")
@@ -820,6 +829,11 @@ class FileInfoResponse(BaseModel):
     )
     jobs: int = Field(description="Workflow runs that took it as an input.")
     collections: list[CollectionUseResponse]
+    uses: list[RecordUseResponse] = Field(
+        default_factory=list,
+        description="The live records that use it, named, with the records "
+        "above each (at most 200; `records` is the full count).",
+    )
 
 
 class StorageLocationResponse(BaseModel):
@@ -2452,12 +2466,17 @@ class FilePickRequest(FileSelectionRequest):
         default=None,
         description="Only files whose name, or whose record's name, contains this.",
     )
-    paths: list[str] | None = Field(
+    shas: list[str] | None = Field(
         default=None,
         max_length=100_000,
-        description="Only these rows (each a file of one record, by its `path` "
-        "in the list), e.g. the ticked ones. A file other records also use is "
-        "picked for these records only.",
+        description="Only these files (by content hash), e.g. the ticked rows: "
+        "each with every use of it in the selection. Records outside the "
+        "selection that use the same file are not picked.",
+    )
+    used_by: list[int] | None = Field(
+        default=None,
+        description="Only files used by exactly one of these numbers of live "
+        "records (anywhere, not only in the selection).",
     )
 
 

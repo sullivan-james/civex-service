@@ -421,7 +421,11 @@ export function RecordsExplorer({
                 type="search"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                placeholder={`Search ${listedLabel.toLowerCase() || 'records'}…`}
+                placeholder={
+                  showFiles
+                    ? 'Search files…'
+                    : `Search ${listedLabel.toLowerCase() || 'records'}…`
+                }
                 className="w-full"
               />
             </Field>
@@ -602,13 +606,16 @@ export function RecordsExplorer({
 
         {showFiles ? (
           <FilesView
+            // The search box looks for files here (their names, and the
+            // records they sit under), not for the records listed above them.
             selection={selectionFor(
-              x.query,
+              { ...x.query, search: undefined },
               dataset,
               undefined,
               undefined,
               true,
             )}
+            search={state.q || undefined}
           />
         ) : (
           <>

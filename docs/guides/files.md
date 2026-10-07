@@ -317,9 +317,20 @@ Removing a linked folder gives back no space and never touches the stored files.
 The record list, on a collection's **Records** tab and a record's
 **Contains** tab, has a switch above it: **Records | Their files**. *Their
 files* lists the files of exactly the records you are looking at, and of
-everything beneath them, under the same filters, search and saved view. For
-example, filter to Recordings that have a Selection with `selection_number`
-below 5, then switch to their files.
+everything beneath them, under the same filters and saved view. For example,
+filter to Recordings that have a Selection with `selection_number` below 5,
+then switch to their files.
+
+Each row is one file as it is stored. A file is stored once however many
+records use it, so a file three records use is one row, and every count and
+size is of real files on disk. The **Record** column shows where the file sits
+("Encounter 7 › Recording 2 › Selection 11"). **Used by N records** opens every
+record that uses it, with the records above each, including those outside
+this list. The search box at the top searches the files (their names and the
+names of the records they sit under), **Kinds of file** narrows to some file
+fields, and **Used by** to files that so many records use. Each record names a
+file by its own name template: when they differ, the row says what else it is
+called.
 
 Above the files is a bar of where all of them are: each drive, a drive that
 isn't plugged in, **not on this computer** (for a project that syncs:
@@ -334,8 +345,8 @@ page), then:
   Files not on this computer are downloaded straight onto it, and files on a
   drive that isn't plugged in stay where they are. A file is stored once
   however many records use it, so moving it moves it for all of them: a file
-  that records you didn't tick also use (its row says "also used by 3 other
-  records") stays where it is, unless you choose **Also move** in the dialog,
+  that records not in the list also use ("Used by 4 records (3 not listed)")
+  stays where it is, unless you choose **Also move** in the dialog,
   which says how many there are before anything moves
   (`civex files gather --include-shared`).
 - **Download to this computer** fetches the ones not on this computer from

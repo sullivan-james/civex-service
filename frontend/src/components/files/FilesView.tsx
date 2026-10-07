@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import type {
   FilePick,
+  FileUse,
   FileSelection,
   ListedFile,
   PlaceSummary,
@@ -13,6 +14,7 @@ import { PROJECT, useDriveChoice } from '../../hooks/useDriveChoice'
 import { useVolumes } from '../../hooks/useStore'
 import { useQueryClient } from '@tanstack/react-query'
 import { useFileListing, useFreeUpFiles } from '../../hooks/useFileListing'
+import { useFileInfo } from '../../hooks/useFiles'
 import { useQuery } from '@tanstack/react-query'
 import { fileAccessApi } from '../../api/fileAccess'
 import { errorMessage } from '../../lib/errors'
@@ -34,6 +36,7 @@ import {
   ModalFooter,
   ModalHeader,
   Pagination,
+  TriggerPopover,
   useToast,
 } from '../ui'
 import { DrivePicker } from './DrivePicker'
@@ -50,8 +53,15 @@ const NS = 'files.'
  * drive, download them from the server, or free this computer's space. What is
  * listed is exactly what an action takes (the server picks both by the same
  * rule). */
-export function FilesView({ selection }: { selection: FileSelection }) {
-  const list = useListParams(NS, ['place', 'kind'], 50)
+export function FilesView({
+  selection,
+  search,
+}: {
+  selection: FileSelection
+  /** The explorer's search box: a file's name, or any record's it sits under. */
+  search?: string
+}) {
+  const list = useListParams(NS, ['place', 'kind', 'used'], 50)
   const { data: schemas = [] } = useSchemas()
   const followsServer = useFollowsServer()
   const [acting, setActing] = useState<'move' | 'free' | null>(null)
@@ -64,10 +74,16 @@ export function FilesView({ selection }: { selection: FileSelection }) {
 
   // Kinds of file (file fields), several at once, kept in the address.
   const chosenKinds = list.picks.kind ? list.picks.kind.split(',') : []
+  // How many records use a file, several at once ("used by 2 or 3").
+  const chosenUses = list.picks.used
+    ? list.picks.used.split(',').map(Number)
+    : []
   const pick: FilePick = {
     ...selection,
     fields: chosenKinds.length ? chosenKinds : selection.fields,
     place: list.picks.place || undefined,
+    name: search || undefined,
+    used_by: chosenUses.length ? chosenUses : undefined,
   }
   const order = list.sort
     ? `${list.sort.dir === 'desc' ? '-' : ''}${list.sort.field}`
@@ -84,14 +100,14 @@ export function FilesView({ selection }: { selection: FileSelection }) {
   // The same ticks as the records list: rows, ranges, the page box, and "all N
   // matching" (every file the filters match, on every page).
   const picked = useBulkSelection(
-    rows.map((r) => r.path),
+    rows.map((r) => r.sha256),
     JSON.stringify([pick, order, list.page, list.size]),
   )
-  // "All matching" takes the filters as they are; ticks take those rows (a
-  // file of one record each: a file others share is theirs to keep).
+  // "All matching" takes the filters as they are; ticks take those files (a
+  // row is a file as stored, with every record here that uses it).
   const target: FilePick = picked.allMatching
     ? pick
-    : { ...pick, paths: [...picked.selected] }
+    : { ...pick, shas: [...picked.selected] }
   const count = picked.count(total)
   const what = `${count.toLocaleString()} file${count === 1 ? '' : 's'}`
 
@@ -101,6 +117,7 @@ export function FilesView({ selection }: { selection: FileSelection }) {
     return displayLabel(name, f?.label)
   }
   const kinds = data?.kinds ?? []
+  const sharing = data?.sharing ?? []
 
   return (
     <div className="space-y-4">
@@ -119,6 +136,20 @@ export function FilesView({ selection }: { selection: FileSelection }) {
                 value: k.field,
                 label: kindLabel(k.field),
                 hint: k.files.toLocaleString(),
+              }))}
+            />
+          )}
+          {(sharing.length > 1 || chosenUses.length > 0) && (
+            <MultiPick
+              label="Used by"
+              value={chosenUses.map(String)}
+              onChange={(next) =>
+                list.set({ used: next.length ? next.join(',') : undefined })
+              }
+              options={sharing.map((u) => ({
+                value: String(u.records),
+                label: `${u.records} record${u.records === 1 ? '' : 's'}`,
+                hint: u.files.toLocaleString(),
               }))}
             />
           )}
@@ -166,14 +197,16 @@ export function FilesView({ selection }: { selection: FileSelection }) {
         <DataTable
           layout="auto"
           rows={rows}
-          getRowId={(r) => r.path}
+          getRowId={(r) => r.sha256}
           isLoading={isLoading}
           error={error ? errorMessage(error) : undefined}
           emptyTitle="No files"
           emptyMessage={
-            list.picks.place
-              ? 'None here: pick another place to see more.'
-              : 'None of these records holds a file.'
+            search
+              ? 'No file or record matches the search.'
+              : list.picks.place
+                ? 'None here: pick another place to see more.'
+                : 'None of these records holds a file.'
           }
           sort={
             list.sort
@@ -184,7 +217,8 @@ export function FilesView({ selection }: { selection: FileSelection }) {
           selection={{
             ...picked.table,
             allLabel: 'Tick every file on this page',
-            rowLabel: (id) => `Tick ${id}`,
+            rowLabel: (id) =>
+              `Tick ${rows.find((r) => r.sha256 === id)?.path ?? id}`,
           }}
           columns={[
             {
@@ -199,14 +233,7 @@ export function FilesView({ selection }: { selection: FileSelection }) {
               key: 'record',
               header: 'Record',
               sortable: true,
-              render: (f) => (
-                <Link
-                  to={`/records/${f.record_id}`}
-                  className="text-accent hover:underline"
-                >
-                  {f.record_name}
-                </Link>
-              ),
+              render: (f) => <UsedBy file={f} />,
             },
             {
               key: 'size',
@@ -278,6 +305,12 @@ export function FilesView({ selection }: { selection: FileSelection }) {
 }
 
 function FileCell({ file, kind }: { file: ListedFile; kind: string }) {
+  // Each record names the file by its own template: the first record's name
+  // leads, and any other is shown beside it.
+  const names = [
+    ...new Set([file.filename, ...(file.uses ?? []).map((u) => u.filename)]),
+  ]
+  const otherNames = names.slice(1)
   const location = {
     volume: file.volume,
     state: file.state as never,
@@ -305,10 +338,100 @@ function FileCell({ file, kind }: { file: ListedFile; kind: string }) {
       </FileLink>
       <div className="text-xs text-fg-subtle">
         {kind}
-        {file.others
-          ? ` · also used by ${file.others} other record${file.others === 1 ? '' : 's'}`
-          : ''}
+        {otherNames.length > 0 && (
+          <span title={names.join('\n')}>
+            {' · also called '}
+            {otherNames[0]}
+            {otherNames.length > 1 ? ` and ${otherNames.length - 1} more` : ''}
+          </span>
+        )}
       </div>
+    </div>
+  )
+}
+
+/** The records that use a file: the first with the records above it, and
+ * when there are more, a button opening every one of them (with those not
+ * in this list too: moving the file moves it for them). */
+function UsedBy({ file }: { file: ListedFile }) {
+  const uses: FileUse[] = file.uses?.length
+    ? file.uses
+    : [
+        {
+          record_id: file.record_id,
+          record_name: file.record_name,
+          field: file.field,
+          filename: file.filename,
+          trail: [],
+        },
+      ]
+  const [first] = uses
+  const total = uses.length + (file.others ?? 0)
+  return (
+    <div className="min-w-0">
+      <Link
+        to={`/records/${first.record_id}`}
+        className="text-accent hover:underline"
+      >
+        {first.trail.length > 0 && (
+          <span className="text-fg-muted">{first.trail.join(' › ')} › </span>
+        )}
+        {first.record_name}
+      </Link>
+      {total > 1 && (
+        <TriggerPopover
+          label={`Records that use ${file.filename}`}
+          trigger={({ toggle }) => (
+            <Button variant="link" size="sm" onClick={toggle}>
+              Used by {total} records
+              {file.others ? ` (${file.others} not listed)` : ''}
+            </Button>
+          )}
+        >
+          <RecordsUsing sha256={file.sha256} here={uses} />
+        </TriggerPopover>
+      )}
+    </div>
+  )
+}
+
+/** Every live record that uses a file, each with the records above it and
+ * its collection, those in this list first. */
+function RecordsUsing({ sha256, here }: { sha256: string; here: FileUse[] }) {
+  const { data, isLoading } = useFileInfo(sha256)
+  const listed = new Set(here.map((u) => u.record_id))
+  const all = data?.uses ?? []
+  const rows = [
+    ...all.filter((u) => listed.has(u.id)),
+    ...all.filter((u) => !listed.has(u.id)),
+  ]
+  return (
+    <div className="max-h-80 w-[28rem] max-w-[90vw] overflow-auto p-2 text-sm">
+      {isLoading && <p className="p-2 text-fg-muted">Looking…</p>}
+      <ul className="space-y-1">
+        {rows.map((u) => (
+          <li key={u.id} className="rounded px-2 py-1 hover:bg-canvas-inset">
+            <Link
+              to={`/records/${u.id}`}
+              className="text-accent hover:underline"
+            >
+              {u.trail.length > 0 && (
+                <span className="text-fg-muted">{u.trail.join(' › ')} › </span>
+              )}
+              {u.name}
+            </Link>
+            <div className="text-xs text-fg-subtle">
+              {u.collection ?? ''}
+              {listed.has(u.id) ? '' : ' · not in this list'}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {data && data.records > all.length && (
+        <p className="p-2 text-xs text-fg-muted">
+          and {(data.records - all.length).toLocaleString()} more
+        </p>
+      )}
     </div>
   )
 }

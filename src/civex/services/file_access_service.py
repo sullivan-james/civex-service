@@ -13,6 +13,8 @@ rest, and then says exactly which were left out.
 
 from __future__ import annotations
 
+from collections import Counter
+
 import dataclasses
 import json
 import os
@@ -1156,19 +1158,22 @@ class FileAccessService:
         selection: FileSelection,
         place: str | None = None,
         name: str | None = None,
-        paths: list[str] | None = None,
+        shas: list[str] | None = None,
+        used_by: list[int] | None = None,
     ) -> tuple[FilePlan, list[FileItem]]:
         """The files a person has picked: a selection's files, narrowed to its
         kinds of file (`selection.fields`), a place (`in_place`), a name (in
-        the file's or its record's), and ticked rows (`paths`: a file of one
-        record each, so a file others share is picked for these alone). The one rule
+        the file's name or the names of the records it sits under), and
+        ticked files (`shas`: a file with every use of it listed here; records
+        outside the selection that use it are not picked), and how many live
+        records use a file (`used_by`, see `use_counts`). The one rule
         behind the file list and every action on it, so what is listed is what
         is acted on. The plan returned is of every kind (what the list's
         choices are counted from)."""
         plan = self.plan(dataclasses.replace(selection, fields=None))
         kinds = set(selection.fields) if selection.fields else None
         needle = (name or "").strip().casefold()
-        wanted = set(paths) if paths is not None else None
+        wanted = set(shas) if shas is not None else None
         items = [
             i
             for i in plan.items
@@ -1177,11 +1182,27 @@ class FileAccessService:
             and (
                 not needle
                 or needle in i.filename.casefold()
+                or needle in i.path.casefold()
                 or needle in i.record_name.casefold()
             )
-            and (wanted is None or i.path in wanted)
+            and (wanted is None or i.sha256 in wanted)
         ]
+        if used_by:
+            counts = self.use_counts(items)
+            items = [i for i in items if counts[i.sha256] in set(used_by)]
         return plan, items
+
+    def use_counts(self, items: list[FileItem]) -> dict[str, int]:
+        """How many live records use each of these files, anywhere (at least
+        the records among these that do)."""
+        users = self.refs.records_using(i.sha256 for i in items) if self.refs else {}
+        here: dict[str, set[str]] = {}
+        for i in items:
+            here.setdefault(i.sha256, set()).add(i.record_id)
+        return {
+            sha: max(len(users.get(sha, ())), len(records))
+            for sha, records in here.items()
+        }
 
     def listing(
         self,
@@ -1191,19 +1212,31 @@ class FileAccessService:
         sort: str = "path",
         offset: int = 0,
         limit: int = 100,
+        used_by: list[int] | None = None,
     ) -> FileListing:
-        """A page of a selection's files, narrowed like `chosen`, with where
-        the files of the kinds chosen are (`summary`, before narrowing by
-        place, so the places a person can pick stay in view) and how many of
-        each kind the selection holds (`kinds`, before narrowing by kind).
-        `sort`: path, name, size, record or place; a leading "-" reverses
-        it."""
+        """A page of a selection's files, one row per file as it is stored (a
+        file several records use is one row, with `uses` naming them), narrowed
+        like `chosen`. With where the files of the kinds chosen are (`summary`,
+        before narrowing by place, so the places a person can pick stay in
+        view) and how many of each kind the selection holds (`kinds`, before
+        narrowing by kind); every count is of files, not of uses. `used_by`
+        keeps the files used by exactly so many live records (anywhere), and
+        `sharing` counts the files by that. `sort`: path, name, size, record
+        or place; a leading "-" reverses it."""
         plan, items = self.chosen(selection, place, name)
         of_kind = (
             [i for i in plan.items if i.field in set(selection.fields)]
             if selection.fields
             else plan.items
         )
+        uses: dict[str, list[FileItem]] = {}
+        for item in sorted(items, key=lambda i: i.path.casefold()):
+            uses.setdefault(item.sha256, []).append(item)
+        rows = [found[0] for found in uses.values()]
+        used = self.use_counts(items)
+        counts = Counter(used[i.sha256] for i in rows)
+        if used_by:
+            rows = [i for i in rows if used[i.sha256] in set(used_by)]
         key, reverse = sort.lstrip("-"), sort.startswith("-")
         order: dict[str, Callable[[FileItem], Any]] = {
             "path": lambda i: i.path.casefold(),
@@ -1214,20 +1247,19 @@ class FileAccessService:
         }
         if key not in order:
             raise ValidationError(f"sort must be one of: {', '.join(order)}")
-        items.sort(key=order[key], reverse=reverse)
-        page = items[offset : offset + limit]
-        users = self.refs.records_using(i.sha256 for i in page) if self.refs else {}
+        rows.sort(key=order[key], reverse=reverse)
+        page = rows[offset : offset + limit]
         return FileListing(
-            total=len(items),
-            summary=_places(of_kind),
+            total=len(rows),
+            summary=_places(_one_each(of_kind)),
             items=page,
             kinds=_kinds(plan.items),
+            uses={i.sha256: uses[i.sha256] for i in page},
             others={
-                i.path: len(
-                    {str(r) for r in users.get(i.sha256, set())} - {i.record_id}
-                )
+                i.sha256: used[i.sha256] - len({u.record_id for u in uses[i.sha256]})
                 for i in page
             },
+            sharing=[{"records": n, "files": counts[n]} for n in sorted(counts)],
         )
 
     def shared_with_others(self, items: list[FileItem]) -> dict[str, int]:
@@ -1659,11 +1691,18 @@ def _places(items: list[FileItem]) -> list[PlaceSummary]:
     return sorted(out.values(), key=lambda r: (rank[r.kind], -r.bytes, r.place))
 
 
+def _one_each(items: list[FileItem]) -> list[FileItem]:
+    """One item per file as stored: however many records use a file, it is
+    one file in a count and its bytes are on disk once."""
+    return list({i.sha256: i for i in reversed(items)}.values())
+
+
 def _kinds(items: list[FileItem]) -> list[dict[str, Any]]:
     """How many files of each kind (file field) a selection holds, most
-    first: the choices of the list's "kind of file" pick."""
+    first: the choices of the list's "kind of file" pick. A file counts once
+    per kind however many records use it."""
     out: dict[str, dict[str, Any]] = {}
-    for item in items:
+    for item in {(i.field, i.sha256): i for i in items}.values():
         row = out.setdefault(item.field, {"field": item.field, "files": 0, "bytes": 0})
         row["files"] += 1
         row["bytes"] += item.size

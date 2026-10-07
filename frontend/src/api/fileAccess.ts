@@ -281,9 +281,11 @@ export function selectionFor(
 export interface FilePick extends FileSelection {
   place?: string
   name?: string
-  /** Only these rows (a file of one record each, by `path`): the ticked ones.
-   * A file other records also use is picked for these records alone. */
-  paths?: string[]
+  /** Only these files (by content hash): the ticked rows, each with every
+   * use of it listed. Records outside the list that use it are not picked. */
+  shas?: string[]
+  /** Only files used by exactly one of these numbers of live records. */
+  used_by?: number[]
   /** Moving: also move files records not picked use (for them too). */
   include_shared?: boolean
 }
@@ -318,8 +320,22 @@ export interface ListedFile {
   fix: string
   place: string
   place_kind: PlaceKind
-  /** Other live records that use the same file: moving it moves it for them. */
+  /** Records not listed here that use the same file: moving it moves it for
+   * them too. */
   others?: number
+  /** The records listed here that use this file (one row per file as
+   * stored), each with the names of the records above it. */
+  uses?: FileUse[]
+}
+
+export interface FileUse {
+  record_id: string
+  record_name: string
+  field: string
+  /** The name this record gives the file (its own name template). */
+  filename: string
+  /** The records above it, outermost first, from where the list starts. */
+  trail: string[]
 }
 
 /** What moving picked files onto a drive would do. */
@@ -342,6 +358,9 @@ export interface FileListing {
   items: ListedFile[]
   /** How many files of each kind (file field) the selection holds. */
   kinds?: { field: string; files: number; bytes: number }[]
+  /** How many files are used by how many live records (before narrowing by
+   * that): the "Used by" pick's choices. */
+  sharing?: { records: number; files: number }[]
 }
 
 /** What a download from the server did. */

@@ -122,7 +122,7 @@ def test_a_file_other_records_use_stays_put_unless_asked(ctx, study, archive):  
     only_a = _within(study.rec_a)
     _, items = svc.chosen(only_a)
     listing = svc.listing(only_a)
-    assert {i.filename: listing.others[i.path] for i in listing.items} == {
+    assert {i.filename: listing.others[i.sha256] for i in listing.items} == {
         "s1.txt": 1,
         "s3.txt": 0,
     }
@@ -137,20 +137,48 @@ def test_a_file_other_records_use_stays_put_unless_asked(ctx, study, archive):  
     assert shared and own
 
 
-def test_ticked_rows_pick_those_records_files_not_every_record_sharing_them(
-    ctx, study, archive  # noqa: F811
-):
-    """Two records use one file; ticking one row picks that record's file
-    only, so the other record's makes it "shared with records not picked"."""
+def test_a_file_several_records_use_is_one_row_and_one_file(ctx, study, archive):  # noqa: F811
+    """Rows are files as stored: two records using one file are one row (both
+    named in `uses`), counted once, and ticking it picks both uses."""
     svc = ctx.file_access_svc
     study.selection(study.rec_a, "s1", b"the same table")
     study.selection(study.rec_b, "s2", b"the same table")
     ctx.commit()
     everything = _within(study.e7)
-    rows = svc.listing(everything).items
-    assert len(rows) == 2 and rows[0].sha256 == rows[1].sha256
+    listing = svc.listing(everything)
+    (row,) = listing.items
+    assert listing.total == 1
+    assert sum(p.files for p in listing.summary) == 1
+    assert sorted(u.filename for u in listing.uses[row.sha256]) == ["s1.txt", "s2.txt"]
+    assert listing.others[row.sha256] == 0
 
-    _, picked = svc.chosen(everything, paths=[rows[0].path])
-    assert len(picked) == 1
-    plan = svc.plan_move(picked, "archive")
-    assert (plan.files, plan.shared_left) == (0, 1)  # stays: rec_b uses it
+    _, picked = svc.chosen(everything, shas=[row.sha256])
+    assert len(picked) == 2
+    assert svc.plan_move(picked, "archive").shared_left == 0  # both are picked
+
+
+def test_files_are_picked_by_how_many_records_use_them(ctx, study, archive):  # noqa: F811
+    """`used_by` keeps files used by exactly that many live records, and the
+    listing counts the files by it (its choices), before narrowing by it."""
+    svc = ctx.file_access_svc
+    study.selection(study.rec_a, "s1", b"the same table")
+    study.selection(study.rec_b, "s2", b"the same table")
+    study.selection(study.rec_a, "s3", b"only s3's")
+    ctx.commit()
+    everything = _within(study.e7)
+    listing = svc.listing(everything, used_by=[2])
+    assert [len(listing.uses[i.sha256]) for i in listing.items] == [2]
+    assert listing.sharing == [{"records": 1, "files": 1}, {"records": 2, "files": 1}]
+    _, picked = svc.chosen(everything, used_by=[1])  # actions follow the list
+    assert [i.filename for i in picked] == ["s3.txt"]
+
+
+def test_a_files_info_names_every_record_that_uses_it(ctx, study):  # noqa: F811
+    study.selection(study.rec_a, "s1", b"the same table")
+    study.selection(study.rec_b, "s2", b"the same table")
+    ctx.commit()
+    (row,) = ctx.file_access_svc.listing(_within(study.e7)).items
+    info = ctx.file_info_svc.info(row.sha256)
+    assert info.records == 2
+    assert sorted(u.name for u in info.uses) == ["s1", "s2"]
+    assert all(u.trail for u in info.uses)  # the records above each

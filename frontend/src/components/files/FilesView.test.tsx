@@ -120,7 +120,7 @@ describe('FilesView', () => {
         calls.find((c) => c.path === '/api/file-access/download')?.body,
       ).toMatchObject({
         collection: 'hb',
-        paths: ['Encounter 7/s2/table.txt'],
+        shas: ['bbb'],
         place: 'server',
       }),
     )
@@ -153,7 +153,7 @@ describe('FilesView', () => {
     })
     // The filters as they are, not the ticked rows of one page.
     expect(sent).toMatchObject({ collection: 'hb', place: 'server' })
-    expect(sent).not.toHaveProperty('paths')
+    expect(sent).not.toHaveProperty('shas')
   })
 
   it('narrows to kinds of file, several at once, counted for each kind', async () => {
@@ -232,7 +232,9 @@ describe('FilesView', () => {
     })
     show()
     expect(
-      await screen.findByText(/also used by 3 other records/),
+      await screen.findByRole('button', {
+        name: /Used by 4 records \(3 not listed\)/,
+      }),
     ).toBeInTheDocument()
     await userEvent.click(
       screen.getByRole('checkbox', { name: 'Tick Encounter 7/s1/table.txt' }),

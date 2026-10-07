@@ -57,6 +57,14 @@ export interface FileInfo {
   records: number
   jobs: number
   collections: { id: string; name: string | null; records: number }[]
+  /** The live records that use it, named, with the records above each
+   * (at most 200; `records` is the full count). */
+  uses?: {
+    id: string
+    name: string
+    collection: string | null
+    trail: string[]
+  }[]
 }
 
 /** `?collection=` for an upload: the collection the file is for. */

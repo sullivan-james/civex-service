@@ -229,9 +229,15 @@ class FileListing:
     items: list[FileItem]
     # How many files of each kind (file field): {field, files, bytes}.
     kinds: list[dict[str, Any]] = field(default_factory=list)
-    # For each listed file (by path): how many other live records use the
-    # same file (moving it would move it for them).
+    # For each listed file (by sha256): the records here that use it (each
+    # a FileItem: the record, the kind of file, where it sits)...
+    uses: dict[str, list[FileItem]] = field(default_factory=dict)
+    # ...and how many live records not listed here use it too (moving it
+    # would move it for them).
     others: dict[str, int] = field(default_factory=dict)
+    # How many files are used by how many records ({records, files}, fewest
+    # records first), before narrowing by that: the "used by" pick's choices.
+    sharing: list[dict[str, int]] = field(default_factory=list)
 
 
 @dataclass

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 
 from civex.domain.dtos import (
+    RecordUse,
     CollectionStorage,
     CollectionUse,
     CollectionVolumeShare,
@@ -17,6 +19,10 @@ from civex.repositories.protocols import (
     FileObjectStore,
     FileReferenceRepository,
 )
+
+
+# How many of the records using a file its info names (the count is exact).
+RECORD_USES_SHOWN = 200
 
 
 class FileInfoService:
@@ -33,6 +39,11 @@ class FileInfoService:
         # `build_local_context`): they are then "only on the server", not
         # missing.
         self.files_from_server: Callable[[], bool] = lambda: False
+        # Names live records and the records above them (set by
+        # `build_local_context`, from RecordService).
+        self.describe_records: Callable[[list[uuid.UUID]], list[RecordUse]] = (
+            lambda ids: []
+        )
 
     def surplus_by_volume(self) -> dict[str, VolumeSurplus]:
         """For each volume, how much of what it holds no collection uses: files
@@ -119,6 +130,9 @@ class FileInfoService:
                 )
             )
         collections.sort(key=lambda c: (c.name or "").casefold())
+        users = self._refs.records_using([sha256]).get(sha256, set())
+        uses = self.describe_records(sorted(users, key=str)[:RECORD_USES_SHOWN])
+        uses.sort(key=lambda u: [*u.trail, u.name])
         return FileInfo(
             sha256=sha256,
             size=self._store.size_of(sha256),
@@ -126,4 +140,5 @@ class FileInfoService:
             records=sum(by_collection.values()),
             jobs=jobs,
             collections=collections,
+            uses=uses,
         )

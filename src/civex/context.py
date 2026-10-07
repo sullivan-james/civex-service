@@ -8,12 +8,15 @@ store instead of the default LocalFileObjectStore.
 
 from __future__ import annotations
 
+import uuid
+
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
+from civex.domain.dtos import RecordUse
 from civex.config import Config
 
 if TYPE_CHECKING:
@@ -211,6 +214,21 @@ def build_local_context(
     file_info_svc = FileInfoService(
         file_store, LocalFileReferenceRepository(session), dataset_repo
     )
+
+    def _describe_records(ids: list[uuid.UUID]) -> list[RecordUse]:
+        records = record_svc.get_many([str(i) for i in ids])
+        trails = record_svc.ancestor_trails(records)
+        return [
+            RecordUse(
+                id=str(r.id),
+                name=r.natural_name or str(r.id)[:8],
+                collection=r.dataset_name,
+                trail=[a.natural_name or str(a.id)[:8] for a in trails.get(r.id, [])],
+            )
+            for r in records
+        ]
+
+    file_info_svc.describe_records = _describe_records
     file_access_svc = FileAccessService(
         record_svc, schema_svc, file_store, config.civex_dir
     )

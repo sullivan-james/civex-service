@@ -315,25 +315,35 @@ def _picked(body: FilePickRequest, ctx: AppContext):
     if body.sort:
         selection.query.sort = body.sort
     try:
-        return ctx.file_access_svc.chosen(selection, body.place, body.name, body.paths)[
-            1
-        ]
+        return ctx.file_access_svc.chosen(
+            selection, body.place, body.name, body.shas, body.used_by
+        )[1]
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
 
 
 @router.post("/files")
 def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
-    """A page of a selection's files, each with where it is (`place`: a
+    """A page of a selection's files, one row per file as stored (a file
+    several records use is one row: `uses` lists those records, each with the
+    names of the records above it, `trail`; `others` counts the records
+    outside the selection that use it too), each with where it is (`place`: a
     drive's name, `server` or `missing`; `place_kind`: drive, unreachable,
-    server or missing), narrowed by place, name and the selection's own
-    filter; and `summary`, where all of the selection's files are, by place."""
+    server or missing), narrowed by place, name (the file's, or any record's
+    it sits under) and the selection's own filter; and `summary`, where all
+    of the selection's files are, by place. Counts are of files."""
     selection = _base_selection(body, ctx)
     if body.sort:
         selection.query.sort = body.sort
     try:
         listing = ctx.file_access_svc.listing(
-            selection, body.place, body.name, body.order, body.offset, body.limit
+            selection,
+            body.place,
+            body.name,
+            body.order,
+            body.offset,
+            body.limit,
+            body.used_by,
         )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
@@ -343,12 +353,24 @@ def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
         "total": listing.total,
         "summary": [vars(p) for p in listing.summary],
         "kinds": listing.kinds,
+        "sharing": listing.sharing,
         "items": [
             {
                 **i.to_dict(),
                 "place": place_of(i)[0],
                 "place_kind": place_of(i)[1],
-                "others": listing.others.get(i.path, 0),
+                "others": listing.others.get(i.sha256, 0),
+                "uses": [
+                    {
+                        "record_id": u.record_id,
+                        "record_name": u.record_name,
+                        "field": u.field,
+                        # The name this record gives the file (its template).
+                        "filename": u.filename,
+                        "trail": u.path.split("/")[:-2],
+                    }
+                    for u in listing.uses.get(i.sha256, [i])
+                ],
             }
             for i in listing.items
         ],

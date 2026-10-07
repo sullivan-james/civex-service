@@ -501,6 +501,17 @@ class CollectionUse:
 
 
 @dataclass
+class RecordUse:
+    """A live record that uses a file, named as the UI names it, with the
+    records above it (outermost first)."""
+
+    id: str
+    name: str
+    collection: str | None
+    trail: list[str]
+
+
+@dataclass
 class FileInfo:
     """Where a file's content is stored and what uses it."""
 
@@ -510,6 +521,8 @@ class FileInfo:
     records: int  # records that reference it
     jobs: int  # workflow runs that took it as an input
     collections: list[CollectionUse]
+    # The live records that use it, named (at most RECORD_USES_SHOWN).
+    uses: list[RecordUse] = field(default_factory=list)
 
 
 @dataclass
