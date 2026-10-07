@@ -120,10 +120,12 @@ class LocalFileReferenceRepository:
                 query if wanted is None else query.where(Record.dataset_id.in_(wanted))
             )
 
-        # one row per (collection, file)
+        # one row per (collection, file), of its live records: what a person
+        # sees as its files (a deleted record's are in Recently Deleted)
         mine = scoped(
             select(Record.dataset_id.label("cid"), FileReference.sha256.label("sha"))
             .join(Record, Record.id == FileReference.record_id)
+            .where(Record.deleted_at.is_(None))
             .distinct()
         ).subquery()
 
@@ -140,7 +142,10 @@ class LocalFileReferenceRepository:
                 func.count(func.distinct(Record.dataset_id)).label("n"),
             )
             .join(Record, Record.id == FileReference.record_id)
-            .where(FileReference.sha256.in_(select(mine.c.sha)))
+            .where(
+                FileReference.sha256.in_(select(mine.c.sha)),
+                Record.deleted_at.is_(None),
+            )
             .group_by(FileReference.sha256)
             .subquery()
         )

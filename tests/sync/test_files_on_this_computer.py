@@ -204,3 +204,25 @@ def test_a_download_says_how_many_listed_files_it_covers_and_where_the_rest_are(
             "files": 1,
         }
     ]
+
+
+def test_a_deleted_records_files_are_not_counted_as_the_collections(pair):
+    """What a collection's files are is what its live records use: the report,
+    the background download and the storage bar agree with the file list."""
+    laptop, phone, record = pair
+    _with_file(laptop, record, b"of a record deleted later")
+    phone.sync_svc.sync()
+    assert _row(phone).files_on_server == 1
+    assert phone.sync_svc.files_to_fetch() == 1
+
+    phone.record_svc.delete(str(record.id))
+    phone.commit()
+    assert _row(phone).files_on_server == 0
+    assert phone.sync_svc.files_to_fetch() == 0
+    study = _row(phone).id
+    storage = phone.file_info_svc.all_collection_storage([study])[study]
+    assert (storage.files, storage.unlocated_files) == (0, 0)
+
+    phone.record_svc.restore(str(record.id))  # counted again once it is back
+    phone.commit()
+    assert _row(phone).files_on_server == 1

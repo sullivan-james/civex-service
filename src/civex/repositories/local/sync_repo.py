@@ -165,12 +165,14 @@ class LocalSyncRepository:
         return [sha for (sha,) in rows]
 
     def _not_here(self):  # type: ignore[no-untyped-def]
-        """Files records here cite that no drive here is recorded to hold."""
+        """Files live records here cite that no drive here is recorded to hold
+        (a deleted record's files are fetched if it comes back and is opened,
+        not in the background)."""
         return (
             select(FileReference.sha256, func.min(Record.dataset_id))
             .join(Record, Record.id == FileReference.record_id)
             .outerjoin(StoredObject, StoredObject.sha256 == FileReference.sha256)
-            .where(StoredObject.sha256.is_(None))
+            .where(StoredObject.sha256.is_(None), Record.deleted_at.is_(None))
             .group_by(FileReference.sha256)
         )
 
@@ -241,7 +243,7 @@ class LocalSyncRepository:
             select(Record.dataset_id.label("cid"), FileReference.sha256.label("sha"))
             .join(Record, Record.id == FileReference.record_id)
             .join(Dataset, Dataset.id == Record.dataset_id)
-            .where(Dataset.deleted_at.is_(None))
+            .where(Dataset.deleted_at.is_(None), Record.deleted_at.is_(None))
             .distinct()
             .subquery()
         )
