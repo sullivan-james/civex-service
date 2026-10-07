@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
 import { ThemeProvider } from './hooks/useTheme'
+import { applyUiSize } from './hooks/useUiSize'
 import { ToastProvider } from './components/ui/ToastProvider'
 import { ApiError } from './api/client'
 
@@ -24,6 +25,9 @@ const queryClient = new QueryClient({
     },
   },
 })
+
+// The chosen size before the first paint, so a page never flashes at another.
+applyUiSize()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
