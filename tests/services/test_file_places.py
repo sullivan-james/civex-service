@@ -78,3 +78,32 @@ def test_files_are_picked_by_kind_and_every_kind_is_still_counted(ctx, study, sp
     assert len(listing.kinds) == 2  # the other kind can still be picked
     _, picked = svc.chosen(tables)
     assert {i.field for i in picked} == {"table"}  # and actions take the same
+
+
+def test_records_beneath_count_only_if_they_match_the_filter_at_their_level(
+    ctx, study, spread  # noqa: F811
+):
+    """Encounters "with a Selection named s1" take that Selection's files, not
+    every Selection's: a record beneath is taken when the list, run for its
+    kind with the same filter, would list it."""
+    svc = ctx.file_access_svc
+    selection = FileSelection(
+        query=RecordQuery(
+            dataset="hb",
+            schema="encounter",
+            filter_tree={
+                "and": [
+                    {"schema": "selection", "field": "sname", "op": "eq", "value": "s1"}
+                ]
+            },
+        ),
+        below=True,
+    )
+    _, items = svc.chosen(selection)
+    assert [i.filename for i in items] == ["s1.txt"]
+
+    no_filter = FileSelection(
+        query=RecordQuery(dataset="hb", schema="encounter"), below=True
+    )
+    _, items = svc.chosen(no_filter)
+    assert sorted(i.filename for i in items) == ["s1.txt", "s2.txt"]

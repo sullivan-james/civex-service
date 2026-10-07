@@ -18,6 +18,7 @@ import json
 import os
 import posixpath
 import shutil
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -29,6 +30,7 @@ from civex.domain.sync import not_on_server_yet
 from civex.domain import tables as table_rules
 from civex.domain import templating
 from civex.domain.naming import display_label
+from civex.domain.query import RecordQuery
 from civex.domain.file_access import (
     FileListing,
     PlaceSummary,
@@ -770,10 +772,31 @@ class FileAccessService:
             beneath = self._records.beneath(
                 found, (lambda n: progress.advance(n)) if progress else None
             )
+            if selection.record_ids is None and selection.query.filter_tree:
+                beneath = self._as_listed(beneath, selection.query)
             everything = [*found, *beneath]
         if allowed is not None:
             everything = [r for r in everything if r.schema_name in allowed]
         return everything
+
+    def _as_listed(
+        self, beneath: list[RecordDTO], query: RecordQuery
+    ) -> list[RecordDTO]:
+        """Of the records beneath those a filtered selection chose, the ones the
+        record list would list too, given the same filter: a record of each
+        kind only if the filter, run for that kind (the explorer's own query,
+        so AND, OR and conditions on parents or children mean what they mean
+        there), lists it. "Encounters with a Selection whose contour file is
+        empty" then takes those Selections' files, not every Selection's. One
+        query per kind beneath."""
+        kinds = {r.schema_name for r in beneath}
+        listed: set[uuid.UUID] = set()
+        for kind in kinds:
+            for page in self._records.stream_records(
+                dataclasses.replace(query, schema=kind)
+            ):
+                listed.update(r.id for r in page)
+        return [r for r in beneath if r.id in listed]
 
     def _base_id(self, selection: FileSelection) -> str | None:
         ref = selection.base or selection.query.within
