@@ -39,13 +39,18 @@ invite starts with `civex_inv_`, so secret scanners recognise one pasted by
 mistake.
 
 `civex serve --sync-only` serves the sync address (`/api/sync/v1/`) and nothing
-else. Bind it to `127.0.0.1` and put an HTTPS reverse proxy in front: devices only
-connect over `https://`, because invites and sessions travel in requests. Run the app
-itself (`civex serve`, without the flag) on the same machine for yourself, and reach
-it over SSH (`ssh -L 8000:localhost:8000 <server>`).
+else. Devices only connect over `https://`, because invites and sessions travel in
+requests, so it needs an HTTPS address in front of it:
 
-For a trial on your own network, `civex serve` alone also answers devices on the
-sync address, and `tailscale serve 8000` gives it an HTTPS address.
+- **On your own network, or across several:** [Syncing with Tailscale](#syncing-with-tailscale)
+  below is the simplest, with nothing to configure on the civex side.
+- **On a server you run:** bind it to `127.0.0.1` and put an HTTPS reverse proxy
+  (Caddy, nginx) with a certificate in front.
+
+A plain `http://` address on your network (`http://192.168.1.20:8000`) doesn't
+work: a device refuses it. Run the app itself (`civex serve`, without the flag) on
+the same machine for yourself, and reach it from elsewhere over SSH
+(`ssh -L 8000:localhost:8000 <server>`).
 
 ## Connect a device
 
@@ -83,6 +88,65 @@ in the background:
   joined. `civex clone` shows this with a bar of its own; Ctrl+C leaves it to finish
   later.
 - **Files.** See [Files](#files) below.
+
+## Syncing with Tailscale
+
+[Tailscale](https://tailscale.com) puts your computers on a private network of their
+own, wherever they are (one office, home, a laptop on the road), and gives each an
+`https://` address with a real certificate. Only computers you add can reach it. It is
+free for personal use and small teams.
+
+**Once, for everyone**
+
+1. [Install Tailscale](https://tailscale.com/download) on the authority and on every
+   device, and sign each in to the same Tailscale account (your *tailnet*).
+2. In the Tailscale admin console, under **DNS**, turn on **MagicDNS** and **HTTPS
+   Certificates**. (`tailscale serve` below asks for this, with a link, if it is
+   off.)
+
+**On the authority**
+
+```bash
+civex sync authority enable
+civex sync device invite laptop        # prints the laptop's invite: copy it now
+civex serve --sync-only --port 8100    # leave this running
+```
+
+Then, in a second terminal:
+
+```bash
+tailscale serve --bg 8100
+```
+
+It prints the authority's address, such as `https://lab-pc.tail1234.ts.net`
+(`tailscale serve status` shows it again later). The first visit can take a few
+seconds while Tailscale fetches the certificate.
+
+To use civex yourself on this computer at the same time, run `civex serve` as usual:
+it uses port 8000, the sync server 8100.
+
+**On each device**
+
+```bash
+civex clone https://lab-pc.tail1234.ts.net my-project --invite <invite>
+```
+
+Or, in the app: Settings → **Sync**, the address and the invite, then **Connect**.
+
+**Good to know**
+
+- **Keep the sync server running.** Devices sync whenever `civex serve --sync-only`
+  is up on the authority; while it isn't, they keep working and catch up later.
+  `tailscale serve --bg` comes back by itself after a restart; start civex with the
+  computer too (a login item on macOS, Task Scheduler on Windows, a systemd service on
+  Linux).
+- **Use `serve`, never `funnel`.** `tailscale funnel` puts an address on the public
+  internet; `serve` keeps it inside your tailnet.
+- **Point Tailscale at the sync server only** (port 8100 here), never at the app's
+  port (8000): the app has no sign-in, so everyone in your tailnet could use it.
+  Open the app on the authority itself, or from elsewhere over SSH as above.
+- **Invite another device** with `civex sync device invite <name>`, or Settings →
+  Sync → *Other devices following this project*.
 
 ## Syncing by itself
 

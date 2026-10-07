@@ -1,90 +1,94 @@
 # Server & web UI
 
-## Starting the server
+`civex serve` starts civex's web app and HTTP API for the project you're in. It
+runs on your own computer, for you, like `git`: there are no accounts or
+passwords.
+
+## Start it
+
+From inside a project (any folder at or below the one holding `_civex/`):
 
 ```bash
-civex serve                  # production mode — serves built UI from frontend/dist/
-civex serve --reload         # development mode — auto-restarts on code changes
-civex serve --host 0.0.0.0   # listen on all interfaces (see Security model below)
-civex serve --port 9000      # custom port (default: 8000)
-civex serve --log-level DEBUG  # DEBUG | INFO | WARNING | ERROR — see Logging & telemetry
+civex serve --open
 ```
 
-The server must be run from within (or below) a directory that contains a `_civex/` project.
+This starts the server at [http://localhost:8000](http://localhost:8000) and
+opens it in your browser. Stop it with **Ctrl+C**.
 
-## Security model
+To start it with a double-click instead, run `civex shortcut` once: it puts a
+shortcut for this project on your Desktop.
 
-`civex serve` is **local-first, like `git`** — it runs for a single trusted user on your own machine and has **no authentication**. By default it binds to loopback (`127.0.0.1`) and a middleware guards the two attack classes that still apply to a localhost server open in a browser:
+## Who can reach it
 
-- **DNS rebinding** — requests whose `Host` header isn't a loopback name are rejected.
-- **CSRF** — state-changing requests (`POST`/`PUT`/`PATCH`/`DELETE`) carrying a non-loopback `Origin` are rejected.
+By default only this computer can. Pick the row that matches what you want:
 
-Passing a non-loopback `--host` (e.g. `0.0.0.0`) without opting in exits immediately with an error and does not start the server:
+| You want… | Do this |
+| --- | --- |
+| To use civex yourself, on this computer | `civex serve` (the default) |
+| Other computers to **sync** with this project | `civex serve --sync-only`, reached over HTTPS: see [Syncing with Tailscale](sync.md#syncing-with-tailscale) |
+| To use this computer's civex **from another computer** | Forward the port over SSH: `ssh -L 8000:localhost:8000 <this computer>`, then open `http://localhost:8000` there |
 
-```bash
-civex serve --host 0.0.0.0
-# Refusing to bind to non-loopback address '0.0.0.0': the civex server has no
-# authentication and would be reachable by other machines.
-# Re-run with --allow-remote if this is intentional (and put it behind a
-# reverse proxy / firewall).
-```
+Sharing the web app itself on a network isn't supported: it has no sign-in, so
+anyone who could reach it could read and change everything, and run workflows.
+`--allow-remote` (below) exists for setups that put their own protection in
+front, and civex prints a warning when it's used.
 
-To expose the server to other machines you must opt in explicitly:
+??? note "What protects the default"
+    The server listens on `127.0.0.1` only, so other computers can't connect at
+    all. It also refuses requests that don't come from this computer's own
+    pages: a `Host` header that isn't `localhost` (DNS rebinding) and a change
+    sent from another site (`Origin`, cross-site request forgery).
 
-```bash
-civex serve --host 0.0.0.0 --allow-remote
-```
+## The web UI
 
-`--allow-remote` stands the guard down and prints a warning instead of exiting. Because there is still no authentication, only do this on a trusted network **behind a reverse proxy or firewall**.
+The left-hand navigation has:
 
-For other civex installs to sync with this project, don't expose the app: serve them with `civex serve --sync-only` (see [Syncing between machines](sync.md#set-up-the-authority)).
+| Section | What it's for | More |
+| --- | --- | --- |
+| **Home** | Your pinned saved filters with live counts, and what you opened lately | |
+| **Collections** | Browse and edit records, their files and everything under them; search, filter, save views, export | [Collections & records](collections-and-records.md), [Views](views.md) |
+| **Exports** | Saved exports, and the folders they've made | [Files](files.md) |
+| **Activity** | Every change, who made it, and restoring what was deleted | [Deleting & restoring](deleting-and-restoring.md) |
+| **Schemas** | The kinds of record, their fields and rules | [Schemas & fields](schemas-and-fields.md) |
+| **Workflows**, **Runs** | Automations and each time one ran | [Workflows](workflows.md), [Automation](automation.md) |
+| **Settings** | Appearance, database, storage, retention, sync, map | |
 
-## Web UI
+A few things work everywhere:
 
-Opening [http://localhost:8000](http://localhost:8000) (or wherever you configured it) loads the web interface. The main sections are:
-
-**Schemas** — Create and edit schemas, add and configure fields, view field types and restrictions.
-
-**Collections** — Create collections and browse their records top-down through the schema hierarchy, with search, filters, saved filters ([views](views.md)), columns, sort and export. The collections you open most appear under **Collections** in the left-hand navigation. See [Browsing a collection](collections-and-records.md#browsing-a-collection).
-
-**Selecting several** — In any table with tick boxes, and in the lists of columns, schemas and shape types, click one box and then **shift-click** another to tick (or untick) everything between them, in the order shown. The next range starts from the box you last clicked.
-
-**Tab titles** — The browser tab says where you are, so several open tabs can be told apart: a record shows its name, then the record it sits under and its collection ("Sample 12 · Patient 3 · study"), a settings page shows its area ("Tasks · Storage · Settings"), and everything ends with "civex".
-
-**Records** — Each record has a detail page showing its field values, attached files, everything under it (children, grandchildren, … in the same explorer), workflow jobs that have run against it, and a form to edit field values.
-
-- File fields show a file picker for upload and a download link for existing attachments.
-- `datetime` fields display and edit in the collection's timezone (or the field's own override), with the zone shown next to the value and the UTC value on hover. If neither is set they use your own timezone. Values are stored as UTC.
-- `reference` fields show a searchable dropdown of records from the target schema.
-- String fields with a `choices` restriction render as a dropdown.
-- A **"⊙ from filename"** button appears on text/number/date/datetime fields whenever a file field on the same record has a file attached — lets you extract a value from the filename using a regex, without writing a workflow.
-
-**Runs** — A paginated log of all workflow job executions, filterable by status (`pending`, `running`, `completed`, `failed`). Each job shows its log output.
-
-**Workflows** — View and edit workflow YAML files directly in the browser. Run a workflow manually with the **Run** button on a record's detail page.
-
-### Pins, Home and jump-to
-
-Click the star on a saved filter, a collection, a record or a drilled-down place in the explorer to **pin** it. Pins appear in a **Pinned** section at the top of the left-hand navigation; a pinned saved filter shows how many records it matches right now. Pins and the list of things you opened lately are kept in your browser (they don't follow you to another machine or browser profile, and clearing site data removes them).
-
-**Home** shows your pinned saved filters with their live counts under *Needs your attention*, and what you opened lately under *Pick up where you left off*, each with a star to pin it.
-
-Press **Ctrl+K** (**⌘K** on a Mac), or click **Jump to** in the top bar, to search collections, schemas, saved filters, records and places by name. Records are searched across every collection in one go, and each result shows which collection it is in. With nothing typed it lists your pins and recents. The star on a result pins it.
+- **Ctrl+K** (**⌘K** on a Mac) jumps to any collection, schema, saved filter or
+  record by name.
+- **The star** pins a collection, record, saved filter or place to the top of
+  the navigation. Pins and recent items are kept in this browser only.
+- **Shift-click** a second tick box to tick everything between it and the last
+  one you clicked.
+- **The status bar** at the bottom shows work going on in the background (file
+  moves, workflow runs, sync) and anything that needs you.
 
 ## HTTP API
 
-Everything the web UI does, it does through `/api/` — schemas, collections (`/api/collections`), records, files, workflows, and jobs. Responses are JSON. For the complete, current list of endpoints, use the interactive documentation (Swagger UI) at [`/docs`](http://localhost:8000/docs) while the server is running, rather than a table here that would drift from the code.
-
-Two examples worth calling out because they're the ones you're likely to script against directly:
+Everything the web UI does goes through `/api/`, as JSON. The full, current
+list of endpoints is at [`/docs`](http://localhost:8000/docs) while the server
+runs. Two you're likely to script against:
 
 ```bash
-# Upload a file, then use the returned sha256 as a `file` field's value
-curl -X POST http://localhost:8000/api/files \
-  -F "file=@/path/to/recording.wav"
+# Upload a file; use the returned sha256 as a file field's value
+curl -X POST http://localhost:8000/api/files -F "file=@recording.wav"
 # → {"sha256": "abc123…", "filename": "recording.wav", "size": 4096000}
 
-# Run a workflow against a record (multipart if it declares `files` inputs)
+# Run a workflow against a record
 curl -X POST http://localhost:8000/api/workflows/extract-start-time/run \
   -H "Content-Type: application/json" \
   -d '{"record_id": "abc123…"}'
 ```
+
+## Options
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `--open` | off | Open the browser once the server is up (or just open it, if civex is already running on that port) |
+| `--port`, `-p` | `8000` | The port to listen on |
+| `--sync-only` | off | Serve only what syncing devices call; see [Syncing between machines](sync.md) |
+| `--log-level` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR`; see [Logging & telemetry](logging-and-telemetry.md) |
+| `--host` | `127.0.0.1` | The address to listen on. Anything but this computer's own is refused without `--allow-remote` |
+| `--allow-remote` | off | Allow `--host` to be a network address. There is no sign-in: only behind protection of your own |
+| `--reload` | off | Restart when civex's own code changes, for working on civex itself |
