@@ -84,6 +84,10 @@ civex update --check   # only report whether one is available
 
 (`uv tool upgrade civex` does the same for a uv install.)
 
+Pre-releases (release candidates, for trying what's coming) are only
+installed if you ask: `civex update --pre`. Once you're on one, a plain
+`civex update` moves you on when the final release is out.
+
 `civex update` detects whether civex was installed with pipx, `uv tool` or pip
 and runs the matching upgrade. Restart `civex serve` afterwards if it's
 running. Project databases migrate themselves the next time they're opened.
