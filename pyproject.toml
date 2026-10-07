@@ -46,6 +46,10 @@ dependencies = [
     # newer versions only install there by compiling Rust. 48 is the last
     # with one. Widen this if a later version ships Intel wheels again.
     "cryptography>=42,<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    # HTTPS that trusts what the operating system trusts (civex/tls.py):
+    # Python's own default has no certificates on some installs (python.org
+    # on macOS), so a device couldn't reach a server every browser accepts.
+    "truststore>=0.10",
     # The plugin SDK is its own published project (MIT, versioned from `sdk-v*` git tags --
     # see docs/contributing/sdk-release.md). This range must admit the newest
     # `sdk-v*` tag: scripts/check_sdk_sync.py enforces that in CI, and the
