@@ -5,25 +5,32 @@ on:
     tags:
       - "v*"
 
+# Build the wheel once, install that exact file on every OS and run it, and
+# only then publish it: a PyPI version can never be uploaded again, even after
+# it is deleted, and tests from a checkout can't see what the wheel is missing.
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      id-token: write
+      contents: read
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
 
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Verify CHANGELOG entry exists for this tag
-        run: |
-          TAG="${GITHUB_REF_NAME}"
-          if ! grep -qE "^## ${TAG}([[:space:]]|\$)" CHANGELOG.md; then
-            echo "::error::No CHANGELOG.md entry found for ${TAG}. Add a '## ${TAG} — <label> (YYYY-MM-DD)' section before pushing this tag (see PRODUCTION_READINESS.md §4a)."
-            exit 1
-          fi
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      # A final release needs its own `## vX.Y.Z` entry; a pre-release
+      # (vX.Y.ZrcN, bN, aN, .devN) may use that heading or `## Unreleased`.
+      - name: Check the tag and its CHANGELOG entry
+        id: tag
+        run: uv run --no-project --with packaging python scripts/check_release_tag.py "$GITHUB_REF_NAME"
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -46,10 +53,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
       - name: Verify the SDK civex depends on is published
         # civex declares civex-plugin-sdk as a normal dependency, so the
         # in-repo SDK version must already be on PyPI or `pip install civex`
@@ -63,11 +66,59 @@ jobs:
           pip install build
           python -m build --wheel
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+      - name: Check the wheel is the tag's version
+        run: uv run --no-project --with packaging python scripts/check_release_tag.py "$GITHUB_REF_NAME" --wheel-dir dist
+
+      - uses: actions/upload-artifact@v7
         with:
-          files: dist/*.whl
-          generate_release_notes: true
+          name: wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
+
+      # As the install guide says, with no Python set up: uv fetches one.
+      - name: Install the wheel the way a person would
+        shell: bash
+        run: uv tool install dist/*.whl
+
+      - name: Run it
+        shell: bash
+        run: |
+          civex="$(uv tool dir --bin)/civex$([ "$RUNNER_OS" = Windows ] && echo .exe)"
+          uv run --no-project python scripts/smoke_civex.py "$civex" \
+            --expect-version "${{ needs.build.outputs.version }}"
+
+  publish:
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -77,3 +128,11 @@ jobs:
           attestations: false
           packages-dir: dist/
           skip-existing: true
+
+      # After PyPI, so a release page never offers a version pip can't get.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*.whl
+          generate_release_notes: true
+          prerelease: ${{ needs.build.outputs.prerelease == 'true' }}

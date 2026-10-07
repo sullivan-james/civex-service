@@ -56,6 +56,11 @@ _DATAS = [
     # pyinstaller-hooks-contrib probably handles this already; declaring it
     # here costs nothing and doesn't depend on that staying true.
     *collect_data_files("jsonschema_specifications"),
+    # Alembic finds migrations by walking a directory on disk (env.py,
+    # script.py.mako, versions/*.py), not by importing them, so the modules
+    # collect_submodules puts in the archive aren't enough: without these
+    # files every frozen build failed `civex init` (db/migrate.py).
+    ("src/civex/db/migrations", "civex/db/migrations"),
 ]
 
 # ── Desktop tray app ──────────────────────────────────────────────────────────

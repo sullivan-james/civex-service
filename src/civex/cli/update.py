@@ -24,10 +24,30 @@ from civex.console import console
 _PYPI_URL = "https://pypi.org/pypi/civex/json"
 
 
-def latest_version(timeout: float = 10.0) -> str:
-    """Latest stable civex version published on PyPI."""
+def latest_version(pre: bool = False, timeout: float = 10.0) -> str:
+    """Latest civex version published on PyPI: the latest stable one, or with
+    `pre` the newest of all, release candidates and betas included."""
     with urllib.request.urlopen(_PYPI_URL, timeout=timeout) as resp:  # noqa: S310
-        return json.load(resp)["info"]["version"]
+        data = json.load(resp)
+    if not pre:
+        return data["info"]["version"]
+    return newest_release(data["releases"]) or data["info"]["version"]
+
+
+def newest_release(releases: dict[str, list[dict]]) -> str | None:
+    """The highest version in PyPI's `releases` that has files and isn't
+    wholly yanked; pre-releases count."""
+    from packaging.version import InvalidVersion, Version
+
+    found: list[Version] = []
+    for number, files in releases.items():
+        if not files or all(f.get("yanked") for f in files):
+            continue
+        try:
+            found.append(Version(number))
+        except InvalidVersion:
+            continue
+    return str(max(found)) if found else None
 
 
 def detect_installer() -> str:
@@ -64,7 +84,7 @@ def installed_version() -> str | None:
     return result.stdout.strip() or None if result.returncode == 0 else None
 
 
-def upgrade_command(installer: str) -> list[str]:
+def upgrade_command(installer: str, pre: bool = False) -> list[str]:
     """The command that upgrades civex for *installer*.
 
     Falls back to pip inside this environment when the installer's own CLI
@@ -72,10 +92,24 @@ def upgrade_command(installer: str) -> list[str]:
     not have it, so that case is reported by the caller instead).
     """
     if installer == "pipx" and shutil.which("pipx"):
-        return ["pipx", "upgrade", "civex"]
+        return ["pipx", "upgrade", *(["--pip-args=--pre"] if pre else []), "civex"]
     if installer == "uv" and shutil.which("uv"):
-        return ["uv", "tool", "upgrade", "civex"]
-    return [sys.executable, "-m", "pip", "install", "--upgrade", "civex"]
+        return [
+            "uv",
+            "tool",
+            "upgrade",
+            *(["--prerelease", "allow"] if pre else []),
+            "civex",
+        ]
+    return [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--upgrade",
+        *(["--pre"] if pre else []),
+        "civex",
+    ]
 
 
 def installed_missing_requirements() -> list[str]:
@@ -133,11 +167,20 @@ def update(
     check: bool = typer.Option(
         False, "--check", help="Only report whether a newer version exists."
     ),
+    pre: bool = typer.Option(
+        False,
+        "--pre",
+        help="Include pre-releases (release candidates, betas) when looking "
+        "for a newer version.",
+    ),
 ) -> None:
     """Update civex to the latest release.
 
     Detects whether civex was installed with pipx, uv tool or pip and runs the
     matching upgrade. Restart any running `civex serve` afterwards.
+
+    Pre-releases are only installed with --pre. Once on one, a plain
+    `civex update` moves on when the final release is out.
     """
     installer = detect_installer()
     if installer == "editable":
@@ -152,7 +195,7 @@ def update(
     from packaging.version import InvalidVersion, Version
 
     try:
-        latest = latest_version()
+        latest = latest_version(pre=pre)
         newer = Version(latest) > Version(__version__)
     except (urllib.error.URLError, TimeoutError, KeyError, ValueError) as e:
         console.print(f"[error]Couldn't check PyPI for updates: {e}[/error]")
@@ -164,15 +207,21 @@ def update(
 
     if not newer:
         console.print(f"[success]civex {__version__} is up to date.[/success]")
+        if not pre and _is_prerelease(__version__):
+            console.print(
+                "[dim]This is a pre-release; `civex update --pre` looks for "
+                "newer pre-releases too.[/dim]"
+            )
         if not check and not ensure_requirements(installer, __version__):
             raise typer.Exit(1)
         return
     if check:
         console.print(f"civex {latest} is available (you have {__version__}).")
-        console.print("Run [cyan]civex update[/cyan] to install it.")
+        command = "civex update --pre" if pre else "civex update"
+        console.print(f"Run [cyan]{command}[/cyan] to install it.")
         raise typer.Exit(1)
 
-    cmd = upgrade_command(installer)
+    cmd = upgrade_command(installer, pre=pre)
     console.print(
         f"Updating civex {__version__} -> {latest}: [dim]{' '.join(cmd)}[/dim]"
     )
@@ -199,6 +248,15 @@ def update(
     _warn_if_shadowed(now or latest)
     if not ok:
         raise typer.Exit(1)
+
+
+def _is_prerelease(version: str) -> bool:
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        return Version(version).is_prerelease
+    except InvalidVersion:
+        return False
 
 
 def _warn_if_shadowed(expected: str) -> None:
