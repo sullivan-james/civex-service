@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Runs a frozen civex CLI the way a person without Python would.
+"""Runs an installed civex the way a person would, before it is released.
 
-    smoke_frozen.py PATH/TO/civex[.exe]
+    smoke_civex.py PATH/TO/civex[.exe] [--expect-version VERSION]
 
-Stdlib only. A bundle can build cleanly and still be missing files that are
-read from disk at runtime (the Alembic migrations once were, so every desktop
-download failed `civex init`), so CI runs the binary instead of trusting the
-build: init a project, write to it, serve it, and fetch the API and the UI.
-Everything happens in a temporary home and project, never the runner's own.
+Stdlib only. A wheel or a frozen bundle can build cleanly and still be missing
+files that are read from disk at runtime (the Alembic migrations once were
+left out of the desktop bundle, so every download failed `civex init`), and
+tests run from a checkout can't notice, because the checkout has every file.
+So the release workflows run what they built: init a project, write to it,
+serve it, and fetch the API and the UI. Everything happens in a temporary
+home and project, never the runner's own.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -39,14 +42,21 @@ def get(path: str) -> str:
 
 
 def main() -> None:
-    exe = Path(sys.argv[1]).resolve()
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("exe", type=Path)
+    parser.add_argument("--expect-version")
+    args = parser.parse_args()
+    exe = args.exe.resolve()
     with tempfile.TemporaryDirectory() as tmp:
         home, project = Path(tmp, "home"), Path(tmp, "project")
         home.mkdir()
         project.mkdir()
         env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home)}
 
-        print(run(exe, "--version", cwd=project, env=env).strip())
+        reported = run(exe, "--version", cwd=project, env=env).strip()
+        print(reported)
+        if args.expect_version and reported.split()[-1] != args.expect_version:
+            sys.exit(f"Expected civex {args.expect_version}, got: {reported}")
         run(exe, "init", cwd=project, env=env)
         run(exe, "schema", "create", "sample", cwd=project, env=env)
 
@@ -80,7 +90,7 @@ def main() -> None:
                 server.wait(timeout=15)
             except subprocess.TimeoutExpired:
                 server.kill()
-    print("frozen civex: init, schema, serve, API and UI all work")
+    print("civex: init, schema, serve, API and UI all work")
 
 
 if __name__ == "__main__":

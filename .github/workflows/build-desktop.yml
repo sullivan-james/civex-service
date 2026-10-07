@@ -54,7 +54,7 @@ jobs:
       # run it: nothing is attached to a release unless this passes.
       - name: Smoke-test the CLI binary
         shell: bash
-        run: python scripts/smoke_frozen.py "dist/civex$([ "$RUNNER_OS" = Windows ] && echo .exe)"
+        run: python scripts/smoke_civex.py "dist/civex$([ "$RUNNER_OS" = Windows ] && echo .exe)"
 
       # ── macOS: wrap in a DMG ──────────────────────────────────────────────
       - name: Package DMG (macOS)
@@ -88,8 +88,22 @@ jobs:
           path: ${{ matrix.asset }}
 
       # ── Attach to GitHub Release (tag pushes only) ────────────────────────
+      # release.yml marks a pre-release tag (vX.Y.ZrcN, bN, aN, .devN) as one;
+      # this job may create the release first, so it must say the same.
+      - name: Is this a pre-release?
+        id: kind
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ [0-9][-_.]?(a|b|rc|dev)[0-9]*$ ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
           files: ${{ matrix.asset }}
+          prerelease: ${{ steps.kind.outputs.prerelease == 'true' }}

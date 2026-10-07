@@ -3,7 +3,8 @@
 One section per tagged release: `## vX.Y.Z — <label> (YYYY-MM-DD)`. Every
 `v*` tag must have a matching entry here *before* the tag is pushed —
 `.github/workflows/release.yml` fails the release job if it's missing (see
-PRODUCTION_READINESS.md §4a). The version itself has one source of truth,
+PRODUCTION_READINESS.md §4a). A pre-release tag (`v1.3.0rc1`) may use the
+final version's entry or `## Unreleased` instead of one of its own. The version itself has one source of truth,
 the git tag (resolved via setuptools-scm into `civex.__version__`); this
 file is release notes, not a second place to track the number.
 
