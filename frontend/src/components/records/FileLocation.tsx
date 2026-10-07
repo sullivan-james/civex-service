@@ -151,7 +151,7 @@ function DownloadLink({
 function chipText(file: FileLike): string {
   const loc = file.location
   if (!loc) return ''
-  if (loc.state === 'remote') return 'on the server'
+  if (loc.state === 'remote') return 'not on this computer'
   if (loc.volume === null) return 'location unknown'
   if (loc.available === false)
     return `${loc.volume} · ${loc.state.replace('_', ' ')}`

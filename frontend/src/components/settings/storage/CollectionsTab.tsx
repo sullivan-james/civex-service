@@ -122,7 +122,7 @@ function FilesCell({
             {spread.volumes.length > 0 && ' · '}
             {spread.unlocated_files.toLocaleString()}{' '}
             {spread.unlocated_place === 'server'
-              ? 'only on the server'
+              ? 'not on this computer'
               : 'missing'}
           </span>
         )}

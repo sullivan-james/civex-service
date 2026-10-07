@@ -1,18 +1,19 @@
-import { useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router'
-import type { FilePick, ListedFile, PlaceSummary } from '../../api/fileAccess'
-import type { FilterTreeWire } from '../../utils/filterTree'
+import { useState } from 'react'
+import { Link } from 'react-router'
+import type {
+  FilePick,
+  FileSelection,
+  ListedFile,
+  PlaceSummary,
+} from '../../api/fileAccess'
 import { useListParams } from '../../hooks/useListParams'
 import { useFollowsServer } from '../../hooks/useRemote'
-import { useSchemas } from '../../hooks/useSchemas'
 import { PROJECT, useDriveChoice } from '../../hooks/useDriveChoice'
 import { useQueryClient } from '@tanstack/react-query'
 import { useFileListing, useFreeUpFiles } from '../../hooks/useFileListing'
 import { errorMessage } from '../../lib/errors'
-import { filterableFields } from '../../utils/hierarchy'
 import { placeLabel } from '../../utils/places'
 import { formatSize } from '../../utils/storage'
-import { FilterControls } from '../explorer/FilterControls'
 import { FileLink } from '../records/FileLocation'
 import { SelectionBar } from '../explorer/SelectionBar'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
@@ -21,13 +22,11 @@ import {
   Button,
   Chip,
   DataTable,
-  Input,
   Modal,
   ModalBody,
   ModalFooter,
   ModalHeader,
   Pagination,
-  Select,
   useToast,
 } from '../ui'
 import { DrivePicker } from './DrivePicker'
@@ -36,23 +35,16 @@ import { ToDownloadNotice } from './ToDownloadNotice'
 
 const NS = 'files.'
 
-/** The files of a collection, or of a record and everything beneath it: where
- * each one is, picked out by kind of record (with the explorer's own filter),
- * place and name, and acted on: moved onto a drive, downloaded from the
- * server, or removed from this computer to free space. Everything is in the
- * address, so a view of "the 2024 recordings still on the field SSD" is a
- * link. What is listed is exactly what an action takes (the server picks both
- * by the same rule). */
-export function FilesTab({
-  scope,
-}: {
-  /** A collection (by name), and/or a record whose files and its
-   * descendants' are taken. */
-  scope: { collection?: string; within?: string }
-}) {
-  const list = useListParams(NS, ['place', 'kind'], 50)
-  const [sp, setSp] = useSearchParams()
-  const { data: schemas = [] } = useSchemas()
+/** What the records explorer is listing, as files: the files of those records
+ * and of everything beneath them, under the explorer's own filters (any
+ * condition, on any level), search and saved view, so there is nothing to set
+ * twice. Here it adds where each file is (the places bar, a filter by place),
+ * ticks with "all N matching", and what to do with them: move them onto a
+ * drive, download them from the server, or free this computer's space. What is
+ * listed is exactly what an action takes (the server picks both by the same
+ * rule). */
+export function FilesView({ selection }: { selection: FileSelection }) {
+  const list = useListParams(NS, ['place'], 50)
   const followsServer = useFollowsServer()
   const [acting, setActing] = useState<'move' | 'free' | null>(null)
   const toast = useToast()
@@ -62,30 +54,9 @@ export function FilesTab({
   const flow: FlowContext = { toast, qc, problem: () => undefined }
   const free = useFreeUpFiles()
 
-  const kind = list.picks.kind
-  const kindSchema = schemas.find((s) => s.name === kind)
-  const filter = useMemo<FilterTreeWire | null>(() => {
-    const raw = sp.get(`${NS}filter`)
-    try {
-      return raw ? (JSON.parse(raw) as FilterTreeWire) : null
-    } catch {
-      return null
-    }
-  }, [sp])
-  const kinds = schemas.filter((s) =>
-    s.fields.some((f) => f.type === 'file' || f.type === 'file_list'),
-  )
-  const fields = useMemo(
-    () => (kindSchema ? filterableFields(kindSchema, schemas) : []),
-    [kindSchema, schemas],
-  )
-
   const pick: FilePick = {
-    ...scope,
-    schema_name: kind || undefined,
-    filter: kind && filter ? filter : undefined,
+    ...selection,
     place: list.picks.place || undefined,
-    name: list.q || undefined,
   }
   const order = list.sort
     ? `${list.sort.dir === 'desc' ? '-' : ''}${list.sort.field}`
@@ -115,33 +86,6 @@ export function FilesTab({
   const count = picked.count(total)
   const what = `${count.toLocaleString()} file${count === 1 ? '' : 's'}`
 
-  function setKind(next: string) {
-    setSp(
-      (prev) => {
-        const out = new URLSearchParams(prev)
-        out.delete(`${NS}page`)
-        out.delete(`${NS}filter`)
-        if (next) out.set(`${NS}kind`, next)
-        else out.delete(`${NS}kind`)
-        return out
-      },
-      { replace: true },
-    )
-  }
-
-  function setFilter(wire: FilterTreeWire | null) {
-    setSp(
-      (prev) => {
-        const out = new URLSearchParams(prev)
-        out.delete(`${NS}page`)
-        if (wire) out.set(`${NS}filter`, JSON.stringify(wire))
-        else out.delete(`${NS}filter`)
-        return out
-      },
-      { replace: true },
-    )
-  }
-
   return (
     <div className="space-y-4">
       <Places
@@ -149,37 +93,6 @@ export function FilesTab({
         value={list.picks.place}
         onChange={(place) => list.set({ place: place || undefined })}
       />
-
-      <div className="flex flex-wrap items-center gap-3">
-        <Input
-          aria-label="Find files by name"
-          placeholder="File or record name"
-          value={list.q}
-          onChange={(e) => list.set({ q: e.target.value || undefined })}
-          className="w-64"
-        />
-        <Select
-          size="sm"
-          aria-label="Records of kind"
-          value={kind}
-          onChange={(e) => setKind(e.target.value)}
-        >
-          <option value="">Every kind of record</option>
-          {kinds.map((s) => (
-            <option key={s.name} value={s.name}>
-              {s.label ?? s.name}
-            </option>
-          ))}
-        </Select>
-      </div>
-      {kindSchema && (
-        <FilterControls
-          wire={filter}
-          fields={fields}
-          listedSchema={kindSchema.name}
-          onChange={setFilter}
-        />
-      )}
 
       <SelectionBar
         selectedCount={picked.selected.size}
@@ -221,9 +134,9 @@ export function FilesTab({
           error={error ? errorMessage(error) : undefined}
           emptyTitle="No files"
           emptyMessage={
-            list.picks.place || list.q || filter
-              ? 'None match: clear a filter to see more.'
-              : 'No record here holds a file.'
+            list.picks.place
+              ? 'None here: pick another place to see more.'
+              : 'None of these records holds a file.'
           }
           sort={
             list.sort

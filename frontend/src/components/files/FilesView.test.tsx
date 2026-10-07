@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider } from '../ui'
-import { FilesTab } from './FilesTab'
+import { FilesView } from './FilesView'
 import { fakeServer } from './testSupport'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -68,14 +68,14 @@ function show() {
     <QueryClientProvider client={new QueryClient()}>
       <ToastProvider>
         <MemoryRouter>
-          <FilesTab scope={{ collection: 'hb' }} />
+          <FilesView selection={{ collection: 'hb' }} />
         </MemoryRouter>
       </ToastProvider>
     </QueryClientProvider>,
   )
 }
 
-describe('FilesTab', () => {
+describe('FilesView', () => {
   it('says where every file is, and lists one place when it is picked', async () => {
     const calls = fakeServer({
       '/api/file-access/files': LISTING,
@@ -85,7 +85,7 @@ describe('FilesTab', () => {
     })
     show()
     expect(await screen.findByText('All · 2 · 2.5 KB')).toBeInTheDocument()
-    expect(screen.getByText('Only on the server · 1')).toBeInTheDocument()
+    expect(screen.getByText('Not on this computer · 1')).toBeInTheDocument()
     const table = screen.getByRole('table')
     expect(within(table).getByText('s2')).toBeInTheDocument()
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import { viewsApi } from '../../api/views'
 import {
@@ -23,6 +23,7 @@ import {
   type MenuItem,
   TriggerPopover,
   TableSkeleton,
+  SegmentedControl,
   Field,
 } from '../ui'
 import { ChevronDown, Columns3, Download, Plus, Upload } from '../ui/icons'
@@ -38,6 +39,7 @@ import { DrillLinks } from './DrillLinks'
 import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
 import { SelectionBar } from './SelectionBar'
+import { FilesView } from '../files/FilesView'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { BulkRunWorkflow, bulkRunnable } from '../workflows/BulkRunWorkflow'
 import { FileAccessActions } from '../files/FileAccessActions'
@@ -112,6 +114,10 @@ export function RecordsExplorer({
     JSON.stringify([listedName, x.rootId, x.query, state.page, state.pageSize]),
   )
   const { selected, allMatching } = picked
+  // The same records, as their files (and those of everything beneath them):
+  // one set of filters for both, held in the address like the rest.
+  const [params, setParams] = useSearchParams()
+  const showFiles = params.get('show') === 'files'
   const [confirmDelete, setConfirmDelete] = useState(false)
   const deleteMany = useDeleteManyRecords(dataset ?? '')
   const deleteMatching = useDeleteMatchingRecords(dataset ?? '')
@@ -567,107 +573,141 @@ export function RecordsExplorer({
               {listedLabel.toLowerCase()}
               {state.q && <> matching “{state.q}”</>}
             </p>
+            <SegmentedControl
+              size="sm"
+              label="Show"
+              value={showFiles ? 'files' : 'records'}
+              onChange={(v) =>
+                setParams(
+                  (prev) => {
+                    const out = new URLSearchParams(prev)
+                    if (v === 'files') out.set('show', 'files')
+                    else out.delete('show')
+                    return out
+                  },
+                  { replace: true },
+                )
+              }
+              options={[
+                { value: 'records', label: 'Records' },
+                { value: 'files', label: 'Their files' },
+              ]}
+            />
           </div>
         )}
 
-        {dataset && (
-          <SelectionBar
-            selectedCount={selected.size}
-            pageCount={rows.length}
-            total={total}
-            allMatching={allMatching}
-            onSelectAllMatching={picked.selectAllMatching}
-            onDelete={() => setConfirmDelete(true)}
-            deleting={deleteMany.isPending || deleteMatching.isPending}
-            // Runs are queued for the records ticked, not for "all matching":
-            // that would be every record the filters match, on every page.
-            actions={
-              <>
-                <FileAccessActions
-                  selection={exportContext(
-                    allMatching ? undefined : [...selected],
-                  )}
-                  folderName={`${folderName}-selected`}
-                  scopeSchema={listedName ?? undefined}
-                  builderTo={builderHref}
-                />
-                {!allMatching && (
-                  <BulkRunWorkflow
-                    workflows={runnable}
-                    recordIds={[...selected]}
-                    onStarted={picked.clear}
-                  />
-                )}
-              </>
-            }
-          />
-        )}
-
-        {x.page.error ? (
-          // In place of the rows only: the filters and search stay editable,
-          // since a bad one is usually what caused this.
-          <div className="space-y-2">
-            <ErrorState message={errorMessage(x.page.error)} />
-            {(x.hasSelection || state.q) && (
-              <Button
-                size="sm"
-                onClick={() =>
-                  patch({
-                    filter: null,
-                    sort: [],
-                    cols: null,
-                    view: null,
-                    q: '',
-                  })
-                }
-              >
-                Clear filters
-              </Button>
+        {showFiles ? (
+          <FilesView
+            selection={selectionFor(
+              x.query,
+              dataset,
+              undefined,
+              undefined,
+              true,
             )}
-          </div>
-        ) : x.page.isLoading ? (
-          <TableSkeleton
-            columns={['w-8', 'w-24', 'w-32', 'w-32', 'w-24']}
-            rows={8}
-          />
-        ) : rows.length === 0 ? (
-          <EmptyState
-            title={`No ${listedLabel.toLowerCase()} match`}
-            message={
-              state.q || x.filter
-                ? 'Try removing a filter or clearing the search.'
-                : 'Nothing here yet.'
-            }
           />
         ) : (
-          <div aria-busy={x.page.isFetching}>
-            <RecordsTable
-              columns={columns}
-              rows={rows}
-              schemas={x.schemas}
-              recordLink={(r) => `/records/${r.id}`}
-              sort={sort}
-              onSortChange={toggleSort}
-              selection={dataset ? picked.table : undefined}
-              trailing={{
-                header: 'Contains',
-                render: (row) => (
-                  <DrillLinks
-                    counts={row.child_counts}
-                    byName={x.byName}
-                    onDrill={(child) => drill(row, child)}
-                  />
-                ),
-              }}
-            />
-            <Pagination
-              page={state.page}
-              pageSize={state.pageSize}
-              total={total}
-              onPage={(page) => patch({ page })}
-              onPageSize={(pageSize) => patch({ pageSize })}
-            />
-          </div>
+          <>
+            {dataset && (
+              <SelectionBar
+                selectedCount={selected.size}
+                pageCount={rows.length}
+                total={total}
+                allMatching={allMatching}
+                onSelectAllMatching={picked.selectAllMatching}
+                onDelete={() => setConfirmDelete(true)}
+                deleting={deleteMany.isPending || deleteMatching.isPending}
+                // Runs are queued for the records ticked, not for "all matching":
+                // that would be every record the filters match, on every page.
+                actions={
+                  <>
+                    <FileAccessActions
+                      selection={exportContext(
+                        allMatching ? undefined : [...selected],
+                      )}
+                      folderName={`${folderName}-selected`}
+                      scopeSchema={listedName ?? undefined}
+                      builderTo={builderHref}
+                    />
+                    {!allMatching && (
+                      <BulkRunWorkflow
+                        workflows={runnable}
+                        recordIds={[...selected]}
+                        onStarted={picked.clear}
+                      />
+                    )}
+                  </>
+                }
+              />
+            )}
+
+            {x.page.error ? (
+              // In place of the rows only: the filters and search stay editable,
+              // since a bad one is usually what caused this.
+              <div className="space-y-2">
+                <ErrorState message={errorMessage(x.page.error)} />
+                {(x.hasSelection || state.q) && (
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      patch({
+                        filter: null,
+                        sort: [],
+                        cols: null,
+                        view: null,
+                        q: '',
+                      })
+                    }
+                  >
+                    Clear filters
+                  </Button>
+                )}
+              </div>
+            ) : x.page.isLoading ? (
+              <TableSkeleton
+                columns={['w-8', 'w-24', 'w-32', 'w-32', 'w-24']}
+                rows={8}
+              />
+            ) : rows.length === 0 ? (
+              <EmptyState
+                title={`No ${listedLabel.toLowerCase()} match`}
+                message={
+                  state.q || x.filter
+                    ? 'Try removing a filter or clearing the search.'
+                    : 'Nothing here yet.'
+                }
+              />
+            ) : (
+              <div aria-busy={x.page.isFetching}>
+                <RecordsTable
+                  columns={columns}
+                  rows={rows}
+                  schemas={x.schemas}
+                  recordLink={(r) => `/records/${r.id}`}
+                  sort={sort}
+                  onSortChange={toggleSort}
+                  selection={dataset ? picked.table : undefined}
+                  trailing={{
+                    header: 'Contains',
+                    render: (row) => (
+                      <DrillLinks
+                        counts={row.child_counts}
+                        byName={x.byName}
+                        onDrill={(child) => drill(row, child)}
+                      />
+                    ),
+                  }}
+                />
+                <Pagination
+                  page={state.page}
+                  pageSize={state.pageSize}
+                  total={total}
+                  onPage={(page) => patch({ page })}
+                  onPageSize={(pageSize) => patch({ pageSize })}
+                />
+              </div>
+            )}
+          </>
         )}
         {listed && listed.parent_id && !scope.root && x.chain.length === 0 && (
           <p className="text-xs text-fg-muted">

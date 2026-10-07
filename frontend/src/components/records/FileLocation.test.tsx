@@ -124,7 +124,7 @@ describe('FileLocationChip', () => {
         })}
       />,
     )
-    const chip = await screen.findByText('on the server')
+    const chip = await screen.findByText('not on this computer')
     expect(chip.closest('button')).toHaveAttribute(
       'title',
       'Not downloaded to this computer yet: opening it downloads it.',

@@ -586,7 +586,7 @@ def files_fetch(
     try:
         _, items = ctx.file_access_svc.chosen(selection, "server", name)
         if not items:
-            console.print("[dim]None of them is only on the server.[/dim]")
+            console.print("[dim]All of them are on this computer.[/dim]")
             return
         report = ctx.file_access_svc.download(items)
         ctx.commit()

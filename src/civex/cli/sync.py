@@ -192,7 +192,7 @@ def files(
     ),
 ) -> None:
     """See, per collection, how many files are on this computer and how many are
-    only on the server, and whether it keeps a copy here. With a mode, set the
+    not on this computer, and whether it keeps a copy here. With a mode, set the
     default for collections that haven't their own (`civex sync keep`)."""
     c = _ctx()
     try:
@@ -215,7 +215,7 @@ def files(
     table.add_column("Collection")
     table.add_column("Keeps")
     table.add_column("On this computer", justify="right")
-    table.add_column("Only on the server", justify="right")
+    table.add_column("Not on this computer", justify="right")
     for r in rows:
         table.add_row(
             escape(r.name),

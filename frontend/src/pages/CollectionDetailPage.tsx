@@ -22,7 +22,6 @@ import {
   useTabParam,
 } from '../components/ui'
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
-import { CollectionStorage } from '../components/collections/CollectionStorage'
 import { recordCollectionVisit } from '../hooks/useFrequentCollections'
 import { recordRecent } from '../hooks/usePins'
 import { collectionTarget } from '../utils/navTargets'
@@ -34,12 +33,10 @@ import { CollectionScopeFields } from '../components/collections/CollectionScope
 import { inCollection } from '../utils/auditFilter'
 import { errorMessage } from '../lib/errors'
 import { CollectionExportsSection } from '../components/exports/CollectionExportsSection'
-import { FilesTab } from '../components/files/FilesTab'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
 
 const COLLECTION_TABS = [
   { id: 'records' },
-  { id: 'files' },
   { id: 'exports' },
   { id: 'activity' },
 ] as const
@@ -58,8 +55,22 @@ export default function CollectionDetailPage() {
   const [schemasValue, setSchemasValue] = useState<string[]>([])
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [tab, setTab] = useTabParam(COLLECTION_TABS, 'records')
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
+  // The Storage tab became the records list's "Their files" view: its old
+  // links land there.
   const legacyTab = params.get('tab')
+  useEffect(() => {
+    if (legacyTab !== 'storage') return
+    setParams(
+      (prev) => {
+        const out = new URLSearchParams(prev)
+        out.delete('tab')
+        out.set('show', 'files')
+        return out
+      },
+      { replace: true },
+    )
+  }, [legacyTab, setParams])
 
   const { data: collection, isLoading, error } = useCollection(id!)
   const collectionName = collection?.name
@@ -141,8 +152,7 @@ export default function CollectionDetailPage() {
   }
 
   const recordCount = collection.record_count
-  // The Storage tab became part of Files: its old links still land there.
-  const shownTab = legacyTab === 'storage' ? 'files' : tab
+  const shownTab = tab
 
   return (
     <CollectionTimeZone
@@ -178,7 +188,6 @@ export default function CollectionDetailPage() {
               onChange={setTab}
               tabs={[
                 { id: 'records' as const, label: 'Records' },
-                { id: 'files' as const, label: 'Files' },
                 { id: 'exports' as const, label: 'Exports' },
                 { id: 'activity' as const, label: 'Activity' },
               ]}
@@ -274,13 +283,6 @@ export default function CollectionDetailPage() {
 
           <TabPanel id="exports" value={shownTab}>
             <CollectionExportsSection collection={collection.name} />
-          </TabPanel>
-
-          <TabPanel id="files" value={shownTab}>
-            <FilesTab scope={{ collection: collection.name }} />
-            <div className="mt-6">
-              <CollectionStorage collectionId={collection.id} />
-            </div>
           </TabPanel>
 
           <TabPanel id="activity" value={shownTab}>

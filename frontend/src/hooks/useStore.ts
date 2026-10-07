@@ -19,13 +19,6 @@ export function useVolumes() {
 
 /** Where a collection's files are, by volume. Refreshed when a move is started
  * or controlled (see `useTransfers`) and whenever the page is revisited. */
-export function useCollectionStorage(collectionId: string) {
-  return useQuery({
-    queryKey: ['store', 'collection', collectionId],
-    queryFn: () => storeApi.collectionStorage(collectionId),
-    staleTime: 10_000,
-  })
-}
 
 /** Where every collection's files are (those that have any), in one request. */
 export function useAllCollectionStorage() {

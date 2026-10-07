@@ -314,22 +314,28 @@ Removing a linked folder gives back no space and never touches the stored files.
 
 ## Where files are, and moving them
 
-A collection's page and a record's page each have a **Files** tab. On a record
-it covers that record and everything beneath it. It lists the files with
-where each one is, and above them a bar of where all of them are: each drive,
-a drive that isn't plugged in, **only on the server** (for a project that
-syncs) and **missing**. Click a place to list only its files.
+The record list, on a collection's **Records** tab and a record's
+**Contains** tab, has a switch above it: **Records | Their files**. *Their
+files* lists the files of exactly the records you are looking at, and of
+everything beneath them, under the same filters, search and saved view. For
+example, filter to Recordings that have a Selection with `selection_number`
+below 5, then switch to their files.
 
-Narrow the list by the kind of record that holds the files, with the same
-filters as the record explorer, and by file or record name. The whole view
-is in the page address, so it can be bookmarked or shared.
+Above the files is a bar of where all of them are: each drive, a drive that
+isn't plugged in, **not on this computer** (for a project that syncs:
+downloading it fetches it from the server) and **missing**. Click a place to
+list only its files. The whole view is in the page address, so it can be
+bookmarked or shared.
 
-Tick files, or leave none ticked to use everything that matches, then:
+Tick files (ticking a whole page offers every file that matches, on every
+page), then:
 
 - **Move to drive…** moves just those files onto one drive, in the background.
-  Files only on the server are downloaded first, and files on a drive that
+  Files not on this computer are downloaded first, and files on a drive that
   isn't plugged in stay where they are.
-- **Download to this computer** brings the ones only on the server here.
+- **Download to this computer** fetches the ones not on this computer from
+  the server. Any the server hasn't got yet (the device that added them
+  hasn't sent them) are named.
 - **Free up space…** removes this computer's copies of files the server holds
   (see [Files on this computer](sync.md#which-files-this-computer-keeps)).
 

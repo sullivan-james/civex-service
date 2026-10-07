@@ -135,7 +135,7 @@ Each file comes back the next time it's opened or exported. It's safe to use:
 
 === "CLI"
     ```bash
-    civex sync files                 # each collection: here, only on the server, setting
+    civex sync files                 # each collection: here, not here, its setting
     civex sync files opened          # the default: fetch when opened (or: all)
     civex sync keep "Humpbacks"      # keep this collection's files here
     civex sync keep "Archive" --opened   # or --reset to follow the default
@@ -146,8 +146,8 @@ Each file comes back the next time it's opened or exported. It's safe to use:
 === "Web UI"
     Settings → Storage → **Collections**: the default above the table, and for
     each collection its setting and **Free up space…**; its bar says how many
-    files are only on the server. To act on some files rather than a whole
-    collection, use a collection's or record's **Files** tab.
+    files are not on this computer. To act on some files rather than a whole
+    collection, use **Their files** above a collection's or record's list.
 
 Downloaded files are checked against their content hash. They go on the drive their
 collection's files go to (see
