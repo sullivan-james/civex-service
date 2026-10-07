@@ -316,7 +316,10 @@ describe('FileLink download check', () => {
 
     await user.click(screen.getByRole('link', { name: 'Download' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(detail)
+    // A situation the server explains (amber), not a failure (red).
+    const note = await screen.findByText(detail)
+    expect(note).toHaveAttribute('role', 'status')
+    expect(note).toHaveClass('text-attention')
   })
 
   it('starts the browser download and says so when the file can be served', async () => {

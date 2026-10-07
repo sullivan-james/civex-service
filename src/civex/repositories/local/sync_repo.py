@@ -6,6 +6,7 @@ is how a change made on one machine is reproduced on another."""
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -201,6 +202,36 @@ class LocalSyncRepository:
                 select(func.count()).select_from(query.subquery())
             ).scalar_one()
         )
+
+    def added_by(self, shas: list[str]) -> dict[str, str | None]:
+        """Which device (else author) added each of these files: the earliest
+        history entry of a record citing it whose new side has it and old side
+        hasn't. A few lookups per file, for the handful a person is told about
+        (files nobody can fetch yet), never a list."""
+        out: dict[str, str | None] = {}
+        for sha in dict.fromkeys(shas):
+            holders = [
+                r
+                for (r,) in self._s.execute(
+                    select(FileReference.record_id).where(
+                        FileReference.sha256 == sha,
+                        FileReference.record_id.is_not(None),
+                    )
+                )
+            ]
+            out[sha] = None
+            if not holders:
+                continue
+            for row in (
+                self._s.query(AuditLog)
+                .filter(AuditLog.entity_id.in_(holders))
+                .order_by(*_WRITE_ORDER)
+            ):
+                old, new = entry_snapshots(row.old_data, row.new_data, row.delta)
+                if sha in json.dumps(new or {}) and sha not in json.dumps(old or {}):
+                    out[sha] = row.device or row.actor
+                    break
+        return out
 
     def files_by_collection(self) -> dict[uuid.UUID, tuple[int, int, int]]:
         """Per live collection: the distinct files its records use that a drive

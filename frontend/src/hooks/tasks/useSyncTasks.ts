@@ -26,9 +26,10 @@ export function useSyncTasks(): BackgroundTask[] {
         title: text.title,
         progress:
           text.fraction != null
-            ? { fraction: text.fraction, label: text.title }
+            ? { fraction: text.fraction, label: text.title, count: text.count }
             : undefined,
-        detail: text.detail,
+        // Without a bar (how many isn't known yet), the count says how far.
+        detail: text.fraction != null ? undefined : text.detail,
         actions: [details],
       },
     ]

@@ -90,10 +90,11 @@ describe('useSyncTasks', () => {
     await waitFor(() => expect(result.current).toHaveLength(1))
     expect(result.current[0]).toMatchObject({
       title: 'Copying the project from the server',
-      progress: { fraction: 0.25 },
+      // The numbers beside the bar, not repeated as a detail.
+      progress: { fraction: 0.25, count: '50 of 200 records' },
       tone: 'info',
     })
-    expect(result.current[0].detail).toContain('records')
+    expect(result.current[0].detail).toBeUndefined()
   })
 
   it('says when connecting stopped', async () => {

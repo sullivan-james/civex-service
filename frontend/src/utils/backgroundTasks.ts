@@ -20,8 +20,10 @@ export interface BackgroundTask {
   spinning?: boolean
   /** What it is, in a few words. */
   title: string
-  /** A bar, when how far along it is is known. Without it, no bar is drawn. */
-  progress?: { fraction: number; label: string }
+  /** A bar, when how far along it is is known. Without it, no bar is drawn.
+   * `label` names it for a screen reader; `count` is shown beside it
+   * ("12 of 50 files"), else the percentage is. */
+  progress?: { fraction: number; label: string; count?: string }
   /** The particulars: counts, speed, time left. */
   detail?: string
   /** Something muted beside it, such as how many more are waiting. */

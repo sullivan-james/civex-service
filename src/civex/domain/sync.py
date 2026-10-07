@@ -368,6 +368,21 @@ def parse_snapshot_cursor(cursor: str) -> tuple[str, str]:
     return created_at, id_
 
 
+def not_on_server_yet(added_by: str | None) -> tuple[str, str]:
+    """(reason, fix) for a file this computer hasn't got and the server hasn't
+    either: the computer that added it hasn't sent it yet. The one wording,
+    wherever it is said (opening it, downloading, an export)."""
+    if added_by:
+        return (
+            f"It is still only on '{added_by}'.",
+            "It arrives here once that computer syncs.",
+        )
+    return (
+        "It is still only on the computer that added it.",
+        "It arrives here once that computer syncs.",
+    )
+
+
 class SyncError(RuntimeError):
     """Sync could not finish. `retryable` is true for what trying again can fix
     (a network failure); a refused token or a protocol mismatch is not."""

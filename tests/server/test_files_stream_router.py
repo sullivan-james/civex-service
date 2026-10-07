@@ -60,9 +60,16 @@ def test_a_file_not_here_is_fetched_from_the_server_when_opened(
     assert resp.status_code == 503 and "can't be reached" in resp.json()["detail"]
 
     monkeypatch.setattr(SyncService, "fetch_file", lambda self, sha256: False)
+    monkeypatch.setattr(
+        SyncService,
+        "not_here_reasons",
+        lambda self, shas: {
+            s: ("It is still only on 'backup'.", "It arrives.") for s in shas
+        },
+    )
     resp = client.get(f"/api/files/{sha}")
     assert resp.status_code == 404
-    assert "hasn't reached the server" in resp.json()["detail"]
+    assert resp.json()["detail"] == "It is still only on 'backup'. It arrives."
 
     def fetched(self, sha256):
         self._files.put(payload, "x.bin", None)

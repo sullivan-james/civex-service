@@ -212,7 +212,8 @@ describe('following a request while it runs', () => {
 
     expect(jobs.result.current[0].progress).toEqual({
       fraction: 0.3,
-      label: '12,000 of 40,000',
+      label: 'Finding files',
+      count: '12,000 of 40,000',
     })
     g.open()
     await running
@@ -382,7 +383,18 @@ describe('moving and downloading picked files', () => {
 
   it('downloads only what is on the server, with its progress followed', async () => {
     const calls = fakeServer({
-      '/api/file-access/download': { fetched: 4, absent: 1 },
+      '/api/file-access/download': {
+        fetched: 4,
+        listed: 9,
+        absent: 1,
+        absent_where: [
+          {
+            reason: "It is still only on 'backup'.",
+            fix: 'It arrives here once that computer syncs.',
+            files: 1,
+          },
+        ],
+      },
     })
     const { ctx, toast } = context()
 
@@ -395,7 +407,7 @@ describe('moving and downloading picked files', () => {
     })
     expect(calls[0].headers['x-civex-progress']).toBeTruthy()
     expect(toast.success).toHaveBeenCalledWith(
-      "Downloaded 4 files; 1 file hasn't reached the server yet.",
+      "Downloaded 4 files. Some records share a file, so 9 listed files are on this computer now. 1 file not downloaded: It is still only on 'backup'. It arrives here once that computer syncs.",
     )
   })
 })

@@ -74,14 +74,18 @@ function DownloadLink({
   title?: string
   children: ReactNode
 }) {
-  const [note, setNote] = useState<{ error: boolean; text: string } | null>(
-    null,
-  )
+  // error: it failed (red, stays); attention: a situation the server
+  // explains, such as a file not here yet or its drive unplugged (amber,
+  // stays); info: what is happening (fades).
+  const [note, setNote] = useState<{
+    tone: 'error' | 'attention' | 'info'
+    text: string
+  } | null>(null)
   const name = file.resolved_filename ?? file.filename
   const href = `/api/files/${file.sha256}?filename=${encodeURIComponent(name)}`
 
   useEffect(() => {
-    if (!note || note.error) return
+    if (!note || note.tone !== 'info') return
     const timer = setTimeout(() => setNote(null), 6000)
     return () => clearTimeout(timer)
   }, [note])
@@ -92,7 +96,7 @@ function DownloadLink({
     e.preventDefault()
     setNote(
       file.location?.state === 'remote'
-        ? { error: false, text: 'Downloading it from the server first…' }
+        ? { tone: 'info', text: 'Downloading it from the server first…' }
         : null,
     )
     const abort = new AbortController()
@@ -101,7 +105,8 @@ function DownloadLink({
       if (!res.ok) {
         const body = await res.json().catch(() => null)
         setNote({
-          error: true,
+          tone:
+            res.status === 404 || res.status === 503 ? 'attention' : 'error',
           text:
             body?.detail ?? `The file couldn't be downloaded (${res.status}).`,
         })
@@ -110,7 +115,7 @@ function DownloadLink({
       abort.abort() // only the headers were wanted; the browser fetches the rest
     } catch {
       setNote({
-        error: true,
+        tone: 'error',
         text: "Couldn't reach the server to download this.",
       })
       return
@@ -120,7 +125,7 @@ function DownloadLink({
     link.download = name
     link.click()
     setNote({
-      error: false,
+      tone: 'info',
       text: "Download started. It's in your browser's downloads.",
     })
   }
@@ -138,8 +143,14 @@ function DownloadLink({
       </a>
       {note && (
         <span
-          role={note.error ? 'alert' : 'status'}
-          className={`text-xs ${note.error ? 'text-danger' : 'text-fg-muted'}`}
+          role={note.tone === 'error' ? 'alert' : 'status'}
+          className={`text-xs ${
+            note.tone === 'error'
+              ? 'text-danger'
+              : note.tone === 'attention'
+                ? 'text-attention'
+                : 'text-fg-muted'
+          }`}
         >
           {note.text}
         </span>

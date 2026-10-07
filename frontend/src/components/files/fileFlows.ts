@@ -3,6 +3,7 @@ import {
   fileAccessApi,
   problemFrom,
   type ExportProblem,
+  type DownloadResult,
   type FilePick,
   type FilePlanSummary,
   type FileSelection,
@@ -86,7 +87,8 @@ function watchProgress(j: JobHandle, id: string, every: number): () => void {
           p.total > 0
             ? {
                 fraction: Math.min(1, p.done / p.total),
-                label: `${p.done.toLocaleString()} of ${p.total.toLocaleString()}`,
+                label: p.phase || 'Progress',
+                count: `${p.done.toLocaleString()} of ${p.total.toLocaleString()}`,
               }
             : undefined,
       })
@@ -336,13 +338,23 @@ export function downloadFiles(ctx: FlowContext, pick: FilePick) {
       fileAccessApi.download({ ...pick, place: 'server' }, progressId),
     )
     refreshPlaces(ctx)
-    ctx.toast.success(
-      `Downloaded ${plural(got.fetched, 'file')}` +
-        (got.absent
-          ? `; ${plural(got.absent, 'file')} ${got.absent === 1 ? "hasn't" : "haven't"} reached the server yet.`
-          : '.'),
-    )
+    ctx.toast.success(downloadReport(got))
   })
+}
+
+/** What a download did, in a person's terms: how many files came, the listed
+ * rows that covers when records share files, and where any still are. */
+export function downloadReport(got: DownloadResult): string {
+  const parts = [`Downloaded ${plural(got.fetched, 'file')}.`]
+  if (got.listed > got.fetched)
+    parts.push(
+      `Some records share a file, so ${got.listed.toLocaleString()} listed files are on this computer now.`,
+    )
+  for (const g of got.absent_where ?? [])
+    parts.push(
+      `${plural(g.files, 'file')} not downloaded: ${g.reason} ${g.fix}`,
+    )
+  return parts.join(' ')
 }
 
 /** Everything that says where files are, asked again after they moved. */

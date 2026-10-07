@@ -309,6 +309,7 @@ def build_local_context(
     file_access_svc.free_files = lambda shas, dry: _sync().free_up_files(
         shas, dry_run=dry
     )
+    file_access_svc.why_not_here = lambda shas: _sync().not_here_reasons(shas)
 
     ctx: AppContext = AppContext(
         schema_svc=schema_svc,

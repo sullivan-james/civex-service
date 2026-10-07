@@ -153,4 +153,6 @@ def test_a_file_the_server_lacks_is_unreachable_once_the_export_has_tried(
     plan = phone.file_access_svc.plan(selection, fetch=True)
     assert not plan.complete
     (group,) = plan.unavailable
-    assert "Not on the server yet" in group.reason
+    # Where it still is: the device that added it (its token's name).
+    assert group.reason == "It is still only on 'laptop'."
+    assert group.fix == "It arrives here once that computer syncs."

@@ -318,6 +318,18 @@ export interface FileListing {
   items: ListedFile[]
 }
 
+/** What a download from the server did. */
+export interface DownloadResult {
+  /** Files that came. */
+  fetched: number
+  /** Listed rows those cover: records that share a file share its download. */
+  listed: number
+  /** Files the server hasn't got either. */
+  absent: number
+  /** Where those still are, and what brings them, grouped. */
+  absent_where: { reason: string; fix: string; files: number }[]
+}
+
 export const fileAccessApi = {
   /** Totals, which drives hold the files, and what's out of reach; makes
    * nothing. */
@@ -387,11 +399,7 @@ export const fileAccessApi = {
 
   /** Bring the picked files that are only on the server to this computer. */
   download: (pick: FilePick, progressId?: string) =>
-    api.post<{ fetched: number; absent: number }>(
-      '/file-access/download',
-      pick,
-      tagged(progressId),
-    ),
+    api.post<DownloadResult>('/file-access/download', pick, tagged(progressId)),
 
   /** Remove this computer's copies of the picked files the server holds;
    * `dryRun` only counts. */

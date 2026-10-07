@@ -117,13 +117,8 @@ def download_file(sha256: str, filename: str = "", ctx: AppContext = Depends(get
                     ),
                 )
             if not fetched:
-                raise HTTPException(
-                    404,
-                    detail=(
-                        "This file hasn't reached the server yet: the device that "
-                        "added it hasn't sent it. It can be opened once it has."
-                    ),
-                )
+                reason, fix = ctx.sync_svc.not_here_reasons([sha256])[sha256]
+                raise HTTPException(404, detail=f"{reason} {fix}")
             ctx.commit()
             return FileResponse(
                 ctx.file_svc.local_path(sha256),

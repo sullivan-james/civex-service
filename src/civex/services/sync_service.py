@@ -52,6 +52,7 @@ from civex.domain.sync import (
     SyncEntry,
     SyncError,
     SyncProgress,
+    not_on_server_yet,
     SyncTransport,
     snapshot_cursor,
 )
@@ -1200,6 +1201,14 @@ class SyncService:
                 self._files.delete(sha)
         self._commit()
         return report
+
+    def not_here_reasons(self, shas: list[str]) -> dict[str, tuple[str, str]]:
+        """(reason, fix) for each of these files the server hasn't got either:
+        where it still is (the computer that added it) and what brings it."""
+        return {
+            sha: not_on_server_yet(who)
+            for sha, who in self._repo.added_by(shas).items()
+        }
 
     def set_download_files(self, mode: str) -> None:
         """Which files this device keeps a copy of: `all` (fetched in the

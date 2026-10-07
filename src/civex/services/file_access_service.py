@@ -25,6 +25,7 @@ from typing import Any, Callable, Iterator
 from civex import __version__
 from civex.domain.dtos import FileRef, RecordDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.domain.sync import not_on_server_yet
 from civex.domain import tables as table_rules
 from civex.domain import templating
 from civex.domain.naming import display_label
@@ -99,6 +100,12 @@ class FileAccessService:
         # hashes and whether only to count); None when the project follows no
         # server. Injected like `fetch_missing`.
         self.free_files: Callable[[list[str], bool], object] | None = None
+        # Where files nobody can fetch yet still are, and what brings them
+        # (`SyncService.not_here_reasons`); None when the project follows no
+        # server. Injected like the others.
+        self.why_not_here: Callable[[list[str]], dict[str, tuple[str, str]]] | None = (
+            None
+        )
 
     # -- planning ------------------------------------------------------------
 
@@ -121,7 +128,24 @@ class FileAccessService:
         if not (fetch and remote and self.fetch_missing):
             return found
         self._fetch(remote, progress)
-        return _absent_now(self._plan(selection, with_sources, progress))
+        return self._absent_now(self._plan(selection, with_sources, progress))
+
+    def _absent_now(self, plan: FilePlan) -> FilePlan:
+        """A plan made after downloading what was only on the server: a file
+        still not here is one the server hasn't got either, so it can't be
+        reached (not "to download"), and it says where it still is."""
+        gone = [i.sha256 for i in plan.items if i.state == "remote"]
+        if not gone:
+            return plan
+        why = self.why_not_here(gone) if self.why_not_here else {}
+        for n, item in enumerate(plan.items):
+            if item.state == "remote":
+                reason, fix = why.get(item.sha256, not_on_server_yet(None))
+                plan.items[n] = dataclasses.replace(
+                    item, state="absent", available=False, reason=reason, fix=fix
+                )
+        plan.unavailable = _unavailable_groups(plan.items)
+        return plan
 
     def _fetch(
         self, shas: list[str], progress: Progress | None, volume: str | None = None
@@ -1155,11 +1179,32 @@ class FileAccessService:
         elsewhere = [sha for sha, on in located.items() if on and on != volume]
         return elsewhere, fetched.fetched if fetched else 0
 
-    def download(self, items: list[FileItem], progress: Progress | None = None) -> Any:
-        """Fetch the files among these that are only on the server."""
-        return self._fetch(
-            [i.sha256 for i in items if place_of(i)[1] == "server"], progress
+    def download(
+        self, items: list[FileItem], progress: Progress | None = None
+    ) -> dict[str, Any]:
+        """Fetch the files among these that aren't on this computer. Says how
+        many came, how many of the listed rows that covers (records that share
+        a file share its download), and, for any the server hasn't got either,
+        where they still are, grouped by that."""
+        wanted = list(
+            dict.fromkeys(i.sha256 for i in items if place_of(i)[1] == "server")
         )
+        report = self._fetch(wanted, progress)
+        here = self._store.locate_volumes(wanted)
+        absent = report.absent if report else []
+        why = self.why_not_here(absent) if (absent and self.why_not_here) else {}
+        groups: dict[tuple[str, str], int] = {}
+        for sha in absent:
+            key = why.get(sha, not_on_server_yet(None))
+            groups[key] = groups.get(key, 0) + 1
+        return {
+            "fetched": report.fetched if report else 0,
+            "listed": sum(1 for i in items if here.get(i.sha256)),
+            "absent": len(absent),
+            "absent_where": [
+                {"reason": r, "fix": f, "files": n} for (r, f), n in groups.items()
+            ],
+        }
 
     def free_up(self, items: list[FileItem], dry_run: bool = True) -> Any:
         """Remove this computer's copies of these files, where the server holds
@@ -1482,23 +1527,3 @@ def _places(items: list[FileItem]) -> list[PlaceSummary]:
         row.bytes += item.size
     rank = {"drive": 0, "unreachable": 1, "server": 2, "missing": 3}
     return sorted(out.values(), key=lambda r: (rank[r.kind], -r.bytes, r.place))
-
-
-def _absent_now(plan: FilePlan) -> FilePlan:
-    """A plan made after downloading what was only on the server: a file
-    still not here is one the server hasn't got either, so it can't be reached
-    (not "to download")."""
-    gone = False
-    for i, item in enumerate(plan.items):
-        if item.state == "remote":
-            gone = True
-            plan.items[i] = dataclasses.replace(
-                item,
-                state="absent",
-                available=False,
-                reason="Not on the server yet: the device that added it hasn't sent it.",
-                fix="It can be exported once that device has synced.",
-            )
-    if gone:
-        plan.unavailable = _unavailable_groups(plan.items)
-    return plan

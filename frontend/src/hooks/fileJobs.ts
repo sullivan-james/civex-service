@@ -9,7 +9,7 @@ export interface FileJob {
   title: string
   detail?: string
   /** How far along, when that is known (a move). */
-  progress?: { fraction: number; label: string }
+  progress?: { fraction: number; label: string; count?: string }
   startedAt: number
 }
 

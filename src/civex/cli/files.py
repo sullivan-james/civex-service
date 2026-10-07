@@ -595,10 +595,11 @@ def files_fetch(
         raise typer.Exit(1)
     finally:
         ctx.close()
-    console.print(f"[success]Downloaded {report.fetched} file(s).[/success]")
-    if report.absent:
+    console.print(f"[success]Downloaded {report['fetched']} file(s).[/success]")
+    for group in report["absent_where"]:
         console.print(
-            f"[warning]{len(report.absent)} haven't reached the server yet.[/warning]"
+            f"[warning]{group['files']} not downloaded: {group['reason']} "
+            f"{group['fix']}[/warning]"
         )
 
 

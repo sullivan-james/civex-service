@@ -351,10 +351,7 @@ def download_files(
     except SyncError as e:
         raise HTTPException(503, detail=f"The server can't be reached: {e}")
     ctx.commit()
-    return {
-        "fetched": report.fetched if report else 0,
-        "absent": len(report.absent) if report else 0,
-    }
+    return report
 
 
 @router.post("/free-up")

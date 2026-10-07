@@ -13,6 +13,7 @@ describe('describeSyncProgress', () => {
     ).toEqual({
       title: 'Copying the project from the server',
       detail: `records · ${(12000).toLocaleString()} of ${(48000).toLocaleString()}`,
+      count: `${(12000).toLocaleString()} of ${(48000).toLocaleString()} records`,
       fraction: 0.25,
     })
   })

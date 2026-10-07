@@ -19,6 +19,8 @@ export interface SyncProgressText {
   title: string
   /** "records · 12,000 of 48,000" */
   detail: string
+  /** "12,000 of 48,000 records": beside a bar. */
+  count: string
   /** 0 to 1, or null when how many there are isn't known. */
   fraction: number | null
 }
@@ -39,6 +41,7 @@ export function describeSyncProgress(p: SyncProgress): SyncProgressText {
   return {
     title: PHASES[p.phase] ?? 'Syncing',
     detail: what ? `${what} · ${count}` : count,
+    count: what ? `${count} ${what}` : count,
     fraction:
       p.total != null && p.total > 0 ? Math.min(1, p.done / p.total) : null,
   }

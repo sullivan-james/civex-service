@@ -121,7 +121,7 @@ def test_picked_files_are_downloaded_and_freed_by_the_same_rules(pair):
 
     _, on_server = svc.chosen(everything, place="server")
     assert [i.sha256 for i in on_server] == [ref.sha256]
-    assert svc.download(on_server).fetched == 1
+    assert svc.download(on_server)["fetched"] == 1
     phone.commit()
     _, here = svc.chosen(everything, place="here")
     assert [i.sha256 for i in here] == [ref.sha256]
@@ -158,3 +158,49 @@ def test_moving_a_file_only_on_the_server_downloads_it_onto_that_drive(pair, tmp
 
     assert (shas, downloaded) == ([], 1)
     assert phone.file_svc._store.locate_volumes([ref.sha256]) == {ref.sha256: "archive"}
+
+
+def test_a_download_says_how_many_listed_files_it_covers_and_where_the_rest_are(
+    pair, authority
+):
+    """Records that share a file share its download; a file the server hasn't
+    got is said to be still on the computer that added it."""
+    from civex.domain.file_access import FileSelection
+    from civex.domain.query import RecordQuery
+
+    laptop, phone, record = pair
+    ref = _with_file(laptop, record, b"shared")
+    laptop.record_svc.add(
+        "study", "encounter", {"site": "b", "depth": 2.0, "scan": ref.to_dict()}
+    )
+    laptop.commit()
+    laptop.sync_svc.sync()
+    phone.sync_svc.sync()
+    svc = phone.file_access_svc
+    everything = FileSelection(query=RecordQuery(dataset="study"))
+    _, rows = svc.chosen(everything, place="server")
+    assert len(rows) == 2  # two records, one file
+
+    got = svc.download(rows[:1])
+    phone.commit()
+    assert (got["fetched"], got["listed"]) == (1, 1)
+    _, rows = svc.chosen(everything, place="here")
+    assert len(rows) == 2  # the other record's row came with it
+
+    lost = laptop.file_svc.store_bytes(b"never sent", "x.bin")
+    laptop.record_svc.add(
+        "study", "encounter", {"site": "c", "depth": 3.0, "scan": lost.to_dict()}
+    )
+    laptop.commit()
+    laptop.file_svc.object_path(lost.sha256).unlink()  # unplugged before sending
+    laptop.sync_svc.sync()
+    phone.sync_svc.sync()
+    _, rows = svc.chosen(everything, place="server")
+    got = svc.download(rows)
+    assert got["absent_where"] == [
+        {
+            "reason": "It is still only on 'laptop'.",
+            "fix": "It arrives here once that computer syncs.",
+            "files": 1,
+        }
+    ]
