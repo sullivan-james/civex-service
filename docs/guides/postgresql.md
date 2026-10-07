@@ -68,7 +68,7 @@ Point civex at the server:
 === "Web UI"
     Go to **Settings → Database**, click **Change URL…**, and paste the connection string. Civex tests the connection and migrates it before switching over — the target database itself is left untouched.
 
-JSON fields (`record.data`) automatically upgrade to `JSONB` on PostgreSQL for indexed querying. Install the driver with `pipx inject civex psycopg2-binary`.
+JSON fields (`record.data`) automatically upgrade to `JSONB` on PostgreSQL for indexed querying. The PostgreSQL driver is installed with civex, so there's nothing extra to install.
 
 ## Checking status and migrations
 

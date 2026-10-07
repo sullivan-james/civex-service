@@ -1,26 +1,60 @@
 # Install
 
-civex is published on PyPI as [`civex`](https://pypi.org/project/civex/) and requires Python 3.12 or newer.
+civex is published on PyPI as [`civex`](https://pypi.org/project/civex/). The
+recommended way to install it is [uv](https://docs.astral.sh/uv/), which
+**doesn't need Python on your computer**: it downloads a suitable Python
+(3.12 or newer) by itself and keeps civex in its own environment. civex also
+uses uv to run custom plugins, so installing it this way sets that up too.
 
-=== "pipx (recommended)"
+**1. Install uv** (once per computer):
 
-    ```bash
-    pip install pipx
-    pipx ensurepath        # adds civex to PATH — open a new terminal after this
-    ```
-
-    ```bash
-    pipx install civex
-    ```
-
-=== "pip"
-
-    If you'd rather manage the virtual environment yourself:
+=== "macOS / Linux"
 
     ```bash
-    python -m venv venv && source venv/bin/activate
-    pip install civex
+    curl -LsSf https://astral.sh/uv/install.sh | sh
     ```
+
+=== "Windows"
+
+    In PowerShell:
+
+    ```powershell
+    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+    ```
+
+Open a new terminal afterwards so `uv` is on your PATH. (Already have
+Homebrew, WinGet or pipx? `brew install uv`, `winget install --id=astral-sh.uv -e`
+or `pipx install uv` work too.)
+
+**2. Install civex:**
+
+```bash
+uv tool install civex
+```
+
+If the terminal then says `civex` isn't found, run `uv tool update-shell` and
+open a new terminal.
+
+??? note "Other ways to install"
+
+    If you already manage Python yourself, civex installs like any other
+    package (Python 3.12 or newer):
+
+    === "pipx"
+
+        ```bash
+        pipx install civex
+        ```
+
+    === "pip"
+
+        ```bash
+        python -m venv venv && source venv/bin/activate
+        pip install civex
+        ```
+
+    Custom plugins still need `uv` on your PATH; `civex doctor` says whether it
+    was found.
 
 Everything is included: the HTTP API and web UI, workflow execution, the
 PostgreSQL driver, AI-assisted commands and telemetry. There's nothing to
@@ -31,7 +65,7 @@ The one optional extra is the desktop tray app, which pulls in
 platform-specific GUI packages:
 
 ```bash
-pipx install "civex[desktop]"
+uv tool install "civex[desktop]"
 ```
 
 Verify the install:
@@ -47,6 +81,8 @@ civex --help
 civex update           # install the latest release
 civex update --check   # only report whether one is available
 ```
+
+(`uv tool upgrade civex` does the same for a uv install.)
 
 `civex update` detects whether civex was installed with pipx, `uv tool` or pip
 and runs the matching upgrade. Restart `civex serve` afterwards if it's

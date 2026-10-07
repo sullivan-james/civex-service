@@ -13,10 +13,10 @@ flowchart LR
 ## Install
 
 ```bash
-pipx install civex
+uv tool install civex
 ```
 
-See [Install](https://civexdata.github.io/civex-docs/getting-started/install.html) for installing and updating (`civex update`).
+No Python needed: [uv](https://docs.astral.sh/uv/) fetches one for you. See [Install](https://civexdata.github.io/civex-docs/getting-started/install.html) for installing uv itself, other ways to install, and updating (`civex update`).
 
 ## 60-second example
 
