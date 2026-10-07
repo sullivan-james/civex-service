@@ -61,15 +61,18 @@ def app_home() -> Path:
 
 
 def bundled_uv() -> Path:
-    """The uv inside this app (or, run from source, the one on PATH)."""
+    """The uv inside this app (or, run from source, the one on PATH).
+
+    A built app never falls back to PATH: a uv missing from the app would
+    then go unnoticed wherever one happens to be installed (CI runners have
+    one), and fail only on the computers that don't."""
     here = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     inside = here / "uv" / f"uv{EXE}"
     if inside.exists():
         return inside
-    found = shutil.which("uv")
-    if found:
+    if not getattr(sys, "frozen", False) and (found := shutil.which("uv")):
         return Path(found)
-    raise RuntimeError("This copy of the civex app is missing its uv.")
+    raise RuntimeError(f"This copy of the civex app is missing its uv ({inside}).")
 
 
 def desktop_app(home: Path) -> Path:

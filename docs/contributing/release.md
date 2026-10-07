@@ -90,11 +90,24 @@ The desktop app is `desktop-launcher/civex_launcher.py`: a small program
 carrying `uv`, built with PyInstaller (`desktop-launcher/launcher.spec`). It
 doesn't contain civex: on first start it runs `uv tool install civex[desktop]`
 into a folder of its own, and it updates with `uv tool upgrade` when the app
-asks (`civex.updates`). The job builds it and runs it as a first start would
-(`--install-only`, installing the tested wheel through
-`CIVEX_LAUNCHER_SOURCE`), then runs the smoke test against the civex it
-installed. **publish** attaches the three downloads to the release, so it waits
-for this job too.
+asks (`civex.updates`). The job builds it, packages it the way people download
+it, and tests that:
+
+- **Windows:** `civex-setup-windows.exe`, made by Inno Setup from
+  `desktop-launcher/windows/civex.iss` (installs for the current user, Start
+  menu entry, uninstaller). The job installs it silently, runs the installed
+  app, and uninstalls it again.
+- **macOS:** `civex-macos.dmg`, one universal app for Intel and Apple silicon.
+  It is built with python.org's universal2 Python (the runner's is arm64 only)
+  and a universal `uv` joined from its two builds with `lipo`; the job checks
+  both halves are there, and runs it natively and again under Rosetta.
+- **Linux:** `civex-linux.tar.gz`, the app on its own.
+
+Each run is a first start (`--install-only`, installing the tested wheel through
+`CIVEX_LAUNCHER_SOURCE`) followed by the smoke test against the civex it
+installed. **publish** attaches the downloads to the release, so it waits for
+this job too. The icons are in `desktop-launcher/assets/` (placeholders, drawn
+by `make_icons.py`). None of the downloads is signed yet.
 
 A run started by hand (**Run workflow** in Actions) is a dry run: every build
 and test on that branch, and nothing published.

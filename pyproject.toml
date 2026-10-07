@@ -41,7 +41,11 @@ dependencies = [
     # Sync's device keys (Ed25519): a device signs in with a key that never
     # leaves it, so nothing reusable crosses the network. The standard library
     # has no Ed25519.
-    "cryptography>=42",
+    "cryptography>=42; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    # Intel Macs: cryptography 49 stopped publishing Intel macOS wheels, so
+    # newer versions only install there by compiling Rust. 48 is the last
+    # with one. Widen this if a later version ships Intel wheels again.
+    "cryptography>=42,<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     # The plugin SDK is its own published project (MIT, versioned from `sdk-v*` git tags --
     # see docs/contributing/sdk-release.md). This range must admit the newest
     # `sdk-v*` tag: scripts/check_sdk_sync.py enforces that in CI, and the

@@ -126,3 +126,19 @@ def test_a_broken_request_file_is_treated_as_a_plain_close(tmp_path: Path) -> No
     path.write_text("not json")
     assert launcher.take_request(path) is None
     assert not path.exists()
+
+
+def test_a_built_app_never_borrows_a_uv_from_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A uv missing from the app went unnoticed on CI runners, which have
+    one on PATH, and would have failed only on people's computers."""
+    monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", str(tmp_path), raising=False)
+    monkeypatch.setattr(launcher.shutil, "which", lambda name: "/usr/bin/uv")
+    with pytest.raises(RuntimeError, match="missing its uv"):
+        launcher.bundled_uv()
+    inside = tmp_path / "uv" / f"uv{launcher.EXE}"
+    inside.parent.mkdir()
+    inside.touch()
+    assert launcher.bundled_uv() == inside
