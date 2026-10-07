@@ -34,6 +34,10 @@ def test_work_reports_a_stage_and_how_far_it_has_got() -> None:
         "total": 1000,
         "finished": False,
         "error": None,
+        "bytes_done": 0,
+        "bytes_total": 0,
+        "rate": 0.0,
+        "eta": None,
     }
 
 
@@ -129,3 +133,15 @@ def test_reporting_from_several_threads_is_safe() -> None:
 
     state = registry.get("threaded1")
     assert state["total"] == 4000 and 0 <= state["done"] < 1000
+
+
+def test_a_stage_that_moves_bytes_says_how_many_how_fast_and_how_long() -> None:
+    registry = ProgressRegistry()
+    progress = registry.start("bytesbytes")
+    progress.phase("Downloading 2 files from the server", 2, total_bytes=1000)
+    progress.add_bytes(200)
+    state = registry.get("bytesbytes")
+    assert (state["bytes_done"], state["bytes_total"]) == (200, 1000)
+    # A new stage starts its own count.
+    progress.phase("Writing tables", 3)
+    assert registry.get("bytesbytes")["bytes_done"] == 0

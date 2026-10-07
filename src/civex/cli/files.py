@@ -11,6 +11,7 @@ from rich.table import Table
 
 from civex.cli.utils import format_bytes, get_ctx
 from civex.console import console
+from civex.domain.sync import SyncError
 from civex.domain.exceptions import CivexError
 from civex.domain.file_access import (
     EXPORT_MODES,
@@ -191,6 +192,16 @@ _COLUMN = typer.Option(
 _NO_FILES = typer.Option(
     False, "--no-files", help="Make the table alone, without the files."
 )
+_ON = typer.Option(
+    None,
+    "--on",
+    help="Only files in this place: a drive's name, 'server' (only on the "
+    "server), 'missing', 'here' (on a drive that can be read now) or "
+    "'unreachable'",
+)
+_NAME = typer.Option(
+    None, "--name", help="Only files whose name, or whose record's name, has this"
+)
 _LAYOUT = typer.Option(
     None,
     "--layout",
@@ -225,6 +236,8 @@ def files_list(
     view: Optional[str] = _VIEW,
     export: Optional[str] = _EXPORT,
     layout: Optional[str] = _LAYOUT,
+    on: Optional[str] = _ON,
+    name: Optional[str] = _NAME,
     paths: bool = typer.Option(
         False,
         "--paths",
@@ -242,6 +255,12 @@ def files_list(
     ctx = get_ctx()
     try:
         plan = ctx.file_access_svc.plan(selection, with_sources=paths)
+        if on or name:
+            _, picked = ctx.file_access_svc.chosen(selection, on, name)
+            keep = {(i.record_id, i.field, i.sha256) for i in picked}
+            plan.items = [
+                i for i in plan.items if (i.record_id, i.field, i.sha256) in keep
+            ]
     except CivexError as e:
         console.print(f"[error]{escape(str(e))}[/error]")
         raise typer.Exit(1)
@@ -360,7 +379,7 @@ def files_export(
     ctx = get_ctx()
     try:
         svc = ctx.file_access_svc
-        plan = svc.plan(selection)
+        plan = svc.plan(selection, fetch=True)
         if not plan.items and not plan.tables:
             console.print("[dim]Nothing to export.[/dim]")
             return
@@ -461,7 +480,7 @@ def files_download(
     ctx = get_ctx()
     scratch = Path(tempfile.mkdtemp(prefix="civex-download-"))
     try:
-        plan = ctx.file_access_svc.plan(selection)
+        plan = ctx.file_access_svc.plan(selection, fetch=True)
         if not plan.complete:
             _print_unreachable(plan)
             if not allow_partial:
@@ -496,44 +515,180 @@ def files_gather(
     search: Optional[str] = _SEARCH,
     view: Optional[str] = _VIEW,
     export: Optional[str] = _EXPORT,
-    layout: Optional[str] = _LAYOUT,
+    on: Optional[str] = _ON,
+    name: Optional[str] = _NAME,
+    include_shared: bool = typer.Option(
+        False,
+        "--include-shared",
+        help="Also move files that other records use (they move for them "
+        "too). By default those stay where they are.",
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would move and stop."
     ),
 ) -> None:
-    """Move just these files onto one drive, so they can be linked as a folder.
+    """Move just these files onto one drive.
 
-    Only the files you select move, not the rest of their collections. It is
-    an ordinary move (checked before the original is removed, safe to stop at
-    any moment, queued behind any other); once it has finished,
-    `civex files export` can make a linked folder of them all. Use
-    `civex files list` first to see what you are selecting.
+    Only the files you select move, not the rest of their collections; pick
+    them by records (the usual options), by place (--on: e.g. everything still
+    on the field SSD) and by name. Files only on the server are downloaded
+    first. It is an ordinary move (checked before the original is removed, safe
+    to stop at any moment, queued behind any other). Use `civex files list`
+    with the same options first to see what you are selecting.
     """
     from civex.cli.transfers import _start
     from civex.domain.transfers import KIND_FILES, TransferSpec
 
     selection = _selection(
-        collection, schema, under, field, where, search, view, layout, export
+        collection, schema, under, field, where, search, view, None, export
     )
     ctx = get_ctx()
     try:
         svc = ctx.file_access_svc
-        plan = svc.plan(selection)
-        shas = svc.files_to_gather(plan, to)
+        _, items = svc.chosen(selection, on, name)
+        if dry_run:  # the move's usual preview; nothing is downloaded or moved
+            p = svc.plan_move(items, to, include_shared)
+            shas = svc.shas_to_move(items, to, include_shared)
+            if p.from_server:
+                console.print(
+                    f"{p.from_server} file(s) would be downloaded from the server "
+                    f"straight onto '{escape(to)}'."
+                )
+            if p.shared_left:
+                console.print(
+                    f"[dim]{p.shared_left} file(s) that other records also use "
+                    "would stay where they are (--include-shared moves them "
+                    "too).[/dim]"
+                )
+            if shas:
+                _start(
+                    TransferSpec(
+                        kind=KIND_FILES, targets=[to], shas=shas, freeze_sources=False
+                    ),
+                    True,
+                )
+            return
+        shas, downloaded, plan = svc.to_move(items, to, include_shared=include_shared)
+        ctx.commit()
     except CivexError as e:
         console.print(f"[error]{escape(str(e))}[/error]")
         raise typer.Exit(1)
     finally:
         ctx.close()
+    if downloaded:
+        console.print(
+            f"Downloaded {downloaded} file(s) from the server onto '{escape(to)}'."
+        )
+    if plan.shared_left:
+        console.print(
+            f"[dim]{plan.shared_left} file(s) that other records also use stay "
+            "where they are (--include-shared moves them too).[/dim]"
+        )
     if not shas:
-        console.print(f"[dim]Every reachable file is already on '{escape(to)}'.[/dim]")
+        if not downloaded:
+            console.print(
+                f"[dim]Every file that can move is already on '{escape(to)}'.[/dim]"
+            )
         return
-    if not plan.complete:
-        _print_unreachable(plan)
-        console.print("[dim]Those can't be moved until they can be reached.[/dim]")
     _start(
         TransferSpec(kind=KIND_FILES, targets=[to], shas=shas, freeze_sources=False),
         dry_run,
+    )
+
+
+@app.command("fetch")
+def files_fetch(
+    collection: Optional[str] = _IN,
+    schema: Optional[str] = _SCHEMA,
+    under: Optional[str] = _UNDER,
+    field: Optional[list[str]] = _FIELD,
+    where: Optional[list[str]] = _WHERE,
+    search: Optional[str] = _SEARCH,
+    view: Optional[str] = _VIEW,
+    name: Optional[str] = _NAME,
+) -> None:
+    """Download these files from the server, where they are only there.
+
+    For a project that follows a server: the selected files another device
+    added are brought to this computer, onto their collection's drive.
+    """
+    selection = _selection(
+        collection, schema, under, field, where, search, view, None, None
+    )
+    ctx = get_ctx()
+    try:
+        _, items = ctx.file_access_svc.chosen(selection, "server", name)
+        if not items:
+            console.print("[dim]All of them are on this computer.[/dim]")
+            return
+        report = ctx.file_access_svc.download(items)
+        ctx.commit()
+    except (CivexError, SyncError) as e:
+        console.print(f"[error]{escape(str(e))}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    console.print(f"[success]Downloaded {report['fetched']} file(s).[/success]")
+    for group in report["absent_where"]:
+        console.print(
+            f"[warning]{group['files']} not downloaded: {group['reason']} "
+            f"{group['fix']}[/warning]"
+        )
+
+
+@app.command("free")
+def files_free(
+    collection: Optional[str] = _IN,
+    schema: Optional[str] = _SCHEMA,
+    under: Optional[str] = _UNDER,
+    field: Optional[list[str]] = _FIELD,
+    where: Optional[list[str]] = _WHERE,
+    search: Optional[str] = _SEARCH,
+    view: Optional[str] = _VIEW,
+    on: Optional[str] = _ON,
+    name: Optional[str] = _NAME,
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask first."),
+) -> None:
+    """Free space: remove this computer's copies of these files.
+
+    Each comes back when opened or exported. Only files the server confirms it
+    holds are removed, and never one a collection kept on this computer uses
+    (`civex sync keep <collection> --opened` first). Counts and asks before
+    removing anything.
+    """
+    selection = _selection(
+        collection, schema, under, field, where, search, view, None, None
+    )
+    ctx = get_ctx()
+    try:
+        svc = ctx.file_access_svc
+        _, items = svc.chosen(selection, on, name)
+        counted = svc.free_up(items, dry_run=True)
+        kept = []
+        if counted.kept_shared:
+            kept.append(f"{counted.kept_shared} in a collection kept on this computer")
+        if counted.not_on_server:
+            kept.append(f"{counted.not_on_server} the server hasn't got yet")
+        if not counted.files:
+            console.print(
+                "Nothing to remove" + (f" (kept: {'; '.join(kept)})." if kept else ".")
+            )
+            return
+        console.print(
+            f"Removes {counted.files} file(s), {format_bytes(counted.bytes)}"
+            + (f"; keeps {'; '.join(kept)}" if kept else "")
+            + "."
+        )
+        if not yes and not typer.confirm("Remove them?"):
+            return
+        done = svc.free_up(items, dry_run=False)
+    except (CivexError, SyncError) as e:
+        console.print(f"[error]{escape(str(e))}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    console.print(
+        f"[success]Freed {format_bytes(done.bytes)} ({done.files} file(s)).[/success]"
     )
 
 

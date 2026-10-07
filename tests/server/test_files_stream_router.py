@@ -40,3 +40,41 @@ def test_stream_upload_rejects_when_allocation_too_small(client: TestClient) -> 
         headers={"content-length": str(len(payload))},
     )
     assert resp.status_code == 507
+
+
+def test_a_file_not_here_is_fetched_from_the_server_when_opened(
+    client: TestClient, monkeypatch
+) -> None:
+    from civex.domain.sync import SyncError
+    from civex.services.sync_service import SyncService
+
+    payload = b"added on another device"
+    sha = hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(SyncService, "fetches_files", property(lambda self: True))
+
+    def unreachable(self, sha256):
+        raise SyncError("Could not reach the server")
+
+    monkeypatch.setattr(SyncService, "fetch_file", unreachable)
+    resp = client.get(f"/api/files/{sha}")
+    assert resp.status_code == 503 and "can't be reached" in resp.json()["detail"]
+
+    monkeypatch.setattr(SyncService, "fetch_file", lambda self, sha256: False)
+    monkeypatch.setattr(
+        SyncService,
+        "not_here_reasons",
+        lambda self, shas: {
+            s: ("It is still only on 'backup'.", "It arrives.") for s in shas
+        },
+    )
+    resp = client.get(f"/api/files/{sha}")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "It is still only on 'backup'. It arrives."
+
+    def fetched(self, sha256):
+        self._files.put(payload, "x.bin", None)
+        return True
+
+    monkeypatch.setattr(SyncService, "fetch_file", fetched)
+    resp = client.get(f"/api/files/{sha}?filename=scan.bin")
+    assert resp.status_code == 200 and resp.content == payload

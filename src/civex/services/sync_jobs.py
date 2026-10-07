@@ -68,6 +68,13 @@ class SyncJobs:
         if thread is not None:
             thread.join(2.0)
 
+    def fetch_now(self, total: int) -> None:
+        """Start downloading what this computer keeps (a collection was just
+        set to keep its files here): the progress is there at once, before the
+        worker has started, so the status bar shows it on the next read."""
+        self.ensure_worker()
+        self.worker.request_files(total)
+
     def sync_now(self) -> None:
         self.ensure_worker()
         self.worker.request()

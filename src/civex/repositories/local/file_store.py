@@ -183,15 +183,25 @@ class VolumeAwareFileObjectStore:
         sha256 = hashlib.sha256(data).hexdigest()
         size = len(data)
 
-        # If the content is already stored anywhere, reuse it (idempotent).
-        # Placement never overrides this: a collection's home volume decides
-        # where *new* content goes, not whether to copy existing content.
-        existing = self._existing_copy(sha256)
+        # Content already stored is reused (idempotent), unless the collection
+        # has a home without a copy: a home keeps every file its collection
+        # uses, so a copy is written there (and only there).
+        home = self._home(collection_id)
+        writing_home = home is not None and self._can_write(home, size)[0]
+        existing = self._existing_copy(
+            sha256, collection_id, writing_to=home if writing_home else None
+        )
         if existing is not None:
             return self._reuse(existing, sha256, original_filename, size)
+        stored_elsewhere = self._any_copy(sha256) is not None
+        candidates = (
+            [home]
+            if stored_elsewhere and home
+            else self._write_candidates(collection_id)
+        )
 
         reasons: list[str] = []
-        for vol_name in self._write_candidates(collection_id):
+        for vol_name in candidates:
             can, reason = self._can_write(vol_name, size)
             if not can:
                 reasons.append(f"{vol_name}: {reason}")
@@ -230,6 +240,10 @@ class VolumeAwareFileObjectStore:
                 volume=vol_name,
             )
 
+        if stored_elsewhere:  # the home couldn't take its copy: the file is stored
+            copy = self._any_copy(sha256)
+            assert copy is not None
+            return self._reuse(copy, sha256, original_filename, size)
         raise self._all_volumes_full(size, reasons, collection_id)
 
     async def put_stream(
@@ -273,7 +287,49 @@ class VolumeAwareFileObjectStore:
                 raise self._write_error(vol_name, e, size, streamed=True) from e
             raise
         return self._finalize(
-            vol_name, tmp_path, hasher.hexdigest(), size, original_filename
+            vol_name,
+            tmp_path,
+            hasher.hexdigest(),
+            size,
+            original_filename,
+            collection_id,
+        )
+
+    def put_chunks(
+        self,
+        chunks: Iterable[bytes],
+        original_filename: str,
+        size_hint: int | None = None,
+        collection_id: str | None = None,
+        volume: str | None = None,
+    ) -> FileRef:
+        """`put_stream` for chunks that arrive in this thread (a download from
+        the server): written straight to a scratch file on the drive they go
+        to, hashed as they come, then renamed into place, so each byte is
+        written once. `volume` names the drive, else the collection's."""
+        vol_name, tmp_path = self._open_scratch(size_hint, collection_id, volume)
+        hasher = hashlib.sha256()
+        size = 0
+        try:
+            with tmp_path.open("wb") as f:
+                for chunk in chunks:
+                    if not chunk:
+                        continue
+                    hasher.update(chunk)
+                    f.write(chunk)
+                    size += len(chunk)
+        except BaseException as e:
+            tmp_path.unlink(missing_ok=True)
+            if isinstance(e, OSError):
+                raise self._write_error(vol_name, e, size, streamed=True) from e
+            raise
+        return self._finalize(
+            vol_name,
+            tmp_path,
+            hasher.hexdigest(),
+            size,
+            original_filename,
+            collection_id,
         )
 
     def put_path(
@@ -281,15 +337,19 @@ class VolumeAwareFileObjectStore:
         path: Path,
         original_filename: str | None = None,
         collection_id: str | None = None,
+        volume: str | None = None,
     ) -> FileRef:
         """Store a file from disk by copying it in fixed-size chunks, so a
         multi-GB file never has to fit in memory (put(path.read_bytes())
         would). Unlike put_stream, the source is replayable, so a volume that
-        runs out of space partway through falls through to the next one."""
+        runs out of space partway through falls through to the next one.
+        `volume` names the one drive to write to (a person chose it, e.g. a
+        file downloaded to be moved there), instead of the collection's."""
         name = original_filename or path.name
         size = path.stat().st_size
         reasons: list[str] = []
-        for vol_name in self._write_candidates(collection_id):
+        candidates = [volume] if volume else self._write_candidates(collection_id)
+        for vol_name in candidates:
             can, reason = self._can_write(vol_name, size)
             if not can:
                 reasons.append(f"{vol_name}: {reason}")
@@ -313,7 +373,9 @@ class VolumeAwareFileObjectStore:
                     reasons.append(f"{vol_name}: no space left on device")
                     continue
                 raise self._write_error(vol_name, e, written, streamed=False) from e
-            return self._finalize(vol_name, tmp_path, hasher.hexdigest(), written, name)
+            return self._finalize(
+                vol_name, tmp_path, hasher.hexdigest(), written, name, collection_id
+            )
         raise self._all_volumes_full(size, reasons, collection_id)
 
     # -- shared write plumbing -------------------------------------------
@@ -347,28 +409,61 @@ class VolumeAwareFileObjectStore:
         )
         return AllVolumesFull(f"{head} " + "; ".join(reasons))
 
-    def _existing_copy(self, sha256: str) -> tuple[str, Path | None] | None:
-        """(volume, path) of content that is already stored, so it is reused
-        and never written twice. `path` is None when the only copy is on a
-        volume that can't be reached right now: the inventory says it is
-        there, and the same content is not copied onto another volume just
-        because the first one is unplugged."""
-        located = self._locate(sha256)
-        if located is not None:
-            return located
-        return self._offline_copy(sha256)
+    def _existing_copy(
+        self,
+        sha256: str,
+        collection_id: str | None = None,
+        writing_to: str | None = None,
+    ) -> tuple[str, Path | None] | None:
+        """A copy to reuse instead of storing the content again, or None to
+        store it. The one dedup rule: content already stored is reused where
+        it is, except that a collection's home keeps a copy of every file the
+        collection uses, so content stored elsewhere is written again when it
+        is being written to that home (`writing_to`) and the home has none.
+        `path` is None when the copy is on a volume that can't be reached right
+        now: the same content is not copied onto another volume just because
+        the first one is unplugged."""
+        copy = self._any_copy(sha256)
+        if copy is None:
+            return None
+        home = self._home(collection_id)
+        if home is None or copy[0] == home:
+            return copy
+        on_home = self._copy_on(sha256, home)
+        if on_home is not None:
+            return on_home
+        return None if writing_to == home else copy
+
+    def _any_copy(self, sha256: str) -> tuple[str, Path | None] | None:
+        """A copy of this content: one to read, else one recorded on a volume
+        that can't be reached right now (path None)."""
+        return self._locate(sha256) or self._offline_copy(sha256)
+
+    def _copy_on(self, sha256: str, volume: str) -> tuple[str, Path | None] | None:
+        """The copy on that volume, if the inventory records one (or, with no
+        inventory, it is on disk); path None when the volume can't be reached."""
+        if self._session is not None:
+            if volume not in dict(self.copies([sha256]).get(sha256, [])):
+                return None
+            if not self.volume_status(volume).reachable:
+                return volume, None
+        path = self._object_path(sha256, volume)
+        return (volume, path) if path.exists() else None
+
+    def _home(self, collection_id: str | None) -> str | None:
+        """The collection's home drive, if it has one that exists."""
+        return self._cfg.homes().get(collection_id) if collection_id else None
 
     def _offline_copy(self, sha256: str) -> tuple[str, None] | None:
+        """A copy recorded on a volume that can't be reached now, when no
+        reachable volume is recorded to hold one (a recorded copy on a
+        reachable volume that isn't there is a stale row, not "unplugged")."""
         if self._session is None:
             return None
-        from civex.db.models import StoredObject
-
-        row = self._session.get(StoredObject, sha256)
-        if row is None or row.volume not in self._cfg.volumes:
+        rows = [v for v, _ in self.copies([sha256]).get(sha256, [])]
+        if any(self.volume_status(v).reachable for v in rows):
             return None
-        if self.volume_status(row.volume).reachable:
-            return None  # reachable but the file is gone: the row is stale
-        return row.volume, None
+        return (rows[0], None) if rows else None
 
     def _reuse(
         self,
@@ -397,12 +492,16 @@ class VolumeAwareFileObjectStore:
         return scratch_dir / f"{uuid.uuid4().hex}.part"
 
     def _open_scratch(
-        self, size_hint: int | None, collection_id: str | None = None
+        self,
+        size_hint: int | None,
+        collection_id: str | None = None,
+        volume: str | None = None,
     ) -> tuple[str, Path]:
-        """First candidate volume passing the allocation/headroom gates, plus
-        a fresh scratch path on it."""
+        """First candidate volume passing the allocation/headroom gates (or
+        the one `volume` named), plus a fresh scratch path on it."""
         reasons: list[str] = []
-        for vol_name in self._write_candidates(collection_id):
+        candidates = [volume] if volume else self._write_candidates(collection_id)
+        for vol_name in candidates:
             can, reason = self._can_write(vol_name, size_hint or 0)
             if not can:
                 reasons.append(f"{vol_name}: {reason}")
@@ -433,10 +532,12 @@ class VolumeAwareFileObjectStore:
         sha256: str,
         size: int,
         original_filename: str,
+        collection_id: str | None = None,
     ) -> FileRef:
         """Rename a fully-written scratch file into its content-addressed
-        path, or discard it if the same content is already stored."""
-        existing = self._existing_copy(sha256)
+        path, or discard it if the same content is already stored (and this
+        isn't the copy the collection's home keeps: `_existing_copy`)."""
+        existing = self._existing_copy(sha256, collection_id, writing_to=vol_name)
         if existing is not None:
             tmp_path.unlink(missing_ok=True)
             return self._reuse(existing, sha256, original_filename, size)
@@ -466,67 +567,102 @@ class VolumeAwareFileObjectStore:
 
     # -- where is it? -------------------------------------------------------
 
-    def locate_volumes(self, shas: Iterable[str]) -> dict[str, str | None]:
-        """The volume each blob is on, for a whole batch at once. Reads the
-        inventory in a few queries, and only looks on disk for blobs it doesn't
-        know (an older blob, a request that was rolled back), and for a bounded
-        number of those, so listing many records never means a stat per file."""
+    def copies(self, shas: Iterable[str]) -> dict[str, list[tuple[str, int]]]:
+        """Every copy the inventory records of each file, as (volume, size), on
+        volumes that exist, in the order the volumes are configured. A file
+        with no copy here is absent. A few queries, no disk access."""
         wanted = list(dict.fromkeys(shas))
+        out: dict[str, list[tuple[str, int]]] = {}
+        if self._session is None or not wanted:
+            return out
+        from sqlalchemy import select
+
+        from civex.db.models import StoredObject
+
+        order = {name: i for i, name in enumerate(self._cfg.volumes)}
+        for i in range(0, len(wanted), _LOCATE_CHUNK):
+            rows = self._session.execute(
+                select(
+                    StoredObject.sha256, StoredObject.volume, StoredObject.size
+                ).where(StoredObject.sha256.in_(wanted[i : i + _LOCATE_CHUNK]))
+            )
+            for sha, volume, size in rows:
+                if volume in order:
+                    out.setdefault(sha, []).append((volume, int(size)))
+        for found in out.values():
+            found.sort(key=lambda row: order[row[0]])
+        return out
+
+    def homes(self) -> dict[str, str]:
+        """Collection id -> its home drive (each keeps a copy of every file its
+        collection uses: domain.placement)."""
+        return self._cfg.homes()
+
+    def readable_first(self, volumes: Iterable[str]) -> list[str]:
+        """These volumes, the ones that can be read now first (each looked at
+        once), keeping their order otherwise: which copy to use."""
+        names = list(dict.fromkeys(volumes))
+        reachable = {v: self.volume_status(v).reachable for v in names}
+        return sorted(names, key=lambda v: not reachable[v])
+
+    def locate_volumes(self, shas: Iterable[str]) -> dict[str, str | None]:
+        """The volume to use for each file, for a whole batch at once: of its
+        copies, one that can be read now, else one on a drive that isn't
+        plugged in. From the inventory in a few queries; only a file it doesn't
+        know (stored before it existed) is looked for on disk, a bounded number
+        of them, and recorded when found, so it isn't looked for again."""
+        wanted = list(dict.fromkeys(shas))
+        copies = self.copies(wanted)
+        statuses: dict[str, bool] = {}
+
+        def readable(volume: str) -> bool:
+            if volume not in statuses:
+                statuses[volume] = self.volume_status(volume).reachable
+            return statuses[volume]
+
         found: dict[str, str | None] = {}
-        if self._session is not None and wanted:
-            from sqlalchemy import select
-
-            from civex.db.models import StoredObject
-
-            for i in range(0, len(wanted), _LOCATE_CHUNK):
-                rows = self._session.execute(
-                    select(StoredObject.sha256, StoredObject.volume).where(
-                        StoredObject.sha256.in_(wanted[i : i + _LOCATE_CHUNK])
-                    )
-                )
-                for sha, volume in rows:
-                    if volume in self._cfg.volumes:
-                        found[sha] = volume
-        for sha in [s for s in wanted if s not in found][:_LOCATE_DISK_FALLBACK]:
-            located = self._locate(sha)
+        for sha, rows in copies.items():
+            volumes = [v for v, _ in rows]
+            found[sha] = next((v for v in volumes if readable(v)), volumes[0])
+        if self._session is None:
+            unknown = wanted
+        else:
+            unknown = [s for s in wanted if s not in found][:_LOCATE_DISK_FALLBACK]
+        for sha in unknown:
+            located = self._find_unrecorded(sha)
             if located is not None:
                 found[sha] = located[0]
         return {sha: found.get(sha) for sha in wanted}
 
     def copies_of(self, sha256: str) -> list[FileCopy]:
-        """Every place this content is: each reachable volume that holds it,
-        plus the volume the inventory records it on if that one can't be
-        reached now (so a file on an unplugged drive is still accounted for)."""
-        recorded = self._recorded_volume(sha256)
+        """Every place this content is, as the inventory records it, each with
+        whether it is on disk now (None when its volume can't be reached)."""
         mounts = fs_locations.all_mounts()
-        copies: list[FileCopy] = []
-        for name in self._cfg.volumes:
+        volumes = [v for v, _ in self.copies([sha256]).get(sha256, [])]
+        if not volumes:
+            located = self._locate(sha256)  # recorded if found
+            volumes = [located[0]] if located else []
+        out: list[FileCopy] = []
+        for name in volumes:
             path = self._object_path(sha256, name)
             status = self.volume_status(name)
             network = fs_locations.is_network_path(
                 fs_locations.normalise(str(path)), mounts
             )
+            present: bool | None = None
             if status.reachable:
                 try:
                     present = path.exists()
                 except OSError:
                     present = None
-                if present is not False:
-                    copies.append(
-                        FileCopy(name, str(path), present, status.state, network)
-                    )
-            elif name == recorded:
-                copies.append(FileCopy(name, str(path), None, status.state, network))
-        return copies
+            out.append(FileCopy(name, str(path), present, status.state, network))
+        return out
 
     def size_of(self, sha256: str) -> int | None:
         """The blob's size: from the inventory, else from a copy on disk."""
-        if self._session is not None:
-            from civex.db.models import StoredObject
-
-            row = self._session.get(StoredObject, sha256)
-            if row is not None:
-                return int(row.size)
+        rows = self.copies([sha256]).get(sha256)
+        if rows:
+            return rows[0][1]
         located = self._locate(sha256)
         if located is None:
             return None
@@ -542,14 +678,6 @@ class VolumeAwareFileObjectStore:
         if copy is None:
             return None
         return copy[0], self.volume_status(copy[0])
-
-    def _recorded_volume(self, sha256: str) -> str | None:
-        if self._session is None:
-            return None
-        from civex.db.models import StoredObject
-
-        row = self._session.get(StoredObject, sha256)
-        return row.volume if row is not None else None
 
     def path_on(self, sha256: str, volume: str) -> Path:
         """Where this content would be on `volume`: pure path arithmetic, no
@@ -675,34 +803,32 @@ class VolumeAwareFileObjectStore:
         return count
 
     def delete(self, sha256: str, volume: str | None = None) -> bool:
-        """Remove a stored object. `volume` is an optional hint (e.g. from
-        list_objects) to skip the full-volume scan; falls back to searching
-        every volume if the hint misses. Returns False if not found."""
-        path = None
+        """Remove the copy on `volume`, or with no volume every copy that can
+        be reached (one on a drive that isn't plugged in stays, and stays
+        recorded). Returns False if no copy was removed."""
         if volume is not None:
-            vc = self._cfg.volumes.get(volume)
-            if vc is not None:
-                candidate = self._resolve_path(vc) / sha256[:2] / sha256[2:]
-                if candidate.exists():
-                    path = candidate
-        if path is None:
+            targets = [volume] if volume in self._cfg.volumes else []
+        else:
+            targets = [v for v, _ in self.copies([sha256]).get(sha256, [])]
             located = self._locate(sha256)
-            if located is not None:
-                volume, path = located
-        if path is None:
-            return False
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            # Already gone -- e.g. a second GC run (or any other deleter)
-            # removed the same object between our existence check above and
-            # this unlink(). The end state either caller wanted is achieved
-            # either way, so this is success, not a failure to propagate.
-            pass
-        if volume is not None:
-            self._used_cache.pop(volume, None)
-        self._unregister(sha256)
-        return True
+            if located is not None and located[0] not in targets:
+                targets.append(located[0])
+        removed = False
+        for name in targets:
+            if not self.volume_status(name).reachable:
+                continue
+            path = self._object_path(sha256, name)
+            try:
+                path.unlink()
+                removed = True
+            except FileNotFoundError:
+                # Already gone -- e.g. a second GC run (or any other deleter)
+                # removed it between the listing and this unlink(). The end
+                # state either caller wanted is achieved, so it isn't a failure.
+                removed = removed or volume is not None
+            self._used_cache.pop(name, None)
+            self._unregister(sha256, name)
+        return removed
 
     @contextlib.contextmanager
     def gc_lock(self) -> Iterator[None]:
@@ -1004,26 +1130,6 @@ class VolumeAwareFileObjectStore:
             totals[volume] = (int(files), int(size))
         return totals
 
-    def inventory_rows(self, shas: Iterable[str]) -> dict[str, tuple[str, int]]:
-        """sha256 -> (volume, size) for the blobs the catalog knows."""
-        wanted = list(dict.fromkeys(shas))
-        found: dict[str, tuple[str, int]] = {}
-        if self._session is None or not wanted:
-            return found
-        from sqlalchemy import select
-
-        from civex.db.models import StoredObject
-
-        for i in range(0, len(wanted), _LOCATE_CHUNK):
-            rows = self._session.execute(
-                select(
-                    StoredObject.sha256, StoredObject.volume, StoredObject.size
-                ).where(StoredObject.sha256.in_(wanted[i : i + _LOCATE_CHUNK]))
-            )
-            for sha, volume, size in rows:
-                found[sha] = (volume, int(size))
-        return found
-
     def room_on(self, volume: str) -> int | None:
         """How many more bytes `volume` would take: what its allocation leaves,
         or the disk's free space less the headroom Civex keeps -- whichever is
@@ -1041,12 +1147,22 @@ class VolumeAwareFileObjectStore:
         headroom = max(0, disk.free - int(self._cfg.full_below_gb * 1024**3))
         return headroom if room is None else min(room, headroom)
 
-    def record_moves(self, moves: list[tuple[str, str, int]]) -> None:
-        """Say in the catalog that each (sha256, volume, size) now lives on that
-        volume. The caller commits, and only then removes the originals."""
+    def record_moves(
+        self,
+        added: list[tuple[str, str, int]],
+        removed: list[tuple[str, str]] = [],  # noqa: B006 - never mutated
+    ) -> None:
+        """Say in the catalog that each (sha256, volume, size) in `added` is now
+        on that volume, and each (sha256, volume) in `removed` no longer is (a
+        moved file's original). The caller commits, and only then removes the
+        originals from disk."""
         self._used_cache.clear()
-        if self._session is not None and moves:
-            self._upsert_inventory(moves)
+        if self._session is None:
+            return
+        if added:
+            self._upsert_inventory(added)
+        for sha, volume in removed:
+            self._unregister(sha, volume)
 
     def remove_from_volume(self, sha256: str, volume: str) -> bool:
         """Remove the object from exactly that volume (never searching others,
@@ -1308,10 +1424,26 @@ class VolumeAwareFileObjectStore:
             )
 
     def _locate(self, sha256: str) -> tuple[str, Path] | None:
-        """(volume name, path) of the first volume holding this object --
-        one pass over the volumes, rather than separate find/volume-of scans
-        (each of which is a stat per volume, i.e. a network round trip on
-        NFS-style mounts)."""
+        """(volume, path) of a copy to read. The inventory says which volumes
+        hold one: those that can be reached are tried, in order, and no other
+        volume is looked at. Only content the inventory knows nothing of is
+        looked for on the volumes (`_find_unrecorded`)."""
+        if self._session is not None:
+            rows = self.copies([sha256]).get(sha256)
+            if rows:
+                for name, _size in rows:
+                    if not self.volume_status(name).reachable:
+                        continue
+                    path = self._object_path(sha256, name)
+                    if path.exists():
+                        return name, path
+                return None
+        return self._find_unrecorded(sha256)
+
+    def _find_unrecorded(self, sha256: str) -> tuple[str, Path] | None:
+        """Content the inventory doesn't know (stored before it existed, or a
+        request rolled back after writing), looked for on each volume once:
+        what is found is recorded, so it isn't looked for again."""
         for name, vc in self._cfg.volumes.items():
             # One dead network mount must not stall every read: a volume
             # outside the project that isn't answering is skipped.
@@ -1319,6 +1451,11 @@ class VolumeAwareFileObjectStore:
                 continue
             p = self._resolve_path(vc) / sha256[:2] / sha256[2:]
             if p.exists():
+                if self._session is not None:
+                    try:
+                        self._register(name, sha256, p.stat().st_size)
+                    except OSError:
+                        pass
                 return name, p
         return None
 
@@ -1350,14 +1487,18 @@ class VolumeAwareFileObjectStore:
             return
         self._upsert_inventory([(sha256, volume, size)])
 
-    def _unregister(self, sha256: str) -> None:
+    def _unregister(self, sha256: str, volume: str | None = None) -> None:
+        """Forget the copy on `volume`, or every copy."""
         if self._session is None:
             return
         from sqlalchemy import delete
 
         from civex.db.models import StoredObject
 
-        self._session.execute(delete(StoredObject).where(StoredObject.sha256 == sha256))
+        query = delete(StoredObject).where(StoredObject.sha256 == sha256)
+        if volume is not None:
+            query = query.where(StoredObject.volume == volume)
+        self._session.execute(query)
 
     def _upsert_inventory(self, rows: list[tuple[str, str, int]]) -> None:
         assert self._session is not None
@@ -1381,8 +1522,8 @@ class VolumeAwareFileObjectStore:
             ]
         )
         stmt = stmt.on_conflict_do_update(
-            index_elements=["sha256"],
-            set_={"volume": stmt.excluded.volume, "size": stmt.excluded.size},
+            index_elements=["sha256", "volume"],
+            set_={"size": stmt.excluded.size},
         )
         self._session.execute(stmt)
 
@@ -1472,7 +1613,9 @@ class VolumeAwareFileObjectStore:
             gone = [s for s in shas if not (root / s[:2] / s[2:]).exists()]
             if gone:
                 self._session.execute(
-                    delete(StoredObject).where(StoredObject.sha256.in_(gone))
+                    delete(StoredObject).where(
+                        StoredObject.volume == name, StoredObject.sha256.in_(gone)
+                    )
                 )
                 removed += len(gone)
         self._used_cache.pop(name, None)

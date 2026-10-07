@@ -17,6 +17,8 @@ from civex.server.models import (
     RecordLabelsRequest,
     RestoreSelectedRequest,
     RestoreSelectedResponse,
+    OrphanResponse,
+    OrphansResponse,
     RecordRef,
     RecordResponse,
     RestorePlanResponse,
@@ -228,19 +230,62 @@ def record_labels(body: RecordLabelsRequest, ctx: AppContext = Depends(get_ctx))
     ]
 
 
+def _ref(r) -> RecordRef:
+    return RecordRef(
+        id=str(r.id), schema_name=r.schema_name, natural_name=r.natural_name
+    )
+
+
+@router.get("/records/orphans", response_model=OrphansResponse)
+def list_orphans(
+    limit: int = Query(default=200, ge=1, le=1000),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Live records that sit under a deleted record, so nothing above them lists
+    them: each with what it sits under. Restore that with
+    POST /records/{id}/restore-above, or delete the record."""
+    found, total = ctx.record_svc.orphans(limit)
+    return OrphansResponse(
+        total=total,
+        items=[
+            OrphanResponse(
+                record=_ref(o.record),
+                collection=o.record.dataset_name,
+                above=[_ref(a) for a in o.above],
+            )
+            for o in found
+        ],
+    )
+
+
 @router.get("/records/{record_id}", response_model=RecordResponse)
 def get_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
     try:
         record = ctx.record_svc.get(record_id)
         ancestors = ctx.record_svc.ancestors(record)
+        above = ctx.record_svc.deleted_above(str(record.id))
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     response = RecordResponse.from_dto(record)
-    response.ancestors = [
-        RecordRef(id=str(a.id), schema_name=a.schema_name, natural_name=a.natural_name)
-        for a in ancestors
-    ]
+    response.ancestors = [_ref(a) for a in ancestors]
+    response.deleted_above = [_ref(a) for a in above]
     return response
+
+
+@router.post("/records/{record_id}/restore-above", response_model=list[RecordResponse])
+def restore_above(record_id: str, ctx: AppContext = Depends(get_ctx)):
+    """Bring back what a live record sits under that is deleted: each deleted
+    record directly above it, by itself, so their other children stay deleted.
+    Refused (422) while the collection or schema of the topmost is deleted, or
+    when one would clash with a live record's unique key."""
+    try:
+        restored = ctx.record_svc.restore_above(record_id)
+        ctx.commit()
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return [RecordResponse.from_dto(r) for r in restored]
 
 
 @router.get(

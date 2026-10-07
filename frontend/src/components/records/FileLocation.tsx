@@ -3,8 +3,7 @@ import { Link } from 'react-router'
 import type { FileRef } from '../../api/files'
 import { useFileLocationDisplay } from '../../hooks/useFileLocationDisplay'
 import { formatSize } from '../../utils/storage'
-import { StatusDot } from '../settings/storage/StatusDot'
-import { STATE_LABEL } from '../settings/storage/volumeState'
+import { PlaceStatus, VolumeStatus } from '../files/Where'
 import { Button, Chip, TriggerPopover } from '../ui'
 import { AlertTriangle, HardDrive } from '../ui/icons'
 import { FileInfoPanel } from './FileInfoPanel'
@@ -74,14 +73,18 @@ function DownloadLink({
   title?: string
   children: ReactNode
 }) {
-  const [note, setNote] = useState<{ error: boolean; text: string } | null>(
-    null,
-  )
+  // error: it failed (red, stays); attention: a situation the server
+  // explains, such as a file not here yet or its drive unplugged (amber,
+  // stays); info: what is happening (fades).
+  const [note, setNote] = useState<{
+    tone: 'error' | 'attention' | 'info'
+    text: string
+  } | null>(null)
   const name = file.resolved_filename ?? file.filename
   const href = `/api/files/${file.sha256}?filename=${encodeURIComponent(name)}`
 
   useEffect(() => {
-    if (!note || note.error) return
+    if (!note || note.tone !== 'info') return
     const timer = setTimeout(() => setNote(null), 6000)
     return () => clearTimeout(timer)
   }, [note])
@@ -90,14 +93,19 @@ function DownloadLink({
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
       return
     e.preventDefault()
-    setNote(null)
+    setNote(
+      file.location?.state === 'remote'
+        ? { tone: 'info', text: 'Downloading it from the server first…' }
+        : null,
+    )
     const abort = new AbortController()
     try {
       const res = await fetch(href, { signal: abort.signal })
       if (!res.ok) {
         const body = await res.json().catch(() => null)
         setNote({
-          error: true,
+          tone:
+            res.status === 404 || res.status === 503 ? 'attention' : 'error',
           text:
             body?.detail ?? `The file couldn't be downloaded (${res.status}).`,
         })
@@ -106,7 +114,7 @@ function DownloadLink({
       abort.abort() // only the headers were wanted; the browser fetches the rest
     } catch {
       setNote({
-        error: true,
+        tone: 'error',
         text: "Couldn't reach the server to download this.",
       })
       return
@@ -116,7 +124,7 @@ function DownloadLink({
     link.download = name
     link.click()
     setNote({
-      error: false,
+      tone: 'info',
       text: "Download started. It's in your browser's downloads.",
     })
   }
@@ -134,8 +142,14 @@ function DownloadLink({
       </a>
       {note && (
         <span
-          role={note.error ? 'alert' : 'status'}
-          className={`text-xs ${note.error ? 'text-danger' : 'text-fg-muted'}`}
+          role={note.tone === 'error' ? 'alert' : 'status'}
+          className={`text-xs ${
+            note.tone === 'error'
+              ? 'text-danger'
+              : note.tone === 'attention'
+                ? 'text-attention'
+                : 'text-fg-muted'
+          }`}
         >
           {note.text}
         </span>
@@ -147,6 +161,7 @@ function DownloadLink({
 function chipText(file: FileLike): string {
   const loc = file.location
   if (!loc) return ''
+  if (loc.state === 'remote') return 'not on this computer'
   if (loc.volume === null) return 'location unknown'
   if (loc.available === false)
     return `${loc.volume} · ${loc.state.replace('_', ' ')}`
@@ -157,11 +172,13 @@ function chipText(file: FileLike): string {
  * is there, and that there is more. */
 function hint(file: FileLike): string {
   const loc = file.location
+  if (loc?.state === 'remote')
+    return 'Not downloaded to this computer yet: opening it downloads it.'
   if (!loc || loc.volume === null)
     return 'Not found on any drive yet. Click for details.'
   if (loc.available === false)
-    return `On '${loc.volume}', which isn't available right now. Click to see what to do.`
-  return `Stored on '${loc.volume}' (${STATE_LABEL[loc.state as keyof typeof STATE_LABEL] ?? loc.state}). Click for details.`
+    return `On '${loc.volume}', which can't be reached now. Click for what to do.`
+  return `On '${loc.volume}'. Click for details.`
 }
 
 /** Which volume a file is stored on, shown when it matters (see
@@ -233,42 +250,37 @@ function FileLocationPanel({
           )}
         </div>
 
-        {loc.volume === null ? (
-          <p className="text-attention">
-            This file isn&apos;t on any drive Civex knows about. It may be on a
-            drive that hasn&apos;t been added yet.
-          </p>
-        ) : loc.available === false ? (
-          <div
-            role="alert"
-            className="space-y-1 rounded-md border border-attention-muted bg-attention-subtle p-2 text-attention"
+        <p className="flex flex-wrap items-center gap-2 text-fg">
+          {loc.state === 'remote' ? (
+            <PlaceStatus
+              place=""
+              kind="server"
+              reason="Another device added it. Opening or exporting it downloads it."
+            />
+          ) : loc.volume === null ? (
+            <PlaceStatus
+              place=""
+              kind="missing"
+              reason="It isn't on any drive Civex knows about here."
+            />
+          ) : (
+            <>
+              On <strong>{loc.volume}</strong>
+              <VolumeStatus
+                state={loc.state}
+                reason={loc.reason}
+                fix={loc.fix}
+              />
+            </>
+          )}
+        </p>
+        {loc.available === false && loc.volume && (
+          <Link
+            to={`/settings/storage/volumes/${encodeURIComponent(loc.volume)}`}
+            className="inline-block text-accent hover:underline"
           >
-            <p className="font-medium">
-              It&apos;s on &lsquo;{loc.volume}&rsquo;, which isn&apos;t
-              available right now, so it can&apos;t be opened.
-            </p>
-            {loc.reason && <p>{loc.reason}</p>}
-            {loc.fix && <p>{loc.fix}</p>}
-            <Link
-              to={`/settings/storage/volumes/${encodeURIComponent(loc.volume)}`}
-              className="inline-block text-accent hover:underline"
-            >
-              Open &lsquo;{loc.volume}&rsquo; in Settings
-            </Link>
-          </div>
-        ) : (
-          <p className="flex flex-wrap items-center gap-2 text-fg">
-            <StatusDot state={loc.state as keyof typeof STATE_LABEL} />
-            <span>
-              Stored on <strong>{loc.volume}</strong> ·{' '}
-              {STATE_LABEL[loc.state as keyof typeof STATE_LABEL] ?? loc.state}
-            </span>
-            <span className="text-fg-muted">
-              {loc.state === 'readonly'
-                ? 'It can be opened, but nothing new is written to that drive.'
-                : 'Ready to open.'}
-            </span>
-          </p>
+            Open &lsquo;{loc.volume}&rsquo;
+          </Link>
         )}
 
         {!more && (

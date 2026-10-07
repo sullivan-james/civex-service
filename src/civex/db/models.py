@@ -484,8 +484,13 @@ class AuditLog(Base):
     # Sync bookkeeping (sync is CIVEX-305). Only `actor` is written so far; the rest are
     # here so the one rebuild of this table that dropping `commit_id` forces
     # also covers them, instead of a second one on a large table later.
-    #  - actor: who made the change: the OS user on that machine, unverified
-    #    (None for entries from before it was recorded).
+    #  - actor: who made the change: the name chosen in that project (else the
+    #    OS user on that machine), as given, unverified (None for entries from
+    #    before it was recorded).
+    #  - device: for a change that came through the authority, the name of the
+    #    device whose token sent it, stamped by the authority (the part it can
+    #    vouch for). None for a change made on the authority itself, one not
+    #    synced yet, or one synced before this was kept.
     #  - device_id: which installation made it.
     #  - hlc: hybrid logical clock stamp, an opaque string that sorts
     #    correctly; orders changes without trusting wall clocks.
@@ -494,6 +499,7 @@ class AuditLog(Base):
     #    (`synced`), or refused it (`rejected`); `seeding` while a seed that
     #    covers it (sends the thing as it is) has not finished.
     actor: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    device: Mapped[str | None] = mapped_column(String(100), nullable=True)
     device_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     hlc: Mapped[str | None] = mapped_column(String(40), nullable=True)
     hub_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -726,8 +732,10 @@ class StorageTransfer(Base):
 
 
 class StoredObject(Base):
-    """Inventory of blobs in the object store: one row per sha256, written
-    when the blob lands on disk and removed when it is deleted. Exists so
+    """Inventory of blobs in the object store: one row per copy (sha256 and
+    the volume holding it; a file may be on several), written when the blob
+    lands on disk and removed when it is deleted. The one answer to "where is
+    this file on this computer": reads look here, not on every drive. Exists so
     per-volume usage is `SUM(size)` over an indexed column instead of a walk
     of the whole volume, and so GC never has to hold the store listing in
     memory. Disk is the source of truth -- GC reconciles this table against
@@ -737,7 +745,7 @@ class StoredObject(Base):
     __table_args__ = (Index("ix_stored_objects_volume", "volume"),)
 
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
-    volume: Mapped[str] = mapped_column(String(255), nullable=False)
+    volume: Mapped[str] = mapped_column(String(255), primary_key=True)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
@@ -1015,6 +1023,8 @@ class SyncConflict(Base):
     # when: what a person needs to judge a clash without going to the history.
     base: Mapped[Any | None] = mapped_column(_JSON, nullable=True)
     theirs_actor: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # The device that change came through (see AuditLog.device).
+    theirs_device: Mapped[str | None] = mapped_column(String(100), nullable=True)
     theirs_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     op_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     device_name: Mapped[str | None] = mapped_column(String(100), nullable=True)

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import { viewsApi } from '../../api/views'
 import {
@@ -23,6 +23,7 @@ import {
   type MenuItem,
   TriggerPopover,
   TableSkeleton,
+  SegmentedControl,
   Field,
 } from '../ui'
 import { ChevronDown, Columns3, Download, Plus, Upload } from '../ui/icons'
@@ -38,6 +39,9 @@ import { DrillLinks } from './DrillLinks'
 import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
 import { SelectionBar } from './SelectionBar'
+import { FilesView } from '../files/FilesView'
+import { MoveToDriveButton } from '../files/MoveDialog'
+import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { BulkRunWorkflow, bulkRunnable } from '../workflows/BulkRunWorkflow'
 import { FileAccessActions } from '../files/FileAccessActions'
 import { selectionFor } from '../../api/fileAccess'
@@ -46,7 +50,6 @@ import { describeDefinition } from '../../utils/exportBuilder'
 import { schemaTreeHasFiles } from '../../utils/hierarchy'
 import { useWorkflows } from '../../hooks/useWorkflows'
 import { useExplorer, type ExplorerScope } from './useExplorer'
-import { withRange } from '../../hooks/useRangeSelect'
 import { useCollection } from '../../hooks/useCollections'
 import { recordRecent } from '../../hooks/usePins'
 import { placeTarget, viewTarget } from '../../utils/navTargets'
@@ -107,21 +110,15 @@ export function RecordsExplorer({
   }, [x.viewsLoaded, x.activeView, x.hasSelection, patch])
 
   // --- selection (only where rows can be deleted)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [allMatching, setAllMatching] = useState(false)
-  const selectionKey = JSON.stringify([
-    listedName,
-    x.rootId,
-    x.query,
-    state.page,
-    state.pageSize,
-  ])
-  const [seenKey, setSeenKey] = useState(selectionKey)
-  if (selectionKey !== seenKey) {
-    setSeenKey(selectionKey)
-    setSelected(new Set())
-    setAllMatching(false)
-  }
+  const picked = useBulkSelection(
+    (x.page.data?.items ?? []).map((r) => r.id),
+    JSON.stringify([listedName, x.rootId, x.query, state.page, state.pageSize]),
+  )
+  const { selected, allMatching } = picked
+  // The same records, as their files (and those of everything beneath them):
+  // one set of filters for both, held in the address like the rest.
+  const [params, setParams] = useSearchParams()
+  const showFiles = params.get('show') === 'files'
   const [confirmDelete, setConfirmDelete] = useState(false)
   const deleteMany = useDeleteManyRecords(dataset ?? '')
   const deleteMatching = useDeleteMatchingRecords(dataset ?? '')
@@ -300,8 +297,7 @@ export function RecordsExplorer({
   function confirmBulkDelete() {
     const done = {
       onSuccess: () => {
-        setSelected(new Set())
-        setAllMatching(false)
+        picked.clear()
         setConfirmDelete(false)
       },
     }
@@ -426,7 +422,11 @@ export function RecordsExplorer({
                 type="search"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                placeholder={`Search ${listedLabel.toLowerCase() || 'records'}…`}
+                placeholder={
+                  showFiles
+                    ? 'Search files…'
+                    : `Search ${listedLabel.toLowerCase() || 'records'}…`
+                }
                 className="w-full"
               />
             </Field>
@@ -570,152 +570,176 @@ export function RecordsExplorer({
         )}
 
         {!x.page.error && (
-          <div className="flex flex-wrap items-center gap-3">
+          // The results: which records the filters above found, and whether
+          // to see them or their files. A rule sets them apart from the
+          // filters.
+          <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
             <p className="text-sm text-fg-muted" aria-live="polite">
               <span className="font-medium text-fg">
                 {total.toLocaleString()}
               </span>{' '}
               {listedLabel.toLowerCase()}
+              {total === 1 ? '' : 's'}
               {state.q && <> matching “{state.q}”</>}
             </p>
+            <SegmentedControl
+              size="sm"
+              label="Show"
+              value={showFiles ? 'files' : 'records'}
+              onChange={(v) =>
+                setParams(
+                  (prev) => {
+                    const out = new URLSearchParams(prev)
+                    if (v === 'files') out.set('show', 'files')
+                    else out.delete('show')
+                    return out
+                  },
+                  { replace: true },
+                )
+              }
+              options={[
+                { value: 'records', label: 'Records' },
+                { value: 'files', label: 'Their files' },
+              ]}
+            />
           </div>
         )}
 
-        {dataset && (
-          <SelectionBar
-            selectedCount={selected.size}
-            pageCount={rows.length}
-            total={total}
-            allMatching={allMatching}
-            onSelectAllMatching={() => setAllMatching(true)}
-            onClear={() => {
-              setSelected(new Set())
-              setAllMatching(false)
+        {showFiles ? (
+          <FilesView
+            // The search box looks for files here (their names, and the
+            // records they sit under), not for the records listed above them.
+            // Inside a record, its own files are among "their files" too.
+            selection={{
+              ...selectionFor(
+                { ...x.query, search: undefined },
+                dataset,
+                undefined,
+                undefined,
+                true,
+              ),
+              with_within: !!x.query.within,
             }}
-            onDelete={() => setConfirmDelete(true)}
-            deleting={deleteMany.isPending || deleteMatching.isPending}
-            // Runs are queued for the records ticked, not for "all matching":
-            // that would be every record the filters match, on every page.
-            actions={
-              <>
-                <FileAccessActions
-                  selection={exportContext(
-                    allMatching ? undefined : [...selected],
-                  )}
-                  folderName={`${folderName}-selected`}
-                  scopeSchema={listedName ?? undefined}
-                  builderTo={builderHref}
-                />
-                {!allMatching && (
-                  <BulkRunWorkflow
-                    workflows={runnable}
-                    recordIds={[...selected]}
-                    onStarted={() => setSelected(new Set())}
-                  />
-                )}
-              </>
-            }
-          />
-        )}
-
-        {x.page.error ? (
-          // In place of the rows only: the filters and search stay editable,
-          // since a bad one is usually what caused this.
-          <div className="space-y-2">
-            <ErrorState message={errorMessage(x.page.error)} />
-            {(x.hasSelection || state.q) && (
-              <Button
-                size="sm"
-                onClick={() =>
-                  patch({
-                    filter: null,
-                    sort: [],
-                    cols: null,
-                    view: null,
-                    q: '',
-                  })
-                }
-              >
-                Clear filters
-              </Button>
-            )}
-          </div>
-        ) : x.page.isLoading ? (
-          <TableSkeleton
-            columns={['w-8', 'w-24', 'w-32', 'w-32', 'w-24']}
-            rows={8}
-          />
-        ) : rows.length === 0 ? (
-          <EmptyState
-            title={`No ${listedLabel.toLowerCase()} match`}
-            message={
-              state.q || x.filter
-                ? 'Try removing a filter or clearing the search.'
-                : 'Nothing here yet.'
-            }
+            search={state.q || undefined}
           />
         ) : (
-          <div aria-busy={x.page.isFetching}>
-            <RecordsTable
-              columns={columns}
-              rows={rows}
-              schemas={x.schemas}
-              recordLink={(r) => `/records/${r.id}`}
-              sort={sort}
-              onSortChange={toggleSort}
-              selection={
-                dataset
-                  ? {
-                      selected: allMatching
-                        ? new Set(rows.map((r) => r.id))
-                        : selected,
-                      onToggle: (id) => {
-                        setAllMatching(false)
-                        setSelected((prev) => {
-                          const next = new Set(prev)
-                          if (!next.delete(id)) next.add(id)
-                          return next
-                        })
-                      },
-                      onSetMany: (ids, on) => {
-                        // A shift-click range, from what is shown now (with "all
-                        // matching" the whole page is ticked).
-                        const shown = allMatching
-                          ? new Set(rows.map((r) => r.id))
-                          : selected
-                        setAllMatching(false)
-                        setSelected(withRange(shown, ids, on))
-                      },
-                      onToggleAll: () => {
-                        setAllMatching(false)
-                        setSelected(
-                          selected.size === rows.length
-                            ? new Set()
-                            : new Set(rows.map((r) => r.id)),
-                        )
-                      },
+          <>
+            {dataset && (
+              <SelectionBar
+                selectedCount={selected.size}
+                pageCount={rows.length}
+                total={total}
+                allMatching={allMatching}
+                onSelectAllMatching={picked.selectAllMatching}
+                onDelete={() => setConfirmDelete(true)}
+                deleting={deleteMany.isPending || deleteMatching.isPending}
+                // Runs are queued for the records ticked, not for "all matching":
+                // that would be every record the filters match, on every page.
+                actions={
+                  <>
+                    <FileAccessActions
+                      selection={exportContext(
+                        allMatching ? undefined : [...selected],
+                      )}
+                      folderName={`${folderName}-selected`}
+                      scopeSchema={listedName ?? undefined}
+                      builderTo={builderHref}
+                    />
+                    {canExportFiles && (
+                      // The files of the records ticked and of everything in
+                      // them: the one move dialog.
+                      <MoveToDriveButton
+                        label="Move files to drive…"
+                        what={`the files of ${bulkCount.toLocaleString()} record${bulkCount === 1 ? '' : 's'}`}
+                        pick={selectionFor(
+                          x.query,
+                          dataset,
+                          allMatching ? undefined : [...selected],
+                          undefined,
+                          true,
+                        )}
+                        onStarted={picked.clear}
+                      />
+                    )}
+                    {!allMatching && (
+                      <BulkRunWorkflow
+                        workflows={runnable}
+                        recordIds={[...selected]}
+                        onStarted={picked.clear}
+                      />
+                    )}
+                  </>
+                }
+              />
+            )}
+
+            {x.page.error ? (
+              // In place of the rows only: the filters and search stay editable,
+              // since a bad one is usually what caused this.
+              <div className="space-y-2">
+                <ErrorState message={errorMessage(x.page.error)} />
+                {(x.hasSelection || state.q) && (
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      patch({
+                        filter: null,
+                        sort: [],
+                        cols: null,
+                        view: null,
+                        q: '',
+                      })
                     }
-                  : undefined
-              }
-              trailing={{
-                header: 'Contains',
-                render: (row) => (
-                  <DrillLinks
-                    counts={row.child_counts}
-                    byName={x.byName}
-                    onDrill={(child) => drill(row, child)}
-                  />
-                ),
-              }}
-            />
-            <Pagination
-              page={state.page}
-              pageSize={state.pageSize}
-              total={total}
-              onPage={(page) => patch({ page })}
-              onPageSize={(pageSize) => patch({ pageSize })}
-            />
-          </div>
+                  >
+                    Clear filters
+                  </Button>
+                )}
+              </div>
+            ) : x.page.isLoading ? (
+              <TableSkeleton
+                columns={['w-8', 'w-24', 'w-32', 'w-32', 'w-24']}
+                rows={8}
+              />
+            ) : rows.length === 0 ? (
+              <EmptyState
+                title={`No ${listedLabel.toLowerCase()} match`}
+                message={
+                  state.q || x.filter
+                    ? 'Try removing a filter or clearing the search.'
+                    : 'Nothing here yet.'
+                }
+              />
+            ) : (
+              <div aria-busy={x.page.isFetching}>
+                <RecordsTable
+                  columns={columns}
+                  rows={rows}
+                  schemas={x.schemas}
+                  recordLink={(r) => `/records/${r.id}`}
+                  sort={sort}
+                  onSortChange={toggleSort}
+                  selection={dataset ? picked.table : undefined}
+                  trailing={{
+                    header: 'Contains',
+                    render: (row) => (
+                      <DrillLinks
+                        counts={row.child_counts}
+                        byName={x.byName}
+                        onDrill={(child) => drill(row, child)}
+                      />
+                    ),
+                  }}
+                />
+                <Pagination
+                  page={state.page}
+                  pageSize={state.pageSize}
+                  total={total}
+                  onPage={(page) => patch({ page })}
+                  onPageSize={(pageSize) => patch({ pageSize })}
+                />
+              </div>
+            )}
+          </>
         )}
         {listed && listed.parent_id && !scope.root && x.chain.length === 0 && (
           <p className="text-xs text-fg-muted">

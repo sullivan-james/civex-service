@@ -8,6 +8,11 @@ export interface RemoteStatus {
   /** The schedule is stopped; Sync now still works. */
   paused: boolean
   interval_seconds: number
+  /** Which files this computer keeps a copy of: every file (downloaded in the
+   * background), or only those opened or exported. */
+  download_files: 'all' | 'opened'
+  /** Files the records here cite that aren't on this computer yet. */
+  files_to_fetch: number
   /** This project is itself an authority. */
   serving: boolean
   /** Changes made here that have not been sent. */
@@ -46,6 +51,9 @@ export interface SyncProgress {
   done: number
   total: number | null
   kind: string | null
+  /** Downloading files: bytes so far, and how fast (bytes a second). */
+  bytes_done?: number
+  rate?: number
 }
 
 export interface SyncResult {
@@ -59,7 +67,7 @@ export interface SyncResult {
 /** How a conflict is settled. Which of these a row offers is the server's word
  * (`takes`), so this screen keeps no rule of its own. */
 export type ConflictTake =
-  'theirs' | 'mine' | 'value' | 'edited' | 'delete' | 'retry'
+  'theirs' | 'mine' | 'value' | 'edited' | 'delete' | 'retry' | 'restore_above'
 
 /** How a conflict ended: what a person chose, or what settled it by itself:
  * `sent` (a refused record went in once fixed), `replaced` (a later attempt
@@ -95,6 +103,8 @@ export interface SyncConflict {
   base: unknown
   /** Who wrote the value that stayed, and when. */
   theirs_actor: string | null
+  /** The device their change came through (verified by the server). */
+  theirs_device?: string | null
   theirs_at: string | null
   /** Worked out when read (records only): what a person recognises. */
   record_name: string | null
@@ -114,6 +124,9 @@ export interface SyncConflict {
   attempted: 'create' | 'update' | 'delete' | null
   /** ...and the fields it set, to show on the record itself. */
   changes: ConflictChange[]
+  /** For a refused record that sits under deleted records here: those records,
+   * topmost first. `restore_above` brings them back and sends it again. */
+  sits_under?: { id: string; schema_name: string; name: string | null }[]
 }
 
 /** One field a refused or colliding change set. */
@@ -156,8 +169,44 @@ export interface ResolveManyResult {
   failed: { id: string; message: string }[]
 }
 
+/** One collection's files on this computer. */
+export interface CollectionFiles {
+  id: string
+  name: string
+  /** In force: `keep` (a copy stays here) or `opened` (fetched when opened). */
+  mode: 'keep' | 'opened'
+  /** Set for this collection, rather than following the project's setting. */
+  chosen: boolean
+  files_here: number
+  bytes_here: number
+  /** Only on the server: on no drive here. */
+  files_on_server: number
+}
+
+/** What freeing a collection's space removes (or would), and what it keeps. */
+export interface FreeUp {
+  files: number
+  bytes: number
+  /** Kept: also used by a collection kept on this computer. */
+  kept_shared: number
+  /** Kept: the server hasn't got them yet. */
+  not_on_server: number
+  done: boolean
+}
+
 export const remoteApi = {
   status: () => api.get<RemoteStatus>('/remote'),
+  collectionFiles: () => api.get<CollectionFiles[]>('/remote/files'),
+  setCollectionMode: (collection: string, mode: 'keep' | 'opened' | null) =>
+    api.patch<CollectionFiles[]>(
+      `/remote/files/${encodeURIComponent(collection)}`,
+      { mode },
+    ),
+  freeUp: (collection: string, dryRun: boolean) =>
+    api.post<FreeUp>(
+      `/remote/files/${encodeURIComponent(collection)}/free-up?dry_run=${dryRun}`,
+      {},
+    ),
   /** This project as an authority: whether it accepts devices, and which. */
   authority: () => api.get<Authority>('/remote/authority'),
   setServing: (serving: boolean) =>
@@ -179,8 +228,11 @@ export const remoteApi = {
     api.post<{ mode: string }>('/remote/connect', { url, token }),
   disconnect: () => api.post<RemoteStatus>('/remote/disconnect', {}),
   syncNow: () => api.post<{ requested: boolean }>('/remote/sync', {}),
-  update: (body: { paused?: boolean; interval_seconds?: number }) =>
-    api.patch<RemoteStatus>('/remote', body),
+  update: (body: {
+    paused?: boolean
+    interval_seconds?: number
+    download_files?: 'all' | 'opened'
+  }) => api.patch<RemoteStatus>('/remote', body),
   conflicts: (status: 'open' | 'resolved' | 'all' = 'open', record?: string) =>
     api.get<SyncConflict[]>(
       `/remote/conflicts?status=${status}${record ? `&record=${record}` : ''}`,

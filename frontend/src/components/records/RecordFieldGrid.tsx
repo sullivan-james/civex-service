@@ -192,8 +192,7 @@ function FileControl({
             <p className="text-sm">
               Remove{' '}
               <strong>{removing.resolved_filename ?? removing.filename}</strong>{' '}
-              from this record? The file stays in storage until it is cleaned
-              up, but nothing on the record will point to it.
+              from this record?
             </p>
           }
           onConfirm={() => {

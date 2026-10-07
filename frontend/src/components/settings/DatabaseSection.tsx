@@ -4,6 +4,7 @@ import { errorMessage } from '../../lib/errors'
 import { AdvancedDatabase } from './database/AdvancedDatabase'
 import { CurrentDatabaseCard } from './database/CurrentDatabaseCard'
 import { HistoryStorageCard } from './database/HistoryStorageCard'
+import { OrphansCard } from './database/OrphansCard'
 import { MoveHistory } from './database/MoveHistory'
 
 const DB_TABS = [
@@ -54,6 +55,7 @@ export default function DatabaseSection() {
         <div className="space-y-5">
           <CurrentDatabaseCard />
           <HistoryStorageCard />
+          <OrphansCard />
         </div>
       </TabPanel>
       <TabPanel id="history" value={shownTab}>

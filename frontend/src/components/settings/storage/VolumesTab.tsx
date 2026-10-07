@@ -30,10 +30,10 @@ import {
 import { errorMessage } from '../../../lib/errors'
 import { formatSize } from '../../../utils/storage'
 import { AddVolumeModal } from '../AddVolumeModal'
-import { StatusDot } from './StatusDot'
+import { VolumeStatus } from '../../files/Where'
 import { useVolumeActions } from './useVolumeActions'
 import { VolumeSpace } from './VolumeSpace'
-import { NEEDS_ATTENTION, STATE_LABEL } from './volumeState'
+import { NEEDS_ATTENTION } from '../../../utils/volumes'
 
 /** The volumes Civex keeps files on, one row each, and the order new files
  * are written in. */
@@ -171,16 +171,11 @@ export function VolumesTab() {
             className: 'whitespace-nowrap',
             render: (vol) => (
               <>
-                <span className="inline-flex items-center gap-2">
-                  <StatusDot state={vol.state} />
-                  {STATE_LABEL[vol.state]}
-                  {NEEDS_ATTENTION.includes(vol.state) && (
-                    <InfoTip>
-                      {vol.reason}
-                      {vol.fix ? ` ${vol.fix}` : ''}
-                    </InfoTip>
-                  )}
-                </span>
+                <VolumeStatus
+                  state={vol.state}
+                  reason={vol.reason}
+                  fix={vol.fix}
+                />
                 {vol.warning && vol.state === 'online' && (
                   <span className="mt-1 flex items-center gap-1 text-xs text-attention">
                     <AlertTriangle size={12} aria-hidden="true" /> Low space
@@ -261,7 +256,7 @@ export function VolumesTab() {
                 <span className="flex min-h-12 items-center gap-3 px-2 text-sm">
                   <span className="w-5 text-fg-muted">{i + 1}</span>
                   <span className="font-medium">{vol.name}</span>
-                  <StatusDot state={vol.state} />
+                  <VolumeStatus state={vol.state} />
                 </span>
               )}
             />

@@ -121,6 +121,10 @@ class FileSelection:
     # encounters, and everything inside them". Without it, only the selected
     # records' own files.
     below: bool = False
+    # With `query.within` and a `query.schema`: also the files of the `within`
+    # record itself (the record a list of what it contains is inside), so
+    # "its files" means all of them, not only its children's.
+    with_within: bool = False
     # The tables made beside the files (`tables`; each says what its rows are,
     # where it is written and its columns), and whether the files themselves are
     # taken (`files`: False is tables alone).
@@ -162,6 +166,85 @@ class FileItem:
             "fix": self.fix,
             "source": self.source,
         }
+
+
+# Where a file is, as one word a person can filter by: the name of the drive
+# that holds it (reachable or not), or one of these.
+PLACE_SERVER = "server"  # another device added it; only the server has it
+PLACE_MISSING = "missing"  # on no drive this project knows, and no server
+# Filters that group places.
+PLACE_HERE = "here"  # on a drive of this computer that can be read now
+PLACE_UNREACHABLE = "unreachable"  # on a drive of this computer that can't
+
+
+def place_of(item: FileItem) -> tuple[str, str]:
+    """(place, kind) of a file: the drive holding it and whether it can be read
+    now (`drive` / `unreachable`), or `server` / `missing`. The one rule for
+    where a file is, behind the Files tab's summary, its Where filter and the
+    actions that pick files by place."""
+    if item.volume:
+        return item.volume, ("drive" if item.available else "unreachable")
+    if item.state == "remote":
+        return PLACE_SERVER, "server"
+    return PLACE_MISSING, "missing"
+
+
+def in_place(item: FileItem, wanted: str) -> bool:
+    """Whether a file is in `wanted`: a drive's name, `server`, `missing`, or
+    the groups `here` (any readable drive) and `unreachable`."""
+    place, kind = place_of(item)
+    if wanted == PLACE_HERE:
+        return kind == "drive"
+    if wanted == PLACE_UNREACHABLE:
+        return kind == "unreachable"
+    return place == wanted
+
+
+@dataclass
+class MovePlan:
+    """What moving picked files onto a drive would do."""
+
+    files: int  # files that would move from another drive
+    bytes: int
+    from_server: int  # files only on the server, downloaded straight there
+    shared_left: int  # files records you didn't pick also use: they stay
+    shared_bytes: int
+    already_there: int
+    # Of `files`, those copied, not moved: their drive is the home of a
+    # collection that uses them, and keeps its copy.
+    copied: int = 0
+
+
+@dataclass
+class PlaceSummary:
+    """How much of a selection is in one place."""
+
+    place: str
+    kind: str  # drive | unreachable | server | missing
+    files: int
+    bytes: int
+    reason: str = ""  # for an unreachable drive: why, in its own words
+    fix: str = ""
+
+
+@dataclass
+class FileListing:
+    """One page of a selection's files, with where all of them are."""
+
+    total: int  # files matching (after the place and name filters)
+    summary: list[PlaceSummary]  # every file of the selection, by place
+    items: list[FileItem]
+    # How many files of each kind (file field): {field, files, bytes}.
+    kinds: list[dict[str, Any]] = field(default_factory=list)
+    # For each listed file (by sha256): the records here that use it (each
+    # a FileItem: the record, the kind of file, where it sits)...
+    uses: dict[str, list[FileItem]] = field(default_factory=dict)
+    # ...and how many live records not listed here use it too (moving it
+    # would move it for them).
+    others: dict[str, int] = field(default_factory=dict)
+    # How many files are used by how many records ({records, files}, fewest
+    # records first), before narrowing by that: the "used by" pick's choices.
+    sharing: list[dict[str, int]] = field(default_factory=list)
 
 
 @dataclass
@@ -262,8 +345,14 @@ class FilePlan:
         return sum(i.size for i in self.items if i.available)
 
     @property
+    def to_fetch(self) -> list[FileItem]:
+        """Files only on the server (another device added them): an export
+        downloads them first, so they don't make it incomplete."""
+        return [i for i in self.items if i.state == "remote"]
+
+    @property
     def complete(self) -> bool:
-        return self.available == self.total
+        return self.available + len(self.to_fetch) == self.total
 
     @property
     def by_volume(self) -> list[VolumeShare]:
@@ -319,6 +408,10 @@ class FilePlan:
                 for v in self.by_volume
             ],
             "duplicates_dropped": self.duplicates_dropped,
+            "to_fetch": {
+                "files": len(self.to_fetch),
+                "bytes": sum(i.size for i in self.to_fetch),
+            },
             "tables": [t.to_dict() for t in self.tables],
             "summary": self.summary(),
             "unavailable": [

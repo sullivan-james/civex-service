@@ -51,6 +51,7 @@ import { RecordFieldGrid } from '../components/records/RecordFieldGrid'
 import { MergeView } from '../components/sync/MergeView'
 import { ReviewStepper } from '../components/sync/ReviewStepper'
 import { RecordConflicts } from '../components/sync/RecordConflicts'
+import { OrphanBanner } from '../components/records/OrphanBanner'
 import { layoutConflicts } from '../utils/syncConflicts'
 import {
   useConflictsAbout,
@@ -293,6 +294,7 @@ export default function RecordDetailPage() {
         }
       >
         <ReviewStepper recordId={record.id} active={shownTab === 'resolve'} />
+        <OrphanBanner record={record} onDelete={() => setConfirmDelete(true)} />
         {shownTab === 'fields' && (
           <RecordConflicts
             layout={conflictLayout}
@@ -314,7 +316,13 @@ export default function RecordDetailPage() {
         <TabPanel id="fields" value={shownTab}>
           <UploadCollectionContext.Provider value={record.dataset_id}>
             <div className="mb-3">
-              <RecordStorageSummary data={record.data} />
+              <RecordStorageSummary
+                recordId={record.id}
+                name={record.natural_name ?? record.id.slice(0, 8)}
+                filesHref={
+                  showContains ? '?tab=contains&show=files' : undefined
+                }
+              />
             </div>
             <RecordFieldGrid
               fields={

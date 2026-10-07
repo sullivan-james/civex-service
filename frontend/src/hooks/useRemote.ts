@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   remoteApi,
@@ -24,6 +24,31 @@ export function useRemoteStatus() {
       return s.running || s.pending > 0 ? 2000 : 15_000
     },
   })
+}
+
+/** Whatever page is open, refresh what it shows when a sync has finished
+ * having changed something (records came in or went out, values to review),
+ * or when a download of files has finished. Mounted once, in the layout. */
+export function useRefreshOnSync() {
+  const { data } = useRemoteStatus()
+  const qc = useQueryClient()
+  const seen = useRef<{ synced: string | null; busy: boolean } | null>(null)
+  useEffect(() => {
+    if (!data?.configured) {
+      seen.current = null
+      return
+    }
+    const now = { synced: data.last_synced_at, busy: !!data.progress }
+    const before = seen.current
+    seen.current = now
+    if (!before) return
+    const r = data.last_result
+    const changed =
+      !!r && r.pulled + r.pushed + r.conflicts + r.rejected + r.files_sent > 0
+    const synced = now.synced !== before.synced && changed
+    const downloaded = before.busy && !now.busy
+    if (synced || downloaded) void qc.invalidateQueries()
+  }, [data, qc])
 }
 
 export function useSyncConflicts(enabled: boolean) {
@@ -109,6 +134,43 @@ export function useDisconnectRemote() {
 export function useSyncNow() {
   const refresh = useRefreshing()
   return useMutation({ mutationFn: remoteApi.syncNow, onSuccess: refresh })
+}
+
+/** Whether files can live only on a server: the project follows one (and isn't
+ * one). Everything about keeping files on this computer shows only then. */
+export function useFollowsServer(): boolean {
+  const { data } = useRemoteStatus()
+  return !!data?.configured && !data.serving
+}
+
+/** Each collection's files on this computer, and whether it keeps a copy. */
+export function useCollectionFiles(enabled = true) {
+  return useQuery({
+    queryKey: [...KEY, 'files'],
+    queryFn: remoteApi.collectionFiles,
+    enabled,
+  })
+}
+
+export function useSetCollectionMode() {
+  const refresh = useRefreshing()
+  return useMutation({
+    mutationFn: (v: { id: string; mode: 'keep' | 'opened' | null }) =>
+      remoteApi.setCollectionMode(v.id, v.mode),
+    onSuccess: refresh,
+  })
+}
+
+/** Free a collection's space: `dryRun` only counts (and refreshes nothing). */
+export function useFreeUp() {
+  const refresh = useRefreshing()
+  return useMutation({
+    mutationFn: (v: { id: string; dryRun: boolean }) =>
+      remoteApi.freeUp(v.id, v.dryRun),
+    onSuccess: (r) => {
+      if (r.done) refresh()
+    },
+  })
 }
 
 export function useUpdateRemote() {

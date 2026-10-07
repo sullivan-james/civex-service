@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { byWhom } from '../../utils/syncConflicts'
 import type { AuditLogEntry, RevertField, RevertPlan } from '../../api/audit'
 import { blockerTarget } from '../../api/restore'
 import { useRevertEntry, useRevertPlan } from '../../hooks/useAudit'
@@ -67,7 +68,7 @@ export function AuditEntryDialog({
             <EntrySubject entry={entry} full />
             <p className="text-xs text-fg-muted">
               {new Date(entry.timestamp).toLocaleString()}
-              {entry.actor ? ` · by ${entry.actor}` : ''}
+              {entry.actor ? ` · by ${byWhom(entry.actor, entry.device)}` : ''}
             </p>
             <SyncOutcome entry={entry} />
             <AuditChangeList changes={entry.changes} action={entry.action} />
@@ -224,19 +225,14 @@ function PlanSummary({ plan }: { plan: RevertPlan }) {
   if (plan.kind === 'delete')
     return (
       <p className="text-sm text-fg">
-        This moves the record to Recently Deleted. You can restore it from
-        there.
+        This deletes the record. It can be restored from Activity.
       </p>
     )
   if (!plan.fields.length)
     return (
       <p className="text-sm text-fg">This entry changed no field values.</p>
     )
-  return (
-    <p className="text-sm text-fg">
-      Each field below goes back to the value it had before this change.
-    </p>
-  )
+  return null
 }
 
 function PlanFields({ fields }: { fields: RevertField[] }) {

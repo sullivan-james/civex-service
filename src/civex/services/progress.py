@@ -15,6 +15,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from civex.domain.rates import RateWindow, eta_seconds
+
 # A client-chosen id: short and plain, so it can't be used to smuggle anything.
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 _KEEP_FINISHED_SECONDS = 120
@@ -29,6 +31,12 @@ class _State:
     finished: bool = False
     error: str | None = None
     touched: float = 0.0
+    # For a stage that moves bytes (downloading): how many so far and of how
+    # many (0 = not known), how fast, and how long the rest will take.
+    bytes_done: int = 0
+    bytes_total: int = 0
+    rate: float = 0.0
+    eta: float | None = None
 
 
 class Progress:
@@ -37,14 +45,32 @@ class Progress:
     def __init__(self, state: _State, lock: threading.Lock) -> None:
         self._state = state
         self._lock = lock
+        self._rate = RateWindow()
 
-    def phase(self, label: str, total: int = 0) -> None:
-        """A new stage of the work, with how many steps it has (0 = not known)."""
+    def phase(self, label: str, total: int = 0, total_bytes: int = 0) -> None:
+        """A new stage of the work, with how many steps it has (0 = not known)
+        and, for one that moves bytes, how many."""
         with self._lock:
             self._state.phase = label
             self._state.done = 0
             self._state.total = max(total, 0)
+            self._state.bytes_done = 0
+            self._state.bytes_total = max(total_bytes, 0)
+            self._state.rate = 0.0
+            self._state.eta = None
             self._state.touched = time.monotonic()
+        self._rate = RateWindow()
+
+    def add_bytes(self, n: int) -> None:
+        """Bytes that have just arrived (or moved) in this stage."""
+        with self._lock:
+            now = time.monotonic()
+            self._state.bytes_done += n
+            self._state.rate = self._rate.add(now, self._state.bytes_done)
+            self._state.eta = eta_seconds(
+                self._state.rate, self._state.bytes_done, self._state.bytes_total
+            )
+            self._state.touched = now
 
     def advance(self, done: int, total: int | None = None) -> None:
         """Steps done so far in this stage (and, if it has just become known, how many
@@ -89,6 +115,10 @@ class ProgressRegistry:
                 "total": state.total,
                 "finished": state.finished,
                 "error": state.error,
+                "bytes_done": state.bytes_done,
+                "bytes_total": state.bytes_total,
+                "rate": state.rate,
+                "eta": state.eta,
             }
 
     def _forget_old(self) -> None:

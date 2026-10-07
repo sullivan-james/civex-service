@@ -41,10 +41,17 @@ function TaskRow({ task }: { task: BackgroundTask }) {
         />
         <p className={task.progress ? 'font-medium' : ''}>{task.title}</p>
         {task.progress && (
-          <ProgressBar
-            fraction={task.progress.fraction}
-            label={task.progress.label}
-          />
+          <>
+            <ProgressBar
+              fraction={task.progress.fraction}
+              label={task.progress.label}
+            />
+            {/* The numbers stay in view: how many of how many, else how far. */}
+            <span className="tabular-nums text-fg-muted">
+              {task.progress.count ??
+                `${Math.round(Math.min(1, task.progress.fraction) * 100)}%`}
+            </span>
+          </>
         )}
         {task.detail && <p className="text-fg-muted">{task.detail}</p>}
         {task.note && <span className="text-fg-muted">{task.note}</span>}

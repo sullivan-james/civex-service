@@ -41,7 +41,6 @@ export function NewTransferModal({
   const [source, setSource] = useState(preset.source ?? '')
   const [collectionId, setCollectionId] = useState(preset.collectionId ?? '')
   const [target, setTarget] = useState(preset.target ?? '')
-  const [includeShared, setIncludeShared] = useState(false)
   const [verifyFull, setVerifyFull] = useState(false)
   const [freeze, setFreeze] = useState(true)
 
@@ -52,7 +51,6 @@ export function NewTransferModal({
         targets: [target],
         sources: kind === 'drain' ? [source] : [],
         collection_ids: kind === 'consolidate' ? [collectionId] : [],
-        include_shared: includeShared,
         verify: verifyFull ? 'full' : 'copy',
         freeze_sources: freeze,
       }
@@ -135,16 +133,6 @@ export function NewTransferModal({
             </select>
           </label>
 
-          {kind === 'consolidate' && (
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={includeShared}
-                onChange={(e) => setIncludeShared(e.target.checked)}
-              />
-              Also move files that other collections use
-            </label>
-          )}
           {kind === 'drain' && (
             <label className="flex items-center gap-2">
               <input
@@ -182,13 +170,6 @@ export function NewTransferModal({
                     `; ${plan.already_there} already there`}
                   .
                 </p>
-                {plan.shared_left > 0 && (
-                  <p className="text-fg-muted">
-                    {plan.shared_left} files (
-                    {formatSize(plan.shared_left_bytes)}) stay, because other
-                    collections use them.
-                  </p>
-                )}
                 {plan.warnings.map((w) => (
                   <p key={w} className="text-attention">
                     {w}

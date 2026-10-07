@@ -92,10 +92,6 @@ class TransferSpec:
     sources: list[str] = field(default_factory=list)
     # consolidate: the collections (by id) whose files to move.
     collection_ids: list[str] = field(default_factory=list)
-    # consolidate: also move files that other collections, homed on a different
-    # volume, use as well. Left alone by default, since one copy can only be in
-    # one place and moving it would just split those collections instead.
-    include_shared: bool = False
     # files: the content to move, by sha256. Files already on a target stay put.
     shas: list[str] = field(default_factory=list)
     verify: str = VERIFY_COPY
@@ -123,8 +119,10 @@ class TransferPlan:
     files: int = 0  # files that would be moved
     bytes: int = 0
     already_there: int = 0  # files already on a target, left where they are
-    shared_left: int = 0  # consolidate: files used by other collections' homes
-    shared_left_bytes: int = 0
+    # Of `files`, those copied rather than moved: the drive they come from is
+    # the home of another collection that uses them, which keeps its copy.
+    copied: int = 0
+    copied_bytes: int = 0
     targets: list[TargetShare] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)

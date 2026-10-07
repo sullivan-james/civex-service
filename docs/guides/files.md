@@ -5,7 +5,7 @@
 Civex uses a content-addressed object store: when you attach a file to a record, the file's bytes are stored in `_civex/objects/<sha256[:2]>/<sha256[2:]>` — the same layout as Git's object store. The record stores a lightweight reference: `{sha256, filename, size}`.
 
 This means:
-- **Identical files are stored once.** Attaching the same file to ten records uses disk space once.
+- **Identical files are stored once.** Attaching the same file to ten records uses disk space once. The one exception is a collection's home drive (below): it keeps its own copy of every file the collection uses.
 - **Files are immutable.** The SHA-256 hash is the address; the content never changes.
 - **Filenames are cosmetic.** The stored filename is the original name you uploaded, but retrieval is always by hash.
 
@@ -84,7 +84,9 @@ civex store place clear study
 
 A home need not be in the write queue. If the home can't take a file (unplugged, full, the wrong drive), the file goes to the write queue by default (`spill`), so an unplugged drive doesn't stop uploads; with `--on-unavailable fail` the upload is refused instead, so the collection's data is never written anywhere else.
 
-A home only decides where **new** files are written. Deduplication always wins: a file whose content is already stored on any volume is reused where it lives and is never copied to the home — including when the only copy is on a volume that is currently unplugged. Two collections with different homes that attach the same file therefore share one stored copy.
+**A home keeps a copy of every file its collection uses.** When two collections have different homes and use the same file, each home holds a copy, so each collection is whole on its own drive: unplug one drive and the other collection still opens everything. A file that is already stored somewhere is written again only onto a home that hasn't got it, never onto any other drive. Gathering a collection onto its home copies a file another collection keeps on its own home (that home keeps its copy) and moves everything else; the preview says how many are copied. Opening a file uses a copy on a drive that is plugged in.
+
+Civex knows where every copy is from its own inventory of this computer, so opening a file never searches the drives. Where a file is stored belongs to this computer: it is not part of the record and doesn't sync (another computer may hold the same record's file on a different drive, or only on the server). **Clean up** checks the inventory against what is on the drives and repairs it. Clearing a collection's home doesn't remove the copies that home was keeping.
 
 Homes are stored in `_civex/config.toml` by collection id (`[store.placement.<id>]`), so renaming a collection changes nothing, and they belong to this machine alongside the volumes they name. Removing a volume that is a home needs `--force` (in the app, the removal dialog says what will happen and asks you to type the volume's name when it holds files), which clears those homes. Nothing is ever deleted from the drive.
 
@@ -312,6 +314,63 @@ civex files exports remove --all
 
 Removing a linked folder gives back no space and never touches the stored files. Removing a copied folder gives back its space. Anything of your own that you put inside an export folder is left, with the folder. Exports on a drive that isn't connected are listed once it is plugged in again.
 
+## Where files are, and moving them
+
+The record list, on a collection's **Records** tab and a record's
+**Contains** tab, has a switch above it: **Records | Their files**. *Their
+files* lists the files of exactly the records you are looking at, and of
+everything beneath them, under the same filters and saved view. For example,
+filter to Recordings that have a Selection with `selection_number` below 5,
+then switch to their files.
+
+Each row is one file as it is stored. A file is stored once however many
+records use it, so a file three records use is one row, and every count and
+size is of real files on disk. The **Record** column shows where the file sits
+("Encounter 7 › Recording 2 › Selection 11"). **Used by N records** opens every
+record that uses it, with the records above each, including those outside
+this list. Deleted records still keep a file while they can be restored, but
+they don't count as using it: the list says how many there are, apart. Inside
+a record, its own files are listed with those of what it contains, so the
+count matches the record's storage line. The search box at the top searches the files (their names and the
+names of the records they sit under), **Kinds of file** narrows to some file
+fields, and **Used by** to files that so many records use. Each record names a
+file by its own name template: when they differ, the row says what else it is
+called.
+
+Above the files is a bar of where all of them are: each drive, a drive that
+isn't plugged in, **not on this computer** (for a project that syncs:
+downloading it fetches it from the server) and **missing**. Click a place to
+list only its files. The whole view is in the page address, so it can be
+bookmarked or shared.
+
+Tick files (ticking a whole page offers every file that matches, on every
+page), then:
+
+- **Move to drive…** moves just those files onto one drive, in the background.
+  Files not on this computer are downloaded straight onto it, and files on a
+  drive that isn't plugged in stay where they are. A file is stored once
+  however many records use it, so moving it moves it for all of them: a file
+  that records not in the list also use ("Used by 4 records (3 not listed)")
+  stays where it is, unless you choose **Also move** in the dialog,
+  which says how many there are before anything moves
+  (`civex files gather --include-shared`).
+- **Download to this computer** fetches the ones not on this computer from
+  the server. Any the server hasn't got yet (the device that added them
+  hasn't sent them) are named.
+- **Free up space…** removes this computer's copies of files the server holds
+  (see [Files on this computer](sync.md#which-files-this-computer-keeps)).
+
+Each action says first what it will do, and runs as a job in the status bar.
+From a terminal, the same selection options pick the same files, with `--on`
+for a place and `--name` for a name:
+
+```bash
+civex files list --in Humpbacks --on field-ssd
+civex files gather --in Humpbacks --on field-ssd --to archive
+civex files fetch --under <record id>
+civex files free --in Humpbacks --name ".wav"
+```
+
 ## Downloading files
 
 In the UI, each file field shows a download link next to the filename. Via the API:
@@ -319,6 +378,12 @@ In the UI, each file field shows a download link next to the filename. Via the A
 ```
 GET /api/files/<sha256>
 ```
+
+
+!!! note "On a project that syncs"
+    A file another device added is downloaded from the authority the first time it
+    is opened or exported, and in the background unless this computer keeps only
+    the files it opens. See [Files](sync.md#files) in the sync guide.
 
 ## Restricting accepted files
 

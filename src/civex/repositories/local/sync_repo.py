@@ -6,6 +6,7 @@ is how a change made on one machine is reproduced on another."""
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -46,6 +47,7 @@ from civex.domain.sync import (
     SyncMetaDTO,
     parse_snapshot_cursor,
 )
+from civex.repositories.local.inventory import stored_files
 from civex.repositories.local.dataset_repo import _to_dtos as _dataset_dtos
 from civex.repositories.local.record_repo import _to_dto as _record_dto
 from civex.repositories.local.schema_repo import _field_to_dto, _schema_to_dto
@@ -149,18 +151,161 @@ class LocalSyncRepository:
         )
 
     def referenced_shas(self, after: str, limit: int) -> list[str]:
-        """Hashes of the files live records cite, in hash order, `limit` of them
+        """Hashes of the files live records cite (a deleted record's are sent if
+        it is restored), in hash order, `limit` of them
         after `after`. The catalog is kept up to date as records are written, so
         what a device still owes its authority is worked out from it each time
         rather than remembered."""
         rows = self._s.execute(
             select(FileReference.sha256)
-            .where(FileReference.record_id.is_not(None), FileReference.sha256 > after)
+            .join(Record, Record.id == FileReference.record_id)
+            .where(FileReference.sha256 > after, Record.deleted_at.is_(None))
             .distinct()
             .order_by(FileReference.sha256)
             .limit(limit)
         )
         return [sha for (sha,) in rows]
+
+    def _not_here(self):  # type: ignore[no-untyped-def]
+        """Files live records here cite that no drive here is recorded to hold
+        (a deleted record's files are fetched if it comes back and is opened,
+        not in the background)."""
+        stored = stored_files()
+        return (
+            select(FileReference.sha256, func.min(Record.dataset_id))
+            .join(Record, Record.id == FileReference.record_id)
+            .outerjoin(stored, stored.c.sha == FileReference.sha256)
+            .where(stored.c.sha.is_(None), Record.deleted_at.is_(None))
+            .group_by(FileReference.sha256)
+        )
+
+    def files_not_here(
+        self,
+        after: str,
+        limit: int,
+        shas: list[str] | None = None,
+        collections: set[uuid.UUID] | None = None,
+    ) -> list[tuple[str, uuid.UUID | None]]:
+        """Files the records here cite that no drive here holds (another device
+        added them), in hash order after `after`, each with a collection that
+        uses it (to choose the drive it is written to). With `shas`, only those;
+        with `collections`, only files records in those collections use."""
+        query = self._not_here().where(FileReference.sha256 > after)
+        if shas is not None:
+            query = query.where(FileReference.sha256.in_(shas))
+        if collections is not None:
+            query = query.where(Record.dataset_id.in_(collections))
+        rows = self._s.execute(query.order_by(FileReference.sha256).limit(limit))
+        return [(sha, collection) for sha, collection in rows]
+
+    def count_files_not_here(self, collections: set[uuid.UUID] | None = None) -> int:
+        query = self._not_here()
+        if collections is not None:
+            query = query.where(Record.dataset_id.in_(collections))
+        return int(
+            self._s.execute(
+                select(func.count()).select_from(query.subquery())
+            ).scalar_one()
+        )
+
+    def added_by(self, shas: list[str]) -> dict[str, str | None]:
+        """Which device (else author) added each of these files: the earliest
+        history entry of a record citing it whose new side has it and old side
+        hasn't. A few lookups per file, for the handful a person is told about
+        (files nobody can fetch yet), never a list."""
+        out: dict[str, str | None] = {}
+        for sha in dict.fromkeys(shas):
+            holders = [
+                r
+                for (r,) in self._s.execute(
+                    select(FileReference.record_id).where(
+                        FileReference.sha256 == sha,
+                        FileReference.record_id.is_not(None),
+                    )
+                )
+            ]
+            out[sha] = None
+            if not holders:
+                continue
+            for row in (
+                self._s.query(AuditLog)
+                .filter(AuditLog.entity_id.in_(holders))
+                .order_by(*_WRITE_ORDER)
+            ):
+                old, new = entry_snapshots(row.old_data, row.new_data, row.delta)
+                if sha in json.dumps(new or {}) and sha not in json.dumps(old or {}):
+                    out[sha] = row.device or row.actor
+                    break
+        return out
+
+    def files_by_collection(self) -> dict[uuid.UUID, tuple[int, int, int]]:
+        """Per live collection: the distinct files its records use that a drive
+        here holds, their bytes, and the files that are only on the server (no
+        drive here holds them). One grouped query over the catalog."""
+        pairs = (
+            select(Record.dataset_id.label("cid"), FileReference.sha256.label("sha"))
+            .join(Record, Record.id == FileReference.record_id)
+            .join(Dataset, Dataset.id == Record.dataset_id)
+            .where(Dataset.deleted_at.is_(None), Record.deleted_at.is_(None))
+            .distinct()
+            .subquery()
+        )
+        stored = stored_files()
+        here = stored.c.sha.is_not(None)
+        rows = self._s.execute(
+            select(
+                pairs.c.cid,
+                func.count().filter(here),
+                func.coalesce(func.sum(stored.c.size).filter(here), 0),
+                func.count().filter(stored.c.sha.is_(None)),
+            )
+            .select_from(pairs)
+            .outerjoin(stored, stored.c.sha == pairs.c.sha)
+            .group_by(pairs.c.cid)
+        )
+        return {cid: (int(n), int(b), int(r)) for cid, n, b, r in rows}
+
+    def live_collections(self) -> dict[uuid.UUID, str]:
+        """Every live collection, id to name."""
+        return {
+            i: n
+            for i, n in self._s.execute(
+                select(Dataset.id, Dataset.name).where(Dataset.deleted_at.is_(None))
+            )
+        }
+
+    def files_here_of(self, collection: uuid.UUID) -> dict[str, int]:
+        """The files a collection's records use that a drive here holds, with
+        their size."""
+        stored = stored_files()
+        rows = self._s.execute(
+            select(FileReference.sha256, stored.c.size)
+            .join(Record, Record.id == FileReference.record_id)
+            .join(stored, stored.c.sha == FileReference.sha256)
+            .where(Record.dataset_id == collection)
+            .distinct()
+        )
+        return {sha: int(size) for sha, size in rows}
+
+    def used_by(self, shas: list[str], collections: set[uuid.UUID]) -> set[str]:
+        """Of these files, those that records in these collections use."""
+        out: set[str] = set()
+        if not shas or not collections:
+            return out
+        for i in range(0, len(shas), 500):
+            out |= {
+                sha
+                for (sha,) in self._s.execute(
+                    select(FileReference.sha256)
+                    .join(Record, Record.id == FileReference.record_id)
+                    .where(
+                        FileReference.sha256.in_(shas[i : i + 500]),
+                        Record.dataset_id.in_(collections),
+                    )
+                    .distinct()
+                )
+            }
+        return out
 
     def set_project_id(self, project_id: uuid.UUID) -> None:
         self._meta_row().project_id = project_id
@@ -322,6 +467,7 @@ class LocalSyncRepository:
         base: Any = None,
         theirs_actor: str | None = None,
         theirs_at: str | None = None,
+        theirs_device: str | None = None,
     ) -> SyncConflictDTO:
         row = SyncConflict(
             kind=kind,
@@ -332,6 +478,7 @@ class LocalSyncRepository:
             theirs=theirs,
             base=base,
             theirs_actor=theirs_actor,
+            theirs_device=theirs_device,
             theirs_at=_parse(theirs_at),
             op_id=op_id,
             device_name=device_name,
@@ -376,8 +523,9 @@ class LocalSyncRepository:
 
     def last_change(
         self, kind: str, entity_id: uuid.UUID, path: str | None
-    ) -> tuple[str | None, str | None]:
-        """Who last changed a value of a thing, and when (actor, ISO time): the
+    ) -> tuple[str | None, str | None, str | None]:
+        """Who last changed a value of a thing, through which device, and when
+        (actor, device, ISO time): the
         latest numbered entry whose before and after differ at `path`, or the
         latest entry of any kind when `path` is None. What a conflict says about
         the value that stayed."""
@@ -397,8 +545,8 @@ class LocalSyncRepository:
         for row in rows:
             old, new = entry_snapshots(row.old_data, row.new_data, row.delta)
             if path is None or value_at(old, path) != value_at(new, path):
-                return row.actor, _iso(row.timestamp)
-        return None, None
+                return row.actor, row.device, _iso(row.timestamp)
+        return None, None, None
 
     def resolve_conflict(self, id: uuid.UUID, resolution: str) -> None:
         row = self._s.get(SyncConflict, id)
@@ -880,11 +1028,16 @@ class LocalSyncRepository:
             )
             self._s.expire_all()
 
-    def mark_seq(self, entry_id: uuid.UUID, seq: int) -> None:
-        """The authority has numbered a change made here: it is theirs now too."""
+    def mark_seq(
+        self, entry_id: uuid.UUID, seq: int, device: str | None = None
+    ) -> None:
+        """The authority has numbered a change made here: it is theirs now too,
+        and says which device it came through (this one, by its token's name)."""
         row = self._s.get(AuditLog, entry_id)
         if row is not None:
             row.hub_seq = seq
+            if device:
+                row.device = device
             if row.sync_state == "pending":
                 row.sync_state = "synced"
             self._s.flush()
@@ -979,6 +1132,7 @@ class LocalSyncRepository:
                 timestamp=_parse(entry.timestamp),
                 batch_id=batch_id,
                 actor=entry.actor,
+                device=entry.device,
                 device_id=uuid.UUID(entry.device_id) if entry.device_id else None,
                 hlc=entry.hlc,
                 hub_seq=hub_seq,
@@ -1101,6 +1255,7 @@ class LocalSyncRepository:
                 new_data=r.new_data,
                 timestamp=_iso(r.timestamp) or "",
                 actor=r.actor,
+                device=r.device,
                 device_id=str(r.device_id) if r.device_id else None,
                 hlc=r.hlc,
                 batch=batches.get(r.batch_id) if r.batch_id else None,
@@ -1158,6 +1313,7 @@ def _conflict_dto(row: SyncConflict) -> SyncConflictDTO:
         message=row.message,
         base=row.base,
         theirs_actor=row.theirs_actor,
+        theirs_device=row.theirs_device,
         theirs_at=_iso(row.theirs_at),
         status=row.status,
         created_at=_iso(row.created_at) or "",

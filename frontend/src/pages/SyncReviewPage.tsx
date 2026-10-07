@@ -6,7 +6,12 @@ import type {
   SyncConflict,
 } from '../api/remote'
 import { ConflictSubject } from '../components/sync/ConflictSubject'
-import { inReviewOrder, kindLabel, takeLabel } from '../utils/syncConflicts'
+import {
+  byWhom,
+  inReviewOrder,
+  kindLabel,
+  takeLabel,
+} from '../utils/syncConflicts'
 import { saveReview, stepsFrom } from '../utils/reviewSession'
 import {
   Button,
@@ -342,7 +347,10 @@ export default function SyncReviewPage() {
                   <span>
                     <AuditValue value={c.theirs} dtype={c.dtype} compact />
                     {c.theirs_actor && (
-                      <span className="text-fg-muted"> · {c.theirs_actor}</span>
+                      <span className="text-fg-muted">
+                        {' '}
+                        · {byWhom(c.theirs_actor, c.theirs_device)}
+                      </span>
                     )}
                   </span>
                 ) : (
@@ -377,10 +385,8 @@ export default function SyncReviewPage() {
               <>
                 <p>
                   Keep the other side’s value for {count.data.done}{' '}
-                  {count.data.done === 1 ? 'change' : 'changes'}? This project
-                  already has those values, so nothing in your data changes.
-                  What goes is your own value for each, and a refused change
-                  that was only ever saved here.
+                  {count.data.done === 1 ? 'change' : 'changes'}? Your data
+                  doesn’t change: your own values are let go.
                 </p>
                 {count.data.not_offered > 0 && (
                   <p className="mt-2 text-fg-muted">

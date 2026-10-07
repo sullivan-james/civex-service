@@ -9,14 +9,17 @@ export interface FileJob {
   title: string
   detail?: string
   /** How far along, when that is known (a move). */
-  progress?: { fraction: number; label: string }
+  progress?: { fraction: number; label: string; count?: string }
   startedAt: number
+  /** Only waiting on work that shows itself (a move has its own row in the
+   * status bar): not shown twice. */
+  waiting?: boolean
 }
 
 /** What the work being done can tell the bar as it goes. */
 export interface JobHandle {
   update: (
-    patch: Partial<Pick<FileJob, 'title' | 'detail' | 'progress'>>,
+    patch: Partial<Pick<FileJob, 'title' | 'detail' | 'progress' | 'waiting'>>,
   ) => void
 }
 

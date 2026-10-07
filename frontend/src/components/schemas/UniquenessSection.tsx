@@ -3,7 +3,7 @@ import type { Schema } from '../../api/schemas'
 import { useSetUniqueKeys } from '../../hooks/useSchemas'
 import { errorMessage } from '../../lib/errors'
 import { displayLabel } from '../../utils/naming'
-import { Button, Checkbox, Chip, EmptyState, Subheading } from '../ui'
+import { Button, Checkbox, Chip, EmptyState, InfoTip, Subheading } from '../ui'
 
 /** Field types whose values compare as plain scalars (`domain/uniqueness.py`
  * is the authority; the server refuses the rest). */
@@ -70,18 +70,22 @@ export function UniquenessSection({ schema }: { schema: Schema }) {
       </div>
 
       <div className="space-y-2">
-        <Subheading>Add a rule</Subheading>
-        <p className="text-sm text-fg-muted">
-          No two {displayLabel(schema.name, schema.label)} records may have the
-          same values in all of the fields you tick,{' '}
-          {nested ? 'under the same parent record' : 'in the same collection'}.
-          A record where any of them is blank isn’t held to the rule.
-        </p>
+        <Subheading>
+          Add a rule
+          <InfoTip>
+            No two {displayLabel(schema.name, schema.label)} records may have
+            the same values in all of the fields you tick,{' '}
+            {nested ? 'under the same parent record' : 'in the same collection'}
+            . A record where any of them is blank isn’t held to the rule.
+          </InfoTip>
+        </Subheading>
         {eligible.length === 0 ? (
-          <p className="text-sm text-fg-muted">
-            This schema has no fields that can be made unique (files, locations
-            and lists can’t). Inherited fields aren’t listed: a rule uses the
-            schema’s own fields.
+          <p className="flex items-center gap-1 text-sm text-fg-muted">
+            No fields can be made unique.
+            <InfoTip>
+              Files, locations and lists can’t. A rule uses the schema’s own
+              fields, so inherited ones aren’t listed.
+            </InfoTip>
           </p>
         ) : (
           <div className="flex flex-wrap gap-x-4 gap-y-2">

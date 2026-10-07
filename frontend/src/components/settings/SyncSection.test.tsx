@@ -22,6 +22,8 @@ const base = {
   project_id: 'p',
   paused: false,
   interval_seconds: 60,
+  download_files: 'all',
+  files_to_fetch: 0,
   serving: false,
   pending: 0,
   open_conflicts: 0,
@@ -35,7 +37,20 @@ const base = {
   connect_error: null,
 }
 
+let files: unknown[] = []
+
 beforeEach(() => {
+  files = [
+    {
+      id: 'c1',
+      name: 'Humpbacks',
+      mode: 'keep',
+      chosen: false,
+      files_here: 3,
+      bytes_here: 3 * 1024 * 1024,
+      files_on_server: 2,
+    },
+  ]
   status = { ...base }
   conflicts = []
   identity = { name: 'sulli', chosen: null, default: 'sulli' }
@@ -56,6 +71,16 @@ beforeEach(() => {
         return json(identity)
       }
       if (url.pathname === '/api/remote/conflicts') return json(conflicts)
+      if (url.pathname === '/api/remote/files') return json(files)
+      if (url.pathname === '/api/remote/files/c1/free-up')
+        return json({
+          files: 3,
+          bytes: 3 * 1024 * 1024,
+          kept_shared: 1,
+          not_on_server: 0,
+          done: url.searchParams.get('dry_run') === 'false',
+        })
+      if (url.pathname === '/api/remote/files/c1') return json(files)
       if (url.pathname === '/api/remote/authority')
         return json({ serving: false, devices: [] })
       if (url.pathname.endsWith('/resolve')) {
@@ -156,6 +181,14 @@ describe('SyncSection', () => {
       ).toEqual({ interval_seconds: 0 }),
     )
     expect(await screen.findByText('Up to date')).toBeInTheDocument()
+  })
+
+  it('points to storage for which files this computer keeps', async () => {
+    status = { ...base, configured: true, remote: 'https://a.example' }
+    renderSection()
+    expect(
+      await screen.findByRole('link', { name: 'Files on this computer' }),
+    ).toHaveAttribute('href', '/settings/storage?tab=collections')
   })
 
   it('says changes are waiting rather than up to date', async () => {

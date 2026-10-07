@@ -4,8 +4,16 @@ import { api } from './client'
 export interface FileLocation {
   /** The volume holding it; null when it isn't on any volume Civex knows. */
   volume: string | null
+  /** `remote`: another device added it and it isn't on this computer yet;
+   * opening or exporting it downloads it from the server. */
   state:
-    'online' | 'offline' | 'wrong_drive' | 'readonly' | 'retired' | 'unknown'
+    | 'online'
+    | 'offline'
+    | 'wrong_drive'
+    | 'readonly'
+    | 'retired'
+    | 'unknown'
+    | 'remote'
   /** Can be opened right now; null when unknown. */
   available: boolean | null
   /** Why it can't be opened, in plain words (blank when it can). */
@@ -49,6 +57,17 @@ export interface FileInfo {
   records: number
   jobs: number
   collections: { id: string; name: string | null; records: number }[]
+  /** The live records that use it, named, with the records above each
+   * (at most 200; `records` is the full count). */
+  /** Deleted records that still reference it: they keep it while they can
+   * be restored, but don't count as using it. */
+  deleted_records?: number
+  uses?: {
+    id: string
+    name: string
+    collection: string | null
+    trail: string[]
+  }[]
 }
 
 /** `?collection=` for an upload: the collection the file is for. */

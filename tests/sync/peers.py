@@ -141,10 +141,11 @@ class Loopback:
         assert stored.sha256 == sha256
         self._authority.commit()
 
-    def download_file(self, sha256, dest):
-        self.calls.append("download_file")
+    def file_chunks(self, sha256):
+        self.calls.append("file_chunks")
         self._svc()
-        dest.write_bytes(self._authority.file_svc.retrieve(sha256))
+        data = self._authority.file_svc.retrieve(sha256)  # FileNotFoundError
+        return iter([data[i : i + 4096] for i in range(0, len(data), 4096)])
 
 
 class Flaky:

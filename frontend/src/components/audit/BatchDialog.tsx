@@ -13,6 +13,7 @@ import {
   ModalFooter,
   ModalHeader,
   Pagination,
+  InfoTip,
 } from '../ui'
 import { RestoreBatchDialog } from '../trash/RestoreBatchDialog'
 import { AuditEntryDialog } from './AuditEntryDialog'
@@ -70,10 +71,12 @@ export function BatchDialog({
           </Link>
         )}
         {canPick && (
-          <p className="text-sm text-fg-muted">
-            Tick the records to bring back, or restore everything this delete
-            took. A record under a deleted record brings that one back too, by
-            itself; the rest stays deleted.
+          <p className="flex items-center gap-1 text-sm text-fg-muted">
+            Tick the records to bring back.
+            <InfoTip>
+              A record under a deleted record brings that one back too, by
+              itself; the rest stays deleted.
+            </InfoTip>
           </p>
         )}
         <DataTable

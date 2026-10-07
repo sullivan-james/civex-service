@@ -260,14 +260,36 @@ function RefusedFix({
               </div>
             )
           })}
-          <p className="text-xs text-fg-muted">
-            Click the value to change it. Saving sends the record again; this
-            closes once the server takes it.
-          </p>
         </div>
+      )}
+      {open && !sending && (c.sits_under ?? []).length > 0 && (
+        <p className="text-sm">
+          It sits under{' '}
+          {(c.sits_under ?? [])
+            .map((u) => `${u.schema_name} ${u.name ?? ''}`.trim())
+            .join(' › ')}
+          , which is deleted here too: the server won&apos;t take it until that
+          is back.
+        </p>
       )}
       {open && (
         <div className="flex flex-wrap items-center gap-2">
+          {!sending && c.takes.includes('restore_above') && (
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={resolve.isPending}
+              onClick={() =>
+                resolve.mutate({ id: c.id, take: 'restore_above' })
+              }
+            >
+              Restore{' '}
+              {(c.sits_under ?? [])
+                .map((u) => u.name ?? u.schema_name)
+                .join(' › ')}{' '}
+              and send
+            </Button>
+          )}
           {!sending && c.takes.includes('retry') && (
             <Button
               size="sm"

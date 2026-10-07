@@ -642,7 +642,7 @@ class SyncAuthorityService:
         sides, what the value was, and who wrote the one that stayed and when.
         The device that sent the change keeps it for review (the authority keeps
         no list of its own)."""
-        actor, at = self._repo.last_change(kind, entity_id, path)
+        actor, via, at = self._repo.last_change(kind, entity_id, path)
         return {
             "kind": what,
             "field": path,
@@ -650,6 +650,7 @@ class SyncAuthorityService:
             "theirs": theirs,
             "base": base,
             "theirs_actor": actor,
+            "theirs_device": via,
             "theirs_at": at,
             "message": message,
         }
@@ -702,7 +703,11 @@ class SyncAuthorityService:
             old_data=entry.old_data,
             new_data=entry.new_data,
             timestamp=entry.timestamp,
-            actor=device.name,  # who sent it is who the token says, not what was claimed
+            # Who made it is what the device says, as given (the name a person
+            # chose; a token proves a device, not a person). Which device sent
+            # it is what the token says, never what was claimed.
+            actor=_claimed_author(entry.actor) or device.name,
+            device=device.name,
             device_id=device_id,
             hlc=self._believable(entry.hlc),
             batch=entry.batch,
@@ -842,3 +847,13 @@ def _sides(
     if "deleted_at" not in entry.delta:
         incoming["deleted_at"] = (entry.new_data or {}).get("deleted_at")
     return base, incoming
+
+
+def _claimed_author(name: str | None) -> str | None:
+    """The author a device gives for a change, kept as a label: trimmed and
+    capped. `sync` is the authority's own mark on what it writes (and what
+    conflict descriptions skip), so a device can't take it."""
+    if not isinstance(name, str):
+        return None
+    name = name.strip()[:100]
+    return name if name and name != "sync" else None

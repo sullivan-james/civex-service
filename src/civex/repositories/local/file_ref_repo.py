@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Iterable
 
-from sqlalchemy import case, delete, func, insert, select
+from sqlalchemy import case, delete, func, insert, null, select
 from sqlalchemy.orm import Session
 
 from civex.db.models import FileReference, Record, WorkflowJob
@@ -33,27 +33,34 @@ class LocalFileReferenceRepository:
         )
         return {sha for (sha,) in rows}
 
-    def usage(self, sha256: str) -> tuple[dict[uuid.UUID | None, int], int]:
-        """What uses a blob: the number of records that reference it in each
-        collection, and the number of workflow runs that took it as input."""
-        by_collection = {
-            dataset_id: n
-            for dataset_id, n in self._s.execute(
-                select(
-                    Record.dataset_id,
-                    func.count(func.distinct(FileReference.record_id)),
-                )
-                .join(Record, Record.id == FileReference.record_id)
-                .where(FileReference.sha256 == sha256)
-                .group_by(Record.dataset_id)
+    def usage(self, sha256: str) -> tuple[dict[uuid.UUID | None, int], int, int]:
+        """What uses a blob: the number of live records that reference it in
+        each collection, the number of workflow runs that took it as input,
+        and the number of deleted records that still reference it (they keep
+        it while they can be restored, but don't count as using it)."""
+        live = Record.deleted_at.is_(None)
+        by_collection: dict[uuid.UUID | None, int] = {}
+        deleted = 0
+        for dataset_id, is_live, n in self._s.execute(
+            select(
+                Record.dataset_id,
+                live,
+                func.count(func.distinct(FileReference.record_id)),
             )
-        }
+            .join(Record, Record.id == FileReference.record_id)
+            .where(FileReference.sha256 == sha256)
+            .group_by(Record.dataset_id, live)
+        ):
+            if is_live:
+                by_collection[dataset_id] = int(n)
+            else:
+                deleted += int(n)
         jobs = self._s.execute(
             select(func.count(func.distinct(FileReference.job_id))).where(
                 FileReference.sha256 == sha256, FileReference.job_id.is_not(None)
             )
         ).scalar_one()
-        return by_collection, int(jobs)
+        return by_collection, int(jobs), deleted
 
     def shas_for_collections(
         self, collection_ids: list[str], after: str | None, limit: int
@@ -65,7 +72,9 @@ class LocalFileReferenceRepository:
         query = (
             select(FileReference.sha256)
             .join(Record, Record.id == FileReference.record_id)
-            .where(Record.dataset_id.in_(ids))
+            # Live records: a deleted record's files are left where they are
+            # (moving a drive's contents still takes them).
+            .where(Record.dataset_id.in_(ids), Record.deleted_at.is_(None))
             .distinct()
             .order_by(FileReference.sha256)
             .limit(limit)
@@ -103,12 +112,15 @@ class LocalFileReferenceRepository:
         return {v: (int(a), int(b), int(c), int(d)) for v, a, b, c, d in rows}
 
     def volume_breakdowns(
-        self, collection_ids: list[str] | None
+        self, collection_ids: list[str] | None, homes: dict[str, str] | None = None
     ) -> dict[str, tuple[int, list[tuple[str, int, int, int]]]]:
         """Where collections' files are, from the catalog in a few grouped
         queries (no file is read), for the given collections or all of them.
         Per collection id: the number of distinct files its records use, and per
-        volume (volume, files, bytes, files another collection also uses)."""
+        volume (volume, files, bytes, files another collection also uses). A
+        file stored on several drives counts once, on the collection's home
+        (`homes`: collection id -> drive) when a copy is there, else on the
+        first drive by name that holds it."""
         from civex.db.models import StoredObject
 
         wanted = (
@@ -120,10 +132,12 @@ class LocalFileReferenceRepository:
                 query if wanted is None else query.where(Record.dataset_id.in_(wanted))
             )
 
-        # one row per (collection, file)
+        # one row per (collection, file), of its live records: what a person
+        # sees as its files (a deleted record's are in Recently Deleted)
         mine = scoped(
             select(Record.dataset_id.label("cid"), FileReference.sha256.label("sha"))
             .join(Record, Record.id == FileReference.record_id)
+            .where(Record.deleted_at.is_(None))
             .distinct()
         ).subquery()
 
@@ -140,24 +154,66 @@ class LocalFileReferenceRepository:
                 func.count(func.distinct(Record.dataset_id)).label("n"),
             )
             .join(Record, Record.id == FileReference.record_id)
-            .where(FileReference.sha256.in_(select(mine.c.sha)))
+            .where(
+                FileReference.sha256.in_(select(mine.c.sha)),
+                Record.deleted_at.is_(None),
+            )
             .group_by(FileReference.sha256)
+            .subquery()
+        )
+        # each (collection, file) once, on the copy that counts for it
+        home: Any = (
+            case(
+                {uuid.UUID(c): v for c, v in homes.items()},
+                value=mine.c.cid,
+                else_=None,
+            )
+            if homes
+            else null()
+        )
+        counted = (
+            select(
+                mine.c.cid.label("cid"),
+                mine.c.sha.label("sha"),
+                func.coalesce(
+                    func.max(case((StoredObject.volume == home, StoredObject.volume))),
+                    func.min(StoredObject.volume),
+                ).label("volume"),
+                func.max(StoredObject.size).label("size"),
+            )
+            .join(StoredObject, StoredObject.sha256 == mine.c.sha)
+            .group_by(mine.c.cid, mine.c.sha)
             .subquery()
         )
         rows = self._s.execute(
             select(
-                mine.c.cid,
-                StoredObject.volume,
+                counted.c.cid,
+                counted.c.volume,
                 func.count(),
-                func.coalesce(func.sum(StoredObject.size), 0),
+                func.coalesce(func.sum(counted.c.size), 0),
                 func.coalesce(func.sum(case((users.c.n > 1, 1), else_=0)), 0),
             )
-            .join(StoredObject, StoredObject.sha256 == mine.c.sha)
-            .join(users, users.c.sha == mine.c.sha)
-            .group_by(mine.c.cid, StoredObject.volume)
+            .join(users, users.c.sha == counted.c.sha)
+            .group_by(counted.c.cid, counted.c.volume)
         )
         for cid, volume, files, size, shared in rows:
             out[str(cid)][1].append((volume, int(files), int(size), int(shared)))
+        return out
+
+    def records_using(self, shas: Iterable[str]) -> dict[str, set[uuid.UUID]]:
+        """For each file, the live records that use it."""
+        wanted = list(dict.fromkeys(shas))
+        out: dict[str, set[uuid.UUID]] = {}
+        for i in range(0, len(wanted), 500):
+            for sha, record_id in self._s.execute(
+                select(FileReference.sha256, FileReference.record_id)
+                .join(Record, Record.id == FileReference.record_id)
+                .where(
+                    FileReference.sha256.in_(wanted[i : i + 500]),
+                    Record.deleted_at.is_(None),
+                )
+            ):
+                out.setdefault(sha, set()).add(record_id)
         return out
 
     def collections_using(self, shas: Iterable[str]) -> dict[str, set[str]]:
@@ -169,7 +225,7 @@ class LocalFileReferenceRepository:
         rows = self._s.execute(
             select(FileReference.sha256, Record.dataset_id)
             .join(Record, Record.id == FileReference.record_id)
-            .where(FileReference.sha256.in_(wanted))
+            .where(FileReference.sha256.in_(wanted), Record.deleted_at.is_(None))
             .distinct()
         )
         for sha, dataset_id in rows:

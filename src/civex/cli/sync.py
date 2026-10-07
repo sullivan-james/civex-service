@@ -13,6 +13,7 @@ import typer
 from rich.markup import escape
 from rich.table import Table
 
+from civex.cli.db import _size
 from civex.cli.utils import cli_load_config, get_ctx as _ctx
 from civex.console import console
 from civex.domain.exceptions import CivexError
@@ -181,6 +182,165 @@ def interval(
     )
 
 
+@app.command("files")
+def files(
+    mode: str = typer.Argument(
+        None,
+        help="Set the project's default: 'all' keeps a copy of every file, "
+        "'opened' fetches a file only when it is opened or exported. Leave out "
+        "to see where each collection's files are.",
+    ),
+) -> None:
+    """See, per collection, how many files are on this computer and how many are
+    not on this computer, and whether it keeps a copy here. With a mode, set the
+    default for collections that haven't their own (`civex sync keep`)."""
+    c = _ctx()
+    try:
+        if mode is not None:
+            c.sync_svc.set_download_files(mode)
+        s = c.sync_svc.status()
+        rows = c.sync_svc.collection_files()
+    except CivexError as e:
+        raise _fail(e)
+    finally:
+        c.close()
+    console.print(
+        "By default, keeps every file."
+        if s.download_files == "all"
+        else "By default, fetches a file when it is opened."
+    )
+    if not rows:
+        return
+    table = Table()
+    table.add_column("Collection")
+    table.add_column("Keeps")
+    table.add_column("On this computer", justify="right")
+    table.add_column("Not on this computer", justify="right")
+    for r in rows:
+        table.add_row(
+            escape(r.name),
+            ("every file" if r.mode == "keep" else "files opened")
+            + ("" if r.chosen else " [dim](default)[/dim]"),
+            f"{r.files_here} ({_size(r.bytes_here)})",
+            str(r.files_on_server),
+        )
+    console.print(table)
+    if s.files_to_fetch:
+        console.print(
+            f"{s.files_to_fetch} kept file(s) not downloaded yet "
+            "(`civex sync fetch` downloads them now)."
+        )
+
+
+@app.command("keep")
+def keep(
+    collection: str = typer.Argument(help="The collection, by name or id."),
+    opened: bool = typer.Option(
+        False, "--opened", help="Fetch its files only when opened instead."
+    ),
+    reset: bool = typer.Option(
+        False, "--reset", help="Follow the project's default again."
+    ),
+) -> None:
+    """Keep a collection's files on this computer: what is missing is
+    downloaded in the background while civex runs (or now, with `civex sync
+    fetch`). With --opened, fetch them only when opened or exported."""
+    c = _ctx()
+    try:
+        now = c.sync_svc.set_collection_mode(
+            collection, None if reset else ("opened" if opened else "keep")
+        )
+    except CivexError as e:
+        raise _fail(e)
+    finally:
+        c.close()
+    console.print(
+        f"{escape(collection)}: "
+        + ("keeps every file." if now == "keep" else "fetches files when opened.")
+    )
+
+
+@app.command("free")
+def free(
+    collection: str = typer.Argument(help="The collection, by name or id."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask first."),
+) -> None:
+    """Free space: remove this computer's copies of a collection's files; they
+    are fetched again when opened or exported. Only files the server confirms
+    it holds are removed, never one another collection kept here uses, and the
+    collection is set to fetch files when opened."""
+    c = _ctx()
+    try:
+        counted = c.sync_svc.free_up(collection, dry_run=True)
+        kept = []
+        if counted.kept_shared:
+            kept.append(f"{counted.kept_shared} also used by a collection kept here")
+        if counted.not_on_server:
+            kept.append(f"{counted.not_on_server} the server hasn't got yet")
+        if not counted.files:
+            console.print(
+                "Nothing to remove" + (f" (kept: {'; '.join(kept)})." if kept else ".")
+            )
+            return
+        console.print(
+            f"Removes {counted.files} file(s), {_size(counted.bytes)}"
+            + (f"; keeps {'; '.join(kept)}" if kept else "")
+            + "."
+        )
+        if not yes and not typer.confirm("Remove them?"):
+            return
+        done = c.sync_svc.free_up(collection, dry_run=False)
+    except (CivexError, SyncError) as e:
+        raise _fail(e)
+    finally:
+        c.close()
+    console.print(
+        f"[success]Freed {_size(done.bytes)} ({done.files} file(s)).[/success]"
+    )
+
+
+@app.command("fetch")
+def fetch() -> None:
+    """Download every file this project's records cite that isn't on this
+    computer yet, now, with a progress bar. Stopping (Ctrl+C) keeps what has
+    arrived; the rest comes later."""
+    from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
+
+    c = _ctx()
+    try:
+        if not c.sync_svc.fetches_files:
+            raise _fail(ValueError("This project doesn't follow an authority."))
+        total = c.sync_svc.files_to_fetch()
+        if not total:
+            console.print("Every file is here.")
+            return
+        with Progress(
+            TextColumn("Downloading files"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            console=console,
+            transient=True,
+        ) as bar:
+            task = bar.add_task("files", total=total)
+            try:
+                report = c.sync_svc.fetch_files(
+                    progress=lambda done: bar.update(task, completed=done)
+                )
+            except KeyboardInterrupt:
+                console.print("Stopped; what arrived is kept.")
+                return
+    except SyncError as e:
+        raise _fail(e)
+    finally:
+        c.close()
+    console.print(f"[success]Downloaded {report.fetched} file(s).[/success]")
+    if report.absent:
+        console.print(
+            f"[warning]{len(report.absent)} haven't reached the server yet: the "
+            "device that added them hasn't sent them.[/warning]"
+        )
+
+
 @app.command("watch")
 def watch() -> None:
     """Keep syncing in this terminal until stopped (Ctrl+C): after edits, on the
@@ -223,6 +383,10 @@ def status() -> None:
     console.print(f"Paused      {'yes' if s.paused else 'no'}")
     console.print(f"Unsent      {s.pending}")
     console.print(f"Conflicts   {s.open_conflicts}")
+    console.print(
+        f"Files       keeps {'every file' if s.download_files == 'all' else 'files opened'}"
+        + (f"; {s.files_to_fetch} not downloaded yet" if s.files_to_fetch else "")
+    )
     console.print(f"Last synced {s.last_synced_at or 'never'}")
     if s.last_error:
         console.print(f"[warning]Last problem  {escape(s.last_error)}[/warning]")
@@ -321,7 +485,18 @@ def conflicts(
             escape(f.record_name or f"{f.entity_type} {str(f.entity_id)[:8]}"),
             escape(f.field_label or f.field or (f.message or "")),
             escape(str(f.yours)),
-            escape(str(f.theirs) + (f" ({f.theirs_actor})" if f.theirs_actor else "")),
+            escape(
+                str(f.theirs)
+                + (f" ({f.theirs_actor}" if f.theirs_actor else "")
+                + (
+                    f" via {f.theirs_device}"
+                    if f.theirs_actor
+                    and f.theirs_device
+                    and f.theirs_device != f.theirs_actor
+                    else ""
+                )
+                + (")" if f.theirs_actor else "")
+            ),
             f.resolution or f.status,
         )
     console.print(table)
@@ -336,7 +511,8 @@ def resolve(
         help="'theirs' keeps what the authority has; 'mine' puts your value back as "
         "a new edit; 'value' puts the one given with --value; 'delete' deletes a "
         "record that was deleted there; 'retry' sends a refused change again from "
-        "the record as it is now.",
+        "the record as it is now; 'restore_above' brings back the deleted records "
+        "a refused record sits under, then sends it again.",
     ),
     value: str = typer.Option(
         None,
@@ -396,7 +572,7 @@ def resolve(
     c = _ctx()
     try:
         c.sync_svc.resolve_conflict(cid, take, value=_read_value(value), force=force)
-        if take == "retry":
+        if take in ("retry", "restore_above"):
             # Settled by the authority's answer, so ask for it now (as the app
             # does): it goes in, or it is refused again and says why.
             try:

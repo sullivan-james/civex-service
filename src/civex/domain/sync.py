@@ -14,6 +14,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any, Protocol
 
 from civex.domain import hlc
@@ -83,6 +84,9 @@ class SyncEntry:
     new_data: dict[str, Any] | None
     timestamp: str  # ISO 8601, when it was made
     actor: str | None = None
+    # The device whose token sent it: stamped by the authority, never taken
+    # from what a device sends.
+    device: str | None = None
     device_id: str | None = None
     hlc: str | None = None
     batch: SyncBatchInfo | None = None
@@ -110,6 +114,7 @@ class SyncEntry:
             "new_data": self.new_data,
             "timestamp": self.timestamp,
             "actor": self.actor,
+            "device": self.device,
             "device_id": self.device_id,
             "hlc": self.hlc,
             "batch": self.batch.to_dict() if self.batch else None,
@@ -130,6 +135,7 @@ class SyncEntry:
             new_data=d.get("new_data"),
             timestamp=d["timestamp"],
             actor=d.get("actor"),
+            device=d.get("device"),
             device_id=d.get("device_id"),
             hlc=d.get("hlc"),
             batch=SyncBatchInfo.from_dict(d["batch"]) if d.get("batch") else None,
@@ -291,6 +297,7 @@ class Hello:
 COPYING = "copying"  # a device joining: reading the authority's things
 FILLING = "filling"  # a device filling an empty authority with its own
 HISTORY = "history"  # a joined device fetching the history from before it joined
+FILES = "files"  # a device downloading the files its records cite
 
 
 @dataclass
@@ -302,6 +309,9 @@ class SyncProgress:
     done: int
     total: int | None
     kind: str | None = None
+    # For downloading files: bytes so far, how fast (`domain/rates`).
+    bytes_done: int = 0
+    rate: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -309,6 +319,8 @@ class SyncProgress:
             "done": self.done,
             "total": self.total,
             "kind": self.kind,
+            "bytes_done": self.bytes_done,
+            "rate": self.rate,
         }
 
 
@@ -360,6 +372,21 @@ def parse_snapshot_cursor(cursor: str) -> tuple[str, str]:
     if not sep or not created_at or not id_:
         raise ValueError(f"Not a page cursor: {cursor!r}")
     return created_at, id_
+
+
+def not_on_server_yet(added_by: str | None) -> tuple[str, str]:
+    """(reason, fix) for a file this computer hasn't got and the server hasn't
+    either: the computer that added it hasn't sent it yet. The one wording,
+    wherever it is said (opening it, downloading, an export)."""
+    if added_by:
+        return (
+            f"It is still only on '{added_by}'.",
+            "It arrives here once that computer syncs.",
+        )
+    return (
+        "It is still only on the computer that added it.",
+        "It arrives here once that computer syncs.",
+    )
 
 
 class SyncError(RuntimeError):
@@ -420,6 +447,7 @@ class SyncConflictDTO:
     # stayed, and when.
     base: Any = None
     theirs_actor: str | None = None
+    theirs_device: str | None = None
     theirs_at: str | None = None
     # Response-only, worked out when read (see `FieldValueDTO`): what a person
     # needs to recognise the record and the field, and whether the value they are
@@ -444,6 +472,10 @@ class SyncConflictDTO:
     # record page can show the change in place of describing it.
     attempted: str | None = None
     changes: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    # For a refused record that sits under deleted records here: those records
+    # ({id, schema_name, name}, topmost first), which `restore_above` brings
+    # back before sending it again.
+    sits_under: list[dict[str, Any]] = dataclasses.field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -463,6 +495,7 @@ class SyncConflictDTO:
             "resolution": self.resolution,
             "base": self.base,
             "theirs_actor": self.theirs_actor,
+            "theirs_device": self.theirs_device,
             "theirs_at": self.theirs_at,
             "record_name": self.record_name,
             "dataset_name": self.dataset_name,
@@ -476,6 +509,7 @@ class SyncConflictDTO:
             "also_saved": self.also_saved,
             "attempted": self.attempted,
             "changes": self.changes,
+            "sits_under": self.sits_under,
         }
 
 
@@ -489,4 +523,4 @@ class SyncTransport(Protocol):
     def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage: ...
     def missing_files(self, shas: list[str]) -> list[str]: ...
     def upload_file(self, sha256: str, path: Path) -> None: ...
-    def download_file(self, sha256: str, dest: Path) -> None: ...
+    def file_chunks(self, sha256: str) -> Iterator[bytes]: ...

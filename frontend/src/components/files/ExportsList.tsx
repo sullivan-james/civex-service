@@ -100,9 +100,8 @@ export function ExportsList() {
         <>
           <p className="mb-3 text-sm text-fg-muted">
             {reclaimable > 0
-              ? `Copies are using ${formatSize(reclaimable)}. `
-              : 'These take no space. '}
-            Removing a linked folder never touches the stored files.
+              ? `Copies are using ${formatSize(reclaimable)}.`
+              : 'These take no space.'}
           </p>
           <ul className="divide-y divide-border rounded-md border border-border">
             {list.map((e) => (
@@ -132,10 +131,6 @@ export function ExportsList() {
           </ul>
         </>
       )}
-      <p className="mt-3 text-xs text-fg-muted">
-        Exports on a drive that isn’t connected aren’t listed until you plug it
-        in.
-      </p>
       {confirming && (
         <ConfirmDialog
           title={
@@ -145,10 +140,8 @@ export function ExportsList() {
           }
           body={
             <p>
-              The folders and the links or copies in them are deleted. Links
-              give back no space and the stored files are not touched; copies
-              give back their space. Anything of your own inside an export
-              folder is kept.
+              The stored files are not touched, and anything of your own inside
+              an export folder is kept.
             </p>
           }
           confirmLabel="Remove"

@@ -1,5 +1,6 @@
-"""Placement decides where *new* content goes. It must never cause content that
-already exists to be stored again: dedup always wins over a home volume."""
+"""Placement decides where new content goes, and a home keeps a copy of every
+file its collection uses: content already stored is written again only onto a
+home that hasn't a copy, never onto any other drive."""
 
 from __future__ import annotations
 
@@ -145,22 +146,44 @@ def test_a_placement_naming_a_removed_volume_is_ignored(
 # -- dedup always wins --------------------------------------------------------
 
 
-def test_existing_content_is_reused_not_copied_to_the_home(
+def test_a_home_gets_a_copy_of_content_stored_elsewhere(
     ctx: AppContext, tmp_path: Path
 ) -> None:
+    """A home keeps a copy of every file its collection uses: content already
+    on another drive is written to the home too, once."""
     _add(ctx, "archive", _drive(tmp_path, "archive"))
     store = ctx.file_svc._store
     first = store.put(b"already here", "first.txt")  # general queue -> default
     cid = _home(ctx, "archive")
 
     again = store.put(b"already here", "second.txt", cid)
+    third = store.put(b"already here", "third.txt", cid)
 
-    assert again.volume == first.volume == "default"
-    assert _copies(store, first.sha256) == ["default"]
+    assert (first.volume, again.volume, third.volume) == (
+        "default",
+        "archive",
+        "archive",
+    )
+    assert sorted(_copies(store, first.sha256)) == ["archive", "default"]
+    assert _rows(store) == 2
+
+
+def test_content_stored_elsewhere_is_reused_by_a_collection_with_no_home(
+    ctx: AppContext, tmp_path: Path
+) -> None:
+    _add(ctx, "archive", _drive(tmp_path, "archive"))
+    store = ctx.file_svc._store
+    ctx.store_svc.set_queue(["archive"])
+    first = store.put(b"stored once", "first.txt")
+    ctx.store_svc.set_queue(["default"])
+
+    again = store.put(b"stored once", "second.txt")
+
+    assert again.volume == first.volume == "archive"
     assert _rows(store) == 1
 
 
-def test_one_blob_shared_by_collections_with_different_homes_is_stored_once(
+def test_a_file_two_collections_use_is_on_each_ones_home(
     ctx: AppContext, tmp_path: Path
 ) -> None:
     _add(ctx, "a", _drive(tmp_path, "a"))
@@ -171,11 +194,11 @@ def test_one_blob_shared_by_collections_with_different_homes_is_stored_once(
     one = store.put(b"shared bytes", "x.dat", in_a)
     two = store.put(b"shared bytes", "x.dat", in_b)
 
-    assert one.volume == two.volume == "a"
-    assert _copies(store, one.sha256) == ["a"]
+    assert (one.volume, two.volume) == ("a", "b")
+    assert sorted(_copies(store, one.sha256)) == ["a", "b"]
 
 
-def test_put_path_and_put_stream_dedup_against_other_volumes(
+def test_put_path_and_put_stream_write_the_homes_copy_once(
     ctx: AppContext, tmp_path: Path
 ) -> None:
     _add(ctx, "archive", _drive(tmp_path, "archive"))
@@ -188,13 +211,14 @@ def test_put_path_and_put_stream_dedup_against_other_volumes(
     async def chunks():
         yield b"same content"
 
-    assert store.put_path(src, collection_id=cid).volume == first.volume
+    assert store.put_path(src, collection_id=cid).volume == "archive"
     assert (
         asyncio.run(store.put_stream(chunks(), "s", collection_id=cid)).volume
-        == first.volume
+        == "archive"
     )
-    assert _copies(store, first.sha256) == [first.volume]
-    # The duplicate's scratch copy is discarded, not left behind.
+    assert store.put_path(src).volume in ("default", "archive")  # no home: reused
+    assert sorted(_copies(store, first.sha256)) == ["archive", "default"]
+    # A copy not kept is discarded from scratch, not left behind.
     for vc in store._cfg.volumes.values():
         scratch = store._resolve_path(vc) / ".tmp"
         assert not scratch.exists() or not list(scratch.glob("*.part"))

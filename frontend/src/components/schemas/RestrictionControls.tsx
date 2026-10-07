@@ -473,10 +473,8 @@ export function UnitControl({ desc, rules, set, ctx }: ControlProps) {
       </datalist>
       {relabelling && (
         <p role="alert" className="text-xs text-warning">
-          This relabels the unit from {String(saved)} to{' '}
-          {value.trim() || 'none'}. Stored values are not converted, so use it
-          only to correct a wrong label. For a different unit going forward, add
-          a new field.
+          Relabels {String(saved)} as {value.trim() || 'none'}: stored values
+          are not converted. For a different unit, add a new field.
         </p>
       )}
     </Shell>

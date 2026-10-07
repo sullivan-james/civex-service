@@ -149,10 +149,6 @@ export function AiTokenUsageWidget({ filters }: AiTokenUsageWidgetProps) {
           />
         </>
       )}
-      <p className="text-xs text-fg-subtle">
-        Showing token counts only -- estimated cost isn&apos;t shown because no
-        per-model pricing source exists in this project yet.
-      </p>
     </div>
   )
 }

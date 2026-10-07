@@ -63,10 +63,8 @@ function WhatCausedIt({ job }: { job: WorkflowJob }) {
       </p>
       {job.depth >= LONG_CHAIN && (
         <p role="note" className="text-attention">
-          Runs are triggering each other here. If that isn&apos;t what you want,
-          a workflow is probably saving a field that another one (or itself)
-          watches. Use <strong>Stop automation</strong> on the Runs page to end
-          it.
+          Runs are triggering each other. Use <strong>Stop automation</strong>{' '}
+          on the Runs page to end it.
         </p>
       )}
     </div>

@@ -176,9 +176,7 @@ describe('unit and precision controls', () => {
     const input = screen.getByLabelText('Unit')
     await userEvent.clear(input)
     await userEvent.type(input, 'ft')
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      /relabels the unit from m to ft/,
-    )
+    expect(screen.getByRole('alert')).toHaveTextContent(/Relabels m as ft/)
     expect(screen.getByRole('alert')).toHaveTextContent(/not converted/)
   })
 

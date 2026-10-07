@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import {
   restoreApi,
@@ -81,25 +86,57 @@ export function useRestore(onDone?: () => void) {
       onDone?.()
     },
     onError: (error) => toast.error(errorMessage(error)),
-    onSettled: () => {
-      for (const key of [
-        'records',
-        'record',
-        'record-counts',
-        'record-audit',
-        'records-deleted',
-        'collections',
-        'collections-deleted',
-        'schemas',
-        'schemas-deleted',
-        'trash',
-        'audit',
-        'restore-plan',
-        'audit-revert-plan',
-      ])
-        qc.invalidateQueries({ queryKey: [key] })
-      invalidateRecordNames(qc)
-    },
+    onSettled: () => refreshAfterRestore(qc),
+  })
+}
+
+/** Every cache a restore can change. The one list, for anything that brings
+ * things back. */
+export function refreshAfterRestore(qc: QueryClient) {
+  for (const key of [
+    'records',
+    'record',
+    'record-counts',
+    'record-audit',
+    'records-deleted',
+    'records-orphans',
+    'collections',
+    'collections-deleted',
+    'schemas',
+    'schemas-deleted',
+    'trash',
+    'audit',
+    'restore-plan',
+    'audit-revert-plan',
+    'remote',
+  ])
+    qc.invalidateQueries({ queryKey: [key] })
+  invalidateRecordNames(qc)
+}
+
+/** Live records that sit under a deleted record (out of sight). */
+export function useOrphans() {
+  return useQuery({
+    queryKey: ['records-orphans'],
+    queryFn: () => recordsApi.orphans(),
+  })
+}
+
+/** Bring back what a live record sits under that is deleted (each by itself,
+ * so their other children stay deleted). */
+export function useRestoreAbove() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: (id: string) => recordsApi.restoreAbove(id),
+    onSuccess: (restored) =>
+      toast.success(
+        `Restored ${restored
+          .map((r) => r.natural_name ?? r.schema_name)
+          .join(' › ')}`,
+      ),
+    onError: (error) => toast.error(errorMessage(error)),
+    onSettled: () => refreshAfterRestore(qc),
   })
 }
 

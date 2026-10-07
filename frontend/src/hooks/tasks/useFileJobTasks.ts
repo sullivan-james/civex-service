@@ -26,7 +26,7 @@ export function useFileJobTasks(): BackgroundTask[] {
   }, [jobs])
 
   return jobs
-    .filter((j) => now - j.startedAt >= FILE_JOB_SHOW_AFTER_MS)
+    .filter((j) => !j.waiting && now - j.startedAt >= FILE_JOB_SHOW_AFTER_MS)
     .map((j) => ({
       id: `file-job-${j.id}`,
       tone: 'info' as const,

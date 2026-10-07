@@ -1,6 +1,6 @@
 import { useTransfers } from './useTransfers'
 import { useVolumes } from './useStore'
-import { NEEDS_ATTENTION } from '../components/settings/storage/volumeState'
+import { NEEDS_ATTENTION } from '../utils/volumes'
 
 export type StorageTab = 'volumes' | 'collections' | 'tasks'
 

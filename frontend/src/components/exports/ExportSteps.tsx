@@ -25,7 +25,7 @@ import { LAYOUTS, LAYOUT_NAME } from '../../utils/exportLayouts'
 import { filterableFields } from '../../utils/hierarchy'
 import { displayLabel } from '../../utils/naming'
 import { FilterControls } from '../explorer/FilterControls'
-import { Button, CheckRow } from '../ui'
+import { Button, CheckRow, InfoTip } from '../ui'
 import { FolderTree, Plus } from '../ui/icons'
 import { LayoutPreview } from './LayoutPreview'
 
@@ -323,9 +323,11 @@ export function LayoutStep({
   return (
     <div className="space-y-3">
       {needsTree && (
-        <p className="text-sm text-fg-muted">
-          A table written in each record’s folder needs the layout with a folder
-          per record, so the other two are not offered.
+        <p className="flex items-center gap-1 text-sm text-fg-muted">
+          Folder per record
+          <InfoTip>
+            A table written in each record’s folder needs a folder per record.
+          </InfoTip>
         </p>
       )}
       <div

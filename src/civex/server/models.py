@@ -508,6 +508,19 @@ class RecordRef(BaseModel):
     natural_name: str | None
 
 
+class OrphanResponse(BaseModel):
+    record: RecordRef
+    collection: str | None = Field(description="The collection it is in.")
+    above: list[RecordRef] = Field(
+        description="The deleted records directly above it, topmost first."
+    )
+
+
+class OrphansResponse(BaseModel):
+    total: int = Field(description="How many live records sit under a deleted one.")
+    items: list[OrphanResponse] = Field(description="Up to `limit` of them.")
+
+
 class RestoreSelectedRequest(BaseModel):
     ids: list[str] = Field(
         max_length=5000, description="The deleted records to restore."
@@ -645,6 +658,13 @@ class RecordResponse(BaseModel):
         default=None,
         description="Only on a single-record fetch: the parent chain, root "
         "first, for breadcrumbs.",
+    )
+    deleted_above: list[RecordRef] | None = Field(
+        default=None,
+        description="Only on a single-record fetch of a live record: the deleted "
+        "records directly above it, topmost first. Not empty means it is out of "
+        "sight (nothing above it lists it); POST /records/{id}/restore-above "
+        "brings them back.",
     )
     deleted_fields: list[DeletedFieldValue] | None = Field(
         default=None,
@@ -789,6 +809,15 @@ class CollectionUseResponse(BaseModel):
     records: int = Field(description="Records in that collection that use the file.")
 
 
+class RecordUseResponse(BaseModel):
+    id: str
+    name: str = Field(description="The record's name, as the app shows it.")
+    collection: str | None = Field(description="The collection it is in.")
+    trail: list[str] = Field(
+        description="The names of the records above it, outermost first."
+    )
+
+
 class FileInfoResponse(BaseModel):
     sha256: str
     size: int | None = Field(description="Size in bytes, if known.")
@@ -796,10 +825,20 @@ class FileInfoResponse(BaseModel):
         description="Every place the content is, or is recorded to be."
     )
     records: int = Field(
-        description="Records that use this file, across all collections."
+        description="Live records that use this file, across all collections."
+    )
+    deleted_records: int = Field(
+        default=0,
+        description="Deleted records that still reference it: they keep it "
+        "while they can be restored, but don't count as using it.",
     )
     jobs: int = Field(description="Workflow runs that took it as an input.")
     collections: list[CollectionUseResponse]
+    uses: list[RecordUseResponse] = Field(
+        default_factory=list,
+        description="The live records that use it, named, with the records "
+        "above each (at most 200; `records` is the full count).",
+    )
 
 
 class StorageLocationResponse(BaseModel):
@@ -895,6 +934,11 @@ class CollectionStorageResponse(BaseModel):
     unlocated_files: int = Field(
         description="Files records use that the catalog doesn't place on any volume."
     )
+    unlocated_place: str = Field(
+        default="missing",
+        description="Where those are: `server` (this project follows one, so "
+        "they are only there) or `missing`.",
+    )
 
 
 class TransferRequest(BaseModel):
@@ -909,14 +953,6 @@ class TransferRequest(BaseModel):
     )
     collection_ids: list[str] = Field(
         default_factory=list, description="consolidate: ids of the collections to move."
-    )
-    include_shared: bool = Field(
-        default=False,
-        description=(
-            "consolidate: also move files that collections kept on a different "
-            "volume use as well. They stay where they are by default, since moving "
-            "one would only split those collections instead."
-        ),
     )
     verify: str = Field(
         default="copy",
@@ -949,10 +985,12 @@ class TransferPlanResponse(BaseModel):
     )
     bytes: int
     already_there: int = Field(description="Files already on a target, left alone.")
-    shared_left: int = Field(
-        description="consolidate: files left because collections kept elsewhere use them too."
+    copied: int = Field(
+        description="Of `files`, those copied rather than moved: the drive they "
+        "come from is the home of another collection that uses them, and keeps "
+        "its copy."
     )
-    shared_left_bytes: int
+    copied_bytes: int
     targets: list[TargetShareResponse]
     problems: list[str] = Field(description="Reasons the transfer can't start.")
     warnings: list[str] = Field(description="Things worth knowing; they don't stop it.")
@@ -1368,8 +1406,15 @@ class AuditLogResponse(BaseModel):
     actor: str | None = Field(
         default=None,
         description="Who made the change, as reported by the machine that made "
-        "it (the operating-system user). Not verified. Null for entries from "
-        "before this was recorded.",
+        "it (the name chosen in the project, else the operating-system user). "
+        "Not verified. Null for entries from before this was recorded.",
+    )
+    device: str | None = Field(
+        default=None,
+        description="For a synced change, the device it came through, as the "
+        "authority stamped it from that device's token (verified). Null for a "
+        "change made on the authority, not synced yet, or synced before this "
+        "was kept.",
     )
     entity_type: str = Field(
         description="One of: record, schema, field, dataset, view."
@@ -1419,6 +1464,7 @@ class AuditLogResponse(BaseModel):
             id=str(dto.id),
             action=dto.action,
             actor=dto.actor,
+            device=dto.device,
             entity_type=dto.entity_type,
             entity_id=str(dto.entity_id),
             # Both sides however the entry was stored, so a reader comparing
@@ -1472,9 +1518,13 @@ class AuditEventResponse(BaseModel):
     )
     actor: str | None = Field(
         default=None,
-        description="Who made it, as reported by the machine that made it (the "
-        "operating-system user); for a batch, who made its changes. Null when "
-        "it was not recorded.",
+        description="Who made it, as reported by the machine that made it; for "
+        "a batch, who made its changes. Null when it was not recorded.",
+    )
+    device: str | None = Field(
+        default=None,
+        description="For a synced change, the device it came through (verified "
+        "by the authority).",
     )
 
     @classmethod
@@ -1488,6 +1538,7 @@ class AuditEventResponse(BaseModel):
             batch=AuditBatchResponse.from_dto(dto.batch) if dto.batch else None,
             parts=[AuditPart(**p) for p in dto.parts],
             actor=dto.actor,
+            device=dto.device,
         )
 
 
@@ -1972,6 +2023,11 @@ class RetentionReportResponse(BaseModel):
     audit_kept_unsynced: int = Field(
         description="Older history kept because it has not been synced yet."
     )
+    audit_kept_first_and_last: int = Field(
+        default=0,
+        description="Older history kept because it is a thing's creation or its "
+        "latest entry, which are kept however old.",
+    )
     runs: int
     run_steps: int
     anything: bool
@@ -2295,6 +2351,12 @@ class FileSelectionRequest(BaseModel):
         "one (the selected encounters, and everything inside them). Without it, "
         "only the selected records' own files.",
     )
+    with_within: bool = Field(
+        default=False,
+        description="With `within` and `schema_name`: also the files of the "
+        "`within` record itself (a list of what a record contains, taking the "
+        "record's own files too).",
+    )
     kinds: list[str] | None = Field(
         default=None,
         description="Only records of these kinds (schema names), when 'schema_name' "
@@ -2398,11 +2460,50 @@ class RemoveExportsRequest(BaseModel):
     )
 
 
-class FileGatherRequest(FileSelectionRequest):
+class FilePickRequest(FileSelectionRequest):
+    place: str | None = Field(
+        default=None,
+        description="Only files in this place: a drive's name, `server` (only on "
+        "the server), `missing`, or the groups `here` (on a drive that can be read "
+        "now) and `unreachable` (on one that can't).",
+    )
+    name: str | None = Field(
+        default=None,
+        description="Only files whose name, or whose record's name, contains this.",
+    )
+    shas: list[str] | None = Field(
+        default=None,
+        max_length=100_000,
+        description="Only these files (by content hash), e.g. the ticked rows: "
+        "each with every use of it in the selection. Records outside the "
+        "selection that use the same file are not picked.",
+    )
+    used_by: list[int] | None = Field(
+        default=None,
+        description="Only files used by exactly one of these numbers of live "
+        "records (anywhere, not only in the selection).",
+    )
+
+
+class FileListRequest(FilePickRequest):
+    order: str = Field(
+        default="path",
+        description="path, name, size, record or place; a leading '-' reverses it.",
+    )
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=1000)
+
+
+class FileGatherRequest(FilePickRequest):
     volume: str = Field(
         description="The drive (volume name) to gather the selection's files "
         "onto. Only the files in the selection move, not the rest of their "
         "collections.",
+    )
+    include_shared: bool = Field(
+        default=False,
+        description="Also move files that records not picked use (they move "
+        "for those records too). By default those stay where they are.",
     )
 
 

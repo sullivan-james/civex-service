@@ -21,14 +21,15 @@ import {
   TabNav,
   TabPanel,
   useTabParam,
+  ProgressBar,
 } from '../../ui'
 import { Network } from '../../ui/icons'
 import { CleanUpDialog } from './CleanUpDialog'
 import { NewTransferModal, type TransferPreset } from './NewTransferModal'
-import { StatusDot } from './StatusDot'
+import { VolumeStatus } from '../../files/Where'
 import { TransferCard } from './TransferCard'
 import { useVolumeActions } from './useVolumeActions'
-import { NEEDS_ATTENTION, STATE_LABEL } from './volumeState'
+import { NEEDS_ATTENTION } from '../../../utils/volumes'
 import { VolumeSpace } from './VolumeSpace'
 
 const STORAGE = '/settings/storage'
@@ -186,9 +187,8 @@ export default function VolumePage() {
       title={
         <span className="flex flex-wrap items-center gap-3">
           {vol.name}
-          <span className="inline-flex items-center gap-2 text-sm font-normal">
-            <StatusDot state={vol.state} />
-            {STATE_LABEL[vol.state]}
+          <span className="text-sm font-normal">
+            <VolumeStatus state={vol.state} reason={vol.reason} fix={vol.fix} />
           </span>
           {vol.network && (
             <Badge variant="accent">
@@ -384,15 +384,13 @@ function ShareBar({
 }) {
   const pct = total > 0 ? Math.min(100, Math.round((bytes / total) * 100)) : 0
   return (
-    <div
-      role="img"
-      aria-label={`${pct}% of this volume`}
-      className="h-1.5 overflow-hidden rounded-full bg-canvas-inset"
-    >
-      <div
-        className={muted ? 'h-full bg-fg-subtle' : 'h-full bg-accent'}
-        style={{ width: `${pct}%` }}
-      />
-    </div>
+    <ProgressBar
+      meter
+      thin
+      muted={muted}
+      fraction={pct / 100}
+      label={`${pct}% of this volume`}
+      className="w-full"
+    />
   )
 }

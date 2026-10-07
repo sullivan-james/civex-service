@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import asdict
 
+from civex.domain.sync import SyncError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
@@ -103,6 +104,27 @@ def download_file(sha256: str, filename: str = "", ctx: AppContext = Depends(get
         # "Not there" and "on a drive that isn't plugged in" are different
         # problems with different fixes: say which.
         offline = ctx.file_svc.offline_location(sha256)
+        if offline is None and ctx.sync_svc.fetches_files:
+            # Another device added it: fetch it from the authority, then serve.
+            try:
+                fetched = ctx.sync_svc.fetch_file(sha256)
+            except SyncError as e:
+                raise HTTPException(
+                    503,
+                    detail=(
+                        "This file hasn't been downloaded to this computer yet, "
+                        f"and the server can't be reached to get it: {e}"
+                    ),
+                )
+            if not fetched:
+                reason, fix = ctx.sync_svc.not_here_reasons([sha256])[sha256]
+                raise HTTPException(404, detail=f"{reason} {fix}")
+            ctx.commit()
+            return FileResponse(
+                ctx.file_svc.local_path(sha256),
+                media_type="application/octet-stream",
+                filename=filename or None,
+            )
         if offline is not None:
             volume, status = offline
             raise HTTPException(

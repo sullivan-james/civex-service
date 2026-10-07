@@ -6,7 +6,6 @@ import { MemoryRouter } from 'react-router'
 import type { FileRef } from '../../api/files'
 import { FileLink, FileLocationChip } from './FileLocation'
 import { FieldValue } from './FieldValue'
-import { RecordStorageSummary } from './RecordStorageSummary'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -104,10 +103,29 @@ describe('FileLocationChip', () => {
     renderIt(<FileLocationChip file={file()} />)
 
     expect(
-      await screen.findByTitle(
-        "Stored on 'archive' (Online). Click for details.",
-      ),
+      await screen.findByTitle("On 'archive'. Click for details."),
     ).toHaveTextContent('archive')
+  })
+
+  it('always says when another device added a file not downloaded yet', async () => {
+    renderIt(
+      <FileLocationChip
+        file={file({
+          location: {
+            volume: null,
+            state: 'remote',
+            available: null,
+            reason: 'Not downloaded to this computer yet.',
+            fix: 'Opening or exporting it downloads it from the server.',
+          },
+        })}
+      />,
+    )
+    const chip = await screen.findByText('not on this computer')
+    expect(chip.closest('button')).toHaveAttribute(
+      'title',
+      'Not downloaded to this computer yet: opening it downloads it.',
+    )
   })
 
   it('always says when a file is on a volume that is not available', async () => {
@@ -116,7 +134,7 @@ describe('FileLocationChip', () => {
     const chip = await screen.findByText('archive · offline')
     expect(chip.closest('button')).toHaveAttribute(
       'title',
-      "On 'archive', which isn't available right now. Click to see what to do.",
+      "On 'archive', which can't be reached now. Click for what to do.",
     )
   })
 
@@ -141,15 +159,14 @@ describe('FileLocationChip', () => {
     const panel = await screen.findByRole('dialog', {
       name: 'Where this file is stored',
     })
-    expect(within(panel).getByRole('alert')).toHaveTextContent(
-      "It's on ‘archive’, which isn't available right now, so it can't be opened.",
+    expect(panel).toHaveTextContent(/On archive\s*Offline/)
+    // Why, and which drive to plug in, are the status's tooltip.
+    await user.click(within(panel).getByRole('button', { name: 'Why' }))
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      "'archive' isn't connected. Plug in the drive for 'archive'",
     )
-    expect(within(panel).getByText("'archive' isn't connected.")).toBeVisible()
     expect(
-      within(panel).getByText(/Plug in the drive for 'archive'/),
-    ).toBeVisible()
-    expect(
-      within(panel).getByRole('link', { name: /Open ‘archive’ in Settings/ }),
+      within(panel).getByRole('link', { name: /Open ‘archive’/ }),
     ).toHaveAttribute('href', '/settings/storage/volumes/archive')
     // The technical detail stays out of the way until asked for.
     expect(calls).not.toContain(`/api/files/${SHA}/info`)
@@ -171,8 +188,7 @@ describe('FileLocationChip', () => {
     })
     expect(within(panel).getByText('scan.png')).toBeInTheDocument()
     expect(within(panel).getByText('2.0 KB')).toBeInTheDocument()
-    expect(panel).toHaveTextContent('Stored on archive · Online')
-    expect(panel).toHaveTextContent('Ready to open.')
+    expect(panel).toHaveTextContent(/On archive\s*Online/)
     expect(calls).not.toContain(`/api/files/${SHA}/info`) // nothing fetched yet
 
     await user.click(
@@ -295,7 +311,10 @@ describe('FileLink download check', () => {
 
     await user.click(screen.getByRole('link', { name: 'Download' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(detail)
+    // A situation the server explains (amber), not a failure (red).
+    const note = await screen.findByText(detail)
+    expect(note).toHaveAttribute('role', 'status')
+    expect(note).toHaveClass('text-attention')
   })
 
   it('starts the browser download and says so when the file can be served', async () => {
@@ -356,74 +375,10 @@ describe('FieldValue with files', () => {
       await screen.findAllByRole('link', { name: 'Download' }),
     ).toHaveLength(2)
     expect(
-      await screen.findByTitle(
-        "Stored on 'default' (Online). Click for details.",
-      ),
+      await screen.findByTitle("On 'default'. Click for details."),
     ).toBeInTheDocument()
     expect(
-      screen.getByTitle("Stored on 'archive' (Online). Click for details."),
-    ).toBeInTheDocument()
-  })
-})
-
-describe('RecordStorageSummary', () => {
-  const data = (...files: FileRef[]) => ({ title: 'x', scans: files })
-
-  it('is silent for a record with no files', async () => {
-    const { container } = renderIt(
-      <RecordStorageSummary data={{ title: 'x' }} />,
-    )
-    await waitFor(() => expect(calls).toContain('/api/settings/ui'))
-
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it('is silent when all files are together and nothing is wrong', async () => {
-    const { container } = renderIt(
-      <RecordStorageSummary
-        data={data(file(), file({ sha256: 'cd'.repeat(32) }))}
-      />,
-    )
-    await waitFor(() => expect(calls).toContain('/api/settings/ui'))
-
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it('says when a record is split across volumes', async () => {
-    const other = file({
-      sha256: 'cd'.repeat(32),
-      location: { volume: 'default', state: 'online', available: true },
-    })
-    renderIt(
-      <RecordStorageSummary
-        data={data(file(), file({ sha256: 'ef'.repeat(32) }), other)}
-      />,
-    )
-
-    const note = await screen.findByRole('group', {
-      name: "Where this record's files are stored",
-    })
-    expect(note).toHaveTextContent('3 files stored on archive (2), default (1)')
-    expect(note).toHaveTextContent('Split across 2 volumes')
-    expect(
-      within(note).getByRole('link', { name: 'Storage settings' }),
-    ).toHaveAttribute('href', '/settings/storage')
-  })
-
-  it('flags files that cannot be opened right now', async () => {
-    renderIt(<RecordStorageSummary data={data(file({ location: OFFLINE }))} />)
-
-    expect(
-      await screen.findByText('1 not available right now'),
-    ).toBeInTheDocument()
-  })
-
-  it('always shows in advanced mode', async () => {
-    advanced = true
-    renderIt(<RecordStorageSummary data={data(file())} />)
-
-    expect(
-      await screen.findByText('1 file stored on archive (1)'),
+      screen.getByTitle("On 'archive'. Click for details."),
     ).toBeInTheDocument()
   })
 })

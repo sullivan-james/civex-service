@@ -86,6 +86,20 @@ class SyncConfig:
     # How often the background sync looks for changes, in seconds. 0 = never:
     # it syncs only when asked (Sync now, `civex sync`).
     interval_seconds: int = 60
+    # Which files a device keeps a copy of (`DOWNLOAD_MODES`): "all" fetches
+    # every file the project's records cite in the background, a few at a time;
+    # "opened" fetches one only when it is opened or exported (for a computer
+    # short of space). Either way a file is fetched on demand.
+    download_files: str = "all"
+    # Per collection (by id), overriding `download_files` for its files: "keep"
+    # (a copy stays on this computer, fetched in the background) or "opened"
+    # (fetched when opened or exported; its copies can be removed to free
+    # space). Keyed by id like placement, so a rename changes nothing.
+    collection_files: dict[str, str] = field(default_factory=dict)
+
+
+DOWNLOAD_MODES = ("all", "opened")
+COLLECTION_FILE_MODES = ("keep", "opened")
 
 
 @dataclass
@@ -180,6 +194,14 @@ class StoreConfig:
     # collection id -> home volume. Per-machine like the volumes it names, so
     # it lives here and not on the collection (which dump/sync carry elsewhere).
     placement: dict[str, PlacementConfig] = field(default_factory=dict)
+
+    def homes(self) -> dict[str, str]:
+        """Collection id -> its home drive, for drives that exist."""
+        return {
+            cid: place.volume
+            for cid, place in self.placement.items()
+            if place.volume in self.volumes
+        }
 
 
 def _default_store(project_root: Path) -> StoreConfig:
@@ -368,6 +390,16 @@ def load_config() -> Config:
         serve=bool(sync_data.get("serve", False)),
         paused=bool(sync_data.get("paused", False)),
         interval_seconds=_interval(sync_data.get("interval_seconds", 60)),
+        download_files=(
+            str(sync_data.get("download_files"))
+            if sync_data.get("download_files") in DOWNLOAD_MODES
+            else "all"
+        ),
+        collection_files={
+            str(cid): str(mode)
+            for cid, mode in (sync_data.get("collection_files") or {}).items()
+            if mode in COLLECTION_FILE_MODES
+        },
     )
 
     return Config(
@@ -510,7 +542,13 @@ def save_config(config: Config) -> None:
         lines += ["\n[identity]\n", f"name = {_tv(config.identity.name)}\n"]
 
     sync = config.sync
-    if sync.remote or sync.serve or sync.paused or sync.interval_seconds != 60:
+    if (
+        sync.remote
+        or sync.serve
+        or sync.paused
+        or sync.interval_seconds != 60
+        or sync.download_files != "all"
+    ):
         lines.append("\n[sync]\n")
         if sync.remote:
             lines.append(f"remote = {_tv(sync.remote)}\n")
@@ -520,6 +558,12 @@ def save_config(config: Config) -> None:
             lines.append("paused = true\n")
         if sync.interval_seconds != 60:
             lines.append(f"interval_seconds = {sync.interval_seconds}\n")
+        if sync.download_files != "all":
+            lines.append(f"download_files = {_tv(sync.download_files)}\n")
+    if sync.collection_files:
+        lines.append("\n[sync.collection_files]\n")
+        for cid, mode in sorted(sync.collection_files.items()):
+            lines.append(f"{_tv(cid)} = {_tv(mode)}\n")
 
     retention = config.retention
     retention_lines = []

@@ -13,11 +13,14 @@ rest, and then says exactly which were left out.
 
 from __future__ import annotations
 
+from collections import Counter
+
 import dataclasses
 import json
 import os
 import posixpath
 import shutil
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -25,10 +28,20 @@ from typing import Any, Callable, Iterator
 from civex import __version__
 from civex.domain.dtos import FileRef, RecordDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.domain.sync import not_on_server_yet
 from civex.domain import tables as table_rules
 from civex.domain import templating
 from civex.domain.naming import display_label
+from civex.domain.query import RecordQuery
+from civex.domain.placement import STEP_COPY, STEP_MOVE, STEP_THERE
+from civex.domain.transfers import KIND_FILES, TransferSpec
+from civex.services.transfer_engine import Step, plan_steps
 from civex.domain.file_access import (
+    MovePlan,
+    FileListing,
+    PlaceSummary,
+    in_place,
+    place_of,
     EXPORT_MODES,
     LAYOUT_FLAT,
     LAYOUT_GROUPED,
@@ -53,7 +66,7 @@ from civex.domain.file_access import (
     group_folder,
     safe_segment,
 )
-from civex.repositories.protocols import FileObjectStore
+from civex.repositories.protocols import FileObjectStore, FileReferenceRepository
 from civex.services.progress import Progress
 from civex.services.record_service import RecordService
 from civex.services.schema_service import SchemaService
@@ -84,6 +97,35 @@ class FileAccessService:
         self._schemas = schemas
         self._store = store
         self._civex_dir = civex_dir
+        # Which live records use a file (for files shared with records not
+        # picked); set by `build_local_context`.
+        self.refs: FileReferenceRepository | None = None
+        # Downloads files another device added (they are cited here but on no
+        # drive here) from the authority, given their hashes and a callable told
+        # how many have arrived; None when the project follows none. Injected
+        # so this service doesn't know sync.
+        self.fetch_missing: (
+            Callable[
+                [
+                    list[str],
+                    Callable[[int], None] | None,
+                    str | None,
+                    Callable[[int], None] | None,
+                ],
+                Any,
+            ]
+            | None
+        ) = None
+        # Removes this computer's copies of content the server holds (given the
+        # hashes and whether only to count); None when the project follows no
+        # server. Injected like `fetch_missing`.
+        self.free_files: Callable[[list[str], bool], object] | None = None
+        # Where files nobody can fetch yet still are, and what brings them
+        # (`SyncService.not_here_reasons`); None when the project follows no
+        # server. Injected like the others.
+        self.why_not_here: Callable[[list[str]], dict[str, tuple[str, str]]] | None = (
+            None
+        )
 
     # -- planning ------------------------------------------------------------
 
@@ -92,12 +134,74 @@ class FileAccessService:
         selection: FileSelection,
         with_sources: bool = False,
         progress: Progress | None = None,
+        fetch: bool = False,
     ) -> FilePlan:
         """Every file the selection holds, each with the path it would have and
         whether it can be reached now, and the tables it makes with where each is
         written. Reads only; makes nothing. With `with_sources`, each reachable
         file also carries where it is on disk (one stat per file, so only when
-        asked for)."""
+        asked for). With `fetch` (an export about to be made), files another
+        device added that aren't here yet are first downloaded from the server,
+        and the plan is of what is here then."""
+        found = self._plan(selection, with_sources, progress)
+        remote = [i.sha256 for i in found.to_fetch]
+        if not (fetch and remote and self.fetch_missing):
+            return found
+        self._fetch(remote, progress, sizes=_sizes(found.to_fetch))
+        return self._absent_now(self._plan(selection, with_sources, progress))
+
+    def _absent_now(self, plan: FilePlan) -> FilePlan:
+        """A plan made after downloading what was only on the server: a file
+        still not here is one the server hasn't got either, so it can't be
+        reached (not "to download"), and it says where it still is."""
+        gone = [i.sha256 for i in plan.items if i.state == "remote"]
+        if not gone:
+            return plan
+        why = self.why_not_here(gone) if self.why_not_here else {}
+        for n, item in enumerate(plan.items):
+            if item.state == "remote":
+                reason, fix = why.get(item.sha256, not_on_server_yet(None))
+                plan.items[n] = dataclasses.replace(
+                    item, state="absent", available=False, reason=reason, fix=fix
+                )
+        plan.unavailable = _unavailable_groups(plan.items)
+        return plan
+
+    def _fetch(
+        self,
+        shas: list[str],
+        progress: Progress | None,
+        volume: str | None = None,
+        sizes: dict[str, int] | None = None,
+    ) -> Any:
+        """Download these files from the server, as a stage of the work a
+        person is watching (the same progress as the rest of it: how many
+        files, how many bytes of how many, how fast); onto `volume` when they
+        are being fetched to go there. `sizes` are the files' sizes as their
+        records say, for the bytes to expect."""
+        shas = list(dict.fromkeys(shas))
+        if not shas or not self.fetch_missing:
+            return None
+        if progress:
+            progress.phase(
+                f"Downloading {len(shas)} file{'s' if len(shas) != 1 else ''} "
+                "from the server",
+                len(shas),
+                sum((sizes or {}).get(sha, 0) for sha in shas),
+            )
+        return self.fetch_missing(
+            shas,
+            progress.advance if progress else None,
+            volume,
+            progress.add_bytes if progress else None,
+        )
+
+    def _plan(
+        self,
+        selection: FileSelection,
+        with_sources: bool,
+        progress: Progress | None,
+    ) -> FilePlan:
         if selection.layout not in LAYOUTS:
             raise ValidationError(f"layout must be one of: {', '.join(LAYOUTS)}")
         flat = selection.layout == LAYOUT_FLAT
@@ -668,6 +772,9 @@ class FileAccessService:
             ]
         else:
             queries = [query]
+            if selection.with_within and query.within and query.schema:
+                # The record the list is inside: its own files too.
+                found.append(self._records.get(query.within))
         if progress:
             # How many records there are to go through, so it can say how far.
             progress.phase(
@@ -698,10 +805,31 @@ class FileAccessService:
             beneath = self._records.beneath(
                 found, (lambda n: progress.advance(n)) if progress else None
             )
+            if selection.record_ids is None and selection.query.filter_tree:
+                beneath = self._as_listed(beneath, selection.query)
             everything = [*found, *beneath]
         if allowed is not None:
             everything = [r for r in everything if r.schema_name in allowed]
         return everything
+
+    def _as_listed(
+        self, beneath: list[RecordDTO], query: RecordQuery
+    ) -> list[RecordDTO]:
+        """Of the records beneath those a filtered selection chose, the ones the
+        record list would list too, given the same filter: a record of each
+        kind only if the filter, run for that kind (the explorer's own query,
+        so AND, OR and conditions on parents or children mean what they mean
+        there), lists it. "Encounters with a Selection whose contour file is
+        empty" then takes those Selections' files, not every Selection's. One
+        query per kind beneath."""
+        kinds = {r.schema_name for r in beneath}
+        listed: set[uuid.UUID] = set()
+        for kind in kinds:
+            for page in self._records.stream_records(
+                dataclasses.replace(query, schema=kind)
+            ):
+                listed.update(r.id for r in page)
+        return [r for r in beneath if r.id in listed]
 
     def _base_id(self, selection: FileSelection) -> str | None:
         ref = selection.base or selection.query.within
@@ -772,7 +900,7 @@ class FileAccessService:
         `list_exports` / `remove_export`."""
         if mode not in EXPORT_MODES:
             raise ValidationError(f"mode must be one of: {', '.join(EXPORT_MODES)}")
-        plan = plan or self.plan(selection, progress=progress)
+        plan = plan or self.plan(selection, progress=progress, fetch=True)
         if not plan.complete and not allow_partial:
             raise FilesUnavailableError(plan)
         if mode == "link":
@@ -820,7 +948,7 @@ class FileAccessService:
         in place; a copy is yours to change."""
         if mode not in EXPORT_MODES:
             raise ValidationError(f"mode must be one of: {', '.join(EXPORT_MODES)}")
-        plan = plan or self.plan(selection, progress=progress)
+        plan = plan or self.plan(selection, progress=progress, fetch=True)
         if not plan.complete and not allow_partial:
             raise FilesUnavailableError(plan)
         if mode == "link" and plan.scattered:
@@ -1029,18 +1157,247 @@ class FileAccessService:
             removed_folder = not folder.exists()
         return RemoveResult(str(folder), removed, freed, kept, removed_folder)
 
-    def files_to_gather(self, plan: FilePlan, volume: str) -> list[str]:
-        """The content a selection would need moved so that every reachable file
-        is on `volume`: each file not already there, once. Just the selection's
-        files, never the rest of their collections. Feed it to a "files"
-        transfer; once it has run, a linked folder can hold the whole selection."""
+    # -- the files of a selection, by place (the Files tab) -----------------
+
+    def chosen(
+        self,
+        selection: FileSelection,
+        place: str | None = None,
+        name: str | None = None,
+        shas: list[str] | None = None,
+        used_by: list[int] | None = None,
+    ) -> tuple[FilePlan, list[FileItem]]:
+        """The files a person has picked: a selection's files, narrowed to its
+        kinds of file (`selection.fields`), a place (`in_place`), a name (in
+        the file's name or the names of the records it sits under), and
+        ticked files (`shas`: a file with every use of it listed here; records
+        outside the selection that use it are not picked), and how many live
+        records use a file (`used_by`, see `use_counts`). The one rule
+        behind the file list and every action on it, so what is listed is what
+        is acted on. The plan returned is of every kind (what the list's
+        choices are counted from)."""
+        plan = self.plan(dataclasses.replace(selection, fields=None))
+        kinds = set(selection.fields) if selection.fields else None
+        needle = (name or "").strip().casefold()
+        wanted = set(shas) if shas is not None else None
+        items = [
+            i
+            for i in plan.items
+            if (kinds is None or i.field in kinds)
+            and (place is None or in_place(i, place))
+            and (
+                not needle
+                or needle in i.filename.casefold()
+                or needle in i.path.casefold()
+                or needle in i.record_name.casefold()
+            )
+            and (wanted is None or i.sha256 in wanted)
+        ]
+        if used_by:
+            counts = self.use_counts(items)
+            items = [i for i in items if counts[i.sha256] in set(used_by)]
+        return plan, items
+
+    def use_counts(self, items: list[FileItem]) -> dict[str, int]:
+        """How many live records use each of these files, anywhere (at least
+        the records among these that do)."""
+        users = self.refs.records_using(i.sha256 for i in items) if self.refs else {}
+        here: dict[str, set[str]] = {}
+        for i in items:
+            here.setdefault(i.sha256, set()).add(i.record_id)
+        return {
+            sha: max(len(users.get(sha, ())), len(records))
+            for sha, records in here.items()
+        }
+
+    def listing(
+        self,
+        selection: FileSelection,
+        place: str | None = None,
+        name: str | None = None,
+        sort: str = "path",
+        offset: int = 0,
+        limit: int = 100,
+        used_by: list[int] | None = None,
+    ) -> FileListing:
+        """A page of a selection's files, one row per file as it is stored (a
+        file several records use is one row, with `uses` naming them), narrowed
+        like `chosen`. With where the files of the kinds chosen are (`summary`,
+        before narrowing by place, so the places a person can pick stay in
+        view) and how many of each kind the selection holds (`kinds`, before
+        narrowing by kind); every count is of files, not of uses. `used_by`
+        keeps the files used by exactly so many live records (anywhere), and
+        `sharing` counts the files by that. `sort`: path, name, size, record
+        or place; a leading "-" reverses it."""
+        plan, items = self.chosen(selection, place, name)
+        of_kind = (
+            [i for i in plan.items if i.field in set(selection.fields)]
+            if selection.fields
+            else plan.items
+        )
+        uses: dict[str, list[FileItem]] = {}
+        for item in sorted(items, key=lambda i: i.path.casefold()):
+            uses.setdefault(item.sha256, []).append(item)
+        rows = [found[0] for found in uses.values()]
+        used = self.use_counts(items)
+        counts = Counter(used[i.sha256] for i in rows)
+        if used_by:
+            rows = [i for i in rows if used[i.sha256] in set(used_by)]
+        key, reverse = sort.lstrip("-"), sort.startswith("-")
+        order: dict[str, Callable[[FileItem], Any]] = {
+            "path": lambda i: i.path.casefold(),
+            "name": lambda i: i.filename.casefold(),
+            "size": lambda i: i.size,
+            "record": lambda i: (i.record_name.casefold(), i.path.casefold()),
+            "place": lambda i: (place_of(i)[0].casefold(), i.path.casefold()),
+        }
+        if key not in order:
+            raise ValidationError(f"sort must be one of: {', '.join(order)}")
+        rows.sort(key=order[key], reverse=reverse)
+        page = rows[offset : offset + limit]
+        return FileListing(
+            total=len(rows),
+            summary=_places(_one_each(of_kind)),
+            items=page,
+            kinds=_kinds(plan.items),
+            uses={i.sha256: uses[i.sha256] for i in page},
+            others={
+                i.sha256: used[i.sha256] - len({u.record_id for u in uses[i.sha256]})
+                for i in page
+            },
+            sharing=[{"records": n, "files": counts[n]} for n in sorted(counts)],
+        )
+
+    def shared_with_others(self, items: list[FileItem]) -> dict[str, int]:
+        """Files among these that live records not among them also use, and
+        how many such records: moving one would move it for them too."""
+        if not self.refs or not items:
+            return {}
+        picked = {i.record_id for i in items}
+        users = self.refs.records_using(i.sha256 for i in items)
+        out = {}
+        for sha, records in users.items():
+            others = {str(r) for r in records} - picked
+            if others:
+                out[sha] = len(others)
+        return out
+
+    def plan_move(
+        self, items: list[FileItem], volume: str, include_shared: bool = False
+    ) -> MovePlan:
+        """What moving these files onto `volume` would do: what moves or is
+        copied from another drive (the transfer's own steps, `plan_steps`: a
+        file stays on a drive that is the home of a collection using it, so it
+        is copied), what comes from the server straight there, and what stays
+        because records not among them also use it (unless `include_shared`:
+        then it moves for them too). The one rule behind the move dialog's
+        preview and the move itself. Unreachable and missing files can't move
+        and are left out."""
         if volume not in self._store.volume_names():
             raise NotFoundError(f"There is no drive called '{volume}'.")
-        return list(
-            dict.fromkeys(
-                i.sha256 for i in plan.items if i.available and i.volume != volume
-            )
+        shared = {} if include_shared else self.shared_with_others(items)
+        size = {i.sha256: i.size for i in items}
+        on_drives = {i.sha256 for i in items if place_of(i)[1] == "drive"}
+        remote = {i.sha256 for i in items if place_of(i)[1] == "server"}
+        plan = MovePlan(
+            files=0,
+            bytes=0,
+            from_server=len(remote),
+            shared_left=0,
+            shared_bytes=0,
+            already_there=0,
         )
+        for step in self._steps(sorted(on_drives), volume):
+            if step.step == STEP_THERE:
+                plan.already_there += 1
+            elif step.sha256 in shared:
+                plan.shared_left += 1
+                plan.shared_bytes += size[step.sha256]
+            elif step.step in (STEP_MOVE, STEP_COPY):
+                plan.files += 1
+                plan.bytes += size[step.sha256]
+                if step.step == STEP_COPY:
+                    plan.copied += 1
+        return plan
+
+    def _steps(self, shas: list[str], volume: str) -> Iterator[Step]:
+        """What gathering these files onto `volume` does with each (the
+        transfer's own rule)."""
+        if self.refs is None:
+            return iter(())
+        spec = TransferSpec(kind=KIND_FILES, targets=[volume], shas=shas)
+        return plan_steps(self._store, self.refs, spec, self._store.homes())
+
+    def to_move(
+        self,
+        items: list[FileItem],
+        volume: str,
+        progress: Progress | None = None,
+        include_shared: bool = False,
+    ) -> tuple[list[str], int, MovePlan]:
+        """Get these files onto `volume`, as `plan_move` says: those only on
+        the server are downloaded straight onto it; returns the content a
+        move has to carry from other drives (each once, without files others
+        share unless `include_shared`), how many were downloaded there, and
+        the plan."""
+        plan = self.plan_move(items, volume, include_shared)
+        remote = [i for i in items if place_of(i)[1] == "server"]
+        fetched = self._fetch(
+            [i.sha256 for i in remote], progress, volume, _sizes(remote)
+        )
+        moving = self.shas_to_move(items, volume, include_shared)
+        return moving, fetched.fetched if fetched else 0, plan
+
+    def shas_to_move(
+        self, items: list[FileItem], volume: str, include_shared: bool = False
+    ) -> list[str]:
+        """The content a move has to carry onto `volume` from other drives:
+        each file not there yet, once, without those records not among these
+        also use unless `include_shared`. Downloads nothing."""
+        shared = {} if include_shared else self.shared_with_others(items)
+        on_drives = sorted({i.sha256 for i in items if place_of(i)[1] == "drive"})
+        return [
+            step.sha256
+            for step in self._steps(on_drives, volume)
+            if step.step in (STEP_MOVE, STEP_COPY) and step.sha256 not in shared
+        ]
+
+    def download(
+        self, items: list[FileItem], progress: Progress | None = None
+    ) -> dict[str, Any]:
+        """Fetch the files among these that aren't on this computer. Says how
+        many came, how many of the listed rows that covers (records that share
+        a file share its download), and, for any the server hasn't got either,
+        where they still are, grouped by that."""
+        remote = [i for i in items if place_of(i)[1] == "server"]
+        wanted = list(dict.fromkeys(i.sha256 for i in remote))
+        report = self._fetch(wanted, progress, sizes=_sizes(remote))
+        here = self._store.locate_volumes(wanted)
+        absent = report.absent if report else []
+        why = self.why_not_here(absent) if (absent and self.why_not_here) else {}
+        groups: dict[tuple[str, str], int] = {}
+        for sha in absent:
+            key = why.get(sha, not_on_server_yet(None))
+            groups[key] = groups.get(key, 0) + 1
+        return {
+            "fetched": report.fetched if report else 0,
+            "listed": sum(1 for i in items if here.get(i.sha256)),
+            "absent": len(absent),
+            "absent_where": [
+                {"reason": r, "fix": f, "files": n} for (r, f), n in groups.items()
+            ],
+        }
+
+    def free_up(self, items: list[FileItem], dry_run: bool = True) -> Any:
+        """Remove this computer's copies of these files, where the server holds
+        them (see `SyncService.free_up_files` for what is kept and why)."""
+        if not self.free_files:
+            raise ValidationError(
+                "This project doesn't follow a server, so its files have nowhere "
+                "else to come from: they can't be removed to free space."
+            )
+        here = list(dict.fromkeys(i.sha256 for i in items if place_of(i)[1] == "drive"))
+        return self.free_files(here, dry_run)
 
     def missing_note(self, plan: FilePlan) -> str | None:
         """The text for a zip's MISSING.txt: the files that couldn't be reached
@@ -1150,7 +1507,7 @@ def _gone(item: FileItem) -> FileItem:
 def _unavailable_groups(items: list[FileItem]) -> list[UnavailableGroup]:
     groups: dict[tuple[str | None, str, str, str], UnavailableGroup] = {}
     for item in items:
-        if item.available:
+        if item.available or item.state == "remote":  # to download, not lost
             continue
         reason = item.reason or (
             "" if item.volume else "Not stored on any drive this project knows."
@@ -1329,3 +1686,50 @@ def _remove(dest: Path, path: str) -> None:
         return
     target.unlink(missing_ok=True)
     _prune_empty(dest, target.parent)
+
+
+def _places(items: list[FileItem]) -> list[PlaceSummary]:
+    """Every file of a selection by place, readable drives first, then
+    unreachable drives, the server, and missing (biggest first within each)."""
+    out: dict[tuple[str, str], PlaceSummary] = {}
+    for item in items:
+        place, kind = place_of(item)
+        row = out.setdefault(
+            (place, kind),
+            PlaceSummary(
+                place,
+                kind,
+                0,
+                0,
+                item.reason if kind == "unreachable" else "",
+                item.fix if kind == "unreachable" else "",
+            ),
+        )
+        row.files += 1
+        row.bytes += item.size
+    rank = {"drive": 0, "unreachable": 1, "server": 2, "missing": 3}
+    return sorted(out.values(), key=lambda r: (rank[r.kind], -r.bytes, r.place))
+
+
+def _one_each(items: list[FileItem]) -> list[FileItem]:
+    """One item per file as stored: however many records use a file, it is
+    one file in a count and its bytes are on disk once."""
+    return list({i.sha256: i for i in reversed(items)}.values())
+
+
+def _kinds(items: list[FileItem]) -> list[dict[str, Any]]:
+    """How many files of each kind (file field) a selection holds, most
+    first: the choices of the list's "kind of file" pick. A file counts once
+    per kind however many records use it."""
+    out: dict[str, dict[str, Any]] = {}
+    for item in {(i.field, i.sha256): i for i in items}.values():
+        row = out.setdefault(item.field, {"field": item.field, "files": 0, "bytes": 0})
+        row["files"] += 1
+        row["bytes"] += item.size
+    return sorted(out.values(), key=lambda r: (-r["files"], r["field"]))
+
+
+def _sizes(items: list[FileItem]) -> dict[str, int]:
+    """Each file's size, as its records say, for how many bytes a download
+    has to bring."""
+    return {i.sha256: i.size for i in items}

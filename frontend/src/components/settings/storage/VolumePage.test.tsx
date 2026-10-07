@@ -303,7 +303,6 @@ describe('a volume’s page', () => {
         targets,
         sources,
         collection_ids: [],
-        include_shared: false,
         verify: 'copy',
         freeze_sources: true,
       },

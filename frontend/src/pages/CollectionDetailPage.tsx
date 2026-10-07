@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link, useNavigate } from 'react-router'
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router'
 import {
   useCollection,
   useUpdateCollection,
@@ -22,10 +22,6 @@ import {
   useTabParam,
 } from '../components/ui'
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
-import {
-  CollectionStorage,
-  useHasStorageChoice,
-} from '../components/collections/CollectionStorage'
 import { recordCollectionVisit } from '../hooks/useFrequentCollections'
 import { recordRecent } from '../hooks/usePins'
 import { collectionTarget } from '../utils/navTargets'
@@ -42,7 +38,6 @@ import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
 const COLLECTION_TABS = [
   { id: 'records' },
   { id: 'exports' },
-  { id: 'storage' },
   { id: 'activity' },
 ] as const
 
@@ -60,10 +55,25 @@ export default function CollectionDetailPage() {
   const [schemasValue, setSchemasValue] = useState<string[]>([])
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [tab, setTab] = useTabParam(COLLECTION_TABS, 'records')
+  const [params, setParams] = useSearchParams()
+  // The Storage tab became the records list's "Their files" view: its old
+  // links land there.
+  const legacyTab = params.get('tab')
+  useEffect(() => {
+    if (legacyTab !== 'storage') return
+    setParams(
+      (prev) => {
+        const out = new URLSearchParams(prev)
+        out.delete('tab')
+        out.set('show', 'files')
+        return out
+      },
+      { replace: true },
+    )
+  }, [legacyTab, setParams])
 
   const { data: collection, isLoading, error } = useCollection(id!)
   const collectionName = collection?.name
-  const hasStorageTab = useHasStorageChoice(id!)
   useEffect(() => {
     if (collectionName) recordCollectionVisit(collectionName)
   }, [collectionName])
@@ -142,7 +152,7 @@ export default function CollectionDetailPage() {
   }
 
   const recordCount = collection.record_count
-  const shownTab = tab === 'storage' && !hasStorageTab ? 'records' : tab
+  const shownTab = tab
 
   return (
     <CollectionTimeZone
@@ -179,9 +189,6 @@ export default function CollectionDetailPage() {
               tabs={[
                 { id: 'records' as const, label: 'Records' },
                 { id: 'exports' as const, label: 'Exports' },
-                ...(hasStorageTab
-                  ? [{ id: 'storage' as const, label: 'Storage' }]
-                  : []),
                 { id: 'activity' as const, label: 'Activity' },
               ]}
             />
@@ -276,10 +283,6 @@ export default function CollectionDetailPage() {
 
           <TabPanel id="exports" value={shownTab}>
             <CollectionExportsSection collection={collection.name} />
-          </TabPanel>
-
-          <TabPanel id="storage" value={shownTab}>
-            <CollectionStorage collectionId={collection.id} />
           </TabPanel>
 
           <TabPanel id="activity" value={shownTab}>

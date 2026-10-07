@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Callable
+
 from civex.domain.dtos import (
+    RecordUse,
     CollectionStorage,
     CollectionUse,
     CollectionVolumeShare,
@@ -17,6 +21,10 @@ from civex.repositories.protocols import (
 )
 
 
+# How many of the records using a file its info names (the count is exact).
+RECORD_USES_SHOWN = 200
+
+
 class FileInfoService:
     def __init__(
         self,
@@ -27,6 +35,15 @@ class FileInfoService:
         self._store = store
         self._refs = refs
         self._datasets = datasets
+        # Whether files on no drive here can come from a server (set by
+        # `build_local_context`): they are then "only on the server", not
+        # missing.
+        self.files_from_server: Callable[[], bool] = lambda: False
+        # Names live records and the records above them (set by
+        # `build_local_context`, from RecordService).
+        self.describe_records: Callable[[list[uuid.UUID]], list[RecordUse]] = (
+            lambda ids: []
+        )
 
     def surplus_by_volume(self) -> dict[str, VolumeSurplus]:
         """For each volume, how much of what it holds no collection uses: files
@@ -50,7 +67,7 @@ class FileInfoService:
     ) -> dict[str, CollectionStorage]:
         """The same for several collections (all, if none are named), in a few
         queries. A collection with no files is still answered, with none."""
-        found = self._refs.volume_breakdowns(collection_ids)
+        found = self._refs.volume_breakdowns(collection_ids, self._store.homes())
         status: dict[str, tuple[str, bool]] = {}  # a volume's state, asked once
 
         def state(volume: str) -> tuple[str, bool]:
@@ -60,6 +77,7 @@ class FileInfoService:
             return status[volume]
 
         out = {}
+        elsewhere = "server" if self.files_from_server() else "missing"
         for cid in collection_ids if collection_ids is not None else list(found):
             total, rows = found.get(cid, (0, []))
             shares = [
@@ -79,6 +97,7 @@ class FileInfoService:
                 bytes=sum(s.bytes for s in shares),
                 volumes=shares,
                 unlocated_files=max(total - sum(s.files for s in shares), 0),
+                unlocated_place=elsewhere,
             )
         return out
 
@@ -87,8 +106,8 @@ class FileInfoService:
         and workflow runs that use it. Raises NotFoundError for content that is
         neither stored anywhere nor used by anything."""
         copies = self._store.copies_of(sha256)
-        by_collection, jobs = self._refs.usage(sha256)
-        if not copies and not by_collection and not jobs:
+        by_collection, jobs, deleted = self._refs.usage(sha256)
+        if not copies and not by_collection and not jobs and not deleted:
             raise NotFoundError(f"No file with hash {sha256} is stored or used.")
 
         collections = []
@@ -111,6 +130,9 @@ class FileInfoService:
                 )
             )
         collections.sort(key=lambda c: (c.name or "").casefold())
+        users = self._refs.records_using([sha256]).get(sha256, set())
+        uses = self.describe_records(sorted(users, key=str)[:RECORD_USES_SHOWN])
+        uses.sort(key=lambda u: [*u.trail, u.name])
         return FileInfo(
             sha256=sha256,
             size=self._store.size_of(sha256),
@@ -118,4 +140,6 @@ class FileInfoService:
             records=sum(by_collection.values()),
             jobs=jobs,
             collections=collections,
+            uses=uses,
+            deleted_records=deleted,
         )

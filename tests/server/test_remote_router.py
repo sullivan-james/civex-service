@@ -118,3 +118,20 @@ def test_the_app_serves_and_issues_tokens_as_the_cli_does(client: TestClient) ->
     assert revoked["devices"][0]["revoked"] is True
     assert client.post("/api/remote/authority/devices/laptop/revoke").status_code == 404
     assert client.get("/api/remote").json()["serving"] is True
+
+
+def test_files_on_this_computer_per_collection(client, make_collection):
+    make_collection("study")
+    rows = client.get("/api/remote/files").json()
+    assert [(r["name"], r["mode"], r["chosen"]) for r in rows] == [
+        ("study", "keep", False)
+    ]
+    rows = client.patch("/api/remote/files/study", json={"mode": "opened"}).json()
+    assert (rows[0]["mode"], rows[0]["chosen"]) == ("opened", True)
+    rows = client.patch("/api/remote/files/study", json={"mode": None}).json()
+    assert (rows[0]["mode"], rows[0]["chosen"]) == ("keep", False)
+    assert (
+        client.patch("/api/remote/files/nope", json={"mode": "keep"}).status_code == 404
+    )
+    # A project that follows no server has nowhere to fetch files back from.
+    assert client.post("/api/remote/files/study/free-up").status_code == 422

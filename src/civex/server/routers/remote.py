@@ -26,6 +26,10 @@ class SyncProgressResponse(BaseModel):
     kind: str | None = Field(
         default=None, description="The kind of thing it is on (schema, record...)."
     )
+    bytes_done: int = Field(default=0, description="Downloading files: bytes so far.")
+    rate: float = Field(
+        default=0.0, description="Downloading files: bytes per second, lately."
+    )
 
 
 class RemoteStatusResponse(BaseModel):
@@ -45,6 +49,12 @@ class RemoteStatusResponse(BaseModel):
     )
     last_error_at: str | None
     running: bool = Field(description="A sync is in progress right now.")
+    download_files: str = Field(
+        description="Which files this device keeps a copy of: all, or opened."
+    )
+    files_to_fetch: int = Field(
+        description="Files records here cite that aren't on this computer yet."
+    )
     last_result: SyncResultResponse | None = Field(
         default=None,
         description="What the last sync run by this server did; null after a "
@@ -96,6 +106,11 @@ class RemoteUpdateRequest(BaseModel):
         ge=0,
         description="Seconds between looks for changes; 0 = never (only when asked).",
     )
+    download_files: str | None = Field(
+        default=None,
+        description="Keep a copy of every file (all), or only of files opened "
+        "or exported (opened).",
+    )
 
 
 class ConflictResponse(BaseModel):
@@ -111,6 +126,11 @@ class ConflictResponse(BaseModel):
     )
     theirs_actor: str | None = Field(
         default=None, description="Who wrote the value that stayed."
+    )
+    theirs_device: str | None = Field(
+        default=None,
+        description="The device their change came through (verified by the "
+        "authority), when it came through one.",
     )
     theirs_at: str | None = Field(default=None, description="When they wrote it.")
     device_name: str | None
@@ -158,6 +178,12 @@ class ConflictResponse(BaseModel):
         description="The fields that attempt set, for showing it on the record: "
         "field_id, field_name, field_label, dtype, before, after and current.",
     )
+    sits_under: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="For a refused record that sits under deleted records here: "
+        "those records (id, schema_name, name), topmost first. `restore_above` "
+        "brings them back and sends the record again.",
+    )
 
 
 class ResolveRequest(BaseModel):
@@ -165,7 +191,9 @@ class ResolveRequest(BaseModel):
         description="`theirs` keeps what the authority has (or lets a refused change "
         "go); `mine` puts your value back as a new edit; `value` puts the one in "
         "`value`; `delete` deletes a record that was deleted there; `retry` sends a "
-        "refused change again from the record as it is now; `edited` closes a clash "
+        "refused change again from the record as it is now; `restore_above` brings back "
+        "the deleted records a refused record sits under, then sends it again; "
+        "`edited` closes a clash "
         "because the field was just set by hand on the record."
     )
     value: Any = Field(default=None, description="The value, for `take: value`.")
@@ -267,6 +295,8 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         last_error=s.last_error,
         last_error_at=s.last_error_at,
         running=s.running,
+        download_files=s.download_files,
+        files_to_fetch=s.files_to_fetch,
         last_result=_last_result(),
         progress=(
             SyncProgressResponse(**p.to_dict()) if (p := sync_jobs.progress) else None
@@ -323,11 +353,16 @@ def sync_now(ctx: AppContext = Depends(get_ctx)):
 
 @router.patch("", response_model=RemoteStatusResponse)
 def update(body: RemoteUpdateRequest, ctx: AppContext = Depends(get_ctx)):
-    """Pause or resume the schedule, or change how often it looks."""
+    """Pause or resume the schedule, change how often it looks, or choose which
+    files this device keeps a copy of."""
     if body.paused is not None:
         ctx.sync_svc.set_paused(body.paused)
     if body.interval_seconds is not None:
         ctx.sync_svc.set_interval(body.interval_seconds)
+    if body.download_files is not None:
+        ctx.sync_svc.set_download_files(body.download_files)
+        if body.download_files == "all" and ctx.sync_svc.fetches_files:
+            sync_jobs.fetch_now(ctx.sync_svc.files_to_fetch())
     return _status(ctx)
 
 
@@ -476,3 +511,80 @@ def revoke_device(name: str, ctx: AppContext = Depends(get_ctx)):
         raise HTTPException(404, detail=f"No active device named {name}")
     ctx.commit()
     return _authority(ctx)
+
+
+# -- files on this computer -------------------------------------------------
+
+
+class CollectionFilesResponse(BaseModel):
+    id: str
+    name: str
+    mode: str = Field(
+        description="keep: a copy stays on this computer (fetched in the "
+        "background); opened: fetched when opened or exported."
+    )
+    chosen: bool = Field(
+        description="Set for this collection, rather than following the "
+        "project's setting."
+    )
+    files_here: int = Field(description="Files its records use that are here.")
+    bytes_here: int = Field(description="Their size.")
+    files_on_server: int = Field(
+        description="Files its records use that are only on the server."
+    )
+
+
+class CollectionModeRequest(BaseModel):
+    mode: str | None = Field(
+        description="keep, opened, or null to follow the project's setting."
+    )
+
+
+class FreeUpResponse(BaseModel):
+    files: int = Field(description="Copies removed (or that would be, counting).")
+    bytes: int = Field(description="The space that frees.")
+    kept_shared: int = Field(
+        description="Kept: also used by a collection kept on this computer."
+    )
+    not_on_server: int = Field(
+        description="Kept: the server hasn't got them yet (never sent)."
+    )
+    done: bool = Field(description="False when only counted.")
+
+
+@router.get("/files", response_model=list[CollectionFilesResponse])
+def collection_files(ctx: AppContext = Depends(get_ctx)):
+    """Each collection's files on this computer: how many are here and their
+    size, how many are only on the server, and whether it keeps a copy here."""
+    return [CollectionFilesResponse(**vars(c)) for c in ctx.sync_svc.collection_files()]
+
+
+@router.patch("/files/{collection}", response_model=list[CollectionFilesResponse])
+def set_collection_mode(
+    collection: str, body: CollectionModeRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """Keep a collection's files on this computer, fetch them only when
+    opened, or follow the project's setting. Keeping starts the background
+    download of what is missing."""
+    mode = ctx.sync_svc.set_collection_mode(collection, body.mode)
+    if mode == "keep" and ctx.sync_svc.fetches_files:
+        sync_jobs.fetch_now(ctx.sync_svc.files_to_fetch())
+    return [CollectionFilesResponse(**vars(c)) for c in ctx.sync_svc.collection_files()]
+
+
+@router.post("/files/{collection}/free-up", response_model=FreeUpResponse)
+def free_up(
+    collection: str,
+    dry_run: bool = Query(default=True, description="Only count (the default)."),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Remove this computer's copies of a collection's files to free space;
+    they are fetched again when opened. Only files the server confirms it
+    holds, and never one a collection kept here also uses. Counts first unless
+    `dry_run=false`, which also sets the collection to fetch when opened."""
+    try:
+        report = ctx.sync_svc.free_up(collection, dry_run=dry_run)
+    except SyncError as e:
+        raise HTTPException(503, detail=f"The server can't be reached to check: {e}")
+    ctx.commit()
+    return FreeUpResponse(**vars(report), done=not dry_run)

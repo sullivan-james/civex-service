@@ -501,15 +501,31 @@ class CollectionUse:
 
 
 @dataclass
+class RecordUse:
+    """A live record that uses a file, named as the UI names it, with the
+    records above it (outermost first)."""
+
+    id: str
+    name: str
+    collection: str | None
+    trail: list[str]
+
+
+@dataclass
 class FileInfo:
     """Where a file's content is stored and what uses it."""
 
     sha256: str
     size: int | None
     copies: list[FileCopy]
-    records: int  # records that reference it
+    records: int  # live records that use it
     jobs: int  # workflow runs that took it as an input
     collections: list[CollectionUse]
+    # The live records that use it, named (at most RECORD_USES_SHOWN).
+    uses: list[RecordUse] = field(default_factory=list)
+    # Deleted records that still reference it: they keep it while they can be
+    # restored, but don't count as using it until they are.
+    deleted_records: int = 0
 
 
 @dataclass
@@ -533,6 +549,9 @@ class CollectionStorage:
     bytes: int  # of those the catalog has a size for
     volumes: list[CollectionVolumeShare]
     unlocated_files: int  # used by records but not in the catalog on any volume
+    # Where those are: "server" (the project follows one: only there) or
+    # "missing" (nowhere this project can get them from).
+    unlocated_place: str = "missing"
 
 
 @dataclass
@@ -704,9 +723,14 @@ class AuditLogDTO:
     # -- {kind, status: live|deleted|gone, name, collection, deleted_at} -- so a
     # lost record can be told from one that was edited, deleted or purged.
     now: dict[str, Any] | None = None
-    # Who made the change, as the machine that made it reported it (the OS
-    # user). None for entries from before this was recorded.
+    # Who made the change, as the machine that made it reported it (the name
+    # chosen in the project, else the OS user). None for entries from before
+    # this was recorded.
     actor: str | None = None
+    # The device a synced change came through, as the authority stamped it
+    # from the device's token (None: made on the authority, not synced yet, or
+    # synced before this was kept).
+    device: str | None = None
     # How the change is stored (`AuditLog.format`): 1 = whole `old_data` and
     # `new_data`; 2 = `delta` (only what changed) with `new_data` the thing's
     # identity. Read the two sides with `audit_diff.entry_snapshots`.
@@ -904,6 +928,8 @@ class RetentionReportDTO:
     # not yet pushed to the remote.
     audit_kept_restorable: int = 0
     audit_kept_unsynced: int = 0
+    # Kept however old: each thing's creation and latest entry.
+    audit_kept_first_and_last: int = 0
     runs: int = 0
     run_steps: int = 0
 
@@ -928,6 +954,7 @@ class RetentionReportDTO:
             "audit_batches": self.audit_batches,
             "audit_kept_restorable": self.audit_kept_restorable,
             "audit_kept_unsynced": self.audit_kept_unsynced,
+            "audit_kept_first_and_last": self.audit_kept_first_and_last,
             "runs": self.runs,
             "run_steps": self.run_steps,
             "anything": self.anything,
@@ -1130,6 +1157,8 @@ class AuditEventDTO:
     # Who made it: the entry's actor, or for a batch the one its changes were
     # made by. None when it was not recorded.
     actor: str | None = None
+    # The device it came through, when synced (see AuditLogDTO.device).
+    device: str | None = None
 
 
 @dataclass
@@ -1308,3 +1337,12 @@ class AnalyticsFilters:
     trigger: str | None = None
     entity_type: str | None = None
     action: str | None = None
+
+
+@dataclass
+class OrphanDTO:
+    """A live record that sits under a deleted one, and what it sits under
+    (the deleted records directly above it, topmost first)."""
+
+    record: RecordDTO
+    above: list[RecordDTO]

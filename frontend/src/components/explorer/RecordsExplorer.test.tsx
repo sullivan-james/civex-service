@@ -111,6 +111,8 @@ function handle(method: string, path: string, p: URLSearchParams) {
   if (path === '/api/workflows') return json([])
   // The exports saved with the listed kind of record, for the Files menu.
   if (path === '/api/file-access/definitions') return json([])
+  if (path === '/api/file-access/files')
+    return json({ total: 0, summary: [], items: [] })
   if (path.endsWith('/views'))
     return json(
       path.includes('/selection/') ? [{ ...EMPTY_TABLES, name: viewName }] : [],
@@ -1064,5 +1066,37 @@ describe('RecordsExplorer', () => {
       ).toBeTruthy()
       expect(screen.queryByRole('group', { name: /files$/i })).toBeNull()
     })
+  })
+
+  it('shows the files of exactly the records it lists, under the same filter', async () => {
+    const filter = JSON.stringify({
+      and: [
+        {
+          schema: 'selection',
+          field: 'selection_table',
+          op: 'eq',
+          value: 'a.txt',
+        },
+      ],
+    })
+    renderExplorer(
+      {},
+      `/collections/hb?schema=recording&filter=${encodeURIComponent(filter)}`,
+    )
+    await userEvent.click(
+      await screen.findByRole('radio', { name: 'Their files' }),
+    )
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.path === '/api/file-access/files')?.body,
+      ).toMatchObject({
+        collection: 'hb',
+        schema_name: 'recording',
+        filter: JSON.parse(filter),
+        below: true,
+      }),
+    )
+    expect(search().get('show')).toBe('files')
+    expect(search().get('filter')).toBe(filter) // one filter for both
   })
 })

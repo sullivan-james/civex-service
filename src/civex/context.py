@@ -8,12 +8,15 @@ store instead of the default LocalFileObjectStore.
 
 from __future__ import annotations
 
+import uuid
+
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
+from civex.domain.dtos import RecordUse
 from civex.config import Config
 
 if TYPE_CHECKING:
@@ -211,9 +214,25 @@ def build_local_context(
     file_info_svc = FileInfoService(
         file_store, LocalFileReferenceRepository(session), dataset_repo
     )
+
+    def _describe_records(ids: list[uuid.UUID]) -> list[RecordUse]:
+        records = record_svc.get_many([str(i) for i in ids])
+        trails = record_svc.ancestor_trails(records)
+        return [
+            RecordUse(
+                id=str(r.id),
+                name=r.natural_name or str(r.id)[:8],
+                collection=r.dataset_name,
+                trail=[a.natural_name or str(a.id)[:8] for a in trails.get(r.id, [])],
+            )
+            for r in records
+        ]
+
+    file_info_svc.describe_records = _describe_records
     file_access_svc = FileAccessService(
         record_svc, schema_svc, file_store, config.civex_dir
     )
+    file_access_svc.refs = LocalFileReferenceRepository(session)
     transfer_svc = TransferService(
         config,
         file_store,
@@ -295,7 +314,25 @@ def build_local_context(
         record_svc,
     )
 
-    ctx = AppContext(
+    # Files another device added are fetched from the authority when opened or
+    # exported, and say so meanwhile (asked each time: a project can start
+    # following one while this context is open).
+    def _sync() -> SyncService:
+        return ctx.sync_svc  # whatever stands in for it by then (tests wrap it)
+
+    record_svc.files_from_server = lambda: _sync().fetches_files
+    file_info_svc.files_from_server = lambda: _sync().fetches_files
+    file_access_svc.fetch_missing = (
+        lambda shas, on_file=None, volume=None, on_bytes=None: _sync().fetch_files(
+            shas=shas, progress=on_file, volume=volume, on_bytes=on_bytes
+        )
+    )
+    file_access_svc.free_files = lambda shas, dry: _sync().free_up_files(
+        shas, dry_run=dry
+    )
+    file_access_svc.why_not_here = lambda shas: _sync().not_here_reasons(shas)
+
+    ctx: AppContext = AppContext(
         schema_svc=schema_svc,
         dataset_svc=dataset_svc,
         record_svc=record_svc,

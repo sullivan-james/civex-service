@@ -61,11 +61,6 @@ def _print_plan(spec: TransferSpec, ctx) -> bool:
             f"  → {t.volume}: about {t.files} files ({format_bytes(t.bytes)}), "
             f"{format_bytes(t.free_bytes)} free"
         )
-    if plan.shared_left:
-        console.print(
-            f"  {plan.shared_left} files ({format_bytes(plan.shared_left_bytes)}) stay: "
-            "another collection uses them. Add --include-shared to move them too."
-        )
     for w in plan.warnings:
         console.print(f"  [yellow]! {w}[/yellow]")
     for prob in plan.problems:
@@ -183,9 +178,6 @@ def move(
         "--collection",
         help="Gather this collection's files onto the target (repeatable).",
     ),
-    include_shared: bool = typer.Option(
-        False, "--include-shared", help="Also move files that other collections use."
-    ),
     verify_full: bool = typer.Option(
         False, "--verify-full", help="Read every copy back and check it (slower)."
     ),
@@ -222,7 +214,6 @@ def move(
         targets=list(to),
         sources=list(off or []),
         collection_ids=ids,
-        include_shared=include_shared,
         verify="full" if verify_full else "copy",
         freeze_sources=not keep_writable,
     )

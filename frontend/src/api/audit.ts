@@ -41,9 +41,13 @@ export interface AuditNow {
 
 export interface AuditLogEntry {
   id: string
-  /** Who made the change, as the machine that made it reported it (the OS
-   * user). Not verified. Null for entries from before it was recorded. */
+  /** Who made the change, as the machine that made it reported it (the name
+   * chosen in the project, else the OS user). Not verified. Null for entries
+   * from before it was recorded. */
   actor?: string | null
+  /** For a synced change, the device it came through, as the authority stamped
+   * it from that device's token (verified). */
+  device?: string | null
   action: string
   entity_type: string
   entity_id: string
@@ -240,6 +244,8 @@ export interface AuditEvent {
   /** Who made it (the OS user on the machine that did); for a batch, who made
    * its changes. Null when it was not recorded. */
   actor?: string | null
+  /** The device it came through, when synced. */
+  device?: string | null
 }
 
 export interface PaginatedAuditEvents {

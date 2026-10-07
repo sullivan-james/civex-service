@@ -22,9 +22,18 @@ export { MonoId } from './MonoId'
 export { Skeleton } from './Skeleton'
 export { Spinner } from './Spinner'
 export { ProgressBar } from './ProgressBar'
+export {
+  Status,
+  StatusDot,
+  SegmentBar,
+  TONE_BG,
+  TONE_TEXT,
+  type Tone,
+} from './Status'
 export { Menu, type MenuItem } from './Menu'
 export { Popover } from './Popover'
 export { TriggerPopover } from './TriggerPopover'
+export { MultiPick, type MultiPickOption } from './MultiPick'
 export { Stepper, type StepperStep } from './Stepper'
 export { StepBadge, type StepState } from './StepBadge'
 export { TableSkeleton } from './TableSkeleton'

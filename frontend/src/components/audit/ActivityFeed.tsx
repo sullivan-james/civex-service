@@ -201,13 +201,22 @@ export function ActivityFeed({
             key: 'actor',
             header: 'Who',
             width: '9rem',
-            className: 'whitespace-nowrap',
             render: (e: AuditEvent) => {
               const who = e.actor ?? e.entry?.actor
-              return who ? (
-                <span className="font-medium text-fg">{who}</span>
-              ) : (
-                <span className="text-fg-subtle">—</span>
+              const via = e.device ?? e.entry?.device
+              if (!who) return <span className="text-fg-subtle">—</span>
+              return (
+                <span className="flex flex-col">
+                  <span className="truncate font-medium text-fg">{who}</span>
+                  {via && via !== who && (
+                    <span
+                      className="truncate text-xs text-fg-muted"
+                      title={`Sent from the device '${via}' (the server checked its token)`}
+                    >
+                      via {via}
+                    </span>
+                  )}
+                </span>
               )
             },
           },

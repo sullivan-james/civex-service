@@ -74,7 +74,11 @@ def _on_disk(ctx: AppContext, volume: str) -> set[str]:
 
 
 def _catalog(ctx: AppContext, shas) -> dict[str, str]:
-    return {sha: v for sha, (v, _) in ctx.file_svc._store.inventory_rows(shas).items()}
+    """Where the inventory records each file, its drives joined by "+"."""
+    return {
+        sha: "+".join(sorted(v for v, _ in rows))
+        for sha, rows in ctx.file_svc._store.copies(shas).items()
+    }
 
 
 def _run(
@@ -676,15 +680,19 @@ def test_files_already_home_are_skipped(
     assert set(_catalog(ctx, [r.sha256 for r in refs]).values()) == {"home"}
 
 
-def test_a_file_shared_with_a_collection_homed_elsewhere_stays_unless_asked(
+def test_a_file_on_another_collections_home_is_copied_not_moved(
     ctx: AppContext, tmp_path: Path, make_schema, make_collection, make_record
 ) -> None:
+    """A home keeps a copy of every file its collection uses: gathering `mine`
+    onto its home copies a file `theirs` keeps on its own home (both homes
+    then hold it) and moves the rest."""
     _volumes(ctx, tmp_path, "a", "home", "elsewhere")
     make_schema("doc", fields=[("scan", "file")])
-    ctx.store_svc.set_queue(["a"])
     make_collection("mine")
     make_collection("theirs")
+    ctx.store_svc.set_queue(["elsewhere"])
     shared = ctx.file_svc.store_bytes(b"shared " * 40, "shared.txt")
+    ctx.store_svc.set_queue(["a"])
     private = ctx.file_svc.store_bytes(b"private " * 40, "private.txt")
     make_record("mine", "doc", {"scan": shared.to_dict()})
     make_record("mine", "doc", {"scan": private.to_dict()})
@@ -692,28 +700,23 @@ def test_a_file_shared_with_a_collection_homed_elsewhere_stays_unless_asked(
     ctx.commit()
     mine_id = str(ctx.dataset_svc.get("mine").id)
     theirs_id = str(ctx.dataset_svc.get("theirs").id)
-    homes = {theirs_id: "elsewhere"}  # `theirs` keeps its files elsewhere
+    homes = {theirs_id: "elsewhere", mine_id: "home"}
 
     spec = TransferSpec(
         kind=KIND_CONSOLIDATE, targets=["home"], collection_ids=[mine_id]
     )
-    first = _run(ctx, spec, placements=homes)
+    done = _run(ctx, spec, placements=homes)
 
-    assert first.progress.files_done == 1  # only the private file moved
+    assert done.progress.files_done == 2
     assert _catalog(ctx, [shared.sha256, private.sha256]) == {
-        shared.sha256: "a",
-        private.sha256: "home",
+        shared.sha256: "elsewhere+home",  # copied: `theirs` keeps its copy
+        private.sha256: "home",  # moved
     }
+    assert shared.sha256 in _on_disk(ctx, "elsewhere")
+    assert private.sha256 not in _on_disk(ctx, "a")
 
-    again = TransferSpec(
-        kind=KIND_CONSOLIDATE,
-        targets=["home"],
-        collection_ids=[mine_id],
-        include_shared=True,
-    )
-    second = _run(ctx, again, placements=homes)
-    assert second.progress.files_done == 1
-    assert _catalog(ctx, [shared.sha256])[shared.sha256] == "home"
+    again = _run(ctx, spec, placements=homes)  # nothing left to do
+    assert again.progress.files_done == 0 and again.progress.files_skipped == 2
 
 
 # -- progress --------------------------------------------------------------------

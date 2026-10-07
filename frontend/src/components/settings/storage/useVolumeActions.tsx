@@ -72,9 +72,8 @@ export function useVolumeActions(onRemoved?: () => void) {
           warning={adopt.isError ? errorMessage(adopt.error) : undefined}
           body={
             <p className="text-sm text-fg">
-              {adopting.reason} If this is in fact the right drive — its marker
-              was deleted, or it was re-formatted — Civex rewrites the marker so
-              it is recognised again. Nothing else on the drive changes.
+              {adopting.reason} If it is the right drive, Civex marks it as{' '}
+              {adopting.name}. Nothing else on the drive changes.
             </p>
           }
           onConfirm={() =>

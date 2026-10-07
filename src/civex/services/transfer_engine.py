@@ -26,10 +26,16 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Iterator
 
+from civex.domain.placement import (
+    STEP_COPY,
+    STEP_THERE,
+    file_step,
+    homes_keeping,
+)
+from civex.domain.rates import RateWindow, eta_seconds
 from civex.domain.transfers import (
     KIND_CONSOLIDATE,
     CopyResult,
@@ -61,7 +67,6 @@ FLUSH_SECONDS = 1.0
 LARGE_FILE = 8 * 1024 * 1024  # a file this big is committed on its own
 RETRIES = 2  # extra attempts at a file whose copy failed in a way that may pass
 RETRY_DELAY = 0.5
-RATE_WINDOW = 15.0  # seconds of history the speed is averaged over
 PAGE = 1000  # references read per query when consolidating
 
 ProgressFn = Callable[[TransferProgress], None]
@@ -119,6 +124,19 @@ class _Item:
     sha256: str
     source: str
     size: int | None = None  # None until it has been looked at
+    # Copied, not moved: the source is a home that keeps it (domain.placement).
+    keep_source: bool = False
+
+
+@dataclass
+class Step:
+    """What a transfer does with one file (`plan_steps`): `step` is a
+    domain.placement STEP_*, `source` the drive it comes from."""
+
+    sha256: str
+    step: str
+    source: str | None
+    size: int
 
 
 @dataclass
@@ -133,6 +151,7 @@ class _Moved:
     # False for a file whose move an earlier run already committed and counted,
     # leaving only its original to be removed: cleaning that up isn't another move.
     counted: bool = True
+    keep_source: bool = False  # copied: the original stays (a home keeps it)
 
 
 class _Run:
@@ -162,7 +181,7 @@ class _Run:
         self.pending_files = 0  # counted files in the batch, not yet in files_done
         self.last_flush = clock()
         self.last_emit = 0.0
-        self.window: deque[tuple[float, int]] = deque()
+        self.window = RateWindow()
         # Bytes written to targets in the current batch, per target, so room is
         # judged against what is already promised, not just what is committed.
         self.pending: dict[str, int] = {}
@@ -184,14 +203,9 @@ class _Run:
         self.last_emit = now
         self.store.touch_transfer_lock()  # proof of life, so the lock isn't taken for stale
         done = self.p.bytes_done + self.p.current_bytes
-        self.window.append((now, done))
-        while len(self.window) > 2 and now - self.window[0][0] > RATE_WINDOW:
-            self.window.popleft()
-        t0, b0 = self.window[0]
-        rate = (done - b0) / (now - t0) if now - t0 > 0 else 0.0
-        self.p.rate_bytes_per_second = max(rate, 0.0)
-        remaining = max(self.p.bytes_total - done, 0)
-        self.p.eta_seconds = remaining / rate if rate > 0 and remaining else None
+        rate = self.window.add(now, done)
+        self.p.rate_bytes_per_second = rate
+        self.p.eta_seconds = eta_seconds(rate, done, self.p.bytes_total)
         self.hook(TransferProgress(**vars(self.p)))
 
     def check_stop(self) -> None:
@@ -222,11 +236,15 @@ class _Run:
         self.batch_bytes = 0
         self.pending_files = 0
         self.pending.clear()
-        self.store.record_moves([(m.sha256, m.target, m.size) for m in moved])
+        self.store.record_moves(
+            [(m.sha256, m.target, m.size) for m in moved],
+            [(m.sha256, m.source) for m in moved if not m.keep_source],
+        )
         self.commit()
         for m in moved:
             try:
-                self.store.remove_from_volume(m.sha256, m.source)
+                if not m.keep_source:
+                    self.store.remove_from_volume(m.sha256, m.source)
             except OSError as exc:  # it is safely on the target; a stray copy remains
                 log.warning(
                     "Transfer: %s is on %s but its original on %s couldn't be removed: %s",
@@ -269,63 +287,78 @@ def _items(
             status = store.volume_status(source)
             if not status.reachable:
                 raise VolumeNotResponding(source, status.reason)
-    elif spec.kind == KIND_CONSOLIDATE:
-        yield from _consolidation_items(store, refs, spec, placements, run)
-    elif spec.kind == KIND_FILES:
-        yield from _file_items(store, spec, run)
+    elif spec.kind in (KIND_CONSOLIDATE, KIND_FILES):
+        yield from _file_items(store, refs, spec, placements, run)
     else:
         raise ValueError(f"Unknown transfer kind '{spec.kind}'")
 
 
 def _file_items(
-    store: FileObjectStore, spec: TransferSpec, run: _Run
-) -> Iterator[_Item]:
-    """The named files that aren't on a target yet. Work is re-found from where
-    each file is now, so a resumed transfer carries on with what is left."""
-    for start in range(0, len(spec.shas), PAGE):
-        shas = spec.shas[start : start + PAGE]
-        where = store.locate_volumes(shas)
-        for sha in shas:
-            volume = where.get(sha)
-            if volume is None:
-                continue  # not stored on any volume we know of: nothing to move
-            if volume in spec.targets:
-                run.p.files_skipped += 1
-                continue
-            yield _Item(sha, volume)
-
-
-def _consolidation_items(
     store: FileObjectStore,
     refs: FileReferenceRepository,
     spec: TransferSpec,
     placements: dict[str, str],
     run: _Run,
 ) -> Iterator[_Item]:
+    """The files `plan_steps` says go somewhere, re-found from where each is
+    now, so a resumed transfer carries on with what is left."""
+    for step in plan_steps(store, refs, spec, placements):
+        if step.step == STEP_THERE:
+            run.p.files_skipped += 1
+        elif step.source is not None:
+            yield _Item(
+                step.sha256,
+                step.source,
+                step.size or None,
+                keep_source=step.step == STEP_COPY,
+            )
+
+
+def plan_steps(
+    store: FileObjectStore,
+    refs: FileReferenceRepository,
+    spec: TransferSpec,
+    placements: dict[str, str],
+) -> Iterator[Step]:
+    """What gathering files onto `spec.targets` does with each: the named files
+    (`files`) or every file of the collections (`consolidate`), a page at a
+    time, from the inventory. The one rule (`domain.placement.file_step`)
+    behind a transfer's preview and the transfer: a file is copied, not moved,
+    when the drive it comes from is the home of a collection that uses it
+    (gathering a collection, its own home doesn't count: it is being moved)."""
     selected = set(spec.collection_ids)
+    for shas in _pages(refs, spec):
+        copies = store.copies(shas)
+        unknown = [s for s in shas if s not in copies]
+        for sha, volume in store.locate_volumes(unknown).items():
+            if volume is not None:  # stored before the inventory knew of it
+                copies[sha] = [(volume, 0)]
+        order = {
+            v: i
+            for i, v in enumerate(
+                store.readable_first(v for rows in copies.values() for v, _ in rows)
+            )
+        }
+        users = refs.collections_using(shas)
+        for sha in shas:
+            rows = sorted(copies.get(sha, []), key=lambda r: order[r[0]])
+            keeping = homes_keeping(users.get(sha, set()) - selected, placements)
+            step, source = file_step([v for v, _ in rows], spec.targets, keeping)
+            yield Step(sha, step, source, rows[0][1] if rows else 0)
+
+
+def _pages(refs: FileReferenceRepository, spec: TransferSpec) -> Iterator[list[str]]:
+    if spec.kind == KIND_FILES:
+        for start in range(0, len(spec.shas), PAGE):
+            yield spec.shas[start : start + PAGE]
+        return
     after: str | None = None
     while True:
         shas = refs.shas_for_collections(spec.collection_ids, after, PAGE)
         if not shas:
             return
         after = shas[-1]
-        where = store.locate_volumes(shas)
-        users = refs.collections_using(shas) if not spec.include_shared else {}
-        for sha in shas:
-            volume = where.get(sha)
-            if volume is None:
-                continue  # not stored on any volume we know of: nothing to move
-            if volume in spec.targets:
-                run.p.files_skipped += 1
-                continue
-            # A file other collections use too stays put when one of them keeps
-            # its files somewhere other than where this one is going: moving it
-            # would only split that collection instead.
-            others = users.get(sha, set()) - selected
-            if any(placements.get(c) not in (None, *spec.targets) for c in others):
-                run.p.files_skipped += 1
-                continue
-            yield _Item(sha, volume)
+        yield shas
 
 
 def _choose_target(store: FileObjectStore, run: _Run, size: int) -> str:
@@ -453,8 +486,8 @@ def _move(store: FileObjectStore, run: _Run, item: _Item) -> None:
         if result.reused:
             # Already complete on the target. If the catalog already says so too,
             # an earlier run moved and counted it and only the original is left.
-            row = store.inventory_rows([item.sha256]).get(item.sha256)
-            counted = not (row is not None and row[0] == target)
+            on = {v for v, _ in store.copies([item.sha256]).get(item.sha256, [])}
+            counted = target not in on
         if counted:
             needed = _accounted(run.p) + run.pending_files + 1
             if run.p.files_total < needed:
@@ -471,6 +504,7 @@ def _move(store: FileObjectStore, run: _Run, item: _Item) -> None:
                 size,
                 run.name_of(item.source, item.sha256),
                 counted,
+                item.keep_source,
             )
         )
         run.batch_bytes += size

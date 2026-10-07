@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import dataclasses
+
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -21,11 +23,21 @@ from civex.domain.transfers import (
 )
 
 
+def _known(cls: Any, data: dict[str, Any]) -> dict[str, Any]:
+    """The keys of a saved spec or plan this version still has: one saved by
+    an older version may name a setting since removed (`include_shared`)."""
+    names = {f.name for f in dataclasses.fields(cls)}
+    return {k: v for k, v in data.items() if k in names}
+
+
 def _plan_from(data: dict[str, Any] | None) -> TransferPlan | None:
     if data is None:
         return None
     return TransferPlan(
-        **{**data, "targets": [TargetShare(**t) for t in data.get("targets", [])]}
+        **{
+            **_known(TransferPlan, data),
+            "targets": [TargetShare(**t) for t in data.get("targets", [])],
+        }
     )
 
 
@@ -34,7 +46,7 @@ def _to_record(row: StorageTransfer) -> TransferRecord:
         id=str(row.id),
         kind=row.kind,
         status=row.status,
-        spec=TransferSpec(**row.spec),
+        spec=TransferSpec(**_known(TransferSpec, row.spec)),
         progress=TransferProgress(**row.progress),
         plan=_plan_from(row.plan),
         failures=[TransferFailure(**f) for f in row.failures],

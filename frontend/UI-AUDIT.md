@@ -200,6 +200,10 @@ One component per concept; pages compose these and never restyle them.
 | Sub-pages                      | `TabNav` + `TabPanel`, tab held in the address with `useTabParam`                                                                        |
 | Detail inside one list row     | `Disclosure`                                                                                                                             |
 | Explanation                    | `InfoTip` / `Tooltip`                                                                                                                    |
+| A status (drive, file place)   | `Status` / `StatusDot` with a `Tone` (ok, attention, danger, neutral); a drive's is `VolumeStatus`, a file's place `PlaceStatus`         |
+| Parts of a whole               | `SegmentBar` (where files are: `PlacesBar`, `SpreadBar`)                                                                                 |
+| Progress, how full             | `ProgressBar` (`meter` for how full; `warn`, `busy`, `muted`)                                                                            |
+| What a card or field is for    | `Card info=` / `Field info=` / `Page info=`, never a paragraph under it                                                                  |
 
 ### Type scale
 

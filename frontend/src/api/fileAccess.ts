@@ -53,6 +53,9 @@ export interface FileSelection {
   kinds?: string[]
   /** Also the files of every record beneath each selected one. */
   below?: boolean
+  /** With `within` and a kind: also the files of the `within` record itself
+   * (the record a list of what it contains is inside). */
+  with_within?: boolean
   /** Also make these tables. */
   tables?: TableSpec[]
   /** false takes the table alone, with no files (needs `table`). */
@@ -112,6 +115,9 @@ export interface FilePlanSummary {
   unavailable: UnavailableGroup[]
   /** The tables the selection asks for, beside the files. */
   tables: PlannedTable[]
+  /** Files only on the server: downloaded first, so not counted as out of
+   * reach. */
+  to_fetch?: { files: number; bytes: number }
 }
 
 /** One file in a preview: where it would go in the folder, and where it is. */
@@ -223,6 +229,12 @@ export interface FileProgress {
   total: number
   finished: boolean
   error: string | null
+  /** A stage that moves bytes (downloading): so far, of how many, how fast
+   * (bytes a second), seconds left. */
+  bytes_done?: number
+  bytes_total?: number
+  rate?: number
+  eta?: number | null
 }
 
 const PROGRESS_HEADER = 'X-Civex-Progress'
@@ -263,6 +275,110 @@ export function selectionFor(
     where: query.where,
     search: query.search || undefined,
   }
+}
+
+/** Files picked from a selection: narrowed to a place (a drive's name,
+ * `server`, `missing`, or the groups `here` and `unreachable`), a name (the
+ * file's or its record's) and ticked content. What the Files tab lists is what
+ * its actions act on. */
+export interface FilePick extends FileSelection {
+  place?: string
+  name?: string
+  /** Only these files (by content hash): the ticked rows, each with every
+   * use of it listed. Records outside the list that use it are not picked. */
+  shas?: string[]
+  /** Only files used by exactly one of these numbers of live records. */
+  used_by?: number[]
+  /** Moving: also move files records not picked use (for them too). */
+  include_shared?: boolean
+}
+
+export type PlaceKind = 'drive' | 'unreachable' | 'server' | 'missing'
+
+/** How much of a selection is in one place. */
+export interface PlaceSummary {
+  /** A drive's name, or `server` / `missing`. */
+  place: string
+  kind: PlaceKind
+  files: number
+  bytes: number
+  /** For a drive that can't be read: why, and what to do. */
+  reason: string
+  fix: string
+}
+
+/** One file of a selection, with where it is. */
+export interface ListedFile {
+  path: string
+  sha256: string
+  filename: string
+  size: number
+  record_id: string
+  record_name: string
+  field: string
+  volume: string | null
+  state: string
+  available: boolean
+  reason: string
+  fix: string
+  place: string
+  place_kind: PlaceKind
+  /** Records not listed here that use the same file: moving it moves it for
+   * them too. */
+  others?: number
+  /** The records listed here that use this file (one row per file as
+   * stored), each with the names of the records above it. */
+  uses?: FileUse[]
+}
+
+export interface FileUse {
+  record_id: string
+  record_name: string
+  field: string
+  /** The name this record gives the file (its own name template). */
+  filename: string
+  /** The records above it, outermost first, from where the list starts. */
+  trail: string[]
+}
+
+/** What moving picked files onto a drive would do. */
+export interface MovePlan {
+  files: number
+  bytes: number
+  /** Only on the server: downloaded straight onto the drive. */
+  from_server: number
+  /** Also used by records not picked: they stay unless asked. */
+  shared_left: number
+  shared_bytes: number
+  already_there: number
+  /** Of `files`, those copied, not moved: their drive is the home of a
+   * collection that uses them, and keeps its copy. */
+  copied: number
+}
+
+export interface FileListing {
+  /** Files matching the place and name. */
+  total: number
+  /** Every file of the kinds chosen, by place (before narrowing by place). */
+  summary: PlaceSummary[]
+  items: ListedFile[]
+  /** How many files of each kind (file field) the selection holds. */
+  kinds?: { field: string; files: number; bytes: number }[]
+  /** How many files are used by how many live records (before narrowing by
+   * that): the "Used by" pick's choices. */
+  sharing?: { records: number; files: number }[]
+}
+
+/** What a download from the server did. */
+export interface DownloadResult {
+  /** Files that came. */
+  fetched: number
+  /** Listed rows those cover: records that share a file share its download. */
+  listed: number
+  /** Files the server hasn't got either. */
+  absent: number
+  /** Where those still are, and what brings them, grouped. */
+  absent_where: { reason: string; fix: string; files: number }[]
 }
 
 export const fileAccessApi = {
@@ -327,9 +443,37 @@ export const fileAccessApi = {
     return { blob: await res.blob(), filename: filenameOf(res) }
   },
 
+  /** A page of a selection's files and where all of them are. */
+  files: (
+    pick: FilePick & { order?: string; offset?: number; limit?: number },
+  ) => api.post<FileListing>('/file-access/files', pick),
+
+  /** Bring the picked files that are only on the server to this computer. */
+  download: (pick: FilePick, progressId?: string) =>
+    api.post<DownloadResult>('/file-access/download', pick, tagged(progressId)),
+
+  /** Remove this computer's copies of the picked files the server holds;
+   * `dryRun` only counts. */
+  freeUp: (pick: FilePick, dryRun: boolean) =>
+    api.post<{
+      files: number
+      bytes: number
+      kept_shared: number
+      not_on_server: number
+      done: boolean
+    }>(`/file-access/free-up?dry_run=${dryRun}`, pick),
+
   /** Queue a move of just this selection's files onto one drive, so a linked
    * folder can hold them all. Nothing else in their collections moves. */
-  gather: (selection: FileSelection, volume: string, progressId?: string) =>
+  /** What moving these files onto `volume` would do; nothing is done. */
+  planMove: (pick: FilePick, volume: string, includeShared: boolean) =>
+    api.post<{ plan: MovePlan }>('/file-access/gather?dry_run=true', {
+      ...pick,
+      volume,
+      include_shared: includeShared,
+    }),
+
+  gather: (selection: FilePick, volume: string, progressId?: string) =>
     api.post<GatherResult>(
       '/file-access/gather',
       { ...selection, volume },
@@ -362,8 +506,12 @@ export const fileAccessApi = {
 
 /** What starting a move of a selection's files answers. */
 export interface GatherResult {
-  transfer_id: string
+  /** Null when nothing had to move: the files only on the server were
+   * downloaded straight onto the drive (`downloaded`). */
+  transfer_id: string | null
   volume: string
   files: number
   bytes: number
+  /** How many came from the server straight onto the drive. */
+  downloaded?: number
 }

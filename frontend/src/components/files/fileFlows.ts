@@ -3,12 +3,15 @@ import {
   fileAccessApi,
   problemFrom,
   type ExportProblem,
+  type DownloadResult,
+  type FilePick,
   type FilePlanSummary,
   type FileSelection,
 } from '../../api/fileAccess'
 import { transfersApi } from '../../api/transfers'
 import { runFileJob, type JobHandle } from '../../hooks/fileJobs'
 import { errorMessage } from '../../lib/errors'
+import { describeAmounts } from '../../utils/amounts'
 import { percentDone } from '../../utils/transfers'
 import { reportExport } from './reportExport'
 
@@ -85,7 +88,16 @@ function watchProgress(j: JobHandle, id: string, every: number): () => void {
           p.total > 0
             ? {
                 fraction: Math.min(1, p.done / p.total),
-                label: `${p.done.toLocaleString()} of ${p.total.toLocaleString()}`,
+                label: p.phase || 'Progress',
+                count: describeAmounts({
+                  done: p.done,
+                  total: p.total,
+                  unit: p.bytes_total ? 'files' : undefined,
+                  bytesDone: p.bytes_done,
+                  bytesTotal: p.bytes_total,
+                  rate: p.rate,
+                  eta: p.eta,
+                }),
               }
             : undefined,
       })
@@ -267,9 +279,11 @@ export function moveThenOpen(
       fileAccessApi.gather(selection, volume, progressId),
     )
     void ctx.qc.invalidateQueries({ queryKey: ['store'] })
-    const title = `Moving ${plural(started.files, 'file')} to ${volume}…`
-    j.update({ title })
-    await waitForMove(ctx, j, started.transfer_id, title)
+    if (started.transfer_id) {
+      const title = `Moving ${plural(started.files, 'file')} to ${volume}…`
+      j.update({ title })
+      await waitForMove(ctx, j, started.transfer_id, title)
+    }
 
     j.update({
       title: 'Opening folder…',
@@ -296,6 +310,77 @@ export function moveThenOpen(
   })
 }
 
+/** Move picked files (the Files tab: a selection narrowed by place, name or
+ * ticks) onto one drive, as one job: downloading any that are only on the
+ * server, then the move itself, each with its progress in the status bar. */
+export function moveFiles(
+  ctx: FlowContext,
+  pick: FilePick,
+  volume: string,
+  includeShared = false,
+) {
+  return job(ctx, 'Preparing the move…', async (j) => {
+    const started = await tracked(ctx, j, (progressId) =>
+      fileAccessApi.gather(
+        { ...pick, include_shared: includeShared },
+        volume,
+        progressId,
+      ),
+    )
+    refreshPlaces(ctx)
+    const fetched = started.downloaded ?? 0
+    if (started.transfer_id) {
+      const title = `Moving ${plural(started.files, 'file')} to ${volume}…`
+      j.update({ title, detail: undefined, progress: undefined })
+      await waitForMove(ctx, j, started.transfer_id, title)
+      refreshPlaces(ctx)
+    }
+    ctx.toast.success(
+      [
+        started.files ? `Moved ${plural(started.files, 'file')}` : null,
+        fetched
+          ? `${started.files ? 'downloaded' : 'Downloaded'} ${plural(fetched, 'file')} from the server`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' and ') + ` onto ${volume}.`,
+    )
+  })
+}
+
+/** Download picked files that are only on the server, as one job with its
+ * progress in the status bar. */
+export function downloadFiles(ctx: FlowContext, pick: FilePick) {
+  return job(ctx, 'Downloading from the server…', async (j) => {
+    const got = await tracked(ctx, j, (progressId) =>
+      fileAccessApi.download({ ...pick, place: 'server' }, progressId),
+    )
+    refreshPlaces(ctx)
+    ctx.toast.success(downloadReport(got))
+  })
+}
+
+/** What a download did, in a person's terms: how many files came, the listed
+ * rows that covers when records share files, and where any still are. */
+export function downloadReport(got: DownloadResult): string {
+  const parts = [`Downloaded ${plural(got.fetched, 'file')}.`]
+  if (got.listed > got.fetched)
+    parts.push(
+      `Some records share a file, so ${got.listed.toLocaleString()} listed files are on this computer now.`,
+    )
+  for (const g of got.absent_where ?? [])
+    parts.push(
+      `${plural(g.files, 'file')} not downloaded: ${g.reason} ${g.fix}`,
+    )
+  return parts.join(' ')
+}
+
+/** Everything that says where files are, asked again after they moved. */
+function refreshPlaces(ctx: FlowContext) {
+  for (const key of ['file-listing', 'store', 'records', 'record', 'remote'])
+    void ctx.qc.invalidateQueries({ queryKey: [key] })
+}
+
 /** Follow a move until it finishes, showing how far it is. A move that stops
  * for a reason a person has to deal with ends the job with that reason. */
 async function waitForMove(
@@ -305,6 +390,23 @@ async function waitForMove(
   title: string,
 ): Promise<void> {
   const wait = ctx.pollMs ?? 1000
+  // The move shows itself in the status bar (with pause, speed and time left):
+  // this job keeps out of sight while it waits, and is back after.
+  j.update({ waiting: true })
+  try {
+    return await followMove(ctx, j, id, title, wait)
+  } finally {
+    j.update({ waiting: false })
+  }
+}
+
+async function followMove(
+  ctx: FlowContext,
+  j: JobHandle,
+  id: string,
+  title: string,
+  wait: number,
+): Promise<void> {
   for (;;) {
     const t = await transfersApi.get(id)
     const pct = percentDone(t.progress)

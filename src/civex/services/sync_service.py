@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
@@ -22,10 +23,16 @@ from datetime import datetime, timezone
 from typing import Any
 
 from civex import user_state
-from civex.config import Config, save_config
+from civex.config import (
+    COLLECTION_FILE_MODES,
+    DOWNLOAD_MODES,
+    Config,
+    save_config,
+)
 from civex.domain import hlc
 from civex.domain.audit_diff import BEFORE, apply_delta, entry_snapshots
 from civex.domain.exceptions import (
+    NotFoundError,
     CivexError,
     ConflictMovedError,
     ValidationError,
@@ -45,6 +52,7 @@ from civex.domain.sync import (
     SyncEntry,
     SyncError,
     SyncProgress,
+    not_on_server_yet,
     SyncTransport,
     snapshot_cursor,
 )
@@ -106,6 +114,33 @@ class ResolveManyReport:
 
 
 @dataclass
+class CollectionFilesDTO:
+    id: str
+    name: str
+    mode: str  # keep | opened (in force)
+    chosen: bool  # set for this collection, rather than the project's setting
+    files_here: int
+    bytes_here: int
+    files_on_server: int  # only on the server: not on any drive here
+
+
+@dataclass
+class FreeUpReport:
+    files: int  # copies removed (or that would be)
+    bytes: int
+    kept_shared: int  # also used by a collection kept here, so kept
+    not_on_server: int  # the server hasn't got them yet, so kept
+
+
+@dataclass
+class FileFetchReport:
+    attempted: int = 0
+    fetched: int = 0
+    absent: list[str] = field(default_factory=list)  # the authority lacks them
+    stopped: bool = False  # ran out of `limit` or `seconds` with more to do
+
+
+@dataclass
 class SyncStatus:
     configured: bool
     remote: str | None
@@ -120,6 +155,8 @@ class SyncStatus:
     running: bool  # a sync is in progress right now
     interval_seconds: int = 60
     serving: bool = False  # this project is itself an authority
+    download_files: str = "all"
+    files_to_fetch: int = 0  # files records here cite that no drive here holds
 
 
 class SyncService:
@@ -169,6 +206,8 @@ class SyncService:
             running=sync_running(self._config.civex_dir),
             interval_seconds=self._config.sync.interval_seconds,
             serving=self._config.sync.serve,
+            download_files=self._config.sync.download_files,
+            files_to_fetch=self.files_to_fetch(),
         )
 
     def conflicts(
@@ -190,6 +229,21 @@ class SyncService:
             if c.op_id is not None:
                 out.setdefault(c.op_id, []).append(c)
         return out
+
+    def _sits_under(self, c: SyncConflictDTO) -> list[dict[str, Any]]:
+        """For an open refusal of a live record here that sits under deleted
+        records: those records, topmost first (the server refuses such a record,
+        so they have to come back first). Empty otherwise."""
+        if c.kind != "rejected" or c.status != "open" or c.entity_type != "record":
+            return []
+        try:
+            above = self._records.deleted_above(str(c.entity_id))
+        except NotFoundError:
+            return []
+        return [
+            {"id": str(a.id), "schema_name": a.schema_name, "name": a.natural_name}
+            for a in above
+        ]
 
     def _describe(self, found: list[SyncConflictDTO]) -> list[SyncConflictDTO]:
         """Add what a row needs to be recognised and acted on: the record's name
@@ -213,9 +267,12 @@ class SyncService:
         out = []
         for c in found:
             takes = list(_takes_for(c))
+            under = self._sits_under(c)
+            if under and "retry" in takes:
+                takes.insert(takes.index("retry"), "restore_above")
             v = values.get((str(c.entity_id), _field_id(c) or ""))
             if v is None:
-                out.append(replace(c, takes=takes))
+                out.append(replace(c, takes=takes, sits_under=under))
                 continue
             current = without_file_locations(v.value) if c.field else None
             also = [
@@ -237,6 +294,7 @@ class SyncService:
                     and current != c.theirs,
                     record_deleted=v.record_deleted,
                     takes=takes,
+                    sits_under=under,
                     also_saved=also,
                     attempted=attempts[c.id][0],
                     changes=[
@@ -565,7 +623,8 @@ class SyncService:
                 if entry.hub_seq is None:
                     raise SyncError("The server sent a change without a number")
                 if self._repo.has_entry(entry.id):
-                    self._repo.mark_seq(entry.id, entry.hub_seq)  # ours, now numbered
+                    # Ours, now numbered, and stamped with the device it came through.
+                    self._repo.mark_seq(entry.id, entry.hub_seq, entry.device)
                 else:
                     self._take(entry, dirty)
                     applied += 1
@@ -795,6 +854,7 @@ class SyncService:
                 )
                 if c.op_id != result.op_id
             ]
+            retried: list[uuid.UUID] = []
             if result.status == REJECTED:
                 if waiting:
                     # Refused again: the item already open says so (the
@@ -816,10 +876,14 @@ class SyncService:
                 self._repo.resolve_conflicts([c.id for c in waiting], "sent")
             else:
                 # A change sent again went in: its refusal is settled.
-                self._repo.resolve_conflicts(
-                    [c.id for c in waiting if c.resolution == "retrying"], "sent"
-                )
+                retried = [c.id for c in waiting if c.resolution == "retrying"]
+                self._repo.resolve_conflicts(retried, "sent")
             problems = result.conflicts
+            if result.status != REJECTED and retried:
+                # Sent again to bring it back (it was deleted on the server):
+                # being kept despite that delete is what was asked for, not
+                # something new to review.
+                problems = [p for p in problems if p.get("kind") != "edit_vs_delete"]
             if result.status == REJECTED:
                 report.rejected += 1
                 problems = [
@@ -845,6 +909,7 @@ class SyncService:
                     theirs=problem.get("theirs"),
                     base=problem.get("base"),
                     theirs_actor=problem.get("theirs_actor"),
+                    theirs_device=problem.get("theirs_device"),
                     theirs_at=problem.get("theirs_at"),
                     op_id=result.op_id,
                     device_name=None,
@@ -996,6 +1061,247 @@ class SyncService:
                 self._commit()
                 return True
             return False
+
+    # -- files from the authority ----------------------------------------
+
+    @property
+    def fetches_files(self) -> bool:
+        """Whether files missing here can come from an authority: this project
+        follows one (an authority itself has nobody to fetch from)."""
+        return self.configured and not self._config.sync.serve
+
+    def files_to_fetch(self) -> int:
+        """How many files this computer keeps a copy of (those of collections
+        kept here, see `collection_mode`) that no drive here holds yet: what the
+        background download still has to fetch."""
+        if not self.fetches_files:
+            return 0
+        return self._repo.count_files_not_here(self._kept_collections())
+
+    def collection_mode(self, collection_id: str) -> str:
+        """Whether a collection's files are kept on this computer (`keep`) or
+        fetched when opened or exported (`opened`): its own setting, else the
+        project's `download_files`."""
+        return self._config.sync.collection_files.get(collection_id) or (
+            "keep" if self._config.sync.download_files == "all" else "opened"
+        )
+
+    def _kept_collections(self) -> set[uuid.UUID]:
+        return {
+            cid
+            for cid in self._repo.live_collections()
+            if self.collection_mode(str(cid)) == "keep"
+        }
+
+    def _collection_id(self, ref: str) -> uuid.UUID:
+        """A live collection, by id or name."""
+        live = self._repo.live_collections()
+        for cid, name in live.items():
+            if str(cid) == ref or name == ref:
+                return cid
+        raise NotFoundError(f"There is no collection '{ref}'")
+
+    def collection_files(self) -> list[CollectionFilesDTO]:
+        """Each live collection's files on this computer: how many are here and
+        their size, how many are only on the server, and whether it keeps a
+        copy here. From the catalog, nothing read from disk or the server."""
+        counts = self._repo.files_by_collection()
+        out = []
+        for cid, name in sorted(
+            self._repo.live_collections().items(), key=lambda kv: kv[1].casefold()
+        ):
+            here, size, remote = counts.get(cid, (0, 0, 0))
+            out.append(
+                CollectionFilesDTO(
+                    id=str(cid),
+                    name=name,
+                    mode=self.collection_mode(str(cid)),
+                    chosen=str(cid) in self._config.sync.collection_files,
+                    files_here=here,
+                    bytes_here=size,
+                    files_on_server=remote,
+                )
+            )
+        return out
+
+    def set_collection_mode(self, collection: str, mode: str | None) -> str:
+        """Keep a collection's files on this computer (`keep`), fetch them
+        only when opened (`opened`), or follow the project's setting (None).
+        Keeping means the background download fetches what is missing. Returns
+        the mode now in force."""
+        if mode is not None and mode not in COLLECTION_FILE_MODES:
+            raise ValidationError(
+                f"Choose one of: {', '.join(COLLECTION_FILE_MODES)} (got '{mode}')"
+            )
+        cid = str(self._collection_id(collection))
+        if mode is None:
+            self._config.sync.collection_files.pop(cid, None)
+        else:
+            self._config.sync.collection_files[cid] = mode
+        save_config(self._config)
+        return self.collection_mode(cid)
+
+    def free_up(self, collection: str, dry_run: bool = True) -> FreeUpReport:
+        """Remove this computer's copies of a collection's files, to free space
+        (see `free_up_files` for what is kept and why). Done for real, the
+        collection is set to `opened` first, so the background download doesn't
+        fetch them straight back."""
+        self._can_free_up()
+        cid = self._collection_id(collection)
+        here = self._room_of(list(self._repo.files_here_of(cid)))
+        report = self._free(here, self._kept_collections() - {cid}, dry_run=True)
+        if dry_run:
+            return report
+        self.set_collection_mode(str(cid), "opened")
+        return self._free(here, self._kept_collections(), dry_run=False)
+
+    def free_up_files(self, shas: list[str], dry_run: bool = True) -> FreeUpReport:
+        """Remove this computer's copies of these files, to free space; each is
+        fetched again when opened or exported. Safe by construction: only
+        files the server says it holds, asked at that moment (one never sent
+        stays), and never one a collection kept on this computer uses (the
+        background download would only fetch it back: switch that collection to
+        `opened` first). Counts only unless `dry_run` is False. Holds the
+        store's clean-up lock, so no clean-up or file move runs meanwhile."""
+        self._can_free_up()
+        return self._free(self._room_of(shas), self._kept_collections(), dry_run)
+
+    def _room_of(self, shas: list[str]) -> dict[str, int]:
+        """Of these files, those on a drive here, with the room removing them
+        frees: every copy goes, so each copy's bytes count."""
+        return {
+            sha: sum(size for _volume, size in rows)
+            for sha, rows in self._files.copies(shas).items()
+        }
+
+    def _can_free_up(self) -> None:
+        if not self.fetches_files:
+            raise ValidationError(
+                "This project doesn't follow a server, so its files have nowhere "
+                "else to come from: they can't be removed to free space."
+            )
+
+    def _free(
+        self, here: dict[str, int], kept: set[uuid.UUID], dry_run: bool
+    ) -> FreeUpReport:
+        """The one rule for removing copies: of these files on this computer
+        (sha -> size), all but those a kept collection uses and those the
+        server hasn't got."""
+        kept_shared = self._repo.used_by(list(here), kept)
+        candidates = [sha for sha in here if sha not in kept_shared]
+        transport = self._transport()
+        missing: set[str] = set()
+        for i in range(0, len(candidates), FILE_CHECK_PAGE):
+            missing |= set(transport.missing_files(candidates[i : i + FILE_CHECK_PAGE]))
+        removable = [sha for sha in candidates if sha not in missing]
+        report = FreeUpReport(
+            files=len(removable),
+            bytes=sum(here[sha] for sha in removable),
+            kept_shared=len(kept_shared),
+            not_on_server=len(missing),
+        )
+        if dry_run:
+            return report
+        with self._files.gc_lock():
+            for sha in removable:
+                self._files.delete(sha)
+        self._commit()
+        return report
+
+    def not_here_reasons(self, shas: list[str]) -> dict[str, tuple[str, str]]:
+        """(reason, fix) for each of these files the server hasn't got either:
+        where it still is (the computer that added it) and what brings it."""
+        return {
+            sha: not_on_server_yet(who)
+            for sha, who in self._repo.added_by(shas).items()
+        }
+
+    def set_download_files(self, mode: str) -> None:
+        """Which files this device keeps a copy of: `all` (fetched in the
+        background) or `opened` (only when opened or exported)."""
+        if mode not in DOWNLOAD_MODES:
+            raise ValidationError(
+                f"Choose one of: {', '.join(DOWNLOAD_MODES)} (got '{mode}')"
+            )
+        self._config.sync.download_files = mode
+        save_config(self._config)
+
+    def fetch_file(self, sha256: str) -> bool:
+        """Download one file a record here cites from the authority, onto the
+        drive its collection's files go to. True once it is here (it may have
+        been already); False when the authority hasn't got it either (the device
+        that added it hasn't sent it yet). Raises `SyncError` when the authority
+        can't be reached. Doesn't take the sync lock: a download changes no
+        record, and two of the same file store the same content once."""
+        return self.fetch_files(shas=[sha256]).fetched == 1 or self._files.exists(
+            sha256
+        )
+
+    def fetch_files(
+        self,
+        shas: list[str] | None = None,
+        limit: int | None = None,
+        skip: set[str] | None = None,
+        seconds: float | None = None,
+        progress: Callable[[int], None] | None = None,
+        volume: str | None = None,
+        on_bytes: Callable[[int], None] | None = None,
+    ) -> FileFetchReport:
+        """Download files the records here cite that no drive here holds (all
+        of them, or those of `shas`), each checked against its hash and saved
+        as it arrives. `limit` files or `seconds` at most (a background pass
+        stops between files once either is spent); `skip` names files not to
+        ask for again (the authority hadn't got them a moment ago). `progress`
+        is told each file done. What the authority hasn't got is in `absent`."""
+        report = FileFetchReport()
+        if not self.fetches_files:
+            return report
+        transport = self._transport()
+        # The background download fetches only what this computer keeps; a
+        # file asked for by hash (opened, exported) comes whatever its
+        # collection's setting.
+        collections = self._kept_collections() if shas is None else None
+        started = time.monotonic()
+        after = ""
+        while True:
+            page = self._repo.files_not_here(after, FILE_CHECK_PAGE, shas, collections)
+            if not page:
+                break
+            after = page[-1][0]
+            for sha, collection in page:
+                if skip and sha in skip:
+                    continue
+                if (limit is not None and report.attempted >= limit) or (
+                    seconds is not None and time.monotonic() - started >= seconds
+                ):
+                    report.stopped = True
+                    return report
+                report.attempted += 1
+                if self._files.exists(sha):  # on a drive, just not inventoried
+                    report.fetched += 1
+                    continue
+                try:
+                    chunks = transport.file_chunks(sha)
+                except FileNotFoundError:
+                    report.absent.append(sha)
+                    continue
+                # Straight onto the drive (the one asked for, when it is
+                # fetched to go there, else its collection's): each byte
+                # written once, counted as it comes.
+                stored = self._files.put_chunks(
+                    _counted(chunks, on_bytes),
+                    sha,
+                    collection_id=str(collection) if collection else None,
+                    volume=volume,
+                )
+                if stored.sha256 != sha:
+                    self._files.delete(stored.sha256)
+                    raise SyncError("The server sent the wrong content for a file")
+                self._commit()
+                report.fetched += 1
+                if progress:
+                    progress(report.fetched)
+        return report
 
     def _join_one(
         self,
@@ -1151,8 +1457,10 @@ class SyncService:
             raise ValidationError("That conflict is not open")
         # `edited` is not a choice to offer: the record page sends it once the
         # person has set the field themselves, so a clash is all it closes.
-        if take not in _takes_for(conflict) and not (
-            take == "edited" and conflict.kind == "conflict"
+        if (
+            take not in _takes_for(conflict)
+            and not (take == "edited" and conflict.kind == "conflict")
+            and not (take == "restore_above" and self._sits_under(conflict))
         ):
             raise ValidationError(f"A {conflict.kind} can't be settled with '{take}'")
         if take in ("mine", "value"):
@@ -1161,7 +1469,11 @@ class SyncService:
             )
         elif take == "delete":
             self._records.delete(str(conflict.entity_id))
-        elif take == "retry":
+        elif take in ("retry", "restore_above"):
+            if take == "restore_above":
+                # Refused because what it sits under is deleted: bring that
+                # back (its restores go first), then send the record again.
+                self._records.restore_above(str(conflict.entity_id))
             # Not settled yet: it is settled by the authority's answer (it goes
             # in, or the same item says why it was refused again).
             self._resend(conflict)
@@ -1338,6 +1650,9 @@ _RECORD_ONLY = frozenset({"mine", "value", "delete"})
 
 
 def _takes_for(conflict: SyncConflictDTO) -> tuple[str, ...]:
+    """What a row offers by its kind. `SyncService._describe` adds
+    `restore_above` for a refused record that sits under deleted records here,
+    which takes looking the record up."""
     if conflict.status == "open" and conflict.resolution == "retrying":
         return ("theirs",)  # on its way: only letting it go is left to choose
     takes = _TAKES.get(conflict.kind, ("theirs",))
@@ -1365,3 +1680,13 @@ def _field_id(conflict: SyncConflictDTO) -> str | None:
     """The field id a conflict is about (`data.<field id>`), if it is about one."""
     top, _, sub = (conflict.field or "").partition(".")
     return sub if top == "data" and sub else None
+
+
+def _counted(
+    chunks: Iterator[bytes], on_bytes: Callable[[int], None] | None
+) -> Iterator[bytes]:
+    """The chunks, telling `on_bytes` how many bytes each brought."""
+    for chunk in chunks:
+        if on_bytes:
+            on_bytes(len(chunk))
+        yield chunk

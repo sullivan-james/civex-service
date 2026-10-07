@@ -212,9 +212,7 @@ describe('Storage > Volumes', () => {
     await screen.findByRole('link', { name: /^nas/ })
     const banner = screen.getByRole('alert')
     expect(banner).toHaveTextContent('2 volumes need attention: nas, usb')
-    await user.click(
-      within(rowOf('nas')).getByRole('button', { name: 'More information' }),
-    )
+    await user.click(within(rowOf('nas')).getByRole('button', { name: 'Why' }))
     expect(screen.getByRole('tooltip')).toHaveTextContent(
       'path missing: /mnt/nas/civex',
     )
@@ -570,7 +568,9 @@ describe('Storage > Collections', () => {
     renderAt('/settings/storage?tab=collections')
 
     await screen.findByLabelText('Home volume for zoo')
-    expect(screen.getByText('Home offline')).toBeInTheDocument()
+    expect(screen.getByText('Home').closest('span')).toHaveTextContent(
+      'HomeOffline',
+    )
     // An offline volume stays choosable, but is labelled in every row's list.
     expect(
       screen.getAllByRole('option', { name: 'nas (offline)' }).length,

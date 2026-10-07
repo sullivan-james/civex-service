@@ -163,9 +163,7 @@ describe('the status bar, for workflow runs', () => {
       await screen.findByRole('button', { name: /Stop automation/ }),
     )
     const dialog = await screen.findByRole('dialog')
-    expect(dialog).toHaveTextContent(
-      /cancels every workflow run that is waiting/,
-    )
+    expect(dialog).toHaveTextContent(/Cancels waiting runs/)
     expect(calls.some((c) => c.path === '/api/automation/stop')).toBe(false) // not yet
     await user.click(
       within(dialog).getByRole('button', { name: 'Stop automation' }),

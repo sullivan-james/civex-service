@@ -74,6 +74,17 @@ function Kept({ report }: { report: RetentionReport }) {
           kept: not yet synced.
         </p>
       )}
+      {(report.audit_kept_first_and_last ?? 0) > 0 && (
+        <p>
+          {n(
+            report.audit_kept_first_and_last ?? 0,
+            'older history entry',
+            'older history entries',
+          )}{' '}
+          kept: each thing&apos;s creation and latest change are kept however
+          old.
+        </p>
+      )}
       {report.skipped.map((s) => (
         <p key={s} className="text-attention">
           Could not delete {s}

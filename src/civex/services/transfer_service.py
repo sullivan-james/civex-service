@@ -44,11 +44,12 @@ from civex.domain.transfers import (
     TransferRecord,
     TransferSpec,
 )
+from civex.domain.placement import STEP_COPY, STEP_NOWHERE, STEP_THERE
 from civex.services.transfer_engine import (
-    PAGE,
     ProgressFn,
     Seed,
     TransferControl,
+    plan_steps,
     run_transfer,
 )
 
@@ -161,10 +162,7 @@ class TransferService:
     # -- planning ---------------------------------------------------------------
 
     def _placements(self) -> dict[str, str]:
-        return {
-            cid: place.volume
-            for cid, place in self._config.store_config.placement.items()
-        }
+        return self._config.store_config.homes()
 
     def _is_network(self, volume: str) -> bool:
         path = fs_locations.normalise(str(self._store.volume_path(volume)))
@@ -234,10 +232,8 @@ class TransferService:
                     + ", ".join(f"'{s}'" for s in spec.sources)
                     + ", so there is nothing to move."
                 )
-        elif spec.kind == KIND_FILES:
-            self._size_files(spec, plan)
         else:
-            self._size_consolidation(spec, plan)
+            self._size_steps(spec, plan)
 
         self._fit(spec, plan)
         self._warn(spec, plan)
@@ -268,65 +264,25 @@ class TransferService:
                 problems.append("A chosen collection no longer exists.")
         return problems
 
-    def _size_files(self, spec: TransferSpec, plan: TransferPlan) -> None:
-        """Count what moving the named files would do, from the catalog."""
+    def _size_steps(self, spec: TransferSpec, plan: TransferPlan) -> None:
+        """Count what gathering would move, copy and leave, from the catalog,
+        by the steps the transfer itself takes (`plan_steps`)."""
         unknown = 0
-        for start in range(0, len(spec.shas), PAGE):
-            rows = self._store.inventory_rows(spec.shas[start : start + PAGE])
-            for sha in spec.shas[start : start + PAGE]:
-                row = rows.get(sha)
-                if row is None:
-                    unknown += 1
-                    continue
-                volume, size = row
-                if volume in spec.targets:
-                    plan.already_there += 1
-                else:
-                    plan.files += 1
-                    plan.bytes += size
+        for step in plan_steps(self._store, self._refs, spec, self._placements()):
+            if step.step == STEP_THERE:
+                plan.already_there += 1
+            elif step.step == STEP_NOWHERE:
+                unknown += 1
+            else:
+                plan.files += 1
+                plan.bytes += step.size
+                if step.step == STEP_COPY:
+                    plan.copied += 1
+                    plan.copied_bytes += step.size
         if unknown:
             plan.warnings.append(
-                f"{unknown} of these file(s) aren't in the catalog, so they aren't "
-                "counted here; the transfer moves what it finds."
-            )
-
-    def _size_consolidation(self, spec: TransferSpec, plan: TransferPlan) -> None:
-        """Count what consolidating would move, skip and leave, the way the
-        engine will choose it."""
-        selected = set(spec.collection_ids)
-        placements = self._placements()
-        after: str | None = None
-        unknown_count = 0
-        while True:
-            shas = self._refs.shas_for_collections(spec.collection_ids, after, PAGE)
-            if not shas:
-                break
-            after = shas[-1]
-            rows = self._store.inventory_rows(shas)
-            users = (
-                self._refs.collections_using(shas) if not spec.include_shared else {}
-            )
-            for sha in shas:
-                row = rows.get(sha)
-                if row is None:
-                    unknown_count += 1
-                    continue
-                volume, size = row
-                if volume in spec.targets:
-                    plan.already_there += 1
-                    continue
-                others = users.get(sha, set()) - selected
-                if any(placements.get(c) not in (None, *spec.targets) for c in others):
-                    plan.shared_left += 1
-                    plan.shared_left_bytes += size
-                    continue
-                plan.files += 1
-                plan.bytes += size
-        if unknown_count:
-            plan.warnings.append(
-                f"{unknown_count} file(s) used by these collections aren't in the "
-                "catalog, so they aren't counted here (running garbage collection "
-                "refreshes it); the transfer moves what it finds."
+                f"{unknown} file(s) aren't on any drive here, so there is nothing "
+                "to move for them."
             )
 
     def _fit(self, spec: TransferSpec, plan: TransferPlan) -> None:
@@ -375,10 +331,10 @@ class TransferService:
                 "Full verification reads every copy back, which roughly doubles the "
                 "reading."
             )
-        if spec.kind == KIND_CONSOLIDATE and plan.shared_left:
+        if plan.copied:
             plan.warnings.append(
-                f"{plan.shared_left} file(s) ({_size(plan.shared_left_bytes)}) are also "
-                "used by collections kept elsewhere and will stay where they are."
+                f"{plan.copied} file(s) ({_size(plan.copied_bytes)}) are copied, not "
+                "moved: another collection that uses them keeps them on its own drive."
             )
         if plan.already_there:
             plan.warnings.append(

@@ -7,7 +7,6 @@ export interface TransferSpec {
   collection_ids: string[]
   /** files: the content moved, by hash. */
   shas?: string[]
-  include_shared: boolean
   verify: 'copy' | 'full'
   freeze_sources: boolean
 }
@@ -16,8 +15,10 @@ export interface TransferPlan {
   files: number
   bytes: number
   already_there: number
-  shared_left: number
-  shared_left_bytes: number
+  /** Of `files`, those copied, not moved: their drive is the home of another
+   * collection that uses them, and keeps its copy. */
+  copied: number
+  copied_bytes: number
   targets: {
     volume: string
     files: number
