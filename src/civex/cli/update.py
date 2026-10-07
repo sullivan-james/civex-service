@@ -12,104 +12,24 @@ import shutil
 import subprocess
 import sys
 import urllib.error
-import urllib.request
-from importlib.metadata import PackageNotFoundError, distribution
-from pathlib import Path
 
 import typer
 
 from civex import __version__
 from civex.console import console
 
-_PYPI_URL = "https://pypi.org/pypi/civex/json"
-
-
-def latest_version(pre: bool = False, timeout: float = 10.0) -> str:
-    """Latest civex version published on PyPI: the latest stable one, or with
-    `pre` the newest of all, release candidates and betas included."""
-    with urllib.request.urlopen(_PYPI_URL, timeout=timeout) as resp:  # noqa: S310
-        data = json.load(resp)
-    if not pre:
-        return data["info"]["version"]
-    return newest_release(data["releases"]) or data["info"]["version"]
-
-
-def newest_release(releases: dict[str, list[dict]]) -> str | None:
-    """The highest version in PyPI's `releases` that has files and isn't
-    wholly yanked; pre-releases count."""
-    from packaging.version import InvalidVersion, Version
-
-    found: list[Version] = []
-    for number, files in releases.items():
-        if not files or all(f.get("yanked") for f in files):
-            continue
-        try:
-            found.append(Version(number))
-        except InvalidVersion:
-            continue
-    return str(max(found)) if found else None
-
-
-def detect_installer() -> str:
-    """How this civex was installed: ``pipx`` | ``uv`` | ``editable`` | ``pip``."""
-    try:
-        direct_url = distribution("civex").read_text("direct_url.json")
-        if direct_url and json.loads(direct_url).get("dir_info", {}).get("editable"):
-            return "editable"
-    except (PackageNotFoundError, ValueError):
-        pass
-    parts = Path(sys.prefix).parts
-    if "pipx" in parts and "venvs" in parts:
-        return "pipx"
-    if "uv" in parts and "tools" in parts:
-        return "uv"
-    return "pip"
-
-
-def installed_version() -> str | None:
-    """civex's version as installed *now*, read in a fresh interpreter.
-
-    ``civex.__version__`` was fixed when this process started, so it can't
-    show the effect of the upgrade we just ran.
-    """
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "from importlib.metadata import version; print(version('civex'))",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip() or None if result.returncode == 0 else None
-
-
-def upgrade_command(installer: str, pre: bool = False) -> list[str]:
-    """The command that upgrades civex for *installer*.
-
-    Falls back to pip inside this environment when the installer's own CLI
-    isn't on PATH (pip is always present in a pipx venv; uv tool venvs may
-    not have it, so that case is reported by the caller instead).
-    """
-    if installer == "pipx" and shutil.which("pipx"):
-        return ["pipx", "upgrade", *(["--pip-args=--pre"] if pre else []), "civex"]
-    if installer == "uv" and shutil.which("uv"):
-        return [
-            "uv",
-            "tool",
-            "upgrade",
-            *(["--prerelease", "allow"] if pre else []),
-            "civex",
-        ]
-    return [
-        sys.executable,
-        "-m",
-        "pip",
-        "install",
-        "--upgrade",
-        *(["--pre"] if pre else []),
-        "civex",
-    ]
+# The rules live in civex.updates, shared with the app's Updates page; these
+# names are imported here so the command (and its tests) read them from one
+# place.
+from civex.updates import (
+    detect_installer,
+    installed_version,
+    is_prerelease,
+    latest_version,
+    newest_release,  # noqa: F401  (re-exported for callers of the old module)
+    upgrade_command,
+    why_not,
+)
 
 
 def installed_missing_requirements() -> list[str]:
@@ -133,9 +53,13 @@ def installed_missing_requirements() -> list[str]:
 
 def repair_command(installer: str, version: str) -> list[str]:
     """Reinstall civex at `version`, which also installs any dependency that
-    is missing (an upgrade alone doesn't when the version is unchanged)."""
+    is missing (an upgrade alone doesn't when the version is unchanged).
+
+    For uv, `>=` and not `==`: uv records the requirement a tool was installed
+    with, and `uv tool upgrade` keeps to it, so `==` pinned the install and
+    every later `civex update` quietly did nothing."""
     if installer == "uv" and shutil.which("uv"):
-        return ["uv", "tool", "install", "--force", f"civex=={version}"]
+        return ["uv", "tool", "install", "--force", "--reinstall", f"civex>={version}"]
     return [sys.executable, "-m", "pip", "install", f"civex=={version}"]
 
 
@@ -183,11 +107,12 @@ def update(
     `civex update` moves on when the final release is out.
     """
     installer = detect_installer()
-    if installer == "editable":
-        console.print(
-            "[warning]This is a development (editable) install -- update it "
-            "with git and `uv sync` instead.[/warning]"
+    if installer in ("editable", "frozen", "desktop"):
+        reason = why_not(installer, from_app=False) or (
+            "This is the desktop app's copy of civex: update it from the app "
+            "(Settings > Updates)."
         )
+        console.print(f"[warning]{reason}[/warning]")
         raise typer.Exit(1)
 
     # Imported here, not at module top: a stale environment missing this
@@ -207,7 +132,7 @@ def update(
 
     if not newer:
         console.print(f"[success]civex {__version__} is up to date.[/success]")
-        if not pre and _is_prerelease(__version__):
+        if not pre and is_prerelease(__version__):
             console.print(
                 "[dim]This is a pre-release; `civex update --pre` looks for "
                 "newer pre-releases too.[/dim]"
@@ -248,15 +173,6 @@ def update(
     _warn_if_shadowed(now or latest)
     if not ok:
         raise typer.Exit(1)
-
-
-def _is_prerelease(version: str) -> bool:
-    from packaging.version import InvalidVersion, Version
-
-    try:
-        return Version(version).is_prerelease
-    except InvalidVersion:
-        return False
 
 
 def _warn_if_shadowed(expected: str) -> None:
