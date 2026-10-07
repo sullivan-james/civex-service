@@ -517,6 +517,12 @@ def files_gather(
     export: Optional[str] = _EXPORT,
     on: Optional[str] = _ON,
     name: Optional[str] = _NAME,
+    include_shared: bool = typer.Option(
+        False,
+        "--include-shared",
+        help="Also move files that other records use (they move for them "
+        "too). By default those stay where they are.",
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would move and stop."
     ),
@@ -540,7 +546,29 @@ def files_gather(
     try:
         svc = ctx.file_access_svc
         _, items = svc.chosen(selection, on, name)
-        shas, downloaded = svc.to_move(items, to)
+        if dry_run:  # the move's usual preview; nothing is downloaded or moved
+            p = svc.plan_move(items, to, include_shared)
+            shas = svc.shas_to_move(items, to, include_shared)
+            if p.from_server:
+                console.print(
+                    f"{p.from_server} file(s) would be downloaded from the server "
+                    f"straight onto '{escape(to)}'."
+                )
+            if p.shared_left:
+                console.print(
+                    f"[dim]{p.shared_left} file(s) that other records also use "
+                    "would stay where they are (--include-shared moves them "
+                    "too).[/dim]"
+                )
+            if shas:
+                _start(
+                    TransferSpec(
+                        kind=KIND_FILES, targets=[to], shas=shas, freeze_sources=False
+                    ),
+                    True,
+                )
+            return
+        shas, downloaded, plan = svc.to_move(items, to, include_shared=include_shared)
         ctx.commit()
     except CivexError as e:
         console.print(f"[error]{escape(str(e))}[/error]")
@@ -550,6 +578,11 @@ def files_gather(
     if downloaded:
         console.print(
             f"Downloaded {downloaded} file(s) from the server onto '{escape(to)}'."
+        )
+    if plan.shared_left:
+        console.print(
+            f"[dim]{plan.shared_left} file(s) that other records also use stay "
+            "where they are (--include-shared moves them too).[/dim]"
         )
     if not shas:
         if not downloaded:

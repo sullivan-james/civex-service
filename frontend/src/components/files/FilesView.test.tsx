@@ -181,4 +181,73 @@ describe('FilesView', () => {
       ).toMatchObject({ fields: ['selection_table', 'audio'] }),
     )
   })
+
+  it('moves picked files, leaving shared ones unless asked to move them too', async () => {
+    const calls = fakeServer({
+      '/api/file-access/files': {
+        ...LISTING,
+        items: [{ ...LISTING.items[0], others: 3 }, LISTING.items[1]],
+      },
+      '/api/file-access/gather': (body: Record<string, unknown>) =>
+        new Response(
+          JSON.stringify(
+            body.volume && !('include_shared' in body && body.include_shared)
+              ? {
+                  plan: {
+                    files: 0,
+                    bytes: 0,
+                    from_server: 0,
+                    shared_left: 1,
+                    shared_bytes: 2048,
+                    already_there: 0,
+                  },
+                }
+              : {
+                  plan: {
+                    files: 1,
+                    bytes: 2048,
+                    from_server: 0,
+                    shared_left: 0,
+                    shared_bytes: 0,
+                    already_there: 0,
+                  },
+                },
+          ),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      '/api/schemas': [],
+      '/api/remote': { configured: true, serving: false },
+      '/api/store/volumes': [
+        {
+          name: 'archive',
+          available: true,
+          state: 'online',
+          disk_free_bytes: 1e9,
+        },
+      ],
+    })
+    show()
+    expect(
+      await screen.findByText(/also used by 3 other records/),
+    ).toBeInTheDocument()
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: 'Tick Encounter 7/s1/table.txt' }),
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Move to drive…' }),
+    )
+    const also = await screen.findByRole('checkbox', {
+      name: /Also move 1 file other records use/,
+    })
+    await userEvent.click(also)
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.path === '/api/file-access/gather' &&
+            (c.body as Record<string, unknown>).include_shared === true,
+        ),
+      ).toBe(true),
+    )
+  })
 })

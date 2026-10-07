@@ -56,10 +56,10 @@ def test_moving_names_only_what_is_elsewhere_and_reachable(ctx, study, spread, a
     svc = ctx.file_access_svc
     _, items = svc.chosen(_within(study.e7))
     s1 = next(i for i in items if i.filename == "s1.txt")
-    assert svc.to_move(items, "archive") == ([s1.sha256], 0)  # s2 is there
+    assert svc.to_move(items, "archive")[:2] == ([s1.sha256], 0)  # s2 is there
     _unplug(archive)
     _, items = svc.chosen(_within(study.e7))
-    assert svc.to_move(items, "default") == ([], 0)  # s2 can't be read to move
+    assert svc.to_move(items, "default")[:2] == ([], 0)  # s2 can't be read
 
 
 def test_files_are_picked_by_kind_and_every_kind_is_still_counted(ctx, study, spread):  # noqa: F811
@@ -81,7 +81,9 @@ def test_files_are_picked_by_kind_and_every_kind_is_still_counted(ctx, study, sp
 
 
 def test_records_beneath_count_only_if_they_match_the_filter_at_their_level(
-    ctx, study, spread  # noqa: F811
+    ctx,
+    study,
+    spread,  # noqa: F811
 ):
     """Encounters "with a Selection named s1" take that Selection's files, not
     every Selection's: a record beneath is taken when the list, run for its
@@ -107,3 +109,29 @@ def test_records_beneath_count_only_if_they_match_the_filter_at_their_level(
     )
     _, items = svc.chosen(no_filter)
     assert sorted(i.filename for i in items) == ["s1.txt", "s2.txt"]
+
+
+def test_a_file_other_records_use_stays_put_unless_asked(ctx, study, archive):  # noqa: F811
+    """Moving one record's files leaves a file other records also use where
+    it is (moving it would move it for them too), unless asked."""
+    svc = ctx.file_access_svc
+    shared = study.selection(study.rec_a, "s1", b"the same table")
+    study.selection(study.rec_b, "s2", b"the same table")  # same content
+    own = study.selection(study.rec_a, "s3", b"only s3's")
+    ctx.commit()
+    only_a = _within(study.rec_a)
+    _, items = svc.chosen(only_a)
+    listing = svc.listing(only_a)
+    assert {i.filename: listing.others[i.path] for i in listing.items} == {
+        "s1.txt": 1,
+        "s3.txt": 0,
+    }
+
+    plan = svc.plan_move(items, "archive")
+    assert (plan.files, plan.shared_left) == (2 - 1, 1)
+    shas, _, _ = svc.to_move(items, "archive")
+    assert len(shas) == 1  # only s3's own file
+
+    with_shared = svc.plan_move(items, "archive", include_shared=True)
+    assert (with_shared.files, with_shared.shared_left) == (2, 0)
+    assert shared and own

@@ -197,6 +197,18 @@ def in_place(item: FileItem, wanted: str) -> bool:
 
 
 @dataclass
+class MovePlan:
+    """What moving picked files onto a drive would do."""
+
+    files: int  # files that would move from another drive
+    bytes: int
+    from_server: int  # files only on the server, downloaded straight there
+    shared_left: int  # files records you didn't pick also use: they stay
+    shared_bytes: int
+    already_there: int
+
+
+@dataclass
 class PlaceSummary:
     """How much of a selection is in one place."""
 
@@ -217,6 +229,9 @@ class FileListing:
     items: list[FileItem]
     # How many files of each kind (file field): {field, files, bytes}.
     kinds: list[dict[str, Any]] = field(default_factory=list)
+    # For each listed file (by path): how many other live records use the
+    # same file (moving it would move it for them).
+    others: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass

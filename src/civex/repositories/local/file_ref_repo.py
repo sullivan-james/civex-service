@@ -167,6 +167,22 @@ class LocalFileReferenceRepository:
             out[str(cid)][1].append((volume, int(files), int(size), int(shared)))
         return out
 
+    def records_using(self, shas: Iterable[str]) -> dict[str, set[uuid.UUID]]:
+        """For each file, the live records that use it."""
+        wanted = list(dict.fromkeys(shas))
+        out: dict[str, set[uuid.UUID]] = {}
+        for i in range(0, len(wanted), 500):
+            for sha, record_id in self._s.execute(
+                select(FileReference.sha256, FileReference.record_id)
+                .join(Record, Record.id == FileReference.record_id)
+                .where(
+                    FileReference.sha256.in_(wanted[i : i + 500]),
+                    Record.deleted_at.is_(None),
+                )
+            ):
+                out.setdefault(sha, set()).add(record_id)
+        return out
+
     def collections_using(self, shas: Iterable[str]) -> dict[str, set[str]]:
         """For each file, the ids of the collections whose records use it."""
         wanted = list(shas)

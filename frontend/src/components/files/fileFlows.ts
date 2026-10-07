@@ -313,10 +313,19 @@ export function moveThenOpen(
 /** Move picked files (the Files tab: a selection narrowed by place, name or
  * ticks) onto one drive, as one job: downloading any that are only on the
  * server, then the move itself, each with its progress in the status bar. */
-export function moveFiles(ctx: FlowContext, pick: FilePick, volume: string) {
+export function moveFiles(
+  ctx: FlowContext,
+  pick: FilePick,
+  volume: string,
+  includeShared = false,
+) {
   return job(ctx, 'Preparing the move…', async (j) => {
     const started = await tracked(ctx, j, (progressId) =>
-      fileAccessApi.gather(pick, volume, progressId),
+      fileAccessApi.gather(
+        { ...pick, include_shared: includeShared },
+        volume,
+        progressId,
+      ),
     )
     refreshPlaces(ctx)
     const fetched = started.downloaded ?? 0

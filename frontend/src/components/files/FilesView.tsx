@@ -12,6 +12,8 @@ import { useSchemas } from '../../hooks/useSchemas'
 import { PROJECT, useDriveChoice } from '../../hooks/useDriveChoice'
 import { useQueryClient } from '@tanstack/react-query'
 import { useFileListing, useFreeUpFiles } from '../../hooks/useFileListing'
+import { useQuery } from '@tanstack/react-query'
+import { fileAccessApi } from '../../api/fileAccess'
 import { errorMessage } from '../../lib/errors'
 import { displayLabel } from '../../utils/naming'
 import { placeLabel } from '../../utils/places'
@@ -22,6 +24,7 @@ import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { FreeUpDialog } from '../settings/storage/ComputerFiles'
 import {
   Button,
+  CheckRow,
   Chip,
   DataTable,
   MultiPick,
@@ -251,8 +254,8 @@ export function FilesView({ selection }: { selection: FileSelection }) {
           pick={target}
           summary={data?.summary ?? []}
           onClose={() => setActing(null)}
-          onMove={(volume) => {
-            void moveFiles(flow, target, volume)
+          onMove={(volume, includeShared) => {
+            void moveFiles(flow, target, volume, includeShared)
             picked.clear()
             setActing(null)
           }}
@@ -301,7 +304,12 @@ function FileCell({ file, kind }: { file: ListedFile; kind: string }) {
       >
         {file.filename}
       </FileLink>
-      <div className="text-xs text-fg-subtle">{kind}</div>
+      <div className="text-xs text-fg-subtle">
+        {kind}
+        {file.others
+          ? ` · also used by ${file.others} other record${file.others === 1 ? '' : 's'}`
+          : ''}
+      </div>
     </div>
   )
 }
@@ -386,6 +394,7 @@ function PlacesBar({ summary }: { summary: PlaceSummary[] }) {
  * what can't move; the move itself then runs as a job in the status bar. */
 function MoveDialog({
   what,
+  pick,
   summary,
   onClose,
   onMove,
@@ -394,30 +403,66 @@ function MoveDialog({
   pick: FilePick
   summary: PlaceSummary[]
   onClose: () => void
-  onMove: (volume: string) => void
+  onMove: (volume: string, includeShared: boolean) => void
 }) {
   const holding = summary.find((p) => p.kind === 'drive')?.place
-  const total = summary.reduce((n, p) => n + p.bytes, 0)
   const [chosen, setChosen] = useState<string | null>(null)
+  const [includeShared, setIncludeShared] = useState(false)
   const drive = useDriveChoice({
     holding,
-    need: total,
+    need: 0,
     allowProject: false,
     chosen,
   })
+  // What it would do, asked of the server for the drive chosen: the same
+  // rule the move itself follows.
+  const { data: preview } = useQuery({
+    queryKey: ['move-plan', pick, drive.target, includeShared],
+    queryFn: () => fileAccessApi.planMove(pick, drive.target, includeShared),
+    enabled: !!drive.target && drive.target !== PROJECT,
+  })
+  const plan = preview?.plan
   const stuck = summary.filter(
     (p) => p.kind === 'unreachable' || p.kind === 'missing',
   )
-  const server = summary.find((p) => p.kind === 'server')
   return (
     <Modal onClose={onClose}>
       <ModalHeader onClose={onClose}>Move {what} to a drive</ModalHeader>
       <ModalBody className="space-y-3 text-sm">
-        <p>
-          Only these files move; the rest of their collections stay where they
-          are. Files already on the drive are left as they are.
-        </p>
-        <ToDownloadNotice toFetch={server} />
+        <DrivePicker
+          label="Move them onto"
+          value={drive.target}
+          targets={drive.targets}
+          allowProject={false}
+          need={plan?.bytes ?? 0}
+          free={drive.free}
+          tooBig={drive.free != null && (plan?.bytes ?? 0) > drive.free}
+          onChange={setChosen}
+        />
+        {plan && (
+          <p>
+            {plan.files === 0 && plan.from_server === 0
+              ? 'Nothing to move: they are there already.'
+              : `Moves ${plan.files.toLocaleString()} file${plan.files === 1 ? '' : 's'} (${formatSize(plan.bytes)}).`}
+            {plan.already_there > 0 &&
+              ` ${plan.already_there.toLocaleString()} are there already.`}
+          </p>
+        )}
+        {plan && plan.from_server > 0 && (
+          <ToDownloadNotice toFetch={{ files: plan.from_server, bytes: 0 }} />
+        )}
+        {plan && (plan.shared_left > 0 || includeShared) && (
+          <CheckRow
+            checked={includeShared}
+            onChange={setIncludeShared}
+            title={
+              includeShared
+                ? 'Moving the files other records also use too'
+                : `Also move ${plan.shared_left.toLocaleString()} file${plan.shared_left === 1 ? '' : 's'} other records use (${formatSize(plan.shared_bytes)})`
+            }
+            description="Some of these files are also used by records you didn't pick. They stay where they are unless you tick this; ticked, they move for those records too."
+          />
+        )}
         {stuck.length > 0 && (
           <p className="text-attention">
             Left where they are:{' '}
@@ -427,16 +472,6 @@ function MoveDialog({
             .
           </p>
         )}
-        <DrivePicker
-          label="Move them onto"
-          value={drive.target}
-          targets={drive.targets}
-          allowProject={false}
-          need={total}
-          free={drive.free}
-          tooBig={drive.tooBig}
-          onChange={setChosen}
-        />
       </ModalBody>
       <ModalFooter>
         <Button variant="ghost" onClick={onClose}>
@@ -444,8 +479,13 @@ function MoveDialog({
         </Button>
         <Button
           variant="primary"
-          disabled={!drive.target || drive.target === PROJECT}
-          onClick={() => onMove(drive.target)}
+          disabled={
+            !drive.target ||
+            drive.target === PROJECT ||
+            !plan ||
+            (plan.files === 0 && plan.from_server === 0)
+          }
+          onClick={() => onMove(drive.target, includeShared)}
         >
           Move
         </Button>

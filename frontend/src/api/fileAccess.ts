@@ -282,6 +282,8 @@ export interface FilePick extends FileSelection {
   place?: string
   name?: string
   shas?: string[]
+  /** Moving: also move files records not picked use (for them too). */
+  include_shared?: boolean
 }
 
 export type PlaceKind = 'drive' | 'unreachable' | 'server' | 'missing'
@@ -314,6 +316,20 @@ export interface ListedFile {
   fix: string
   place: string
   place_kind: PlaceKind
+  /** Other live records that use the same file: moving it moves it for them. */
+  others?: number
+}
+
+/** What moving picked files onto a drive would do. */
+export interface MovePlan {
+  files: number
+  bytes: number
+  /** Only on the server: downloaded straight onto the drive. */
+  from_server: number
+  /** Also used by records not picked: they stay unless asked. */
+  shared_left: number
+  shared_bytes: number
+  already_there: number
 }
 
 export interface FileListing {
@@ -422,7 +438,15 @@ export const fileAccessApi = {
 
   /** Queue a move of just this selection's files onto one drive, so a linked
    * folder can hold them all. Nothing else in their collections moves. */
-  gather: (selection: FileSelection, volume: string, progressId?: string) =>
+  /** What moving these files onto `volume` would do; nothing is done. */
+  planMove: (pick: FilePick, volume: string, includeShared: boolean) =>
+    api.post<{ plan: MovePlan }>('/file-access/gather?dry_run=true', {
+      ...pick,
+      volume,
+      include_shared: includeShared,
+    }),
+
+  gather: (selection: FilePick, volume: string, progressId?: string) =>
     api.post<GatherResult>(
       '/file-access/gather',
       { ...selection, volume },

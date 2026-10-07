@@ -32,6 +32,7 @@ from civex.domain import templating
 from civex.domain.naming import display_label
 from civex.domain.query import RecordQuery
 from civex.domain.file_access import (
+    MovePlan,
     FileListing,
     PlaceSummary,
     in_place,
@@ -60,7 +61,7 @@ from civex.domain.file_access import (
     group_folder,
     safe_segment,
 )
-from civex.repositories.protocols import FileObjectStore
+from civex.repositories.protocols import FileObjectStore, FileReferenceRepository
 from civex.services.progress import Progress
 from civex.services.record_service import RecordService
 from civex.services.schema_service import SchemaService
@@ -91,6 +92,9 @@ class FileAccessService:
         self._schemas = schemas
         self._store = store
         self._civex_dir = civex_dir
+        # Which live records use a file (for files shared with records not
+        # picked); set by `build_local_context`.
+        self.refs: FileReferenceRepository | None = None
         # Downloads files another device added (they are cited here but on no
         # drive here) from the authority, given their hashes and a callable told
         # how many have arrived; None when the project follows none. Injected
@@ -1210,31 +1214,100 @@ class FileAccessService:
         if key not in order:
             raise ValidationError(f"sort must be one of: {', '.join(order)}")
         items.sort(key=order[key], reverse=reverse)
+        page = items[offset : offset + limit]
+        users = self.refs.records_using(i.sha256 for i in page) if self.refs else {}
         return FileListing(
             total=len(items),
             summary=_places(of_kind),
-            items=items[offset : offset + limit],
+            items=page,
             kinds=_kinds(plan.items),
+            others={
+                i.path: len(
+                    {str(r) for r in users.get(i.sha256, set())} - {i.record_id}
+                )
+                for i in page
+            },
+        )
+
+    def shared_with_others(self, items: list[FileItem]) -> dict[str, int]:
+        """Files among these that live records not among them also use, and
+        how many such records: moving one would move it for them too."""
+        if not self.refs or not items:
+            return {}
+        picked = {i.record_id for i in items}
+        users = self.refs.records_using(i.sha256 for i in items)
+        out = {}
+        for sha, records in users.items():
+            others = {str(r) for r in records} - picked
+            if others:
+                out[sha] = len(others)
+        return out
+
+    def plan_move(
+        self, items: list[FileItem], volume: str, include_shared: bool = False
+    ) -> MovePlan:
+        """What moving these files onto `volume` would do: what moves from
+        another drive, what comes from the server straight there, and what
+        stays because records not among them also use it (unless
+        `include_shared`: then it moves for them too). The one rule behind
+        the move dialog's preview and the move itself. Unreachable and
+        missing files can't move and are left out."""
+        if volume not in self._store.volume_names():
+            raise NotFoundError(f"There is no drive called '{volume}'.")
+        shared = {} if include_shared else self.shared_with_others(items)
+        size = {i.sha256: i.size for i in items}
+        here: set[str] = set()
+        remote: set[str] = set()
+        there: set[str] = set()
+        for i in items:
+            kind = place_of(i)[1]
+            if kind == "server":
+                remote.add(i.sha256)
+            elif kind == "drive":
+                (there if i.volume == volume else here).add(i.sha256)
+        moving = here - set(shared)
+        left = here & set(shared)
+        return MovePlan(
+            files=len(moving),
+            bytes=sum(size[s] for s in moving),
+            from_server=len(remote),
+            shared_left=len(left),
+            shared_bytes=sum(size[s] for s in left),
+            already_there=len(there),
         )
 
     def to_move(
-        self, items: list[FileItem], volume: str, progress: Progress | None = None
-    ) -> tuple[list[str], int]:
-        """Get these files onto `volume`: those only on the server are
-        downloaded straight onto it; returns the content still elsewhere that a
-        move has to carry (each once), and how many were downloaded there.
-        Unreachable and missing files can't move and are left out (the plan the
-        caller showed already said so)."""
-        if volume not in self._store.volume_names():
-            raise NotFoundError(f"There is no drive called '{volume}'.")
-        movable = [i for i in items if place_of(i)[1] in ("drive", "server")]
-        remote = [i for i in movable if place_of(i)[1] == "server"]
+        self,
+        items: list[FileItem],
+        volume: str,
+        progress: Progress | None = None,
+        include_shared: bool = False,
+    ) -> tuple[list[str], int, MovePlan]:
+        """Get these files onto `volume`, as `plan_move` says: those only on
+        the server are downloaded straight onto it; returns the content a
+        move has to carry from other drives (each once, without files others
+        share unless `include_shared`), how many were downloaded there, and
+        the plan."""
+        plan = self.plan_move(items, volume, include_shared)
+        remote = [i for i in items if place_of(i)[1] == "server"]
         fetched = self._fetch(
             [i.sha256 for i in remote], progress, volume, _sizes(remote)
         )
+        moving = self.shas_to_move(items, volume, include_shared)
+        return moving, fetched.fetched if fetched else 0, plan
+
+    def shas_to_move(
+        self, items: list[FileItem], volume: str, include_shared: bool = False
+    ) -> list[str]:
+        """The content a move has to carry onto `volume` from other drives:
+        each file not there yet, once, without those records not among these
+        also use unless `include_shared`. Downloads nothing."""
+        shared = {} if include_shared else self.shared_with_others(items)
+        movable = [
+            i for i in items if place_of(i)[1] == "drive" and i.sha256 not in shared
+        ]
         located = self._store.locate_volumes(i.sha256 for i in movable)
-        elsewhere = [sha for sha, on in located.items() if on and on != volume]
-        return elsewhere, fetched.fetched if fetched else 0
+        return [sha for sha, on in located.items() if on and on != volume]
 
     def download(
         self, items: list[FileItem], progress: Progress | None = None

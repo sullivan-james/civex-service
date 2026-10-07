@@ -245,6 +245,9 @@ def export_files(
 @router.post("/gather", status_code=202)
 def gather_files(
     body: FileGatherRequest,
+    dry_run: bool = Query(
+        default=False, description="Only say what the move would do."
+    ),
     ctx: AppContext = Depends(get_ctx),
     progress: Progress | None = Depends(report_progress),
 ):
@@ -255,10 +258,22 @@ def gather_files(
     runs like any other move (one at a time, safe to pause, cancel or lose
     power; see /store/transfers). Files downloaded straight onto the drive need
     no move: when nothing else has to move, `transfer_id` is null and
-    `downloaded` says how many came. 422 when they are all already there."""
+    `downloaded` says how many came. Files that records not picked also use
+    stay where they are unless `include_shared` (`shared_left` says how
+    many). With `dry_run`, only `plan` is answered and nothing is done. 422
+    when they are all already there."""
     items = _picked(body, ctx)
+    svc = ctx.file_access_svc
+    if dry_run:
+        try:
+            plan = svc.plan_move(items, body.volume, body.include_shared)
+        except NotFoundError as e:
+            raise HTTPException(404, detail=str(e))
+        return JSONResponse({"plan": vars(plan)}, status_code=200)
     try:
-        shas, downloaded = ctx.file_access_svc.to_move(items, body.volume, progress)
+        shas, downloaded, plan = svc.to_move(
+            items, body.volume, progress, body.include_shared
+        )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except CivexError as e:
@@ -273,6 +288,7 @@ def gather_files(
                     "files": 0,
                     "bytes": 0,
                     "downloaded": downloaded,
+                    "shared_left": plan.shared_left,
                 },
                 status_code=200,
             )
@@ -290,6 +306,7 @@ def gather_files(
         "files": record.plan.files if record.plan else len(shas),
         "bytes": record.plan.bytes if record.plan else 0,
         "downloaded": downloaded,
+        "shared_left": plan.shared_left,
     }
 
 
@@ -331,6 +348,7 @@ def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
                 **i.to_dict(),
                 "place": place_of(i)[0],
                 "place_kind": place_of(i)[1],
+                "others": listing.others.get(i.path, 0),
             }
             for i in listing.items
         ],

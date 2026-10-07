@@ -214,6 +214,7 @@ def build_local_context(
     file_access_svc = FileAccessService(
         record_svc, schema_svc, file_store, config.civex_dir
     )
+    file_access_svc.refs = LocalFileReferenceRepository(session)
     transfer_svc = TransferService(
         config,
         file_store,
