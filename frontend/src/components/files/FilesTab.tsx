@@ -14,6 +14,8 @@ import { placeLabel } from '../../utils/places'
 import { formatSize } from '../../utils/storage'
 import { FilterControls } from '../explorer/FilterControls'
 import { FileLink } from '../records/FileLocation'
+import { SelectionBar } from '../explorer/SelectionBar'
+import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { FreeUpDialog } from '../settings/storage/ComputerFiles'
 import {
   Button,
@@ -52,9 +54,13 @@ export function FilesTab({
   const [sp, setSp] = useSearchParams()
   const { data: schemas = [] } = useSchemas()
   const followsServer = useFollowsServer()
-  const [ticked, setTicked] = useState<Set<string>>(new Set())
   const [acting, setActing] = useState<'move' | 'free' | null>(null)
   const toast = useToast()
+  const qc = useQueryClient()
+  // Moving and downloading run as file jobs: progress in the status bar, and
+  // they carry on if the page is left.
+  const flow: FlowContext = { toast, qc, problem: () => undefined }
+  const free = useFreeUpFiles()
 
   const kind = list.picks.kind
   const kindSchema = schemas.find((s) => s.name === kind)
@@ -91,30 +97,46 @@ export function FilesTab({
     limit: list.size,
   })
   const rows = data?.items ?? []
-  const shas = [
-    ...new Set(rows.filter((r) => ticked.has(r.path)).map((r) => r.sha256)),
-  ]
-  // Ticked rows, else everything that matches.
-  const target: FilePick = shas.length ? { ...pick, shas } : pick
-  const what = shas.length
-    ? `${shas.length.toLocaleString()} ticked file${shas.length === 1 ? '' : 's'}`
-    : `all ${(data?.total ?? 0).toLocaleString()} matching`
-  const onServer = data?.summary.find((p) => p.kind === 'server')?.files ?? 0
+  const total = data?.total ?? 0
 
-  const free = useFreeUpFiles()
-  const qc = useQueryClient()
-  // Moving and downloading run as file jobs: progress in the status bar, and
-  // they carry on if the page is left.
-  const flow: FlowContext = { toast, qc, problem: () => undefined }
+  // The same ticks as the records list: rows, ranges, the page box, and "all N
+  // matching" (every file the filters match, on every page).
+  const picked = useBulkSelection(
+    rows.map((r) => r.path),
+    JSON.stringify([pick, order, list.page, list.size]),
+  )
+  const shas = [
+    ...new Set(
+      rows.filter((r) => picked.selected.has(r.path)).map((r) => r.sha256),
+    ),
+  ]
+  // "All matching" takes the filters as they are; ticks take those files.
+  const target: FilePick = picked.allMatching ? pick : { ...pick, shas }
+  const count = picked.count(total)
+  const what = `${count.toLocaleString()} file${count === 1 ? '' : 's'}`
+
+  function setKind(next: string) {
+    setSp(
+      (prev) => {
+        const out = new URLSearchParams(prev)
+        out.delete(`${NS}page`)
+        out.delete(`${NS}filter`)
+        if (next) out.set(`${NS}kind`, next)
+        else out.delete(`${NS}kind`)
+        return out
+      },
+      { replace: true },
+    )
+  }
 
   function setFilter(wire: FilterTreeWire | null) {
     setSp(
       (prev) => {
-        const next = new URLSearchParams(prev)
-        next.delete(`${NS}page`)
-        if (wire) next.set(`${NS}filter`, JSON.stringify(wire))
-        else next.delete(`${NS}filter`)
-        return next
+        const out = new URLSearchParams(prev)
+        out.delete(`${NS}page`)
+        if (wire) out.set(`${NS}filter`, JSON.stringify(wire))
+        else out.delete(`${NS}filter`)
+        return out
       },
       { replace: true },
     )
@@ -125,10 +147,7 @@ export function FilesTab({
       <Places
         summary={data?.summary ?? []}
         value={list.picks.place}
-        onChange={(place) => {
-          setTicked(new Set())
-          list.set({ place: place || undefined })
-        }}
+        onChange={(place) => list.set({ place: place || undefined })}
       />
 
       <div className="flex flex-wrap items-center gap-3">
@@ -143,20 +162,7 @@ export function FilesTab({
           size="sm"
           aria-label="Records of kind"
           value={kind}
-          onChange={(e) => {
-            setTicked(new Set())
-            setSp(
-              (prev) => {
-                const next = new URLSearchParams(prev)
-                next.delete(`${NS}page`)
-                next.delete(`${NS}filter`)
-                if (e.target.value) next.set(`${NS}kind`, e.target.value)
-                else next.delete(`${NS}kind`)
-                return next
-              },
-              { replace: true },
-            )
-          }}
+          onChange={(e) => setKind(e.target.value)}
         >
           <option value="">Every kind of record</option>
           {kinds.map((s) => (
@@ -175,151 +181,119 @@ export function FilesTab({
         />
       )}
 
-      <div
-        role="region"
-        aria-label="Act on files"
-        className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-canvas-subtle px-3 py-2 text-sm"
-      >
-        <span className="text-fg-muted">{what}:</span>
-        <Button
-          size="sm"
-          disabled={!data?.total}
-          onClick={() => setActing('move')}
-        >
-          Move to drive…
-        </Button>
-        {followsServer && (
+      <SelectionBar
+        selectedCount={picked.selected.size}
+        pageCount={rows.length}
+        total={total}
+        allMatching={picked.allMatching}
+        onSelectAllMatching={picked.selectAllMatching}
+        actions={
           <>
-            <Button
-              size="sm"
-              disabled={!onServer}
-              onClick={() => void downloadFiles(flow, target)}
-            >
-              Download to this computer
+            <Button size="sm" onClick={() => setActing('move')}>
+              Move to drive…
             </Button>
-            <Button
-              size="sm"
-              disabled={!data?.total}
-              onClick={() => setActing('free')}
-            >
-              Free up space…
-            </Button>
+            {followsServer && (
+              <>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    void downloadFiles(flow, target)
+                    picked.clear()
+                  }}
+                >
+                  Download to this computer
+                </Button>
+                <Button size="sm" onClick={() => setActing('free')}>
+                  Free up space…
+                </Button>
+              </>
+            )}
           </>
-        )}
-        {shas.length > 0 && (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setTicked(new Set())}
-          >
-            Clear ticks
-          </Button>
+        }
+      />
+
+      <div aria-busy={isFetching}>
+        <DataTable
+          layout="auto"
+          rows={rows}
+          getRowId={(r) => r.path}
+          isLoading={isLoading}
+          error={error ? errorMessage(error) : undefined}
+          emptyTitle="No files"
+          emptyMessage={
+            list.picks.place || list.q || filter
+              ? 'None match: clear a filter to see more.'
+              : 'No record here holds a file.'
+          }
+          sort={
+            list.sort
+              ? { key: list.sort.field, direction: list.sort.dir }
+              : undefined
+          }
+          onSortChange={list.toggleSort}
+          selection={{
+            ...picked.table,
+            allLabel: 'Tick every file on this page',
+            rowLabel: (id) => `Tick ${id}`,
+          }}
+          columns={[
+            {
+              key: 'name',
+              header: 'File',
+              sortable: true,
+              render: (f: ListedFile) => <FileCell file={f} />,
+            },
+            {
+              key: 'record',
+              header: 'Record',
+              sortable: true,
+              render: (f) => (
+                <Link
+                  to={`/records/${f.record_id}`}
+                  className="text-accent hover:underline"
+                >
+                  {f.record_name}
+                </Link>
+              ),
+            },
+            {
+              key: 'size',
+              header: 'Size',
+              align: 'right',
+              sortable: true,
+              render: (f) => formatSize(f.size),
+            },
+            {
+              key: 'place',
+              header: 'Where',
+              sortable: true,
+              render: (f) => (
+                <span
+                  className={
+                    f.place_kind === 'drive'
+                      ? 'text-fg'
+                      : f.place_kind === 'server'
+                        ? 'text-fg-muted'
+                        : 'text-attention'
+                  }
+                  title={f.reason ? `${f.reason} ${f.fix}`.trim() : undefined}
+                >
+                  {placeLabel({ place: f.place, kind: f.place_kind })}
+                </span>
+              ),
+            },
+          ]}
+        />
+        {total > list.size && (
+          <Pagination
+            page={list.page}
+            pageSize={list.size}
+            total={total}
+            onPage={(page) => list.set({ page })}
+            onPageSize={(size) => list.set({ size, page: 0 })}
+          />
         )}
       </div>
-
-      <DataTable
-        dense
-        rows={rows}
-        getRowId={(r) => r.path}
-        isLoading={isLoading}
-        error={error ? errorMessage(error) : undefined}
-        emptyTitle="No files"
-        emptyMessage={
-          list.picks.place || list.q || filter
-            ? 'None match: clear a filter to see more.'
-            : 'No record here holds a file.'
-        }
-        sort={
-          list.sort
-            ? { key: list.sort.field, direction: list.sort.dir }
-            : undefined
-        }
-        onSortChange={list.toggleSort}
-        className={isFetching ? 'opacity-80' : undefined}
-        selection={{
-          selected: ticked,
-          onToggle: (id) =>
-            setTicked((prev) => {
-              const next = new Set(prev)
-              if (next.has(id)) next.delete(id)
-              else next.add(id)
-              return next
-            }),
-          onSetMany: (ids, on) =>
-            setTicked((prev) => {
-              const next = new Set(prev)
-              for (const id of ids) {
-                if (on) next.add(id)
-                else next.delete(id)
-              }
-              return next
-            }),
-          onToggleAll: () =>
-            setTicked((prev) =>
-              rows.every((r) => prev.has(r.path))
-                ? new Set()
-                : new Set(rows.map((r) => r.path)),
-            ),
-          allLabel: 'Tick every file on this page',
-          rowLabel: (id) => `Tick ${id}`,
-        }}
-        columns={[
-          {
-            key: 'name',
-            header: 'File',
-            sortable: true,
-            render: (f: ListedFile) => <FileCell file={f} />,
-          },
-          {
-            key: 'record',
-            header: 'Record',
-            sortable: true,
-            render: (f) => (
-              <Link
-                to={`/records/${f.record_id}`}
-                className="text-accent hover:underline"
-              >
-                {f.record_name}
-              </Link>
-            ),
-          },
-          {
-            key: 'size',
-            header: 'Size',
-            align: 'right',
-            sortable: true,
-            render: (f) => formatSize(f.size),
-          },
-          {
-            key: 'place',
-            header: 'Where',
-            sortable: true,
-            render: (f) => (
-              <span
-                className={
-                  f.place_kind === 'drive'
-                    ? 'text-fg'
-                    : f.place_kind === 'server'
-                      ? 'text-fg-muted'
-                      : 'text-attention'
-                }
-                title={f.reason ? `${f.reason} ${f.fix}`.trim() : undefined}
-              >
-                {placeLabel({ place: f.place, kind: f.place_kind })}
-              </span>
-            ),
-          },
-        ]}
-      />
-      {data && data.total > list.size && (
-        <Pagination
-          page={list.page}
-          pageSize={list.size}
-          total={data.total}
-          onPage={(page) => list.set({ page })}
-          onPageSize={(size) => list.set({ size, page: 0 })}
-        />
-      )}
 
       {acting === 'move' && (
         <MoveDialog
@@ -329,22 +303,18 @@ export function FilesTab({
           onClose={() => setActing(null)}
           onMove={(volume) => {
             void moveFiles(flow, target, volume)
-            setTicked(new Set())
+            picked.clear()
             setActing(null)
           }}
         />
       )}
       {acting === 'free' && (
         <FreeUpDialog
-          what={
-            shas.length
-              ? what
-              : `these ${(data?.total ?? 0).toLocaleString()} files`
-          }
+          what={what}
           count={() => free.mutateAsync({ pick: target, dryRun: true })}
           run={() =>
             free.mutateAsync({ pick: target, dryRun: false }).then((r) => {
-              setTicked(new Set())
+              picked.clear()
               return r
             })
           }

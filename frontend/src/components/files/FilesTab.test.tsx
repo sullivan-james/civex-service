@@ -111,7 +111,7 @@ describe('FilesTab', () => {
     await userEvent.click(
       screen.getByRole('checkbox', { name: 'Tick Encounter 7/s2/table.txt' }),
     )
-    expect(screen.getByText('1 ticked file:')).toBeInTheDocument()
+    expect(screen.getByText('1 selected')).toBeInTheDocument()
     await userEvent.click(
       screen.getByRole('button', { name: 'Download to this computer' }),
     )
@@ -120,5 +120,35 @@ describe('FilesTab', () => {
         calls.find((c) => c.path === '/api/file-access/download')?.body,
       ).toMatchObject({ collection: 'hb', shas: ['bbb'], place: 'server' }),
     )
+  })
+
+  it('ticks beyond the page: every file the filters match', async () => {
+    const calls = fakeServer({
+      '/api/file-access/files': { ...LISTING, total: 120 },
+      '/api/file-access/download': { fetched: 60, absent: 0 },
+      '/api/schemas': [],
+      '/api/remote': { configured: true, serving: false },
+      '/api/store/volumes': [],
+    })
+    show()
+    await screen.findByText('s2')
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: 'Tick every file on this page' }),
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Select all 120 matching' }),
+    )
+    expect(screen.getByText('All 120 matching selected')).toBeInTheDocument()
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Download to this computer' }),
+    )
+    const sent = await waitFor(() => {
+      const c = calls.find((x) => x.path === '/api/file-access/download')
+      expect(c).toBeTruthy()
+      return c!.body
+    })
+    // The filters as they are, not the ticked rows of one page.
+    expect(sent).toMatchObject({ collection: 'hb', place: 'server' })
+    expect(sent).not.toHaveProperty('shas')
   })
 })

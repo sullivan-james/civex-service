@@ -38,6 +38,7 @@ import { DrillLinks } from './DrillLinks'
 import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
 import { SelectionBar } from './SelectionBar'
+import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { BulkRunWorkflow, bulkRunnable } from '../workflows/BulkRunWorkflow'
 import { FileAccessActions } from '../files/FileAccessActions'
 import { selectionFor } from '../../api/fileAccess'
@@ -46,7 +47,6 @@ import { describeDefinition } from '../../utils/exportBuilder'
 import { schemaTreeHasFiles } from '../../utils/hierarchy'
 import { useWorkflows } from '../../hooks/useWorkflows'
 import { useExplorer, type ExplorerScope } from './useExplorer'
-import { withRange } from '../../hooks/useRangeSelect'
 import { useCollection } from '../../hooks/useCollections'
 import { recordRecent } from '../../hooks/usePins'
 import { placeTarget, viewTarget } from '../../utils/navTargets'
@@ -107,21 +107,11 @@ export function RecordsExplorer({
   }, [x.viewsLoaded, x.activeView, x.hasSelection, patch])
 
   // --- selection (only where rows can be deleted)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [allMatching, setAllMatching] = useState(false)
-  const selectionKey = JSON.stringify([
-    listedName,
-    x.rootId,
-    x.query,
-    state.page,
-    state.pageSize,
-  ])
-  const [seenKey, setSeenKey] = useState(selectionKey)
-  if (selectionKey !== seenKey) {
-    setSeenKey(selectionKey)
-    setSelected(new Set())
-    setAllMatching(false)
-  }
+  const picked = useBulkSelection(
+    (x.page.data?.items ?? []).map((r) => r.id),
+    JSON.stringify([listedName, x.rootId, x.query, state.page, state.pageSize]),
+  )
+  const { selected, allMatching } = picked
   const [confirmDelete, setConfirmDelete] = useState(false)
   const deleteMany = useDeleteManyRecords(dataset ?? '')
   const deleteMatching = useDeleteMatchingRecords(dataset ?? '')
@@ -300,8 +290,7 @@ export function RecordsExplorer({
   function confirmBulkDelete() {
     const done = {
       onSuccess: () => {
-        setSelected(new Set())
-        setAllMatching(false)
+        picked.clear()
         setConfirmDelete(false)
       },
     }
@@ -587,11 +576,7 @@ export function RecordsExplorer({
             pageCount={rows.length}
             total={total}
             allMatching={allMatching}
-            onSelectAllMatching={() => setAllMatching(true)}
-            onClear={() => {
-              setSelected(new Set())
-              setAllMatching(false)
-            }}
+            onSelectAllMatching={picked.selectAllMatching}
             onDelete={() => setConfirmDelete(true)}
             deleting={deleteMany.isPending || deleteMatching.isPending}
             // Runs are queued for the records ticked, not for "all matching":
@@ -610,7 +595,7 @@ export function RecordsExplorer({
                   <BulkRunWorkflow
                     workflows={runnable}
                     recordIds={[...selected]}
-                    onStarted={() => setSelected(new Set())}
+                    onStarted={picked.clear}
                   />
                 )}
               </>
@@ -663,40 +648,7 @@ export function RecordsExplorer({
               recordLink={(r) => `/records/${r.id}`}
               sort={sort}
               onSortChange={toggleSort}
-              selection={
-                dataset
-                  ? {
-                      selected: allMatching
-                        ? new Set(rows.map((r) => r.id))
-                        : selected,
-                      onToggle: (id) => {
-                        setAllMatching(false)
-                        setSelected((prev) => {
-                          const next = new Set(prev)
-                          if (!next.delete(id)) next.add(id)
-                          return next
-                        })
-                      },
-                      onSetMany: (ids, on) => {
-                        // A shift-click range, from what is shown now (with "all
-                        // matching" the whole page is ticked).
-                        const shown = allMatching
-                          ? new Set(rows.map((r) => r.id))
-                          : selected
-                        setAllMatching(false)
-                        setSelected(withRange(shown, ids, on))
-                      },
-                      onToggleAll: () => {
-                        setAllMatching(false)
-                        setSelected(
-                          selected.size === rows.length
-                            ? new Set()
-                            : new Set(rows.map((r) => r.id)),
-                        )
-                      },
-                    }
-                  : undefined
-              }
+              selection={dataset ? picked.table : undefined}
               trailing={{
                 header: 'Contains',
                 render: (row) => (

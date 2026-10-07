@@ -1,18 +1,19 @@
 import type { ReactNode } from 'react'
 import { Button } from '../ui'
 
-/** Shown while rows are ticked. Ticking a whole page offers "select all N
- * matching", so a bulk action can cover every record the filters match, not
- * only the ones on screen -- and says so, with the real count. */
+/** Shown while rows are ticked (`useBulkSelection`). Ticking a whole page
+ * offers "select all N matching", so a bulk action can cover every row the
+ * filters match, not only the ones on screen -- and says so, with the real
+ * count. The page's own box clears it. Used by every paged list with bulk
+ * actions (records, files). */
 export function SelectionBar({
   selectedCount,
   pageCount,
   total,
   allMatching,
   onSelectAllMatching,
-  onClear,
   onDelete,
-  deleting,
+  deleting = false,
   actions,
 }: {
   selectedCount: number
@@ -20,9 +21,9 @@ export function SelectionBar({
   total: number
   allMatching: boolean
   onSelectAllMatching: () => void
-  onClear: () => void
-  onDelete: () => void
-  deleting: boolean
+  /** For a list whose rows can be deleted. */
+  onDelete?: () => void
+  deleting?: boolean
   /** Other things to do with the selection, before Delete. */
   actions?: ReactNode
 }) {
@@ -41,12 +42,16 @@ export function SelectionBar({
         </Button>
       )}
       {actions}
-      <Button variant="danger" size="sm" disabled={deleting} onClick={onDelete}>
-        {deleting ? 'Deleting…' : `Delete ${count.toLocaleString()}`}
-      </Button>
-      <Button size="sm" variant="ghost" onClick={onClear}>
-        Clear selection
-      </Button>
+      {onDelete && (
+        <Button
+          variant="danger"
+          size="sm"
+          disabled={deleting}
+          onClick={onDelete}
+        >
+          {deleting ? 'Deleting…' : `Delete ${count.toLocaleString()}`}
+        </Button>
+      )}
     </div>
   )
 }
