@@ -565,12 +565,16 @@ export function RecordsExplorer({
         )}
 
         {!x.page.error && (
-          <div className="flex flex-wrap items-center gap-3">
+          // The results: which records the filters above found, and whether
+          // to see them or their files. A rule sets them apart from the
+          // filters.
+          <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
             <p className="text-sm text-fg-muted" aria-live="polite">
               <span className="font-medium text-fg">
                 {total.toLocaleString()}
               </span>{' '}
               {listedLabel.toLowerCase()}
+              {total === 1 ? '' : 's'}
               {state.q && <> matching “{state.q}”</>}
             </p>
             <SegmentedControl

@@ -24,7 +24,7 @@ import {
   Button,
   Chip,
   DataTable,
-  ListToolbar,
+  MultiPick,
   Modal,
   ModalBody,
   ModalFooter,
@@ -58,9 +58,11 @@ export function FilesView({ selection }: { selection: FileSelection }) {
   const flow: FlowContext = { toast, qc, problem: () => undefined }
   const free = useFreeUpFiles()
 
+  // Kinds of file (file fields), several at once, kept in the address.
+  const chosenKinds = list.picks.kind ? list.picks.kind.split(',') : []
   const pick: FilePick = {
     ...selection,
-    fields: list.picks.kind ? [list.picks.kind] : selection.fields,
+    fields: chosenKinds.length ? chosenKinds : selection.fields,
     place: list.picks.place || undefined,
   }
   const order = list.sort
@@ -100,29 +102,32 @@ export function FilesView({ selection }: { selection: FileSelection }) {
 
   return (
     <div className="space-y-4">
-      {kinds.length > 1 && (
-        <ListToolbar
-          picks={[
-            {
-              label: 'Kind of file',
-              value: list.picks.kind,
-              options: [
-                { value: '', label: 'Kind of file' },
-                ...kinds.map((k) => ({
-                  value: k.field,
-                  label: `${kindLabel(k.field)} (${k.files.toLocaleString()})`,
-                })),
-              ],
-              onChange: (kind) => list.set({ kind: kind || undefined }),
-            },
-          ]}
-        />
-      )}
-      <Places
-        summary={data?.summary ?? []}
-        value={list.picks.place}
-        onChange={(place) => list.set({ place: place || undefined })}
-      />
+      {/* Which files: of what kind, and where. One row, then where they all
+          are as a bar; the table and what to do with it follow. */}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {kinds.length > 1 && (
+            <MultiPick
+              label="Kinds of file"
+              value={chosenKinds}
+              onChange={(next) =>
+                list.set({ kind: next.length ? next.join(',') : undefined })
+              }
+              options={kinds.map((k) => ({
+                value: k.field,
+                label: kindLabel(k.field),
+                hint: k.files.toLocaleString(),
+              }))}
+            />
+          )}
+          <Places
+            summary={data?.summary ?? []}
+            value={list.picks.place}
+            onChange={(place) => list.set({ place: place || undefined })}
+          />
+        </div>
+        <PlacesBar summary={data?.summary ?? []} />
+      </div>
 
       <SelectionBar
         selectedCount={picked.selected.size}
@@ -184,7 +189,9 @@ export function FilesView({ selection }: { selection: FileSelection }) {
               key: 'name',
               header: 'File',
               sortable: true,
-              render: (f: ListedFile) => <FileCell file={f} />,
+              render: (f: ListedFile) => (
+                <FileCell file={f} kind={kindLabel(f.field)} />
+              ),
             },
             {
               key: 'record',
@@ -268,7 +275,7 @@ export function FilesView({ selection }: { selection: FileSelection }) {
   )
 }
 
-function FileCell({ file }: { file: ListedFile }) {
+function FileCell({ file, kind }: { file: ListedFile; kind: string }) {
   const location = {
     volume: file.volume,
     state: file.state as never,
@@ -282,7 +289,7 @@ function FileCell({ file }: { file: ListedFile }) {
     fix: file.fix,
   }
   return (
-    <div className="min-w-0">
+    <div className="min-w-0" title={file.path}>
       <FileLink
         file={{
           sha256: file.sha256,
@@ -294,15 +301,13 @@ function FileCell({ file }: { file: ListedFile }) {
       >
         {file.filename}
       </FileLink>
-      <div className="truncate text-xs text-fg-subtle" title={file.path}>
-        {file.field} · {file.path}
-      </div>
+      <div className="text-xs text-fg-subtle">{kind}</div>
     </div>
   )
 }
 
-/** Where all of the files are, each place a filter: click one to list only
- * its files, click it again (or All) to list them all. */
+/** Where the files are, each place a filter: click one to list only its
+ * files, click it again (or All) to list them all. */
 function Places({
   summary,
   value,
@@ -315,15 +320,41 @@ function Places({
   if (summary.length === 0) return null
   const files = summary.reduce((n, p) => n + p.files, 0)
   const bytes = summary.reduce((n, p) => n + p.bytes, 0)
+  return (
+    <div className="flex flex-wrap gap-2" role="group" aria-label="Where">
+      <Chip selected={!value} onClick={() => onChange('')}>
+        All · {files.toLocaleString()} · {formatSize(bytes)}
+      </Chip>
+      {summary.map((p) => (
+        <Chip
+          key={`${p.kind}:${p.place}`}
+          selected={value === p.place}
+          onClick={() => onChange(value === p.place ? '' : p.place)}
+        >
+          {placeLabel(p)} · {p.files.toLocaleString()}
+          {p.kind !== 'server' && p.kind !== 'missing'
+            ? ` · ${formatSize(p.bytes)}`
+            : ''}
+        </Chip>
+      ))}
+    </div>
+  )
+}
+
+/** The same places as one bar, sized by bytes, with why a drive can't be
+ * read beneath it. */
+function PlacesBar({ summary }: { summary: PlaceSummary[] }) {
+  if (summary.length === 0) return null
+  const bytes = summary.reduce((n, p) => n + p.bytes, 0)
   const unreachable = summary.filter((p) => p.kind === 'unreachable')
   return (
-    <div className="space-y-2">
+    <>
       <div
         role="img"
         aria-label={summary
           .map((p) => `${placeLabel(p)}: ${p.files} files`)
           .join(', ')}
-        className="flex h-2 overflow-hidden rounded-full bg-canvas-inset"
+        className="flex h-1.5 overflow-hidden rounded-full bg-canvas-inset"
       >
         {summary.map((p) => (
           <div
@@ -341,29 +372,12 @@ function Places({
           />
         ))}
       </div>
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Where">
-        <Chip selected={!value} onClick={() => onChange('')}>
-          All · {files.toLocaleString()} · {formatSize(bytes)}
-        </Chip>
-        {summary.map((p) => (
-          <Chip
-            key={`${p.kind}:${p.place}`}
-            selected={value === p.place}
-            onClick={() => onChange(value === p.place ? '' : p.place)}
-          >
-            {placeLabel(p)} · {p.files.toLocaleString()}
-            {p.kind !== 'server' && p.kind !== 'missing'
-              ? ` · ${formatSize(p.bytes)}`
-              : ''}
-          </Chip>
-        ))}
-      </div>
       {unreachable.map((p) => (
         <p key={p.place} role="status" className="text-xs text-attention">
           {p.place}: {p.reason} {p.fix}
         </p>
       ))}
-    </div>
+    </>
   )
 }
 

@@ -152,13 +152,14 @@ describe('FilesView', () => {
     expect(sent).not.toHaveProperty('shas')
   })
 
-  it('narrows to one kind of file, counted for each kind', async () => {
+  it('narrows to kinds of file, several at once, counted for each kind', async () => {
     const calls = fakeServer({
       '/api/file-access/files': {
         ...LISTING,
         kinds: [
           { field: 'selection_table', files: 120, bytes: 0 },
           { field: 'contour_file', files: 64, bytes: 0 },
+          { field: 'audio', files: 3, bytes: 0 },
         ],
       },
       '/api/schemas': [],
@@ -166,19 +167,18 @@ describe('FilesView', () => {
       '/api/store/volumes': [],
     })
     show()
-    const kind = await screen.findByRole('combobox', { name: 'Kind of file' })
-    expect(
-      within(kind).getByRole('option', { name: 'Kind of file' }),
-    ).toBeInTheDocument()
-    await userEvent.selectOptions(kind, 'selection_table')
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Kinds of file: all/ }),
+    )
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: 'Selection Table (120)' }),
+    )
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Audio (3)' }))
     await waitFor(() =>
       expect(
         calls.filter((c) => c.path === '/api/file-access/files').slice(-1)[0]
           ?.body,
-      ).toMatchObject({ fields: ['selection_table'] }),
+      ).toMatchObject({ fields: ['selection_table', 'audio'] }),
     )
-    expect(
-      within(kind).getByRole('option', { name: 'Selection Table (120)' }),
-    ).toBeInTheDocument()
   })
 })
