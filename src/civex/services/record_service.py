@@ -10,6 +10,7 @@ from typing import Any, Callable, Iterator
 
 from civex.domain.file_refs import without_file_locations
 from civex.domain.dtos import (
+    OrphanDTO,
     DERIVED_FILE_KEYS,
     BlockerDTO,
     DatasetDTO,
@@ -2441,6 +2442,62 @@ class RecordService:
             above.append(parent)
             current = parent
         return list(reversed(above))
+
+    def deleted_above(self, record_id: str) -> list[RecordDTO]:
+        """For a live record, the deleted records directly above it, topmost
+        first and named; empty when what it sits under is live (or the record
+        is itself deleted). Such a record is out of sight -- nothing above it
+        lists it -- and an authority refuses it. It comes about from history
+        (a record brought back by itself before that was refused, a cascade
+        applied before cascades synced), never from an edit today."""
+        record = self._records.get_by_prefix(record_id, include_deleted=True)
+        if record is None:
+            raise NotFoundError(f"Record '{record_id}' not found")
+        if record.deleted_at is not None:
+            return []
+        return [self._with_names(r) for r in self._deleted_above(record)]
+
+    def restore_above(self, record_id: str) -> list[RecordDTO]:
+        """Bring back what a live record sits under that is deleted: each
+        deleted record directly above it, by itself, so their other children
+        stay deleted. Checked, in the history and synced like any restore.
+        Refused while what the topmost sits in (its collection, its schema) is
+        deleted, and when one would clash with a live record's unique key. The
+        one way an out-of-sight record is put back in place: the record page,
+        the project check and a refused change's review all use it."""
+        above = self.deleted_above(record_id)
+        if not above:
+            raise ValidationError("Nothing it sits under is deleted.")
+        plan = self.restore_plan(str(above[0].id))
+        if plan.blocked_by is not None and plan.blocked_by.kind != "record":
+            raise ValidationError(plan.blocked_message or "It can't come back yet.")
+        every = [a.id for a in above]
+        conflict = self._restore_conflict(every)
+        if conflict:
+            raise DuplicateRecordError(
+                conflict.message,
+                conflict.existing_id,
+                conflict.fields,
+                conflict.existing_name,
+            )
+        before = {r.id: self._snapshot(r) for r in self._records.list_by_ids(every)}
+        self._records.restore_many(every)
+        self._log_restored(every, before)
+        return [self.get(str(i)) for i in every]
+
+    def orphans(self, limit: int = 200) -> tuple[list[OrphanDTO], int]:
+        """Every live record that sits under a deleted one (see
+        `deleted_above`), each with what it sits under, at most `limit`; and how
+        many there are."""
+        found, total = self._records.live_under_deleted(limit)
+        out = [
+            OrphanDTO(
+                self._with_names(r),
+                [self._with_names(a) for a in self._deleted_above(r)],
+            )
+            for r in found
+        ]
+        return out, total
 
     def _deleted_record(self, record_id: str) -> RecordDTO:
         record = self._records.get_by_prefix(record_id, include_deleted=True)

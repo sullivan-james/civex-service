@@ -174,6 +174,12 @@ class ConflictResponse(BaseModel):
         description="The fields that attempt set, for showing it on the record: "
         "field_id, field_name, field_label, dtype, before, after and current.",
     )
+    sits_under: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="For a refused record that sits under deleted records here: "
+        "those records (id, schema_name, name), topmost first. `restore_above` "
+        "brings them back and sends the record again.",
+    )
 
 
 class ResolveRequest(BaseModel):
@@ -181,7 +187,9 @@ class ResolveRequest(BaseModel):
         description="`theirs` keeps what the authority has (or lets a refused change "
         "go); `mine` puts your value back as a new edit; `value` puts the one in "
         "`value`; `delete` deletes a record that was deleted there; `retry` sends a "
-        "refused change again from the record as it is now; `edited` closes a clash "
+        "refused change again from the record as it is now; `restore_above` brings back "
+        "the deleted records a refused record sits under, then sends it again; "
+        "`edited` closes a clash "
         "because the field was just set by hand on the record."
     )
     value: Any = Field(default=None, description="The value, for `take: value`.")

@@ -33,6 +33,10 @@ export interface CivexRecord {
   derived?: Record<string, unknown> | null
   /** Only on a single-record fetch: the parent chain, root first. */
   ancestors?: RecordRef[] | null
+  /** Only on a single-record fetch of a live record: the deleted records
+   * directly above it, topmost first. Not empty means it is out of sight:
+   * nothing above it lists it, and a sync server refuses it. */
+  deleted_above?: RecordRef[] | null
   /** Values this record still holds for fields deleted from its schema. They
    * come back in `data` when the field is restored. */
   deleted_fields?: DeletedFieldValue[] | null
@@ -62,6 +66,13 @@ export interface RecordRef {
   id: string
   schema_name: string
   natural_name: string | null
+}
+
+/** A live record that sits under a deleted one, and what it sits under. */
+export interface Orphan {
+  record: RecordRef
+  collection: string | null
+  above: RecordRef[]
 }
 
 /** One row of a record's "Referenced by": how many live records of one
@@ -201,6 +212,14 @@ export const recordsApi = {
   },
 
   restore: (id: string) => api.post<CivexRecord>(`/records/${id}/restore`, {}),
+  /** Live records under a deleted record, with what they sit under. */
+  orphans: (limit = 200) =>
+    api.get<{ total: number; items: Orphan[] }>(
+      `/records/orphans?limit=${limit}`,
+    ),
+  /** Bring back the deleted records a live record sits under, each by itself. */
+  restoreAbove: (id: string) =>
+    api.post<CivexRecord[]>(`/records/${id}/restore-above`, {}),
 
   /** Restore exactly these deleted records, not what was deleted alongside
    * them. The deleted records above a chosen one come back too (each by

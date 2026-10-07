@@ -173,7 +173,9 @@ def test_history_before_the_cutoff_is_removed_but_not_what_can_still_be_restored
     ctx.commit()
     left = ctx.history_svc.page(entity_id=survey["recs"][0].id, limit=50)
     assert {e.action for e in left} == {"create", "delete"}  # all it has, kept
-    assert ctx.history_svc.page(entity_id=survey["recs"][1].id, limit=50) == []
+    # A live record keeps its creation (and latest change) however old.
+    live = ctx.history_svc.page(entity_id=survey["recs"][1].id, limit=50)
+    assert [e.action for e in live] == ["create"]
     assert report.audit_entries > 0
 
     # Once it is gone for good, its history is no longer held back.
@@ -185,14 +187,36 @@ def test_history_before_the_cutoff_is_removed_but_not_what_can_still_be_restored
 
 
 def test_a_batch_with_nothing_left_is_removed_too(ctx, survey, make_record):
+    enc = survey["enc"]
     with ctx.history_svc.batch("import", "x.csv"):
-        make_record("humpback", "encounter", {"site": "a"})
+        ctx.record_svc.update(str(enc.id), {"site": "a"})
+    ctx.record_svc.update(str(enc.id), {"site": "b"})  # its latest, kept
     ctx.commit()
     assert ctx._session.query(AuditBatch).count() == 1
     report = service(ctx).run(RetentionCutoffs(audit_before=TOMORROW()), dry_run=False)
     ctx.commit()
     assert report.audit_batches == 1
     assert ctx._session.query(AuditBatch).count() == 0
+
+
+def test_a_live_record_keeps_its_creation_and_latest_change_however_old(
+    ctx, survey
+):
+    """Pruning by age once left a live record with no history at all: nothing
+    said where it came from, or how it came to be where it was."""
+    rec = survey["recs"][2]
+    for label in ("a", "b", "c"):
+        ctx.record_svc.update(str(rec.id), {"label": label})
+    ctx.commit()
+    svc = service(ctx)
+    preview = svc.run(RetentionCutoffs(audit_before=TOMORROW()))
+    assert preview.audit_kept_first_and_last > 0
+
+    svc.run(RetentionCutoffs(audit_before=TOMORROW()), dry_run=False)
+    ctx.commit()
+    left = ctx.history_svc.page(entity_id=rec.id, limit=50)  # newest first
+    assert [e.action for e in left] == ["update", "create"]
+    assert left[0].changes[0]["after"] == "c"  # the latest, not an older one
 
 
 def test_with_a_remote_history_not_yet_synced_is_kept(ctx, survey):

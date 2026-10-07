@@ -424,7 +424,8 @@ def resolve(
         help="'theirs' keeps what the authority has; 'mine' puts your value back as "
         "a new edit; 'value' puts the one given with --value; 'delete' deletes a "
         "record that was deleted there; 'retry' sends a refused change again from "
-        "the record as it is now.",
+        "the record as it is now; 'restore_above' brings back the deleted records "
+        "a refused record sits under, then sends it again.",
     ),
     value: str = typer.Option(
         None,
@@ -484,7 +485,7 @@ def resolve(
     c = _ctx()
     try:
         c.sync_svc.resolve_conflict(cid, take, value=_read_value(value), force=force)
-        if take == "retry":
+        if take in ("retry", "restore_above"):
             # Settled by the authority's answer, so ask for it now (as the app
             # does): it goes in, or it is refused again and says why.
             try:

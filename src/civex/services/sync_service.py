@@ -27,6 +27,7 @@ from civex.config import DOWNLOAD_MODES, Config, save_config
 from civex.domain import hlc
 from civex.domain.audit_diff import BEFORE, apply_delta, entry_snapshots
 from civex.domain.exceptions import (
+    NotFoundError,
     CivexError,
     ConflictMovedError,
     ValidationError,
@@ -204,6 +205,21 @@ class SyncService:
                 out.setdefault(c.op_id, []).append(c)
         return out
 
+    def _sits_under(self, c: SyncConflictDTO) -> list[dict[str, Any]]:
+        """For an open refusal of a live record here that sits under deleted
+        records: those records, topmost first (the server refuses such a record,
+        so they have to come back first). Empty otherwise."""
+        if c.kind != "rejected" or c.status != "open" or c.entity_type != "record":
+            return []
+        try:
+            above = self._records.deleted_above(str(c.entity_id))
+        except NotFoundError:
+            return []
+        return [
+            {"id": str(a.id), "schema_name": a.schema_name, "name": a.natural_name}
+            for a in above
+        ]
+
     def _describe(self, found: list[SyncConflictDTO]) -> list[SyncConflictDTO]:
         """Add what a row needs to be recognised and acted on: the record's name
         and where it is, the field's label and type, the value on the record now
@@ -226,9 +242,12 @@ class SyncService:
         out = []
         for c in found:
             takes = list(_takes_for(c))
+            under = self._sits_under(c)
+            if under and "retry" in takes:
+                takes.insert(takes.index("retry"), "restore_above")
             v = values.get((str(c.entity_id), _field_id(c) or ""))
             if v is None:
-                out.append(replace(c, takes=takes))
+                out.append(replace(c, takes=takes, sits_under=under))
                 continue
             current = without_file_locations(v.value) if c.field else None
             also = [
@@ -250,6 +269,7 @@ class SyncService:
                     and current != c.theirs,
                     record_deleted=v.record_deleted,
                     takes=takes,
+                    sits_under=under,
                     also_saved=also,
                     attempted=attempts[c.id][0],
                     changes=[
@@ -809,6 +829,7 @@ class SyncService:
                 )
                 if c.op_id != result.op_id
             ]
+            retried: list[uuid.UUID] = []
             if result.status == REJECTED:
                 if waiting:
                     # Refused again: the item already open says so (the
@@ -830,10 +851,14 @@ class SyncService:
                 self._repo.resolve_conflicts([c.id for c in waiting], "sent")
             else:
                 # A change sent again went in: its refusal is settled.
-                self._repo.resolve_conflicts(
-                    [c.id for c in waiting if c.resolution == "retrying"], "sent"
-                )
+                retried = [c.id for c in waiting if c.resolution == "retrying"]
+                self._repo.resolve_conflicts(retried, "sent")
             problems = result.conflicts
+            if result.status != REJECTED and retried:
+                # Sent again to bring it back (it was deleted on the server):
+                # being kept despite that delete is what was asked for, not
+                # something new to review.
+                problems = [p for p in problems if p.get("kind") != "edit_vs_delete"]
             if result.status == REJECTED:
                 report.rejected += 1
                 problems = [
@@ -1255,8 +1280,10 @@ class SyncService:
             raise ValidationError("That conflict is not open")
         # `edited` is not a choice to offer: the record page sends it once the
         # person has set the field themselves, so a clash is all it closes.
-        if take not in _takes_for(conflict) and not (
-            take == "edited" and conflict.kind == "conflict"
+        if (
+            take not in _takes_for(conflict)
+            and not (take == "edited" and conflict.kind == "conflict")
+            and not (take == "restore_above" and self._sits_under(conflict))
         ):
             raise ValidationError(f"A {conflict.kind} can't be settled with '{take}'")
         if take in ("mine", "value"):
@@ -1265,7 +1292,11 @@ class SyncService:
             )
         elif take == "delete":
             self._records.delete(str(conflict.entity_id))
-        elif take == "retry":
+        elif take in ("retry", "restore_above"):
+            if take == "restore_above":
+                # Refused because what it sits under is deleted: bring that
+                # back (its restores go first), then send the record again.
+                self._records.restore_above(str(conflict.entity_id))
             # Not settled yet: it is settled by the authority's answer (it goes
             # in, or the same item says why it was refused again).
             self._resend(conflict)
@@ -1442,6 +1473,9 @@ _RECORD_ONLY = frozenset({"mine", "value", "delete"})
 
 
 def _takes_for(conflict: SyncConflictDTO) -> tuple[str, ...]:
+    """What a row offers by its kind. `SyncService._describe` adds
+    `restore_above` for a refused record that sits under deleted records here,
+    which takes looking the record up."""
     if conflict.status == "open" and conflict.resolution == "retrying":
         return ("theirs",)  # on its way: only letting it go is left to choose
     takes = _TAKES.get(conflict.kind, ("theirs",))

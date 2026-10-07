@@ -215,6 +215,33 @@ describe('MergeView', () => {
     await waitFor(() => expect(posts[0].body).toMatchObject({ take: 'retry' }))
   })
 
+  it('offers to bring back what a refused record sits under, then send it', async () => {
+    show([
+      conflict('c1', {
+        kind: 'rejected',
+        field: null,
+        attempted: 'update',
+        message: 'The record it sits under was deleted on the server',
+        takes: ['theirs', 'restore_above', 'retry'],
+        sits_under: [
+          { id: 'p1', schema_name: 'Recording', name: '2026-11-06' },
+        ],
+        changes: [],
+      }),
+    ])
+    expect(
+      screen.getByText(
+        /sits under Recording 2026-11-06, which is deleted here too/,
+      ),
+    ).toBeInTheDocument()
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Restore 2026-11-06 and send' }),
+    )
+    await waitFor(() =>
+      expect(posts[0].body).toMatchObject({ take: 'restore_above' }),
+    )
+  })
+
   it('says a refusal sent again is on its way, and keeps it open', () => {
     show([
       conflict('c1', {

@@ -64,7 +64,7 @@ export interface SyncResult {
 /** How a conflict is settled. Which of these a row offers is the server's word
  * (`takes`), so this screen keeps no rule of its own. */
 export type ConflictTake =
-  'theirs' | 'mine' | 'value' | 'edited' | 'delete' | 'retry'
+  'theirs' | 'mine' | 'value' | 'edited' | 'delete' | 'retry' | 'restore_above'
 
 /** How a conflict ended: what a person chose, or what settled it by itself:
  * `sent` (a refused record went in once fixed), `replaced` (a later attempt
@@ -121,6 +121,9 @@ export interface SyncConflict {
   attempted: 'create' | 'update' | 'delete' | null
   /** ...and the fields it set, to show on the record itself. */
   changes: ConflictChange[]
+  /** For a refused record that sits under deleted records here: those records,
+   * topmost first. `restore_above` brings them back and sends it again. */
+  sits_under?: { id: string; schema_name: string; name: string | null }[]
 }
 
 /** One field a refused or colliding change set. */

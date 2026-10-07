@@ -102,6 +102,12 @@ def _print_report(report: RetentionReportDTO) -> None:
             f"[dim]Kept {report.audit_kept_unsynced} older history entr(ies): "
             "not yet synced.[/dim]"
         )
+    if report.audit_kept_first_and_last:
+        console.print(
+            f"[dim]Kept {report.audit_kept_first_and_last} older history "
+            "entr(ies): each thing's creation and latest change are kept however "
+            "old.[/dim]"
+        )
     for skipped in report.skipped:
         console.print(f"[warning]Could not delete {skipped}[/warning]")
 

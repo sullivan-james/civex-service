@@ -451,6 +451,10 @@ class SyncConflictDTO:
     # record page can show the change in place of describing it.
     attempted: str | None = None
     changes: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    # For a refused record that sits under deleted records here: those records
+    # ({id, schema_name, name}, topmost first), which `restore_above` brings
+    # back before sending it again.
+    sits_under: list[dict[str, Any]] = dataclasses.field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -484,6 +488,7 @@ class SyncConflictDTO:
             "also_saved": self.also_saved,
             "attempted": self.attempted,
             "changes": self.changes,
+            "sits_under": self.sits_under,
         }
 
 

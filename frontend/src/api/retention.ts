@@ -23,6 +23,8 @@ export interface RetentionReport {
   audit_kept_restorable: number
   /** Older history kept: it has not been pushed to the remote. */
   audit_kept_unsynced: number
+  /** Kept however old: each thing's creation and latest change. */
+  audit_kept_first_and_last?: number
   runs: number
   run_steps: number
   anything: boolean

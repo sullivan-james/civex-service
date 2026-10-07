@@ -143,6 +143,7 @@ class RetentionService:
         report.audit_entries = counted["entries"]
         report.audit_kept_restorable = counted["kept_restorable"]
         report.audit_kept_unsynced = counted["kept_unsynced"]
+        report.audit_kept_first_and_last = counted["kept_first_and_last"]
         if dry_run:
             return
         report.audit_entries, report.audit_batches = self._audit.prune(

@@ -909,6 +909,8 @@ class RetentionReportDTO:
     # not yet pushed to the remote.
     audit_kept_restorable: int = 0
     audit_kept_unsynced: int = 0
+    # Kept however old: each thing's creation and latest entry.
+    audit_kept_first_and_last: int = 0
     runs: int = 0
     run_steps: int = 0
 
@@ -933,6 +935,7 @@ class RetentionReportDTO:
             "audit_batches": self.audit_batches,
             "audit_kept_restorable": self.audit_kept_restorable,
             "audit_kept_unsynced": self.audit_kept_unsynced,
+            "audit_kept_first_and_last": self.audit_kept_first_and_last,
             "runs": self.runs,
             "run_steps": self.run_steps,
             "anything": self.anything,
@@ -1315,3 +1318,12 @@ class AnalyticsFilters:
     trigger: str | None = None
     entity_type: str | None = None
     action: str | None = None
+
+
+@dataclass
+class OrphanDTO:
+    """A live record that sits under a deleted one, and what it sits under
+    (the deleted records directly above it, topmost first)."""
+
+    record: RecordDTO
+    above: list[RecordDTO]

@@ -730,6 +730,20 @@ class LocalRecordRepository:
             )
         self._s.expire_all()
 
+    def live_under_deleted(self, limit: int) -> tuple[list[RecordDTO], int]:
+        """Live records whose parent record is deleted, oldest change first, at
+        most `limit`, and how many there are. Such a record is out of sight:
+        nothing above it lists it."""
+        parent = aliased(Record)
+        base = (
+            self._s.query(Record)
+            .join(parent, parent.id == Record.parent_record_id)
+            .filter(Record.deleted_at.is_(None), parent.deleted_at.is_not(None))
+        )
+        total = base.count()
+        rows = base.order_by(Record.updated_at, Record.id).limit(limit).all()
+        return [_to_dto(r) for r in rows], total
+
     def restore_many(self, ids: list[uuid.UUID]) -> None:
         for chunk in _chunks(ids):
             self._s.execute(

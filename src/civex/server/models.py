@@ -508,6 +508,19 @@ class RecordRef(BaseModel):
     natural_name: str | None
 
 
+class OrphanResponse(BaseModel):
+    record: RecordRef
+    collection: str | None = Field(description="The collection it is in.")
+    above: list[RecordRef] = Field(
+        description="The deleted records directly above it, topmost first."
+    )
+
+
+class OrphansResponse(BaseModel):
+    total: int = Field(description="How many live records sit under a deleted one.")
+    items: list[OrphanResponse] = Field(description="Up to `limit` of them.")
+
+
 class RestoreSelectedRequest(BaseModel):
     ids: list[str] = Field(
         max_length=5000, description="The deleted records to restore."
@@ -645,6 +658,13 @@ class RecordResponse(BaseModel):
         default=None,
         description="Only on a single-record fetch: the parent chain, root "
         "first, for breadcrumbs.",
+    )
+    deleted_above: list[RecordRef] | None = Field(
+        default=None,
+        description="Only on a single-record fetch of a live record: the deleted "
+        "records directly above it, topmost first. Not empty means it is out of "
+        "sight (nothing above it lists it); POST /records/{id}/restore-above "
+        "brings them back.",
     )
     deleted_fields: list[DeletedFieldValue] | None = Field(
         default=None,
@@ -1984,6 +2004,11 @@ class RetentionReportResponse(BaseModel):
     )
     audit_kept_unsynced: int = Field(
         description="Older history kept because it has not been synced yet."
+    )
+    audit_kept_first_and_last: int = Field(
+        default=0,
+        description="Older history kept because it is a thing's creation or its "
+        "latest entry, which are kept however old.",
     )
     runs: int
     run_steps: int

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
+    exists,
     String,
     and_,
     case,
@@ -16,7 +17,7 @@ from sqlalchemy import (
     select,
     text,
 )
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import aliased, Session
 
 from contextlib import contextmanager
 from typing import Iterator
@@ -602,10 +603,9 @@ class LocalAuditRepository:
             self._s.flush()
             self._drop_empty_batches()
 
-    def _prunable(self, before: datetime, protect_unsynced: bool) -> list:
-        """The conditions for an entry that may be removed: older than `before`,
-        not about something that can still be restored, and (with a remote) not
-        waiting to be synced."""
+    def _old_enough(self, before: datetime, protect_unsynced: bool) -> list:
+        """Older than `before`, not about something that can still be restored,
+        and (with a remote) not waiting to be synced."""
         conditions: list = [
             AuditLog.timestamp < before,
             not_(_now_is("deleted")),
@@ -613,6 +613,30 @@ class LocalAuditRepository:
         if protect_unsynced:
             conditions.append(AuditLog.sync_state != "pending")
         return conditions
+
+    def _prunable(self, before: datetime, protect_unsynced: bool) -> list:
+        """The conditions for an entry that may be removed: old enough, and
+        neither the creation nor the latest entry of a thing that still exists
+        (live or deleted). Those two are kept however old, so history always says who made a thing and what last
+        happened to it (pruning once left a live record with no history at
+        all, nothing to say how it came to be where it was). Each thing's
+        latest is found through `ix_audit_log_entity`."""
+        later = aliased(AuditLog)
+        return [
+            *self._old_enough(before, protect_unsynced),
+            or_(
+                # Gone for good: nothing is left to explain, so its tombstone
+                # goes by age like any entry.
+                _now_is("gone"),
+                and_(
+                    AuditLog.action != "create",
+                    exists().where(
+                        later.entity_id == AuditLog.entity_id,
+                        later.timestamp > AuditLog.timestamp,
+                    ),
+                ),
+            ),
+        ]
 
     def count_prunable(
         self, before: datetime, protect_unsynced: bool
@@ -625,12 +649,18 @@ class LocalAuditRepository:
             .filter(*self._prunable(before, protect_unsynced))
             .count()
         )
+        old_enough = (
+            self._s.query(AuditLog)
+            .filter(*self._old_enough(before, protect_unsynced))
+            .count()
+        )
         restorable = older.filter(_now_is("deleted")).count()
-        unsynced = older.count() - restorable - removable
+        unsynced = older.count() - restorable - old_enough
         return {
             "entries": removable,
             "kept_restorable": restorable,
             "kept_unsynced": max(unsynced, 0),
+            "kept_first_and_last": max(old_enough - removable, 0),
         }
 
     # -- converting whole-snapshot entries to deltas (`HistoryCompactionService`)

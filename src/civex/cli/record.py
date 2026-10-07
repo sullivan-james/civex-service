@@ -287,6 +287,57 @@ def record_restore(
         raise typer.Exit(1)
 
 
+@app.command("orphans")
+def record_orphans(
+    limit: int = typer.Option(200, help="Show at most this many."),
+) -> None:
+    """List live records that sit under a deleted record, so nothing above them
+    lists them, with what they sit under. Put one back in place with
+    `civex record restore-above <id>`, or delete it."""
+    ctx = _ctx()
+    try:
+        found, total = ctx.record_svc.orphans(limit)
+    finally:
+        ctx.close()
+    if not total:
+        console.print("No record sits under a deleted one.")
+        return
+    table = Table(title=f"{total} record(s) under a deleted record")
+    table.add_column("Record")
+    table.add_column("Under (deleted)")
+    for o in found:
+        table.add_row(
+            f"{o.record.schema_name} {o.record.natural_name or ''} "
+            f"[dim]{str(o.record.id)[:8]}[/dim]",
+            " › ".join(
+                f"{a.schema_name} {a.natural_name or ''} [dim]{str(a.id)[:8]}[/dim]"
+                for a in o.above
+            ),
+        )
+    console.print(table)
+
+
+@app.command("restore-above")
+def record_restore_above(
+    record_id: str = typer.Argument(..., help="Record ID or short prefix"),
+) -> None:
+    """Bring back what a live record sits under that is deleted: each deleted
+    record directly above it, by itself, so their other children stay deleted."""
+    ctx = _ctx()
+    try:
+        restored = ctx.record_svc.restore_above(record_id)
+        ctx.commit()
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    names = ", ".join(
+        f"{r.schema_name} {r.natural_name or str(r.id)[:8]}" for r in restored
+    )
+    console.print(f"[success]Restored {names}.[/success]")
+
+
 @app.command("purge")
 def record_purge(
     record_id: str = typer.Argument(..., help="Record ID or short prefix"),
