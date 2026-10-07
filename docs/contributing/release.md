@@ -84,9 +84,20 @@ has every file).
    for a pre-release tag. It comes after PyPI so a release page never offers
    a version pip can't get.
 
-`build-desktop.yml` runs on the same tags, builds the standalone apps, runs
-the same smoke test on each, and attaches them to the same release (marked a
-pre-release by the same rule).
+**desktop**, on Linux, macOS and Windows, beside **test**
+
+The desktop app is `desktop-launcher/civex_launcher.py`: a small program
+carrying `uv`, built with PyInstaller (`desktop-launcher/launcher.spec`). It
+doesn't contain civex: on first start it runs `uv tool install civex[desktop]`
+into a folder of its own, and it updates with `uv tool upgrade` when the app
+asks (`civex.updates`). The job builds it and runs it as a first start would
+(`--install-only`, installing the tested wheel through
+`CIVEX_LAUNCHER_SOURCE`), then runs the smoke test against the civex it
+installed. **publish** attaches the three downloads to the release, so it waits
+for this job too.
+
+A run started by hand (**Run workflow** in Actions) is a dry run: every build
+and test on that branch, and nothing published.
 
 ## Pre-releases
 

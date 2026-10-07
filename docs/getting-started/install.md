@@ -61,11 +61,30 @@ PostgreSQL driver, AI-assisted commands and telemetry. There's nothing to
 choose. (`civex[server]` and the other old extra names still install fine —
 they're now no-ops — so existing scripts and installs keep working.)
 
-The one optional extra is the desktop tray app, which pulls in
-platform-specific GUI packages:
+## The desktop app
+
+For people who'd rather not use a terminal at all, the desktop app opens civex
+in its own window with a project picker. Download it from the release page
+(`civex-windows.zip` or `civex-macos.dmg`) and open it.
+
+The first time it starts it sets civex up, which needs an internet connection
+and takes a minute or two: it downloads civex and the Python it runs on into a
+folder of its own (`%LOCALAPPDATA%\civex\app` on Windows,
+`~/Library/Application Support/civex/app` on macOS, `~/.local/share/civex/app`
+on Linux), separate from any civex you installed yourself. After that it starts
+straight away, and keeps itself up to date from **Settings → Updates**.
+
+!!! warning "Linux"
+    The desktop window doesn't open on Linux yet: it needs a GTK or Qt window
+    backend that isn't installed with it. The Linux download still installs
+    civex; use it from a terminal (`~/.local/share/civex/app/bin/civex serve
+    --open`) until it does.
+
+The desktop window can also be installed alongside the command line:
 
 ```bash
 uv tool install "civex[desktop]"
+civex-desktop
 ```
 
 Verify the install:
@@ -76,6 +95,11 @@ civex --help
 ```
 
 ## Updating
+
+In the app, **Settings → Updates** checks for a newer version and updates with
+one click: civex closes, installs it and starts again, and the page reloads.
+The status bar says when one is available. This works for the desktop app and
+for `civex serve` installed with uv, pipx or pip. From a terminal:
 
 ```bash
 civex update           # install the latest release

@@ -183,3 +183,13 @@ def test_pre_upgrade_commands(monkeypatch: pytest.MonkeyPatch) -> None:
         "allow",
         "civex",
     ]
+
+
+def test_repairing_a_uv_install_does_not_pin_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """uv keeps a tool to the requirement it was installed with, so a repair
+    with `==` would stop every later update."""
+    monkeypatch.setattr(update_mod.shutil, "which", lambda name: "/usr/bin/" + name)
+    cmd = update_mod.repair_command("uv", "1.3.0rc1")
+    assert cmd[-1] == "civex>=1.3.0rc1" and "--reinstall" in cmd
