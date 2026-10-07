@@ -41,6 +41,23 @@ def get(path: str) -> str:
         return r.read().decode()
 
 
+def stop(server: subprocess.Popen) -> None:
+    """Stop the server and everything it started. On Windows the `civex.exe`
+    an installer makes is a small launcher that runs Python as a child, so
+    stopping the launcher alone left the server running (and its log open,
+    which then can't be deleted)."""
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(server.pid)], capture_output=True
+        )
+    else:
+        server.terminate()
+    try:
+        server.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        server.kill()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("exe", type=Path)
@@ -85,11 +102,7 @@ def main() -> None:
             if "<title>civex</title>" not in get("/"):
                 sys.exit("The web UI isn't in the bundle.")
         finally:
-            server.terminate()
-            try:
-                server.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                server.kill()
+            stop(server)
     print("civex: init, schema, serve, API and UI all work")
 
 
