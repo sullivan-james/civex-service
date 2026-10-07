@@ -50,6 +50,12 @@ jobs:
       - name: Build executables
         run: pyinstaller civex.spec
 
+      # A bundle can build and still lack files read from disk at runtime, so
+      # run it: nothing is attached to a release unless this passes.
+      - name: Smoke-test the CLI binary
+        shell: bash
+        run: python scripts/smoke_frozen.py "dist/civex$([ "$RUNNER_OS" = Windows ] && echo .exe)"
+
       # ── macOS: wrap in a DMG ──────────────────────────────────────────────
       - name: Package DMG (macOS)
         if: runner.os == 'macOS'
