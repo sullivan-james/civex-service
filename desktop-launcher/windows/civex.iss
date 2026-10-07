@@ -28,6 +28,7 @@ DefaultDirName={localappdata}\Programs\civex
 DisableDirPage=auto
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
+; The release workflow names it for its version (iscc /F).
 OutputBaseFilename=civex-setup-windows
 SetupIconFile=..\assets\civex.ico
 UninstallDisplayIcon={app}\civex.exe

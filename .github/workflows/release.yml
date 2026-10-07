@@ -127,12 +127,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The download is civex-<version>-<this>.
           - os: ubuntu-latest
-            asset: civex-linux.tar.gz
+            download: linux.tar.gz
           - os: macos-latest
-            asset: civex-macos.dmg
+            download: macos.dmg
           - os: windows-latest
-            asset: civex-setup-windows.exe
+            download: windows-setup.exe
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -153,6 +154,18 @@ jobs:
         with:
           name: wheel
           path: dist
+
+      # Named for the civex inside, read off the wheel this run built: a
+      # release's version (2.0.0rc2), or a dry run's build (1.2.0.post120),
+      # so a test download can't be taken for a release.
+      - name: Name the download
+        shell: bash
+        run: |
+          wheel="$(basename dist/*.whl)"
+          version="${wheel#civex-}"
+          version="${version%%-*}"
+          echo "DOWNLOAD_VERSION=$version" >> "$GITHUB_ENV"
+          echo "DOWNLOAD=civex-$version-${{ matrix.download }}" >> "$GITHUB_ENV"
 
       # One app for Intel and Apple silicon: python.org's Python is universal2
       # (the runner's is arm64 only), and uv is joined from its two builds.
@@ -198,7 +211,7 @@ jobs:
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
-        run: tar -czf ${{ matrix.asset }} -C app-dist civex
+        run: tar -czf "$DOWNLOAD" -C app-dist civex
 
       # The window people know: the app beside a link to Applications.
       - name: Package (macOS)
@@ -207,7 +220,7 @@ jobs:
           mkdir dmg
           cp -R app-dist/civex.app dmg/
           ln -s /Applications dmg/Applications
-          hdiutil create -volname civex -srcfolder dmg -ov -format UDZO ${{ matrix.asset }}
+          hdiutil create -volname civex -srcfolder dmg -ov -format UDZO "$DOWNLOAD"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -215,8 +228,8 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
-          $version = if ($env:CIVEX_APP_VERSION) { $env:CIVEX_APP_VERSION } else { "0.0.0" }
-          & $iscc "/DAppVersion=$version" "/DAppSource=$PWD\app-dist\civex" "/O$PWD" desktop-launcher\windows\civex.iss
+          $name = [IO.Path]::GetFileNameWithoutExtension($env:DOWNLOAD)
+          & $iscc "/DAppVersion=$env:DOWNLOAD_VERSION" "/DAppSource=$PWD\app-dist\civex" "/O$PWD" "/F$name" desktop-launcher\windows\civex.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # Windows: run the installer as a person would (silently here), so what
@@ -230,7 +243,7 @@ jobs:
           $wheel = (Get-Item dist\*.whl).FullName -replace '\\', '/'
           $env:CIVEX_APP_HOME = "$env:RUNNER_TEMP\civex-app"
           $env:CIVEX_LAUNCHER_SOURCE = "civex[desktop] @ file:///$wheel"
-          Start-Process -Wait -FilePath .\${{ matrix.asset }} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+          Start-Process -Wait -FilePath ".\$env:DOWNLOAD" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
           $app = "$env:LOCALAPPDATA\Programs\civex\civex.exe"
           if (-not (Test-Path $app)) { throw "The installer didn't install $app" }
           if (-not (Test-Path "$env:CIVEX_APP_HOME\bin\civex.exe")) { throw "The installer didn't set civex up" }
@@ -285,8 +298,8 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: desktop-${{ runner.os }}
-          path: ${{ matrix.asset }}
+          name: ${{ env.DOWNLOAD }}
+          path: ${{ env.DOWNLOAD }}
           if-no-files-found: error
 
   publish:
@@ -305,7 +318,7 @@ jobs:
 
       - uses: actions/download-artifact@v7
         with:
-          pattern: desktop-*
+          pattern: civex-*
           path: desktop
           merge-multiple: true
 
@@ -318,7 +331,28 @@ jobs:
           packages-dir: dist/
           skip-existing: true
 
-      # After PyPI, so a release page never offers a version pip can't get.
+      # The downloads install civex from PyPI on first start, and a new version
+      # can take a minute or two to show in the index installers read. So the
+      # release (with them) is made only once PyPI serves it; if it never
+      # does, nothing is attached and the run says so.
+      - name: Wait until PyPI serves this version
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS -H "Accept: application/vnd.pypi.simple.v1+json" \
+                 "https://pypi.org/simple/civex/" \
+               | python3 -c 'import json, os, sys; sys.exit(os.environ["VERSION"] not in json.load(sys.stdin).get("versions", []))'; then
+              echo "PyPI serves civex $VERSION"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::PyPI hasn't served civex $VERSION after 10 minutes; the release and its downloads were not created."
+          exit 1
+
+      # Only after PyPI serves it, so a release page never offers a version
+      # an installer can't get.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:

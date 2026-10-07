@@ -68,7 +68,7 @@ in its own window with a project picker. Download it from the release page:
 
 === "Windows"
 
-    `civex-setup-windows.exe`. Run it: it installs for you only, so it doesn't
+    `civex-<version>-windows-setup.exe`. Run it: it installs for you only, so it doesn't
     ask for an administrator, and adds civex to the Start menu (and, if you
     tick it, the Desktop). Uninstall it from **Settings → Apps**.
 
@@ -77,7 +77,7 @@ in its own window with a project picker. Download it from the release page:
 
 === "macOS"
 
-    `civex-macos.dmg`, one download for Intel and Apple silicon Macs (macOS 11
+    `civex-<version>-macos.dmg`, one download for Intel and Apple silicon Macs (macOS 11
     or later). Open it and drag **civex** into **Applications**.
 
     The app isn't signed yet, so the first time you open it macOS says it

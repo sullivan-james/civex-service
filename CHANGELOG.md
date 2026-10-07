@@ -65,7 +65,7 @@ from the next tag forward.
   longer contains civex, so it never needs downloading again for a new
   version. Custom plugins work in it without anything else installed.
 - **The desktop app installs properly**: a Windows installer
-  (`civex-setup-windows.exe`: Start menu, uninstaller, no administrator
+  (`civex-<version>-windows-setup.exe`: Start menu, uninstaller, no administrator
   needed) and a macOS disk image with one app for Intel and Apple silicon
   Macs. Neither is signed yet; the install guide says how to open them.
 - **The desktop app's civex can be a terminal command**: the Windows
