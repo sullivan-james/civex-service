@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -56,6 +58,43 @@ def stop(server: subprocess.Popen) -> None:
         server.wait(timeout=15)
     except subprocess.TimeoutExpired:
         server.kill()
+    # Waiting for the launcher isn't waiting for the server it started: on
+    # Windows that one can still be letting go when the launcher has gone.
+    # Gone means its port no longer answers; still answering is a real
+    # failure, since the server didn't stop.
+    deadline = time.monotonic() + 15
+    while _answers():
+        if time.monotonic() > deadline:
+            sys.exit(
+                f"civex serve is still running on port {PORT} after being stopped."
+            )
+        time.sleep(0.2)
+
+
+def _answers() -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", PORT), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def remove(folder: str) -> None:
+    """Delete the temporary home and project. Windows can hold a stopped
+    process's folders for a moment, so try for a while; a folder it still
+    holds after that is reported, not a failure (every check has passed)."""
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            shutil.rmtree(folder)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as e:
+            if time.monotonic() > deadline:
+                print(f"warning: couldn't remove {folder}: {e}", file=sys.stderr)
+                return
+            time.sleep(0.5)
 
 
 def main() -> None:
@@ -64,7 +103,8 @@ def main() -> None:
     parser.add_argument("--expect-version")
     args = parser.parse_args()
     exe = args.exe.resolve()
-    with tempfile.TemporaryDirectory() as tmp:
+    tmp = tempfile.mkdtemp(prefix="civex-smoke-")
+    try:
         home, project = Path(tmp, "home"), Path(tmp, "project")
         home.mkdir()
         project.mkdir()
@@ -103,6 +143,8 @@ def main() -> None:
                 sys.exit("The web UI isn't in the bundle.")
         finally:
             stop(server)
+    finally:
+        remove(tmp)
     print("civex: init, schema, serve, API and UI all work")
 
 
