@@ -26,6 +26,19 @@ export interface ShortcutState {
   path: string | null
 }
 
+/** Whether the desktop app's `civex` can be typed in a terminal. */
+export interface CommandLineState {
+  /** Only the desktop app's civex; a uv, pipx or pip install already is one. */
+  available: boolean
+  on_path: boolean
+  /** The folder put on PATH (Windows) or the link made (macOS, Linux). */
+  where: string | null
+  /** Another civex a terminal would find first. */
+  shadowed_by: string | null
+  /** What is still to do; blank if nothing. */
+  note: string
+}
+
 /** Who changes made here are recorded as, for this user and project. */
 export interface Identity {
   name: string | null
@@ -38,6 +51,11 @@ export const settingsApi = {
   updateIdentity: (name: string | null) =>
     api.patch<Identity>('/settings/identity', { name }),
   getShortcut: () => api.get<ShortcutState>('/settings/shortcut'),
+  getCommandLine: () => api.get<CommandLineState>('/settings/command-line'),
+  addCommandLine: () =>
+    api.post<CommandLineState>('/settings/command-line', {}),
+  removeCommandLine: () =>
+    api.delete<CommandLineState>('/settings/command-line'),
   createShortcut: () => api.post<ShortcutState>('/settings/shortcut', {}),
   getMap: () => api.get<MapSettings>('/settings/map'),
   updateMap: (body: MapSettings) =>

@@ -94,6 +94,13 @@ straight away, and keeps itself up to date from **Settings → Updates**. On
 Windows the installer does this setup, so the first start opens straight into
 the app. Its logs are in the `logs` folder inside that folder.
 
+To use the app's civex in a terminal too, tick **Add the civex command to
+PATH** in the Windows installer (on by default), or use **Settings → Updates →
+Command line** in the app on any system: it adds the app's `civex` to your PATH
+on Windows, or links it into `~/.local/bin` on macOS and Linux. Open a new
+terminal afterwards. If you also installed civex with uv, the section says
+which copy a terminal would find first.
+
 !!! warning "Linux"
     The desktop window doesn't open on Linux yet: it needs a GTK or Qt window
     backend that isn't installed with it. The Linux download still installs

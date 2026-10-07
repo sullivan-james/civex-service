@@ -234,6 +234,9 @@ jobs:
           $app = "$env:LOCALAPPDATA\Programs\civex\civex.exe"
           if (-not (Test-Path $app)) { throw "The installer didn't install $app" }
           if (-not (Test-Path "$env:CIVEX_APP_HOME\bin\civex.exe")) { throw "The installer didn't set civex up" }
+          # "Add the civex command to PATH" is on by default.
+          $userPath = (Get-ItemProperty HKCU:\Environment).Path
+          if ($userPath -notlike "*\civex\app\bin*") { throw "The installer didn't put civex on PATH: $userPath" }
           "APP=$app" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       - name: Run it as a first start would, then use the civex it installed
@@ -277,6 +280,8 @@ jobs:
           # The uninstaller hands over to a copy of itself and finishes there.
           for ($i = 0; $i -lt 60 -and (Test-Path "$dir\civex.exe"); $i++) { Start-Sleep 1 }
           if (Test-Path "$dir\civex.exe") { throw "Uninstalling left $dir\civex.exe" }
+          $userPath = (Get-ItemProperty HKCU:\Environment).Path
+          if ($userPath -like "*\civex\app\bin*") { throw "Uninstalling left civex on PATH: $userPath" }
 
       - uses: actions/upload-artifact@v7
         with:

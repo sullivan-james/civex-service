@@ -1,4 +1,8 @@
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { settingsApi } from '../../api/settings'
 import type { UpdateAttempt, UpdateStatus } from '../../api/updates'
+import { errorMessage } from '../../lib/errors'
 import {
   usePreReleases,
   useUpdateStatus,
@@ -11,7 +15,75 @@ import {
   useRestartPhase,
   type RestartPhase,
 } from '../../utils/updateRestart'
-import { Button, Checkbox, Field, Skeleton, Spinner, Status } from '../ui'
+import {
+  Button,
+  Checkbox,
+  Field,
+  Skeleton,
+  Spinner,
+  Status,
+  Subheading,
+} from '../ui'
+
+/** The desktop app's civex as a terminal command: shown only in the desktop
+ * app (a uv, pipx or pip install already is one). */
+function CommandLine() {
+  const qc = useQueryClient()
+  const { data } = useQuery({
+    queryKey: ['command-line'],
+    queryFn: settingsApi.getCommandLine,
+  })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  if (!data?.available) return null
+
+  async function change(add: boolean) {
+    setBusy(true)
+    setError(null)
+    try {
+      const next = add
+        ? await settingsApi.addCommandLine()
+        : await settingsApi.removeCommandLine()
+      qc.setQueryData(['command-line'], next)
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const why = data.shadowed_by
+    ? `A terminal finds another civex first: ${data.shadowed_by}`
+    : data.note || undefined
+  return (
+    <div className="space-y-2">
+      <Subheading>Command line</Subheading>
+      {data.on_path ? (
+        <Status
+          tone={data.shadowed_by || data.note ? 'attention' : 'ok'}
+          why={why}
+        >
+          `civex` works in a terminal
+        </Status>
+      ) : (
+        <Status
+          tone="neutral"
+          why="Adds this app's civex to your PATH, for you only. Remove it here, or by uninstalling the app."
+        >
+          `civex` isn’t a terminal command yet
+        </Status>
+      )}
+      {error && (
+        <p role="alert" className="text-xs text-danger">
+          {error}
+        </p>
+      )}
+      <Button disabled={busy} onClick={() => void change(!data.on_path)}>
+        {data.on_path ? 'Remove from PATH' : 'Add to PATH'}
+      </Button>
+    </div>
+  )
+}
 
 function Availability({ status }: { status: UpdateStatus }) {
   if (status.error)
@@ -134,6 +206,8 @@ export default function UpdatesSection() {
           {isFetching ? 'Checking…' : 'Check again'}
         </Button>
       </div>
+
+      <CommandLine />
     </div>
   )
 }
