@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { SyncDevice } from '../../api/remote'
+import type { SyncDevice, SyncInvite } from '../../api/remote'
 import { useAuthority, useAuthorityActions } from '../../hooks/useRemote'
 import { errorMessage } from '../../lib/errors'
 import {
@@ -16,33 +16,46 @@ function when(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString() : 'never'
 }
 
-const COLUMNS: DataTableColumn<SyncDevice>[] = [
+const DEVICES: DataTableColumn<SyncDevice>[] = [
   { key: 'name', header: 'Device', render: (d) => d.name },
+  {
+    key: 'key',
+    header: 'Key',
+    render: (d) => <span className="font-mono">{d.fingerprint}</span>,
+  },
   { key: 'seen', header: 'Last synced', render: (d) => when(d.last_seen_at) },
   {
     key: 'state',
-    header: 'Token',
+    header: 'State',
     render: (d) => (d.revoked ? 'Revoked' : 'Active'),
   },
 ]
 
-/** This project as an authority: whether other copies may follow it, and the
- * devices issued a token. The same as `civex sync authority` and `civex sync
- * device`, through the same calls. */
+const INVITES: DataTableColumn<SyncInvite>[] = [
+  { key: 'name', header: 'Invited', render: (i) => i.name },
+  { key: 'until', header: 'Works until', render: (i) => when(i.expires_at) },
+]
+
+/** This project as an authority: whether other copies may follow it, the
+ * devices that joined and the invites waiting. The same as `civex sync
+ * authority` and `civex sync device`, through the same calls. */
 export function SyncServing() {
   const { data } = useAuthority()
-  const { setServing, addDevice, revokeDevice } = useAuthorityActions()
+  const { setServing, invite, cancelInvite, revokeDevice } =
+    useAuthorityActions()
   const [name, setName] = useState('')
-  const [issued, setIssued] = useState<{ name: string; token: string } | null>(
+  const [issued, setIssued] = useState<{ name: string; invite: string } | null>(
     null,
   )
   const [revoking, setRevoking] = useState<string | null>(null)
   if (!data) return null
-  const failure = setServing.error ?? addDevice.error ?? revokeDevice.error
+  const failure =
+    setServing.error ?? invite.error ?? cancelInvite.error ?? revokeDevice.error
 
   return (
     <Card
       title="Other devices following this project"
+      info="A device joins with an invite that works once, then signs in with a key that never leaves it."
       action={
         <Button
           size="sm"
@@ -55,16 +68,20 @@ export function SyncServing() {
       }
     >
       <div className="space-y-4 text-sm">
-        <p className="text-fg-muted">
-          {data.serving
-            ? 'Devices with a token can copy this project and keep in step with it while the app is running.'
-            : 'No device can follow this project. Accept devices to let other copies keep in step with this one.'}
-        </p>
+        {!data.serving && (
+          <p className="text-fg-muted">No device can follow this project.</p>
+        )}
+        {data.fingerprint && (
+          <p className="text-fg-muted">
+            This authority's key:{' '}
+            <span className="font-mono text-fg">{data.fingerprint}</span>
+          </p>
+        )}
         {data.devices.length > 0 && (
           <DataTable
-            columns={COLUMNS}
+            columns={DEVICES}
             rows={data.devices}
-            getRowId={(d) => d.name}
+            getRowId={(d) => `${d.name}-${d.created_at}`}
             dense
             actions={(d) =>
               d.revoked ? null : (
@@ -79,6 +96,23 @@ export function SyncServing() {
             }
           />
         )}
+        {data.invites.length > 0 && (
+          <DataTable
+            columns={INVITES}
+            rows={data.invites}
+            getRowId={(i) => i.name}
+            dense
+            actions={(i) => (
+              <Button
+                size="sm"
+                disabled={cancelInvite.isPending}
+                onClick={() => cancelInvite.mutate(i.name)}
+              >
+                Cancel
+              </Button>
+            )}
+          />
+        )}
         {data.serving && (
           <div className="flex items-end gap-2">
             <Field label="New device">
@@ -90,17 +124,17 @@ export function SyncServing() {
             </Field>
             <Button
               size="sm"
-              disabled={!name.trim() || addDevice.isPending}
+              disabled={!name.trim() || invite.isPending}
               onClick={() =>
-                addDevice.mutate(name.trim(), {
+                invite.mutate(name.trim(), {
                   onSuccess: (r) => {
-                    setIssued({ name: name.trim(), token: r.token })
+                    setIssued({ name: name.trim(), invite: r.invite })
                     setName('')
                   },
                 })
               }
             >
-              Issue a token
+              Invite
             </Button>
           </div>
         )}
@@ -110,16 +144,15 @@ export function SyncServing() {
             className="space-y-1 rounded border border-border p-3"
           >
             <p>
-              Token for <strong>{issued.name}</strong>. Copy it now: it is not
-              shown again. On that device, connect with this project's address
-              and this token.
+              Invite for <strong>{issued.name}</strong>. Copy it now: it is not
+              shown again, and it works once.
             </p>
             <code className="block break-all font-mono text-xs">
-              {issued.token}
+              {issued.invite}
             </code>
             <Button
               size="sm"
-              onClick={() => void navigator.clipboard?.writeText(issued.token)}
+              onClick={() => void navigator.clipboard?.writeText(issued.invite)}
             >
               Copy
             </Button>
@@ -134,7 +167,7 @@ export function SyncServing() {
       {revoking && (
         <ConfirmDialog
           title={`Revoke ${revoking}?`}
-          body="Its token stops working at once. Changes it has not sent stay on that device."
+          body="It can't sync from now on. Changes it has not sent stay on that device."
           confirmLabel="Revoke"
           variant="danger"
           isPending={revokeDevice.isPending}

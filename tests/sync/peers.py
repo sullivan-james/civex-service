@@ -4,16 +4,25 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from civex import keys, user_state
 from civex.domain.sync import (
     ENTITY_ORDER,
+    PROTOCOL_MAX,
+    DeviceCredentials,
+    Joined,
     OpResult,
+    Principal,
     PushResult,
     SyncEntry,
     SyncError,
+    session_answer,
+    session_request,
     snapshot_cursor,
 )
 
@@ -49,22 +58,28 @@ def push(
 ) -> PushResult:
     """Send everything `device` has not sent, to `authority`, and record the
     answers on the device, as the client does."""
-    found = (
-        authority.sync_repo.device_named(name)
-        or authority.authority_svc.add_device(name)[0]
-    )
     entries = [
         SyncEntry.from_dict(wire(e.to_dict()))
         for e in device.sync_repo.pending_entries(1000)
     ]
     result = authority.authority_svc.push(
-        found, device_id or device_uuid(name), entries
+        principal(authority, name, device_id), entries
     )
     authority.commit()
     result = PushResult.from_dict(wire(result.to_dict()))
     device.sync_repo.mark_sent(result.results)
     device.commit()
     return result
+
+
+def principal(authority, name: str, device_id: str | None = None) -> Principal:
+    """The device called `name` as the authority's authenticator would prove
+    it: allowed (given a token) the first time it is asked for."""
+    device_id = device_id or device_uuid(name)
+    found = authority.sync_repo.device_named(name) or authority.sync_repo.add_device(
+        name, device_id, keys.public_of(keys.new_private_key())
+    )
+    return Principal(found.name, found.id, device_id)
 
 
 def statuses(result: PushResult) -> list[str]:
@@ -85,18 +100,57 @@ def new_id() -> str:
 
 class Loopback:
     """A transport that calls an authority in this process, carrying real JSON
-    both ways, as a device on a network would see it."""
+    both ways, as a device on a network would see it. It joins and signs in as
+    the HTTP transport does: with the device's key, checking the authority's
+    signature, and it is refused once the device is revoked."""
 
-    def __init__(self, authority, token: str, device_id: str) -> None:
+    def __init__(self, authority, credentials: DeviceCredentials) -> None:
         self._authority = authority
-        self._token = token
-        self._device_id = device_id
+        self._credentials = credentials
+        self._token: str | None = None
         self.calls: list[str] = []
+
+    def join(self, invite):
+        self.calls.append("join")
+        creds = self._credentials
+        joined = self._authority.device_keys.join(
+            invite, creds.device_id, keys.public_of(creds.private_key)
+        )
+        self._authority.commit()
+        joined = Joined.from_dict(wire(joined.to_dict()))
+        self._credentials = replace(creds, authority_key=joined.authority_key)
+        return joined
 
     def _svc(self):
         svc = self._authority.authority_svc
-        self._device = svc.authenticate(self._token, self._device_id)
+        if self._token is not None:
+            try:
+                self._device = svc.authenticate(self._token)
+                return svc
+            except SyncError:  # no longer good: sign in again, as HTTP does
+                self._token = None
+        self._sign_in()
+        self._device = svc.authenticate(self._token)
         return svc
+
+    def _sign_in(self) -> None:
+        creds = self._credentials
+        if self._token is None:
+            if not creds.authority_key:
+                raise SyncError("Not joined", retryable=False)
+            at = int(time.time())
+            signature = keys.sign(
+                creds.private_key,
+                session_request(creds.authority_key, creds.device_id, at),
+            )
+            grant = self._authority.device_keys.start_session(
+                creds.device_id, at, signature
+            )
+            self._authority.commit()
+            assert keys.verifies(
+                creds.authority_key, session_answer(signature), grant.signature
+            )
+            self._token = grant.token
 
     def _done(self, value):
         self._authority.commit()
@@ -106,7 +160,8 @@ class Loopback:
         from civex.domain.sync import Hello
 
         self.calls.append("hello")
-        return Hello.from_dict(self._done(self._svc().hello(self._device).to_dict()))
+        hello = self._svc().hello(self._device, PROTOCOL_MAX)
+        return Hello.from_dict(self._done(hello.to_dict()))
 
     def push(self, entries):
         from civex.domain.sync import PushResult
@@ -114,7 +169,7 @@ class Loopback:
         self.calls.append("push")
         svc = self._svc()
         sent = [SyncEntry.from_dict(wire(e.to_dict())) for e in entries]
-        result = svc.push(self._device, self._device_id, sent)
+        result = svc.push(self._device, sent)
         return PushResult.from_dict(self._done(result.to_dict()))
 
     def feed(self, after, limit):
@@ -210,52 +265,62 @@ class AsDevice:
 
 
 def device(project, authority, name, *, flaky: bool = False):
-    """A new, empty project that syncs to `authority` over a loopback. Returns
-    (context, transport) where the transport is the Flaky wrapper if asked."""
+    """A new, empty project that syncs to `authority` over a loopback, invited
+    as `name`. The transport is the Flaky wrapper if asked."""
     ctx = project(name)
-    _, token = authority.authority_svc.add_device(name)
+    _, invite = authority.device_keys.invite(name)
     authority.commit()
-    holder: dict = {}
-
-    def factory(url, tok, device_id):
-        # One transport per device id, so a fault planned on it outlives the
-        # service asking for a fresh one each time it syncs.
-        if holder.get("device_id") != device_id:
-            inner = Loopback(authority, tok, device_id)
-            holder["inner"] = inner
-            holder["transport"] = Flaky(inner) if flaky else inner
-            holder["device_id"] = device_id
-        return holder["transport"]
-
-    ctx.sync_svc._make_transport = factory
+    ctx._holder = {}  # type: ignore[attr-defined]
+    _use(ctx, authority, flaky)
     root = ctx.sync_svc._config.project_root
     ctx.sync_svc = AsDevice(ctx.sync_svc, root.parent / f"{name}-user-state.toml")
-    ctx._token = token  # type: ignore[attr-defined]
-    ctx._holder = holder  # type: ignore[attr-defined]
+    ctx._invite = invite  # type: ignore[attr-defined]
     return ctx
 
 
-def follow(ctx, other, name):
-    """Point the device `ctx` (made by `device`) at another authority, with a
-    token of its own there, as a person moving to a new server would."""
-    _, token = other.authority_svc.add_device(name)
-    other.commit()
+def _use(ctx, authority, flaky: bool = False) -> None:
     holder = ctx._holder
-    holder.clear()
 
-    def factory(url, tok, device_id):
-        if holder.get("device_id") != device_id:
-            holder["transport"] = holder["inner"] = Loopback(other, tok, device_id)
-            holder["device_id"] = device_id
+    def factory(url, credentials):
+        # One transport per device, so a fault planned on it outlives the
+        # service asking for a fresh one each time it syncs.
+        if holder.get("device_id") != credentials.device_id:
+            inner = Loopback(authority, credentials)
+            holder["inner"] = inner
+            holder["transport"] = Flaky(inner) if flaky else inner
+            holder["device_id"] = credentials.device_id
         return holder["transport"]
 
-    # The service itself, not the AsDevice wrapper around it.
-    object.__getattribute__(ctx.sync_svc, "_svc")._make_transport = factory
-    ctx._token = token
+    service = ctx.sync_svc
+    if isinstance(service, AsDevice):  # the service itself, not the wrapper
+        service = object.__getattribute__(service, "_svc")
+    service._make_transport = factory
 
 
-def connect(ctx, authority_url: str = "http://authority.test") -> str:
-    return ctx.sync_svc.connect(authority_url, ctx._token)
+def follow(ctx, other, name):
+    """Point the device `ctx` (made by `device`) at another authority, with an
+    invite of its own there, as a person moving to a new server would."""
+    _, invite = other.device_keys.invite(name)
+    other.commit()
+    ctx._holder.clear()
+    _use(ctx, other)
+    ctx._invite = invite
+
+
+def connect(ctx, authority_url: str = "https://authority.test") -> str:
+    """Connect as a person would: with the invite the first time, and without
+    once this computer has joined that address."""
+    state = object.__getattribute__(ctx.sync_svc, "_state")
+    previous = os.environ.get("CIVEX_USER_STATE")
+    os.environ["CIVEX_USER_STATE"] = str(state)
+    try:
+        joined = user_state.authority_for(authority_url) is not None
+    finally:
+        if previous is None:
+            os.environ.pop("CIVEX_USER_STATE", None)
+        else:
+            os.environ["CIVEX_USER_STATE"] = previous
+    return ctx.sync_svc.connect(authority_url, None if joined else ctx._invite)
 
 
 def flaky(ctx) -> Flaky:

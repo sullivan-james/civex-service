@@ -117,8 +117,8 @@ export function useConnectRemote() {
   const refresh = useRefreshing()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ url, token }: { url: string; token?: string }) =>
-      remoteApi.connect(url, token),
+    mutationFn: ({ url, invite }: { url: string; invite?: string }) =>
+      remoteApi.connect(url, invite),
     onSuccess: () => {
       refresh()
       qc.invalidateQueries()
@@ -231,8 +231,12 @@ export function useAuthorityActions() {
       mutationFn: remoteApi.setServing,
       onSuccess: settle,
     }),
-    addDevice: useMutation({
-      mutationFn: remoteApi.addDevice,
+    invite: useMutation({
+      mutationFn: remoteApi.invite,
+      onSuccess: settle,
+    }),
+    cancelInvite: useMutation({
+      mutationFn: remoteApi.cancelInvite,
       onSuccess: settle,
     }),
     revokeDevice: useMutation({

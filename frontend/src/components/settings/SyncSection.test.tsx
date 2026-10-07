@@ -82,7 +82,12 @@ beforeEach(() => {
         })
       if (url.pathname === '/api/remote/files/c1') return json(files)
       if (url.pathname === '/api/remote/authority')
-        return json({ serving: false, devices: [] })
+        return json({
+          serving: false,
+          fingerprint: null,
+          devices: [],
+          invites: [],
+        })
       if (url.pathname.endsWith('/resolve')) {
         conflicts = []
         status = { ...status, open_conflicts: 0 }
@@ -112,7 +117,7 @@ function renderSection() {
 }
 
 describe('SyncSection', () => {
-  it('connects with an address and a token', async () => {
+  it('connects with an address and an invite', async () => {
     renderSection()
     const connect = await screen.findByRole('button', { name: 'Connect' })
     expect(connect).toBeDisabled()
@@ -120,13 +125,13 @@ describe('SyncSection', () => {
       screen.getByLabelText('Authority address'),
       'https://civex.example.com',
     )
-    await userEvent.type(screen.getByLabelText('Device token'), 'secret')
+    await userEvent.type(screen.getByLabelText('Invite'), 'civex_inv_x')
     await userEvent.click(connect)
     await waitFor(() =>
       expect(calls.find((c) => c.path === '/api/remote/connect')?.body).toEqual(
         {
           url: 'https://civex.example.com',
-          token: 'secret',
+          invite: 'civex_inv_x',
         },
       ),
     )
@@ -238,7 +243,7 @@ describe('copying from the server', () => {
     )
   })
 
-  it('offers to try again when the copy stopped, without asking for the token', async () => {
+  it('offers to try again when the copy stopped, without asking for an invite', async () => {
     status = {
       ...base,
       configured: true,

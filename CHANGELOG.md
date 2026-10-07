@@ -21,7 +21,7 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
-## Unreleased — syncing between machines
+## v1.2.1 — syncing between machines, updates from the app (2026-10-07)
 
 ### Breaking
 
@@ -38,8 +38,19 @@ from the next tag forward.
   after changes, on an interval, backing off when the authority is unreachable.
   Settings → Sync connects, shows status, syncs now, pauses and settles
   conflicts; the status bar shows a failing or waiting sync.
-- `civex sync authority enable` + `civex sync device add` turn a server into an
+- `civex sync authority enable` + `civex sync device invite` turn a server into an
   authority; remote hosts reach only `/api/sync/v1/`.
+- **Devices join by invite and sign in with a key.** An invite works once and
+  expires (24 hours by default). The device makes a key of its own, which never
+  leaves it, and signs in for a session of a few minutes; a server that isn't the
+  one it joined is refused before anything is sent. `civex sync connect --invite`,
+  `civex sync device invite|list|cancel|revoke`; Settings → Sync. Adds the
+  `cryptography` dependency and migration `a8c4e2f6b1d9`.
+- `civex serve --sync-only` serves only the sync API, for an authority behind an
+  HTTPS proxy. Devices connect over `https://` only (`http://` for this computer).
+- Sync protocol 2. A device and the authority use the newest version both speak,
+  and one that can't says which side to update.
+- Invites start with `civex_inv_`, recognised by gitleaks and secret scanners.
 - **Update from the app** (Settings → Updates, and a notice in the status bar
   when a newer version is out): civex closes, installs the new version and
   starts again, reopening the page. It works for the desktop app and for
@@ -55,16 +66,6 @@ from the next tag forward.
   version. Custom plugins work in it without anything else installed.
 - Install with `uv tool install civex`, which needs no Python on the computer.
 
-### Fixed
-
-- The desktop downloads couldn't create a project (`civex init` failed: the
-  database migrations were left out of the bundle). Every release is now
-  installed and run on Linux, macOS and Windows before it is published.
-- After `civex update` reinstalled missing packages for a uv install, later
-  updates did nothing: the repair pinned the version (`==`).
-
-## v1.2.1 — history records every change (2026-10-05)
-
 ### Fixes
 
 - **Reordering a schema's fields now appears in history.** It wrote no entry,
@@ -75,6 +76,11 @@ from the next tag forward.
   A schema's record-name template, or a file field's download-name template,
   that used the field was updated without an entry; each template changed is
   now an edit of its schema or field in history.
+- **The desktop downloads couldn't create a project** (`civex init` failed: the
+  database migrations were left out of the bundle). Every release is now
+  installed and run on Linux, macOS and Windows before it is published.
+- After `civex update` reinstalled missing packages for a uv install, later
+  updates did nothing: the repair pinned the version (`==`).
 
 A new test (`tests/services/test_audit_replay.py`) does everything a person can
 do to schemas, fields, collections, views and records and checks that the last

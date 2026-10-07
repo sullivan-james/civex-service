@@ -4,8 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from civex.domain.sync import SyncError
-from .peers import by_status, device_uuid, join, push, snapshots, statuses
+from civex.domain.sync import PROTOCOL_MAX
+from .peers import (
+    by_status,
+    device_uuid,
+    join,
+    principal,
+    push,
+    snapshots,
+    statuses,
+)
 
 
 @pytest.fixture()
@@ -59,10 +67,10 @@ def test_sending_the_same_changes_twice_does_nothing_more(project):
         SyncEntry.from_dict(wire(e.to_dict()))
         for e in laptop.sync_repo.pending_entries(10)
     ]
-    device = authority.authority_svc.add_device("laptop")[0]
-    first = authority.authority_svc.push(device, device_uuid("d1"), entries)
+    device = principal(authority, "laptop", device_uuid("d1"))
+    first = authority.authority_svc.push(device, entries)
     authority.commit()
-    again = authority.authority_svc.push(device, device_uuid("d1"), entries)
+    again = authority.authority_svc.push(device, entries)
     authority.commit()
 
     assert [r.to_dict() for r in again.results] == [r.to_dict() for r in first.results]
@@ -263,34 +271,18 @@ def test_the_authoritys_own_edits_join_the_feed_in_the_order_made(world):
     assert [e.hub_seq for e in page.entries] == sorted(e.hub_seq for e in page.entries)
 
 
-def test_a_token_works_until_revoked_and_belongs_to_one_device(project):
-    authority = project("authority")
-    svc = authority.authority_svc
-    device, token = svc.add_device("lab-laptop")
-    assert svc.authenticate(token, device_uuid("dev-1")).name == "lab-laptop"
-    with pytest.raises(SyncError, match="another device"):
-        svc.authenticate(token, device_uuid("dev-2"))
-    with pytest.raises(SyncError, match="not valid"):
-        svc.authenticate("wrong", device_uuid("dev-1"))
-    assert svc.revoke_device("lab-laptop") is True
-    with pytest.raises(SyncError, match="revoked"):
-        svc.authenticate(token, device_uuid("dev-1"))
-    with pytest.raises(Exception):
-        svc.add_device("lab-laptop") and svc.add_device("lab-laptop")
-
-
 def test_a_new_authority_is_empty_until_data_arrives_and_remembers_who_brought_it(
     project,
 ):
     authority, laptop = project("authority"), project("laptop")
-    device, _ = authority.authority_svc.add_device("laptop")
-    assert authority.authority_svc.hello(device).empty is True
+    device = principal(authority, "laptop")
+    assert authority.authority_svc.hello(device, PROTOCOL_MAX).empty is True
     laptop.schema_svc.create("thing")
     laptop.commit()
     push(authority, laptop, "laptop", device_id=device_uuid("laptop"))
-    hello = authority.authority_svc.hello(device)
+    hello = authority.authority_svc.hello(device, PROTOCOL_MAX)
     assert hello.empty is False and hello.seeded_by == device_uuid("laptop")
-    assert hello.protocol_version == 1
+    assert hello.protocol_version == PROTOCOL_MAX
 
 
 def test_a_joining_device_reads_each_kind_in_pages_with_the_head_taken_first(world):
@@ -308,15 +300,14 @@ def _pending(device):
     from civex.domain.sync import SyncEntry
     from .peers import wire
 
-    return [SyncEntry.from_dict(wire(e.to_dict())) for e in device.sync_repo.pending_entries(50)]
+    return [
+        SyncEntry.from_dict(wire(e.to_dict()))
+        for e in device.sync_repo.pending_entries(50)
+    ]
 
 
 def _send(authority, entries, name="phone"):
-    found = (
-        authority.sync_repo.device_named(name)
-        or authority.authority_svc.add_device(name)[0]
-    )
-    result = authority.authority_svc.push(found, device_uuid(name), entries)
+    result = authority.authority_svc.push(principal(authority, name), entries)
     authority.commit()
     return result
 
@@ -343,7 +334,10 @@ def test_a_value_that_is_not_an_id_is_refused_not_a_server_error(world):
     phone.record_svc.update(str(record.id), {"site": "a", "depth": 2.0})
     phone.commit()
     (entry,) = _pending(phone)
-    entry.delta = {**entry.delta, "parent_record_id": {"before": None, "after": "not-a-uuid"}}
+    entry.delta = {
+        **entry.delta,
+        "parent_record_id": {"before": None, "after": "not-a-uuid"},
+    }
 
     result = _send(authority, [entry])
 
@@ -493,3 +487,25 @@ def test_editing_a_record_that_already_clashes_is_not_refused_over_the_old_clash
 
     assert "rejected" not in statuses(result)
     assert head(authority, dup.id)["depth"] == 3.0
+
+
+def test_a_policy_decides_what_a_caller_may_change(project, monkeypatch):
+    """Where a hub says what each person may change: a refusal is answered as
+    any change that breaks a rule is, and the rest of the push goes in."""
+    authority, laptop = project("authority"), project("laptop")
+    laptop.schema_svc.create("thing")
+    laptop.dataset_svc.create("study")
+    laptop.commit()
+
+    class NoCollections:
+        def refuses(self, who, entry):
+            if entry.entity_type == "dataset":
+                return f"{who.name} may not change collections"
+            return None
+
+    monkeypatch.setattr(authority.authority_svc, "_policy", NoCollections())
+    result = push(authority, laptop, "laptop")
+    assert statuses(result) == ["applied", "rejected"]
+    assert by_status(result, "rejected")[0].message == (
+        "laptop may not change collections"
+    )

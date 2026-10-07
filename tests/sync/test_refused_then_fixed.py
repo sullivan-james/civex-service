@@ -124,7 +124,7 @@ def test_following_another_server_forgets_the_old_ones_numbers(pair, project):
 
     replacement = project("replacement")
     follow(laptop, replacement, "laptop")
-    connect(laptop, "http://replacement.test")
+    connect(laptop, "https://replacement.test")
     # Nothing carries a number the old server gave (filling the new one sends
     # the state, which numbers nothing here).
     assert laptop._session.execute(text(numbered)).scalar_one() == 0

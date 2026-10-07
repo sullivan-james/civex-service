@@ -4,7 +4,12 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { SyncServing } from './SyncServing'
 
-let authority: { serving: boolean; devices: Record<string, unknown>[] }
+let authority: {
+  serving: boolean
+  fingerprint: string | null
+  devices: Record<string, unknown>[]
+  invites: Record<string, unknown>[]
+}
 let calls: { method: string; path: string; body: unknown }[]
 
 function renderCard() {
@@ -18,19 +23,15 @@ function renderCard() {
       if (path === '/api/remote/authority' && init?.method === 'PATCH')
         authority = { ...authority, serving: body.serving }
       let answer: unknown = authority
-      if (path === '/api/remote/authority/devices') {
+      if (path === '/api/remote/authority/invites') {
         authority = {
           ...authority,
-          devices: [
-            {
-              name: body.name,
-              created_at: 'now',
-              last_seen_at: null,
-              revoked: false,
-            },
+          fingerprint: 'K7QM-29XD',
+          invites: [
+            { name: body.name, created_at: 'now', expires_at: 'later' },
           ],
         }
-        answer = { ...authority, token: 'secret-token' }
+        answer = { ...authority, invite: 'civex_inv_secret' }
       }
       return new Response(JSON.stringify(answer), {
         headers: { 'Content-Type': 'application/json' },
@@ -48,8 +49,8 @@ function renderCard() {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('SyncServing', () => {
-  it('starts accepting devices, and issues a token shown once', async () => {
-    authority = { serving: false, devices: [] }
+  it('starts accepting devices, and invites one with a code shown once', async () => {
+    authority = { serving: false, fingerprint: null, devices: [], invites: [] }
     renderCard()
     await userEvent.click(
       await screen.findByRole('button', { name: 'Accept devices' }),
@@ -58,22 +59,37 @@ describe('SyncServing', () => {
       await screen.findByLabelText('New device'),
       'field laptop',
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Issue a token' }))
-    expect(await screen.findByText('secret-token')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Invite' }))
+    expect(await screen.findByText('civex_inv_secret')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('not shown again')
+    expect(screen.getByText('K7QM-29XD')).toBeInTheDocument()
     await waitFor(() =>
       expect(
-        calls.find((c) => c.path === '/api/remote/authority/devices')?.body,
+        calls.find((c) => c.path === '/api/remote/authority/invites')?.body,
       ).toEqual({ name: 'field laptop' }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() =>
+      expect(calls.map((c) => c.path)).toContain(
+        '/api/remote/authority/invites/field%20laptop/cancel',
+      ),
     )
   })
 
   it('revokes a device after asking', async () => {
     authority = {
       serving: true,
+      fingerprint: 'K7QM-29XD',
       devices: [
-        { name: 'phone', created_at: 'x', last_seen_at: null, revoked: false },
+        {
+          name: 'phone',
+          fingerprint: 'AB12-CD34',
+          created_at: 'x',
+          last_seen_at: null,
+          revoked: false,
+        },
       ],
+      invites: [],
     }
     renderCard()
     await userEvent.click(await screen.findByRole('button', { name: 'Revoke' }))

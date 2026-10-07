@@ -3,6 +3,12 @@ title = "civex gitleaks config"
 [extend]
 useDefault = true
 
+[[rules]]
+id = "civex-device-invite"
+description = "A civex sync device invite"
+regex = '''civex_inv_[A-Za-z0-9_-]{43}'''
+keywords = ["civex_inv_"]
+
 [allowlist]
 paths = [
   '''\.env\.example$''',

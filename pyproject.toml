@@ -38,6 +38,10 @@ dependencies = [
     "jsonschema>=4.0",
     # `civex update` compares the installed version against PyPI's.
     "packaging>=23",
+    # Sync's device keys (Ed25519): a device signs in with a key that never
+    # leaves it, so nothing reusable crosses the network. The standard library
+    # has no Ed25519.
+    "cryptography>=42",
     # The plugin SDK is its own published project (MIT, versioned from `sdk-v*` git tags --
     # see docs/contributing/sdk-release.md). This range must admit the newest
     # `sdk-v*` tag: scripts/check_sdk_sync.py enforces that in CI, and the

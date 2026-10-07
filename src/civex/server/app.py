@@ -335,16 +335,13 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         history_jobs.shutdown()
 
 
-def create_app() -> FastAPI:
+def _base_app(**kwargs) -> FastAPI:
     _init_observability()
     from civex import __version__
 
     app = FastAPI(
         title="civex",
-        description=_DESCRIPTION,
         version=__version__,
-        openapi_tags=_OPENAPI_TAGS,
-        lifespan=_lifespan,
         contact={
             "name": "James Sullivan",
             "email": "sullivanj041@gmail.com",
@@ -353,6 +350,30 @@ def create_app() -> FastAPI:
             "name": "PolyForm Shield 1.0.0",
             "url": "https://polyformproject.org/licenses/shield/1.0.0",
         },
+        **kwargs,
+    )
+
+    @app.get("/health", include_in_schema=False)
+    def health():
+        return {"status": "ok"}
+
+    return app
+
+
+def create_sync_app() -> FastAPI:
+    """Only what devices call (`civex serve --sync-only`): put on a network,
+    there is nothing else to reach, however a proxy in front treats the Host
+    header. No background work: run the app on this machine for that."""
+    app = _base_app(openapi_url=None)
+    app.add_middleware(RequestContextMiddleware)
+    register_error_handlers(app)
+    app.include_router(sync_peer.router, prefix="/api")
+    return app
+
+
+def create_app() -> FastAPI:
+    app = _base_app(
+        description=_DESCRIPTION, openapi_tags=_OPENAPI_TAGS, lifespan=_lifespan
     )
 
     # Local-only guard: blocks DNS-rebinding and cross-origin (CSRF) attacks
@@ -391,10 +412,6 @@ def create_app() -> FastAPI:
     app.include_router(analytics.router, prefix="/api")
     app.include_router(views.router, prefix="/api")
     app.include_router(views.all_views_router, prefix="/api")
-
-    @app.get("/health", include_in_schema=False)
-    def health():
-        return {"status": "ok"}
 
     if (_DIST / "index.html").exists():
         app.mount(

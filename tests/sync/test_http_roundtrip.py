@@ -7,14 +7,17 @@ import os
 import socket
 import threading
 import time
+from dataclasses import replace
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 import uvicorn
 
+from civex import keys
 from civex.config import load_config, save_config
-from civex.domain.sync import SyncError
+from civex.domain.sync import SyncError, session_answer
+from civex.services.device_keys import DeviceKeys
 
 from .peers import snapshots
 from .test_convergence import populate
@@ -29,7 +32,7 @@ def server(project, tmp_path: Path) -> Iterator[tuple[str, str, object]]:
     config = load_config()
     config.sync.serve = True
     save_config(config)
-    _, token = authority.authority_svc.add_device("laptop")
+    _, invite = authority.device_keys.invite("laptop")
     authority.commit()
 
     from civex.server.app import create_app
@@ -47,7 +50,7 @@ def server(project, tmp_path: Path) -> Iterator[tuple[str, str, object]]:
             break
         time.sleep(0.05)
     try:
-        yield f"http://127.0.0.1:{port}", token, authority
+        yield f"http://127.0.0.1:{port}", invite, authority
     finally:
         uv.should_exit = True
         thread.join(timeout=5)
@@ -55,31 +58,60 @@ def server(project, tmp_path: Path) -> Iterator[tuple[str, str, object]]:
 
 
 def test_a_project_seeds_the_authority_and_a_second_device_joins(project, server):
-    url, token, authority = server
+    url, invite, authority = server
     first = project("first")
     populate(first)
-    assert first.sync_svc.connect(url, token) == "seeded"
+    assert first.sync_svc.connect(url, invite) == "seeded"
     first.commit()
     assert len(snapshots(authority)["record"]) == 4
 
-    _, token2 = authority.authority_svc.add_device("tablet")
+    _, invite2 = authority.device_keys.invite("tablet")
     authority.commit()
     second = project("second")
-    assert second.sync_svc.connect(url, token2) == "joined"
+    assert second.sync_svc.connect(url, invite2) == "joined"
     second.commit()
     assert snapshots(second)["record"] == snapshots(authority)["record"]
+    # Joined once, a device signs in with its key from then on.
+    second.sync_svc.sync()
 
 
-def test_a_wrong_token_is_a_clear_refusal(project, server):
+def test_a_wrong_invite_is_a_clear_refusal(project, server):
     url, _, _ = server
     ctx = project("stranger")
-    with pytest.raises(SyncError) as e:
-        ctx.sync_svc.connect(url, "not-a-token")
+    with pytest.raises(SyncError, match="invite") as e:
+        ctx.sync_svc.connect(url, "civex_inv_not-one")
     assert not e.value.retryable
+
+
+def test_a_different_server_at_the_address_is_refused_before_anything_is_sent(
+    project, server, monkeypatch
+):
+    """The device keeps the key of the authority it joined; a server that can't
+    sign with it (another machine at that address) gets nothing."""
+    url, invite, authority = server
+    first = project("first")
+    populate(first)
+    assert first.sync_svc.connect(url, invite) == "seeded"
+    first.commit()
+    real = DeviceKeys.start_session
+    impostor = keys.new_private_key()
+
+    def answer_as_another(self, device_id, at, signature):
+        grant = real(self, device_id, at, signature)
+        return replace(grant, signature=keys.sign(impostor, session_answer(signature)))
+
+    monkeypatch.setattr(DeviceKeys, "start_session", answer_as_another)
+    pushed = len(authority.sync_repo.entries_after(0, 1000)[0])
+    first.record_svc.add("study", "encounter", {"site": "new", "depth": 9.0})
+    first.commit()
+    with pytest.raises(SyncError, match="not the one this computer joined") as e:
+        first.sync_svc.sync()
+    assert not e.value.retryable
+    assert len(authority.sync_repo.entries_after(0, 1000)[0]) == pushed
 
 
 def test_an_unreachable_authority_is_retryable(project):
     ctx = project("lonely")
     with pytest.raises(SyncError) as e:
-        ctx.sync_svc.connect("http://127.0.0.1:9", "x")
+        ctx.sync_svc.connect("http://127.0.0.1:9", "civex_inv_x")
     assert e.value.retryable

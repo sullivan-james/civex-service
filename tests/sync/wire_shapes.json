@@ -1,0 +1,9 @@
+{
+  "2": {
+    "dataset": ["created_at", "deleted_at", "description", "id", "name", "schema_ids", "schemas", "scope", "timezone"],
+    "field": ["created_at", "default_value", "deleted_at", "dtype", "id", "label", "name", "position", "required", "restrictions", "schema_id"],
+    "record": ["created_at", "data", "dataset_id", "deleted_at", "id", "parent_record_id", "schema_id", "updated_at"],
+    "schema": ["created_at", "deleted_at", "description", "display_template", "id", "label", "name", "parent_id", "unique_keys"],
+    "view": ["columns", "created_at", "files_layout", "filter_tree", "id", "name", "schema_id", "sort"]
+  }
+}
