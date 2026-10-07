@@ -21,3 +21,6 @@ def test_an_unknown_api_address_is_not_found_and_pages_are_the_app(client):
     page = client.get("/records/anything")
     assert page.status_code == 200
     assert page.headers["content-type"].startswith("text/html")
+    # Checked with the server each time, so an update is never hidden by a
+    # copy the browser kept.
+    assert page.headers["cache-control"] == "no-cache"

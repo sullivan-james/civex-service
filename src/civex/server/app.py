@@ -403,7 +403,12 @@ def create_app() -> FastAPI:
                     detail=f"This server has no /{full_path}. If civex was just "
                     "updated, restart it.",
                 )
-            return FileResponse(str(_DIST / "index.html"))
+            # Never reused without asking: a browser that kept it would load
+            # an older app after an update (its assets have hashed names, so
+            # those may be cached).
+            return FileResponse(
+                str(_DIST / "index.html"), headers={"Cache-Control": "no-cache"}
+            )
     else:
 
         @app.get("/", include_in_schema=False)
