@@ -7,7 +7,6 @@ import {
   useState,
 } from 'react'
 import { NavLink } from 'react-router'
-import { useQueryClient } from '@tanstack/react-query'
 import {
   Group,
   Panel,
@@ -15,7 +14,7 @@ import {
   useDefaultLayout,
 } from 'react-resizable-panels'
 import { useUISettings } from '../hooks/useUISettings'
-import { useRemoteStatus } from '../hooks/useRemote'
+import { useRefreshOnSync, useRemoteStatus } from '../hooks/useRemote'
 import { syncButtonState } from '../utils/syncState'
 import { useManualSync } from '../hooks/useSyncToasts'
 import { useFrequentCollections } from '../hooks/useFrequentCollections'
@@ -288,7 +287,6 @@ function NavGroups({
 function SyncButton() {
   const { data } = useRemoteStatus()
   const { request, spinning } = useManualSync()
-  const queryClient = useQueryClient()
   if (!data?.configured) return null
   const state = syncButtonState(data, spinning)
   const busy = state.tone === 'busy'
@@ -297,9 +295,7 @@ function SyncButton() {
       variant={state.tone === 'ok' || busy ? 'nav' : 'navActive'}
       size="sm"
       disabled={busy}
-      onClick={() =>
-        request(() => queryClient.refetchQueries({ type: 'active' }))
-      }
+      onClick={() => request()}
     >
       <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />
       {state.label}
@@ -308,6 +304,7 @@ function SyncButton() {
 }
 
 export default function Layout({ children }: { children: ReactNode }) {
+  useRefreshOnSync()
   const [aiOpen, setAiOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [drawerOpen, setDrawerOpen] = useState(false)
