@@ -40,6 +40,28 @@ from the next tag forward.
   conflicts; the status bar shows a failing or waiting sync.
 - `civex sync authority enable` + `civex sync device add` turn a server into an
   authority; remote hosts reach only `/api/sync/v1/`.
+- **Update from the app** (Settings → Updates, and a notice in the status bar
+  when a newer version is out): civex closes, installs the new version and
+  starts again, reopening the page. It works for the desktop app and for
+  `civex serve` installed with uv, pipx or pip. `GET`/`POST /api/update`.
+- **Pre-releases**: `civex update --pre`, and *Include pre-releases* on the
+  Updates page, install release candidates; nobody gets one otherwise.
+
+### Changed
+
+- **The desktop app is a small launcher** (about 30 MB) that installs civex
+  with its own `uv` the first time it starts, then keeps it up to date. It no
+  longer contains civex, so it never needs downloading again for a new
+  version. Custom plugins work in it without anything else installed.
+- Install with `uv tool install civex`, which needs no Python on the computer.
+
+### Fixed
+
+- The desktop downloads couldn't create a project (`civex init` failed: the
+  database migrations were left out of the bundle). Every release is now
+  installed and run on Linux, macOS and Windows before it is published.
+- After `civex update` reinstalled missing packages for a uv install, later
+  updates did nothing: the repair pinned the version (`==`).
 
 ## v1.2.1 — history records every change (2026-10-05)
 

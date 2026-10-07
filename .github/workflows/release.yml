@@ -4,10 +4,13 @@ on:
   push:
     tags:
       - "v*"
+  # A dry run: every build and test, on any branch, and nothing published.
+  workflow_dispatch:
 
-# Build the wheel once, install that exact file on every OS and run it, and
-# only then publish it: a PyPI version can never be uploaded again, even after
-# it is deleted, and tests from a checkout can't see what the wheel is missing.
+# Build the wheel once, install that exact file on every OS and run it (and
+# the desktop app, installing it), and only then publish: a PyPI version can
+# never be uploaded again, even after it is deleted, and tests from a checkout
+# can't see what the wheel is missing.
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -30,6 +33,7 @@ jobs:
       # (vX.Y.ZrcN, bN, aN, .devN) may use that heading or `## Unreleased`.
       - name: Check the tag and its CHANGELOG entry
         id: tag
+        if: startsWith(github.ref, 'refs/tags/')
         run: uv run --no-project --with packaging python scripts/check_release_tag.py "$GITHUB_REF_NAME"
 
       - name: Set up Node
@@ -67,6 +71,7 @@ jobs:
           python -m build --wheel
 
       - name: Check the wheel is the tag's version
+        if: startsWith(github.ref, 'refs/tags/')
         run: uv run --no-project --with packaging python scripts/check_release_tag.py "$GITHUB_REF_NAME" --wheel-dir dist
 
       - uses: actions/upload-artifact@v7
@@ -107,8 +112,88 @@ jobs:
           uv run --no-project python scripts/smoke_civex.py "$civex" \
             --expect-version "${{ needs.build.outputs.version }}"
 
+  # The desktop app is a small launcher carrying uv (desktop-launcher/): it
+  # installs civex[desktop] on first start and updates it with uv. Build it,
+  # then run it as a person's first start would, against the tested wheel.
+  desktop:
+    needs: build
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: civex-linux.tar.gz
+          - os: macos-latest
+            asset: civex-macos.dmg
+          - os: windows-latest
+            asset: civex-windows.zip
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The uv bundled into the app.
+      - uses: astral-sh/setup-uv@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
+
+      - name: Build the app
+        shell: bash
+        run: |
+          pip install pyinstaller
+          CIVEX_LAUNCHER_UV="$(command -v uv)" pyinstaller desktop-launcher/launcher.spec \
+            --distpath app-dist --workpath app-build
+
+      - name: Run it as a first start would, then use the civex it installed
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            macOS)   app=app-dist/civex.app/Contents/MacOS/civex ;;
+            Windows) app=app-dist/civex.exe ;;
+            *)       app=app-dist/civex ;;
+          esac
+          wheel="$(ls "$PWD"/dist/*.whl)"
+          [ "$RUNNER_OS" = Windows ] && wheel="$(cygpath -m "$wheel")"
+          home="$RUNNER_TEMP/civex-app"
+          CIVEX_APP_HOME="$home" \
+            CIVEX_LAUNCHER_SOURCE="civex[desktop] @ file:///${wheel#/}" \
+            "$app" --install-only
+          python scripts/smoke_civex.py \
+            "$home/bin/civex$([ "$RUNNER_OS" = Windows ] && echo .exe)" \
+            --expect-version "${{ needs.build.outputs.version }}"
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: tar -czf ${{ matrix.asset }} -C app-dist civex
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: hdiutil create -volname civex -srcfolder app-dist/civex.app -ov -format UDZO ${{ matrix.asset }}
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path app-dist\civex.exe -DestinationPath ${{ matrix.asset }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ runner.os }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
   publish:
-    needs: [build, test]
+    needs: [build, test, desktop]
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -119,6 +204,12 @@ jobs:
         with:
           name: wheel
           path: dist
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: desktop-*
+          path: desktop
+          merge-multiple: true
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -133,6 +224,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: dist/*.whl
+          files: |
+            dist/*.whl
+            desktop/*
           generate_release_notes: true
           prerelease: ${{ needs.build.outputs.prerelease == 'true' }}
