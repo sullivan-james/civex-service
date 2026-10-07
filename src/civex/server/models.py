@@ -915,6 +915,11 @@ class CollectionStorageResponse(BaseModel):
     unlocated_files: int = Field(
         description="Files records use that the catalog doesn't place on any volume."
     )
+    unlocated_place: str = Field(
+        default="missing",
+        description="Where those are: `server` (this project follows one, so "
+        "they are only there) or `missing`.",
+    )
 
 
 class TransferRequest(BaseModel):

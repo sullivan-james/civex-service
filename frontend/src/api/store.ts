@@ -65,6 +65,9 @@ export interface CollectionStorageReport {
   volumes: CollectionVolumeShare[]
   /** Used by records but not placed on any volume by the catalog. */
   unlocated_files: number
+  /** Where those are: only on the server (this project follows one), or
+   * missing. */
+  unlocated_place?: 'server' | 'missing'
 }
 
 /** What adding a folder as a volume would involve. `problems` block it;

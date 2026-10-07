@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from civex.domain.dtos import (
     CollectionStorage,
     CollectionUse,
@@ -27,6 +29,10 @@ class FileInfoService:
         self._store = store
         self._refs = refs
         self._datasets = datasets
+        # Whether files on no drive here can come from a server (set by
+        # `build_local_context`): they are then "only on the server", not
+        # missing.
+        self.files_from_server: Callable[[], bool] = lambda: False
 
     def surplus_by_volume(self) -> dict[str, VolumeSurplus]:
         """For each volume, how much of what it holds no collection uses: files
@@ -60,6 +66,7 @@ class FileInfoService:
             return status[volume]
 
         out = {}
+        elsewhere = "server" if self.files_from_server() else "missing"
         for cid in collection_ids if collection_ids is not None else list(found):
             total, rows = found.get(cid, (0, []))
             shares = [
@@ -79,6 +86,7 @@ class FileInfoService:
                 bytes=sum(s.bytes for s in shares),
                 volumes=shares,
                 unlocated_files=max(total - sum(s.files for s in shares), 0),
+                unlocated_place=elsewhere,
             )
         return out
 

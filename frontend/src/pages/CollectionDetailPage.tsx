@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link, useNavigate } from 'react-router'
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router'
 import {
   useCollection,
   useUpdateCollection,
@@ -22,10 +22,7 @@ import {
   useTabParam,
 } from '../components/ui'
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
-import {
-  CollectionStorage,
-  useHasStorageChoice,
-} from '../components/collections/CollectionStorage'
+import { CollectionStorage } from '../components/collections/CollectionStorage'
 import { recordCollectionVisit } from '../hooks/useFrequentCollections'
 import { recordRecent } from '../hooks/usePins'
 import { collectionTarget } from '../utils/navTargets'
@@ -37,12 +34,13 @@ import { CollectionScopeFields } from '../components/collections/CollectionScope
 import { inCollection } from '../utils/auditFilter'
 import { errorMessage } from '../lib/errors'
 import { CollectionExportsSection } from '../components/exports/CollectionExportsSection'
+import { FilesTab } from '../components/files/FilesTab'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
 
 const COLLECTION_TABS = [
   { id: 'records' },
+  { id: 'files' },
   { id: 'exports' },
-  { id: 'storage' },
   { id: 'activity' },
 ] as const
 
@@ -60,10 +58,11 @@ export default function CollectionDetailPage() {
   const [schemasValue, setSchemasValue] = useState<string[]>([])
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [tab, setTab] = useTabParam(COLLECTION_TABS, 'records')
+  const [params] = useSearchParams()
+  const legacyTab = params.get('tab')
 
   const { data: collection, isLoading, error } = useCollection(id!)
   const collectionName = collection?.name
-  const hasStorageTab = useHasStorageChoice(id!)
   useEffect(() => {
     if (collectionName) recordCollectionVisit(collectionName)
   }, [collectionName])
@@ -142,7 +141,8 @@ export default function CollectionDetailPage() {
   }
 
   const recordCount = collection.record_count
-  const shownTab = tab === 'storage' && !hasStorageTab ? 'records' : tab
+  // The Storage tab became part of Files: its old links still land there.
+  const shownTab = legacyTab === 'storage' ? 'files' : tab
 
   return (
     <CollectionTimeZone
@@ -178,10 +178,8 @@ export default function CollectionDetailPage() {
               onChange={setTab}
               tabs={[
                 { id: 'records' as const, label: 'Records' },
+                { id: 'files' as const, label: 'Files' },
                 { id: 'exports' as const, label: 'Exports' },
-                ...(hasStorageTab
-                  ? [{ id: 'storage' as const, label: 'Storage' }]
-                  : []),
                 { id: 'activity' as const, label: 'Activity' },
               ]}
             />
@@ -278,8 +276,11 @@ export default function CollectionDetailPage() {
             <CollectionExportsSection collection={collection.name} />
           </TabPanel>
 
-          <TabPanel id="storage" value={shownTab}>
-            <CollectionStorage collectionId={collection.id} />
+          <TabPanel id="files" value={shownTab}>
+            <FilesTab scope={{ collection: collection.name }} />
+            <div className="mt-6">
+              <CollectionStorage collectionId={collection.id} />
+            </div>
           </TabPanel>
 
           <TabPanel id="activity" value={shownTab}>

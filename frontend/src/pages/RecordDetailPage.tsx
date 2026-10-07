@@ -52,6 +52,7 @@ import { MergeView } from '../components/sync/MergeView'
 import { ReviewStepper } from '../components/sync/ReviewStepper'
 import { RecordConflicts } from '../components/sync/RecordConflicts'
 import { OrphanBanner } from '../components/records/OrphanBanner'
+import { FilesTab } from '../components/files/FilesTab'
 import { layoutConflicts } from '../utils/syncConflicts'
 import {
   useConflictsAbout,
@@ -63,6 +64,7 @@ const RECORD_TABS = [
   { id: 'fields' },
   { id: 'resolve' },
   { id: 'contains' },
+  { id: 'files' },
   { id: 'referenced' },
   { id: 'runs' },
   { id: 'history' },
@@ -279,6 +281,7 @@ export default function RecordDetailPage() {
                     },
                   ]
                 : []),
+              { id: 'files' as const, label: 'Files' },
               { id: 'referenced' as const, label: 'Referenced by' },
               { id: 'runs' as const, label: 'Runs' },
               { id: 'history' as const, label: 'History' },
@@ -354,6 +357,9 @@ export default function RecordDetailPage() {
           )}
         </TabPanel>
 
+        <TabPanel id="files" value={shownTab}>
+          <FilesTab scope={{ within: record.id }} />
+        </TabPanel>
         <TabPanel id="referenced" value={shownTab}>
           <ReferencedBy recordId={record.id} />
         </TabPanel>

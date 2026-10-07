@@ -63,6 +63,24 @@ describe('the preview of what an export makes', () => {
     expect(screen.getByText('1 row')).toBeTruthy()
   })
 
+  it('says first which files are downloaded from the server, not that they are lost', () => {
+    render(
+      <FilePreviewList
+        data={preview({
+          total: 3,
+          available: 1,
+          to_fetch: { files: 2, bytes: 2 * 1024 * 1024 },
+        })}
+      />,
+    )
+    expect(
+      screen.getByText(
+        /2 files \(2.0 MB\) aren't on this computer yet: they are downloaded from the server first/,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/can’t be reached/)).not.toBeInTheDocument()
+  })
+
   it('shows tables alone when there are no files', () => {
     render(
       <FilePreviewList

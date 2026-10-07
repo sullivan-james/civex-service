@@ -533,6 +533,9 @@ class CollectionStorage:
     bytes: int  # of those the catalog has a size for
     volumes: list[CollectionVolumeShare]
     unlocated_files: int  # used by records but not in the catalog on any volume
+    # Where those are: "server" (the project follows one: only there) or
+    # "missing" (nowhere this project can get them from).
+    unlocated_place: str = "missing"
 
 
 @dataclass

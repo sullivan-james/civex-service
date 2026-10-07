@@ -312,6 +312,38 @@ civex files exports remove --all
 
 Removing a linked folder gives back no space and never touches the stored files. Removing a copied folder gives back its space. Anything of your own that you put inside an export folder is left, with the folder. Exports on a drive that isn't connected are listed once it is plugged in again.
 
+## Where files are, and moving them
+
+A collection's page and a record's page each have a **Files** tab. On a record
+it covers that record and everything beneath it. It lists the files with
+where each one is, and above them a bar of where all of them are: each drive,
+a drive that isn't plugged in, **only on the server** (for a project that
+syncs) and **missing**. Click a place to list only its files.
+
+Narrow the list by the kind of record that holds the files, with the same
+filters as the record explorer, and by file or record name. The whole view
+is in the page address, so it can be bookmarked or shared.
+
+Tick files, or leave none ticked to use everything that matches, then:
+
+- **Move to drive…** moves just those files onto one drive, in the background.
+  Files only on the server are downloaded first, and files on a drive that
+  isn't plugged in stay where they are.
+- **Download to this computer** brings the ones only on the server here.
+- **Free up space…** removes this computer's copies of files the server holds
+  (see [Files on this computer](sync.md#which-files-this-computer-keeps)).
+
+Each action says first what it will do, and runs as a job in the status bar.
+From a terminal, the same selection options pick the same files, with `--on`
+for a place and `--name` for a name:
+
+```bash
+civex files list --in Humpbacks --on field-ssd
+civex files gather --in Humpbacks --on field-ssd --to archive
+civex files fetch --under <record id>
+civex files free --in Humpbacks --name ".wav"
+```
+
 ## Downloading files
 
 In the UI, each file field shows a download link next to the filename. Via the API:

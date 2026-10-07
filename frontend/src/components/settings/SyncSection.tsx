@@ -23,7 +23,6 @@ import {
   Spinner,
 } from '../ui'
 import { describeSyncProgress } from '../../utils/syncProgress'
-import { SyncFilesCard } from './SyncFilesCard'
 import { SyncServing } from './SyncServing'
 
 const INTERVALS = [
@@ -241,7 +240,19 @@ function Following({ s }: { s: RemoteStatus }) {
           </Button>
         </div>
       </Card>
-      <SyncFilesCard s={s} />
+      <Card title="Files">
+        <p className="text-sm text-fg-muted">
+          Which files this computer keeps, per collection, and freeing space are
+          with the rest of storage.
+        </p>
+        <Button
+          size="sm"
+          className="mt-2"
+          to="/settings/storage?tab=collections"
+        >
+          Files on this computer
+        </Button>
+      </Card>
       <Conflicts count={s.open_conflicts} />
       {confirm && (
         <ConfirmDialog

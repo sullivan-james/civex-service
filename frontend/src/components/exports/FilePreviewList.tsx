@@ -1,6 +1,7 @@
 import type { FilePreview } from '../../api/fileAccess'
 import { pathsToRows } from '../../utils/fileTree'
 import { formatSize } from '../../utils/storage'
+import { ToDownloadNotice } from '../files/ToDownloadNotice'
 import { FileTree } from './FileTree'
 
 const plural = (n: number, word: string) =>
@@ -15,7 +16,8 @@ export function FilePreviewList({ data }: { data: FilePreview }) {
   const tables = data.tables ?? []
   const byVolume = data.by_volume ?? []
   const total = data.total ?? items.length
-  const missing = total - (data.available ?? total)
+  const toFetch = data.to_fetch?.files ?? 0
+  const missing = total - (data.available ?? total) - toFetch
   const rows = pathsToRows([
     ...items,
     ...tables.map((t) => ({ path: t.path, rows: t.rows })),
@@ -45,6 +47,7 @@ export function FilePreviewList({ data }: { data: FilePreview }) {
         {missing > 0 &&
           ` ${plural(missing, 'file')} can’t be reached right now.`}
       </p>
+      <ToDownloadNotice toFetch={data.to_fetch} />
       {empty ? (
         <p className="text-sm text-fg-muted">There is nothing to export.</p>
       ) : (

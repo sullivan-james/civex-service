@@ -111,3 +111,46 @@ def test_which_files_a_device_keeps_is_saved_in_its_settings(pair):
 def test_an_authority_fetches_from_nobody(authority):
     assert authority.sync_svc.files_to_fetch() == 0
     assert authority.sync_svc.fetch_files().attempted == 0
+
+
+def test_a_preview_counts_files_to_download_and_the_export_says_it_is_downloading(
+    pair,
+):
+    from civex.services.progress import registry
+
+    laptop, phone, record = pair
+    _with_file(laptop, record, b"to fetch")
+    phone.sync_svc.sync()
+    selection = FileSelection(query=RecordQuery(dataset="study"))
+
+    preview = phone.file_access_svc.plan(selection)
+    assert preview.complete  # downloading it first is part of the export
+    assert preview.to_dict()["to_fetch"] == {"files": 1, "bytes": len(b"to fetch")}
+    assert preview.unavailable == []
+
+    progress = registry.start("p-download-test")
+    phases = []
+    real_phase = progress.phase
+    progress.phase = lambda label, total=0: (
+        phases.append(label),
+        real_phase(label, total),
+    )  # type: ignore[method-assign]
+    plan = phone.file_access_svc.plan(selection, progress=progress, fetch=True)
+    assert plan.complete and plan.available == 1
+    assert "Downloading 1 file from the server" in phases
+
+
+def test_a_file_the_server_lacks_is_unreachable_once_the_export_has_tried(
+    pair, authority
+):
+    laptop, phone, record = pair
+    ref = _with_file(laptop, record, b"never sent")
+    authority.file_svc._store.delete(ref.sha256)
+    authority.commit()
+    phone.sync_svc.sync()
+    selection = FileSelection(query=RecordQuery(dataset="study"))
+
+    plan = phone.file_access_svc.plan(selection, fetch=True)
+    assert not plan.complete
+    (group,) = plan.unavailable
+    assert "Not on the server yet" in group.reason

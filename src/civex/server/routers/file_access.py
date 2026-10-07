@@ -243,7 +243,11 @@ def export_files(
 
 
 @router.post("/gather", status_code=202)
-def gather_files(body: FileGatherRequest, ctx: AppContext = Depends(get_ctx)):
+def gather_files(
+    body: FileGatherRequest,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
     """Move the picked files onto one drive: a selection's files, narrowed by
     place, name or ticked files (`shas`). Only those move; the rest of their
     collections stay where they are. Files only on the server are downloaded
@@ -252,7 +256,7 @@ def gather_files(body: FileGatherRequest, ctx: AppContext = Depends(get_ctx)):
     power; see /store/transfers). 422 when they are all already there."""
     items = _picked(body, ctx)
     try:
-        shas = ctx.file_access_svc.to_move(items, body.volume)
+        shas = ctx.file_access_svc.to_move(items, body.volume, progress)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except CivexError as e:
@@ -319,13 +323,17 @@ def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.post("/download")
-def download_files(body: FilePickRequest, ctx: AppContext = Depends(get_ctx)):
+def download_files(
+    body: FilePickRequest,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
     """Download the picked files that are only on the server to this computer
     (onto their collection's drive). Answers when they have arrived: how many
     came and which the server hasn't got yet."""
     items = _picked(body, ctx)
     try:
-        report = ctx.file_access_svc.download(items)
+        report = ctx.file_access_svc.download(items, progress)
     except SyncError as e:
         raise HTTPException(503, detail=f"The server can't be reached: {e}")
     ctx.commit()

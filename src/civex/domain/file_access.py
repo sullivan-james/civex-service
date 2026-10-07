@@ -315,8 +315,14 @@ class FilePlan:
         return sum(i.size for i in self.items if i.available)
 
     @property
+    def to_fetch(self) -> list[FileItem]:
+        """Files only on the server (another device added them): an export
+        downloads them first, so they don't make it incomplete."""
+        return [i for i in self.items if i.state == "remote"]
+
+    @property
     def complete(self) -> bool:
-        return self.available == self.total
+        return self.available + len(self.to_fetch) == self.total
 
     @property
     def by_volume(self) -> list[VolumeShare]:
@@ -372,6 +378,10 @@ class FilePlan:
                 for v in self.by_volume
             ],
             "duplicates_dropped": self.duplicates_dropped,
+            "to_fetch": {
+                "files": len(self.to_fetch),
+                "bytes": sum(i.size for i in self.to_fetch),
+            },
             "tables": [t.to_dict() for t in self.tables],
             "summary": self.summary(),
             "unavailable": [

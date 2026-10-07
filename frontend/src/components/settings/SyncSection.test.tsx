@@ -183,75 +183,12 @@ describe('SyncSection', () => {
     expect(await screen.findByText('Up to date')).toBeInTheDocument()
   })
 
-  it('says how many files are not here yet and lets a person keep only those opened', async () => {
-    status = {
-      ...base,
-      configured: true,
-      remote: 'https://a.example',
-      files_to_fetch: 7,
-    }
-    renderSection()
-    expect(
-      await screen.findByText(
-        /7 files this computer keeps aren't downloaded yet\. They download/,
-      ),
-    ).toBeInTheDocument()
-    await userEvent.click(
-      screen.getByRole('radio', { name: 'Only files I open' }),
-    )
-    await waitFor(() =>
-      expect(
-        calls.find((c) => c.method === 'PATCH' && c.path === '/api/remote')
-          ?.body,
-      ).toEqual({ download_files: 'opened' }),
-    )
-  })
-
-  it('lists each collection with what is here, and frees space after saying what goes', async () => {
+  it('points to storage for which files this computer keeps', async () => {
     status = { ...base, configured: true, remote: 'https://a.example' }
     renderSection()
-    expect(await screen.findByText('Humpbacks')).toBeInTheDocument()
-    expect(screen.getByText('3 · 3.0 MB')).toBeInTheDocument()
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Free up space…' }),
-    )
     expect(
-      await screen.findByText(
-        /Removes this computer’s copies of 3 files|Removes this computer's copies of 3 files/,
-      ),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        /Keeps 1 also used by a collection kept on this computer/,
-      ),
-    ).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Remove 3.0 MB' }))
-    await waitFor(() =>
-      expect(
-        calls.some(
-          (c) =>
-            c.path === '/api/remote/files/c1/free-up' && c.method === 'POST',
-        ),
-      ).toBe(true),
-    )
-  })
-
-  it('sets one collection to fetch its files when opened', async () => {
-    status = { ...base, configured: true, remote: 'https://a.example' }
-    renderSection()
-    await userEvent.selectOptions(
-      await screen.findByLabelText(
-        "Which of Humpbacks's files this computer keeps",
-      ),
-      'opened',
-    )
-    await waitFor(() =>
-      expect(
-        calls.find(
-          (c) => c.method === 'PATCH' && c.path === '/api/remote/files/c1',
-        )?.body,
-      ).toEqual({ mode: 'opened' }),
-    )
+      await screen.findByRole('link', { name: 'Files on this computer' }),
+    ).toHaveAttribute('href', '/settings/storage?tab=collections')
   })
 
   it('says changes are waiting rather than up to date', async () => {

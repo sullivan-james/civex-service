@@ -3,6 +3,7 @@ import {
   fileAccessApi,
   problemFrom,
   type ExportProblem,
+  type FilePick,
   type FilePlanSummary,
   type FileSelection,
 } from '../../api/fileAccess'
@@ -294,6 +295,46 @@ export function moveThenOpen(
       message: out.plan ? undefined : out.message,
     })
   })
+}
+
+/** Move picked files (the Files tab: a selection narrowed by place, name or
+ * ticks) onto one drive, as one job: downloading any that are only on the
+ * server, then the move itself, each with its progress in the status bar. */
+export function moveFiles(ctx: FlowContext, pick: FilePick, volume: string) {
+  return job(ctx, 'Preparing the move…', async (j) => {
+    const started = await tracked(ctx, j, (progressId) =>
+      fileAccessApi.gather(pick, volume, progressId),
+    )
+    refreshPlaces(ctx)
+    const title = `Moving ${plural(started.files, 'file')} to ${volume}…`
+    j.update({ title, detail: undefined, progress: undefined })
+    await waitForMove(ctx, j, started.transfer_id, title)
+    refreshPlaces(ctx)
+    ctx.toast.success(`Moved ${plural(started.files, 'file')} to ${volume}.`)
+  })
+}
+
+/** Download picked files that are only on the server, as one job with its
+ * progress in the status bar. */
+export function downloadFiles(ctx: FlowContext, pick: FilePick) {
+  return job(ctx, 'Downloading from the server…', async (j) => {
+    const got = await tracked(ctx, j, (progressId) =>
+      fileAccessApi.download({ ...pick, place: 'server' }, progressId),
+    )
+    refreshPlaces(ctx)
+    ctx.toast.success(
+      `Downloaded ${plural(got.fetched, 'file')}` +
+        (got.absent
+          ? `; ${plural(got.absent, 'file')} ${got.absent === 1 ? "hasn't" : "haven't"} reached the server yet.`
+          : '.'),
+    )
+  })
+}
+
+/** Everything that says where files are, asked again after they moved. */
+function refreshPlaces(ctx: FlowContext) {
+  for (const key of ['file-listing', 'store', 'records', 'record', 'remote'])
+    void ctx.qc.invalidateQueries({ queryKey: [key] })
 }
 
 /** Follow a move until it finishes, showing how far it is. A move that stops

@@ -12,6 +12,7 @@ import {
   useToast,
 } from '../ui'
 import { DrivePicker } from './DrivePicker'
+import { ToDownloadNotice } from './ToDownloadNotice'
 import {
   copyToDrive,
   downloadZip,
@@ -134,6 +135,7 @@ export function FilesDialog({
       <ModalHeader onClose={onClose}>{title}</ModalHeader>
       <ModalBody>
         <div className="space-y-4 text-sm">
+          <ToDownloadNotice toFetch={plan.to_fetch} />
           <p className="text-fg-muted">
             {plural(plan.total, 'file')} ({formatSize(plan.bytes)})
             {plan.by_volume.length > 0 && (

@@ -112,6 +112,9 @@ export interface FilePlanSummary {
   unavailable: UnavailableGroup[]
   /** The tables the selection asks for, beside the files. */
   tables: PlannedTable[]
+  /** Files only on the server: downloaded first, so not counted as out of
+   * reach. */
+  to_fetch?: { files: number; bytes: number }
 }
 
 /** One file in a preview: where it would go in the folder, and where it is. */
@@ -265,6 +268,56 @@ export function selectionFor(
   }
 }
 
+/** Files picked from a selection: narrowed to a place (a drive's name,
+ * `server`, `missing`, or the groups `here` and `unreachable`), a name (the
+ * file's or its record's) and ticked content. What the Files tab lists is what
+ * its actions act on. */
+export interface FilePick extends FileSelection {
+  place?: string
+  name?: string
+  shas?: string[]
+}
+
+export type PlaceKind = 'drive' | 'unreachable' | 'server' | 'missing'
+
+/** How much of a selection is in one place. */
+export interface PlaceSummary {
+  /** A drive's name, or `server` / `missing`. */
+  place: string
+  kind: PlaceKind
+  files: number
+  bytes: number
+  /** For a drive that can't be read: why, and what to do. */
+  reason: string
+  fix: string
+}
+
+/** One file of a selection, with where it is. */
+export interface ListedFile {
+  path: string
+  sha256: string
+  filename: string
+  size: number
+  record_id: string
+  record_name: string
+  field: string
+  volume: string | null
+  state: string
+  available: boolean
+  reason: string
+  fix: string
+  place: string
+  place_kind: PlaceKind
+}
+
+export interface FileListing {
+  /** Files matching the place and name. */
+  total: number
+  /** Every file of the selection, by place (before narrowing). */
+  summary: PlaceSummary[]
+  items: ListedFile[]
+}
+
 export const fileAccessApi = {
   /** Totals, which drives hold the files, and what's out of reach; makes
    * nothing. */
@@ -326,6 +379,30 @@ export const fileAccessApi = {
     }
     return { blob: await res.blob(), filename: filenameOf(res) }
   },
+
+  /** A page of a selection's files and where all of them are. */
+  files: (
+    pick: FilePick & { order?: string; offset?: number; limit?: number },
+  ) => api.post<FileListing>('/file-access/files', pick),
+
+  /** Bring the picked files that are only on the server to this computer. */
+  download: (pick: FilePick, progressId?: string) =>
+    api.post<{ fetched: number; absent: number }>(
+      '/file-access/download',
+      pick,
+      tagged(progressId),
+    ),
+
+  /** Remove this computer's copies of the picked files the server holds;
+   * `dryRun` only counts. */
+  freeUp: (pick: FilePick, dryRun: boolean) =>
+    api.post<{
+      files: number
+      bytes: number
+      kept_shared: number
+      not_on_server: number
+      done: boolean
+    }>(`/file-access/free-up?dry_run=${dryRun}`, pick),
 
   /** Queue a move of just this selection's files onto one drive, so a linked
    * folder can hold them all. Nothing else in their collections moves. */

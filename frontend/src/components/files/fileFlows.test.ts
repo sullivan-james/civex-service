@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
-import { moveThenOpen, type FlowContext } from './fileFlows'
+import {
+  downloadFiles,
+  moveFiles,
+  moveThenOpen,
+  type FlowContext,
+} from './fileFlows'
 import { exported, fakeServer, json, plan, transfer } from './testSupport'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -331,5 +336,45 @@ describe('following a request while it runs', () => {
     const sent = calls.find((c) => c.path === '/api/file-access/export')!
     expect(sent.headers['content-type']).toBe('application/json')
     expect(sent.body).toMatchObject({ collection: 'hb', mode: 'link' })
+  })
+})
+
+describe('moving and downloading picked files', () => {
+  it('moves the picked files, following the move to the end', async () => {
+    const calls = fakeServer({
+      '/api/file-access/gather': gather,
+      '/api/store/transfers/t1': () => json(transfer({ status: 'completed' })),
+    })
+    const { ctx, toast } = context()
+
+    await moveFiles(ctx, { collection: 'hb', place: 'field-ssd' }, 'archive')
+
+    expect(calls[0].body).toMatchObject({
+      collection: 'hb',
+      place: 'field-ssd',
+      volume: 'archive',
+    })
+    // Tagged, so whatever it does first (downloading) shows as its progress.
+    expect(calls[0].headers['x-civex-progress']).toBeTruthy()
+    expect(toast.success).toHaveBeenCalledWith('Moved 3 files to archive.')
+  })
+
+  it('downloads only what is on the server, with its progress followed', async () => {
+    const calls = fakeServer({
+      '/api/file-access/download': { fetched: 4, absent: 1 },
+    })
+    const { ctx, toast } = context()
+
+    await downloadFiles(ctx, { within: 'r1', shas: ['a', 'b'] })
+
+    expect(calls[0].body).toMatchObject({
+      within: 'r1',
+      shas: ['a', 'b'],
+      place: 'server',
+    })
+    expect(calls[0].headers['x-civex-progress']).toBeTruthy()
+    expect(toast.success).toHaveBeenCalledWith(
+      "Downloaded 4 files; 1 file hasn't reached the server yet.",
+    )
   })
 })

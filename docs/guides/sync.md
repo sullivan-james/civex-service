@@ -107,7 +107,8 @@ ways:
 - **When you open it.** Opening a file that isn't here yet downloads it first.
 - **When you export.** An export, a zip or `civex files download` first downloads
   anything that isn't here, so what you get is complete. The preview downloads
-  nothing.
+  nothing, but says how many files will be downloaded, and the download shows
+  in the status bar as part of the export.
 
 Until then the file is marked **on the server**, and its chip says opening it will
 download it. A file the authority hasn't got either (the device that added it
@@ -143,9 +144,10 @@ Each file comes back the next time it's opened or exported. It's safe to use:
     ```
 
 === "Web UI"
-    Settings → Sync → **Files**: the default, then a row per collection with
-    its setting, how many files are on this computer (and their size), how
-    many are only on the server, and **Free up space…**.
+    Settings → Storage → **Collections**: the default above the table, and for
+    each collection its setting and **Free up space…**; its bar says how many
+    files are only on the server. To act on some files rather than a whole
+    collection, use a collection's or record's **Files** tab.
 
 Downloaded files are checked against their content hash. They go on the drive their
 collection's files go to (see

@@ -302,7 +302,10 @@ def build_local_context(
         return ctx.sync_svc  # whatever stands in for it by then (tests wrap it)
 
     record_svc.files_from_server = lambda: _sync().fetches_files
-    file_access_svc.fetch_missing = lambda shas: _sync().fetch_files(shas=shas)
+    file_info_svc.files_from_server = lambda: _sync().fetches_files
+    file_access_svc.fetch_missing = lambda shas, on_file=None: _sync().fetch_files(
+        shas=shas, progress=on_file
+    )
     file_access_svc.free_files = lambda shas, dry: _sync().free_up_files(
         shas, dry_run=dry
     )

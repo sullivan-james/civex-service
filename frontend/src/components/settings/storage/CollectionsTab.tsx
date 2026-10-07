@@ -33,6 +33,8 @@ import { SpreadBar } from '../../collections/SpreadBar'
 import { gatherPlan } from '../../../utils/collectionStorage'
 import { formatSize } from '../../../utils/storage'
 import { NewTransferModal } from './NewTransferModal'
+import { ComputerFilesCell, ComputerFilesDefault } from './ComputerFiles'
+import { useFollowsServer } from '../../../hooks/useRemote'
 
 const NONE = ''
 
@@ -111,6 +113,19 @@ function FilesCell({
             </span>
           </span>
         ))}
+        {spread.unlocated_files > 0 && (
+          <span
+            className={
+              spread.unlocated_place === 'server' ? undefined : 'text-attention'
+            }
+          >
+            {spread.volumes.length > 0 && ' · '}
+            {spread.unlocated_files.toLocaleString()}{' '}
+            {spread.unlocated_place === 'server'
+              ? 'only on the server'
+              : 'missing'}
+          </span>
+        )}
       </p>
       {gather && (
         <Button size="sm" variant="link" onClick={() => setGathering(true)}>
@@ -201,6 +216,7 @@ export function CollectionsTab({
   const { data: volumes = [] } = useVolumes()
   const { data: spreads = [] } = useAllCollectionStorage()
   const bulk = useBulkPlacement()
+  const followsServer = useFollowsServer()
   const [query, setQuery] = useState('')
   const focused = useRef(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -271,6 +287,8 @@ export function CollectionsTab({
           </Button>
         </div>
       )}
+
+      {followsServer && <ComputerFilesDefault />}
 
       <div className="flex flex-wrap items-center gap-3">
         <Input
@@ -361,6 +379,27 @@ export function CollectionsTab({
               />
             ),
           },
+          ...(followsServer
+            ? [
+                {
+                  key: 'computer',
+                  header: (
+                    <span className="inline-flex items-center gap-1">
+                      On this computer
+                      <InfoTip>
+                        Keep a collection&apos;s files here (downloaded in the
+                        background), or fetch each when it is opened or
+                        exported. Freeing space removes this computer&apos;s
+                        copies of files the server holds.
+                      </InfoTip>
+                    </span>
+                  ),
+                  render: (c: Collection) => (
+                    <ComputerFilesCell collectionId={c.id} />
+                  ),
+                },
+              ]
+            : []),
           {
             key: 'home',
             header: 'Home volume',

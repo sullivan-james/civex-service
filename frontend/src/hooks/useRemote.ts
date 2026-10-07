@@ -111,6 +111,13 @@ export function useSyncNow() {
   return useMutation({ mutationFn: remoteApi.syncNow, onSuccess: refresh })
 }
 
+/** Whether files can live only on a server: the project follows one (and isn't
+ * one). Everything about keeping files on this computer shows only then. */
+export function useFollowsServer(): boolean {
+  const { data } = useRemoteStatus()
+  return !!data?.configured && !data.serving
+}
+
 /** Each collection's files on this computer, and whether it keeps a copy. */
 export function useCollectionFiles(enabled = true) {
   return useQuery({

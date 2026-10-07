@@ -89,9 +89,12 @@ class FileAccessService:
         self._store = store
         self._civex_dir = civex_dir
         # Downloads files another device added (they are cited here but on no
-        # drive here) from the authority, given their hashes; None when the
-        # project follows none. Injected so this service doesn't know sync.
-        self.fetch_missing: Callable[[list[str]], object] | None = None
+        # drive here) from the authority, given their hashes and a callable told
+        # how many have arrived; None when the project follows none. Injected
+        # so this service doesn't know sync.
+        self.fetch_missing: (
+            Callable[[list[str], Callable[[int], None] | None], Any] | None
+        ) = None
         # Removes this computer's copies of content the server holds (given the
         # hashes and whether only to count); None when the project follows no
         # server. Injected like `fetch_missing`.
@@ -114,11 +117,25 @@ class FileAccessService:
         device added that aren't here yet are first downloaded from the server,
         and the plan is of what is here then."""
         found = self._plan(selection, with_sources, progress)
-        remote = [i.sha256 for i in found.items if i.state == "remote"]
+        remote = [i.sha256 for i in found.to_fetch]
         if not (fetch and remote and self.fetch_missing):
             return found
-        self.fetch_missing(remote)
-        return self._plan(selection, with_sources, progress)
+        self._fetch(remote, progress)
+        return _absent_now(self._plan(selection, with_sources, progress))
+
+    def _fetch(self, shas: list[str], progress: Progress | None) -> Any:
+        """Download these files from the server, as a stage of the work a
+        person is watching (the same progress as the rest of it)."""
+        shas = list(dict.fromkeys(shas))
+        if not shas or not self.fetch_missing:
+            return None
+        if progress:
+            progress.phase(
+                f"Downloading {len(shas)} file{'s' if len(shas) != 1 else ''} "
+                "from the server",
+                len(shas),
+            )
+        return self.fetch_missing(shas, progress.advance if progress else None)
 
     def _plan(
         self,
@@ -1117,7 +1134,9 @@ class FileAccessService:
             items=items[offset : offset + limit],
         )
 
-    def to_move(self, items: list[FileItem], volume: str) -> list[str]:
+    def to_move(
+        self, items: list[FileItem], volume: str, progress: Progress | None = None
+    ) -> list[str]:
         """The content that has to move for these files to be on `volume`: each
         not there yet, once; a file only on the server is downloaded first (it
         then moves like any other). Unreachable and missing files can't move
@@ -1125,20 +1144,15 @@ class FileAccessService:
         if volume not in self._store.volume_names():
             raise NotFoundError(f"There is no drive called '{volume}'.")
         movable = [i for i in items if place_of(i)[1] in ("drive", "server")]
-        remote = [i.sha256 for i in movable if place_of(i)[1] == "server"]
-        if remote and self.fetch_missing:
-            self.fetch_missing(remote)
+        self._fetch([i.sha256 for i in movable if place_of(i)[1] == "server"], progress)
         located = self._store.locate_volumes(i.sha256 for i in movable)
         return [sha for sha, on in located.items() if on and on != volume]
 
-    def download(self, items: list[FileItem]) -> Any:
+    def download(self, items: list[FileItem], progress: Progress | None = None) -> Any:
         """Fetch the files among these that are only on the server."""
-        remote = list(
-            dict.fromkeys(i.sha256 for i in items if place_of(i)[1] == "server")
+        return self._fetch(
+            [i.sha256 for i in items if place_of(i)[1] == "server"], progress
         )
-        if not remote or not self.fetch_missing:
-            return None
-        return self.fetch_missing(remote)
 
     def free_up(self, items: list[FileItem], dry_run: bool = True) -> Any:
         """Remove this computer's copies of these files, where the server holds
@@ -1259,7 +1273,7 @@ def _gone(item: FileItem) -> FileItem:
 def _unavailable_groups(items: list[FileItem]) -> list[UnavailableGroup]:
     groups: dict[tuple[str | None, str, str, str], UnavailableGroup] = {}
     for item in items:
-        if item.available:
+        if item.available or item.state == "remote":  # to download, not lost
             continue
         reason = item.reason or (
             "" if item.volume else "Not stored on any drive this project knows."
@@ -1461,3 +1475,23 @@ def _places(items: list[FileItem]) -> list[PlaceSummary]:
         row.bytes += item.size
     rank = {"drive": 0, "unreachable": 1, "server": 2, "missing": 3}
     return sorted(out.values(), key=lambda r: (rank[r.kind], -r.bytes, r.place))
+
+
+def _absent_now(plan: FilePlan) -> FilePlan:
+    """A plan made after downloading what was only on the server: a file
+    still not here is one the server hasn't got either, so it can't be reached
+    (not "to download")."""
+    gone = False
+    for i, item in enumerate(plan.items):
+        if item.state == "remote":
+            gone = True
+            plan.items[i] = dataclasses.replace(
+                item,
+                state="absent",
+                available=False,
+                reason="Not on the server yet: the device that added it hasn't sent it.",
+                fix="It can be exported once that device has synced.",
+            )
+    if gone:
+        plan.unavailable = _unavailable_groups(plan.items)
+    return plan
