@@ -18,8 +18,10 @@ def test_linux_uses_xdg_open(monkeypatch: pytest.MonkeyPatch) -> None:
         fs_open.subprocess, "Popen", lambda cmd, **kw: launched.append(cmd)
     )
 
-    assert fs_open.open_folder(Path("/data/out")) is True
-    assert launched == [["xdg-open", "/data/out"]]
+    folder = Path("/data/out")
+    assert fs_open.open_folder(folder) is True
+    # The folder as this machine writes a path (the test also runs on Windows).
+    assert launched == [["xdg-open", str(folder)]]
 
 
 def test_wsl_opens_windows_explorer_on_the_converted_path(
