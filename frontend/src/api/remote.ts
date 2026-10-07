@@ -166,8 +166,44 @@ export interface ResolveManyResult {
   failed: { id: string; message: string }[]
 }
 
+/** One collection's files on this computer. */
+export interface CollectionFiles {
+  id: string
+  name: string
+  /** In force: `keep` (a copy stays here) or `opened` (fetched when opened). */
+  mode: 'keep' | 'opened'
+  /** Set for this collection, rather than following the project's setting. */
+  chosen: boolean
+  files_here: number
+  bytes_here: number
+  /** Only on the server: on no drive here. */
+  files_on_server: number
+}
+
+/** What freeing a collection's space removes (or would), and what it keeps. */
+export interface FreeUp {
+  files: number
+  bytes: number
+  /** Kept: also used by a collection kept on this computer. */
+  kept_shared: number
+  /** Kept: the server hasn't got them yet. */
+  not_on_server: number
+  done: boolean
+}
+
 export const remoteApi = {
   status: () => api.get<RemoteStatus>('/remote'),
+  collectionFiles: () => api.get<CollectionFiles[]>('/remote/files'),
+  setCollectionMode: (collection: string, mode: 'keep' | 'opened' | null) =>
+    api.patch<CollectionFiles[]>(
+      `/remote/files/${encodeURIComponent(collection)}`,
+      { mode },
+    ),
+  freeUp: (collection: string, dryRun: boolean) =>
+    api.post<FreeUp>(
+      `/remote/files/${encodeURIComponent(collection)}/free-up?dry_run=${dryRun}`,
+      {},
+    ),
   /** This project as an authority: whether it accepts devices, and which. */
   authority: () => api.get<Authority>('/remote/authority'),
   setServing: (serving: boolean) =>

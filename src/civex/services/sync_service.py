@@ -23,7 +23,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from civex import user_state
-from civex.config import DOWNLOAD_MODES, Config, save_config
+from civex.config import (
+    COLLECTION_FILE_MODES,
+    DOWNLOAD_MODES,
+    Config,
+    save_config,
+)
 from civex.domain import hlc
 from civex.domain.audit_diff import BEFORE, apply_delta, entry_snapshots
 from civex.domain.exceptions import (
@@ -105,6 +110,25 @@ class ResolveManyReport:
     settled: list[uuid.UUID] = field(default_factory=list)  # which (not a dry run)
     not_offered: int = 0  # left open: this way of settling isn't theirs to take
     failed: list[tuple[uuid.UUID, str]] = field(default_factory=list)  # left open
+
+
+@dataclass
+class CollectionFilesDTO:
+    id: str
+    name: str
+    mode: str  # keep | opened (in force)
+    chosen: bool  # set for this collection, rather than the project's setting
+    files_here: int
+    bytes_here: int
+    files_on_server: int  # only on the server: not on any drive here
+
+
+@dataclass
+class FreeUpReport:
+    files: int  # copies removed (or that would be)
+    bytes: int
+    kept_shared: int  # also used by a collection kept here, so kept
+    not_on_server: int  # the server hasn't got them yet, so kept
 
 
 @dataclass
@@ -1046,8 +1070,115 @@ class SyncService:
         return self.configured and not self._config.sync.serve
 
     def files_to_fetch(self) -> int:
-        """How many files the records here cite that no drive here holds."""
-        return self._repo.count_files_not_here() if self.fetches_files else 0
+        """How many files this computer keeps a copy of (those of collections
+        kept here, see `collection_mode`) that no drive here holds yet: what the
+        background download still has to fetch."""
+        if not self.fetches_files:
+            return 0
+        return self._repo.count_files_not_here(self._kept_collections())
+
+    def collection_mode(self, collection_id: str) -> str:
+        """Whether a collection's files are kept on this computer (`keep`) or
+        fetched when opened or exported (`opened`): its own setting, else the
+        project's `download_files`."""
+        return self._config.sync.collection_files.get(collection_id) or (
+            "keep" if self._config.sync.download_files == "all" else "opened"
+        )
+
+    def _kept_collections(self) -> set[uuid.UUID]:
+        return {
+            cid
+            for cid in self._repo.live_collections()
+            if self.collection_mode(str(cid)) == "keep"
+        }
+
+    def _collection_id(self, ref: str) -> uuid.UUID:
+        """A live collection, by id or name."""
+        live = self._repo.live_collections()
+        for cid, name in live.items():
+            if str(cid) == ref or name == ref:
+                return cid
+        raise NotFoundError(f"There is no collection '{ref}'")
+
+    def collection_files(self) -> list[CollectionFilesDTO]:
+        """Each live collection's files on this computer: how many are here and
+        their size, how many are only on the server, and whether it keeps a
+        copy here. From the catalog, nothing read from disk or the server."""
+        counts = self._repo.files_by_collection()
+        out = []
+        for cid, name in sorted(
+            self._repo.live_collections().items(), key=lambda kv: kv[1].casefold()
+        ):
+            here, size, remote = counts.get(cid, (0, 0, 0))
+            out.append(
+                CollectionFilesDTO(
+                    id=str(cid),
+                    name=name,
+                    mode=self.collection_mode(str(cid)),
+                    chosen=str(cid) in self._config.sync.collection_files,
+                    files_here=here,
+                    bytes_here=size,
+                    files_on_server=remote,
+                )
+            )
+        return out
+
+    def set_collection_mode(self, collection: str, mode: str | None) -> str:
+        """Keep a collection's files on this computer (`keep`), fetch them
+        only when opened (`opened`), or follow the project's setting (None).
+        Keeping means the background download fetches what is missing. Returns
+        the mode now in force."""
+        if mode is not None and mode not in COLLECTION_FILE_MODES:
+            raise ValidationError(
+                f"Choose one of: {', '.join(COLLECTION_FILE_MODES)} (got '{mode}')"
+            )
+        cid = str(self._collection_id(collection))
+        if mode is None:
+            self._config.sync.collection_files.pop(cid, None)
+        else:
+            self._config.sync.collection_files[cid] = mode
+        save_config(self._config)
+        return self.collection_mode(cid)
+
+    def free_up(self, collection: str, dry_run: bool = True) -> FreeUpReport:
+        """Remove this computer's copies of a collection's files, to free
+        space; they are fetched again when opened or exported. Safe by
+        construction: only files the server says it holds, asked at that
+        moment (one never sent stays), and never one a collection kept here
+        also uses. Done for real, the collection is set to `opened` first, so
+        the background download doesn't fetch them straight back. Counts only
+        unless `dry_run` is False. Holds the store's clean-up lock, so no
+        clean-up or file move runs meanwhile."""
+        if not self.fetches_files:
+            raise ValidationError(
+                "This project doesn't follow a server, so its files have nowhere "
+                "else to come from: they can't be removed to free space."
+            )
+        cid = self._collection_id(collection)
+        here = self._repo.files_here_of(cid)
+        kept_elsewhere = self._repo.used_by(
+            list(here), self._kept_collections() - {cid}
+        )
+        candidates = [sha for sha in here if sha not in kept_elsewhere]
+        transport = self._transport()
+        missing: set[str] = set()
+        for i in range(0, len(candidates), FILE_CHECK_PAGE):
+            missing |= set(transport.missing_files(candidates[i : i + FILE_CHECK_PAGE]))
+        removable = [sha for sha in candidates if sha not in missing]
+        report = FreeUpReport(
+            files=len(removable),
+            bytes=sum(here[sha] for sha in removable),
+            kept_shared=len(kept_elsewhere),
+            not_on_server=len(missing),
+        )
+        if dry_run:
+            return report
+        self.set_collection_mode(str(cid), "opened")
+        with self._files.gc_lock():
+            for sha in removable:
+                self._files.delete(sha)
+        self._commit()
+        return report
 
     def set_download_files(self, mode: str) -> None:
         """Which files this device keeps a copy of: `all` (fetched in the
@@ -1088,11 +1219,15 @@ class SyncService:
         if not self.fetches_files:
             return report
         transport = self._transport()
+        # The background download fetches only what this computer keeps; a
+        # file asked for by hash (opened, exported) comes whatever its
+        # collection's setting.
+        collections = self._kept_collections() if shas is None else None
         started = time.monotonic()
         scratch = self._config.civex_dir / "tmp" / "sync-files"
         after = ""
         while True:
-            page = self._repo.files_not_here(after, FILE_CHECK_PAGE, shas)
+            page = self._repo.files_not_here(after, FILE_CHECK_PAGE, shas, collections)
             if not page:
                 break
             after = page[-1][0]

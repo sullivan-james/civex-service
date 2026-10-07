@@ -37,7 +37,20 @@ const base = {
   connect_error: null,
 }
 
+let files: unknown[] = []
+
 beforeEach(() => {
+  files = [
+    {
+      id: 'c1',
+      name: 'Humpbacks',
+      mode: 'keep',
+      chosen: false,
+      files_here: 3,
+      bytes_here: 3 * 1024 * 1024,
+      files_on_server: 2,
+    },
+  ]
   status = { ...base }
   conflicts = []
   identity = { name: 'sulli', chosen: null, default: 'sulli' }
@@ -58,6 +71,16 @@ beforeEach(() => {
         return json(identity)
       }
       if (url.pathname === '/api/remote/conflicts') return json(conflicts)
+      if (url.pathname === '/api/remote/files') return json(files)
+      if (url.pathname === '/api/remote/files/c1/free-up')
+        return json({
+          files: 3,
+          bytes: 3 * 1024 * 1024,
+          kept_shared: 1,
+          not_on_server: 0,
+          done: url.searchParams.get('dry_run') === 'false',
+        })
+      if (url.pathname === '/api/remote/files/c1') return json(files)
       if (url.pathname === '/api/remote/authority')
         return json({ serving: false, devices: [] })
       if (url.pathname.endsWith('/resolve')) {
@@ -169,7 +192,9 @@ describe('SyncSection', () => {
     }
     renderSection()
     expect(
-      await screen.findByText(/7 files not downloaded yet\. They download/),
+      await screen.findByText(
+        /7 files this computer keeps aren't downloaded yet\. They download/,
+      ),
     ).toBeInTheDocument()
     await userEvent.click(
       screen.getByRole('radio', { name: 'Only files I open' }),
@@ -179,6 +204,53 @@ describe('SyncSection', () => {
         calls.find((c) => c.method === 'PATCH' && c.path === '/api/remote')
           ?.body,
       ).toEqual({ download_files: 'opened' }),
+    )
+  })
+
+  it('lists each collection with what is here, and frees space after saying what goes', async () => {
+    status = { ...base, configured: true, remote: 'https://a.example' }
+    renderSection()
+    expect(await screen.findByText('Humpbacks')).toBeInTheDocument()
+    expect(screen.getByText('3 · 3.0 MB')).toBeInTheDocument()
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Free up space…' }),
+    )
+    expect(
+      await screen.findByText(
+        /Removes this computer’s copies of 3 files|Removes this computer's copies of 3 files/,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /Keeps 1 also used by a collection kept on this computer/,
+      ),
+    ).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Remove 3.0 MB' }))
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.path === '/api/remote/files/c1/free-up' && c.method === 'POST',
+        ),
+      ).toBe(true),
+    )
+  })
+
+  it('sets one collection to fetch its files when opened', async () => {
+    status = { ...base, configured: true, remote: 'https://a.example' }
+    renderSection()
+    await userEvent.selectOptions(
+      await screen.findByLabelText(
+        "Which of Humpbacks's files this computer keeps",
+      ),
+      'opened',
+    )
+    await waitFor(() =>
+      expect(
+        calls.find(
+          (c) => c.method === 'PATCH' && c.path === '/api/remote/files/c1',
+        )?.body,
+      ).toEqual({ mode: 'opened' }),
     )
   })
 

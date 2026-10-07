@@ -111,6 +111,36 @@ export function useSyncNow() {
   return useMutation({ mutationFn: remoteApi.syncNow, onSuccess: refresh })
 }
 
+/** Each collection's files on this computer, and whether it keeps a copy. */
+export function useCollectionFiles(enabled = true) {
+  return useQuery({
+    queryKey: [...KEY, 'files'],
+    queryFn: remoteApi.collectionFiles,
+    enabled,
+  })
+}
+
+export function useSetCollectionMode() {
+  const refresh = useRefreshing()
+  return useMutation({
+    mutationFn: (v: { id: string; mode: 'keep' | 'opened' | null }) =>
+      remoteApi.setCollectionMode(v.id, v.mode),
+    onSuccess: refresh,
+  })
+}
+
+/** Free a collection's space: `dryRun` only counts (and refreshes nothing). */
+export function useFreeUp() {
+  const refresh = useRefreshing()
+  return useMutation({
+    mutationFn: (v: { id: string; dryRun: boolean }) =>
+      remoteApi.freeUp(v.id, v.dryRun),
+    onSuccess: (r) => {
+      if (r.done) refresh()
+    },
+  })
+}
+
 export function useUpdateRemote() {
   const refresh = useRefreshing()
   return useMutation({ mutationFn: remoteApi.update, onSuccess: refresh })

@@ -505,3 +505,80 @@ def revoke_device(name: str, ctx: AppContext = Depends(get_ctx)):
         raise HTTPException(404, detail=f"No active device named {name}")
     ctx.commit()
     return _authority(ctx)
+
+
+# -- files on this computer -------------------------------------------------
+
+
+class CollectionFilesResponse(BaseModel):
+    id: str
+    name: str
+    mode: str = Field(
+        description="keep: a copy stays on this computer (fetched in the "
+        "background); opened: fetched when opened or exported."
+    )
+    chosen: bool = Field(
+        description="Set for this collection, rather than following the "
+        "project's setting."
+    )
+    files_here: int = Field(description="Files its records use that are here.")
+    bytes_here: int = Field(description="Their size.")
+    files_on_server: int = Field(
+        description="Files its records use that are only on the server."
+    )
+
+
+class CollectionModeRequest(BaseModel):
+    mode: str | None = Field(
+        description="keep, opened, or null to follow the project's setting."
+    )
+
+
+class FreeUpResponse(BaseModel):
+    files: int = Field(description="Copies removed (or that would be, counting).")
+    bytes: int = Field(description="The space that frees.")
+    kept_shared: int = Field(
+        description="Kept: also used by a collection kept on this computer."
+    )
+    not_on_server: int = Field(
+        description="Kept: the server hasn't got them yet (never sent)."
+    )
+    done: bool = Field(description="False when only counted.")
+
+
+@router.get("/files", response_model=list[CollectionFilesResponse])
+def collection_files(ctx: AppContext = Depends(get_ctx)):
+    """Each collection's files on this computer: how many are here and their
+    size, how many are only on the server, and whether it keeps a copy here."""
+    return [CollectionFilesResponse(**vars(c)) for c in ctx.sync_svc.collection_files()]
+
+
+@router.patch("/files/{collection}", response_model=list[CollectionFilesResponse])
+def set_collection_mode(
+    collection: str, body: CollectionModeRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """Keep a collection's files on this computer, fetch them only when
+    opened, or follow the project's setting. Keeping starts the background
+    download of what is missing."""
+    mode = ctx.sync_svc.set_collection_mode(collection, body.mode)
+    if mode == "keep" and ctx.sync_svc.configured:
+        sync_jobs.sync_now()
+    return [CollectionFilesResponse(**vars(c)) for c in ctx.sync_svc.collection_files()]
+
+
+@router.post("/files/{collection}/free-up", response_model=FreeUpResponse)
+def free_up(
+    collection: str,
+    dry_run: bool = Query(default=True, description="Only count (the default)."),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Remove this computer's copies of a collection's files to free space;
+    they are fetched again when opened. Only files the server confirms it
+    holds, and never one a collection kept here also uses. Counts first unless
+    `dry_run=false`, which also sets the collection to fetch when opened."""
+    try:
+        report = ctx.sync_svc.free_up(collection, dry_run=dry_run)
+    except SyncError as e:
+        raise HTTPException(503, detail=f"The server can't be reached to check: {e}")
+    ctx.commit()
+    return FreeUpResponse(**vars(report), done=not dry_run)

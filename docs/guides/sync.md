@@ -101,8 +101,9 @@ the same file again later (the same content is the same file).
 **Receiving.** A file another device added reaches this computer in one of three
 ways:
 
-- **In the background.** While civex runs, the files are downloaded a few at a
-  time, with progress in the status bar and Settings → Sync.
+- **In the background**, for collections kept on this computer (see below).
+  While civex runs, the files are downloaded a few at a time, with progress in
+  the status bar and Settings → Sync.
 - **When you open it.** Opening a file that isn't here yet downloads it first.
 - **When you export.** An export, a zip or `civex files download` first downloads
   anything that isn't here, so what you get is complete. The preview downloads
@@ -112,17 +113,39 @@ Until then the file is marked **on the server**, and its chip says opening it wi
 download it. A file the authority hasn't got either (the device that added it
 hasn't sent it yet) is tried again later, and opening it says so.
 
-On a computer short of space, keep only the files you open:
+### Which files this computer keeps
+
+Each collection either **keeps its files on this computer** (they're downloaded
+in the background) or **fetches them when opened** (each file downloads the
+first time it's opened or exported). The project has a default for this, and
+each collection can override it, so the collections you work on stay local and
+the rest only use space while you need them.
+
+**Free up space** on a collection removes this computer's copies of its files.
+Each file comes back the next time it's opened or exported. It's safe to use:
+
+- It asks the server at that moment which files it holds, and removes only
+  those. A file that was never sent stays.
+- It never removes a file that a collection kept on this computer also uses.
+- It counts first and says what goes and what stays, before anything is
+  removed.
+- It then sets the collection to fetch when opened, so the background download
+  doesn't bring the files straight back.
 
 === "CLI"
     ```bash
-    civex sync files opened   # or: civex sync files all (the default)
-    civex sync fetch          # download everything now, with a progress bar
+    civex sync files                 # each collection: here, only on the server, setting
+    civex sync files opened          # the default: fetch when opened (or: all)
+    civex sync keep "Humpbacks"      # keep this collection's files here
+    civex sync keep "Archive" --opened   # or --reset to follow the default
+    civex sync free "Archive"        # count, confirm, remove the copies
+    civex sync fetch                 # download now everything kept here, with a bar
     ```
 
 === "Web UI"
-    Settings → Sync → **Files**: *Keep every file* or *Only files I open*. The card
-    also says how many files aren't on this computer yet.
+    Settings → Sync → **Files**: the default, then a row per collection with
+    its setting, how many files are on this computer (and their size), how
+    many are only on the server, and **Free up space…**.
 
 Downloaded files are checked against their content hash. They go on the drive their
 collection's files go to (see

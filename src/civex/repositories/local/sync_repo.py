@@ -174,23 +174,100 @@ class LocalSyncRepository:
         )
 
     def files_not_here(
-        self, after: str, limit: int, shas: list[str] | None = None
+        self,
+        after: str,
+        limit: int,
+        shas: list[str] | None = None,
+        collections: set[uuid.UUID] | None = None,
     ) -> list[tuple[str, uuid.UUID | None]]:
         """Files the records here cite that no drive here holds (another device
         added them), in hash order after `after`, each with a collection that
-        uses it (to choose the drive it is written to). With `shas`, only those."""
+        uses it (to choose the drive it is written to). With `shas`, only those;
+        with `collections`, only files records in those collections use."""
         query = self._not_here().where(FileReference.sha256 > after)
         if shas is not None:
             query = query.where(FileReference.sha256.in_(shas))
+        if collections is not None:
+            query = query.where(Record.dataset_id.in_(collections))
         rows = self._s.execute(query.order_by(FileReference.sha256).limit(limit))
         return [(sha, collection) for sha, collection in rows]
 
-    def count_files_not_here(self) -> int:
+    def count_files_not_here(self, collections: set[uuid.UUID] | None = None) -> int:
+        query = self._not_here()
+        if collections is not None:
+            query = query.where(Record.dataset_id.in_(collections))
         return int(
             self._s.execute(
-                select(func.count()).select_from(self._not_here().subquery())
+                select(func.count()).select_from(query.subquery())
             ).scalar_one()
         )
+
+    def files_by_collection(self) -> dict[uuid.UUID, tuple[int, int, int]]:
+        """Per live collection: the distinct files its records use that a drive
+        here holds, their bytes, and the files that are only on the server (no
+        drive here holds them). One grouped query over the catalog."""
+        pairs = (
+            select(Record.dataset_id.label("cid"), FileReference.sha256.label("sha"))
+            .join(Record, Record.id == FileReference.record_id)
+            .join(Dataset, Dataset.id == Record.dataset_id)
+            .where(Dataset.deleted_at.is_(None))
+            .distinct()
+            .subquery()
+        )
+        here = StoredObject.sha256.is_not(None)
+        rows = self._s.execute(
+            select(
+                pairs.c.cid,
+                func.count().filter(here),
+                func.coalesce(func.sum(StoredObject.size).filter(here), 0),
+                func.count().filter(StoredObject.sha256.is_(None)),
+            )
+            .select_from(pairs)
+            .outerjoin(StoredObject, StoredObject.sha256 == pairs.c.sha)
+            .group_by(pairs.c.cid)
+        )
+        return {cid: (int(n), int(b), int(r)) for cid, n, b, r in rows}
+
+    def live_collections(self) -> dict[uuid.UUID, str]:
+        """Every live collection, id to name."""
+        return {
+            i: n
+            for i, n in self._s.execute(
+                select(Dataset.id, Dataset.name).where(Dataset.deleted_at.is_(None))
+            )
+        }
+
+    def files_here_of(self, collection: uuid.UUID) -> dict[str, int]:
+        """The files a collection's records use that a drive here holds, with
+        their size."""
+        rows = self._s.execute(
+            select(FileReference.sha256, StoredObject.size)
+            .join(Record, Record.id == FileReference.record_id)
+            .join(StoredObject, StoredObject.sha256 == FileReference.sha256)
+            .where(Record.dataset_id == collection)
+            .distinct()
+        )
+        return {sha: int(size) for sha, size in rows}
+
+    def used_by(self, shas: list[str], collections: set[uuid.UUID]) -> set[str]:
+        """Of these files, those that records in these collections use."""
+        out: set[str] = set()
+        if not shas or not collections:
+            return out
+        for i in range(0, len(shas), 500):
+            out |= {
+                sha
+                for (sha,) in self._s.execute(
+                    select(FileReference.sha256)
+                    .join(Record, Record.id == FileReference.record_id)
+                    .where(
+                        FileReference.sha256.in_(shas[i : i + 500]),
+                        Record.dataset_id.in_(collections),
+                    )
+                    .distinct()
+                )
+            }
+        return out
 
     def set_project_id(self, project_id: uuid.UUID) -> None:
         self._meta_row().project_id = project_id

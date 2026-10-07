@@ -134,12 +134,10 @@ def test_never_syncs_only_when_asked() -> None:
     assert r.tick(1000) is None and r.calls == 1
 
 
-def test_files_not_here_are_downloaded_in_the_background_unless_only_opened_ones():
+def test_files_kept_here_are_downloaded_in_the_background_and_nothing_else():
     r = Rig()
-    r.to_fetch = 3
+    r.to_fetch = 3  # what the collections kept here still lack
     r.tick()
     assert len(r.fetches) == 1 and r.to_fetch == 0
-    r.sync_config.download_files = "opened"
-    r.to_fetch = 2
-    r.tick(1000)
-    assert len(r.fetches) == 1  # only fetched when opened or exported
+    r.tick(1000)  # nothing left to fetch (none kept, or all here): no call
+    assert len(r.fetches) == 1

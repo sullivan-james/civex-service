@@ -13,6 +13,7 @@ import typer
 from rich.markup import escape
 from rich.table import Table
 
+from civex.cli.db import _size
 from civex.cli.utils import cli_load_config, get_ctx as _ctx
 from civex.console import console
 from civex.domain.exceptions import CivexError
@@ -185,31 +186,117 @@ def interval(
 def files(
     mode: str = typer.Argument(
         None,
-        help="'all' to keep a copy of every file, 'opened' to fetch only what is "
-        "opened or exported. Leave out to see the setting.",
+        help="Set the project's default: 'all' keeps a copy of every file, "
+        "'opened' fetches a file only when it is opened or exported. Leave out "
+        "to see where each collection's files are.",
     ),
 ) -> None:
-    """Choose which files this computer keeps a copy of. With 'all' (the
-    default) files other devices add are downloaded in the background while
-    civex is running; with 'opened' a file is downloaded only when it is opened
-    or exported, for a computer short of space."""
+    """See, per collection, how many files are on this computer and how many are
+    only on the server, and whether it keeps a copy here. With a mode, set the
+    default for collections that haven't their own (`civex sync keep`)."""
     c = _ctx()
     try:
         if mode is not None:
             c.sync_svc.set_download_files(mode)
         s = c.sync_svc.status()
+        rows = c.sync_svc.collection_files()
     except CivexError as e:
         raise _fail(e)
     finally:
         c.close()
     console.print(
-        "Keeps every file." if s.download_files == "all" else "Keeps files opened."
+        "By default, keeps every file."
+        if s.download_files == "all"
+        else "By default, fetches a file when it is opened."
     )
+    if not rows:
+        return
+    table = Table()
+    table.add_column("Collection")
+    table.add_column("Keeps")
+    table.add_column("On this computer", justify="right")
+    table.add_column("Only on the server", justify="right")
+    for r in rows:
+        table.add_row(
+            escape(r.name),
+            ("every file" if r.mode == "keep" else "files opened")
+            + ("" if r.chosen else " [dim](default)[/dim]"),
+            f"{r.files_here} ({_size(r.bytes_here)})",
+            str(r.files_on_server),
+        )
+    console.print(table)
     if s.files_to_fetch:
         console.print(
-            f"{s.files_to_fetch} file(s) not downloaded yet "
+            f"{s.files_to_fetch} kept file(s) not downloaded yet "
             "(`civex sync fetch` downloads them now)."
         )
+
+
+@app.command("keep")
+def keep(
+    collection: str = typer.Argument(help="The collection, by name or id."),
+    opened: bool = typer.Option(
+        False, "--opened", help="Fetch its files only when opened instead."
+    ),
+    reset: bool = typer.Option(
+        False, "--reset", help="Follow the project's default again."
+    ),
+) -> None:
+    """Keep a collection's files on this computer: what is missing is
+    downloaded in the background while civex runs (or now, with `civex sync
+    fetch`). With --opened, fetch them only when opened or exported."""
+    c = _ctx()
+    try:
+        now = c.sync_svc.set_collection_mode(
+            collection, None if reset else ("opened" if opened else "keep")
+        )
+    except CivexError as e:
+        raise _fail(e)
+    finally:
+        c.close()
+    console.print(
+        f"{escape(collection)}: "
+        + ("keeps every file." if now == "keep" else "fetches files when opened.")
+    )
+
+
+@app.command("free")
+def free(
+    collection: str = typer.Argument(help="The collection, by name or id."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask first."),
+) -> None:
+    """Free space: remove this computer's copies of a collection's files; they
+    are fetched again when opened or exported. Only files the server confirms
+    it holds are removed, never one another collection kept here uses, and the
+    collection is set to fetch files when opened."""
+    c = _ctx()
+    try:
+        counted = c.sync_svc.free_up(collection, dry_run=True)
+        kept = []
+        if counted.kept_shared:
+            kept.append(f"{counted.kept_shared} also used by a collection kept here")
+        if counted.not_on_server:
+            kept.append(f"{counted.not_on_server} the server hasn't got yet")
+        if not counted.files:
+            console.print(
+                "Nothing to remove" + (f" (kept: {'; '.join(kept)})." if kept else ".")
+            )
+            return
+        console.print(
+            f"Removes {counted.files} file(s), {_size(counted.bytes)}"
+            + (f"; keeps {'; '.join(kept)}" if kept else "")
+            + "."
+        )
+        if not yes and not typer.confirm("Remove them?"):
+            return
+        done = c.sync_svc.free_up(collection, dry_run=False)
+    except (CivexError, SyncError) as e:
+        raise _fail(e)
+    finally:
+        c.close()
+    console.print(
+        f"[success]Freed {_size(done.bytes)} ({done.files} file(s)).[/success]"
+    )
 
 
 @app.command("fetch")

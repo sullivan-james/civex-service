@@ -102,8 +102,9 @@ class SyncWorker:
             report = self._maybe_sync(ctx, config)
             if not config.sync.paused:
                 self._fetch_history(ctx)
-                if config.sync.download_files == "all":
-                    self._fetch_files(ctx)
+                # Only collections kept on this computer (see collection_mode):
+                # the service limits it, so nothing is fetched when none are.
+                self._fetch_files(ctx)
             return report
         finally:
             ctx.close()

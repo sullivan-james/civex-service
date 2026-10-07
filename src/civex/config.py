@@ -91,9 +91,15 @@ class SyncConfig:
     # "opened" fetches one only when it is opened or exported (for a computer
     # short of space). Either way a file is fetched on demand.
     download_files: str = "all"
+    # Per collection (by id), overriding `download_files` for its files: "keep"
+    # (a copy stays on this computer, fetched in the background) or "opened"
+    # (fetched when opened or exported; its copies can be removed to free
+    # space). Keyed by id like placement, so a rename changes nothing.
+    collection_files: dict[str, str] = field(default_factory=dict)
 
 
 DOWNLOAD_MODES = ("all", "opened")
+COLLECTION_FILE_MODES = ("keep", "opened")
 
 
 @dataclass
@@ -381,6 +387,11 @@ def load_config() -> Config:
             if sync_data.get("download_files") in DOWNLOAD_MODES
             else "all"
         ),
+        collection_files={
+            str(cid): str(mode)
+            for cid, mode in (sync_data.get("collection_files") or {}).items()
+            if mode in COLLECTION_FILE_MODES
+        },
     )
 
     return Config(
@@ -541,6 +552,10 @@ def save_config(config: Config) -> None:
             lines.append(f"interval_seconds = {sync.interval_seconds}\n")
         if sync.download_files != "all":
             lines.append(f"download_files = {_tv(sync.download_files)}\n")
+    if sync.collection_files:
+        lines.append("\n[sync.collection_files]\n")
+        for cid, mode in sorted(sync.collection_files.items()):
+            lines.append(f"{_tv(cid)} = {_tv(mode)}\n")
 
     retention = config.retention
     retention_lines = []
