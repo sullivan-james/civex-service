@@ -14,7 +14,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from collections.abc import Callable
+from collections.abc import Iterator
 from typing import Any, Protocol
 
 from civex.domain import hlc
@@ -523,9 +523,4 @@ class SyncTransport(Protocol):
     def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage: ...
     def missing_files(self, shas: list[str]) -> list[str]: ...
     def upload_file(self, sha256: str, path: Path) -> None: ...
-    def download_file(
-        self,
-        sha256: str,
-        dest: Path,
-        on_bytes: Callable[[int], None] | None = None,
-    ) -> None: ...
+    def file_chunks(self, sha256: str) -> Iterator[bytes]: ...

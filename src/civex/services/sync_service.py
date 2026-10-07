@@ -1256,7 +1256,6 @@ class SyncService:
         # collection's setting.
         collections = self._kept_collections() if shas is None else None
         started = time.monotonic()
-        scratch = self._config.civex_dir / "tmp" / "sync-files"
         after = ""
         while True:
             page = self._repo.files_not_here(after, FILE_CHECK_PAGE, shas, collections)
@@ -1275,22 +1274,23 @@ class SyncService:
                 if self._files.exists(sha):  # on a drive, just not inventoried
                     report.fetched += 1
                     continue
-                dest = scratch / sha
                 try:
-                    transport.download_file(sha, dest, on_bytes)
+                    chunks = transport.file_chunks(sha)
                 except FileNotFoundError:
                     report.absent.append(sha)
                     continue
-                try:
-                    # Onto the drive asked for (downloading to move it there),
-                    # else where its collection's files go.
-                    self._files.put_path(
-                        dest,
-                        collection_id=str(collection) if collection else None,
-                        volume=volume,
-                    )
-                finally:
-                    dest.unlink(missing_ok=True)
+                # Straight onto the drive (the one asked for, when it is
+                # fetched to go there, else its collection's): each byte
+                # written once, counted as it comes.
+                stored = self._files.put_chunks(
+                    _counted(chunks, on_bytes),
+                    sha,
+                    collection_id=str(collection) if collection else None,
+                    volume=volume,
+                )
+                if stored.sha256 != sha:
+                    self._files.delete(stored.sha256)
+                    raise SyncError("The server sent the wrong content for a file")
                 self._commit()
                 report.fetched += 1
                 if progress:
@@ -1674,3 +1674,13 @@ def _field_id(conflict: SyncConflictDTO) -> str | None:
     """The field id a conflict is about (`data.<field id>`), if it is about one."""
     top, _, sub = (conflict.field or "").partition(".")
     return sub if top == "data" and sub else None
+
+
+def _counted(
+    chunks: Iterator[bytes], on_bytes: Callable[[int], None] | None
+) -> Iterator[bytes]:
+    """The chunks, telling `on_bytes` how many bytes each brought."""
+    for chunk in chunks:
+        if on_bytes:
+            on_bytes(len(chunk))
+        yield chunk

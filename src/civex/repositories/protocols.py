@@ -628,6 +628,14 @@ class FileObjectStore(Protocol):
         collection_id: str | None = None,
         volume: str | None = None,
     ) -> FileRef: ...
+    def put_chunks(
+        self,
+        chunks: Iterable[bytes],
+        original_filename: str,
+        size_hint: int | None = None,
+        collection_id: str | None = None,
+        volume: str | None = None,
+    ) -> FileRef: ...
     def reconcile_inventory(self) -> dict[str, int]: ...
     def delete(self, sha256: str, volume: str | None = None) -> bool: ...
     def sweep_stale_scratch(

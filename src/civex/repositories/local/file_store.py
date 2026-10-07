@@ -276,6 +276,38 @@ class VolumeAwareFileObjectStore:
             vol_name, tmp_path, hasher.hexdigest(), size, original_filename
         )
 
+    def put_chunks(
+        self,
+        chunks: Iterable[bytes],
+        original_filename: str,
+        size_hint: int | None = None,
+        collection_id: str | None = None,
+        volume: str | None = None,
+    ) -> FileRef:
+        """`put_stream` for chunks that arrive in this thread (a download from
+        the server): written straight to a scratch file on the drive they go
+        to, hashed as they come, then renamed into place, so each byte is
+        written once. `volume` names the drive, else the collection's."""
+        vol_name, tmp_path = self._open_scratch(size_hint, collection_id, volume)
+        hasher = hashlib.sha256()
+        size = 0
+        try:
+            with tmp_path.open("wb") as f:
+                for chunk in chunks:
+                    if not chunk:
+                        continue
+                    hasher.update(chunk)
+                    f.write(chunk)
+                    size += len(chunk)
+        except BaseException as e:
+            tmp_path.unlink(missing_ok=True)
+            if isinstance(e, OSError):
+                raise self._write_error(vol_name, e, size, streamed=True) from e
+            raise
+        return self._finalize(
+            vol_name, tmp_path, hasher.hexdigest(), size, original_filename
+        )
+
     def put_path(
         self,
         path: Path,
@@ -401,12 +433,16 @@ class VolumeAwareFileObjectStore:
         return scratch_dir / f"{uuid.uuid4().hex}.part"
 
     def _open_scratch(
-        self, size_hint: int | None, collection_id: str | None = None
+        self,
+        size_hint: int | None,
+        collection_id: str | None = None,
+        volume: str | None = None,
     ) -> tuple[str, Path]:
-        """First candidate volume passing the allocation/headroom gates, plus
-        a fresh scratch path on it."""
+        """First candidate volume passing the allocation/headroom gates (or
+        the one `volume` named), plus a fresh scratch path on it."""
         reasons: list[str] = []
-        for vol_name in self._write_candidates(collection_id):
+        candidates = [volume] if volume else self._write_candidates(collection_id)
+        for vol_name in candidates:
             can, reason = self._can_write(vol_name, size_hint or 0)
             if not can:
                 reasons.append(f"{vol_name}: {reason}")

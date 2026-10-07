@@ -8,15 +8,12 @@ cannot, and retrying them would only hammer a server that has said no.
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 import socket
-import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -75,36 +72,23 @@ class HttpSyncTransport:
             request.add_header("Content-Type", "application/octet-stream")
             self._open(request).close()
 
-    def download_file(
-        self,
-        sha256: str,
-        dest: Path,
-        on_bytes: Callable[[int], None] | None = None,
-    ) -> None:
-        """Fetch a file to `dest`, checking it is the file asked for: bytes that
-        hash to something else are discarded, never kept under that name."""
-        dest.parent.mkdir(parents=True, exist_ok=True)
+    def file_chunks(self, sha256: str) -> Iterator[bytes]:
+        """A file's bytes from the server, as they arrive. Asks at once, so a
+        file the server hasn't got raises FileNotFoundError here, before
+        anything is written. The caller checks the hash of what it wrote."""
         try:
             response = self._open(self._request("GET", f"/files/{sha256}"))
         except SyncError as e:
             if e.status == 404:  # the server answered: it doesn't have it
                 raise FileNotFoundError(sha256) from e
             raise
-        fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=".sync-")
-        digest = hashlib.sha256()
-        try:
-            with os.fdopen(fd, "wb") as out, response:
+
+        def read() -> Iterator[bytes]:
+            with response:
                 while chunk := response.read(_CHUNK):
-                    digest.update(chunk)
-                    out.write(chunk)
-                    if on_bytes:
-                        on_bytes(len(chunk))
-            if digest.hexdigest() != sha256:
-                raise SyncError("The server sent the wrong content for that file")
-            os.replace(tmp_name, dest)
-        finally:
-            if os.path.exists(tmp_name):
-                os.unlink(tmp_name)
+                    yield chunk
+
+        return read()
 
     # -- plumbing --------------------------------------------------------
 
