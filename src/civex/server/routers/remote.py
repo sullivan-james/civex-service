@@ -10,9 +10,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from civex import keys
 from civex.context import AppContext
 from civex.domain.exceptions import ValidationError
-from civex.domain.sync import SyncError
+from civex.domain.sync import INVITE_HOURS, SyncError
 from civex.server.deps import get_ctx
 from civex.services.sync_jobs import sync_jobs
 
@@ -84,11 +85,10 @@ class SyncResultResponse(BaseModel):
 
 class RemoteConnectRequest(BaseModel):
     url: str = Field(description="The authority's address.")
-    token: str | None = Field(
+    invite: str | None = Field(
         default=None,
-        description="The device token the authority issued. Leave out to use the "
-        "one this computer already holds for that address (trying a connect "
-        "again).",
+        description="The invite the authority's admin gave. Leave out when this "
+        "computer has joined that address before (trying a connect again).",
     )
 
 
@@ -322,15 +322,16 @@ def connect(body: RemoteConnectRequest, ctx: AppContext = Depends(get_ctx)):
     """Point this project at an authority. An empty project becomes a copy of
     it; a project with data fills an empty authority; two with data are refused.
 
-    The address, token and who holds data are checked before this answers, so
-    a mistake is said at once. Copying can take a long time, so it then runs in
+    The address, the invite and who holds data are checked before this answers
+    (an invite is used up here: this computer joins the authority), so a
+    mistake is said at once. Copying can take a long time, so it then runs in
     the background: `GET /remote` says how far it has got (`progress`), and why
     it stopped if it did (`connect_error`)."""
     try:
-        mode = ctx.sync_svc.check_connect(body.url, body.token)
+        mode = ctx.sync_svc.check_connect(body.url, body.invite)
     except SyncError as e:
         raise _refuse(e)
-    sync_jobs.start_connect(body.url, body.token)
+    sync_jobs.start_connect(body.url)
     return RemoteConnectResponse(mode=mode)
 
 
@@ -439,15 +440,30 @@ def reopen(body: ReopenRequest, ctx: AppContext = Depends(get_ctx)):
 
 class DeviceResponse(BaseModel):
     name: str
+    fingerprint: str = Field(
+        description="Its key's short code, as `civex sync device list` shows it."
+    )
+    created_at: str = Field(description="When it joined.")
+    last_seen_at: str | None = Field(
+        description="When it last signed in; null if never."
+    )
+    revoked: bool = Field(description="It can no longer sign in.")
+
+
+class InviteResponse(BaseModel):
+    name: str = Field(description="The device it is for.")
     created_at: str
-    last_seen_at: str | None = Field(description="When it last synced; null if never.")
-    revoked: bool = Field(description="Its token no longer works.")
+    expires_at: str
 
 
 class AuthorityResponse(BaseModel):
     serving: bool = Field(description="This project accepts devices.")
-    devices: list[DeviceResponse] = Field(
-        description="The devices that have been issued a token."
+    fingerprint: str | None = Field(
+        description="This authority's key's short code; null until it first invites."
+    )
+    devices: list[DeviceResponse] = Field(description="The devices that joined.")
+    invites: list[InviteResponse] = Field(
+        description="Invites not used yet and not expired."
     )
 
 
@@ -455,59 +471,80 @@ class AuthorityUpdateRequest(BaseModel):
     serving: bool = Field(description="Accept devices, or stop accepting them.")
 
 
-class DeviceRequest(BaseModel):
+class InviteRequest(BaseModel):
     name: str = Field(description="What to call the device.")
+    hours: int = Field(default=INVITE_HOURS, description="How long the invite works.")
 
 
-class IssuedDeviceResponse(AuthorityResponse):
-    token: str = Field(
-        description="The new device's token. Shown once: only its hash is kept."
+class InvitedResponse(AuthorityResponse):
+    invite: str = Field(
+        description="The invite, for the device to connect with. Shown once: "
+        "only its hash is kept. It works once."
     )
 
 
 def _authority(ctx: AppContext) -> AuthorityResponse:
+    keys_svc = ctx.device_keys
     return AuthorityResponse(
         serving=ctx.sync_svc.status().serving,
+        fingerprint=keys_svc.fingerprint() if keys_svc.has_key() else None,
         devices=[
             DeviceResponse(
                 name=d.name,
+                fingerprint=keys.fingerprint(d.public_key),
                 created_at=d.created_at,
                 last_seen_at=d.last_seen_at,
                 revoked=d.revoked_at is not None,
             )
-            for d in ctx.authority_svc.list_devices()
+            for d in keys_svc.list_devices()
+        ],
+        invites=[
+            InviteResponse(
+                name=i.name, created_at=i.created_at, expires_at=i.expires_at
+            )
+            for i in keys_svc.pending_invites()
         ],
     )
 
 
 @router.get("/authority", response_model=AuthorityResponse)
 def authority(ctx: AppContext = Depends(get_ctx)):
-    """Whether this project accepts devices, and the devices issued a token."""
+    """Whether this project accepts devices, the devices that joined, and the
+    invites waiting."""
     return _authority(ctx)
 
 
 @router.patch("/authority", response_model=AuthorityResponse)
 def update_authority(body: AuthorityUpdateRequest, ctx: AppContext = Depends(get_ctx)):
-    """Start or stop accepting devices. Their tokens stay on record."""
+    """Start or stop accepting devices. The devices stay on record."""
     ctx.sync_svc.set_serving(body.serving)
     return _authority(ctx)
 
 
-@router.post("/authority/devices", response_model=IssuedDeviceResponse)
-def add_device(body: DeviceRequest, ctx: AppContext = Depends(get_ctx)):
-    """Issue a device a token. The answer is the only time it is shown."""
+@router.post("/authority/invites", response_model=InvitedResponse)
+def invite_device(body: InviteRequest, ctx: AppContext = Depends(get_ctx)):
+    """Invite a device. The answer is the only time the invite is shown."""
     try:
-        _, token = ctx.authority_svc.add_device(body.name)
+        _, code = ctx.device_keys.invite(body.name, body.hours)
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
     ctx.commit()
-    return IssuedDeviceResponse(**_authority(ctx).model_dump(), token=token)
+    return InvitedResponse(**_authority(ctx).model_dump(), invite=code)
+
+
+@router.post("/authority/invites/{name}/cancel", response_model=AuthorityResponse)
+def cancel_invite(name: str, ctx: AppContext = Depends(get_ctx)):
+    """Cancel a device's invite before it is used."""
+    if not ctx.device_keys.cancel_invite(name):
+        raise HTTPException(404, detail=f"No invite waiting for {name}")
+    ctx.commit()
+    return _authority(ctx)
 
 
 @router.post("/authority/devices/{name}/revoke", response_model=AuthorityResponse)
 def revoke_device(name: str, ctx: AppContext = Depends(get_ctx)):
-    """Stop a device's token working."""
-    if not ctx.authority_svc.revoke_device(name):
+    """Stop a device syncing, at once: its session is refused from now on."""
+    if not ctx.device_keys.revoke_device(name):
         raise HTTPException(404, detail=f"No active device named {name}")
     ctx.commit()
     return _authority(ctx)

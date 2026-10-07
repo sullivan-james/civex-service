@@ -236,3 +236,49 @@ def make_record(ctx: AppContext):
         return record
 
     return _make
+
+
+@pytest.fixture()
+def sign_in_over_http():
+    """sign_in_over_http(client, invite) -> a session token: join with the
+    invite and sign in over HTTP, as a new machine would."""
+    import time
+    import uuid as _uuid
+
+    from civex import keys
+    from civex.domain.sync import protocol_header, session_request
+
+    def _sign_in(client, invite: str) -> str:
+        device_id, private = str(_uuid.uuid4()), keys.new_private_key()
+        headers = {"X-Civex-Protocol": protocol_header()}
+        body = {
+            "invite": invite,
+            "device_id": device_id,
+            "public_key": keys.public_of(private),
+        }
+        joined = client.post("/api/sync/v1/join", headers=headers, json=body)
+        assert joined.status_code == 200, joined.text
+        at = int(time.time())
+        request = session_request(joined.json()["authority_key"], device_id, at)
+        body = {
+            "device_id": device_id,
+            "at": at,
+            "signature": keys.sign(private, request),
+        }
+        grant = client.post("/api/sync/v1/session", headers=headers, json=body)
+        assert grant.status_code == 200, grant.text
+        return grant.json()["token"]
+
+    return _sign_in
+
+
+@pytest.fixture(autouse=True)
+def _forget_failed_sign_ins():
+    """The peer API counts failed joins and sign-ins per caller, in memory; a
+    test starts with none counted."""
+    import sys
+
+    peer = sys.modules.get("civex.server.routers.sync_peer")
+    if peer is not None:
+        peer._attempts._failed.clear()
+    yield

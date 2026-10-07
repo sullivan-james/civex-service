@@ -1,6 +1,6 @@
-"""`civex sync`: follow an authority, and (on the machine that is one) issue
-device tokens. The work is in SyncService / SyncAuthorityService; these commands
-only ask for it and say what happened."""
+"""`civex sync`: follow an authority, and (on the machine that is one) invite
+devices. The work is in SyncService / DeviceKeys; these commands only ask for
+it and say what happened."""
 
 from __future__ import annotations
 
@@ -13,11 +13,12 @@ import typer
 from rich.markup import escape
 from rich.table import Table
 
+from civex import keys
 from civex.cli.db import _size
 from civex.cli.utils import cli_load_config, get_ctx as _ctx
 from civex.console import console
 from civex.domain.exceptions import CivexError
-from civex.domain.sync import COPYING, FILLING, SyncError, SyncProgress
+from civex.domain.sync import COPYING, FILLING, INVITE_HOURS, SyncError, SyncProgress
 
 app = typer.Typer(
     help="Keep this project in step with an authority: another civex that holds "
@@ -37,7 +38,7 @@ _PHASES = {
 _KINDS = {"dataset": "collections"}
 
 
-def _connect_showing_progress(c, url: str, token: str | None) -> str:
+def _connect_showing_progress(c, url: str, invite: str | None) -> str:
     """Connect, with a live bar while things are copied either way, then fetch
     the history from before joining with a bar of its own. Stopping that part
     (Ctrl+C) loses nothing: the project is already usable, and whatever syncs
@@ -62,7 +63,7 @@ def _connect_showing_progress(c, url: str, token: str | None) -> str:
                 total=p.total,
             )
 
-        mode = c.sync_svc.connect(url, token, progress=show)
+        mode = c.sync_svc.connect(url, invite, progress=show)
         c.commit()
     if mode == "joined":
         _fetch_history_showing_progress(c)
@@ -397,13 +398,13 @@ def connect(
     url: str = typer.Argument(
         help="The authority's address, e.g. https://civex.example.com"
     ),
-    token: str | None = typer.Option(
+    invite: str | None = typer.Option(
         None,
-        "--token",
-        envvar="CIVEX_SYNC_TOKEN",
-        help="The device token the authority issued. Leave out to use the one "
-        "this computer already holds for that address (connecting again after a "
-        "copy stopped part way).",
+        "--invite",
+        envvar="CIVEX_SYNC_INVITE",
+        help="The invite the authority's admin gave. Leave out when this computer "
+        "has joined that address before (connecting again after a copy stopped "
+        "part way).",
     ),
 ) -> None:
     """Point this project at an authority. An empty project becomes a copy of
@@ -411,7 +412,7 @@ def connect(
     hold data are refused."""
     c = _ctx()
     try:
-        mode = _connect_showing_progress(c, url, token)
+        mode = _connect_showing_progress(c, url, invite)
     except (SyncError, CivexError) as e:
         raise _fail(e)
     finally:
@@ -632,21 +633,22 @@ def _read_value(text: str | None) -> object:
 
 @authority_app.command("enable")
 def authority_enable() -> None:
-    """Let devices with a token follow this project (serve it with `civex serve`)."""
+    """Let invited devices follow this project. Serve them with `civex serve
+    --sync-only` behind HTTPS."""
     c = _ctx()
     try:
         c.sync_svc.set_serving(True)
     finally:
         c.close()
     console.print(
-        "This project now accepts devices. Issue one a token with "
-        "`civex sync device add <name>`."
+        "This project now accepts devices. Invite one with "
+        "`civex sync device invite <name>`."
     )
 
 
 @authority_app.command("disable")
 def authority_disable() -> None:
-    """Stop accepting devices. Their tokens stay on record."""
+    """Stop accepting devices. The devices stay on record."""
     c = _ctx()
     try:
         c.sync_svc.set_serving(False)
@@ -655,47 +657,73 @@ def authority_disable() -> None:
     console.print("This project no longer accepts devices.")
 
 
-@device_app.command("add")
-def device_add(name: str = typer.Argument(help="What to call the device.")) -> None:
-    """Issue a device a token. It is shown once and cannot be read back."""
+@device_app.command("invite")
+def device_invite(
+    name: str = typer.Argument(help="What to call the device."),
+    hours: int = typer.Option(INVITE_HOURS, "--hours", help="How long it works."),
+) -> None:
+    """Invite a device. The invite works once; it is shown once and can't be
+    read back. On the device: `civex sync connect <address> --invite <invite>`."""
     c = _ctx()
     try:
-        _, token = c.authority_svc.add_device(name)
+        invite, code = c.device_keys.invite(name, hours)
+        fingerprint = c.device_keys.fingerprint()
         c.commit()
     except CivexError as e:
         raise _fail(e)
     finally:
         c.close()
-    console.print(f"Token for {escape(name)} (shown once):\n\n  {token}\n")
+    console.print(
+        f"Invite for {escape(name)} (shown once, works until {invite.expires_at}):"
+        f"\n\n  {code}\n\nThis authority's key: {fingerprint}"
+    )
 
 
 @device_app.command("list")
 def device_list() -> None:
-    """List the devices that have been issued a token."""
+    """List the devices that joined and the invites waiting."""
     c = _ctx()
     try:
-        devices = c.authority_svc.list_devices()
+        devices = c.device_keys.list_devices()
+        invites = c.device_keys.pending_invites()
     finally:
         c.close()
     table = Table()
-    for col in ("Name", "Created", "Last seen", "State"):
+    for col in ("Name", "Key", "Joined", "Last seen", "State"):
         table.add_column(col)
     for d in devices:
         table.add_row(
             d.name,
+            keys.fingerprint(d.public_key),
             d.created_at,
             d.last_seen_at or "never",
             "revoked" if d.revoked_at else "active",
         )
+    for i in invites:
+        table.add_row(i.name, "", "", "", f"invited, until {i.expires_at}")
     console.print(table)
+
+
+@device_app.command("cancel")
+def device_cancel(name: str = typer.Argument(help="The device's name.")) -> None:
+    """Cancel a device's invite before it is used."""
+    c = _ctx()
+    try:
+        ok = c.device_keys.cancel_invite(name)
+        c.commit()
+    finally:
+        c.close()
+    if not ok:
+        raise _fail(ValueError(f"No invite waiting for {name}"))
+    console.print(f"Cancelled the invite for {escape(name)}.")
 
 
 @device_app.command("revoke")
 def device_revoke(name: str = typer.Argument(help="The device's name.")) -> None:
-    """Stop a device's token working."""
+    """Stop a device syncing, at once."""
     c = _ctx()
     try:
-        ok = c.authority_svc.revoke_device(name)
+        ok = c.device_keys.revoke_device(name)
         c.commit()
     finally:
         c.close()
@@ -709,11 +737,11 @@ def clone(
     path: Path = typer.Argument(
         None, help="Where to put the copy (default: a new folder here)."
     ),
-    token: str = typer.Option(
+    invite: str = typer.Option(
         ...,
-        "--token",
-        envvar="CIVEX_SYNC_TOKEN",
-        help="The device token the authority issued.",
+        "--invite",
+        envvar="CIVEX_SYNC_INVITE",
+        help="The invite the authority's admin gave.",
     ),
 ) -> None:
     """Make a new project that is a copy of an authority's, and keep it in step."""
@@ -727,7 +755,7 @@ def clone(
     os.chdir(target)
     c = _ctx()
     try:
-        _connect_showing_progress(c, url, token)
+        _connect_showing_progress(c, url, invite)
     except (SyncError, CivexError) as e:
         raise _fail(e)
     finally:

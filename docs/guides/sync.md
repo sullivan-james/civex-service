@@ -16,36 +16,51 @@ machine that will hold the shared copy:
 === "CLI"
     ```bash
     civex sync authority enable
-    civex sync device add laptop     # prints the laptop's token, once
-    civex serve --allow-remote
+    civex sync device invite laptop  # prints the laptop's invite, once
+    civex serve --sync-only          # what devices reach, behind HTTPS
     ```
 
 === "Web UI"
     Settings → **Sync** → *Other devices following this project*: **Accept
-    devices**, then **Issue a token** for each device. Copy the token straight
-    away: it is shown only once. Then restart `civex serve` with `--allow-remote`.
+    devices**, then **Invite** each device by name. Copy the invite straight
+    away: it is shown only once. Then start `civex serve --sync-only` for the
+    devices.
 
-Each device gets its own token. `civex sync device list` shows them, and
-`civex sync device revoke <name>` stops one working (a lost laptop, say). The
-devices already issued keep their tokens if you stop accepting devices.
+An invite works **once**, for 24 hours (`--hours` to change it). The device joins
+with it and makes a key of its own; from then on it signs in with that key, which
+never leaves it, for a session that lasts a few minutes. Nothing a device sends
+can be reused for long, and a server that isn't the one it joined is refused
+before anything is sent to it.
 
-On a project that serves, other machines can reach only the sync address
-(`/api/sync/v1/`); the rest of the app stays local to that machine. Put the server
-behind HTTPS (a reverse proxy) before exposing it, because the token is sent with
-every request.
+`civex sync device list` shows the devices with their keys' short codes and the
+invites waiting; `civex sync device cancel <name>` cancels an invite and
+`civex sync device revoke <name>` stops a device at once (a lost laptop, say). An
+invite starts with `civex_inv_`, so secret scanners recognise one pasted by
+mistake.
+
+`civex serve --sync-only` serves the sync address (`/api/sync/v1/`) and nothing
+else. Bind it to `127.0.0.1` and put an HTTPS reverse proxy in front: devices only
+connect over `https://`, because invites and sessions travel in requests. Run the app
+itself (`civex serve`, without the flag) on the same machine for yourself, and reach
+it over SSH (`ssh -L 8000:localhost:8000 <server>`).
+
+For a trial on your own network, `civex serve` alone also answers devices on the
+sync address, and `tailscale serve 8000` gives it an HTTPS address.
 
 ## Connect a device
 
 === "CLI"
     ```bash
-    civex clone https://civex.example.com my-project --token <token>
+    civex clone https://civex.example.com my-project --invite <invite>
     # or, in an existing project:
-    civex sync connect https://civex.example.com --token <token>
+    civex sync connect https://civex.example.com --invite <invite>
     ```
 
 === "Web UI"
-    Settings → **Sync**: the authority's address and the device token, then
+    Settings → **Sync**: the authority's address and the invite, then
     **Connect**.
+
+The address must be `https://`; `http://` is accepted only for this computer.
 
 What connecting does depends on what each side holds:
 
@@ -59,7 +74,7 @@ What connecting does depends on what each side holds:
 A large project takes a while to copy, so both the CLI and Settings → Sync show
 progress, and the copy carries on if the page is closed. A copy that stops halfway
 (the network drops, the computer sleeps) is finished by connecting again;
-**Try again** in Settings → Sync uses the token the device already has.
+**Try again** in Settings → Sync needs no invite: the device has joined.
 
 The project is ready to use as soon as its records have arrived. Two things follow
 in the background:
@@ -86,7 +101,7 @@ server, `civex sync watch` does the same in a terminal.
 
 If the authority can't be reached, civex backs off (up to 15 minutes between tries)
 and the status bar says why. A refusal that waiting can't fix, such as a revoked
-token, says so and waits for you. Disconnecting leaves the data where it is.
+device, says so and waits for you. Disconnecting leaves the data where it is.
 
 ## Files
 
@@ -279,9 +294,19 @@ never told a change went in when it didn't. An authority that falls behind or
 loses its history can't confuse a device: one that finds itself behind the
 authority's history copies the project again.
 
+## Versions
+
+Each civex speaks a range of sync protocol versions, and a device and the authority
+use the newest both speak. Most releases don't change the protocol. When one does:
+
+- **Update the authority first**, then the devices.
+- A device that can't sync says which side to update, and waits until it is.
+- The changelog gives each release's range ("sync protocol 2").
+
 ## Moving to another server
 
-Run `civex sync connect <new address> --token <token>` on each device.
+Run `civex sync connect <new address> --invite <invite>` on each device, with an
+invite from the new server.
 
 - If the new authority is empty, the first device to connect fills it.
 - The rest then follow it. Any item waiting for review against the old server is
@@ -289,9 +314,9 @@ Run `civex sync connect <new address> --token <token>` on each device.
 
 ## Moving a device
 
-The token and device id live in `~/.civex/sync.toml`, not in the project folder.
+The device's id and key live in `~/.civex/sync.toml`, not in the project folder.
 Copying a project folder doesn't copy its identity: the copy has to be connected
-with a token of its own.
+with an invite of its own.
 
 ## What doesn't sync
 

@@ -30,6 +30,7 @@ from civex.db.models import (
     Schema,
     SyncConflict,
     SyncDevice,
+    SyncInvite,
     SyncMeta,
     SyncOp,
     View,
@@ -44,8 +45,10 @@ from civex.domain.sync import (
     SyncConflictDTO,
     SyncDeviceDTO,
     SyncEntry,
+    SyncInviteDTO,
     SyncMetaDTO,
     parse_snapshot_cursor,
+    wire_state,
 )
 from civex.repositories.local.inventory import stored_files
 from civex.repositories.local.dataset_repo import _to_dtos as _dataset_dtos
@@ -360,8 +363,8 @@ class LocalSyncRepository:
     # Devices (authority)
     # ------------------------------------------------------------------
 
-    def add_device(self, name: str, token_hash: str) -> SyncDeviceDTO:
-        row = SyncDevice(name=name, token_hash=token_hash)
+    def add_device(self, name: str, device_id: str, public_key: str) -> SyncDeviceDTO:
+        row = SyncDevice(name=name, device_id=device_id, public_key=public_key)
         self._s.add(row)
         self._s.flush()
         return _device_dto(row)
@@ -370,38 +373,81 @@ class LocalSyncRepository:
         rows = self._s.query(SyncDevice).order_by(SyncDevice.created_at).all()
         return [_device_dto(r) for r in rows]
 
+    def _live_devices(self):
+        return self._s.query(SyncDevice).filter(SyncDevice.revoked_at.is_(None))
+
     def device_named(self, name: str) -> SyncDeviceDTO | None:
-        row = self._s.query(SyncDevice).filter_by(name=name).first()
+        row = self._live_devices().filter_by(name=name).first()
         return _device_dto(row) if row else None
 
-    def device_by_token_hash(self, token_hash: str) -> SyncDeviceDTO | None:
-        row = (
-            self._s.query(SyncDevice)
-            .filter_by(token_hash=token_hash)
-            .filter(SyncDevice.revoked_at.is_(None))
-            .first()
-        )
+    def live_device(self, device_id: str) -> SyncDeviceDTO | None:
+        row = self._live_devices().filter_by(device_id=device_id).first()
+        return _device_dto(row) if row else None
+
+    def get_device(self, id: uuid.UUID) -> SyncDeviceDTO | None:
+        row = self._s.get(SyncDevice, id)
         return _device_dto(row) if row else None
 
     def revoke_device(self, name: str) -> bool:
-        row = self._s.query(SyncDevice).filter_by(name=name).first()
-        if row is None or row.revoked_at is not None:
+        row = self._live_devices().filter_by(name=name).first()
+        if row is None:
             return False
         row.revoked_at = datetime.now(timezone.utc)
         self._s.flush()
         return True
-
-    def bind_device(self, id: uuid.UUID, device_id: str) -> None:
-        row = self._s.get(SyncDevice, id)
-        if row is not None:
-            row.device_id = device_id
-            self._s.flush()
 
     def touch_device(self, id: uuid.UUID) -> None:
         row = self._s.get(SyncDevice, id)
         if row is not None:
             row.last_seen_at = datetime.now(timezone.utc)
             self._s.flush()
+
+    def add_invite(
+        self, name: str, code_hash: str, expires_at: datetime
+    ) -> SyncInviteDTO:
+        row = SyncInvite(name=name, code_hash=code_hash, expires_at=expires_at)
+        self._s.add(row)
+        self._s.flush()
+        return _invite_dto(row)
+
+    def invite_by_hash(self, code_hash: str) -> SyncInviteDTO | None:
+        row = self._s.query(SyncInvite).filter_by(code_hash=code_hash).first()
+        return _invite_dto(row) if row else None
+
+    def _pending_invites(self):
+        return self._s.query(SyncInvite).filter(
+            SyncInvite.used_at.is_(None),
+            SyncInvite.revoked_at.is_(None),
+            SyncInvite.expires_at > datetime.now(timezone.utc),
+        )
+
+    def pending_invites(self) -> list[SyncInviteDTO]:
+        rows = self._pending_invites().order_by(SyncInvite.created_at).all()
+        return [_invite_dto(r) for r in rows]
+
+    def use_invite(self, id: uuid.UUID) -> bool:
+        """Mark it used, if nobody has: one conditional write, so of two joins
+        at once only one takes it."""
+        taken = self._s.execute(
+            update(SyncInvite)
+            .where(SyncInvite.id == id, SyncInvite.used_at.is_(None))
+            .values(used_at=datetime.now(timezone.utc))
+        )
+        return taken.rowcount == 1  # type: ignore[attr-defined]
+
+    def cancel_invite(self, name: str) -> bool:
+        rows = self._pending_invites().filter_by(name=name).all()
+        for row in rows:
+            row.revoked_at = datetime.now(timezone.utc)
+        self._s.flush()
+        return bool(rows)
+
+    def authority_key(self) -> str | None:
+        return self._meta_row().authority_key
+
+    def set_authority_key(self, key: str) -> None:
+        self._meta_row().authority_key = key
+        self._s.flush()
 
     # ------------------------------------------------------------------
     # What an authority has been sent
@@ -764,15 +810,19 @@ class LocalSyncRepository:
         return self._dicts("record", [found[i] for i in wanted if i in found])
 
     def _dicts(self, kind: str, rows: list[Any]) -> list[dict[str, Any]]:
+        """Things as they travel: their DTOs cut to `WIRE_FIELDS`."""
         if kind == "schema":
-            return [_schema_to_dto(r).to_dict() for r in rows]
-        if kind == "field":
-            return [_field_to_dto(r).to_dict() for r in rows]
-        if kind == "dataset":
-            return [d.to_dict() for d in _dataset_dtos(self._s, rows, with_count=False)]
-        if kind == "view":
-            return [_view_dto(r).to_dict() for r in rows]
-        return [_record_dto(r).to_dict() for r in rows]
+            dicts = [_schema_to_dto(r).to_dict() for r in rows]
+        elif kind == "field":
+            dicts = [_field_to_dto(r).to_dict() for r in rows]
+        elif kind == "dataset":
+            dtos = _dataset_dtos(self._s, rows, with_count=False)
+            dicts = [d.to_dict() for d in dtos]
+        elif kind == "view":
+            dicts = [_view_dto(r).to_dict() for r in rows]
+        else:
+            dicts = [_record_dto(r).to_dict() for r in rows]
+        return [wire_state(kind, d) or {} for d in dicts]
 
     def apply_snapshot(self, kind: str, snap: dict[str, Any]) -> None:
         """Make the thing in `snap` exist as it describes, with its own id."""
@@ -1263,7 +1313,7 @@ class LocalSyncRepository:
                 superseded=r.id in superseded,
                 delta=r.delta,
                 op=str(r.op_id) if r.op_id else None,
-            )
+            ).on_the_wire()
             for r in rows
         ]
 
@@ -1293,8 +1343,20 @@ def _device_dto(row: SyncDevice) -> SyncDeviceDTO:
         id=row.id,
         name=row.name,
         device_id=row.device_id,
+        public_key=row.public_key,
         created_at=_iso(row.created_at) or "",
         last_seen_at=_iso(row.last_seen_at),
+        revoked_at=_iso(row.revoked_at),
+    )
+
+
+def _invite_dto(row: SyncInvite) -> SyncInviteDTO:
+    return SyncInviteDTO(
+        id=row.id,
+        name=row.name,
+        created_at=_iso(row.created_at) or "",
+        expires_at=_iso(row.expires_at) or "",
+        used_at=_iso(row.used_at),
         revoked_at=_iso(row.revoked_at),
     )
 

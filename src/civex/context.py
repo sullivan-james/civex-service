@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from civex.services.store_service import StoreService
     from civex.services.export_definition_service import ExportDefinitionService
     from civex.services.history_compaction import HistoryCompactionService
+    from civex.services.device_keys import DeviceKeys
     from civex.services.sync_authority import SyncAuthorityService
     from civex.services.sync_service import SyncService
     from civex.services.view_service import ViewService
@@ -102,6 +103,7 @@ class AppContext:
     export_def_svc: ExportDefinitionService
     sync_repo: LocalSyncRepository
     authority_svc: SyncAuthorityService
+    device_keys: DeviceKeys
     sync_svc: SyncService
     compaction_svc: HistoryCompactionService
     _session: Session
@@ -289,6 +291,7 @@ def build_local_context(
     from civex.services.project_rules import ProjectRules
     from civex.repositories.local.db_space import LocalDbSpace
     from civex.services.history_compaction import HistoryCompactionService
+    from civex.services.device_keys import DeviceKeys
     from civex.services.sync_authority import SyncAuthorityService
 
     from civex.services.sync_service import SyncService
@@ -296,12 +299,14 @@ def build_local_context(
 
     sync_repo = LocalSyncRepository(session)
     applier = SyncApplier(sync_repo, audit_repo)
+    device_keys = DeviceKeys(sync_repo)
     authority_svc = SyncAuthorityService(
         sync_repo,
         applier,
         file_store,
         record_svc,
         ProjectRules(schema_svc, dataset_repo, record_repo),
+        authenticator=device_keys,
     )
     sync_svc = SyncService(
         config,
@@ -358,6 +363,7 @@ def build_local_context(
         export_def_svc=export_def_svc,
         sync_repo=sync_repo,
         authority_svc=authority_svc,
+        device_keys=device_keys,
         sync_svc=sync_svc,
         _session=session,
     )

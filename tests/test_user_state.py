@@ -33,33 +33,40 @@ def test_forgetting_a_device_means_a_new_one_next_time():
     assert user_state.device_id_for(project) != a
 
 
-def test_a_token_is_found_by_the_remote_however_its_address_ends():
-    user_state.save_token("https://hub.example/", "s3cret")
-    assert user_state.token_for("https://hub.example") == "s3cret"
-    assert user_state.token_for("https://other.example") is None
-    user_state.forget_token("https://hub.example")
-    assert user_state.token_for("https://hub.example") is None
+def test_an_authority_is_known_by_its_address_however_it_ends():
+    user_state.save_authority("https://hub.example/", "pub")
+    assert user_state.authority_for("https://hub.example") == "pub"
+    assert user_state.authority_for("https://other.example") is None
+    user_state.forget_authority("https://hub.example")
+    assert user_state.authority_for("https://hub.example") is None
 
 
-def test_tokens_and_devices_do_not_disturb_each_other():
-    project = uuid.uuid4()
-    user_state.save_token("https://hub.example", "t")
-    device = user_state.device_id_for(project)
-    user_state.save_token("https://hub.example", "t2")
-    assert user_state.device_id_for(project) == device
-    assert user_state.token_for("https://hub.example") == "t2"
+def test_a_device_keeps_one_key_per_project_and_moves_it_with_its_id():
+    old, new = uuid.uuid4(), uuid.uuid4()
+    device, key = user_state.device_id_for(old), user_state.device_key_for(old)
+    assert user_state.device_key_for(old) == key
+    assert user_state.device_key_for(uuid.uuid4()) != key
+    user_state.save_authority("https://hub.example", "pub")
+    user_state.move_device(old, new)
+    assert (user_state.device_id_for(new), user_state.device_key_for(new)) == (
+        device,
+        key,
+    )
+    assert user_state.authority_for("https://hub.example") == "pub"
+    user_state.forget_device(new)
+    assert user_state.device_key_for(new) != key
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
 def test_the_file_is_private(_own_state: Path):
-    user_state.save_token("https://hub.example", "t")
+    user_state.device_key_for(uuid.uuid4())
     assert stat.S_IMODE(_own_state.stat().st_mode) == 0o600
 
 
 def test_a_damaged_file_is_treated_as_empty_not_a_crash(_own_state: Path):
     _own_state.parent.mkdir(parents=True)
     _own_state.write_text("not [valid toml", encoding="utf-8")
-    assert user_state.token_for("https://hub.example") is None
+    assert user_state.authority_for("https://hub.example") is None
     assert isinstance(user_state.device_id_for(uuid.uuid4()), uuid.UUID)
 
 

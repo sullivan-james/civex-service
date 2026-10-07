@@ -967,6 +967,9 @@ class SyncMeta(Base):
     last_error_at: Mapped[datetime | None] = mapped_column(
         _UTCDateTime(), nullable=True
     )
+    # Authority: its private key, which signs its answers to devices signing in
+    # (and keys their sessions). Made when it first invites a device.
+    authority_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class SyncOp(Base):
@@ -988,19 +991,53 @@ class SyncOp(Base):
     received_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
 
+_NOT_REVOKED = text("revoked_at IS NULL")
+
+
 class SyncDevice(Base):
-    """Authority: a device allowed to sync, by the token it was given. The
-    token is shown once and only its hash is kept."""
+    """Authority: a device allowed to sync, by the public key it joined with.
+    Its private key never left it. A revoked device's name and id can be used
+    again by a device invited afresh."""
 
     __tablename__ = "sync_devices"
+    __table_args__ = (
+        Index(
+            "ux_sync_devices_name_live",
+            "name",
+            unique=True,
+            postgresql_where=_NOT_REVOKED,
+            sqlite_where=_NOT_REVOKED,
+        ),
+        Index(
+            "ux_sync_devices_device_live",
+            "device_id",
+            unique=True,
+            postgresql_where=_NOT_REVOKED,
+            sqlite_where=_NOT_REVOKED,
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
-    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    # Bound at first contact: a token can't then claim another device's identity.
-    device_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    device_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    public_key: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
     last_seen_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+
+
+class SyncInvite(Base):
+    """Authority: an invitation for a device to join, by name. It works once
+    and until it expires; only the code's hash is kept."""
+
+    __tablename__ = "sync_invites"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(_UTCDateTime(), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
 
 

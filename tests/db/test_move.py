@@ -120,7 +120,11 @@ def _add_sync_state(ctx: AppContext) -> None:
 
     from civex.domain.sync import OpResult, SyncEntry
 
-    ctx.authority_svc.add_device("laptop")
+    from civex import keys
+
+    _, invite = ctx.device_keys.invite("laptop")
+    ctx.device_keys.join(invite, str(uuid.uuid4()), keys.public_of(keys.new_private_key()))
+    ctx.device_keys.invite("phone")  # one still waiting
     record = ctx.record_svc.find("study", "patient")[0]
     op = SyncEntry(
         id=uuid.uuid4(),

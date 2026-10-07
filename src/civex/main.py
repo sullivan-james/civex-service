@@ -2,6 +2,7 @@ import typer
 from typing import Annotated, Optional
 
 from civex import __version__
+from civex.domain.hosts import is_loopback
 from civex.cli import (
     ai as ai_cli,
     dataset,
@@ -92,16 +93,18 @@ app.command("dump", rich_help_panel=_COLLAB)(dump)
 app.command("restore", rich_help_panel=_COLLAB)(restore)
 
 
-def _is_loopback_host(host: str) -> bool:
-    """True if binding to *host* keeps the server reachable only from this machine."""
-    import ipaddress
+def _refuse_unless_serving() -> None:
+    """`--sync-only` serves devices only, so the project must be an authority."""
+    from civex.config import find_project_root, read_sync_flag
 
-    if host == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
+    root = find_project_root()
+    if root is None or not read_sync_flag(root / "_civex", "serve"):
+        typer.secho(
+            "This project is not an authority: run `civex sync authority enable` first.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
 
 
 def _refuse_newer_database() -> None:
@@ -148,6 +151,13 @@ def serve(
         help="Open the browser once the server is up. If civex is already "
         "running on this port, just open the browser.",
     ),
+    sync_only: bool = typer.Option(
+        False,
+        "--sync-only",
+        help="Serve only what devices following this project call, for an "
+        "authority on a network: point the HTTPS proxy at this, and run the app "
+        "itself on this machine.",
+    ),
 ) -> None:
     """Start the civex HTTP API server."""
     try:
@@ -162,11 +172,24 @@ def serve(
     # is configured inside the worker that actually serves requests.
     os.environ["CIVEX_LOG_LEVEL"] = log_level.upper()
 
-    if not _is_loopback_host(host):
+    if sync_only:
+        _refuse_unless_serving()
+        if open_browser:
+            typer.secho("--open has nothing to open with --sync-only", err=True)
+            raise typer.Exit(1)
+
+    if not is_loopback(host):
+        # Devices' tokens would cross the network in plain HTTP; the app
+        # itself has no authentication at all.
+        risk = (
+            "device tokens would travel unencrypted (put an HTTPS proxy in front)"
+            if sync_only
+            else "the civex server has no authentication and would be reachable "
+            "by other machines"
+        )
         if not allow_remote:
             typer.secho(
-                f"Refusing to bind to non-loopback address '{host}': the civex server has no "
-                "authentication and would be reachable by other machines.\n"
+                f"Refusing to bind to non-loopback address '{host}': {risk}.\n"
                 "Re-run with --allow-remote if this is intentional (and put it behind a "
                 "reverse proxy / firewall).",
                 err=True,
@@ -175,8 +198,7 @@ def serve(
             )
             raise typer.Exit(1)
         typer.secho(
-            f"WARNING: binding to '{host}' — the server is reachable by other machines and has "
-            "NO authentication. Anyone who can reach it can read/write your data and run code.",
+            f"WARNING: binding to '{host}': {risk}.",
             err=True,
             fg=typer.colors.YELLOW,
             bold=True,
@@ -218,7 +240,8 @@ def serve(
     # log_config=None: defer all logging to civex's own structlog pipeline
     # (configured in create_app) so uvicorn's records flow through the same sinks.
     uvicorn.run(
-        "civex.server.app:app",
+        "civex.server.app:create_sync_app" if sync_only else "civex.server.app:app",
+        factory=sync_only,
         host=host,
         port=port,
         reload=reload,

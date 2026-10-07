@@ -30,7 +30,9 @@ def study(project, authority, monkeypatch):
 def test_a_join_says_how_far_it_has_got(project, authority, study):
     phone = device(project, authority, "phone")
     seen = []
-    phone.sync_svc.connect("http://authority.test", phone._token, progress=seen.append)
+    phone.sync_svc.connect(
+        "https://authority.test", phone._invite, progress=seen.append
+    )
 
     assert seen and all(p.phase == COPYING for p in seen)
     total = sum(authority.sync_repo.entity_counts().values())
@@ -45,7 +47,7 @@ def test_filling_an_empty_authority_says_how_far_it_has_got(project, authority):
     build_study(laptop)
     seen = []
     laptop.sync_svc.connect(
-        "http://authority.test", laptop._token, progress=seen.append
+        "https://authority.test", laptop._invite, progress=seen.append
     )
     assert seen and all(p.phase == FILLING for p in seen)
     assert seen[-1].done == seen[-1].total == laptop.sync_repo.entity_count()
@@ -98,7 +100,7 @@ def test_a_copy_that_stopped_part_way_is_finished_by_connecting_again(
     # A phone whose copy is cut off after its first page of records.
     other = device(project, authority, "other", flaky=True)
     other.sync_svc.check_connect(
-        "http://authority.test", other._token
+        "https://authority.test", other._invite
     )  # (the transport)
     calls = {"records": 0}
     real = flaky(other)._inner.snapshot

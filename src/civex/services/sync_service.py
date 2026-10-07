@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 
 import time
+import urllib.parse
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
@@ -39,11 +40,12 @@ from civex.domain.exceptions import (
     VolumeUnavailableError,
 )
 from civex.domain.file_refs import collect_sha256_refs, without_file_locations
+from civex.domain.hosts import is_loopback
 from civex.domain.sync import (
     DEFERRED,
     ENTITY_ORDER,
-    PROTOCOL_VERSION,
     COPYING,
+    DeviceCredentials,
     FILLING,
     HISTORY,
     REJECTED,
@@ -52,6 +54,8 @@ from civex.domain.sync import (
     SyncEntry,
     SyncError,
     SyncProgress,
+    agree,
+    protocol_mismatch,
     not_on_server_yet,
     SyncTransport,
     snapshot_cursor,
@@ -75,7 +79,7 @@ SNAPSHOT_PAGE = 200
 # Stands for "the value on the record now" in an attempt's fields, until it is read.
 _NOW: Any = object()
 
-TransportFactory = Callable[[str, str, str], SyncTransport]
+TransportFactory = Callable[[str, DeviceCredentials], SyncTransport]
 # The cursor while a copy from the authority is being made (`_join`).
 JOINING = -1
 # Told how far a long step (copying, filling, fetching history) has got.
@@ -372,38 +376,41 @@ class SyncService:
     # Connecting
     # ------------------------------------------------------------------
 
-    def check_connect(self, url: str, token: str | None) -> str:
+    def check_connect(self, url: str, invite: str | None) -> str:
         """What connecting to this authority would do, found out without doing
-        it: the address is read, the token and protocol accepted, and who holds
-        data decided. Quick, so a mistake is said at once even when the copying
-        itself then runs in the background. Returns the mode `connect` would."""
-        return self._plan_connect(url, token)[0]
+        it: the address is read, the protocol accepted, and who holds data
+        decided. Quick, so a mistake is said at once even when the copying
+        itself then runs in the background. Returns the mode `connect` would.
 
-    def _token(self, url: str, token: str | None) -> str:
-        """The token to connect with: the one given, else the one this computer
-        already holds for that address (connecting again after a copy stopped
+        Given an invite, this computer joins the authority here (the invite is
+        used up), so connecting afterwards needs none; without one, it must
+        have joined that address before (connecting again after a copy stopped
         part way). The one rule both the app and the CLI connect through."""
-        held = token or user_state.token_for(url)
-        if not held:
+        return self._plan_connect(url, invite)[0]
+
+    def _credentials(self, url: str) -> DeviceCredentials:
+        project = self._repo.meta().project_id
+        return DeviceCredentials(
+            device_id=str(user_state.device_id_for(project)),
+            private_key=user_state.device_key_for(project),
+            authority_key=user_state.authority_for(url),
+        )
+
+    def _plan_connect(self, url: str, invite: str | None) -> tuple[str, Hello, str]:
+        url = url.strip().rstrip("/")
+        _check_address(url)
+        probe = self._make_transport(url, self._credentials(url))
+        if invite and invite.strip():
+            joined = probe.join(invite.strip())
+            user_state.save_authority(url, joined.authority_key)
+        elif not user_state.authority_for(url):
             raise SyncError(
-                "A device token is needed: this computer has none for that address",
+                "This computer hasn't joined that server: ask its admin for an invite",
                 retryable=False,
             )
-        return held
-
-    def _plan_connect(self, url: str, token: str | None) -> tuple[str, Hello, str, str]:
-        url = url.strip().rstrip("/")
-        if not url.startswith(("http://", "https://")):
-            raise SyncError(
-                "The address must start with http:// or https://", retryable=False
-            )
-        token = self._token(url, token)
-        meta = self._repo.meta()
-        probe = self._make_transport(
-            url, token, str(user_state.device_id_for(meta.project_id))
-        )
         hello = probe.hello()
         self._check_protocol(hello)
+        meta = self._repo.meta()
 
         local_empty = self._repo.entity_count() == 0
         mine = str(user_state.device_id_for(meta.project_id))
@@ -431,10 +438,10 @@ class SyncService:
                 "project to copy the server's, or point an empty server here.",
                 retryable=False,
             )
-        return mode, hello, url, token
+        return mode, hello, url
 
     def connect(
-        self, url: str, token: str | None, progress: ProgressFn | None = None
+        self, url: str, invite: str | None, progress: ProgressFn | None = None
     ) -> str:
         """Point this project at an authority. What happens depends on who holds
         data: an empty project **joins** one that has some (it becomes a copy), an
@@ -447,7 +454,7 @@ class SyncService:
         `progress` hears how far copying has got. A joined project is usable
         once it returns; the history from before it joined is fetched after
         (`fetch_history`), by whatever runs sync next."""
-        mode, hello, url, token = self._plan_connect(url, token)
+        mode, hello, url = self._plan_connect(url, invite)
         meta = self._repo.meta()
 
         # The project takes the authority's id; the device keeps its identity.
@@ -465,7 +472,6 @@ class SyncService:
                 "followed another server",
             )
             self._commit()
-        user_state.save_token(url, token)
         self._config.sync.remote = url
         save_config(self._config)
 
@@ -490,11 +496,11 @@ class SyncService:
         self._config.sync.remote = None
         save_config(self._config)
         if remote:
-            user_state.forget_token(remote)
+            user_state.forget_authority(remote)
 
     def set_serving(self, on: bool) -> None:
-        """Whether this project accepts devices (is an authority for them). Their
-        tokens stay on record either way."""
+        """Whether this project accepts devices (is an authority for them). The
+        devices it knows stay on record either way."""
         self._config.sync.serve = on
         save_config(self._config)
 
@@ -511,10 +517,10 @@ class SyncService:
         save_config(self._config)
 
     def _check_protocol(self, hello: Hello) -> None:
-        if hello.protocol_version != PROTOCOL_VERSION:
+        theirs = (hello.protocol_min, hello.protocol_max)
+        if agree(theirs) is None:
             raise SyncError(
-                f"The server speaks sync protocol {hello.protocol_version}; this "
-                f"civex speaks {PROTOCOL_VERSION}. Update the older one.",
+                protocol_mismatch(theirs, "the server", "this computer"),
                 retryable=False,
             )
 
@@ -522,17 +528,16 @@ class SyncService:
         remote = self._config.sync.remote
         if not remote:
             raise SyncError(
-                "No server is set. Run `civex remote add <url> --token <token>`.",
+                "No server is set: connect to one first.",
                 retryable=False,
             )
-        token = user_state.token_for(remote)
-        if not token:
+        _check_address(remote)
+        if not user_state.authority_for(remote):
             raise SyncError(
-                f"This device has no token for {remote}. Run `civex remote add` again.",
+                f"This computer hasn't joined {remote}: connect again with an invite.",
                 retryable=False,
             )
-        device_id = user_state.device_id_for(self._repo.meta().project_id)
-        return self._make_transport(remote, token, str(device_id))
+        return self._make_transport(remote, self._credentials(remote))
 
     # ------------------------------------------------------------------
     # Syncing
@@ -1690,3 +1695,18 @@ def _counted(
         if on_bytes:
             on_bytes(len(chunk))
         yield chunk
+
+
+def _check_address(url: str) -> None:
+    """An authority is reached over HTTPS: an invite and a session token travel
+    in requests, readable by anyone on the network over plain HTTP. Plain HTTP
+    is left for this machine itself (tests, a local authority)."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme == "https" and parts.hostname:
+        return
+    if parts.scheme == "http" and parts.hostname and is_loopback(parts.hostname):
+        return
+    raise SyncError(
+        "The address must start with https:// (http:// only for this computer)",
+        retryable=False,
+    )

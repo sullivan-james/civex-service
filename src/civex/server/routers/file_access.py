@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ipaddress
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -9,6 +8,7 @@ from fastapi.responses import JSONResponse
 from civex import fs_open
 from civex.context import AppContext
 from civex.domain.exceptions import CivexError, NotFoundError, ValidationError
+from civex.domain.hosts import is_loopback
 from civex.domain.file_access import (
     place_of,
     FileSelection,
@@ -145,11 +145,7 @@ def _base_selection(body: FileSelectionRequest, ctx: AppContext) -> FileSelectio
 
 
 def _from_this_machine(request: Request) -> bool:
-    host = request.client.host if request.client else ""
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
+    return is_loopback(request.client.host) if request.client else False
 
 
 def _unreachable(e: FilesUnavailableError) -> JSONResponse:

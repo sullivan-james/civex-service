@@ -40,7 +40,7 @@ function when(iso: string | null): string {
 function ConnectForm() {
   const connect = useConnectRemote()
   const [url, setUrl] = useState('')
-  const [token, setToken] = useState('')
+  const [invite, setInvite] = useState('')
   return (
     <div className="max-w-xl space-y-3">
       <Field
@@ -55,13 +55,13 @@ function ConnectForm() {
         />
       </Field>
       <Field
-        label="Device token"
-        info="Issued on the authority with `civex sync device add`. It is stored on this computer, not in the project."
+        label="Invite"
+        info="From the authority's admin. It works once. Leave it empty if this computer has joined that address before."
       >
         <Input
           type="password"
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
+          value={invite}
+          onChange={(e) => setInvite(e.target.value)}
           autoComplete="off"
         />
       </Field>
@@ -71,8 +71,13 @@ function ConnectForm() {
         </p>
       )}
       <Button
-        disabled={!url.trim() || !token.trim() || connect.isPending}
-        onClick={() => connect.mutate({ url: url.trim(), token: token.trim() })}
+        disabled={!url.trim() || connect.isPending}
+        onClick={() =>
+          connect.mutate({
+            url: url.trim(),
+            invite: invite.trim() || undefined,
+          })
+        }
       >
         {connect.isPending ? 'Connecting…' : 'Connect'}
       </Button>
