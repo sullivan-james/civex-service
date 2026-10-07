@@ -21,7 +21,7 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
-## v1.2.1 — syncing between machines, updates from the app (2026-10-07)
+## v1.3.0 — syncing between machines, updates from the app (2026-10-07)
 
 ### Breaking
 
