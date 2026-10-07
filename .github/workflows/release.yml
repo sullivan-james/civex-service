@@ -166,8 +166,11 @@ jobs:
           for arch in aarch64 x86_64; do
             curl -fsSL "https://github.com/astral-sh/uv/releases/download/$v/uv-$arch-apple-darwin.tar.gz" | tar -xz
           done
-          lipo -create uv-aarch64-apple-darwin/uv uv-x86_64-apple-darwin/uv -output uv-universal
-          echo "CIVEX_LAUNCHER_UV=$PWD/uv-universal" >> "$GITHUB_ENV"
+          # Named `uv`: PyInstaller keeps the file's name, and the launcher
+          # looks for uv/uv inside the app.
+          mkdir uv-universal
+          lipo -create uv-aarch64-apple-darwin/uv uv-x86_64-apple-darwin/uv -output uv-universal/uv
+          echo "CIVEX_LAUNCHER_UV=$PWD/uv-universal/uv" >> "$GITHUB_ENV"
           echo "CIVEX_LAUNCHER_ARCH=universal2" >> "$GITHUB_ENV"
           # To run the Intel half below.
           softwareupdate --install-rosetta --agree-to-license || true
@@ -185,8 +188,9 @@ jobs:
       - name: Check the app runs on Intel and Apple silicon (macOS)
         if: runner.os == 'macOS'
         run: |
-          for binary in app-dist/civex.app/Contents/MacOS/civex \
-                        "$(find app-dist/civex.app -type f -name uv | head -1)"; do
+          uv="$(find app-dist/civex.app -path '*/uv/uv' | head -1)"
+          [ -n "$uv" ] || { echo "No uv/uv in the app"; exit 1; }
+          for binary in app-dist/civex.app/Contents/MacOS/civex "$uv"; do
             archs="$(lipo -archs "$binary")"
             echo "$binary: $archs"
             [[ "$archs" == *x86_64* && "$archs" == *arm64* ]] || exit 1
