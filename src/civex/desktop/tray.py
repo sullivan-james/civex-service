@@ -21,20 +21,39 @@ if TYPE_CHECKING:
 
 # Stored alongside other per-user config, outside any project directory.
 _RECENT_FILE = Path.home() / ".config" / "civex" / "recent.json"
-_LOG_FILE = Path.home() / ".config" / "civex" / "civex.log"
+#: Set by the desktop launcher: the folder it keeps its logs in (in AppData on
+#: Windows), so the app's log is beside the launcher's.
+LOG_DIR_ENV = "CIVEX_LOG_DIR"
+
+
+def _log_file() -> Path:
+    folder = os.environ.get(LOG_DIR_ENV)
+    base = Path(folder) if folder else Path.home() / ".config" / "civex"
+    return base / "civex-desktop.log"
+
+
+_LOG_FILE = _log_file()
 
 # Set in main() before webview.start() so Api methods can reference it.
 _window: "webview.Window | None" = None
 
 
 def _setup_logging() -> None:
+    """Log to the log file. Without a terminal (started by the launcher, or
+    from a Start-menu or Dock icon) everything printed goes there too: on
+    Windows the app has no console at all (it is a GUI script), so the
+    server's own output would otherwise be lost."""
     _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    log = open(_LOG_FILE, "a", buffering=1, encoding="utf-8")  # noqa: SIM115
+    terminal = sys.stdout is not None and sys.stdout.isatty()
+    if not terminal:
+        sys.stdout = sys.stderr = log
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=[
-            logging.FileHandler(_LOG_FILE, encoding="utf-8"),
-            *([] if getattr(sys, "frozen", False) else [logging.StreamHandler()]),
+            logging.StreamHandler(log),
+            *([logging.StreamHandler()] if terminal else []),
         ],
     )
 

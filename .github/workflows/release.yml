@@ -225,9 +225,15 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          # The installer sets civex up itself; point it at the tested wheel
+          # and the folder the next step checks.
+          $wheel = (Get-Item dist\*.whl).FullName -replace '\\', '/'
+          $env:CIVEX_APP_HOME = "$env:RUNNER_TEMP\civex-app"
+          $env:CIVEX_LAUNCHER_SOURCE = "civex[desktop] @ file:///$wheel"
           Start-Process -Wait -FilePath .\${{ matrix.asset }} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
           $app = "$env:LOCALAPPDATA\Programs\civex\civex.exe"
           if (-not (Test-Path $app)) { throw "The installer didn't install $app" }
+          if (-not (Test-Path "$env:CIVEX_APP_HOME\bin\civex.exe")) { throw "The installer didn't set civex up" }
           "APP=$app" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       - name: Run it as a first start would, then use the civex it installed
@@ -245,6 +251,11 @@ jobs:
 
           home="$RUNNER_TEMP/civex-app"
           CIVEX_APP_HOME="$home" CIVEX_LAUNCHER_SOURCE="$source" "$app" --install-only
+          # What the app starts the window with (pythonw on Windows, so no
+          # console), and that the desktop extra came with it.
+          window_python="$home/tools/civex/bin/python"
+          [ "$RUNNER_OS" = Windows ] && window_python="$home/tools/civex/Scripts/pythonw.exe"
+          "$window_python" -c "import civex.desktop.tray, webview"
           python scripts/smoke_civex.py "$home/bin/civex$exe" \
             --expect-version "$CIVEX_APP_VERSION"
 

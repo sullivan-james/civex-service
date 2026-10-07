@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -142,3 +144,84 @@ def test_a_built_app_never_borrows_a_uv_from_path(
     inside.parent.mkdir()
     inside.touch()
     assert launcher.bundled_uv() == inside
+
+
+def _released(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, version: str) -> None:
+    (tmp_path / "civex_version.txt").write_text(version)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", str(tmp_path), raising=False)
+
+
+def test_it_installs_at_least_the_civex_it_was_released_with(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Plain civex[desktop] took the newest *stable* civex, so a release
+    candidate's app installed an older one (v2.0.0rc1's got 1.2.0)."""
+    monkeypatch.delenv("CIVEX_LAUNCHER_SOURCE", raising=False)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert launcher.requirement() == "civex[desktop]"  # a dry run's app
+    _released(monkeypatch, tmp_path, "2.0.0rc1")
+    assert launcher.requirement() == "civex[desktop]>=2.0.0rc1"
+    assert launcher.install_command(Path("/u/uv"))[-1] == "civex[desktop]>=2.0.0rc1"
+    monkeypatch.setenv("CIVEX_LAUNCHER_SOURCE", "civex[desktop] @ file:///w.whl")
+    assert launcher.install_command(Path("/u/uv"))[-1].endswith("w.whl")
+
+
+@pytest.mark.parametrize(
+    ("installed", "older", "installs"),
+    [(None, False, True), ("1.2.0", True, True), ("2.0.0rc1", False, False)],
+)
+def test_a_newer_app_brings_an_older_civex_up_to_its_own(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    installed: str | None,
+    older: bool,
+    installs: bool,
+) -> None:
+    home = tmp_path / "app"
+    if installed:
+        launcher.desktop_app(home).parent.mkdir(parents=True)
+        launcher.desktop_app(home).touch()
+    monkeypatch.setattr(launcher, "civex_version", lambda h, env: installed)
+    monkeypatch.setattr(launcher, "older_than_release", lambda h, env, v: older)
+    monkeypatch.setattr(launcher, "with_progress", lambda title, msg, work: work())
+    ran: list[list[str]] = []
+    monkeypatch.setattr(
+        launcher, "run_logged", lambda cmd, env, log: ran.append(cmd) or 0
+    )
+    launcher.ensure_installed(home, Path("/u/uv"), {}, tmp_path / "log")
+    assert bool(ran) is installs
+
+
+@pytest.mark.posix_only
+def test_older_than_release_asks_the_installed_python(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _released(monkeypatch, tmp_path, "2.0.0rc1")
+    home = tmp_path / "app"
+    python = home / "tools" / "civex" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    # Stands in for the installed civex's Python, which has `packaging`.
+    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    python.chmod(0o755)
+    env = dict(os.environ)
+    assert launcher.older_than_release(home, env, "1.2.0")
+    assert not launcher.older_than_release(home, env, "2.0.0rc1")
+    assert not launcher.older_than_release(home, env, "2.0.0")
+
+
+def test_the_window_is_civex_s_own_python_running_the_desktop_module(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No `civex-desktop` command (every install got one that only works with
+    the desktop extra); on Windows pythonw, so no console window."""
+    ran: list[list[str]] = []
+    monkeypatch.setattr(launcher.subprocess, "run", lambda cmd, **kw: ran.append(cmd))
+    launcher.run_app(tmp_path, ["--project", "/p"], {})
+    python = ran[0][0]
+    assert python.endswith("pythonw.exe" if sys.platform == "win32" else "bin/python")
+    assert ran[0][1:] == ["-m", "civex.desktop.tray", "--project", "/p"]
+
+
+def test_the_app_logs_beside_the_launcher(tmp_path: Path) -> None:
+    env = launcher.environment(tmp_path, Path("/u/uv"))
+    assert env["CIVEX_LOG_DIR"] == str(tmp_path / "logs")

@@ -52,6 +52,10 @@ Name: "{autoprograms}\civex"; Filename: "{app}\civex.exe"
 Name: "{autodesktop}\civex"; Filename: "{app}\civex.exe"; Tasks: desktopicon
 
 [Run]
+; Set civex up now, inside the wizard, so its first start opens straight into
+; the app. Without a connection this fails quietly and the first start does
+; it instead.
+Filename: "{app}\civex.exe"; Parameters: "--install-only"; StatusMsg: "Setting up civex..."; Flags: runhidden waituntilterminated
 Filename: "{app}\civex.exe"; Description: "{cm:LaunchProgram,civex}"; Flags: nowait postinstall skipifsilent
 
 [Code]

@@ -90,7 +90,9 @@ and takes a minute or two: it downloads civex and the Python it runs on into a
 folder of its own (`%LOCALAPPDATA%\civex\app` on Windows,
 `~/Library/Application Support/civex/app` on macOS, `~/.local/share/civex/app`
 on Linux), separate from any civex you installed yourself. After that it starts
-straight away, and keeps itself up to date from **Settings → Updates**.
+straight away, and keeps itself up to date from **Settings → Updates**. On
+Windows the installer does this setup, so the first start opens straight into
+the app. Its logs are in the `logs` folder inside that folder.
 
 !!! warning "Linux"
     The desktop window doesn't open on Linux yet: it needs a GTK or Qt window
@@ -102,7 +104,7 @@ The desktop window can also be installed alongside the command line:
 
 ```bash
 uv tool install "civex[desktop]"
-civex-desktop
+civex desktop
 ```
 
 Verify the install:
