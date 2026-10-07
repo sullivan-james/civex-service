@@ -57,6 +57,8 @@ from the next tag forward.
   `civex serve` installed with uv, pipx or pip. `GET`/`POST /api/update`.
 - **Pre-releases**: `civex update --pre`, and *Include pre-releases* on the
   Updates page, install release candidates; nobody gets one otherwise.
+- **Size** in Settings → Appearance (80% to 125%), remembered by each window;
+  in the desktop app ⌘/Ctrl with + − 0 change it too.
 
 ### Changed
 
@@ -81,6 +83,12 @@ from the next tag forward.
 
 ### Fixes
 
+- **The page froze after using the navigation drawer** (a narrow window, as
+  the macOS desktop app often is): closing it left the rest of the page
+  unclickable. It is handed back now.
+- **The Windows desktop app had no project menu** (open, create, reveal the
+  data folder) and no native folder picker: the page decided whether it was in
+  the desktop app before the app had said so.
 - **Reordering a schema's fields now appears in history.** It wrote no entry,
   so the new order was in the database but nowhere in the history (and would
   never have reached another device once sync exists). Each field that moved is
