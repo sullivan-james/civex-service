@@ -21,7 +21,7 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
-## Unreleased — syncing between machines
+## v1.2.1 — syncing between machines, updates from the app (2026-10-07)
 
 ### Breaking
 
@@ -51,8 +51,20 @@ from the next tag forward.
 - Sync protocol 2. A device and the authority use the newest version both speak,
   and one that can't says which side to update.
 - Invites start with `civex_inv_`, recognised by gitleaks and secret scanners.
+- **Update from the app** (Settings → Updates, and a notice in the status bar
+  when a newer version is out): civex closes, installs the new version and
+  starts again, reopening the page. It works for the desktop app and for
+  `civex serve` installed with uv, pipx or pip. `GET`/`POST /api/update`.
+- **Pre-releases**: `civex update --pre`, and *Include pre-releases* on the
+  Updates page, install release candidates; nobody gets one otherwise.
 
-## v1.2.1 — history records every change (2026-10-05)
+### Changed
+
+- **The desktop app is a small launcher** (about 30 MB) that installs civex
+  with its own `uv` the first time it starts, then keeps it up to date. It no
+  longer contains civex, so it never needs downloading again for a new
+  version. Custom plugins work in it without anything else installed.
+- Install with `uv tool install civex`, which needs no Python on the computer.
 
 ### Fixes
 
@@ -64,6 +76,11 @@ from the next tag forward.
   A schema's record-name template, or a file field's download-name template,
   that used the field was updated without an entry; each template changed is
   now an edit of its schema or field in history.
+- **The desktop downloads couldn't create a project** (`civex init` failed: the
+  database migrations were left out of the bundle). Every release is now
+  installed and run on Linux, macOS and Windows before it is published.
+- After `civex update` reinstalled missing packages for a uv install, later
+  updates did nothing: the repair pinned the version (`==`).
 
 A new test (`tests/services/test_audit_replay.py`) does everything a person can
 do to schemas, fields, collections, views and records and checks that the last

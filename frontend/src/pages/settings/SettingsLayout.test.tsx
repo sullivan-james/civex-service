@@ -34,6 +34,7 @@ describe('SettingsLayout', () => {
       'Retention',
       'Sync',
       'Map',
+      'Updates',
       'Advanced',
     ])
     expect(screen.getByRole('link', { name: 'Storage' })).toHaveAttribute(

@@ -509,9 +509,23 @@ _WELCOME_HTML = """<!DOCTYPE html>
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 
+def _project_arg(argv: list[str]) -> Path | None:
+    """`--project PATH`: the project to open at once, as the launcher passes
+    it after an update; None when absent or no longer a project."""
+    if "--project" not in argv:
+        return None
+    i = argv.index("--project")
+    if i + 1 >= len(argv):
+        return None
+    path = Path(argv[i + 1])
+    return path if (path / "_civex").exists() else None
+
+
 def main() -> None:
     global _window
     import webview
+
+    from civex.updates import on_quit_for_update
 
     _setup_logging()
     _log.info("civex desktop starting (log: %s)", _LOG_FILE)
@@ -526,7 +540,14 @@ def main() -> None:
         min_size=(560, 480),
         resizable=True,
     )
-    webview.start()
+    # Updating from the app (civex.updates): close, and the launcher that
+    # started this app updates it and starts it again.
+    on_quit_for_update(lambda: _window.destroy() if _window else None)
+    project = _project_arg(sys.argv[1:])
+    if project is not None:
+        webview.start(lambda: _launch_project(project))
+    else:
+        webview.start()
 
 
 if __name__ == "__main__":

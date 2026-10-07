@@ -209,6 +209,16 @@ def serve(
     if allow_remote:
         os.environ["CIVEX_ALLOW_REMOTE"] = "1"
 
+    # How to start this server again after an update from the app
+    # (civex.updates); not in dev mode, which is never updated that way.
+    if not reload:
+        import json
+        import sys
+
+        from civex.updates import SERVE_ARGS_ENV
+
+        os.environ[SERVE_ARGS_ENV] = json.dumps(sys.argv[1:])
+
     _refuse_newer_database()
 
     if open_browser:

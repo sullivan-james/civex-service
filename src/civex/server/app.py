@@ -33,6 +33,7 @@ from civex.server.routers import (
     sync_peer,
     terminal,
     transfers,
+    updates,
     views,
     workflows,
 )
@@ -232,6 +233,14 @@ _OPENAPI_TAGS = [
         ),
     },
     {
+        "name": "update",
+        "description": (
+            "Updating civex itself from the app: whether a newer version is on "
+            "PyPI, and updating and starting again. The update runs after civex "
+            "has exited, so a running copy is never replaced."
+        ),
+    },
+    {
         "name": "settings",
         "description": (
             "Per-project UI preferences, such as whether the Advanced "
@@ -399,6 +408,7 @@ def create_app() -> FastAPI:
     app.include_router(status.router, prefix="/api")
     app.include_router(terminal.router, prefix="/api")
     app.include_router(settings.router, prefix="/api")
+    app.include_router(updates.router, prefix="/api")
     app.include_router(analytics.router, prefix="/api")
     app.include_router(views.router, prefix="/api")
     app.include_router(views.all_views_router, prefix="/api")
