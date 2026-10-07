@@ -103,9 +103,7 @@ describe('FileLocationChip', () => {
     renderIt(<FileLocationChip file={file()} />)
 
     expect(
-      await screen.findByTitle(
-        "Stored on 'archive' (Online). Click for details.",
-      ),
+      await screen.findByTitle("On 'archive'. Click for details."),
     ).toHaveTextContent('archive')
   })
 
@@ -136,7 +134,7 @@ describe('FileLocationChip', () => {
     const chip = await screen.findByText('archive · offline')
     expect(chip.closest('button')).toHaveAttribute(
       'title',
-      "On 'archive', which isn't available right now. Click to see what to do.",
+      "On 'archive', which can't be reached now. Click for what to do.",
     )
   })
 
@@ -161,15 +159,14 @@ describe('FileLocationChip', () => {
     const panel = await screen.findByRole('dialog', {
       name: 'Where this file is stored',
     })
-    expect(within(panel).getByRole('alert')).toHaveTextContent(
-      "It's on ‘archive’, which isn't available right now, so it can't be opened.",
+    expect(panel).toHaveTextContent(/On archive\s*Offline/)
+    // Why, and which drive to plug in, are the status's tooltip.
+    await user.click(within(panel).getByRole('button', { name: 'Why' }))
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      "'archive' isn't connected. Plug in the drive for 'archive'",
     )
-    expect(within(panel).getByText("'archive' isn't connected.")).toBeVisible()
     expect(
-      within(panel).getByText(/Plug in the drive for 'archive'/),
-    ).toBeVisible()
-    expect(
-      within(panel).getByRole('link', { name: /Open ‘archive’ in Settings/ }),
+      within(panel).getByRole('link', { name: /Open ‘archive’/ }),
     ).toHaveAttribute('href', '/settings/storage/volumes/archive')
     // The technical detail stays out of the way until asked for.
     expect(calls).not.toContain(`/api/files/${SHA}/info`)
@@ -191,8 +188,7 @@ describe('FileLocationChip', () => {
     })
     expect(within(panel).getByText('scan.png')).toBeInTheDocument()
     expect(within(panel).getByText('2.0 KB')).toBeInTheDocument()
-    expect(panel).toHaveTextContent('Stored on archive · Online')
-    expect(panel).toHaveTextContent('Ready to open.')
+    expect(panel).toHaveTextContent(/On archive\s*Online/)
     expect(calls).not.toContain(`/api/files/${SHA}/info`) // nothing fetched yet
 
     await user.click(
@@ -379,12 +375,10 @@ describe('FieldValue with files', () => {
       await screen.findAllByRole('link', { name: 'Download' }),
     ).toHaveLength(2)
     expect(
-      await screen.findByTitle(
-        "Stored on 'default' (Online). Click for details.",
-      ),
+      await screen.findByTitle("On 'default'. Click for details."),
     ).toBeInTheDocument()
     expect(
-      screen.getByTitle("Stored on 'archive' (Online). Click for details."),
+      screen.getByTitle("On 'archive'. Click for details."),
     ).toBeInTheDocument()
   })
 })

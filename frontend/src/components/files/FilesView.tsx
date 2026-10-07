@@ -15,7 +15,8 @@ import { useFileListing, useFreeUpFiles } from '../../hooks/useFileListing'
 import { useFileInfo } from '../../hooks/useFiles'
 import { errorMessage } from '../../lib/errors'
 import { displayLabel } from '../../utils/naming'
-import { placeLabel } from '../../utils/places'
+import { PLACE_TONE, placeLabel } from '../../utils/places'
+import { PlaceStatus, PlacesBar } from './Where'
 import { formatSize } from '../../utils/storage'
 import { FileLink } from '../records/FileLocation'
 import { DeletedKeepers } from '../records/FileInfoPanel'
@@ -25,6 +26,7 @@ import { FreeUpDialog } from '../settings/storage/ComputerFiles'
 import {
   Button,
   Chip,
+  StatusDot,
   DataTable,
   MultiPick,
   Pagination,
@@ -150,7 +152,7 @@ export function FilesView({
             onChange={(place) => list.set({ place: place || undefined })}
           />
         </div>
-        <PlacesBar summary={data?.summary ?? []} />
+        <PlacesBar places={data?.summary ?? []} />
       </div>
 
       <SelectionBar
@@ -240,18 +242,12 @@ export function FilesView({
               header: 'Where',
               sortable: true,
               render: (f) => (
-                <span
-                  className={
-                    f.place_kind === 'drive'
-                      ? 'text-fg'
-                      : f.place_kind === 'server'
-                        ? 'text-fg-muted'
-                        : 'text-attention'
-                  }
-                  title={f.reason ? `${f.reason} ${f.fix}`.trim() : undefined}
-                >
-                  {placeLabel({ place: f.place, kind: f.place_kind })}
-                </span>
+                <PlaceStatus
+                  place={f.place}
+                  kind={f.place_kind}
+                  reason={f.reason}
+                  fix={f.fix}
+                />
               ),
             },
           ]}
@@ -443,7 +439,9 @@ function Places({
           key={`${p.kind}:${p.place}`}
           selected={value === p.place}
           onClick={() => onChange(value === p.place ? '' : p.place)}
+          title={[p.reason, p.fix].filter(Boolean).join(' ') || undefined}
         >
+          <StatusDot tone={PLACE_TONE[p.kind]} />
           {placeLabel(p)} · {p.files.toLocaleString()}
           {p.kind !== 'server' && p.kind !== 'missing'
             ? ` · ${formatSize(p.bytes)}`
@@ -451,45 +449,5 @@ function Places({
         </Chip>
       ))}
     </div>
-  )
-}
-
-/** The same places as one bar, sized by bytes, with why a drive can't be
- * read beneath it. */
-function PlacesBar({ summary }: { summary: PlaceSummary[] }) {
-  if (summary.length === 0) return null
-  const bytes = summary.reduce((n, p) => n + p.bytes, 0)
-  const unreachable = summary.filter((p) => p.kind === 'unreachable')
-  return (
-    <>
-      <div
-        role="img"
-        aria-label={summary
-          .map((p) => `${placeLabel(p)}: ${p.files} files`)
-          .join(', ')}
-        className="flex h-1.5 overflow-hidden rounded-full bg-canvas-inset"
-      >
-        {summary.map((p) => (
-          <div
-            key={`${p.kind}:${p.place}`}
-            className={
-              p.kind === 'drive'
-                ? 'bg-accent'
-                : p.kind === 'server'
-                  ? 'bg-border'
-                  : 'bg-attention'
-            }
-            style={{
-              width: `${(Math.max(p.bytes, 1) / Math.max(bytes, 1)) * 100}%`,
-            }}
-          />
-        ))}
-      </div>
-      {unreachable.map((p) => (
-        <p key={p.place} role="status" className="text-xs text-attention">
-          {p.place}: {p.reason} {p.fix}
-        </p>
-      ))}
-    </>
   )
 }

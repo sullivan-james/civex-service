@@ -1,5 +1,6 @@
 import type { VolumeStats } from '../../../api/store'
 import { formatSize } from '../../../utils/storage'
+import { ProgressBar } from '../../ui'
 
 /** How full a volume's disk is, and how much of it Civex uses. */
 export function VolumeSpace({ vol }: { vol: VolumeStats }) {
@@ -14,16 +15,14 @@ export function VolumeSpace({ vol }: { vol: VolumeStats }) {
   )
   return (
     <div className="w-44">
-      <div
-        role="img"
-        aria-label={`${used}% of the disk is used`}
-        className="h-1.5 overflow-hidden rounded-full bg-canvas-inset"
-      >
-        <div
-          className={`h-full ${vol.warning ? 'bg-attention' : 'bg-accent'}`}
-          style={{ width: `${used}%` }}
-        />
-      </div>
+      <ProgressBar
+        meter
+        thin
+        fraction={used / 100}
+        warn={!!vol.warning}
+        label={`${used}% of the disk is used`}
+        className="w-full"
+      />
       <p className="mt-1 text-xs text-fg-muted">
         {formatSize(vol.disk_free_bytes)} free of{' '}
         {formatSize(vol.disk_total_bytes)}

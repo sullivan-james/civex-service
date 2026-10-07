@@ -17,7 +17,6 @@ import {
   useVolumes,
 } from '../../../hooks/useStore'
 import {
-  Badge,
   Button,
   DataTable,
   ErrorState,
@@ -28,7 +27,8 @@ import {
 } from '../../ui'
 import { X } from '../../ui/icons'
 import { errorMessage } from '../../../lib/errors'
-import { STATE_LABEL } from './volumeState'
+import { STATE_LABEL } from '../../../utils/volumes'
+import { VolumeStatus } from '../../files/Where'
 import { SpreadBar } from '../../collections/SpreadBar'
 import { gatherPlan } from '../../../utils/collectionStorage'
 import { formatSize } from '../../../utils/storage'
@@ -434,9 +434,14 @@ export function CollectionsTab({
               const placement = byId.get(c.id)
               const home = volumes.find((v) => v.name === placement?.volume)
               return home && home.state !== 'online' ? (
-                <Badge variant="danger">
-                  Home {STATE_LABEL[home.state].toLowerCase()}
-                </Badge>
+                <span className="inline-flex items-center gap-1">
+                  Home
+                  <VolumeStatus
+                    state={home.state}
+                    reason={home.reason}
+                    fix={home.fix}
+                  />
+                </span>
               ) : placement ? (
                 <span className="text-fg-muted">Has a home</span>
               ) : (

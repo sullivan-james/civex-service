@@ -14,8 +14,7 @@ import {
 } from '../../ui'
 import { errorMessage } from '../../../lib/errors'
 import { browseFolderDesktop, isDesktop } from '../../../utils/nativeFolder'
-import { StatusDot } from './StatusDot'
-import { STATE_LABEL } from './volumeState'
+import { VolumeStatus } from '../../files/Where'
 import { FolderPickerModal } from '../FolderPickerModal'
 
 /** Change a volume's folder or space limit. The folder is only repointed:
@@ -69,12 +68,8 @@ export function EditVolumeModal({
       <ModalHeader onClose={onClose}>Edit volume “{vol.name}”</ModalHeader>
       <ModalBody>
         <div className="space-y-5">
-          <p className="inline-flex items-center gap-2 text-sm text-fg">
-            <StatusDot state={vol.state} />
-            {STATE_LABEL[vol.state]}
-            {vol.reason && (
-              <span className="text-fg-muted">— {vol.reason}</span>
-            )}
+          <p className="text-sm">
+            <VolumeStatus state={vol.state} reason={vol.reason} fix={vol.fix} />
           </p>
 
           <div className="space-y-2">

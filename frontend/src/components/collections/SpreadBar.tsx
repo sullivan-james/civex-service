@@ -1,30 +1,27 @@
 import type { CollectionStorageReport } from '../../api/store'
 import { formatSize } from '../../utils/storage'
+import { STATE_TONE, type VolumeState } from '../../utils/volumes'
+import { SegmentBar } from '../ui'
 
-/** A collection's data as a bar split by volume: the volume holding most in the
- * accent colour, the rest in another, so a split is visible at a glance. */
+/** A collection's data as a bar split by drive, each part in its drive's
+ * status colour (the shared `SegmentBar`). */
 export function SpreadBar({
   report,
-  className = 'h-2',
+  className,
 }: {
   report: CollectionStorageReport
   className?: string
 }) {
   return (
-    <div
-      role="img"
-      aria-label={report.volumes
-        .map((v) => `${v.volume}: ${formatSize(v.bytes)}`)
-        .join(', ')}
-      className={`flex overflow-hidden rounded-full bg-canvas-inset ${className}`}
-    >
-      {report.volumes.map((v, i) => (
-        <div
-          key={v.volume}
-          className={i === 0 ? 'bg-accent' : 'bg-attention'}
-          style={{ width: `${(v.bytes / Math.max(report.bytes, 1)) * 100}%` }}
-        />
-      ))}
-    </div>
+    <SegmentBar
+      label="Where the files are"
+      className={className}
+      parts={report.volumes.map((v) => ({
+        key: v.volume,
+        label: `${v.volume}: ${formatSize(v.bytes)}`,
+        value: v.bytes,
+        tone: STATE_TONE[v.state as VolumeState] ?? 'neutral',
+      }))}
+    />
   )
 }

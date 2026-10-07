@@ -3,8 +3,7 @@ import { Link } from 'react-router'
 import type { FileRef } from '../../api/files'
 import { useFileLocationDisplay } from '../../hooks/useFileLocationDisplay'
 import { formatSize } from '../../utils/storage'
-import { StatusDot } from '../settings/storage/StatusDot'
-import { STATE_LABEL } from '../settings/storage/volumeState'
+import { PlaceStatus, VolumeStatus } from '../files/Where'
 import { Button, Chip, TriggerPopover } from '../ui'
 import { AlertTriangle, HardDrive } from '../ui/icons'
 import { FileInfoPanel } from './FileInfoPanel'
@@ -178,8 +177,8 @@ function hint(file: FileLike): string {
   if (!loc || loc.volume === null)
     return 'Not found on any drive yet. Click for details.'
   if (loc.available === false)
-    return `On '${loc.volume}', which isn't available right now. Click to see what to do.`
-  return `Stored on '${loc.volume}' (${STATE_LABEL[loc.state as keyof typeof STATE_LABEL] ?? loc.state}). Click for details.`
+    return `On '${loc.volume}', which can't be reached now. Click for what to do.`
+  return `On '${loc.volume}'. Click for details.`
 }
 
 /** Which volume a file is stored on, shown when it matters (see
@@ -251,47 +250,37 @@ function FileLocationPanel({
           )}
         </div>
 
-        {loc.state === 'remote' ? (
-          <p className="text-fg">
-            Another device added this file and it isn&apos;t on this computer
-            yet. Opening or exporting it downloads it from the server.
-          </p>
-        ) : loc.volume === null ? (
-          <p className="text-attention">
-            This file isn&apos;t on any drive Civex knows about. It may be on a
-            drive that hasn&apos;t been added yet.
-          </p>
-        ) : loc.available === false ? (
-          <div
-            role="alert"
-            className="space-y-1 rounded-md border border-attention-muted bg-attention-subtle p-2 text-attention"
+        <p className="flex flex-wrap items-center gap-2 text-fg">
+          {loc.state === 'remote' ? (
+            <PlaceStatus
+              place=""
+              kind="server"
+              reason="Another device added it. Opening or exporting it downloads it."
+            />
+          ) : loc.volume === null ? (
+            <PlaceStatus
+              place=""
+              kind="missing"
+              reason="It isn't on any drive Civex knows about here."
+            />
+          ) : (
+            <>
+              On <strong>{loc.volume}</strong>
+              <VolumeStatus
+                state={loc.state}
+                reason={loc.reason}
+                fix={loc.fix}
+              />
+            </>
+          )}
+        </p>
+        {loc.available === false && loc.volume && (
+          <Link
+            to={`/settings/storage/volumes/${encodeURIComponent(loc.volume)}`}
+            className="inline-block text-accent hover:underline"
           >
-            <p className="font-medium">
-              It&apos;s on &lsquo;{loc.volume}&rsquo;, which isn&apos;t
-              available right now, so it can&apos;t be opened.
-            </p>
-            {loc.reason && <p>{loc.reason}</p>}
-            {loc.fix && <p>{loc.fix}</p>}
-            <Link
-              to={`/settings/storage/volumes/${encodeURIComponent(loc.volume)}`}
-              className="inline-block text-accent hover:underline"
-            >
-              Open &lsquo;{loc.volume}&rsquo; in Settings
-            </Link>
-          </div>
-        ) : (
-          <p className="flex flex-wrap items-center gap-2 text-fg">
-            <StatusDot state={loc.state as keyof typeof STATE_LABEL} />
-            <span>
-              Stored on <strong>{loc.volume}</strong> ·{' '}
-              {STATE_LABEL[loc.state as keyof typeof STATE_LABEL] ?? loc.state}
-            </span>
-            <span className="text-fg-muted">
-              {loc.state === 'readonly'
-                ? 'It can be opened, but nothing new is written to that drive.'
-                : 'Ready to open.'}
-            </span>
-          </p>
+            Open &lsquo;{loc.volume}&rsquo;
+          </Link>
         )}
 
         {!more && (

@@ -1,4 +1,5 @@
 import type { PlaceKind } from '../api/fileAccess'
+import type { Tone } from '../components/ui'
 
 /** What a place is called, the same in the Files tab's summary, its filter
  * and each row. */
@@ -23,4 +24,14 @@ export function placeCount(p: {
   if (p.kind === 'unreachable')
     return `${n} on ${p.place}, which can't be reached`
   return `${n} on ${p.place}`
+}
+
+/** The colour of a place, everywhere it is shown: on a drive here is fine, a
+ * drive that can't be reached is worth a look, only on the server is simply
+ * not here, missing is wrong. */
+export const PLACE_TONE: Record<PlaceKind, Tone> = {
+  drive: 'ok',
+  unreachable: 'attention',
+  server: 'neutral',
+  missing: 'danger',
 }

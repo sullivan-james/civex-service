@@ -8,6 +8,7 @@ import {
   ModalFooter,
   ModalHeader,
   Stepper,
+  ProgressBar,
 } from '../../ui'
 import {
   useCancelMove,
@@ -164,19 +165,11 @@ export function MoveDatabaseWizard({ onClose }: { onClose: () => void }) {
               return (
                 <>
                   <p className="text-sm text-fg">{p?.message || 'Starting…'}</p>
-                  <div
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={pct}
-                    aria-label="Move progress"
-                    className="h-2 w-full rounded-full bg-canvas-inset overflow-hidden"
-                  >
-                    <div
-                      className="h-full bg-accent transition-all"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
+                  <ProgressBar
+                    fraction={pct / 100}
+                    label="Move progress"
+                    className="w-full"
+                  />
                   <p className="text-xs text-fg-muted">
                     {(p?.rows_done ?? 0).toLocaleString()} of{' '}
                     {(p?.rows_total ?? 0).toLocaleString()} rows ·{' '}

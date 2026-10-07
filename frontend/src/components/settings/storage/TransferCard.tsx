@@ -14,7 +14,7 @@ import {
   STATUS_VARIANT,
   percentDone,
 } from '../../../utils/transfers'
-import { Badge, Button, ConfirmDialog, Disclosure } from '../../ui'
+import { Badge, Button, ConfirmDialog, Disclosure, ProgressBar } from '../../ui'
 
 export function describeTransfer(t: Transfer): string {
   if (t.kind === 'drain')
@@ -64,19 +64,11 @@ export function TransferCard({
       </div>
 
       {(active || t.status === 'paused') && (
-        <div
-          role="progressbar"
-          aria-valuenow={pct}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-label="Progress"
-          className="mt-3 h-2 overflow-hidden rounded-full bg-canvas-inset"
-        >
-          <div
-            className="h-full bg-accent transition-[width]"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
+        <ProgressBar
+          fraction={pct / 100}
+          label="Progress"
+          className="mt-3 w-full"
+        />
       )}
 
       {active && (
