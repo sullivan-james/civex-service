@@ -3,6 +3,7 @@ import { useListParams } from '../../hooks/useListParams'
 import { withRange } from '../../hooks/useRangeSelect'
 import {
   useCancelJob,
+  useDeleteJobs,
   useFailureGroups,
   useJobsPaged,
   useRerunJob,
@@ -38,7 +39,7 @@ import {
   ListToolbar,
   Pagination,
 } from '../ui'
-import { RefreshCw, X } from '../ui/icons'
+import { RefreshCw, Trash2, X } from '../ui/icons'
 import { RecordLink } from '../records/RecordLink'
 import JobStatusBadge from './JobStatusBadge'
 import {
@@ -170,6 +171,7 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
   const rerun = useRerunJob()
   const rerunMany = useRerunJobs()
   const cancel = useCancelJob()
+  const deleteMany = useDeleteJobs()
   const { data: workflows } = useWorkflows()
   const { data: schemas } = useSchemas()
   const { data: runFields } = useRunFilterFields()
@@ -178,6 +180,12 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [outcome, setOutcome] = useState<RerunResult | null>(null)
   const [confirmAll, setConfirmAll] = useState(false)
+  // Which runs a delete is waiting to be confirmed for: the ticked ones, or
+  // every run the filter matches.
+  const [confirmDelete, setConfirmDelete] = useState<
+    'selected' | 'matching' | null
+  >(null)
+  const [deleted, setDeleted] = useState<number | null>(null)
 
   const fields = useMemo(
     () =>
@@ -218,6 +226,22 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
   function rerunMatching(which: FilterTreeWire) {
     rerunMany.mutate({ filter: scoped(which)! }, { onSuccess: done })
   }
+  function deleteRuns() {
+    const which =
+      confirmDelete === 'selected'
+        ? { ids: [...selected] }
+        : { filter: scoped(filter)! }
+    deleteMany.mutate(which, {
+      onSuccess: (r) => {
+        setDeleted(r.deleted)
+        setOutcome(null)
+        setSelected(new Set())
+        setConfirmDelete(null)
+      },
+    })
+  }
+  const deleteCount =
+    confirmDelete === 'selected' ? selected.size : Math.min(total, 1000)
   // One failure group: its runs, alongside whatever else narrowed the list
   // (a time window, say), replacing what said otherwise about the same things.
   const groupScope = (g: FailureGroup) =>
@@ -367,7 +391,34 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
           >
             <RefreshCw size={12} /> Re-run all {total.toLocaleString()}…
           </Button>
+          <Button
+            size="sm"
+            disabled={deleteMany.isPending}
+            onClick={() => setConfirmDelete('matching')}
+          >
+            <Trash2 size={12} /> Delete all {total.toLocaleString()}…
+          </Button>
         </div>
+      )}
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Delete ${deleteCount.toLocaleString()} ${deleteCount === 1 ? 'run' : 'runs'}`}
+          body={
+            <p>
+              A waiting run never starts, a running one stops before its next
+              step, and a finished one is removed with its log. What a run
+              already changed in records stays, in their history.
+              {confirmDelete === 'matching' &&
+                total > 1000 &&
+                ' Only the newest 1,000 are deleted at once.'}
+            </p>
+          }
+          confirmLabel="Delete"
+          variant="danger"
+          isPending={deleteMany.isPending}
+          onClose={() => setConfirmDelete(null)}
+          onConfirm={deleteRuns}
+        />
       )}
       {confirmAll && filter && (
         <ConfirmDialog
@@ -407,6 +458,13 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
             />
             {rerunMany.isPending ? 'Re-running…' : `Re-run ${selected.size}`}
           </Button>
+          <Button
+            size="sm"
+            disabled={deleteMany.isPending}
+            onClick={() => setConfirmDelete('selected')}
+          >
+            <Trash2 size={12} /> Delete {selected.size}…
+          </Button>
           <Button size="sm" onClick={() => setSelected(new Set())}>
             Clear selection
           </Button>
@@ -416,6 +474,22 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
             </span>
           )}
         </div>
+      )}
+      {deleteMany.isError && (
+        <p role="alert" className="text-sm text-danger">
+          {deleteMany.error.message}
+        </p>
+      )}
+      {deleted !== null && selected.size === 0 && (
+        <p
+          role="status"
+          className="flex items-center gap-2 text-sm text-fg-muted"
+        >
+          Deleted {deleted} run{deleted === 1 ? '' : 's'}.
+          <Button size="sm" variant="link" onClick={() => setDeleted(null)}>
+            Dismiss
+          </Button>
+        </p>
       )}
       {outcome && selected.size === 0 && (
         <p

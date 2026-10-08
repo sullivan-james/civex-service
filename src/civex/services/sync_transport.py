@@ -122,6 +122,32 @@ class HttpSyncTransport:
 
         return read()
 
+    # -- the library (shared workflows and plugins) -----------------------
+
+    def library(self) -> list[dict[str, Any]]:
+        return list(self._json("GET", "/library")["items"])
+
+    def library_item(self, kind: str, name: str) -> dict[str, Any]:
+        path = f"/library/{urllib.parse.quote(kind)}/{urllib.parse.quote(name)}"
+        try:
+            return self._json("GET", path)
+        except SyncError as e:
+            if e.status == 404:
+                raise FileNotFoundError(f"{kind} {name}") from e
+            raise
+
+    def publish(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return list(self._json("POST", "/library", {"items": items})["items"])
+
+    def unpublish(self, kind: str, name: str, force: bool = False) -> None:
+        path = f"/library/{urllib.parse.quote(kind)}/{urllib.parse.quote(name)}"
+        try:
+            self._json("DELETE", path + ("?force=true" if force else ""))
+        except SyncError as e:
+            if e.status == 404:
+                raise FileNotFoundError(f"{kind} {name}") from e
+            raise
+
     # -- signing in ------------------------------------------------------
 
     def _token(self) -> str:
@@ -229,10 +255,13 @@ def _from_status(error: urllib.error.HTTPError) -> SyncError:
     if error.code == 426:
         return SyncError(_mismatch(detail), retryable=False, status=426)
     text = f"{detail}" if detail else f"The server answered {error.code}"
-    if error.code in (401, 403):
+    if error.code == 401:
         return SyncError(
             f"The server refused this device: {text}", retryable=False, status=401
         )
+    if error.code == 403:
+        # Signed in, but not allowed to do that (publish to the library).
+        return SyncError(text, retryable=False, status=403)
     if error.code == 429:
         return SyncError(text, retryable=True, status=429)
     if error.code == 404:

@@ -27,7 +27,7 @@ PROTOCOL_MIN = 2
 PROTOCOL_MAX = 2
 # Optional features, by name, that a peer can look for in `Hello`. Adding one is
 # not a protocol change; an older peer just doesn't have it.
-CAPABILITIES: tuple[str, ...] = ()
+CAPABILITIES: tuple[str, ...] = ("library",)
 
 # The order a project's things must exist in: each refers to the ones before it.
 ENTITY_ORDER = ("schema", "field", "dataset", "view", "record")
@@ -688,6 +688,7 @@ class SyncDeviceDTO:
     created_at: str
     last_seen_at: str | None
     revoked_at: str | None
+    may_publish: bool = False  # to the library (`domain/library.py`)
 
 
 @dataclass
@@ -827,3 +828,8 @@ class SyncTransport(Protocol):
     def missing_files(self, shas: list[str]) -> list[str]: ...
     def upload_file(self, sha256: str, path: Path) -> None: ...
     def file_chunks(self, sha256: str) -> Iterator[bytes]: ...
+    # The library (`domain/library.py`): items as `LibraryItemDTO.to_dict`.
+    def library(self) -> list[dict[str, Any]]: ...
+    def library_item(self, kind: str, name: str) -> dict[str, Any]: ...
+    def publish(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]: ...
+    def unpublish(self, kind: str, name: str, force: bool = False) -> None: ...

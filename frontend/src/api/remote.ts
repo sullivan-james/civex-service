@@ -39,6 +39,8 @@ export interface SyncDevice {
   created_at: string
   last_seen_at: string | null
   revoked: boolean
+  /** It may publish to the library. */
+  may_publish: boolean
 }
 
 export interface SyncInvite {
@@ -55,6 +57,47 @@ export interface Authority {
   devices: SyncDevice[]
   /** Invites not used yet and not expired. */
   invites: SyncInvite[]
+  /** What devices allowed to publish may share: off, workflows, or all
+   * (plugins too, which are code). */
+  library: LibraryMode
+}
+
+export type LibraryMode = 'off' | 'workflows' | 'all'
+
+/** A workflow or plugin shared through the authority's library. */
+export interface LibraryItem {
+  kind: 'workflow' | 'plugin'
+  name: string
+  filename: string
+  sha256: string
+  size: number
+  /** How many times it has been published. */
+  version: number
+  /** A workflow's own name. */
+  title: string | null
+  description: string | null
+  /** A plugin: the plugin id it registers as. */
+  provides: string | null
+  /** A workflow: the plugins its steps use. */
+  needs: string[]
+  /** A workflow: what starts it by itself. */
+  triggers: string[]
+  published_by: string | null
+  published_at: string | null
+  /** On this computer. */
+  here: 'absent' | 'same' | 'different' | null
+  /** Plugins it needs that are neither here nor in the library. */
+  missing: string[]
+  content: string | null
+}
+
+export interface InstallPlan {
+  steps: { item: LibraryItem; path: string; here: LibraryItem['here'] }[]
+  /** Why it can't be installed as asked. */
+  blocked: string[]
+  warnings: string[]
+  /** It writes a plugin: code this computer will run. */
+  runs_code: boolean
 }
 
 export interface SyncProgress {
@@ -238,6 +281,33 @@ export const remoteApi = {
     api.post<Authority>(
       `/remote/authority/devices/${encodeURIComponent(name)}/revoke`,
       {},
+    ),
+  setLibrary: (library: LibraryMode) =>
+    api.patch<Authority>('/remote/authority', { library }),
+  allowPublish: ({ name, allowed }: { name: string; allowed: boolean }) =>
+    api.post<Authority>(
+      `/remote/authority/devices/${encodeURIComponent(name)}/publish`,
+      { allowed },
+    ),
+  /** The library: the same calls whether this project is the authority or
+   * follows one. */
+  library: () => api.get<LibraryItem[]>('/remote/library'),
+  libraryItem: (kind: string, name: string) =>
+    api.get<LibraryItem>(`/remote/library/${kind}/${encodeURIComponent(name)}`),
+  publish: (body: { kind: string; name: string; with_plugins: boolean }) =>
+    api.post<LibraryItem[]>('/remote/library/publish', body),
+  installPlan: (kind: string, name: string, replace: boolean) =>
+    api.get<InstallPlan>(
+      `/remote/library/${kind}/${encodeURIComponent(name)}/install?replace=${replace}`,
+    ),
+  install: (kind: string, name: string, replace: boolean) =>
+    api.post<InstallPlan>(
+      `/remote/library/${kind}/${encodeURIComponent(name)}/install`,
+      { replace, with_plugins: true },
+    ),
+  unpublish: (kind: string, name: string, force: boolean) =>
+    api.delete<void>(
+      `/remote/library/${kind}/${encodeURIComponent(name)}?force=${force}`,
     ),
   /** Starts connecting: the answer comes once the address and invite are
    * checked (this computer joins with the invite then); copying then runs in

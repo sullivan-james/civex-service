@@ -27,6 +27,7 @@ from civex import user_state
 from civex.config import (
     COLLECTION_FILE_MODES,
     DOWNLOAD_MODES,
+    LIBRARY_MODES,
     Config,
     save_config,
 )
@@ -504,6 +505,20 @@ class SyncService:
         self._config.sync.serve = on
         save_config(self._config)
 
+    @property
+    def library_mode(self) -> str:
+        return self._config.sync.library
+
+    def set_library(self, mode: str) -> None:
+        """What devices may publish to this authority's library: nothing,
+        workflows, or plugins too (`LIBRARY_MODES`)."""
+        if mode not in LIBRARY_MODES:
+            raise ValidationError(
+                f"The library takes one of: {', '.join(LIBRARY_MODES)}"
+            )
+        self._config.sync.library = mode
+        save_config(self._config)
+
     def set_paused(self, paused: bool) -> None:
         self._config.sync.paused = paused
         save_config(self._config)
@@ -523,6 +538,11 @@ class SyncService:
                 protocol_mismatch(theirs, "the server", "this computer"),
                 retryable=False,
             )
+
+    def transport(self) -> SyncTransport:
+        """A connection to the authority this project follows, signed in as
+        this device (for the library, which is not part of syncing)."""
+        return self._transport()
 
     def _transport(self) -> SyncTransport:
         remote = self._config.sync.remote

@@ -243,5 +243,69 @@ export function useAuthorityActions() {
       mutationFn: remoteApi.revokeDevice,
       onSuccess: settle,
     }),
+    setLibrary: useMutation({
+      mutationFn: remoteApi.setLibrary,
+      onSuccess: settle,
+    }),
+    allowPublish: useMutation({
+      mutationFn: remoteApi.allowPublish,
+      onSuccess: settle,
+    }),
+  }
+}
+
+const LIBRARY = [...KEY, 'library']
+
+/** What the library holds, and where each stands here. Only asked for while
+ * this project shares with a server or is one (`enabled`). */
+export function useLibrary(enabled: boolean) {
+  return useQuery({
+    queryKey: LIBRARY,
+    queryFn: remoteApi.library,
+    enabled,
+    retry: false,
+  })
+}
+
+export function useLibraryItem(kind: string, name: string | null) {
+  return useQuery({
+    queryKey: [...LIBRARY, kind, name],
+    queryFn: () => remoteApi.libraryItem(kind, name!),
+    enabled: !!name,
+  })
+}
+
+export function useInstallPlan(
+  item: { kind: string; name: string } | null,
+  replace: boolean,
+) {
+  return useQuery({
+    queryKey: [...LIBRARY, 'plan', item?.kind, item?.name, replace],
+    queryFn: () => remoteApi.installPlan(item!.kind, item!.name, replace),
+    enabled: !!item,
+    retry: false,
+  })
+}
+
+export function useLibraryActions() {
+  const qc = useQueryClient()
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: LIBRARY })
+    // Installing writes workflows and plugins here.
+    qc.invalidateQueries({ queryKey: ['workflows'] })
+    qc.invalidateQueries({ queryKey: ['plugins'] })
+  }
+  return {
+    publish: useMutation({ mutationFn: remoteApi.publish, onSuccess: refresh }),
+    install: useMutation({
+      mutationFn: (v: { kind: string; name: string; replace: boolean }) =>
+        remoteApi.install(v.kind, v.name, v.replace),
+      onSuccess: refresh,
+    }),
+    unpublish: useMutation({
+      mutationFn: (v: { kind: string; name: string; force: boolean }) =>
+        remoteApi.unpublish(v.kind, v.name, v.force),
+      onSuccess: refresh,
+    }),
   }
 }

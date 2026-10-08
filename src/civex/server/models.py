@@ -1263,6 +1263,24 @@ class RerunJobsRequest(BaseModel):
     )
 
 
+class DeleteJobsRequest(BaseModel):
+    ids: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=1000,
+        description="Ids of the runs to delete.",
+    )
+    filter: dict[str, Any] | None = Field(
+        default=None,
+        description="Instead of ids: delete every run this filter matches (the "
+        "same filter tree as GET /jobs, at most 1000 runs).",
+    )
+
+
+class DeleteJobsResponse(BaseModel):
+    deleted: int = Field(description="How many runs were deleted.")
+
+
 class SkippedJob(BaseModel):
     id: str
     reason: str = Field(description="Why this run could not be repeated.")

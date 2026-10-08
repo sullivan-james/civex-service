@@ -47,6 +47,11 @@ class PluginService:
         self._dir = civex_dir / "plugins"
         self._workflows_provider = workflows_provider or (lambda: [])
 
+    @property
+    def directory(self) -> Path:
+        """`_civex/plugins/`, where a user plugin file lives."""
+        return self._dir
+
     def list_registered(self) -> list[dict]:
         """[{"id", "name", "description", "builtin", "category",
         "capabilities", "inputs", "outputs", "config_schema"}] for every
@@ -93,6 +98,21 @@ class PluginService:
             }
             for plugin_id, registration in sorted(all_plugins().items())
         ]
+
+    def local_plugins(self) -> dict[str, str]:
+        """{filename: plugin id} for the plugin files in this project's
+        _civex/plugins/ that load. Scoped to this project's folder, like
+        list_load_errors: the registry is process-wide."""
+        registered = self._register()
+        here = self._dir.resolve()
+        found = {}
+        for plugin_id, registration in registered.items():
+            if plugin_id.startswith("civex."):
+                continue
+            path = Path(registration.module_name)
+            if path.suffix == ".py" and path.resolve().parent == here:
+                found[path.name] = plugin_id
+        return found
 
     def list_load_errors(self) -> list[dict]:
         """[{"filename", "error"}] for every user plugin file that most

@@ -214,6 +214,21 @@ export function useRerunJobs() {
   })
 }
 
+/** Delete runs (one request): a waiting one never starts, a running one stops
+ * before its next step. */
+export function useDeleteJobs() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (which: { ids: string[] } | { filter: FilterTreeWire }) =>
+      jobsApi.deleteMany(which),
+    onSuccess: () => {
+      refreshRuns(qc)
+      qc.invalidateQueries({ queryKey: ['job'] })
+      qc.invalidateQueries({ queryKey: ['automation'] })
+    },
+  })
+}
+
 export function useCancelJob() {
   const qc = useQueryClient()
   return useMutation({

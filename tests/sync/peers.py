@@ -203,6 +203,51 @@ class Loopback:
         return iter([data[i : i + 4096] for i in range(0, len(data), 4096)])
 
 
+    # -- the library, answered as the peer API answers it ----------------
+
+    def _library(self, call):
+        from civex.domain.exceptions import (
+            NotAllowedError,
+            NotFoundError,
+            ValidationError,
+        )
+
+        self._svc()
+        try:
+            return self._done(call(self._authority.library_svc))
+        except NotAllowedError as e:
+            raise SyncError(str(e), retryable=False, status=403)
+        except NotFoundError:
+            raise FileNotFoundError
+        except ValidationError as e:
+            raise SyncError(str(e), retryable=False)
+
+    def library(self):
+        self.calls.append("library")
+        return self._library(
+            lambda lib: [i.to_dict(with_content=False) for i in lib.listing()]
+        )
+
+    def library_item(self, kind, name):
+        self.calls.append("library_item")
+        return self._library(lambda lib: lib.item(kind, name).to_dict())
+
+    def publish(self, items):
+        from civex.domain.library import LibraryItemDTO
+
+        self.calls.append("publish")
+        sent = [LibraryItemDTO.from_dict(wire(i)) for i in items]
+        return self._library(
+            lambda lib: [
+                i.to_dict(with_content=False) for i in lib.accept(self._device, sent)
+            ]
+        )
+
+    def unpublish(self, kind, name, force=False):
+        self.calls.append("unpublish")
+        self._library(lambda lib: lib.withdraw(self._device, kind, name, force))
+
+
 class Flaky:
     """Wraps a transport and fails calls on purpose. `lose_reply` lets the call
     happen on the authority and then loses the answer (the nastiest failure: the
