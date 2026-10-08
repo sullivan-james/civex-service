@@ -186,39 +186,21 @@ describe('FilesView', () => {
     )
   })
 
-  it('moves picked files, leaving shared ones unless asked to move them too', async () => {
+  it('moves every picked file, even one other records use, without asking', async () => {
     const calls = fakeServer({
       '/api/file-access/files': {
         ...LISTING,
         items: [{ ...LISTING.items[0], others: 3 }, LISTING.items[1]],
       },
-      '/api/file-access/gather': (body: Record<string, unknown>) =>
-        new Response(
-          JSON.stringify(
-            body.volume && !('include_shared' in body && body.include_shared)
-              ? {
-                  plan: {
-                    files: 0,
-                    bytes: 0,
-                    from_server: 0,
-                    shared_left: 1,
-                    shared_bytes: 2048,
-                    already_there: 0,
-                  },
-                }
-              : {
-                  plan: {
-                    files: 1,
-                    bytes: 2048,
-                    from_server: 0,
-                    shared_left: 0,
-                    shared_bytes: 0,
-                    already_there: 0,
-                  },
-                },
-          ),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+      '/api/file-access/gather': {
+        plan: {
+          files: 1,
+          bytes: 2048,
+          from_server: 0,
+          already_there: 0,
+          copied: 0,
+        },
+      },
       '/api/schemas': [],
       '/api/remote': { configured: true, serving: false },
       '/api/store/volumes': [
@@ -242,18 +224,17 @@ describe('FilesView', () => {
     await userEvent.click(
       screen.getByRole('button', { name: 'Move to drive…' }),
     )
-    const also = await screen.findByRole('checkbox', {
-      name: /Also move 1 file other records use/,
-    })
-    await userEvent.click(also)
     await waitFor(() =>
-      expect(
-        calls.some(
-          (c) =>
-            c.path === '/api/file-access/gather' &&
-            (c.body as Record<string, unknown>).include_shared === true,
-        ),
-      ).toBe(true),
+      expect(calls.some((c) => c.path === '/api/file-access/gather')).toBe(
+        true,
+      ),
     )
+    // Nothing to decide about the records that share it.
+    expect(screen.queryByText(/also used elsewhere/)).toBeNull()
+    expect(
+      calls.every(
+        (c) => !('include_shared' in ((c.body as object | undefined) ?? {})),
+      ),
+    ).toBe(true)
   })
 })

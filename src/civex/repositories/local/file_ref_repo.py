@@ -200,35 +200,47 @@ class LocalFileReferenceRepository:
             out[str(cid)][1].append((volume, int(files), int(size), int(shared)))
         return out
 
-    def records_using(self, shas: Iterable[str]) -> dict[str, set[uuid.UUID]]:
-        """For each file, the live records that use it."""
+    def _live_users(
+        self, shas: Iterable[str]
+    ) -> list[tuple[str, uuid.UUID, uuid.UUID | None]]:
+        """(file, record, its collection) for each live record using one of
+        these files, found from the files' side: their rows by hash, then just
+        those records. One join instead let SQLite (without statistics) start
+        from `deleted_at IS NULL`, so every live record in the project was
+        visited for each batch of files: seconds for a few thousand files."""
         wanted = list(dict.fromkeys(shas))
-        out: dict[str, set[uuid.UUID]] = {}
+        uses: list[tuple[str, uuid.UUID]] = []
         for i in range(0, len(wanted), 500):
             for sha, record_id in self._s.execute(
-                select(FileReference.sha256, FileReference.record_id)
-                .join(Record, Record.id == FileReference.record_id)
-                .where(
+                select(FileReference.sha256, FileReference.record_id).where(
                     FileReference.sha256.in_(wanted[i : i + 500]),
-                    Record.deleted_at.is_(None),
+                    FileReference.record_id.is_not(None),
                 )
             ):
-                out.setdefault(sha, set()).add(record_id)
+                if record_id is not None:
+                    uses.append((sha, record_id))
+        ids = list({record_id for _, record_id in uses})
+        live: dict[uuid.UUID, uuid.UUID | None] = {}
+        for i in range(0, len(ids), 500):
+            for record_id, dataset_id in self._s.execute(
+                select(Record.id, Record.dataset_id).where(
+                    Record.id.in_(ids[i : i + 500]), Record.deleted_at.is_(None)
+                )
+            ):
+                live[record_id] = dataset_id
+        return [(sha, rid, live[rid]) for sha, rid in uses if rid in live]
+
+    def records_using(self, shas: Iterable[str]) -> dict[str, set[uuid.UUID]]:
+        """For each file, the live records that use it."""
+        out: dict[str, set[uuid.UUID]] = {}
+        for sha, record_id, _ in self._live_users(shas):
+            out.setdefault(sha, set()).add(record_id)
         return out
 
     def collections_using(self, shas: Iterable[str]) -> dict[str, set[str]]:
         """For each file, the ids of the collections whose records use it."""
-        wanted = list(shas)
         out: dict[str, set[str]] = {}
-        if not wanted:
-            return out
-        rows = self._s.execute(
-            select(FileReference.sha256, Record.dataset_id)
-            .join(Record, Record.id == FileReference.record_id)
-            .where(FileReference.sha256.in_(wanted), Record.deleted_at.is_(None))
-            .distinct()
-        )
-        for sha, dataset_id in rows:
+        for sha, _, dataset_id in self._live_users(shas):
             if dataset_id is not None:
                 out.setdefault(sha, set()).add(str(dataset_id))
         return out

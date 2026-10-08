@@ -2,17 +2,15 @@ import type { Transfer } from '../../api/transfers'
 import { HardDrive } from '../../components/ui/icons'
 import { describeAmounts } from '../../utils/amounts'
 import type { BackgroundTask, TaskAction } from '../../utils/backgroundTasks'
-import { isBusy, percentDone } from '../../utils/transfers'
+import {
+  describeTransfer,
+  filesHandled,
+  isBusy,
+  percentDone,
+} from '../../utils/transfers'
 import { usePauseTransfer, useTransfers } from '../useTransfers'
 
 const DETAILS = '/settings/storage?tab=tasks'
-
-function describe(t: Transfer): string {
-  if (t.kind === 'drain') return `Emptying ${t.spec.sources.join(', ')}`
-  if (t.kind === 'files')
-    return `Moving ${(t.spec.shas ?? []).length.toLocaleString()} selected file(s) to ${t.spec.targets.join(', ')}`
-  return `Gathering ${t.spec.collection_ids.length} collection(s)`
-}
 
 /** File moves, as tasks: the running one with how far it is, how fast and how
  * long is left; one waiting for a drive to come back; or just how many are
@@ -39,12 +37,12 @@ export function useMoveTasks(): BackgroundTask[] {
         id: 'moves',
         tone: 'info',
         icon: HardDrive,
-        title: describe(running),
+        title: describeTransfer(running, true),
         progress: {
           fraction: pct / 100,
           label: 'Move progress',
           count: describeAmounts({
-            done: p.files_done,
+            done: filesHandled(p),
             total: p.files_total,
             unit: 'files',
             bytesDone: p.bytes_done,
@@ -73,7 +71,7 @@ export function useMoveTasks(): BackgroundTask[] {
         tone: 'attention',
         icon: HardDrive,
         title:
-          `${describe(waitingForDrive)} is waiting` +
+          `${describeTransfer(waitingForDrive, true)} is waiting` +
           (waitingForDrive.pause_reason
             ? `: ${waitingForDrive.pause_reason}`
             : ' for a drive to come back.') +

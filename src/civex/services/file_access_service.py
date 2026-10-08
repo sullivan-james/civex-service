@@ -1166,6 +1166,7 @@ class FileAccessService:
         name: str | None = None,
         shas: list[str] | None = None,
         used_by: list[int] | None = None,
+        progress: Progress | None = None,
     ) -> tuple[FilePlan, list[FileItem]]:
         """The files a person has picked: a selection's files, narrowed to its
         kinds of file (`selection.fields`), a place (`in_place`), a name (in
@@ -1176,7 +1177,7 @@ class FileAccessService:
         behind the file list and every action on it, so what is listed is what
         is acted on. The plan returned is of every kind (what the list's
         choices are counted from)."""
-        plan = self.plan(dataclasses.replace(selection, fields=None))
+        plan = self.plan(dataclasses.replace(selection, fields=None), progress=progress)
         kinds = set(selection.fields) if selection.fields else None
         needle = (name or "").strip().casefold()
         wanted = set(shas) if shas is not None else None
@@ -1268,57 +1269,46 @@ class FileAccessService:
             sharing=[{"records": n, "files": counts[n]} for n in sorted(counts)],
         )
 
-    def shared_with_others(self, items: list[FileItem]) -> dict[str, int]:
-        """Files among these that live records not among them also use, and
-        how many such records: moving one would move it for them too."""
-        if not self.refs or not items:
-            return {}
-        picked = {i.record_id for i in items}
-        users = self.refs.records_using(i.sha256 for i in items)
-        out = {}
-        for sha, records in users.items():
-            others = {str(r) for r in records} - picked
-            if others:
-                out[sha] = len(others)
-        return out
-
-    def plan_move(
-        self, items: list[FileItem], volume: str, include_shared: bool = False
-    ) -> MovePlan:
+    def plan_move(self, items: list[FileItem], volume: str) -> MovePlan:
         """What moving these files onto `volume` would do: what moves or is
         copied from another drive (the transfer's own steps, `plan_steps`: a
         file stays on a drive that is the home of a collection using it, so it
-        is copied), what comes from the server straight there, and what stays
-        because records not among them also use it (unless `include_shared`:
-        then it moves for them too). The one rule behind the move dialog's
-        preview and the move itself. Unreachable and missing files can't move
-        and are left out."""
+        is copied) and what comes from the server straight there. Every file
+        picked goes, whoever else uses it: a home that keeps a file keeps its
+        copy, and otherwise the others still have it, on its new drive. The
+        one rule behind the move dialog's preview and the move itself.
+        Unreachable and missing files can't move and are left out."""
+        return self._move(items, volume)[0]
+
+    def _move(
+        self,
+        items: list[FileItem],
+        volume: str,
+        progress: Progress | None = None,
+    ) -> tuple[MovePlan, list[str]]:
+        """`plan_move`'s plan and `shas_to_move`'s content from one pass (the
+        transfer's steps cost a lookup per batch of files)."""
         if volume not in self._store.volume_names():
             raise NotFoundError(f"There is no drive called '{volume}'.")
-        shared = {} if include_shared else self.shared_with_others(items)
         size = {i.sha256: i.size for i in items}
-        on_drives = {i.sha256 for i in items if place_of(i)[1] == "drive"}
+        on_drives = sorted({i.sha256 for i in items if place_of(i)[1] == "drive"})
         remote = {i.sha256 for i in items if place_of(i)[1] == "server"}
-        plan = MovePlan(
-            files=0,
-            bytes=0,
-            from_server=len(remote),
-            shared_left=0,
-            shared_bytes=0,
-            already_there=0,
-        )
-        for step in self._steps(sorted(on_drives), volume):
+        plan = MovePlan(files=0, bytes=0, from_server=len(remote), already_there=0)
+        moving: list[str] = []
+        if progress:
+            progress.phase("Working out what moves", len(on_drives))
+        for n, step in enumerate(self._steps(on_drives, volume), 1):
             if step.step == STEP_THERE:
                 plan.already_there += 1
-            elif step.sha256 in shared:
-                plan.shared_left += 1
-                plan.shared_bytes += size[step.sha256]
             elif step.step in (STEP_MOVE, STEP_COPY):
                 plan.files += 1
                 plan.bytes += size[step.sha256]
+                moving.append(step.sha256)
                 if step.step == STEP_COPY:
                     plan.copied += 1
-        return plan
+            if progress and n % 200 == 0:
+                progress.advance(n)
+        return plan, moving
 
     def _steps(self, shas: list[str], volume: str) -> Iterator[Step]:
         """What gathering these files onto `volume` does with each (the
@@ -1333,34 +1323,22 @@ class FileAccessService:
         items: list[FileItem],
         volume: str,
         progress: Progress | None = None,
-        include_shared: bool = False,
     ) -> tuple[list[str], int, MovePlan]:
         """Get these files onto `volume`, as `plan_move` says: those only on
         the server are downloaded straight onto it; returns the content a
-        move has to carry from other drives (each once, without files others
-        share unless `include_shared`), how many were downloaded there, and
-        the plan."""
-        plan = self.plan_move(items, volume, include_shared)
+        move has to carry from other drives (each once), how many were
+        downloaded there, and the plan."""
+        plan, moving = self._move(items, volume, progress)
         remote = [i for i in items if place_of(i)[1] == "server"]
         fetched = self._fetch(
             [i.sha256 for i in remote], progress, volume, _sizes(remote)
         )
-        moving = self.shas_to_move(items, volume, include_shared)
         return moving, fetched.fetched if fetched else 0, plan
 
-    def shas_to_move(
-        self, items: list[FileItem], volume: str, include_shared: bool = False
-    ) -> list[str]:
+    def shas_to_move(self, items: list[FileItem], volume: str) -> list[str]:
         """The content a move has to carry onto `volume` from other drives:
-        each file not there yet, once, without those records not among these
-        also use unless `include_shared`. Downloads nothing."""
-        shared = {} if include_shared else self.shared_with_others(items)
-        on_drives = sorted({i.sha256 for i in items if place_of(i)[1] == "drive"})
-        return [
-            step.sha256
-            for step in self._steps(on_drives, volume)
-            if step.step in (STEP_MOVE, STEP_COPY) and step.sha256 not in shared
-        ]
+        each file not there yet, once. Downloads nothing."""
+        return self._move(items, volume)[1]
 
     def download(
         self, items: list[FileItem], progress: Progress | None = None

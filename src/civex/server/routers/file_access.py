@@ -255,22 +255,20 @@ def gather_files(
     runs like any other move (one at a time, safe to pause, cancel or lose
     power; see /store/transfers). Files downloaded straight onto the drive need
     no move: when nothing else has to move, `transfer_id` is null and
-    `downloaded` says how many came. Files that records not picked also use
-    stay where they are unless `include_shared` (`shared_left` says how
-    many). With `dry_run`, only `plan` is answered and nothing is done. 422
-    when they are all already there."""
-    items = _picked(body, ctx)
+    `downloaded` says how many came. Every file picked goes, whoever else uses
+    it: one on a drive that is the home of a collection using it is copied,
+    so the home keeps it (`plan.copied`). With `dry_run`, only `plan` is
+    answered and nothing is done. 422 when they are all already there."""
+    items = _picked(body, ctx, progress)
     svc = ctx.file_access_svc
     if dry_run:
         try:
-            plan = svc.plan_move(items, body.volume, body.include_shared)
+            plan = svc.plan_move(items, body.volume)
         except NotFoundError as e:
             raise HTTPException(404, detail=str(e))
         return JSONResponse({"plan": vars(plan)}, status_code=200)
     try:
-        shas, downloaded, plan = svc.to_move(
-            items, body.volume, progress, body.include_shared
-        )
+        shas, downloaded, _ = svc.to_move(items, body.volume, progress)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except CivexError as e:
@@ -285,7 +283,6 @@ def gather_files(
                     "files": 0,
                     "bytes": 0,
                     "downloaded": downloaded,
-                    "shared_left": plan.shared_left,
                 },
                 status_code=200,
             )
@@ -303,17 +300,16 @@ def gather_files(
         "files": record.plan.files if record.plan else len(shas),
         "bytes": record.plan.bytes if record.plan else 0,
         "downloaded": downloaded,
-        "shared_left": plan.shared_left,
     }
 
 
-def _picked(body: FilePickRequest, ctx: AppContext):
+def _picked(body: FilePickRequest, ctx: AppContext, progress: Progress | None = None):
     selection = _base_selection(body, ctx)
     if body.sort:
         selection.query.sort = body.sort
     try:
         return ctx.file_access_svc.chosen(
-            selection, body.place, body.name, body.shas, body.used_by
+            selection, body.place, body.name, body.shas, body.used_by, progress
         )[1]
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
@@ -383,7 +379,7 @@ def download_files(
     """Download the picked files that are only on the server to this computer
     (onto their collection's drive). Answers when they have arrived: how many
     came and which the server hasn't got yet."""
-    items = _picked(body, ctx)
+    items = _picked(body, ctx, progress)
     try:
         report = ctx.file_access_svc.download(items, progress)
     except SyncError as e:

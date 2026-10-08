@@ -1,6 +1,7 @@
 import { useTransfers } from './useTransfers'
 import { useVolumes } from './useStore'
 import { NEEDS_ATTENTION } from '../utils/volumes'
+import { filesHandled } from '../utils/transfers'
 
 export type StorageTab = 'volumes' | 'collections' | 'tasks'
 
@@ -53,7 +54,7 @@ export function useStorageAttention(): AttentionItem[] {
       items.push({
         key: `move-${t.id}`,
         tone: 'info',
-        text: `Moving files: ${p.files_done} of ${p.files_total} done.`,
+        text: `Moving files: ${filesHandled(p)} of ${p.files_total} done.`,
         tab: 'tasks',
       })
     else if (t.status === 'paused' || t.status === 'interrupted')

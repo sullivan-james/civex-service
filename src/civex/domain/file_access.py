@@ -207,8 +207,6 @@ class MovePlan:
     files: int  # files that would move from another drive
     bytes: int
     from_server: int  # files only on the server, downloaded straight there
-    shared_left: int  # files records you didn't pick also use: they stay
-    shared_bytes: int
     already_there: int
     # Of `files`, those copied, not moved: their drive is the home of a
     # collection that uses them, and keeps its copy.

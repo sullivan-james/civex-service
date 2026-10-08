@@ -25,6 +25,7 @@ stored template pointing at fields that exist.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -117,6 +118,15 @@ def _check_op(op: str) -> None:
 def parse(template: str) -> list[Token]:
     """The tokens of `template`. Raises ValidationError on a stray or
     unclosed brace, a bad variable name or an unknown format."""
+    return list(_parse(template))
+
+
+@lru_cache(maxsize=4096)
+def _parse(template: str) -> tuple[Token, ...]:
+    """`parse`, remembered: a page of records renders the same few templates
+    (names, file names) once per record, so each is read once. Tokens are
+    frozen, so sharing them is safe; a template that doesn't parse raises
+    every time (lru_cache keeps no exceptions)."""
     tokens: list[Token] = []
     buf: list[str] = []
     i, n = 0, len(template)
@@ -157,7 +167,7 @@ def parse(template: str) -> list[Token]:
             buf.append(ch)
             i += 1
     flush()
-    return tokens
+    return tuple(tokens)
 
 
 def referenced_names(template: str) -> list[str]:

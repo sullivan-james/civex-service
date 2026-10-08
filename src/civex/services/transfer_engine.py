@@ -174,6 +174,9 @@ class _Run:
         self.commit = commit
         self.clock = clock
         self.p = TransferProgress(**vars(seed.progress))
+        # A total from the plan caps what "already there" can add (see flush);
+        # without one, the total grows with what is found.
+        self.total_known = self.p.files_total > 0
         self.failures = list(seed.failures)
         self.failures_total = max(seed.failures_total, len(self.failures))
         self.batch: list[_Moved] = []
@@ -257,6 +260,15 @@ class _Run:
             if m.counted:
                 self.p.files_done += 1
                 self.p.bytes_done += m.size
+            elif not self.total_known or _accounted(self.p) < self.p.files_total:
+                # Already on the target before this move (draining a drive whose
+                # files the target also holds): only the original went, so it
+                # counts as already there, with nothing to carry. Capped at the
+                # total: the same case after a crash, a file an earlier run
+                # already counted, mustn't count twice.
+                self.p.files_skipped += 1
+                self.p.files_total = max(self.p.files_total, _accounted(self.p))
+                self.p.bytes_total = max(self.p.bytes_done, self.p.bytes_total - m.size)
         self.last_flush = self.clock()
         self.emit(force=True)
 

@@ -35,12 +35,18 @@ def _eta(seconds: float | None) -> str:
     return f"{h}h {m}m" if h else f"{m}m {s}s"
 
 
+def _handled(p) -> int:
+    """Files dealt with: moved or copied, already on the target, or failed."""
+    return p.files_done + p.files_skipped + p.files_failed
+
+
 def _summary(record: TransferRecord) -> None:
     p = record.progress
     console.print(
         f"[bold]{record.id[:8]}[/bold] {record.kind}  [cyan]{record.status}[/cyan]  "
-        f"{p.files_done}/{p.files_total} files, "
-        f"{format_bytes(p.bytes_done)} of {format_bytes(p.bytes_total)}"
+        f"{_handled(p)}/{p.files_total} files"
+        + (f" ({p.files_skipped} already there)" if p.files_skipped else "")
+        + f", {format_bytes(p.bytes_done)} of {format_bytes(p.bytes_total)}"
     )
     if record.pause_reason:
         console.print(f"  [yellow]{record.pause_reason}[/yellow]")
@@ -104,7 +110,7 @@ def _run_queue(highlight: str | None = None) -> None:
                 total=total,
                 completed=min(p.bytes_done + p.current_bytes, total),
                 description=(
-                    f"Moving {transfer_id[:8]}  {p.files_done}/{p.files_total} files"
+                    f"Moving {transfer_id[:8]}  {_handled(p)}/{p.files_total} files"
                     + (
                         f"  {format_bytes(p.rate_bytes_per_second)}/s"
                         if p.rate_bytes_per_second
