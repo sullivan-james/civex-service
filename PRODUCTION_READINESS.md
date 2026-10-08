@@ -114,9 +114,11 @@ is actually true.
 Going forward:
 
 - Every `v*` tag must have a matching `## vX.Y.Z` entry in `CHANGELOG.md`
-  before the tag is pushed. `.github/workflows/release.yml` enforces this —
-  the release job fails fast (before building/publishing) if the pushed
-  tag has no matching heading.
+  before the tag is pushed. `.github/workflows/release.yml` enforces this
+  (`scripts/check_release_tag.py`) — the release job fails fast (before
+  building/publishing) if the pushed tag has no matching heading. A
+  pre-release tag (`v1.3.0rc1`) may use the final version's heading or
+  `## Unreleased`, so a candidate can be cut before its notes are final.
 - Treat breaking changes — schema/migration changes (item 1) foremost among
   them — as their own changelog category so they're easy to scan for when
   upgrading, not buried in a generic "Changes" bullet list.

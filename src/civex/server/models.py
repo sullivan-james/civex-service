@@ -1150,6 +1150,11 @@ class WorkflowResponse(BaseModel):
     stem: str
     record_schema: str | None = None
     inputs: dict[str, WorkflowInputResponse] | None = None
+    runs_on: list[str] = Field(
+        default_factory=list,
+        description="What starts it by itself, one line each "
+        '("record_created on sample (site)"); empty if only run by hand.',
+    )
 
 
 class WorkflowTriggerResponse(BaseModel):
@@ -1284,7 +1289,7 @@ class DeleteJobsRequest(BaseModel):
     filter: dict[str, Any] | None = Field(
         default=None,
         description="Instead of ids: delete every run this filter matches (the "
-        "same filter tree as GET /jobs).",
+        "same filter tree as GET /jobs), however many.",
     )
     search: str | None = Field(
         default=None,
@@ -1293,16 +1298,12 @@ class DeleteJobsRequest(BaseModel):
     )
     every: bool = Field(
         default=False,
-        description="With no ids, filter or search: delete every finished run.",
+        description="With no ids, filter or search: delete every run.",
     )
 
 
 class DeleteJobsResponse(BaseModel):
     deleted: int = Field(description="How many runs were deleted.")
-    kept_unfinished: int = Field(
-        description="Runs that matched but are still waiting or running, so "
-        "were left alone. Cancel them first to delete them."
-    )
 
 
 class RerunJobsResponse(BaseModel):

@@ -1,21 +1,7 @@
-import {
-  Badge,
-  Button,
-  Modal,
-  ModalBody,
-  ModalFooter,
-  ModalHeader,
-} from '../ui'
-import { FileCode } from '../ui/icons'
+import { Badge } from '../ui'
 import { useWorkflow } from '../../hooks/useWorkflows'
 import type { PluginInfo } from '../../api/plugins'
-import type { Workflow, WorkflowStep } from '../../api/workflows'
-
-interface WorkflowSummaryModalProps {
-  workflow: Workflow
-  plugins: PluginInfo[]
-  onClose: () => void
-}
+import type { WorkflowStep } from '../../api/workflows'
 
 function TriggerSummary({
   triggers,
@@ -147,90 +133,73 @@ function StepCard({
   )
 }
 
-/** Readable view of a workflow — trigger, steps, their inputs and outputs —
- * so an automation can be understood without reading its YAML. "Edit as
- * YAML" is the explicit escape hatch into the WorkflowEditorPage, opened in
- * a new tab. */
-export function WorkflowSummaryModal({
-  workflow,
+/** Readable view of a workflow (trigger, inputs, steps and what each takes
+ * and gives) so an automation can be understood without reading its YAML. The
+ * Overview of a workflow's page. */
+export function WorkflowSummary({
+  stem,
   plugins,
-  onClose,
-}: WorkflowSummaryModalProps) {
-  const { data: detail, isLoading } = useWorkflow(workflow.stem)
+}: {
+  stem: string
+  plugins: PluginInfo[]
+}) {
+  const { data: detail, isLoading } = useWorkflow(stem)
   const pluginsById = new Map(plugins.map((p) => [p.id, p]))
 
   return (
-    <Modal onClose={onClose} size="2xl" className="h-[90vh]">
-      <ModalHeader onClose={onClose}>{workflow.name}</ModalHeader>
+    <div className="flex flex-col gap-5">
+      {isLoading || !detail ? (
+        <div className="flex-1 flex items-center justify-center text-sm text-fg-muted">
+          Loading…
+        </div>
+      ) : (
+        <>
+          {detail.description && (
+            <p className="text-sm text-fg-muted">{detail.description}</p>
+          )}
 
-      <ModalBody className="flex flex-col gap-5">
-        {isLoading || !detail ? (
-          <div className="flex-1 flex items-center justify-center text-sm text-fg-muted">
-            Loading…
+          <div>
+            <h3 className="text-sm font-semibold text-fg mb-2">Trigger</h3>
+            <TriggerSummary triggers={detail.triggers} />
           </div>
-        ) : (
-          <>
-            {detail.description && (
-              <p className="text-sm text-fg-muted">{detail.description}</p>
-            )}
 
-            <div>
-              <h3 className="text-sm font-semibold text-fg mb-2">Trigger</h3>
-              <TriggerSummary triggers={detail.triggers} />
-            </div>
-
-            {detail.inputs && Object.keys(detail.inputs).length > 0 && (
-              <div>
-                <h3 className="text-sm font-semibold text-fg mb-2">
-                  Manual run inputs
-                </h3>
-                <ul className="text-sm space-y-1">
-                  {Object.entries(detail.inputs).map(([name, input]) => (
-                    <li key={name} className="font-mono text-fg">
-                      {input.label ?? name}
-                      <span className="text-fg-muted font-sans">
-                        {' '}
-                        — {input.type}
-                        {input.description ? `, ${input.description}` : ''}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
+          {detail.inputs && Object.keys(detail.inputs).length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-fg mb-2">
-                Steps ({(detail.step_list ?? []).length})
+                Manual run inputs
               </h3>
-              <ul className="space-y-3">
-                {(detail.step_list ?? []).map((step, i) => (
-                  <StepCard
-                    key={step.id}
-                    step={step}
-                    index={i}
-                    plugin={pluginsById.get(step.plugin)}
-                  />
+              <ul className="text-sm space-y-1">
+                {Object.entries(detail.inputs).map(([name, input]) => (
+                  <li key={name} className="font-mono text-fg">
+                    {input.label ?? name}
+                    <span className="text-fg-muted font-sans">
+                      {' '}
+                      — {input.type}
+                      {input.description ? `, ${input.description}` : ''}
+                    </span>
+                  </li>
                 ))}
               </ul>
             </div>
-          </>
-        )}
-      </ModalBody>
+          )}
 
-      <ModalFooter>
-        <Button variant="default" onClick={onClose}>
-          Close
-        </Button>
-        <Button
-          to={`/workflows/${workflow.stem}/edit`}
-          target="_blank"
-          rel="opener"
-        >
-          <FileCode size={14} />
-          Edit as YAML
-        </Button>
-      </ModalFooter>
-    </Modal>
+          <div>
+            <h3 className="text-sm font-semibold text-fg mb-2">
+              Steps ({(detail.step_list ?? []).length})
+            </h3>
+            <ul className="space-y-3">
+              {(detail.step_list ?? []).map((step, i) => (
+                <StepCard
+                  key={step.id}
+                  step={step}
+                  index={i}
+                  plugin={pluginsById.get(step.plugin)}
+                />
+              ))}
+            </ul>
+          </div>
+        </>
+      )}
+    </div>
   )
 }

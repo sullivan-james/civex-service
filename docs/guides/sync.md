@@ -39,13 +39,18 @@ invite starts with `civex_inv_`, so secret scanners recognise one pasted by
 mistake.
 
 `civex serve --sync-only` serves the sync address (`/api/sync/v1/`) and nothing
-else. Bind it to `127.0.0.1` and put an HTTPS reverse proxy in front: devices only
-connect over `https://`, because invites and sessions travel in requests. Run the app
-itself (`civex serve`, without the flag) on the same machine for yourself, and reach
-it over SSH (`ssh -L 8000:localhost:8000 <server>`).
+else. Devices only connect over `https://`, because invites and sessions travel in
+requests, so it needs an HTTPS address in front of it:
 
-For a trial on your own network, `civex serve` alone also answers devices on the
-sync address, and `tailscale serve 8000` gives it an HTTPS address.
+- **On your own network, or across several:** [Syncing with Tailscale](#syncing-with-tailscale)
+  below is the simplest, with nothing to configure on the civex side.
+- **On a server you run:** bind it to `127.0.0.1` and put an HTTPS reverse proxy
+  (Caddy, nginx) with a certificate in front.
+
+A plain `http://` address on your network (`http://192.168.1.20:8000`) doesn't
+work: a device refuses it. Run the app itself (`civex serve`, without the flag) on
+the same machine for yourself, and reach it from elsewhere over SSH
+(`ssh -L 8000:localhost:8000 <server>`).
 
 ## Connect a device
 
@@ -83,6 +88,65 @@ in the background:
   joined. `civex clone` shows this with a bar of its own; Ctrl+C leaves it to finish
   later.
 - **Files.** See [Files](#files) below.
+
+## Syncing with Tailscale
+
+[Tailscale](https://tailscale.com) puts your computers on a private network of their
+own, wherever they are (one office, home, a laptop on the road), and gives each an
+`https://` address with a real certificate. Only computers you add can reach it. It is
+free for personal use and small teams.
+
+**Once, for everyone**
+
+1. [Install Tailscale](https://tailscale.com/download) on the authority and on every
+   device, and sign each in to the same Tailscale account (your *tailnet*).
+2. In the Tailscale admin console, under **DNS**, turn on **MagicDNS** and **HTTPS
+   Certificates**. (`tailscale serve` below asks for this, with a link, if it is
+   off.)
+
+**On the authority**
+
+```bash
+civex sync authority enable
+civex sync device invite laptop        # prints the laptop's invite: copy it now
+civex serve --sync-only --port 8100    # leave this running
+```
+
+Then, in a second terminal:
+
+```bash
+tailscale serve --bg 8100
+```
+
+It prints the authority's address, such as `https://lab-pc.tail1234.ts.net`
+(`tailscale serve status` shows it again later). The first visit can take a few
+seconds while Tailscale fetches the certificate.
+
+To use civex yourself on this computer at the same time, run `civex serve` as usual:
+it uses port 8000, the sync server 8100.
+
+**On each device**
+
+```bash
+civex clone https://lab-pc.tail1234.ts.net my-project --invite <invite>
+```
+
+Or, in the app: Settings → **Sync**, the address and the invite, then **Connect**.
+
+**Good to know**
+
+- **Keep the sync server running.** Devices sync whenever `civex serve --sync-only`
+  is up on the authority; while it isn't, they keep working and catch up later.
+  `tailscale serve --bg` comes back by itself after a restart; start civex with the
+  computer too (a login item on macOS, Task Scheduler on Windows, a systemd service on
+  Linux).
+- **Use `serve`, never `funnel`.** `tailscale funnel` puts an address on the public
+  internet; `serve` keeps it inside your tailnet.
+- **Point Tailscale at the sync server only** (port 8100 here), never at the app's
+  port (8000): the app has no sign-in, so everyone in your tailnet could use it.
+  Open the app on the authority itself, or from elsewhere over SSH as above.
+- **Invite another device** with `civex sync device invite <name>`, or Settings →
+  Sync → *Other devices following this project*.
 
 ## Syncing by itself
 
@@ -197,6 +261,99 @@ One action travels as one. Deleting a record deletes what is beneath it, and a
 schema change can touch several fields. If such an action can't go in whole, none
 of it goes in: the device is sent back the authority's state, and the review says
 it was **not taken**.
+
+## Sharing workflows and plugins
+
+Workflows and plugins don't sync as you edit them. A plugin is code, and running
+it means trusting whoever wrote it. So you share them on purpose instead, through
+the authority's **library**: one person publishes, and a person on another
+computer installs.
+
+- **Nothing arrives by itself.** What you publish is kept as text in the
+  authority's database. It is never written into a project's `_civex/workflows`
+  or `_civex/plugins`, so nothing anyone sent can run until someone on that
+  computer chooses to install it. That includes the authority itself: civex runs
+  a plugin just to find out what it does, so even that waits for an install.
+- **A workflow goes with its plugins.** Publishing a workflow also sends the
+  plugins its steps use (not the built-in ones). Installing it installs them too.
+  A workflow whose plugins are nowhere can't be published or installed.
+- **Installing shows what it writes first:** every file, whether it is new, an
+  update or replaces yours, who published it, its version and hash, and what
+  starts the workflow by itself. A plugin's code can be read before it is
+  installed, and the app asks you to confirm you trust it.
+- **The authority checks what it is sent without running it.** It checks the
+  names (so no file can land outside its folder) and the size (256 KB at most).
+  A workflow must parse, and YAML aliases are refused, because a few lines of them
+  can expand into gigabytes. A plugin must be valid Python that defines `Plugin`,
+  and can't take a built-in plugin's id. What arrives is checked against its hash,
+  on the authority and again when it is installed.
+
+### Versions
+
+Every time you publish something that has changed, it becomes the next version
+(v1, v2, v3…), and every version is kept. Publishing the same text again changes
+nothing.
+
+- **A workflow remembers its plugins' versions.** It is published together with
+  the plugins it uses, and remembers which version of each that was. Installing it
+  installs those versions, not the newest. Publishing a new version of a plugin
+  therefore changes nothing for anyone until they choose to update.
+- **An update is checked before it goes in.** Each plugin version carries what it
+  takes and gives (its inputs, outputs and settings). Before installing, civex
+  checks every workflow on your computer that uses the plugin against the new
+  version. If any would break, it names them and installs nothing unless you
+  choose **Install anyway**. It checks again against the new code itself before
+  writing anything.
+- **Breaking changes are better as a new plugin.** A plugin keeps its id in every
+  version. A change that breaks the workflows using it is better published as a
+  new plugin, with a new id and name, which can be installed beside the old one.
+  When you publish a version that would break a shared workflow, you are told so.
+  That workflow stays on the version it was published with.
+- **Rolling back** is installing an earlier version.
+- **A file you changed is never overwritten** unless you say so. Updating from one
+  library version to another needs no confirmation.
+
+### Who may publish
+
+The authority's admin decides who may publish and what:
+
+```bash
+civex sync authority library workflows   # off | workflows (the default) | all
+civex sync device allow-publish laptop   # deny-publish takes it back
+```
+
+`workflows` takes workflow files only, which can use only built-in plugins and
+plugins already in the library. `all` also takes plugins. No device may publish
+until it is allowed, and every device may read the library. The authority's own
+computer may always publish. Settings → Sync has the same controls.
+
+### In the app and the terminal
+
+The **Workflows** page lists your workflows and, while the project shares with a
+server, the ones in the library. A **Sharing** column says how each stands:
+*Not shared*, *Shared · v3*, *v2 here · v3 available*, *Changed here*, or
+*In the library* (not installed). Search and the **Show…** filter work on all of
+them, and each row's menu publishes, updates or installs.
+
+Each workflow has its own page. **Overview** says what it does. **Sharing** lists
+every version in the library, with the plugin versions each uses and which one
+you have. From there you install, update, roll back, publish changes or remove a
+version.
+
+```bash
+civex sync library list                          # what is shared, and where each stands here
+civex sync library publish workflow tidy         # with the plugins it uses
+civex sync library show plugin my_step -v 2      # read a version first
+civex sync library install workflow tidy         # the newest; asks before writing anything
+civex sync library install plugin my_step -v 1   # roll back
+civex sync library install plugin my_step --force  # even though it breaks a workflow here
+civex sync library remove workflow tidy -v 1     # one version; copies already installed stay
+```
+
+The authority installs from its library just as a device does. A workflow it
+installs runs there like on any other computer: when someone edits a record on
+the authority, or runs the workflow by hand. Changes that arrive by sync never
+start a workflow, on the authority or on a device.
 
 ## When changes collide
 
@@ -323,7 +480,8 @@ with an invite of its own.
 Schemas, fields, collections, saved views, records and their files sync. These
 don't, and stay on each computer:
 
-- Saved exports (export definitions) and workflows.
+- Saved exports (export definitions). Workflows and plugins are shared on purpose
+  instead (see [Sharing workflows and plugins](#sharing-workflows-and-plugins)).
 - Settings in `config.toml`: storage volumes, retention, the map, automation.
 - Workflow runs and their logs.
 - Pins and recent items, which are kept by each browser.

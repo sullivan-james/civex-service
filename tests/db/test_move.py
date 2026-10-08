@@ -125,6 +125,14 @@ def _add_sync_state(ctx: AppContext) -> None:
     _, invite = ctx.device_keys.invite("laptop")
     ctx.device_keys.join(invite, str(uuid.uuid4()), keys.public_of(keys.new_private_key()))
     ctx.device_keys.invite("phone")  # one still waiting
+    ctx.device_keys.allow_publish("laptop", True)
+    # A shared workflow in the library (its lists are JSON columns).
+    from civex.domain.library import LibraryItemDTO
+
+    shared = LibraryItemDTO.of(
+        "workflow", "tidy", "name: tidy\nsteps:\n  - id: a\n    plugin: civex.noop\n"
+    )
+    ctx.library_svc.accept(None, [shared])
     record = ctx.record_svc.find("study", "patient")[0]
     op = SyncEntry(
         id=uuid.uuid4(),

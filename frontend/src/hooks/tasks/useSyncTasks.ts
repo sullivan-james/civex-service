@@ -1,3 +1,4 @@
+import { logHref } from '../../api/logs'
 import { RefreshCw } from '../../components/ui/icons'
 import type { BackgroundTask } from '../../utils/backgroundTasks'
 import { useRemoteStatus, useSyncNow } from '../useRemote'
@@ -14,6 +15,8 @@ export function useSyncTasks(): BackgroundTask[] {
   const syncNow = useSyncNow()
   if (!data || (!data.configured && !data.connecting)) return []
   const details = { label: 'Details', to: DETAILS }
+  // What the server wrote about it, warnings and errors only.
+  const viewLog = { label: 'View log', to: logHref('project', 'warning') }
 
   if (data.progress) {
     const text = describeSyncProgress(data.progress)
@@ -55,7 +58,7 @@ export function useSyncTasks(): BackgroundTask[] {
         icon: RefreshCw,
         title: 'Could not connect',
         detail: data.connect_error,
-        actions: [details],
+        actions: [details, viewLog],
       },
     ]
 
@@ -92,6 +95,7 @@ export function useSyncTasks(): BackgroundTask[] {
             onClick: () => syncNow.mutate(),
           },
           details,
+          viewLog,
         ],
       },
     ]

@@ -142,20 +142,20 @@ def test_deleting_every_failed_run_the_filter_matches(client: TestClient) -> Non
     resp = client.post("/api/jobs/delete", json={"filter": failed})
 
     assert resp.status_code == 200
-    assert resp.json() == {"deleted": 2, "kept_unfinished": 0}
+    assert resp.json() == {"deleted": 2}
     left = {j["id"] for j in client.get("/api/jobs").json()}
     assert left == {ids["completed"], ids["waiting"]}
 
 
-def test_deleting_runs_leaves_waiting_and_running_ones(client: TestClient) -> None:
+def test_deleting_runs_by_id_whatever_their_state(client: TestClient) -> None:
     ids = _finished_runs(client)
 
     resp = client.post(
         "/api/jobs/delete", json={"ids": [ids["completed"], ids["waiting"]]}
     )
 
-    assert resp.json() == {"deleted": 1, "kept_unfinished": 1}
-    assert client.get(f"/api/jobs/{ids['waiting']}").status_code == 200
+    assert resp.json() == {"deleted": 2}
+    assert client.get(f"/api/jobs/{ids['waiting']}").status_code == 404
     assert client.get(f"/api/jobs/{ids['completed']}").status_code == 404
 
 
@@ -171,10 +171,10 @@ def test_deleting_runs_by_search_alone_and_refusing_nothing(
     assert client.post("/api/jobs/delete", json={}).status_code == 422
 
 
-def test_deleting_every_finished_run(client: TestClient) -> None:
-    ids = _finished_runs(client)
+def test_deleting_every_run(client: TestClient) -> None:
+    _finished_runs(client)
 
     resp = client.post("/api/jobs/delete", json={"every": True})
 
-    assert resp.json() == {"deleted": 3, "kept_unfinished": 1}
-    assert [j["id"] for j in client.get("/api/jobs").json()] == [ids["waiting"]]
+    assert resp.json() == {"deleted": 4}
+    assert client.get("/api/jobs").json() == []

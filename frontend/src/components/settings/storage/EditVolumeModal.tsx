@@ -1,3 +1,4 @@
+import { useIsDesktop } from '../../../hooks/useIsDesktop'
 import { useState } from 'react'
 import type { VolumeStats } from '../../../api/store'
 import { useUpdateVolume } from '../../../hooks/useStore'
@@ -13,7 +14,7 @@ import {
   ModalHeader,
 } from '../../ui'
 import { errorMessage } from '../../../lib/errors'
-import { browseFolderDesktop, isDesktop } from '../../../utils/nativeFolder'
+import { browseFolderDesktop } from '../../../utils/nativeFolder'
 import { VolumeStatus } from '../../files/Where'
 import { FolderPickerModal } from '../FolderPickerModal'
 
@@ -26,6 +27,7 @@ export function EditVolumeModal({
   vol: VolumeStats
   onClose: () => void
 }) {
+  const isDesktop = useIsDesktop()
   const updateVolume = useUpdateVolume()
   const [path, setPath] = useState(vol.path)
   const [limitOn, setLimitOn] = useState(vol.allocated_gb != null)

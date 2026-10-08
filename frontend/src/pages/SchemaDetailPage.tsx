@@ -11,7 +11,6 @@ import {
   useDeleteSchema,
   useSchemas,
 } from '../hooks/useSchemas'
-import { usePlugins } from '../hooks/usePlugins'
 import {
   Button,
   DetailSkeleton,
@@ -34,7 +33,6 @@ import { UniquenessSection } from '../components/schemas/UniquenessSection'
 import { AuditTrail } from '../components/audit/AuditTrail'
 import { describeAuditEntry as describeSchemaAuditEntry } from '../utils/schemaAudit'
 import { WorkflowsPanel } from '../components/workflows/WorkflowsPanel'
-import { WorkflowSummaryModal } from '../components/workflows/WorkflowSummaryModal'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import type { Workflow } from '../api/workflows'
 
@@ -158,8 +156,6 @@ export default function SchemaDetailPage() {
   const { data: deleteImpact, isLoading: deleteImpactLoading } =
     useSchemaDeleteImpact(schema?.name ?? '', confirmDelete)
   const deleteSchema = useDeleteSchema()
-  const { data: pluginList } = usePlugins()
-  const [summaryTarget, setSummaryTarget] = useState<Workflow | null>(null)
   const [runTarget, setRunTarget] = useState<Workflow | null>(null)
 
   const breadcrumbs = [{ label: 'Schemas', to: '/schemas' }]
@@ -271,7 +267,7 @@ export default function SchemaDetailPage() {
         <WorkflowsPanel
           schemaName={schema.name}
           onRun={(wf) => setRunTarget(wf)}
-          onView={(wf) => setSummaryTarget(wf)}
+          ns="wf."
         />
       </TabPanel>
 
@@ -285,14 +281,6 @@ export default function SchemaDetailPage() {
           emptyMessage="No changes yet."
         />
       </TabPanel>
-
-      {summaryTarget && (
-        <WorkflowSummaryModal
-          workflow={summaryTarget}
-          plugins={pluginList ?? []}
-          onClose={() => setSummaryTarget(null)}
-        />
-      )}
 
       {runTarget && (
         <WorkflowRunModal

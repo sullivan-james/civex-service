@@ -4,6 +4,7 @@ import { useFileJobTasks } from './tasks/useFileJobTasks'
 import { useHistoryTasks } from './tasks/useHistoryTasks'
 import { useMoveTasks } from './tasks/useMoveTasks'
 import { useSyncTasks } from './tasks/useSyncTasks'
+import { useUpdateTasks } from './tasks/useUpdateTasks'
 
 /** Everything going on in the background, from every source, as one list for the
  * status bar. To show another kind of work, write a source hook that returns its
@@ -16,5 +17,6 @@ export function useBackgroundTasks(): BackgroundTask[] {
     ...useSyncTasks(),
     ...useAutomationTasks(),
     ...useHistoryTasks(),
+    ...useUpdateTasks(),
   ]
 }

@@ -37,6 +37,16 @@ const settingsSections = [
     info: 'The location editor draws built-in coastlines and a grid, so it works offline. For street-level detail, point it at a tile server; you are responsible for that provider’s terms of use.',
   },
   {
+    to: 'updates',
+    label: 'Updates',
+    info: 'Which version of civex this is, and updating it. An update closes civex, installs the new version and starts it again.',
+  },
+  {
+    to: 'logs',
+    label: 'Logs',
+    info: 'Every log civex keeps on this computer: this project’s server, the desktop app and its launcher, and updates. Anything that mentions a log links here.',
+  },
+  {
     to: 'advanced',
     label: 'Advanced',
     info: 'Power-user surfaces: the terminal, raw YAML workflow editing and the plugin editors.',

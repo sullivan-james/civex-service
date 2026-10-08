@@ -12,7 +12,8 @@ from pydantic import BaseModel, Field
 
 from civex import keys
 from civex.context import AppContext
-from civex.domain.exceptions import ValidationError
+from civex.domain.exceptions import NotAllowedError, NotFoundError, ValidationError
+from civex.domain.library import InstallPlan, LibraryItemDTO
 from civex.domain.sync import INVITE_HOURS, SyncError
 from civex.server.deps import get_ctx
 from civex.services.sync_jobs import sync_jobs
@@ -448,6 +449,10 @@ class DeviceResponse(BaseModel):
         description="When it last signed in; null if never."
     )
     revoked: bool = Field(description="It can no longer sign in.")
+    may_publish: bool = Field(
+        default=False,
+        description="It may publish workflows (and plugins, if taken) to the library.",
+    )
 
 
 class InviteResponse(BaseModel):
@@ -465,10 +470,24 @@ class AuthorityResponse(BaseModel):
     invites: list[InviteResponse] = Field(
         description="Invites not used yet and not expired."
     )
+    library: str = Field(
+        default="workflows",
+        description="What devices allowed to publish may share through this "
+        "server's library: off, workflows, or all (plugins too, which are code).",
+    )
 
 
 class AuthorityUpdateRequest(BaseModel):
-    serving: bool = Field(description="Accept devices, or stop accepting them.")
+    serving: bool | None = Field(
+        default=None, description="Accept devices, or stop accepting them."
+    )
+    library: str | None = Field(
+        default=None, description="off, workflows or all: what the library takes."
+    )
+
+
+class DevicePublishRequest(BaseModel):
+    allowed: bool = Field(description="May it publish to the library.")
 
 
 class InviteRequest(BaseModel):
@@ -495,6 +514,7 @@ def _authority(ctx: AppContext) -> AuthorityResponse:
                 created_at=d.created_at,
                 last_seen_at=d.last_seen_at,
                 revoked=d.revoked_at is not None,
+                may_publish=d.may_publish,
             )
             for d in keys_svc.list_devices()
         ],
@@ -504,6 +524,7 @@ def _authority(ctx: AppContext) -> AuthorityResponse:
             )
             for i in keys_svc.pending_invites()
         ],
+        library=ctx.sync_svc.library_mode,
     )
 
 
@@ -516,8 +537,15 @@ def authority(ctx: AppContext = Depends(get_ctx)):
 
 @router.patch("/authority", response_model=AuthorityResponse)
 def update_authority(body: AuthorityUpdateRequest, ctx: AppContext = Depends(get_ctx)):
-    """Start or stop accepting devices. The devices stay on record."""
-    ctx.sync_svc.set_serving(body.serving)
+    """Start or stop accepting devices (the devices stay on record), and say
+    what the library takes from them."""
+    try:
+        if body.library is not None:
+            ctx.sync_svc.set_library(body.library)
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    if body.serving is not None:
+        ctx.sync_svc.set_serving(body.serving)
     return _authority(ctx)
 
 
@@ -548,6 +576,268 @@ def revoke_device(name: str, ctx: AppContext = Depends(get_ctx)):
         raise HTTPException(404, detail=f"No active device named {name}")
     ctx.commit()
     return _authority(ctx)
+
+
+@router.post("/authority/devices/{name}/publish", response_model=AuthorityResponse)
+def allow_publish(
+    name: str, body: DevicePublishRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """Let a device publish to the library, or stop it."""
+    if not ctx.device_keys.allow_publish(name, body.allowed):
+        raise HTTPException(404, detail=f"No active device named {name}")
+    ctx.commit()
+    return _authority(ctx)
+
+
+# -- the library: shared workflows and plugins --------------------------------
+# The same calls whether this project is the authority (its own library) or
+# follows one (the authority's), so the authority installs like any device.
+
+
+class LibraryVersionResponse(BaseModel):
+    version: int
+    sha256: str
+    published_by: str | None = None
+    published_at: str | None = None
+    pins: dict[str, int] = Field(
+        default_factory=dict,
+        description="A workflow: the plugin versions it was published with.",
+    )
+
+
+class LibraryItemResponse(BaseModel):
+    kind: str = Field(description="workflow or plugin.")
+    name: str
+    filename: str
+    sha256: str
+    size: int
+    version: int = Field(description="This version's number (the newest in a list).")
+    title: str | None = Field(default=None, description="A workflow's own name.")
+    description: str | None = None
+    provides: str | None = Field(
+        default=None, description="A plugin: the plugin id it registers as."
+    )
+    needs: list[str] = Field(
+        default_factory=list, description="A workflow: the plugins its steps use."
+    )
+    pins: dict[str, int] = Field(
+        default_factory=dict,
+        description="A workflow: the version of each plugin it was published with.",
+    )
+    triggers: list[str] = Field(
+        default_factory=list, description="A workflow: what starts it by itself."
+    )
+    published_by: str | None = None
+    published_at: str | None = None
+    history: list[LibraryVersionResponse] = Field(
+        default_factory=list, description="Every version, newest first."
+    )
+    here: str | None = Field(
+        default=None,
+        description="On this computer, against this version: absent, same, older "
+        "(an earlier version from the library) or different (changed here).",
+    )
+    local_version: int | None = Field(
+        default=None, description="The library version this computer has, if any."
+    )
+    missing: list[str] = Field(
+        default_factory=list,
+        description="Plugins it needs that are neither here nor in the library.",
+    )
+    content: str | None = Field(
+        default=None, description="Its text, when asked for one."
+    )
+
+
+class LibraryPublishRequest(BaseModel):
+    kind: str = Field(description="workflow or plugin.")
+    name: str = Field(description="The workflow's or plugin file's name here.")
+    with_plugins: bool = Field(
+        default=True, description="A workflow: send the plugins its steps use too."
+    )
+
+
+class LibraryPublishResponse(BaseModel):
+    items: list[LibraryItemResponse] = Field(description="The versions stored.")
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Shared workflows still on an older version of a plugin that "
+        "the new version would break.",
+    )
+
+
+class LibraryInstallRequest(BaseModel):
+    version: int | None = Field(default=None, description="Omit for the newest.")
+    with_plugins: bool = Field(
+        default=True,
+        description="A workflow: install the plugin versions it is pinned to too.",
+    )
+    replace: bool = Field(
+        default=False, description="Replace files here that were changed here."
+    )
+    force: bool = Field(
+        default=False,
+        description="Install even though it would break workflows here.",
+    )
+
+
+class InstallStepResponse(BaseModel):
+    item: LibraryItemResponse
+    path: str = Field(description="Where it is written, in the project.")
+    here: str = Field(
+        description="absent, same, older or different, before installing."
+    )
+    local_version: int | None = Field(
+        default=None, description="The library version here now, if any."
+    )
+
+
+class InstallPlanResponse(BaseModel):
+    steps: list[InstallStepResponse]
+    blocked: list[str] = Field(description="Why it can't be installed as asked.")
+    warnings: list[str] = Field(
+        description="What to know first (what starts a workflow by itself)."
+    )
+    breaks: list[str] = Field(
+        default_factory=list,
+        description="What the new plugin versions would break among the "
+        "workflows here.",
+    )
+    runs_code: bool = Field(
+        description="It writes a plugin, which is code this computer will run."
+    )
+
+
+def _item(i: LibraryItemDTO) -> LibraryItemResponse:
+    return LibraryItemResponse(
+        **{k: v for k, v in i.to_dict().items() if k != "contract"},
+        filename=i.filename,
+        here=i.here,
+        local_version=i.local_version,
+        missing=i.missing,
+    )
+
+
+def _plan(plan: InstallPlan) -> InstallPlanResponse:
+    return InstallPlanResponse(
+        steps=[
+            InstallStepResponse(
+                item=_item(s.item),
+                path=s.path,
+                here=s.here,
+                local_version=s.local_version,
+            )
+            for s in plan.steps
+        ],
+        blocked=plan.blocked,
+        warnings=plan.warnings,
+        breaks=plan.breaks,
+        runs_code=plan.runs_code,
+    )
+
+
+def _library(call):
+    try:
+        return call()
+    except NotAllowedError as e:
+        raise HTTPException(403, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    except SyncError as e:
+        raise _refuse(e)
+
+
+@router.get("/library", response_model=list[LibraryItemResponse])
+def library(ctx: AppContext = Depends(get_ctx)):
+    """The workflows and plugins shared through the authority (the newest
+    version of each, with its history), and where each stands here. Empty when
+    this project shares with no server."""
+    if not ctx.library_svc.sharing():
+        return []
+    return [_item(i) for i in _library(ctx.library_svc.browse)]
+
+
+@router.get("/library/{kind}/{name}", response_model=LibraryItemResponse)
+def library_item(
+    kind: str,
+    name: str,
+    version: int | None = Query(default=None, description="Omit for the newest."),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """One version of a shared workflow or plugin with its text, to read first."""
+    return _item(_library(lambda: ctx.library_svc.show(kind, name, version)))
+
+
+@router.post("/library/publish", response_model=LibraryPublishResponse)
+def publish_to_library(body: LibraryPublishRequest, ctx: AppContext = Depends(get_ctx)):
+    """Publish a workflow (with the plugins it uses, which it is pinned to) or
+    a plugin from this project to the library. New text is the next version."""
+    result = _library(
+        lambda: ctx.library_svc.publish(body.kind, body.name, body.with_plugins)
+    )
+    ctx.commit()
+    return LibraryPublishResponse(
+        items=[_item(i) for i in result.items], warnings=result.warnings
+    )
+
+
+@router.get("/library/{kind}/{name}/install", response_model=InstallPlanResponse)
+def install_plan(
+    kind: str,
+    name: str,
+    version: int | None = Query(default=None),
+    with_plugins: bool = Query(default=True),
+    replace: bool = Query(default=False),
+    force: bool = Query(default=False),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """What installing (a version) would write here, what it would break among
+    the workflows here, and what stops it. Writes and runs nothing."""
+    return _plan(
+        _library(
+            lambda: ctx.library_svc.plan_install(
+                kind, name, version, with_plugins, replace, force
+            )
+        )
+    )
+
+
+@router.post("/library/{kind}/{name}/install", response_model=InstallPlanResponse)
+def install(
+    kind: str,
+    name: str,
+    body: LibraryInstallRequest,
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Install (a version) from the library into this project. A plugin is
+    code: it is described before anything is written, and runs on this
+    computer from now on."""
+    return _plan(
+        _library(
+            lambda: ctx.library_svc.install(
+                kind, name, body.version, body.with_plugins, body.replace, body.force
+            )
+        )
+    )
+
+
+@router.delete("/library/{kind}/{name}", status_code=204)
+def unpublish(
+    kind: str,
+    name: str,
+    version: int | None = Query(
+        default=None, description="One version; omit to remove every version."
+    ),
+    force: bool = Query(
+        default=False, description="Even if shared workflows are pinned to it."
+    ),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Take something out of the library. Copies already installed stay."""
+    _library(lambda: ctx.library_svc.unpublish(kind, name, version, force))
+    ctx.commit()
 
 
 # -- files on this computer -------------------------------------------------

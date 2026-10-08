@@ -15,6 +15,7 @@ from civex.cli import (
     schema,
     files,
     store,
+    logs as logs_cli,
     sync as sync_cli,
     trash,
     view,
@@ -85,6 +86,7 @@ app.add_typer(sync_cli.app, name="sync", rich_help_panel=_COLLAB)
 app.command("clone", rich_help_panel=_COLLAB)(sync_cli.clone)
 app.add_typer(retention.app, name="retention", rich_help_panel=_WORK)
 app.add_typer(history.app, name="history", rich_help_panel=_WORK)
+app.add_typer(logs_cli.app, name="logs", rich_help_panel=_WORK)
 app.add_typer(view.app, name="view", rich_help_panel=_WORK)
 app.command("resolve", rich_help_panel=_WORK)(resolve)
 app.command("doctor", rich_help_panel=_WORK)(doctor)
@@ -209,6 +211,16 @@ def serve(
     if allow_remote:
         os.environ["CIVEX_ALLOW_REMOTE"] = "1"
 
+    # How to start this server again after an update from the app
+    # (civex.updates); not in dev mode, which is never updated that way.
+    if not reload:
+        import json
+        import sys
+
+        from civex.updates import SERVE_ARGS_ENV
+
+        os.environ[SERVE_ARGS_ENV] = json.dumps(sys.argv[1:])
+
     _refuse_newer_database()
 
     if open_browser:
@@ -237,6 +249,14 @@ def serve(
 
     reload_dirs = [str(Path(__file__).resolve().parent)] if reload else None
 
+    # So an update of this copy can stop this server and start it again. Only
+    # now, once nothing above has refused to start: a record of a server that
+    # never ran would be found by an update.
+    if not reload:
+        from civex import running
+
+        running.register(host, port)
+
     # log_config=None: defer all logging to civex's own structlog pipeline
     # (configured in create_app) so uvicorn's records flow through the same sinks.
     uvicorn.run(
@@ -248,6 +268,26 @@ def serve(
         reload_dirs=reload_dirs,
         log_config=None,
     )
+
+
+@app.command("desktop", rich_help_panel=_START)
+def desktop() -> None:
+    """Open civex in a window of its own, with a project picker.
+
+    Needs the desktop extra: `uv tool install --force "civex[desktop]"`.
+    """
+    try:
+        import webview  # noqa: F401
+    except ImportError:
+        typer.secho(
+            "The desktop window needs the desktop extra: "
+            'uv tool install --force "civex[desktop]"',
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    from civex.desktop.tray import main as open_window
+
+    open_window()
 
 
 @app.command("shortcut", rich_help_panel=_START)

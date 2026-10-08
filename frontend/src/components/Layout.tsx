@@ -1,3 +1,5 @@
+import { useIsDesktop } from '../hooks/useIsDesktop'
+import { useDesktopZoomKeys } from '../hooks/useUiSize'
 import {
   type ComponentType,
   type ReactNode,
@@ -66,8 +68,6 @@ declare global {
     }
   }
 }
-
-const isDesktop = typeof window !== 'undefined' && !!window.pywebview
 
 // pywebview runs inside a native shell, so navigator.platform reflects the
 // host OS reliably enough to pick the right verb for each platform's file manager.
@@ -307,6 +307,8 @@ function SyncButton() {
 export default function Layout({ children }: { children: ReactNode }) {
   useRefreshOnSync()
   useDesktopKeys()
+  useDesktopZoomKeys()
+  const isDesktop = useIsDesktop()
   const [aiOpen, setAiOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [drawerOpen, setDrawerOpen] = useState(false)

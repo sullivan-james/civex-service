@@ -1,3 +1,4 @@
+import { useIsDesktop } from '../../hooks/useIsDesktop'
 import { useState, type ReactNode } from 'react'
 import { useAddVolume, useInspectPath } from '../../hooks/useStore'
 import { useDebouncedValue } from '../../hooks/useDebouncedValue'
@@ -13,7 +14,7 @@ import {
   ModalHeader,
 } from '../ui'
 import { errorMessage } from '../../lib/errors'
-import { browseFolderDesktop, isDesktop } from '../../utils/nativeFolder'
+import { browseFolderDesktop } from '../../utils/nativeFolder'
 import { formatSize } from '../../utils/storage'
 import { FolderBrowser } from './FolderBrowser'
 import { PathCheck } from './PathCheck'
@@ -59,6 +60,7 @@ export function AddVolumeModal({
   existingNames: string[]
   onClose: () => void
 }) {
+  const isDesktop = useIsDesktop()
   const addVolume = useAddVolume()
   const [view, setView] = useState<'form' | 'browse'>('form')
   const [name, setName] = useState('')

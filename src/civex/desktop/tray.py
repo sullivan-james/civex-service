@@ -21,20 +21,39 @@ if TYPE_CHECKING:
 
 # Stored alongside other per-user config, outside any project directory.
 _RECENT_FILE = Path.home() / ".config" / "civex" / "recent.json"
-_LOG_FILE = Path.home() / ".config" / "civex" / "civex.log"
+#: Set by the desktop launcher: the folder it keeps its logs in (in AppData on
+#: Windows), so the app's log is beside the launcher's.
+LOG_DIR_ENV = "CIVEX_LOG_DIR"
+
+
+def _log_file() -> Path:
+    folder = os.environ.get(LOG_DIR_ENV)
+    base = Path(folder) if folder else Path.home() / ".config" / "civex"
+    return base / "civex-desktop.log"
+
+
+_LOG_FILE = _log_file()
 
 # Set in main() before webview.start() so Api methods can reference it.
 _window: "webview.Window | None" = None
 
 
 def _setup_logging() -> None:
+    """Log to the log file. Without a terminal (started by the launcher, or
+    from a Start-menu or Dock icon) everything printed goes there too: on
+    Windows the app has no console at all (it is a GUI script), so the
+    server's own output would otherwise be lost."""
     _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    log = open(_LOG_FILE, "a", buffering=1, encoding="utf-8")  # noqa: SIM115
+    terminal = sys.stdout is not None and sys.stdout.isatty()
+    if not terminal:
+        sys.stdout = sys.stderr = log
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=[
-            logging.FileHandler(_LOG_FILE, encoding="utf-8"),
-            *([] if getattr(sys, "frozen", False) else [logging.StreamHandler()]),
+            logging.StreamHandler(log),
+            *([logging.StreamHandler()] if terminal else []),
         ],
     )
 
@@ -147,6 +166,104 @@ def _wait_for_server(url: str, timeout: float = 30.0) -> bool:
     return False
 
 
+# ── Window size ───────────────────────────────────────────────────────────────
+
+_WINDOW_FILE = _RECENT_FILE.parent / "window.json"
+#: What a project window would like, on a screen with room for it.
+_WANT = (1280, 860)
+#: At or below this (points: what macOS calls "looks like"), a project window
+#: opens filling the screen: a 13-inch laptop has no room to spare around one.
+_SMALL_SCREEN = (1440, 900)
+
+
+def window_place(
+    screen: tuple[int, int, int, int] | None, saved: dict | None
+) -> tuple[str, int, int, int, int]:
+    """Where a project window opens, as ("maximize", ...) or ("place", x, y,
+    width, height). `screen` is (x, y, width, height) of the screen it is on;
+    `saved` what it was when last closed. The size it was left at wins, kept
+    within the screen; else it fills a small screen, or sits centred at a
+    comfortable size on a larger one."""
+    if screen is None:
+        return ("place", 0, 0, *_WANT)
+    sx, sy, sw, sh = screen
+    if saved:
+        if saved.get("maximized"):
+            return ("maximize", sx, sy, sw, sh)
+        try:
+            w = max(640, min(int(saved["width"]), sw))
+            h = max(480, min(int(saved["height"]), sh))
+            x = min(max(int(saved["x"]), sx), sx + sw - w)
+            y = min(max(int(saved["y"]), sy), sy + sh - h)
+            return ("place", x, y, w, h)
+        except (KeyError, TypeError, ValueError):
+            pass
+    if sw <= _SMALL_SCREEN[0] or sh <= _SMALL_SCREEN[1]:
+        return ("maximize", sx, sy, sw, sh)
+    w, h = min(_WANT[0], sw), min(_WANT[1], sh)
+    return ("place", sx + (sw - w) // 2, sy + (sh - h) // 2, w, h)
+
+
+def _screen() -> tuple[int, int, int, int] | None:
+    import webview
+
+    try:
+        first = webview.screens[0]
+    except Exception:  # no display information: let the window be
+        return None
+    return (
+        int(getattr(first, "x", 0)),
+        int(getattr(first, "y", 0)),
+        int(first.width),
+        int(first.height),
+    )
+
+
+def _read_window() -> dict | None:
+    try:
+        data = json.loads(_WINDOW_FILE.read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+_remembering: set[int] = set()
+
+
+def _remember_window(window: "webview.Window") -> None:
+    """Keep the project window's size and place as it changes, to open it the
+    same way next time (once per window, however many projects it opens)."""
+    if id(window) in _remembering:
+        return
+    _remembering.add(id(window))
+    state = dict(_read_window() or {})
+
+    def save(**changes: object) -> None:
+        state.update(changes)
+        try:
+            _WINDOW_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _WINDOW_FILE.write_text(json.dumps(state), "utf-8")
+        except OSError:
+            pass
+
+    window.events.resized += lambda width, height: save(
+        width=width, height=height, maximized=False
+    )
+    window.events.moved += lambda x, y: save(x=x, y=y)
+    window.events.maximized += lambda: save(maximized=True)
+    window.events.restored += lambda: save(maximized=False)
+
+
+def _place_project_window(window: "webview.Window") -> None:
+    how, x, y, w, h = window_place(_screen(), _read_window())
+    if how == "maximize":
+        window.maximize()
+    else:
+        window.resize(w, h)
+        window.move(x, y)
+    _remember_window(window)
+
+
 def _launch_project(path: Path) -> dict:
     """Start the server for path and navigate the window to it."""
     _save_recent(path)
@@ -161,7 +278,7 @@ def _launch_project(path: Path) -> dict:
     def _navigate() -> None:
         assert _window is not None
         if _wait_for_server(url):
-            _window.resize(1280, 800)
+            _place_project_window(_window)
             _window.load_url(url)
         else:
             detail = errors[0] if errors else "The server did not respond within 30 s."
@@ -509,9 +626,33 @@ _WELCOME_HTML = """<!DOCTYPE html>
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 
+def _project_arg(argv: list[str]) -> Path | None:
+    """`--project PATH`: the project to open at once, as the launcher passes
+    it after an update; None when absent or no longer a project."""
+    if "--project" not in argv:
+        return None
+    i = argv.index("--project")
+    if i + 1 >= len(argv):
+        return None
+    path = Path(argv[i + 1])
+    return path if (path / "_civex").exists() else None
+
+
+def _storage_dir() -> str:
+    """Where the app's window keeps what its pages store: in the launcher's
+    folder when the launcher started it (beside `logs`), else beside the
+    recent-projects list."""
+    logs = os.environ.get(LOG_DIR_ENV)
+    folder = (Path(logs).parent if logs else _RECENT_FILE.parent) / "webview"
+    folder.mkdir(parents=True, exist_ok=True)
+    return str(folder)
+
+
 def main() -> None:
     global _window
     import webview
+
+    from civex.updates import on_quit_for_update
 
     _setup_logging()
     _log.info("civex desktop starting (log: %s)", _LOG_FILE)
@@ -530,7 +671,28 @@ def main() -> None:
         min_size=(560, 480),
         resizable=True,
     )
-    webview.start()
+    # Updating from the app (civex.updates): close, and the launcher that
+    # started this app updates it and starts it again.
+    on_quit_for_update(lambda: _window.destroy() if _window else None)
+    # Servers stopped so this app could update start again now, whether or not
+    # the update worked (the launcher that updated it can't: it predates them).
+    from civex import running
+
+    for record in running.start_remembered():
+        _log.info("Started again after an update: %s", record.describe())
+    project = _project_arg(sys.argv[1:])
+    # Not private: what the pages keep (pins, recent items, choices such as
+    # dismissing a notice or including pre-releases) lasts from one opening
+    # of the app to the next, in a folder of the app's own.
+    storage = _storage_dir()
+    if project is not None:
+        webview.start(
+            lambda: _launch_project(project),
+            private_mode=False,
+            storage_path=storage,
+        )
+    else:
+        webview.start(private_mode=False, storage_path=storage)
 
 
 if __name__ == "__main__":

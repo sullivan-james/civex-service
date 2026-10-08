@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { isDesktopNow } from './useIsDesktop'
 
 export type DesktopKeyAction = 'reload' | 'back' | 'forward'
 
@@ -37,12 +38,12 @@ const isMac = () =>
   typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
 
 /** Reload, back and forward from the keyboard in the desktop app. Does nothing
- * in a browser, which has its own. `window.pywebview` is checked at each press,
- * not once, because pywebview may inject it after the page has loaded. */
+ * in a browser, which has its own. Asked at each press (`isDesktopNow`), since
+ * pywebview may arrive after the page has loaded. */
 export function useDesktopKeys() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!window.pywebview || e.defaultPrevented) return
+      if (!isDesktopNow() || e.defaultPrevented) return
       const action = desktopKeyAction(e, isMac())
       if (!action) return
       e.preventDefault()

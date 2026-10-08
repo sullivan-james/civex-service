@@ -117,6 +117,7 @@ nav:
           - civex db: reference/cli/db.md
           - civex files: reference/cli/files.md
           - civex history: reference/cli/history.md
+          - civex logs: reference/cli/logs.md
           - civex plugin: reference/cli/plugin.md
           - civex policy: reference/cli/policy.md
           - civex record: reference/cli/record.md

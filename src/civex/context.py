@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from civex.services.export_definition_service import ExportDefinitionService
     from civex.services.history_compaction import HistoryCompactionService
     from civex.services.device_keys import DeviceKeys
+    from civex.services.library_service import LibraryService
     from civex.services.sync_authority import SyncAuthorityService
     from civex.services.sync_service import SyncService
     from civex.services.view_service import ViewService
@@ -105,6 +106,7 @@ class AppContext:
     authority_svc: SyncAuthorityService
     device_keys: DeviceKeys
     sync_svc: SyncService
+    library_svc: LibraryService
     compaction_svc: HistoryCompactionService
     _session: Session
 
@@ -337,6 +339,20 @@ def build_local_context(
     )
     file_access_svc.why_not_here = lambda shas: _sync().not_here_reasons(shas)
 
+    from civex.identity import local_actor
+    from civex.repositories.local.library_repo import LocalLibraryRepository
+    from civex.services.library_service import LibraryService
+
+    library_svc = LibraryService(
+        LocalLibraryRepository(session),
+        sync_repo,
+        config,
+        workflow_svc,
+        plugin_svc,
+        transport=lambda: _sync().transport(),
+        author=lambda: local_actor(config.identity.name),
+    )
+
     ctx: AppContext = AppContext(
         schema_svc=schema_svc,
         dataset_svc=dataset_svc,
@@ -365,6 +381,7 @@ def build_local_context(
         authority_svc=authority_svc,
         device_keys=device_keys,
         sync_svc=sync_svc,
+        library_svc=library_svc,
         _session=session,
     )
     ai_svc._app_ctx = ctx

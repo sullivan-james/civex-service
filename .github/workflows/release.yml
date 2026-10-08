@@ -4,26 +4,37 @@ on:
   push:
     tags:
       - "v*"
+  # A dry run: every build and test, on any branch, and nothing published.
+  workflow_dispatch:
 
+# Build the wheel once, install that exact file on every OS and run it (and
+# the desktop app, installing it), and only then publish: a PyPI version can
+# never be uploaded again, even after it is deleted, and tests from a checkout
+# can't see what the wheel is missing.
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      id-token: write
+      contents: read
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
 
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Verify CHANGELOG entry exists for this tag
-        run: |
-          TAG="${GITHUB_REF_NAME}"
-          if ! grep -qE "^## ${TAG}([[:space:]]|\$)" CHANGELOG.md; then
-            echo "::error::No CHANGELOG.md entry found for ${TAG}. Add a '## ${TAG} — <label> (YYYY-MM-DD)' section before pushing this tag (see PRODUCTION_READINESS.md §4a)."
-            exit 1
-          fi
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      # A final release needs its own `## vX.Y.Z` entry; a pre-release
+      # (vX.Y.ZrcN, bN, aN, .devN) may use that heading or `## Unreleased`.
+      - name: Check the tag and its CHANGELOG entry
+        id: tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: uv run --no-project --with packaging python scripts/check_release_tag.py "$GITHUB_REF_NAME"
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -46,10 +57,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
       - name: Verify the SDK civex depends on is published
         # civex declares civex-plugin-sdk as a normal dependency, so the
         # in-repo SDK version must already be on PyPI or `pip install civex`
@@ -63,11 +70,257 @@ jobs:
           pip install build
           python -m build --wheel
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+      - name: Check the wheel is the tag's version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: uv run --no-project --with packaging python scripts/check_release_tag.py "$GITHUB_REF_NAME" --wheel-dir dist
+
+      - uses: actions/upload-artifact@v7
         with:
-          files: dist/*.whl
-          generate_release_notes: true
+          name: wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
+
+      # As the install guide says, with no Python set up: uv fetches one.
+      - name: Install the wheel the way a person would
+        shell: bash
+        run: uv tool install dist/*.whl
+
+      - name: Run it
+        shell: bash
+        run: |
+          # Not `$([ ... ] && echo .exe)`: off Windows that test fails, and in
+          # an assignment its failure is the line's, so `bash -e` stops here.
+          exe=""; if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
+          civex="$(uv tool dir --bin)/civex$exe"
+          uv run --no-project python scripts/smoke_civex.py "$civex" \
+            --expect-version "${{ needs.build.outputs.version }}"
+
+  # The desktop app is a small launcher carrying uv (desktop-launcher/): it
+  # installs civex[desktop] on first start and updates it with uv. Build it,
+  # package it as people download it (a Windows installer, a macOS disk image
+  # for Intel and Apple silicon alike), install that, and run it as a person's
+  # first start would, against the tested wheel.
+  desktop:
+    needs: build
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The download is civex-<version>-<this>.
+          - os: ubuntu-latest
+            download: linux.tar.gz
+          - os: macos-latest
+            download: macos.dmg
+          - os: windows-latest
+            download: windows-setup.exe
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    env:
+      CIVEX_APP_VERSION: ${{ needs.build.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The uv bundled into the app.
+      - uses: astral-sh/setup-uv@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
+
+      # Named for the civex inside, read off the wheel this run built: a
+      # release's version (2.0.0rc2), or a dry run's build (1.2.0.post120),
+      # so a test download can't be taken for a release.
+      - name: Name the download
+        shell: bash
+        run: |
+          wheel="$(basename dist/*.whl)"
+          version="${wheel#civex-}"
+          version="${version%%-*}"
+          echo "DOWNLOAD_VERSION=$version" >> "$GITHUB_ENV"
+          echo "DOWNLOAD=civex-$version-${{ matrix.download }}" >> "$GITHUB_ENV"
+
+      # One app for Intel and Apple silicon: python.org's Python is universal2
+      # (the runner's is arm64 only), and uv is joined from its two builds.
+      - name: Universal Python and uv (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          curl -fsSLo python.pkg https://www.python.org/ftp/python/3.12.10/python-3.12.10-macos11.pkg
+          sudo installer -pkg python.pkg -target /
+          echo "BUILD_PYTHON=/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12" >> "$GITHUB_ENV"
+          v="$(uv --version | cut -d' ' -f2)"
+          for arch in aarch64 x86_64; do
+            curl -fsSL "https://github.com/astral-sh/uv/releases/download/$v/uv-$arch-apple-darwin.tar.gz" | tar -xz
+          done
+          # Named `uv`: PyInstaller keeps the file's name, and the launcher
+          # looks for uv/uv inside the app.
+          mkdir uv-universal
+          lipo -create uv-aarch64-apple-darwin/uv uv-x86_64-apple-darwin/uv -output uv-universal/uv
+          echo "CIVEX_LAUNCHER_UV=$PWD/uv-universal/uv" >> "$GITHUB_ENV"
+          echo "CIVEX_LAUNCHER_ARCH=universal2" >> "$GITHUB_ENV"
+          # To run the Intel half below.
+          softwareupdate --install-rosetta --agree-to-license || true
+
+      - name: Build the app
+        shell: bash
+        run: |
+          py="${BUILD_PYTHON:-python}"
+          "$py" -m pip install pyinstaller
+          # Git Bash names Windows programs without `.exe`; PyInstaller needs it.
+          CIVEX_LAUNCHER_UV="${CIVEX_LAUNCHER_UV:-$(command -v uv.exe || command -v uv)}" \
+            "$py" -m PyInstaller desktop-launcher/launcher.spec \
+            --distpath app-dist --workpath app-build
+
+      - name: Check the app runs on Intel and Apple silicon (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          uv="$(find app-dist/civex.app -path '*/uv/uv' | head -1)"
+          [ -n "$uv" ] || { echo "No uv/uv in the app"; exit 1; }
+          for binary in app-dist/civex.app/Contents/MacOS/civex "$uv"; do
+            archs="$(lipo -archs "$binary")"
+            echo "$binary: $archs"
+            [[ "$archs" == *x86_64* && "$archs" == *arm64* ]] || exit 1
+          done
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: tar -czf "$DOWNLOAD" -C app-dist civex
+
+      # The window people know: the app beside a link to Applications.
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir dmg
+          cp -R app-dist/civex.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname civex -srcfolder dmg -ov -format UDZO "$DOWNLOAD"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $name = [IO.Path]::GetFileNameWithoutExtension($env:DOWNLOAD)
+          & $iscc "/DAppVersion=$env:DOWNLOAD_VERSION" "/DAppSource=$PWD\app-dist\civex" "/O$PWD" "/F$name" desktop-launcher\windows\civex.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Windows: run the installer as a person would (silently here), so what
+      # is tested is what was installed.
+      - name: Install it (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # The installer sets civex up itself; point it at the tested wheel
+          # and the folder the next step checks.
+          $wheel = (Get-Item dist\*.whl).FullName -replace '\\', '/'
+          $env:CIVEX_APP_HOME = "$env:RUNNER_TEMP\civex-app"
+          $env:CIVEX_LAUNCHER_SOURCE = "civex[desktop] @ file:///$wheel"
+          Start-Process -Wait -FilePath ".\$env:DOWNLOAD" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+          $app = "$env:LOCALAPPDATA\Programs\civex\civex.exe"
+          if (-not (Test-Path $app)) { throw "The installer didn't install $app" }
+          if (-not (Test-Path "$env:CIVEX_APP_HOME\bin\civex.exe")) { throw "The installer didn't set civex up" }
+          # "Add the civex command to PATH" is on by default.
+          $userPath = (Get-ItemProperty HKCU:\Environment).Path
+          if ($userPath -notlike "*\civex\app\bin*") { throw "The installer didn't put civex on PATH: $userPath" }
+          "APP=$app" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Run it as a first start would, then use the civex it installed
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            macOS)   app="$PWD/dmg/civex.app/Contents/MacOS/civex" ;;
+            Windows) app="$APP" ;;
+            *)       app="$PWD/app-dist/civex" ;;
+          esac
+          wheel="$(ls "$PWD"/dist/*.whl)"
+          [ "$RUNNER_OS" = Windows ] && wheel="$(cygpath -m "$wheel")"
+          source="civex[desktop] @ file:///${wheel#/}"
+          exe=""; if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
+
+          home="$RUNNER_TEMP/civex-app"
+          CIVEX_APP_HOME="$home" CIVEX_LAUNCHER_SOURCE="$source" "$app" --install-only
+          # What the app starts the window with (pythonw on Windows, so no
+          # console), and that the desktop extra came with it.
+          window_python="$home/tools/civex/bin/python"
+          [ "$RUNNER_OS" = Windows ] && window_python="$home/tools/civex/Scripts/pythonw.exe"
+          "$window_python" -c "import civex.desktop.tray, webview"
+          python scripts/smoke_civex.py "$home/bin/civex$exe" \
+            --expect-version "$CIVEX_APP_VERSION"
+
+          if [ "$RUNNER_OS" = macOS ]; then
+            echo "Again as an Intel Mac runs it (Rosetta):"
+            intel="$RUNNER_TEMP/civex-app-intel"
+            CIVEX_APP_HOME="$intel" CIVEX_LAUNCHER_SOURCE="$source" arch -x86_64 "$app" --install-only
+            file "$intel"/python/*/bin/python3.* | head -3
+            arch -x86_64 "$BUILD_PYTHON" scripts/smoke_civex.py "$intel/bin/civex" \
+              --expect-version "$CIVEX_APP_VERSION"
+          fi
+
+      - name: Uninstall it (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = "$env:LOCALAPPDATA\Programs\civex"
+          Start-Process -Wait -FilePath "$dir\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+          # The uninstaller hands over to a copy of itself and finishes there.
+          for ($i = 0; $i -lt 60 -and (Test-Path "$dir\civex.exe"); $i++) { Start-Sleep 1 }
+          if (Test-Path "$dir\civex.exe") { throw "Uninstalling left $dir\civex.exe" }
+          $userPath = (Get-ItemProperty HKCU:\Environment).Path
+          if ($userPath -like "*\civex\app\bin*") { throw "Uninstalling left civex on PATH: $userPath" }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.DOWNLOAD }}
+          path: ${{ env.DOWNLOAD }}
+          if-no-files-found: error
+
+  publish:
+    needs: [build, test, desktop]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: civex-*
+          path: desktop
+          merge-multiple: true
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -77,3 +330,34 @@ jobs:
           attestations: false
           packages-dir: dist/
           skip-existing: true
+
+      # The downloads install civex from PyPI on first start, and a new version
+      # can take a minute or two to show in the index installers read. So the
+      # release (with them) is made only once PyPI serves it; if it never
+      # does, nothing is attached and the run says so.
+      - name: Wait until PyPI serves this version
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS -H "Accept: application/vnd.pypi.simple.v1+json" \
+                 "https://pypi.org/simple/civex/" \
+               | python3 -c 'import json, os, sys; sys.exit(os.environ["VERSION"] not in json.load(sys.stdin).get("versions", []))'; then
+              echo "PyPI serves civex $VERSION"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::PyPI hasn't served civex $VERSION after 10 minutes; the release and its downloads were not created."
+          exit 1
+
+      # Only after PyPI serves it, so a release page never offers a version
+      # an installer can't get.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/*.whl
+            desktop/*
+          generate_release_notes: true
+          prerelease: ${{ needs.build.outputs.prerelease == 'true' }}

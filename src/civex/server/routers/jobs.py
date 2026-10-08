@@ -236,32 +236,48 @@ def rerun_jobs(
     )
 
 
-@router.post("/delete", response_model=DeleteJobsResponse)
-def delete_jobs(body: DeleteJobsRequest, ctx: AppContext = Depends(get_ctx)):
-    """Delete runs, with their step logs: the ones named by `ids`, or every run
-    the list shows for `filter` and `search`, or every run with `every`. Runs still waiting or running are
-    left alone and counted under `kept_unfinished`. A deleted run can't be
-    brought back; the records it changed keep their changes and history."""
-    if body.ids is None and body.filter is None and not body.search and not body.every:
-        raise HTTPException(422, detail="Give ids, a filter or search, or every.")
-    ids = None
-    if body.ids is not None:
-        try:
-            ids = [uuid.UUID(raw) for raw in body.ids]
-        except ValueError:
-            raise HTTPException(422, detail="Not a run id.")
-    deleted, kept = ctx.job_svc.delete_runs(
-        ids, body.filter, body.search, every=body.every
-    )
-    ctx.commit()
-    return DeleteJobsResponse(deleted=deleted, kept_unfinished=kept)
-
-
 @router.post("/drain", status_code=202)
 def drain_jobs(background_tasks: BackgroundTasks):
     """Kick off the worker to process all pending jobs."""
     background_tasks.add_task(run_pending_jobs)
     return {"status": "draining"}
+
+
+@router.post("/delete", response_model=DeleteJobsResponse)
+def delete_jobs(body: DeleteJobsRequest, ctx: AppContext = Depends(get_ctx)):
+    """Delete runs, whatever their state. A waiting run never starts; a running
+    one stops before its next step; a finished one is removed with its step
+    log. What a run already changed in records stays (and is in their history).
+    Which: `ids`, or every run the list shows for `filter` and/or `search`, or
+    every run with `every`."""
+    narrowed = body.filter is not None or bool(body.search)
+    if (body.ids is not None) == (narrowed or body.every):
+        raise HTTPException(
+            422, detail="Give either ids, or a filter, a search or every."
+        )
+    if body.ids is not None:
+        try:
+            ids = [uuid.UUID(i) for i in body.ids]
+        except ValueError:
+            raise HTTPException(422, detail="Not a run id.")
+    else:
+        # Every run the list shows for this filter and search, however many.
+        ids = ctx.job_svc.run_ids(body.filter, limit=None, search=body.search)
+    deleted = ctx.job_svc.delete_runs(ids)
+    ctx.commit()
+    return DeleteJobsResponse(deleted=deleted)
+
+
+@router.delete("/{job_id}", status_code=204)
+def delete_job(job_id: str, ctx: AppContext = Depends(get_ctx)):
+    """Delete one run, whatever its state (see POST /jobs/delete)."""
+    try:
+        run = uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(400, detail="Invalid job ID")
+    if not ctx.job_svc.delete_runs([run]):
+        raise HTTPException(404, detail=f"Job '{job_id}' not found")
+    ctx.commit()
 
 
 @router.post("/{job_id}/rerun", response_model=WorkflowJobResponse, status_code=202)

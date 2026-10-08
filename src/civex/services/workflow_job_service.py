@@ -137,6 +137,15 @@ class WorkflowJobService:
             raise NotFoundError(f"No job '{job_id}'")
         return job
 
+    def delete_runs(self, ids: list[uuid.UUID]) -> int:
+        """Delete runs, whatever their state, with their step logs. A waiting
+        run never starts (claiming takes only a row still there); a running one
+        stops before its next step (`should_stop` finds no row) and what it
+        reports at the end is dropped; a finished one is just gone. The changes
+        a run already made to records stay, in their history. How many were
+        deleted."""
+        return self._repo.delete_jobs(list(dict.fromkeys(ids)))
+
     def should_stop(self, job_id: uuid.UUID) -> bool:
         """Asked by a running job between steps: has it been cancelled (from
         another request or process), or has automation been paused?"""
@@ -344,26 +353,11 @@ class WorkflowJobService:
         )
 
     def run_ids(
-        self, where: Any, limit: int = 1000, search: str | None = None
+        self, where: Any, limit: int | None = 1000, search: str | None = None
     ) -> list[uuid.UUID]:
         """Ids of every run a filter (and search) matches, newest first, at
-        most `limit`."""
+        most `limit` (None: all of them)."""
         return self._repo.ids_matching(_parsed(where), limit, search)
-
-    def delete_runs(
-        self,
-        ids: list[uuid.UUID] | None = None,
-        where: Any = None,
-        search: str | None = None,
-        every: bool = False,
-    ) -> tuple[int, int]:
-        """Delete the runs `ids` names, or else every run the list shows for
-        this filter and search (all of them with `every`), with their step logs. Runs still waiting or
-        running are left alone (cancel them first). Not in history: runs never
-        were. Returns (deleted, kept because unfinished)."""
-        if ids is None and where is None and not search and not every:
-            raise ValueError("Name the runs, give a filter or search, or every.")
-        return self._repo.delete_runs(ids, _parsed(where), search)
 
     def failure_groups(self, where: Any = None) -> list[dict]:
         """Failed runs a filter matches, grouped by workflow and what went wrong."""

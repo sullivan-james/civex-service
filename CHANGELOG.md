@@ -3,7 +3,8 @@
 One section per tagged release: `## vX.Y.Z — <label> (YYYY-MM-DD)`. Every
 `v*` tag must have a matching entry here *before* the tag is pushed —
 `.github/workflows/release.yml` fails the release job if it's missing (see
-PRODUCTION_READINESS.md §4a). The version itself has one source of truth,
+PRODUCTION_READINESS.md §4a). A pre-release tag (`v1.3.0rc1`) may use the
+final version's entry or `## Unreleased` instead of one of its own. The version itself has one source of truth,
 the git tag (resolved via setuptools-scm into `civex.__version__`); this
 file is release notes, not a second place to track the number.
 
@@ -20,7 +21,7 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
-## Unreleased — syncing between machines
+## v2.0.0 — syncing between machines, updates from the app (2026-10-07)
 
 ### Breaking
 
@@ -28,6 +29,12 @@ from the next tag forward.
   `audit_log.apply_state`. It runs automatically; existing history is kept.
 
 ### Added
+
+- **Settings → Logs and `civex logs`**: every log civex keeps on this computer
+  (this project's server, the desktop app and its launcher, updates) in one
+  place, with the latest lines, a level filter, search, following, download and
+  opening the folder. A failed update and a failing sync link to the log that
+  says why.
 
 - **Sync with an authority** (`civex sync`, `civex clone`): a project can follow
   another civex over HTTP. Changes merge field by field; the authority's value
@@ -50,11 +57,70 @@ from the next tag forward.
 - Sync protocol 2. A device and the authority use the newest version both speak,
   and one that can't says which side to update.
 - Invites start with `civex_inv_`, recognised by gitleaks and secret scanners.
+- **Update from the app** (Settings → Updates, and a notice in the status bar
+  when a newer version is out): civex closes, installs the new version and
+  starts again, reopening the page. It works for the desktop app and for
+  `civex serve` installed with uv, pipx or pip. `GET`/`POST /api/update`.
+- **Pre-releases**: `civex update --pre`, and *Include pre-releases* on the
+  Updates page, install release candidates; nobody gets one otherwise.
+- **Size** in Settings → Appearance (80% to 125%), remembered by each window;
+  in the desktop app ⌘/Ctrl with + − 0 change it too.
 
-## v1.2.1 — history records every change (2026-10-05)
+### Changed
+
+- **The desktop app is a small launcher** (about 30 MB) that installs civex
+  with its own `uv` the first time it starts, then keeps it up to date. It no
+  longer contains civex, so it never needs downloading again for a new
+  version. Custom plugins work in it without anything else installed.
+- **The desktop app installs properly**: a Windows installer
+  (`civex-<version>-windows-setup.exe`: Start menu, uninstaller, no administrator
+  needed) and a macOS disk image with one app for Intel and Apple silicon
+  Macs. Neither is signed yet; the install guide says how to open them.
+- **The desktop app's civex can be a terminal command**: the Windows
+  installer's *Add the civex command to PATH* (on by default; uninstalling
+  removes it), or Settings → Updates → *Command line* on any system.
+- The desktop app no longer opens a terminal window, keeps its logs in its own
+  folder (AppData on Windows), and installs the civex it was released with.
+  There is no `civex-desktop` command any more; `civex desktop` opens the
+  window from a terminal.
+- On Intel Macs civex uses `cryptography` 48, the last version with Intel macOS
+  builds: newer ones could only be installed there by compiling Rust.
+- Install with `uv tool install civex`, which needs no Python on the computer.
 
 ### Fixes
 
+- **The desktop app's window fits the screen**: on a small one (a 13-inch
+  laptop, up to 1440 × 900) a project opens filling it, on a larger one at a
+  comfortable size, centred, instead of a fixed 1280 × 800 that didn't fit a
+  13-inch MacBook's screen. It opens as you last left it, kept on the screen.
+  Its Size (⌘ + / −) now lasts too.
+
+- **Updating stops, and starts again, the other servers running from the same
+  copy**, after asking (the Updates page lists them; `civex update` asks). An
+  update from the app used to fail half way while a `civex serve` from the same
+  copy ran in a terminal (on Windows a file in use can't be replaced).
+- **Including pre-releases no longer brings in pre-releases of everything civex
+  depends on** (a beta pydantic, an alpha sentry-sdk): the version found is
+  installed by name instead.
+- **An update's outcome is shown only while it is news**, and **Dismiss**
+  forgets it for good. An update that got civex to the new version is no longer
+  called failed because the installer tripped over a file in use.
+- **The desktop app keeps what its pages remember** (pins, recent items,
+  dismissed notices, the pre-releases choice) from one opening to the next: its
+  window no longer starts in private mode.
+
+- **`civex update` in a terminal updates the desktop app's copy** (the `civex`
+  command the app puts on PATH). It used to try pip, which that copy hasn't got.
+  It now upgrades with the app's own uv and folders. On Windows it refuses while
+  the app is open, and finishes the upgrade once the command has exited, in the
+  same window.
+
+- **The page froze after using the navigation drawer** (a narrow window, as
+  the macOS desktop app often is): closing it left the rest of the page
+  unclickable. It is handed back now.
+- **The Windows desktop app had no project menu** (open, create, reveal the
+  data folder) and no native folder picker: the page decided whether it was in
+  the desktop app before the app had said so.
 - **Reordering a schema's fields now appears in history.** It wrote no entry,
   so the new order was in the database but nowhere in the history (and would
   never have reached another device once sync exists). Each field that moved is
@@ -63,6 +129,11 @@ from the next tag forward.
   A schema's record-name template, or a file field's download-name template,
   that used the field was updated without an entry; each template changed is
   now an edit of its schema or field in history.
+- **The desktop downloads couldn't create a project** (`civex init` failed: the
+  database migrations were left out of the bundle). Every release is now
+  installed and run on Linux, macOS and Windows before it is published.
+- After `civex update` reinstalled missing packages for a uv install, later
+  updates did nothing: the repair pinned the version (`==`).
 
 A new test (`tests/services/test_audit_replay.py`) does everything a person can
 do to schemas, fields, collections, views and records and checks that the last

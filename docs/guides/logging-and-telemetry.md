@@ -29,10 +29,39 @@ json_console = false    # omit for auto (color on a TTY, JSON otherwise)
 to_file = true          # write _civex/logs/civex.log
 ```
 
-Inspect the log file directly:
+## Every log in one place
+
+civex keeps a few logs besides the project's, each where the thing that writes
+it can put it:
+
+| Log | What writes it |
+|---|---|
+| `project` | This project's server (`_civex/logs/civex.log`) |
+| `desktop` | The desktop app's window |
+| `launcher` | The desktop app's launcher: installing and updating civex |
+| `update` | Updates of a `civex serve`, run after it closed |
+| `serve-<port>` | A server an update stopped and started again (off Windows) |
+
+**Settings → Logs** shows them all: the latest lines, newest first, with a
+level filter and search, **Follow** for new lines, **Download**, and **Open
+folder**. Anything in the app that mentions a log links there (a failed update,
+a sync that can't reach its server). A workflow run's log is on the run's own
+page.
+
+From a terminal:
 
 ```bash
-tail -f _civex/logs/civex.log
+civex logs list                         # which there are, and where
+civex logs show                         # the project's latest 50 lines
+civex logs show launcher -n 200         # another log
+civex logs show --level error -f        # errors only, and keep following
+civex logs path update                  # where it is
+civex logs open                         # its folder in the file manager
+```
+
+The project's log is JSON lines, so other tools read it too:
+
+```bash
 cat _civex/logs/civex.log | jq 'select(.level == "error")'   # errors only
 ```
 

@@ -26,7 +26,13 @@ from pydantic import BaseModel, Field
 
 from civex.config import find_project_root, read_sync_flag
 from civex.context import AppContext
-from civex.domain.exceptions import ValidationError, VolumeUnavailableError
+from civex.domain.exceptions import (
+    NotAllowedError,
+    NotFoundError,
+    ValidationError,
+    VolumeUnavailableError,
+)
+from civex.domain.library import MAX_BUNDLE, MAX_BYTES, LibraryItemDTO
 from civex.domain.sync import (
     PROTOCOL_MAX,
     PROTOCOL_MIN,
@@ -399,6 +405,126 @@ def download_file(sha256: str, call: Peer = Depends(peer)):
     except (FileNotFoundError, VolumeUnavailableError):
         raise HTTPException(404, detail="That file is not here")
     return FileResponse(path, media_type="application/octet-stream")
+
+
+# -- the library: workflows and plugins shared through this authority ----------
+# Kept as text and never loaded here (`domain/library.py`): a device publishes,
+# a person on another computer installs. Reading needs only being a device;
+# publishing needs the admin's leave and the `[sync] library` setting.
+
+
+class LibraryItemBody(BaseModel):
+    kind: str = Field(description="workflow or plugin.")
+    name: str = Field(description="The file's name without its extension.")
+    sha256: str = Field(description="The hash of `content`, as UTF-8.")
+    size: int = Field(default=0, description="Its size in bytes.")
+    content: str = Field(description="The file's text.", max_length=MAX_BYTES)
+    provides: str | None = Field(
+        default=None, description="A plugin: the plugin id it registers as."
+    )
+    contract: dict[str, Any] | None = Field(
+        default=None,
+        description="A plugin: its contract (inputs, outputs, config schema) as "
+        "the publisher's computer described it.",
+    )
+
+
+class LibraryPublishRequest(BaseModel):
+    items: list[LibraryItemBody] = Field(
+        description="A workflow and the plugins it uses, or a plugin. Taken whole "
+        "or not at all; new text becomes the next version.",
+        max_length=MAX_BUNDLE,
+    )
+
+
+class LibraryListResponse(BaseModel):
+    items: list[dict[str, Any]] = Field(
+        description="The newest version of each item, without its text: kind, "
+        "name, sha256, size, version, title, description, provides, needs, "
+        "triggers, pins, contract, published_by, published_at, and its history "
+        "(every version)."
+    )
+
+
+class LibraryPublishResponse(LibraryListResponse):
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="What to know: shared workflows still on an older version of "
+        "a plugin that the new version would break.",
+    )
+
+
+def _library_call(call):
+    try:
+        return call()
+    except NotAllowedError as e:
+        raise HTTPException(403, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+
+
+@router.get("/library", response_model=LibraryListResponse)
+def library(call: Peer = Depends(peer)):
+    """The workflows and plugins shared through this server: the newest version
+    of each, with its history, without its text."""
+    items = call.ctx.library_svc.listing()
+    return LibraryListResponse(items=[i.to_dict(with_content=False) for i in items])
+
+
+@router.get("/library/{kind}/{name}")
+def library_item(
+    kind: str,
+    name: str,
+    version: int | None = Query(default=None, description="Omit for the newest."),
+    call: Peer = Depends(peer),
+) -> dict[str, Any]:
+    """One version of a shared workflow or plugin, with its text."""
+    return _library_call(
+        lambda: call.ctx.library_svc.item(kind, name, version)
+    ).to_dict()
+
+
+@router.post("/library", response_model=LibraryPublishResponse)
+def publish(body: LibraryPublishRequest, call: Peer = Depends(peer)):
+    """Publish to the library. Refused (403) unless the admin allowed this
+    device, and for plugins unless the server takes them; checked without being
+    run, and taken whole or not at all. A workflow is pinned to the plugin
+    versions it is published with."""
+    items = [
+        LibraryItemDTO(
+            kind=i.kind,
+            name=i.name,
+            sha256=i.sha256,
+            size=i.size,
+            provides=i.provides,
+            content=i.content,
+            contract=i.contract,
+        )
+        for i in body.items
+    ]
+    result = _library_call(lambda: call.ctx.library_svc.accept(call.who, items))
+    return LibraryPublishResponse(**result.to_dict())
+
+
+@router.delete("/library/{kind}/{name}", status_code=204)
+def unpublish(
+    kind: str,
+    name: str,
+    version: int | None = Query(
+        default=None, description="One version; omit to remove every version."
+    ),
+    force: bool = Query(
+        default=False,
+        description="Remove a plugin version even if shared workflows are pinned to it.",
+    ),
+    call: Peer = Depends(peer),
+):
+    """Take something out of the library. Copies already installed stay."""
+    _library_call(
+        lambda: call.ctx.library_svc.withdraw(call.who, kind, name, version, force)
+    )
 
 
 __all__ = ["router"]

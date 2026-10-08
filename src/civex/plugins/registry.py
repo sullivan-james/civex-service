@@ -302,6 +302,24 @@ def _write_describe_cache(cache_path: Path, cache: dict[str, Any]) -> None:
         return  # a read-only or full project dir just means no caching
 
 
+def describe_file(plugin_path: Path) -> DescribeResult:
+    """Describe one plugin file (which runs it), reusing the on-disk cache when
+    its contents were described before. Registers nothing: the library uses it
+    to check a version before installing it."""
+    return _describe_with_disk_cache(plugin_path, _content_hash(plugin_path))
+
+
+def registration_from_contract(
+    plugin_path: Path, contract: dict[str, Any]
+) -> PluginRegistration:
+    """A registration from a declared contract (a `describe` answer as JSON),
+    for checking workflows against it without running the plugin. Raises
+    pydantic's ValidationError if it isn't one."""
+    return _registration_for_subprocess(
+        plugin_path, DescribeResult.model_validate(contract)
+    )
+
+
 def get_plugin(plugin_id: str) -> PluginRegistration | None:
     return REGISTRY.get(plugin_id)
 

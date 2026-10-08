@@ -124,6 +124,10 @@ A record's page has a **Referenced by** section (collapsed until you open it) co
 === "Web UI"
     Open the record's detail page, edit the form, and click **Save**.
 
+    When the record has a file attached, text, number, date and date-time
+    fields get a **from filename** button: it fills the field from the file's
+    name with a pattern you give, without writing a workflow.
+
 ## Deleting records
 
 === "CLI"

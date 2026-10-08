@@ -37,6 +37,7 @@ from civex.domain.sync import (
     session_answer,
     session_request,
 )
+from civex.tls import certificate_problem, ssl_context
 
 _CHUNK = 1024 * 1024
 API = "/api/sync/v1"
@@ -121,6 +122,42 @@ class HttpSyncTransport:
 
         return read()
 
+    # -- the library (shared workflows and plugins) -----------------------
+
+    def library(self) -> list[dict[str, Any]]:
+        return list(self._json("GET", "/library")["items"])
+
+    def library_item(
+        self, kind: str, name: str, version: int | None = None
+    ) -> dict[str, Any]:
+        path = f"/library/{urllib.parse.quote(kind)}/{urllib.parse.quote(name)}"
+        if version is not None:
+            path += f"?version={int(version)}"
+        try:
+            return self._json("GET", path)
+        except SyncError as e:
+            if e.status == 404:
+                raise FileNotFoundError(f"{kind} {name}") from e
+            raise
+
+    def publish(self, items: list[dict[str, Any]]) -> dict[str, Any]:
+        return self._json("POST", "/library", {"items": items})
+
+    def unpublish(
+        self, kind: str, name: str, version: int | None = None, force: bool = False
+    ) -> None:
+        query = urllib.parse.urlencode(
+            {"force": "true" if force else "false"}
+            | ({"version": int(version)} if version is not None else {})
+        )
+        path = f"/library/{urllib.parse.quote(kind)}/{urllib.parse.quote(name)}?{query}"
+        try:
+            self._json("DELETE", path)
+        except SyncError as e:
+            if e.status == 404:
+                raise FileNotFoundError(f"{kind} {name}") from e
+            raise
+
     # -- signing in ------------------------------------------------------
 
     def _token(self) -> str:
@@ -194,16 +231,27 @@ class HttpSyncTransport:
             if data is not None:
                 request.add_header("Content-Type", "application/json")
             with self._open(request) as response:
-                return json.loads(response.read().decode("utf-8"))
+                raw = response.read()
+                # 204 (a removal) has no body.
+                return json.loads(raw.decode("utf-8")) if raw else {}
 
         return self._again_if_expired(call)
 
     def _open(self, request: urllib.request.Request):
         try:
-            return urllib.request.urlopen(request, timeout=self._timeout)
+            return urllib.request.urlopen(
+                request, timeout=self._timeout, context=ssl_context()
+            )
         except urllib.error.HTTPError as e:
             raise _from_status(e) from e
         except (urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
+            problem = certificate_problem(e)
+            if problem:
+                # Waiting won't fix a certificate; trying again every few
+                # seconds would only fill the status bar.
+                raise SyncError(
+                    f"Could not reach the server: {problem}", retryable=False
+                ) from e
             raise SyncError(f"Could not reach the server: {_reason(e)}") from e
 
 
@@ -219,10 +267,13 @@ def _from_status(error: urllib.error.HTTPError) -> SyncError:
     if error.code == 426:
         return SyncError(_mismatch(detail), retryable=False, status=426)
     text = f"{detail}" if detail else f"The server answered {error.code}"
-    if error.code in (401, 403):
+    if error.code == 401:
         return SyncError(
             f"The server refused this device: {text}", retryable=False, status=401
         )
+    if error.code == 403:
+        # Signed in, but not allowed to do that (publish to the library).
+        return SyncError(text, retryable=False, status=403)
     if error.code == 429:
         return SyncError(text, retryable=True, status=429)
     if error.code == 404:

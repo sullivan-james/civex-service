@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   remoteApi,
   type Authority,
+  type InstallOptions,
   type ResolveBody,
   type ResolveManyBody,
   type SyncConflict,
@@ -242,6 +243,85 @@ export function useAuthorityActions() {
     revokeDevice: useMutation({
       mutationFn: remoteApi.revokeDevice,
       onSuccess: settle,
+    }),
+    setLibrary: useMutation({
+      mutationFn: remoteApi.setLibrary,
+      onSuccess: settle,
+    }),
+    allowPublish: useMutation({
+      mutationFn: remoteApi.allowPublish,
+      onSuccess: settle,
+    }),
+  }
+}
+
+const LIBRARY = [...KEY, 'library']
+
+/** What the library holds (the newest version of each, with its history) and
+ * where each stands here. Empty when this project shares with no server. */
+export function useLibrary() {
+  return useQuery({
+    queryKey: LIBRARY,
+    queryFn: remoteApi.library,
+    retry: false,
+  })
+}
+
+export function useLibraryItem(
+  kind: string,
+  name: string | null,
+  version?: number | null,
+) {
+  return useQuery({
+    queryKey: [...LIBRARY, kind, name, version ?? null],
+    queryFn: () => remoteApi.libraryItem(kind, name!, version),
+    enabled: !!name,
+  })
+}
+
+export function useInstallPlan(
+  item: { kind: string; name: string } | null,
+  options: InstallOptions,
+) {
+  return useQuery({
+    queryKey: [
+      ...LIBRARY,
+      'plan',
+      item?.kind,
+      item?.name,
+      options.version ?? null,
+      !!options.replace,
+      !!options.force,
+    ],
+    queryFn: () => remoteApi.installPlan(item!.kind, item!.name, options),
+    enabled: !!item,
+    retry: false,
+  })
+}
+
+export function useLibraryActions() {
+  const qc = useQueryClient()
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: LIBRARY })
+    // Installing writes workflows and plugins here.
+    qc.invalidateQueries({ queryKey: ['workflows'] })
+    qc.invalidateQueries({ queryKey: ['plugins'] })
+  }
+  return {
+    publish: useMutation({ mutationFn: remoteApi.publish, onSuccess: refresh }),
+    install: useMutation({
+      mutationFn: (v: { kind: string; name: string } & InstallOptions) =>
+        remoteApi.install(v.kind, v.name, v),
+      onSuccess: refresh,
+    }),
+    unpublish: useMutation({
+      mutationFn: (v: {
+        kind: string
+        name: string
+        version: number | null
+        force: boolean
+      }) => remoteApi.unpublish(v.kind, v.name, v.version, v.force),
+      onSuccess: refresh,
     }),
   }
 }

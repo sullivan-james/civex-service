@@ -13,7 +13,6 @@ import {
 } from '../../hooks/useWorkflows'
 import { useSchemas } from '../../hooks/useSchemas'
 import {
-  type DeleteRunsResult,
   type FailureGroup,
   type RerunResult,
   type RunPick,
@@ -42,7 +41,7 @@ import {
   ListToolbar,
   Pagination,
 } from '../ui'
-import { RefreshCw, X } from '../ui/icons'
+import { RefreshCw, Trash2, X } from '../ui/icons'
 import { RecordLink } from '../records/RecordLink'
 import JobStatusBadge from './JobStatusBadge'
 import {
@@ -195,9 +194,13 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
   )
   const ticked = bulk.count(total)
   const [outcome, setOutcome] = useState<RerunResult | null>(null)
-  const [removed, setRemoved] = useState<DeleteRunsResult | null>(null)
   const [confirmAll, setConfirmAll] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  // Which runs a delete is waiting to be confirmed for: the ticked ones, or
+  // every run the filter matches.
+  const [confirmDelete, setConfirmDelete] = useState<
+    'selected' | 'matching' | null
+  >(null)
+  const [deleted, setDeleted] = useState<number | null>(null)
 
   const fields = useMemo(
     () =>
@@ -243,7 +246,7 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
 
   function done(result: RerunResult) {
     setOutcome(result)
-    setRemoved(null)
+    setDeleted(null)
     bulk.clear()
   }
   function rerunSelected() {
@@ -253,16 +256,17 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
   function rerunMatching(which: FilterTreeWire) {
     rerunMany.mutate({ filter: scoped(which)! }, { onSuccess: done })
   }
-  function deletePicked() {
-    deleteMany.mutate(picked, {
-      onSuccess: (result) => {
-        setRemoved(result)
+  function deleteRuns() {
+    deleteMany.mutate(confirmDelete === 'selected' ? picked : matching, {
+      onSuccess: (r) => {
+        setDeleted(r.deleted)
         setOutcome(null)
         bulk.clear()
-        setConfirmDelete(false)
+        setConfirmDelete(null)
       },
     })
   }
+  const deleteCount = confirmDelete === 'selected' ? ticked : total
   // One failure group: its runs, alongside whatever else narrowed the list
   // (a time window, say), replacing what said otherwise about the same things.
   const groupScope = (g: FailureGroup) =>
@@ -412,7 +416,36 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
           >
             <RefreshCw size={12} /> Re-run all {total.toLocaleString()}…
           </Button>
+          <Button
+            size="sm"
+            disabled={deleteMany.isPending}
+            onClick={() => setConfirmDelete('matching')}
+          >
+            <Trash2 size={12} /> Delete all {total.toLocaleString()}…
+          </Button>
         </div>
+      )}
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Delete ${deleteCount.toLocaleString()} ${deleteCount === 1 ? 'run' : 'runs'}`}
+          body={
+            <p>
+              A waiting run never starts, a running one stops before its next
+              step, and a finished one is removed with its log. What a run
+              already changed in records stays, in their history.
+            </p>
+          }
+          confirmLabel={`Delete ${deleteCount.toLocaleString()}`}
+          variant="danger"
+          isPending={deleteMany.isPending}
+          warning={
+            deleteMany.isError ? (
+              <span role="alert">{deleteMany.error.message}</span>
+            ) : undefined
+          }
+          onClose={() => setConfirmDelete(null)}
+          onConfirm={deleteRuns}
+        />
       )}
       {confirmAll && narrowed && (
         <ConfirmDialog
@@ -433,36 +466,13 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
           }}
         />
       )}
-      {confirmDelete && (
-        <ConfirmDialog
-          variant="danger"
-          title={`Delete ${ticked.toLocaleString()} ${ticked === 1 ? 'run' : 'runs'}`}
-          body={
-            <p>
-              Deletes {ticked === 1 ? 'this run' : 'these runs'} and{' '}
-              {ticked === 1 ? 'its' : 'their'} step logs. Runs still waiting or
-              running are left alone. The records they changed keep the changes.
-              This can't be undone.
-            </p>
-          }
-          confirmLabel={`Delete ${ticked.toLocaleString()}`}
-          isPending={deleteMany.isPending}
-          warning={
-            deleteMany.isError ? (
-              <span role="alert">{deleteMany.error.message}</span>
-            ) : undefined
-          }
-          onClose={() => setConfirmDelete(false)}
-          onConfirm={deletePicked}
-        />
-      )}
       <SelectionBar
         selectedCount={bulk.selected.size}
         pageCount={pageIds.length}
         total={total}
         allMatching={bulk.allMatching}
         onSelectAllMatching={bulk.selectAllMatching}
-        onDelete={() => setConfirmDelete(true)}
+        onDelete={() => setConfirmDelete('selected')}
         deleting={deleteMany.isPending}
         actions={
           <>
@@ -493,16 +503,13 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
           </>
         }
       />
-      {removed && ticked === 0 && (
+      {deleted !== null && ticked === 0 && (
         <p
           role="status"
-          className="flex flex-wrap items-center gap-2 text-sm text-fg-muted"
+          className="flex items-center gap-2 text-sm text-fg-muted"
         >
-          Deleted {removed.deleted.toLocaleString()} run
-          {removed.deleted === 1 ? '' : 's'}.
-          {removed.kept_unfinished > 0 &&
-            ` ${removed.kept_unfinished.toLocaleString()} still waiting or running ${removed.kept_unfinished === 1 ? 'was' : 'were'} kept.`}
-          <Button size="sm" variant="link" onClick={() => setRemoved(null)}>
+          Deleted {deleted} run{deleted === 1 ? '' : 's'}.
+          <Button size="sm" variant="link" onClick={() => setDeleted(null)}>
             Dismiss
           </Button>
         </p>

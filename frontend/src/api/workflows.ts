@@ -15,6 +15,8 @@ export interface Workflow {
   stem: string
   record_schema: string | null
   inputs: Record<string, WorkflowInput> | null
+  /** What starts it by itself, one line each; empty if only run by hand. */
+  runs_on: string[]
 }
 
 export interface WorkflowTrigger {
@@ -174,10 +176,9 @@ export type RunPick =
   | { ids: string[] }
   | { filter?: FilterTreeWire; search?: string; every?: boolean }
 
-/** What deleting runs came to. Runs still waiting or running are kept. */
+/** What deleting runs came to. */
 export interface DeleteRunsResult {
   deleted: number
-  kept_unfinished: number
 }
 
 /** What repeating several runs came to: the new runs, and any that couldn't be
@@ -225,7 +226,7 @@ export const jobsApi = {
   cancel: (id: string) => api.post<WorkflowJob>(`/jobs/${id}/cancel`, {}),
   /** Repeat several runs in one request. */
   rerunMany: (which: RunPick) => api.post<RerunResult>('/jobs/rerun', which),
-  /** Delete runs (finished ones only) in one request. */
+  /** Delete runs, whatever their state: a waiting one never starts. */
   deleteMany: (which: RunPick) =>
     api.post<DeleteRunsResult>('/jobs/delete', which),
   filterFields: () => api.get<RunFilterField[]>('/jobs/filter-fields'),

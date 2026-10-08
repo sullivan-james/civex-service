@@ -15,6 +15,7 @@ from rich.table import Table
 
 from civex import keys
 from civex.cli.db import _size
+from civex.cli.library import app as library_app
 from civex.cli.utils import cli_load_config, get_ctx as _ctx
 from civex.console import console
 from civex.domain.exceptions import CivexError
@@ -29,6 +30,7 @@ authority_app = typer.Typer(help="Act as the authority for this project.")
 device_app = typer.Typer(help="Devices allowed to follow this authority.")
 app.add_typer(authority_app, name="authority")
 app.add_typer(device_app, name="device")
+app.add_typer(library_app, name="library")
 
 
 _PHASES = {
@@ -646,6 +648,24 @@ def authority_enable() -> None:
     )
 
 
+@authority_app.command("library")
+def authority_library(
+    mode: str = typer.Argument(
+        help="off, workflows, or all (plugins too: code that whoever installs "
+        "them runs)."
+    ),
+) -> None:
+    """Say what devices allowed to publish may share through the library."""
+    c = _ctx()
+    try:
+        c.sync_svc.set_library(mode)
+    except CivexError as e:
+        raise _fail(e)
+    finally:
+        c.close()
+    console.print(f"The library takes: {escape(mode)}.")
+
+
 @authority_app.command("disable")
 def authority_disable() -> None:
     """Stop accepting devices. The devices stay on record."""
@@ -689,7 +709,7 @@ def device_list() -> None:
     finally:
         c.close()
     table = Table()
-    for col in ("Name", "Key", "Joined", "Last seen", "State"):
+    for col in ("Name", "Key", "Joined", "Last seen", "State", "Publishes"):
         table.add_column(col)
     for d in devices:
         table.add_row(
@@ -698,9 +718,10 @@ def device_list() -> None:
             d.created_at,
             d.last_seen_at or "never",
             "revoked" if d.revoked_at else "active",
+            "yes" if d.may_publish and not d.revoked_at else "",
         )
     for i in invites:
-        table.add_row(i.name, "", "", "", f"invited, until {i.expires_at}")
+        table.add_row(i.name, "", "", "", f"invited, until {i.expires_at}", "")
     console.print(table)
 
 
@@ -730,6 +751,33 @@ def device_revoke(name: str = typer.Argument(help="The device's name.")) -> None
     if not ok:
         raise _fail(ValueError(f"No active device named {name}"))
     console.print(f"Revoked {escape(name)}.")
+
+
+@device_app.command("allow-publish")
+def device_allow_publish(name: str = typer.Argument(help="The device's name.")) -> None:
+    """Let a device publish to the library (`civex sync authority library` says
+    what it may publish)."""
+    _set_publish(name, True)
+
+
+@device_app.command("deny-publish")
+def device_deny_publish(name: str = typer.Argument(help="The device's name.")) -> None:
+    """Stop a device publishing to the library. What it published stays."""
+    _set_publish(name, False)
+
+
+def _set_publish(name: str, allowed: bool) -> None:
+    c = _ctx()
+    try:
+        ok = c.device_keys.allow_publish(name, allowed)
+        c.commit()
+    finally:
+        c.close()
+    if not ok:
+        raise _fail(ValueError(f"No active device named {name}"))
+    console.print(
+        f"{escape(name)} {'may' if allowed else 'may no longer'} publish to the library."
+    )
 
 
 def clone(

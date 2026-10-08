@@ -11,6 +11,8 @@ from fastapi.staticfiles import StaticFiles
 
 from civex.server.errors import RequestContextMiddleware, register_error_handlers
 from civex.server.routers import (
+    logs,
+    server_control,
     ai,
     analytics,
     audit,
@@ -33,6 +35,7 @@ from civex.server.routers import (
     sync_peer,
     terminal,
     transfers,
+    updates,
     views,
     workflows,
 )
@@ -232,6 +235,22 @@ _OPENAPI_TAGS = [
         ),
     },
     {
+        "name": "logs",
+        "description": (
+            "Every log civex keeps on this computer (this project's server, the "
+            "desktop app, its launcher, updates): their latest lines, "
+            "downloading one, and opening its folder."
+        ),
+    },
+    {
+        "name": "update",
+        "description": (
+            "Updating civex itself from the app: whether a newer version is on "
+            "PyPI, and updating and starting again. The update runs after civex "
+            "has exited, so a running copy is never replaced."
+        ),
+    },
+    {
         "name": "settings",
         "description": (
             "Per-project UI preferences, such as whether the Advanced "
@@ -359,6 +378,7 @@ def create_sync_app() -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
     register_error_handlers(app)
     app.include_router(sync_peer.router, prefix="/api")
+    app.include_router(server_control.router, prefix="/api")
     return app
 
 
@@ -377,6 +397,8 @@ def create_app() -> FastAPI:
     register_error_handlers(app)
 
     app.include_router(ai.router, prefix="/api")
+    app.include_router(server_control.router, prefix="/api")
+    app.include_router(logs.router, prefix="/api")
     app.include_router(schemas.router, prefix="/api")
     app.include_router(datasets.router, prefix="/api")
     app.include_router(dump.router, prefix="/api")
@@ -399,6 +421,7 @@ def create_app() -> FastAPI:
     app.include_router(status.router, prefix="/api")
     app.include_router(terminal.router, prefix="/api")
     app.include_router(settings.router, prefix="/api")
+    app.include_router(updates.router, prefix="/api")
     app.include_router(analytics.router, prefix="/api")
     app.include_router(views.router, prefix="/api")
     app.include_router(views.all_views_router, prefix="/api")

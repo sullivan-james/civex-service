@@ -396,6 +396,14 @@ class LocalSyncRepository:
         self._s.flush()
         return True
 
+    def set_may_publish(self, name: str, allowed: bool) -> bool:
+        row = self._live_devices().filter_by(name=name).first()
+        if row is None:
+            return False
+        row.may_publish = allowed
+        self._s.flush()
+        return True
+
     def touch_device(self, id: uuid.UUID) -> None:
         row = self._s.get(SyncDevice, id)
         if row is not None:
@@ -1347,6 +1355,7 @@ def _device_dto(row: SyncDevice) -> SyncDeviceDTO:
         created_at=_iso(row.created_at) or "",
         last_seen_at=_iso(row.last_seen_at),
         revoked_at=_iso(row.revoked_at),
+        may_publish=bool(row.may_publish),
     )
 
 

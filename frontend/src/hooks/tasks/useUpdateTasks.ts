@@ -1,0 +1,103 @@
+import { Sparkles } from '../../components/ui/icons'
+import { logHref } from '../../api/logs'
+import type { BackgroundTask } from '../../utils/backgroundTasks'
+import {
+  clearRestartProblem,
+  restartForUpdate,
+  useRestartPhase,
+} from '../../utils/updateRestart'
+import {
+  useDismissLastUpdate,
+  usePreReleases,
+  useUpdatePref,
+  useUpdateStatus,
+  writeUpdatePref,
+} from '../useUpdate'
+
+const DETAILS = '/settings/updates'
+
+/** Updating civex itself, as tasks: while it restarts to update; a newer
+ * version this copy can install (until put off with Later, for that version);
+ * and an update that didn't work, until dismissed. Quiet otherwise. */
+export function useUpdateTasks(): BackgroundTask[] {
+  const [pre] = usePreReleases()
+  const { data } = useUpdateStatus(pre)
+  const phase = useRestartPhase()
+  const later = useUpdatePref('later')
+  const dismiss = useDismissLastUpdate()
+
+  if (phase.kind === 'closing' || phase.kind === 'restarting')
+    return [
+      {
+        id: 'update',
+        tone: 'info',
+        icon: Sparkles,
+        spinning: true,
+        title: 'Updating civex',
+        detail:
+          phase.kind === 'closing'
+            ? 'Closing to update…'
+            : 'This page reloads when civex is back.',
+      },
+    ]
+  if (phase.kind === 'failed' || phase.kind === 'timeout')
+    return [
+      {
+        id: 'update',
+        tone: 'attention',
+        icon: Sparkles,
+        title:
+          phase.kind === 'failed'
+            ? 'civex couldn’t start the update'
+            : 'civex hasn’t come back from updating',
+        detail: phase.kind === 'failed' ? phase.message : undefined,
+        actions: [
+          { label: 'Details', to: DETAILS },
+          { label: 'Dismiss', onClick: clearRestartProblem },
+        ],
+      },
+    ]
+
+  const tasks: BackgroundTask[] = []
+  if (data?.last && !data.last.ok)
+    tasks.push({
+      id: 'update-result',
+      tone: 'attention',
+      icon: Sparkles,
+      title: 'civex didn’t update',
+      detail: data.last.message,
+      actions: [
+        {
+          label: 'View log',
+          to: logHref(data.installer === 'desktop' ? 'launcher' : 'update'),
+        },
+        { label: 'Dismiss', onClick: () => dismiss.mutate() },
+      ],
+    })
+  if (data?.newer && data.can_update && data.latest && later !== data.latest)
+    tasks.push({
+      id: 'update-available',
+      tone: 'info',
+      icon: Sparkles,
+      title: `civex ${data.latest} is available`,
+      note: `You have ${data.current}`,
+      actions: [
+        // With other servers running from this copy, updating stops them:
+        // that is said, and agreed to, on the Updates page.
+        data.running.length > 0
+          ? { label: 'Update…', variant: 'primary', to: DETAILS }
+          : {
+              label: 'Update and restart',
+              variant: 'primary',
+              onClick: () =>
+                void restartForUpdate({ pre, version: data.latest }),
+            },
+        { label: 'Details', to: DETAILS },
+        {
+          label: 'Later',
+          onClick: () => writeUpdatePref('later', data.latest),
+        },
+      ],
+    })
+  return tasks
+}

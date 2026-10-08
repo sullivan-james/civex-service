@@ -103,6 +103,10 @@ beforeEach(() => {
         )
       }
       if (url.pathname === '/api/schemas') return json([])
+      if (url.pathname === '/api/jobs/delete') {
+        deletePayloads.push(JSON.parse(String(init?.body)))
+        return json({ deleted: 1 })
+      }
       if (url.pathname === '/api/jobs/rerun') {
         const payload = JSON.parse(String(init?.body)) as {
           ids?: string[]
@@ -126,10 +130,6 @@ beforeEach(() => {
             deleted: false,
           })),
         )
-      }
-      if (url.pathname === '/api/jobs/delete') {
-        deletePayloads.push(JSON.parse(String(init?.body)))
-        return json({ deleted: 29, kept_unfinished: 1 })
       }
       if (url.pathname === '/api/jobs/count')
         return json({ total: matchingTotal ?? jobs.length })
@@ -159,6 +159,29 @@ function renderIt(recordId?: string, url = '/') {
     </QueryClientProvider>,
   )
 }
+
+describe('Runs table: deleting runs', () => {
+  it('deletes the ticked runs after asking, so a waiting one never starts', async () => {
+    jobs = [job({ status: 'pending' })]
+    const user = userEvent.setup()
+    renderIt()
+
+    await user.click(
+      await screen.findByRole('checkbox', { name: 'Select the compute run' }),
+    )
+    await user.click(screen.getByRole('button', { name: /Delete 1/ }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/A waiting run never starts/)).toBeTruthy()
+    await user.click(within(dialog).getByRole('button', { name: 'Delete 1' }))
+
+    await waitFor(() =>
+      expect(deletePayloads).toEqual([
+        { ids: ['aaaaaaaa-0000-4000-8000-000000000001'] },
+      ]),
+    )
+    expect(await screen.findByText('Deleted 1 run.')).toBeTruthy()
+  })
+})
 
 describe('Runs table: stopping and what started a run', () => {
   it('can cancel a run that is waiting or running, but not one that finished', async () => {
@@ -577,9 +600,7 @@ describe('Runs table: stopping and what started a run', () => {
     await waitFor(() => expect(deletePayloads).toHaveLength(1))
     // The list's own filter and search, never the ids of one page.
     expect(deletePayloads[0]).toEqual({ filter: failed, search: 'compute' })
-    expect(await screen.findByText(/Deleted 29 runs/)).toHaveTextContent(
-      '1 still waiting or running was kept',
-    )
+    expect(await screen.findByText(/Deleted 1 run\./)).toBeInTheDocument()
   })
 
   it('deletes just the runs ticked on the page', async () => {

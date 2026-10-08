@@ -214,7 +214,8 @@ export function useRerunJobs() {
   })
 }
 
-/** Delete several runs at once (one request; unfinished ones are kept). */
+/** Delete runs (one request): a waiting one never starts, a running one stops
+ * before its next step. */
 export function useDeleteJobs() {
   const qc = useQueryClient()
   return useMutation({
@@ -222,6 +223,7 @@ export function useDeleteJobs() {
     onSuccess: () => {
       refreshRuns(qc)
       qc.invalidateQueries({ queryKey: ['job'] })
+      qc.invalidateQueries({ queryKey: ['automation'] })
     },
   })
 }

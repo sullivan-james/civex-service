@@ -17,6 +17,7 @@ const RecordDetailPage = lazy(() => import('./pages/RecordDetailPage'))
 const NewRecordPage = lazy(() => import('./pages/NewRecordPage'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 const WorkflowEditorPage = lazy(() => import('./pages/WorkflowEditorPage'))
+const WorkflowPage = lazy(() => import('./pages/WorkflowPage'))
 const JobsPage = lazy(() => import('./pages/JobsPage'))
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
 /** The old Recently Deleted address: history showing what is deleted. */
@@ -54,8 +55,12 @@ const RetentionSection = lazy(
   () => import('./components/settings/RetentionSection'),
 )
 const SyncSection = lazy(() => import('./components/settings/SyncSection'))
+const UpdatesSection = lazy(
+  () => import('./components/settings/UpdatesSection'),
+)
 const SyncReviewPage = lazy(() => import('./pages/SyncReviewPage'))
 const MapSection = lazy(() => import('./components/settings/MapSection'))
+const LogsSection = lazy(() => import('./components/settings/LogsSection'))
 const AdvancedSection = lazy(
   () => import('./components/settings/AdvancedSection'),
 )
@@ -99,6 +104,7 @@ export default function App() {
               path="/workflows/new"
               element={<WorkflowEditorPage isNew />}
             />
+            <Route path="/workflows/:stem" element={<WorkflowPage />} />
             <Route
               path="/workflows/:stem/edit"
               element={<WorkflowEditorPage />}
@@ -142,6 +148,8 @@ export default function App() {
               />
               <Route path="sync" element={<SyncSection />} />
               <Route path="map" element={<MapSection />} />
+              <Route path="updates" element={<UpdatesSection />} />
+              <Route path="logs" element={<LogsSection />} />
               <Route path="advanced" element={<AdvancedSection />} />
             </Route>
             {/* Legacy redirect — Storage lives under Settings */}

@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Any, cast
 
 from sqlalchemy import (
+    false,
     true,
     BigInteger,
     Boolean,
@@ -1024,6 +1025,11 @@ class SyncDevice(Base):
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
     last_seen_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    # May publish workflows and plugins to the library. Off until the admin
+    # allows it: a plugin is code that whoever installs it runs.
+    may_publish: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
 
 
 class SyncInvite(Base):
@@ -1039,6 +1045,39 @@ class SyncInvite(Base):
     expires_at: Mapped[datetime] = mapped_column(_UTCDateTime(), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+
+
+class LibraryItem(Base):
+    """Authority: one version of a workflow or plugin shared through its
+    library (`domain/library.py`); every version is kept (migration
+    `e6a2c8f4d1b7`). Kept as text, never written where it would be loaded: a
+    person installs it on their own computer."""
+
+    __tablename__ = "library_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "kind", "name", "version", name="uq_library_items_kind_name_version"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provides: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    needs: Mapped[list] = mapped_column(_JSON, nullable=False, default=list)
+    triggers: Mapped[list] = mapped_column(_JSON, nullable=False, default=list)
+    # A workflow: {plugin id: version} it was published with.
+    pins: Mapped[dict] = mapped_column(_JSON, nullable=False, default=dict)
+    # A plugin: its contract as its publisher's computer described it.
+    contract: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    published_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    published_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
 
 class SyncConflict(Base):
