@@ -93,7 +93,7 @@ def test_dump_and_restore_keep_field_restrictions_and_name_templates(
         "encounter",
         "photo",
         "file",
-        restrictions={"filename_template": "{depth}-{species}{ext}"},
+        restrictions={"filename_template": "{depth}-{species}"},
     )
     ctx.schema_svc.update("encounter", display_template="{depth}")
     ctx.dataset_svc.create(
@@ -118,7 +118,7 @@ def test_dump_and_restore_keep_field_restrictions_and_name_templates(
         assert fields["depth"].restrictions == {"min": 0, "unit": "m"}
         assert fields["depth"].default_value == 1.5
         assert fields["photo"].restrictions == {
-            "filename_template": "{depth}-{species}{ext}"
+            "filename_template": "{depth}-{species}"
         }
         assert ctx.schema_svc.get("encounter").display_template == "{depth}"
         assert ctx.dataset_svc.get("study").timezone == "Europe/London"

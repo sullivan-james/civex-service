@@ -1,8 +1,9 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useListParams } from '../../hooks/useListParams'
-import { withRange } from '../../hooks/useRangeSelect'
+import { useBulkSelection } from '../../hooks/useBulkSelection'
 import {
   useCancelJob,
+  useDeleteJobs,
   useFailureGroups,
   useJobsPaged,
   useRerunJob,
@@ -12,12 +13,15 @@ import {
 } from '../../hooks/useWorkflows'
 import { useSchemas } from '../../hooks/useSchemas'
 import {
+  type DeleteRunsResult,
   type FailureGroup,
   type RerunResult,
+  type RunPick,
   type WorkflowJob,
 } from '../../api/workflows'
 import type { FilterTreeWire } from '../../utils/filterTree'
 import { FilterControls } from '../explorer/FilterControls'
+import { SelectionBar } from '../explorer/SelectionBar'
 import { FailureGroups } from './FailureGroups'
 import {
   RUN_LIST,
@@ -169,15 +173,31 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
   )
   const rerun = useRerunJob()
   const rerunMany = useRerunJobs()
+  const deleteMany = useDeleteJobs()
   const cancel = useCancelJob()
   const { data: workflows } = useWorkflows()
   const { data: schemas } = useSchemas()
   const { data: runFields } = useRunFilterFields()
-  // The runs ticked for a bulk action. They stay ticked across pages until
-  // acted on or cleared.
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  // The runs ticked for a bulk action, as every paged list has them: rows, a
+  // shift-click range, the page, or "all N matching". Cleared when the list
+  // shows other rows.
+  const pageIds = useMemo(() => (jobs.data ?? []).map((j) => j.id), [jobs.data])
+  const bulk = useBulkSelection(
+    pageIds,
+    JSON.stringify([
+      filter,
+      list.q,
+      list.page,
+      list.size,
+      list.sortParam,
+      recordId,
+    ]),
+  )
+  const ticked = bulk.count(total)
   const [outcome, setOutcome] = useState<RerunResult | null>(null)
+  const [removed, setRemoved] = useState<DeleteRunsResult | null>(null)
   const [confirmAll, setConfirmAll] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const fields = useMemo(
     () =>
@@ -208,15 +228,40 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
   )
   const lookingAtFailures = JSON.stringify(filter ?? {}).includes('"failed"')
 
+  // Every run the list shows: its filter (with the record's scope) and its
+  // search, or all of them when nothing narrows it.
+  const matching = useMemo<RunPick>(() => {
+    const where = scoped(filter)
+    const search = list.q || undefined
+    if (!where && !search) return { every: true }
+    return { filter: where ?? undefined, search }
+  }, [scoped, filter, list.q])
+  const narrowed = !('every' in matching)
+  const picked: RunPick = bulk.allMatching
+    ? matching
+    : { ids: [...bulk.selected] }
+
   function done(result: RerunResult) {
     setOutcome(result)
-    setSelected(new Set())
+    setRemoved(null)
+    bulk.clear()
   }
   function rerunSelected() {
-    rerunMany.mutate({ ids: [...selected] }, { onSuccess: done })
+    if (bulk.allMatching) setConfirmAll(true)
+    else rerunMany.mutate(picked, { onSuccess: done })
   }
   function rerunMatching(which: FilterTreeWire) {
     rerunMany.mutate({ filter: scoped(which)! }, { onSuccess: done })
+  }
+  function deletePicked() {
+    deleteMany.mutate(picked, {
+      onSuccess: (result) => {
+        setRemoved(result)
+        setOutcome(null)
+        bulk.clear()
+        setConfirmDelete(false)
+      },
+    })
   }
   // One failure group: its runs, alongside whatever else narrowed the list
   // (a time window, say), replacing what said otherwise about the same things.
@@ -357,7 +402,7 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
           onRerun={(g) => rerunMatching(groupScope(g))}
         />
       )}
-      {filter && total > 0 && selected.size === 0 && (
+      {filter && total > 0 && ticked === 0 && (
         <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
           {total.toLocaleString()} {total === 1 ? 'run matches' : 'runs match'}
           <Button
@@ -369,13 +414,13 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
           </Button>
         </div>
       )}
-      {confirmAll && filter && (
+      {confirmAll && narrowed && (
         <ConfirmDialog
           title={`Re-run ${total.toLocaleString()} ${total === 1 ? 'run' : 'runs'}`}
           body={
             <p>
               Queues a new run of each of the {total.toLocaleString()} runs that
-              match this filter, on the same record with the same input.
+              match, on the same record with the same input.
               {total > 1000 && ' Only the newest 1,000 are queued at once.'}
             </p>
           }
@@ -383,41 +428,86 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
           isPending={rerunMany.isPending}
           onClose={() => setConfirmAll(false)}
           onConfirm={() => {
-            rerunMatching(filter)
+            rerunMany.mutate(matching, { onSuccess: done })
             setConfirmAll(false)
           }}
         />
       )}
-      {selected.size > 0 && (
-        <div
-          role="region"
-          aria-label="Bulk actions"
-          className="flex flex-wrap items-center gap-3 rounded-md border border-accent-muted bg-accent-subtle px-4 py-2 text-sm"
-        >
-          <span className="font-medium text-fg">{selected.size} selected</span>
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={rerunMany.isPending}
-            onClick={rerunSelected}
-          >
-            <RefreshCw
-              size={12}
-              className={rerunMany.isPending ? 'animate-spin' : ''}
-            />
-            {rerunMany.isPending ? 'Re-running…' : `Re-run ${selected.size}`}
-          </Button>
-          <Button size="sm" onClick={() => setSelected(new Set())}>
-            Clear selection
-          </Button>
-          {rerunMany.isError && (
-            <span role="alert" className="text-xs text-danger">
-              {rerunMany.error.message}
-            </span>
-          )}
-        </div>
+      {confirmDelete && (
+        <ConfirmDialog
+          variant="danger"
+          title={`Delete ${ticked.toLocaleString()} ${ticked === 1 ? 'run' : 'runs'}`}
+          body={
+            <p>
+              Deletes {ticked === 1 ? 'this run' : 'these runs'} and{' '}
+              {ticked === 1 ? 'its' : 'their'} step logs. Runs still waiting or
+              running are left alone. The records they changed keep the changes.
+              This can't be undone.
+            </p>
+          }
+          confirmLabel={`Delete ${ticked.toLocaleString()}`}
+          isPending={deleteMany.isPending}
+          warning={
+            deleteMany.isError ? (
+              <span role="alert">{deleteMany.error.message}</span>
+            ) : undefined
+          }
+          onClose={() => setConfirmDelete(false)}
+          onConfirm={deletePicked}
+        />
       )}
-      {outcome && selected.size === 0 && (
+      <SelectionBar
+        selectedCount={bulk.selected.size}
+        pageCount={pageIds.length}
+        total={total}
+        allMatching={bulk.allMatching}
+        onSelectAllMatching={bulk.selectAllMatching}
+        onDelete={() => setConfirmDelete(true)}
+        deleting={deleteMany.isPending}
+        actions={
+          <>
+            {(narrowed || !bulk.allMatching) && (
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={rerunMany.isPending}
+                onClick={rerunSelected}
+              >
+                <RefreshCw
+                  size={12}
+                  className={rerunMany.isPending ? 'animate-spin' : ''}
+                />
+                {rerunMany.isPending
+                  ? 'Re-running…'
+                  : `Re-run ${ticked.toLocaleString()}${bulk.allMatching ? '…' : ''}`}
+              </Button>
+            )}
+            <Button size="sm" variant="link" onClick={bulk.clear}>
+              Clear selection
+            </Button>
+            {rerunMany.isError && (
+              <span role="alert" className="text-xs text-danger">
+                {rerunMany.error.message}
+              </span>
+            )}
+          </>
+        }
+      />
+      {removed && ticked === 0 && (
+        <p
+          role="status"
+          className="flex flex-wrap items-center gap-2 text-sm text-fg-muted"
+        >
+          Deleted {removed.deleted.toLocaleString()} run
+          {removed.deleted === 1 ? '' : 's'}.
+          {removed.kept_unfinished > 0 &&
+            ` ${removed.kept_unfinished.toLocaleString()} still waiting or running ${removed.kept_unfinished === 1 ? 'was' : 'were'} kept.`}
+          <Button size="sm" variant="link" onClick={() => setRemoved(null)}>
+            Dismiss
+          </Button>
+        </p>
+      )}
+      {outcome && ticked === 0 && (
         <p
           role="status"
           className="flex flex-wrap items-center gap-2 text-sm text-fg-muted"
@@ -444,23 +534,7 @@ export default function JobsTable({ recordId, ns = '' }: Props) {
             : `/runs/${job.id}`
         }
         selection={{
-          selected,
-          onToggle: (id) =>
-            setSelected((prev) => {
-              const next = new Set(prev)
-              if (next.has(id)) next.delete(id)
-              else next.add(id)
-              return next
-            }),
-          onSetMany: (ids, on) =>
-            setSelected((prev) => withRange(prev, ids, on)),
-          onToggleAll: () =>
-            setSelected((prev) => {
-              const shown = (jobs.data ?? []).map((j) => j.id)
-              return shown.length > 0 && shown.every((id) => prev.has(id))
-                ? new Set([...prev].filter((id) => !shown.includes(id)))
-                : new Set([...prev, ...shown])
-            }),
+          ...bulk.table,
           allLabel: 'Select all runs on this page',
           rowLabel: (id) => {
             const job = (jobs.data ?? []).find((j) => j.id === id)

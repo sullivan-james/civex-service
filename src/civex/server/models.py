@@ -143,8 +143,9 @@ class PreviewNameRequest(BaseModel):
     kind: Literal["record", "file"] = Field(
         default="record",
         description=(
-            "'record' renders a record's name; 'file' renders a download name, "
-            "where `{ext}` is available and a blank value makes the result null."
+            "'record' renders a record's name; 'file' renders a download name: "
+            "the stem, with an example extension added (the file always keeps "
+            "its own), so `{ext}` can't be used."
         ),
     )
 
@@ -1261,11 +1262,47 @@ class RerunJobsRequest(BaseModel):
         description="Instead of ids: repeat every run this filter matches (the "
         "same filter tree as GET /jobs, at most 1000 runs).",
     )
+    search: str | None = Field(
+        default=None,
+        description="Instead of ids, or with filter: only the runs this search "
+        "matches, as GET /jobs?search= lists them.",
+    )
 
 
 class SkippedJob(BaseModel):
     id: str
     reason: str = Field(description="Why this run could not be repeated.")
+
+
+class DeleteJobsRequest(BaseModel):
+    ids: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=1000,
+        description="Ids of the runs to delete.",
+    )
+    filter: dict[str, Any] | None = Field(
+        default=None,
+        description="Instead of ids: delete every run this filter matches (the "
+        "same filter tree as GET /jobs).",
+    )
+    search: str | None = Field(
+        default=None,
+        description="Instead of ids, or with filter: only the runs this search "
+        "matches, as GET /jobs?search= lists them.",
+    )
+    every: bool = Field(
+        default=False,
+        description="With no ids, filter or search: delete every finished run.",
+    )
+
+
+class DeleteJobsResponse(BaseModel):
+    deleted: int = Field(description="How many runs were deleted.")
+    kept_unfinished: int = Field(
+        description="Runs that matched but are still waiting or running, so "
+        "were left alone. Cancel them first to delete them."
+    )
 
 
 class RerunJobsResponse(BaseModel):

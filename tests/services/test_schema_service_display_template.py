@@ -175,12 +175,12 @@ def test_rename_and_delete_rewrite_filename_templates(
     ctx.schema_svc.update_field("trial", "site", new_name="location")
     ctx.commit()
     scan = next(f for f in ctx.schema_svc.get("trial").fields if f.name == "scan")
-    assert scan.restrictions["filename_template"] == "{location}_{year}.{ext}"
+    assert scan.restrictions["filename_template"] == "{location}_{year}"
 
     ctx.schema_svc.delete_field("trial", "year")
     ctx.commit()
     scan = next(f for f in ctx.schema_svc.get("trial").fields if f.name == "scan")
-    assert scan.restrictions["filename_template"] == "{location}.{ext}"
+    assert scan.restrictions["filename_template"] == "{location}"
 
 
 def _site_and_sample(ctx: AppContext, make_schema) -> None:
@@ -219,15 +219,27 @@ def test_reference_without_a_target_schema_cannot_be_reached(
         ctx.schema_svc.update("sample", display_template="{anything.x}")
 
 
-def test_file_names_cannot_reach_other_records(ctx: AppContext, make_schema) -> None:
+def test_file_names_reach_a_referenced_record_and_follow_its_renames(
+    ctx: AppContext, make_schema
+) -> None:
     _site_and_sample(ctx, make_schema)
-    with pytest.raises(ValidationError):
-        ctx.schema_svc.add_field(
-            "sample",
-            "scan",
-            "file",
-            restrictions={"filename_template": "{site.code}.{ext}"},
-        )
+    ctx.schema_svc.add_field(
+        "sample",
+        "scan",
+        "file",
+        restrictions={"filename_template": "{site.code}_{n}"},
+    )
+    ctx.commit()
+
+    ctx.schema_svc.update_field("site", "code", new_name="short_code")
+    ctx.commit()
+    scan = next(f for f in ctx.schema_svc.get("sample").fields if f.name == "scan")
+    assert scan.restrictions["filename_template"] == "{site.short_code}_{n}"
+
+    ctx.schema_svc.delete_field("site", "short_code")
+    ctx.commit()
+    scan = next(f for f in ctx.schema_svc.get("sample").fields if f.name == "scan")
+    assert scan.restrictions["filename_template"] == "{n}"
 
 
 def test_renaming_the_reference_field_rewrites_the_path(

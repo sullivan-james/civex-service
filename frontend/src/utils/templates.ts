@@ -58,6 +58,25 @@ export function setVariableFormat(
   return template.slice(0, v.start) + next + template.slice(v.end)
 }
 
+/** Characters that separate values in a name (`a_b`, `a - b`). */
+const SEPARATOR = /[\s_\-.,;:|/]+$/
+const LEADING_SEPARATOR = /^[\s_\-.,;:|/]+/
+
+/** `template` without its `index`th variable and the separator beside it
+ * (the one before, or after when it is first), as the server drops a deleted
+ * field from a template. */
+export function removeVariable(template: string, index: number): string {
+  const v = variablesIn(template)[index]
+  if (!v) return template
+  let before = template.slice(0, v.start)
+  let after = template.slice(v.end)
+  const trailing = before.match(SEPARATOR)
+  if (trailing && before.length > trailing[0].length)
+    before = before.slice(0, -trailing[0].length)
+  else if (!before.trim()) after = after.replace(LEADING_SEPARATOR, '')
+  return before + after
+}
+
 /** `snippet` written over the selection; returns the new text and cursor. */
 export function insertAt(
   template: string,

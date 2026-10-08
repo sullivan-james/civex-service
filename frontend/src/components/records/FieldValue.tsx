@@ -8,6 +8,13 @@ import { formatLocation, isGeometry } from '../../utils/geo'
 import { describeGeometry } from '../../utils/geoDraft'
 import type { Field } from '../../api/schemas'
 
+/** The name a file was uploaded with, when its download name differs. */
+function originalName(ref: FileRef): string | undefined {
+  return ref.resolved_filename && ref.resolved_filename !== ref.filename
+    ? `Original: ${ref.filename}`
+    : undefined
+}
+
 export function FieldValue({
   value,
   field,
@@ -95,8 +102,9 @@ export function FieldValue({
             key={ref.sha256}
             className="inline-flex items-center gap-2 text-sm text-fg-muted"
           >
-            <span>
-              {ref.filename} ({(ref.size / 1024).toFixed(1)} KB)
+            <span title={originalName(ref)}>
+              {ref.resolved_filename ?? ref.filename} (
+              {(ref.size / 1024).toFixed(1)} KB)
             </span>
             <FileLink
               file={ref}
@@ -117,8 +125,9 @@ export function FieldValue({
     const ref = value as FileRef
     return (
       <span className="inline-flex items-center gap-2 text-sm text-fg-muted">
-        <span>
-          {ref.filename} ({(ref.size / 1024).toFixed(1)} KB)
+        <span title={originalName(ref)}>
+          {ref.resolved_filename ?? ref.filename} (
+          {(ref.size / 1024).toFixed(1)} KB)
         </span>
         <FileLink
           file={ref}

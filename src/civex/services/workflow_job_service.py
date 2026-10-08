@@ -343,9 +343,27 @@ class WorkflowJobService:
             affected_schema=affected_schema,
         )
 
-    def run_ids(self, where: Any, limit: int = 1000) -> list[uuid.UUID]:
-        """Ids of every run a filter matches (newest first, at most `limit`)."""
-        return self._repo.ids_matching(_parsed(where), limit)
+    def run_ids(
+        self, where: Any, limit: int = 1000, search: str | None = None
+    ) -> list[uuid.UUID]:
+        """Ids of every run a filter (and search) matches, newest first, at
+        most `limit`."""
+        return self._repo.ids_matching(_parsed(where), limit, search)
+
+    def delete_runs(
+        self,
+        ids: list[uuid.UUID] | None = None,
+        where: Any = None,
+        search: str | None = None,
+        every: bool = False,
+    ) -> tuple[int, int]:
+        """Delete the runs `ids` names, or else every run the list shows for
+        this filter and search (all of them with `every`), with their step logs. Runs still waiting or
+        running are left alone (cancel them first). Not in history: runs never
+        were. Returns (deleted, kept because unfinished)."""
+        if ids is None and where is None and not search and not every:
+            raise ValueError("Name the runs, give a filter or search, or every.")
+        return self._repo.delete_runs(ids, _parsed(where), search)
 
     def failure_groups(self, where: Any = None) -> list[dict]:
         """Failed runs a filter matches, grouped by workflow and what went wrong."""

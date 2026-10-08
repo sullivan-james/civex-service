@@ -30,7 +30,7 @@ DUMP = {
                 {
                     "name": "photo",
                     "type": "file",
-                    "restrictions": {"filename_template": "{depth}-{species}{ext}"},
+                    "restrictions": {"filename_template": "{depth}-{species}"},
                 },
             ],
         },
@@ -62,7 +62,7 @@ def test_the_web_restore_keeps_restrictions_defaults_and_templates(
     assert fields["depth"]["restrictions"] == {"min": 0, "unit": "m"}
     assert fields["depth"]["default"] == 1.5
     assert fields["photo"]["restrictions"] == {
-        "filename_template": "{depth}-{species}{ext}"
+        "filename_template": "{depth}-{species}"
     }
     assert client.get("/api/schemas/encounter").json()["display_template"] == "{depth}"
     assert client.get("/api/collections/study").json()["timezone"] == "Europe/London"

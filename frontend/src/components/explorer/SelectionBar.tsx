@@ -5,7 +5,7 @@ import { Button } from '../ui'
  * offers "select all N matching", so a bulk action can cover every row the
  * filters match, not only the ones on screen -- and says so, with the real
  * count. The page's own box clears it. Used by every paged list with bulk
- * actions (records, files). */
+ * actions (records, files, runs). */
 export function SelectionBar({
   selectedCount,
   pageCount,
@@ -30,7 +30,11 @@ export function SelectionBar({
   if (selectedCount === 0 && !allMatching) return null
   const count = allMatching ? total : selectedCount
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-md border border-accent-muted bg-accent-subtle px-3 py-2 text-sm">
+    <div
+      role="region"
+      aria-label="Bulk actions"
+      className="flex flex-wrap items-center gap-3 rounded-md border border-accent-muted bg-accent-subtle px-3 py-2 text-sm"
+    >
       <span className="font-medium text-accent">
         {allMatching
           ? `All ${total.toLocaleString()} matching selected`

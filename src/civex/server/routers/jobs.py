@@ -11,6 +11,8 @@ from civex.server.deps import get_ctx
 from civex.domain.run_filters import RUN_FIELDS
 from civex.server.models import (
     AutomationStatusResponse,
+    DeleteJobsRequest,
+    DeleteJobsResponse,
     FailureGroupResponse,
     RunFieldResponse,
     RerunJobsRequest,
@@ -198,12 +200,12 @@ def rerun_jobs(
     an unknown run, a record that has since been deleted) is listed under
     `skipped` with the reason, and the rest are still queued. Refused (422) while
     automation is paused."""
-    if (body.ids is None) == (body.filter is None):
-        raise HTTPException(422, detail="Give either ids or filter.")
+    if (body.ids is None) == (body.filter is None and not body.search):
+        raise HTTPException(422, detail="Give either ids, or a filter or search.")
     ids = (
         body.ids
         if body.ids is not None
-        else [str(i) for i in ctx.job_svc.run_ids(body.filter)]
+        else [str(i) for i in ctx.job_svc.run_ids(body.filter, search=body.search)]
     )
     started = []
     skipped = []
@@ -232,6 +234,27 @@ def rerun_jobs(
     return RerunJobsResponse(
         started=[WorkflowJobResponse.from_dto(j) for j in started], skipped=skipped
     )
+
+
+@router.post("/delete", response_model=DeleteJobsResponse)
+def delete_jobs(body: DeleteJobsRequest, ctx: AppContext = Depends(get_ctx)):
+    """Delete runs, with their step logs: the ones named by `ids`, or every run
+    the list shows for `filter` and `search`, or every run with `every`. Runs still waiting or running are
+    left alone and counted under `kept_unfinished`. A deleted run can't be
+    brought back; the records it changed keep their changes and history."""
+    if body.ids is None and body.filter is None and not body.search and not body.every:
+        raise HTTPException(422, detail="Give ids, a filter or search, or every.")
+    ids = None
+    if body.ids is not None:
+        try:
+            ids = [uuid.UUID(raw) for raw in body.ids]
+        except ValueError:
+            raise HTTPException(422, detail="Not a run id.")
+    deleted, kept = ctx.job_svc.delete_runs(
+        ids, body.filter, body.search, every=body.every
+    )
+    ctx.commit()
+    return DeleteJobsResponse(deleted=deleted, kept_unfinished=kept)
 
 
 @router.post("/drain", status_code=202)

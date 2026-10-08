@@ -168,6 +168,18 @@ function setRunQuery(p: URLSearchParams, q?: RunQuery) {
   if (q?.filter) p.set('filter', JSON.stringify(q.filter))
 }
 
+/** Which runs a bulk action covers: those ticked, or every run the list
+ * shows for a filter and search (`every` when nothing narrows it). */
+export type RunPick =
+  | { ids: string[] }
+  | { filter?: FilterTreeWire; search?: string; every?: boolean }
+
+/** What deleting runs came to. Runs still waiting or running are kept. */
+export interface DeleteRunsResult {
+  deleted: number
+  kept_unfinished: number
+}
+
 /** What repeating several runs came to: the new runs, and any that couldn't be
  * repeated, with why. */
 export interface RerunResult {
@@ -212,8 +224,10 @@ export const jobsApi = {
   rerun: (id: string) => api.post<WorkflowJob>(`/jobs/${id}/rerun`, {}),
   cancel: (id: string) => api.post<WorkflowJob>(`/jobs/${id}/cancel`, {}),
   /** Repeat several runs in one request. */
-  rerunMany: (which: { ids: string[] } | { filter: FilterTreeWire }) =>
-    api.post<RerunResult>('/jobs/rerun', which),
+  rerunMany: (which: RunPick) => api.post<RerunResult>('/jobs/rerun', which),
+  /** Delete runs (finished ones only) in one request. */
+  deleteMany: (which: RunPick) =>
+    api.post<DeleteRunsResult>('/jobs/delete', which),
   filterFields: () => api.get<RunFilterField[]>('/jobs/filter-fields'),
   failureGroups: (filter?: FilterTreeWire | null) =>
     api.get<FailureGroup[]>(

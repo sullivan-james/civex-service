@@ -408,9 +408,44 @@ class LocalWorkflowJobRepository:
         self._s.expire_all()
         return runs
 
-    def ids_matching(self, where: FilterNode | None, limit: int) -> list[uuid.UUID]:
-        """Ids of the runs a filter matches, newest first, at most `limit`."""
-        q = _narrow(self._s.query(WorkflowJob.id), None, None, None, None, where)
+    def delete_runs(
+        self,
+        ids: list[uuid.UUID] | None,
+        where: FilterNode | None,
+        search: str | None,
+    ) -> tuple[int, int]:
+        """Remove the runs named by `ids`, or else every run the list with this
+        filter and search shows, with their step logs. A run waiting or running
+        is never removed. Returns (removed, kept because unfinished)."""
+        q = _narrow(
+            self._s.query(WorkflowJob.id, WorkflowJob.status),
+            None,
+            None,
+            search,
+            None,
+            where,
+        )
+        if ids is not None:
+            q = q.filter(WorkflowJob.id.in_(ids))
+        over: list[uuid.UUID] = []
+        kept = 0
+        for job_id, status in q.all():
+            if status in ("completed", "failed", "cancelled"):
+                over.append(job_id)
+            else:
+                kept += 1
+        # In chunks: SQLite allows only so many parameters in one statement.
+        for start in range(0, len(over), 500):
+            bulk_delete_jobs(self._s, WorkflowJob.id.in_(over[start : start + 500]))
+        self._s.expire_all()
+        return len(over), kept
+
+    def ids_matching(
+        self, where: FilterNode | None, limit: int, search: str | None = None
+    ) -> list[uuid.UUID]:
+        """Ids of the runs a filter (and search) matches, newest first, at
+        most `limit`."""
+        q = _narrow(self._s.query(WorkflowJob.id), None, None, search, None, where)
         return [r[0] for r in q.order_by(*_order(None)).limit(limit).all()]
 
     def failure_groups(self, where: FilterNode | None) -> list[dict]:

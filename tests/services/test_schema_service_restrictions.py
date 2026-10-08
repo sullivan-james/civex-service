@@ -79,19 +79,38 @@ def test_add_field_accepts_filename_template_referencing_known_field(
         "invoice",
         "scan",
         "file",
-        restrictions={"filename_template": "{invoice_number}.{ext}"},
+        restrictions={"filename_template": "{invoice_number}"},
     )
-    assert field.restrictions == {"filename_template": "{invoice_number}.{ext}"}
+    assert field.restrictions == {"filename_template": "{invoice_number}"}
 
 
-def test_add_field_accepts_filename_template_using_only_reserved_ext_token(
+def test_a_trailing_extension_is_dropped_since_the_file_keeps_its_own(
     ctx: AppContext, make_schema
 ):
-    make_schema("invoice")
+    make_schema("invoice", fields=[("invoice_number", "string")])
     field = ctx.schema_svc.add_field(
-        "invoice", "scan", "file", restrictions={"filename_template": "scan.{ext}"}
+        "invoice",
+        "scan",
+        "file",
+        restrictions={"filename_template": "{invoice_number}.{ext}"},
     )
-    assert field.restrictions == {"filename_template": "scan.{ext}"}
+    assert field.restrictions == {"filename_template": "{invoice_number}"}
+
+    bare = ctx.schema_svc.add_field(
+        "invoice", "photo", "file", restrictions={"filename_template": "{ext}"}
+    )
+    assert bare.restrictions == {}
+
+
+def test_the_extension_cannot_be_written_anywhere_else(ctx: AppContext, make_schema):
+    make_schema("invoice", fields=[("invoice_number", "string")])
+    with pytest.raises(ValidationError, match="extension"):
+        ctx.schema_svc.add_field(
+            "invoice",
+            "scan",
+            "file",
+            restrictions={"filename_template": "{ext}_{invoice_number}"},
+        )
 
 
 def test_add_field_rejects_filename_template_referencing_unknown_field(
@@ -135,9 +154,9 @@ def test_update_field_accepts_filename_template_referencing_known_field(
     field = ctx.schema_svc.update_field(
         "invoice",
         "scan",
-        restrictions={"filename_template": "{invoice_number}.{ext}"},
+        restrictions={"filename_template": "{invoice_number}"},
     )
-    assert field.restrictions == {"filename_template": "{invoice_number}.{ext}"}
+    assert field.restrictions == {"filename_template": "{invoice_number}"}
 
 
 # --- unit / precision / geo ------------------------------------------------

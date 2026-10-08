@@ -91,7 +91,8 @@ _FILE_RULES = (
         "filename_template",
         "Download file name",
         "filename_template",
-        "Falls back to the original name when a field it uses is empty.",
+        "The file keeps its own extension. Empty values are left out; with"
+        " none left, the file keeps its original name.",
     ),
 )
 
