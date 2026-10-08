@@ -1,4 +1,5 @@
 import { Sparkles } from '../../components/ui/icons'
+import { logHref } from '../../api/logs'
 import type { BackgroundTask } from '../../utils/backgroundTasks'
 import {
   clearRestartProblem,
@@ -66,7 +67,10 @@ export function useUpdateTasks(): BackgroundTask[] {
       title: 'civex didn’t update',
       detail: data.last.message,
       actions: [
-        { label: 'Details', to: DETAILS },
+        {
+          label: 'View log',
+          to: logHref(data.installer === 'desktop' ? 'launcher' : 'update'),
+        },
         { label: 'Dismiss', onClick: () => dismiss.mutate() },
       ],
     })

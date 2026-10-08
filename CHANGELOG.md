@@ -30,6 +30,12 @@ from the next tag forward.
 
 ### Added
 
+- **Settings → Logs and `civex logs`**: every log civex keeps on this computer
+  (this project's server, the desktop app and its launcher, updates) in one
+  place, with the latest lines, a level filter, search, following, download and
+  opening the folder. A failed update and a failing sync link to the log that
+  says why.
+
 - **Sync with an authority** (`civex sync`, `civex clone`): a project can follow
   another civex over HTTP. Changes merge field by field; the authority's value
   wins a clash and yours is kept as a conflict you can take back. Retries are

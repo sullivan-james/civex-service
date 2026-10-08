@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { settingsApi } from '../../api/settings'
 import type { UpdateAttempt, UpdateStatus } from '../../api/updates'
+import { logHref } from '../../api/logs'
 import { errorMessage } from '../../lib/errors'
 import {
   useDismissLastUpdate,
@@ -102,7 +103,19 @@ function Availability({ status }: { status: UpdateStatus }) {
   )
 }
 
-function LastUpdate({ last }: { last: UpdateAttempt }) {
+/** Where an update's own log is: the launcher's for the desktop app, the
+ * update helper's for `civex serve`. */
+function updateLog(installer: string): string {
+  return logHref(installer === 'desktop' ? 'launcher' : 'update')
+}
+
+function LastUpdate({
+  last,
+  installer,
+}: {
+  last: UpdateAttempt
+  installer: string
+}) {
   const when = formatDateTime(last.at)
   const dismiss = useDismissLastUpdate()
   return (
@@ -112,9 +125,14 @@ function LastUpdate({ last }: { last: UpdateAttempt }) {
           Updated from {last.from_version} to {last.to_version} on {when}
         </Status>
       ) : (
-        <Status tone="danger" why={last.message}>
-          The update on {when} didn’t install a new version
-        </Status>
+        <>
+          <Status tone="danger" why={last.message}>
+            The update on {when} didn’t install a new version
+          </Status>
+          <Button size="sm" variant="link" to={updateLog(installer)}>
+            View log
+          </Button>
+        </>
       )}
       <Button
         size="sm"
@@ -164,7 +182,7 @@ function Restarting({ phase }: { phase: RestartPhase }) {
     return (
       <Status
         tone="danger"
-        why="It may still be updating, or it may not have started again. Start civex yourself; the log is update.log in the .civex folder in your home folder."
+        why="It may still be updating, or it may not have started again. Start civex yourself; the update’s log says what happened."
       >
         civex hasn’t come back
       </Status>
@@ -194,7 +212,9 @@ export default function UpdatesSection() {
           {status.newer && !status.error && status.blocked && (
             <p className="text-sm text-fg-muted">{status.blocked}</p>
           )}
-          {status.last && <LastUpdate last={status.last} />}
+          {status.last && (
+            <LastUpdate last={status.last} installer={status.installer} />
+          )}
           {status.newer && status.can_update && status.running.length > 0 && (
             <RunningAlongside running={status.running} />
           )}

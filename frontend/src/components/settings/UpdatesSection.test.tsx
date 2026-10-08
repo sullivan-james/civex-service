@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router'
 import UpdatesSection from './UpdatesSection'
 
 const upToDate = {
@@ -38,7 +39,9 @@ function renderWith(commandLine: Record<string, unknown>) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={qc}>
-      <UpdatesSection />
+      <MemoryRouter>
+        <UpdatesSection />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
   return calls
@@ -97,7 +100,9 @@ function renderStatus(status: Record<string, unknown>) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={qc}>
-      <UpdatesSection />
+      <MemoryRouter>
+        <UpdatesSection />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
   return calls
