@@ -1048,13 +1048,16 @@ class SyncInvite(Base):
 
 
 class LibraryItem(Base):
-    """Authority: a workflow or plugin shared through its library
-    (`domain/library.py`). Kept as text, never written where it would be
-    loaded: a person installs it on their own computer."""
+    """Authority: one version of a workflow or plugin shared through its
+    library (`domain/library.py`); every version is kept (migration
+    `e6a2c8f4d1b7`). Kept as text, never written where it would be loaded: a
+    person installs it on their own computer."""
 
     __tablename__ = "library_items"
     __table_args__ = (
-        UniqueConstraint("kind", "name", name="uq_library_items_kind_name"),
+        UniqueConstraint(
+            "kind", "name", "version", name="uq_library_items_kind_name_version"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
