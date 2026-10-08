@@ -272,9 +272,10 @@ def test_civex_knows_the_apps_folders_as_the_launcher_does(
         "UV_PYTHON_PREFERENCE",
     ):
         assert ours[name] == theirs[name], name
+    # The same exact-version install, so the app and a terminal agree.
     assert (
-        updates.upgrade_command("app", pre=True)[1:]
-        == launcher.upgrade_command(Path("/bundled/uv"), pre=True)[1:]
+        updates.upgrade_command("app", pre=True, target="2.0.0rc6")[1:]
+        == launcher.to_command(Path("/bundled/uv"), "2.0.0rc6")[1:]
     )
 
 
@@ -283,3 +284,64 @@ def test_the_launcher_says_where_its_uv_is(home: Path) -> None:
     launcher.record_where(home, Path("/bundled/uv"))
     recorded = json.loads((home / "launcher.json").read_text())
     assert recorded["uv"] == str(Path("/bundled/uv"))
+
+
+def _asks_update(result: Path, **request) -> object:
+    started: list[list[str]] = []
+
+    def app(h: Path, args: list[str], env: dict[str, str]) -> None:
+        started.append(args)
+        if len(started) == 1:
+            Path(env[launcher.REQUEST_ENV]).write_text(
+                json.dumps({"from": "2.0.0rc5", "result": str(result), **request})
+            )
+
+    return app
+
+
+def test_an_update_naming_its_version_installs_that_and_nothing_else_pre(
+    home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    result = tmp_path / "result.json"
+    ran: list[list[str]] = []
+    monkeypatch.setattr(launcher, "run_app", _asks_update(result, to="2.0.0rc6"))
+    monkeypatch.setattr(
+        launcher, "run_logged", lambda cmd, env, log: ran.append(cmd) or 0
+    )
+    monkeypatch.setattr(launcher, "civex_version", lambda h, env: "2.0.0rc6")
+    assert launcher.main([]) == 0
+    assert ran == [
+        ["/bundled/uv", "tool", "install", "--force", "civex[desktop]>=2.0.0rc6"]
+    ]
+
+
+def test_it_waits_while_something_else_holds_the_copy(
+    home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    result = tmp_path / "result.json"
+    ran: list[list[str]] = []
+    monkeypatch.setattr(launcher, "run_app", _asks_update(result, to="2.0.0rc6"))
+    monkeypatch.setattr(
+        launcher, "run_logged", lambda cmd, env, log: ran.append(cmd) or 0
+    )
+    monkeypatch.setattr(launcher, "civex_version", lambda h, env: "2.0.0rc5")
+    monkeypatch.setattr(launcher, "command_busy", lambda h: True)
+    asked: list[str] = []
+    monkeypatch.setattr(launcher, "ask_retry", lambda t, m: asked.append(m) or False)
+    assert launcher.main([]) == 0
+    assert not ran and "civex serve" in asked[0]
+    record = json.loads(result.read_text())
+    assert not record["ok"] and "still running" in record["message"]
+
+
+def test_getting_there_counts_whatever_uv_said(
+    home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The update of 8 Oct: civex reached 2.0.0rc5, then uv failed to copy an
+    entry point that was in use, and it was recorded as a failure."""
+    result = tmp_path / "result.json"
+    monkeypatch.setattr(launcher, "run_app", _asks_update(result, to="2.0.0rc6"))
+    monkeypatch.setattr(launcher, "run_logged", lambda cmd, env, log: 2)
+    monkeypatch.setattr(launcher, "civex_version", lambda h, env: "2.0.0rc6")
+    launcher.main([])
+    assert json.loads(result.read_text())["ok"] is True

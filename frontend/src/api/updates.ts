@@ -23,13 +23,32 @@ export interface UpdateStatus {
   /** Why it can't, in plain words; blank when it can. */
   blocked: string
   error: string
+  /** The last update's outcome while it is news; null once civex has moved
+   * on or it was dismissed. */
   last: UpdateAttempt | null
+  /** Other servers running from this copy: updating stops them and starts
+   * them again afterwards. */
+  running: string[]
+}
+
+export interface StartUpdate {
+  pre: boolean
+  /** The version to install: the one the status showed. */
+  version?: string | null
+  /** Stop the other servers running from this copy (and start them again). */
+  stopOthers?: boolean
 }
 
 export const updatesApi = {
   status: (pre: boolean) =>
     api.get<UpdateStatus>(`/update?pre=${pre ? 'true' : 'false'}`),
   /** civex closes once this answers, updates, and starts again. */
-  start: (pre: boolean) =>
-    api.post<{ restarting: boolean }>('/update', { pre }),
+  start: ({ pre, version, stopOthers }: StartUpdate) =>
+    api.post<{ restarting: boolean }>('/update', {
+      pre,
+      version: version ?? null,
+      stop_others: !!stopOthers,
+    }),
+  /** Forget the last update's outcome: it was seen. */
+  dismissLast: () => api.delete<void>('/update/last'),
 }

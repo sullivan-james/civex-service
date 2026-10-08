@@ -1,15 +1,14 @@
 import { useSyncExternalStore } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { updatesApi } from '../api/updates'
 
 /** Per-browser conveniences about updates, in localStorage: whether to look
- * for pre-releases, which available version was put off ("Later"), and which
- * update outcome has been seen. None of it must persist reliably: losing it
- * only shows a notice again. */
+ * for pre-releases, and which available version was put off ("Later"). None
+ * of it must persist reliably: losing it only shows a notice again. (An
+ * update's outcome is dismissed on the server: `useDismissLastUpdate`.) */
 const KEYS = {
   pre: 'civex.update.pre',
   later: 'civex.update.later',
-  seen: 'civex.update.seen',
 } as const
 type Key = keyof typeof KEYS
 
@@ -60,5 +59,15 @@ export function useUpdateStatus(pre: boolean) {
     staleTime: 6 * 60 * 60 * 1000,
     refetchOnWindowFocus: false,
     retry: false,
+  })
+}
+
+/** Forget the last update's outcome, for every page and the next opening of
+ * the app alike (it is kept by the server, not this browser). */
+export function useDismissLastUpdate() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: updatesApi.dismissLast,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['update'] }),
   })
 }

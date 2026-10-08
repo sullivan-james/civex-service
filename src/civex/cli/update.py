@@ -15,7 +15,7 @@ import urllib.error
 
 import typer
 
-from civex import __version__
+from civex import __version__, running
 from civex.console import console
 
 # The rules live in civex.updates, shared with the app's Updates page; these
@@ -28,6 +28,7 @@ from civex.updates import (
     is_prerelease,
     latest_version,
     newest_release,  # noqa: F401  (re-exported for callers of the old module)
+    stop_others,
     update_after_exit,
     upgrade_command,
     upgrade_env,
@@ -125,11 +126,19 @@ def update(
         help="Include pre-releases (release candidates, betas) when looking "
         "for a newer version.",
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Stop other servers running from this copy without asking (they "
+        "start again afterwards).",
+    ),
 ) -> None:
     """Update civex to the latest release.
 
     Detects whether civex was installed with pipx, uv tool or pip and runs the
-    matching upgrade. Restart any running `civex serve` afterwards.
+    matching upgrade. Other `civex serve` running from the same copy are
+    stopped first and started again afterwards, after asking.
 
     Pre-releases are only installed with --pre. Once on one, a plain
     `civex update` moves on when the final release is out.
@@ -183,20 +192,28 @@ def update(
             console.print(f"Run [cyan]{command}[/cyan] to install it.")
         raise typer.Exit(1)
 
-    cmd = upgrade_command(installer, pre=pre)
+    target = latest if latest != "unknown" else None
+    cmd = upgrade_command(installer, pre=pre, target=target)
+    stopped = _stop_others(yes)
     console.print(
         f"Updating civex {__version__} -> {latest}: [dim]{' '.join(cmd)}[/dim]"
     )
     if installer == "app" and sys.platform == "win32":
         # This command runs from the files the upgrade replaces, which Windows
-        # won't let go while it runs: the helper does it once this has exited.
-        update_after_exit(pre)
+        # won't let go while it runs: the helper does it once this has exited,
+        # and starts again what was stopped.
+        update_after_exit(pre, target, stopped)
         console.print(
             "[dim]It runs as soon as this command has finished; this window "
             "shows how it went.[/dim]"
         )
         return
-    result = _run(cmd, installer)
+    try:
+        result = _run(cmd, installer)
+    finally:
+        for record in stopped:
+            running.start(record)
+            console.print(f"Started again: {record.describe()}")
     if result.returncode != 0:
         console.print("[error]Update failed -- see the output above.[/error]")
         raise typer.Exit(result.returncode)
@@ -218,6 +235,27 @@ def update(
     ok = ensure_requirements(installer, now or latest)
     _warn_if_shadowed(now or latest)
     if not ok:
+        raise typer.Exit(1)
+
+
+def _stop_others(yes: bool) -> list:
+    """Stop the other servers running from this copy, after asking: they hold
+    its files (Windows won't replace them) and would run old code. They start
+    again after the upgrade, whatever its outcome."""
+    others = running.others()
+    if not others:
+        return []
+    console.print("Running from this copy of civex, so stopped for the update:")
+    for record in others:
+        console.print(f"  {record.describe()}")
+    if not yes and not typer.confirm(
+        "Stop them, update, and start them again?", default=True
+    ):
+        raise typer.Exit(1)
+    try:
+        return stop_others(others)
+    except RuntimeError as e:
+        console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
 

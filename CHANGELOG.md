@@ -83,6 +83,20 @@ from the next tag forward.
 
 ### Fixes
 
+- **Updating stops, and starts again, the other servers running from the same
+  copy**, after asking (the Updates page lists them; `civex update` asks). An
+  update from the app used to fail half way while a `civex serve` from the same
+  copy ran in a terminal (on Windows a file in use can't be replaced).
+- **Including pre-releases no longer brings in pre-releases of everything civex
+  depends on** (a beta pydantic, an alpha sentry-sdk): the version found is
+  installed by name instead.
+- **An update's outcome is shown only while it is news**, and **Dismiss**
+  forgets it for good. An update that got civex to the new version is no longer
+  called failed because the installer tripped over a file in use.
+- **The desktop app keeps what its pages remember** (pins, recent items,
+  dismissed notices, the pre-releases choice) from one opening to the next: its
+  window no longer starts in private mode.
+
 - **`civex update` in a terminal updates the desktop app's copy** (the `civex`
   command the app puts on PATH). It used to try pip, which that copy hasn't got.
   It now upgrades with the app's own uv and folders. On Windows it refuses while

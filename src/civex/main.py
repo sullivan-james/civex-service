@@ -219,6 +219,11 @@ def serve(
 
         os.environ[SERVE_ARGS_ENV] = json.dumps(sys.argv[1:])
 
+        # So an update of this copy can stop this server and start it again.
+        from civex import running
+
+        running.register(host, port)
+
     _refuse_newer_database()
 
     if open_browser:

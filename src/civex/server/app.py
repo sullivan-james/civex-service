@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from civex.server.errors import RequestContextMiddleware, register_error_handlers
 from civex.server.routers import (
+    server_control,
     ai,
     analytics,
     audit,
@@ -368,6 +369,7 @@ def create_sync_app() -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
     register_error_handlers(app)
     app.include_router(sync_peer.router, prefix="/api")
+    app.include_router(server_control.router, prefix="/api")
     return app
 
 
@@ -386,6 +388,7 @@ def create_app() -> FastAPI:
     register_error_handlers(app)
 
     app.include_router(ai.router, prefix="/api")
+    app.include_router(server_control.router, prefix="/api")
     app.include_router(schemas.router, prefix="/api")
     app.include_router(datasets.router, prefix="/api")
     app.include_router(dump.router, prefix="/api")

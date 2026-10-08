@@ -50,7 +50,7 @@ def test_update_runs_installer(monkeypatch: pytest.MonkeyPatch) -> None:
     result = runner.invoke(app, ["update"])
     assert result.exit_code == 0
     assert "Updated to 1.3.0" in result.output
-    assert ran and ran[0][-3:] == ["install", "--upgrade", "civex"]
+    assert ran and ran[0][-3:] == ["install", "--upgrade", "civex>=1.3.0"]
 
 
 def test_update_detects_silent_noop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -152,7 +152,9 @@ def test_pre_asks_for_pre_releases_and_installs_them(
     result = runner.invoke(app, ["update", "--pre"])
     assert result.exit_code == 0, result.output
     assert asked == [True]
-    assert ran[0][-4:] == ["install", "--upgrade", "--pre", "civex"]
+    # The pre-release named, not --pre: that would let in pre-releases of
+    # everything civex depends on.
+    assert ran[0][-3:] == ["install", "--upgrade", "civex>=1.3.0rc1"]
     assert "Updated to 1.3.0rc1" in result.output
 
 
@@ -175,14 +177,29 @@ def test_pre_upgrade_commands(monkeypatch: pytest.MonkeyPatch) -> None:
         "--pip-args=--pre",
         "civex",
     ]
-    assert update_mod.upgrade_command("uv", pre=True) == [
+    # Naming the version lets a pre-release of civex in, and nothing else's.
+    assert update_mod.upgrade_command("uv", pre=True, target="1.3.0rc1") == [
         "uv",
         "tool",
-        "upgrade",
-        "--prerelease",
-        "allow",
-        "civex",
+        "install",
+        "--force",
+        "civex>=1.3.0rc1",
     ]
+    assert update_mod.upgrade_command("uv", pre=True) == ["uv", "tool", "upgrade", "civex"]
+
+
+def test_a_uv_install_keeps_its_extras(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from civex import updates
+
+    (tmp_path / "uv-receipt.toml").write_text(
+        '[tool]\nrequirements = [{ name = "civex", extras = ["server", "ai"], '
+        'specifier = ">=2.0.0" }]\n'
+    )
+    monkeypatch.setattr(updates.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(update_mod.shutil, "which", lambda name: "/usr/bin/" + name)
+    assert update_mod.upgrade_command("uv", target="2.0.1")[-1] == "civex[server,ai]>=2.0.1"
 
 
 def test_repairing_a_uv_install_does_not_pin_it(
@@ -236,7 +253,7 @@ def test_the_app_copy_updates_with_its_uv_and_its_folders(
     result = runner.invoke(app, ["update", "--pre"])
     assert result.exit_code == 0, result.output
     [(cmd, env)] = ran
-    assert cmd == [str(uv), "tool", "upgrade", "--prerelease", "allow", "civex"]
+    assert cmd == [str(uv), "tool", "install", "--force", "civex[desktop]>=2.0.0rc5"]
     assert env["UV_TOOL_DIR"] == str(home / "tools")
     assert env["UV_TOOL_BIN_DIR"] == str(home / "bin")
     assert env["UV_PYTHON_PREFERENCE"] == "only-managed"
@@ -246,14 +263,18 @@ def test_on_windows_the_app_copy_is_updated_after_the_command_exits(
     monkeypatch: pytest.MonkeyPatch, app_copy
 ) -> None:
     monkeypatch.setattr(update_mod.sys, "platform", "win32")
-    handed: list[bool] = []
-    monkeypatch.setattr(update_mod, "update_after_exit", handed.append)
+    handed: list[tuple] = []
+    monkeypatch.setattr(
+        update_mod,
+        "update_after_exit",
+        lambda pre, target, stopped: handed.append((pre, target, stopped)),
+    )
     monkeypatch.setattr(
         update_mod.subprocess, "run", lambda *a, **k: pytest.fail("ran in-process")
     )
     result = runner.invoke(app, ["update", "--pre"])
     assert result.exit_code == 0, result.output
-    assert handed == [True]
+    assert handed == [(True, "2.0.0rc5", [])]
     assert "as soon as this command has finished" in result.output
 
 

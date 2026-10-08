@@ -540,6 +540,16 @@ def _project_arg(argv: list[str]) -> Path | None:
     return path if (path / "_civex").exists() else None
 
 
+def _storage_dir() -> str:
+    """Where the app's window keeps what its pages store: in the launcher's
+    folder when the launcher started it (beside `logs`), else beside the
+    recent-projects list."""
+    logs = os.environ.get(LOG_DIR_ENV)
+    folder = (Path(logs).parent if logs else _RECENT_FILE.parent) / "webview"
+    folder.mkdir(parents=True, exist_ok=True)
+    return str(folder)
+
+
 def main() -> None:
     global _window
     import webview
@@ -562,11 +572,25 @@ def main() -> None:
     # Updating from the app (civex.updates): close, and the launcher that
     # started this app updates it and starts it again.
     on_quit_for_update(lambda: _window.destroy() if _window else None)
+    # Servers stopped so this app could update start again now, whether or not
+    # the update worked (the launcher that updated it can't: it predates them).
+    from civex import running
+
+    for record in running.start_remembered():
+        _log.info("Started again after an update: %s", record.describe())
     project = _project_arg(sys.argv[1:])
+    # Not private: what the pages keep (pins, recent items, choices such as
+    # dismissing a notice or including pre-releases) lasts from one opening
+    # of the app to the next, in a folder of the app's own.
+    storage = _storage_dir()
     if project is not None:
-        webview.start(lambda: _launch_project(project))
+        webview.start(
+            lambda: _launch_project(project),
+            private_mode=False,
+            storage_path=storage,
+        )
     else:
-        webview.start()
+        webview.start(private_mode=False, storage_path=storage)
 
 
 if __name__ == "__main__":

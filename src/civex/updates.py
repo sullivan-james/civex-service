@@ -29,7 +29,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from typing import Any
@@ -185,6 +185,21 @@ def app_is_open() -> bool:
     return False
 
 
+def app_command_busy() -> bool:
+    """Whether something runs the desktop app's `civex` command (a terminal
+    `civex serve`, say): on Windows it then can't be replaced, which an update
+    must do."""
+    if sys.platform != "win32":
+        return False
+    try:
+        os.close(os.open(app_home() / "bin" / "civex.exe", os.O_RDWR))
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def detect_installer() -> str:
     """How this civex was installed: ``desktop`` (the desktop app, started by
     its launcher) | ``app`` (the desktop app's copy, started from a terminal:
@@ -225,33 +240,54 @@ def installed_version() -> str | None:
 _VERSION_SNIPPET = "from importlib.metadata import version; print(version('civex'))"
 
 
-def upgrade_command(installer: str, pre: bool = False) -> list[str]:
-    """The command that upgrades civex for *installer*.
+def _tool_requirement(default: str) -> str:
+    """What this uv tool was installed as, extras and all (`civex[desktop]`),
+    from the receipt uv keeps in the tool's environment."""
+    import tomllib
+
+    try:
+        data = tomllib.loads((Path(sys.prefix) / "uv-receipt.toml").read_text("utf-8"))
+        for req in data["tool"]["requirements"]:
+            if req.get("name") == "civex":
+                extras = req.get("extras") or []
+                return f"civex[{','.join(extras)}]" if extras else "civex"
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return default
+
+
+def upgrade_command(
+    installer: str, pre: bool = False, target: str | None = None
+) -> list[str]:
+    """The command that upgrades civex for *installer*, to `target` (the
+    version the check found) when known.
+
+    Naming the version is what lets a pre-release of civex in without letting
+    in pre-releases of everything it depends on: uv's `--prerelease allow` and
+    pip's `--pre` apply to every package (an update once brought in a beta
+    pydantic and an alpha sentry-sdk), while a requirement that names a
+    pre-release (`civex>=2.0.0rc6`) allows one for civex alone.
 
     Falls back to pip inside this environment when the installer's own CLI
     isn't on PATH (pip is always present in a pipx venv; uv tool venvs may
     not have it, so that case is reported by `why_not` instead).
     """
-    if installer == "app":
-        # As the launcher upgrades it (`civex_launcher.upgrade_command`).
-        uv = app_uv()
-        return [
-            str(uv or "uv"),
-            "tool",
-            "upgrade",
-            *(["--prerelease", "allow"] if pre else []),
-            "civex",
-        ]
+    if installer in ("app", "uv") and (installer == "app" or shutil.which("uv")):
+        uv = str(app_uv() or "uv") if installer == "app" else "uv"
+        if target:
+            default = "civex[desktop]" if installer == "app" else "civex"
+            return [
+                uv,
+                "tool",
+                "install",
+                "--force",
+                f"{_tool_requirement(default)}>={target}",
+            ]
+        return [uv, "tool", "upgrade", "civex"]
     if installer == "pipx" and shutil.which("pipx"):
         return ["pipx", "upgrade", *(["--pip-args=--pre"] if pre else []), "civex"]
-    if installer == "uv" and shutil.which("uv"):
-        return [
-            "uv",
-            "tool",
-            "upgrade",
-            *(["--prerelease", "allow"] if pre else []),
-            "civex",
-        ]
+    if target:
+        return [sys.executable, "-m", "pip", "install", "--upgrade", f"civex>={target}"]
     return [
         sys.executable,
         "-m",
@@ -320,8 +356,11 @@ class UpdateCheck:
     #: Why the app can't update this copy; blank when it can.
     blocked: str
     error: str
-    #: The outcome of the last update from the app, if one has been tried.
+    #: The outcome of the last update from the app, while it is news.
     last: dict[str, Any] | None
+    #: Other servers running from this copy, which updating stops and starts
+    #: again (`civex.running`), as people read them.
+    running: list[str] = field(default_factory=list)
 
 
 def check(pre: bool = False, fetch: Callable[[bool], str] | None = None) -> UpdateCheck:
@@ -346,8 +385,35 @@ def check(pre: bool = False, fetch: Callable[[bool], str] | None = None) -> Upda
         installer=installer,
         blocked=why_not(installer, from_app=True),
         error=error,
-        last=last_result(),
+        last=relevant(last_result(), __version__),
+        running=[r.describe() for r in _running().others()],
     )
+
+
+def _running():  # noqa: ANN202 - the module, imported late (it imports this one)
+    from civex import running
+
+    return running
+
+
+def relevant(last: dict[str, Any] | None, current: str) -> dict[str, Any] | None:
+    """The last update's outcome while it is news: while civex is still the
+    version it updated from (it didn't work, or it is waiting), or is the
+    version it went to (it did, whatever the installer's exit said: an update
+    that got civex there but tripped over a file in use is not a failure).
+    Once civex has moved on, it isn't shown."""
+    if not last:
+        return None
+    if current == last.get("from") and not last.get("ok"):
+        return last
+    if current == last.get("to"):
+        return {**last, "ok": True, "message": ""}
+    return None
+
+
+def dismiss_last() -> None:
+    """Forget the last update's outcome (a person dismissed it)."""
+    result_path().unlink(missing_ok=True)
 
 
 # -- Updating after civex exits ----------------------------------------------
@@ -385,28 +451,90 @@ def restart_args(argv: list[str]) -> list[str]:
     return [a for a in argv if a != "--open"]
 
 
-def begin(pre: bool) -> Callable[[], None]:
+def _target(pre: bool, version: str | None) -> str | None:
+    if version:
+        return version
+    try:
+        return latest_version(pre=pre)
+    except (urllib.error.URLError, TimeoutError, OSError, KeyError, ValueError):
+        return None
+
+
+def stop_others(others: list[Any]) -> list[Any]:
+    """Stop the servers running from this copy, for an update. All or none:
+    one that won't stop means the update can't happen, so those already
+    stopped are started again and RuntimeError says which."""
+    running = _running()
+    stopped: list[Any] = []
+    for record in others:
+        if not running.stop(record):
+            for done in stopped:
+                running.start(done)
+            raise RuntimeError(
+                f"{record.describe()} didn't stop, so nothing was updated."
+            )
+        stopped.append(record)
+    return stopped
+
+
+_BUSY = (
+    "Something else is running civex from this copy, started before civex "
+    "could restart it for you (a `civex serve` in a terminal?): stop it (Ctrl+C "
+    "in its window), then update."
+)
+
+
+def begin(
+    pre: bool, version: str | None = None, stop: bool = False
+) -> Callable[[], None]:
     """Hand the update over to what runs after civex exits, and return how to
-    exit (the caller does that once its answer is sent). Raises RuntimeError
-    when this copy can't be updated from the app."""
+    exit (the caller does that once its answer is sent). Other servers running
+    from this copy are stopped first (`stop`, which a person agreed to: without
+    it they refuse the update) and started again afterwards, whatever the
+    outcome. `version` is what to install (what the check found). Raises
+    RuntimeError when this copy can't be updated from the app."""
     installer = detect_installer()
     reason = why_not(installer, from_app=True)
     if reason:
         raise RuntimeError(reason)
+    running = _running()
+    others = running.others()
+    if others and not stop:
+        raise RuntimeError(
+            "Updating stops what else is running from this copy and starts it "
+            "again: " + "; ".join(r.describe() for r in others)
+        )
+    target = _target(pre, version)
+    stopped = stop_others(others)
+    # Started from the app, nothing else may hold the files once those are gone.
+    if installer == "desktop" and app_command_busy():
+        for record in stopped:
+            running.start(record)
+        raise RuntimeError(_BUSY)
     attempt = {"from": __version__, "pre": pre, "result": str(result_path())}
     if installer == "desktop":
         if _quit_app is None:
+            for record in stopped:
+                running.start(record)
             raise RuntimeError("The desktop app can't be closed from here.")
-        # The project open now, so the launcher reopens it afterwards.
-        attempt["project"] = os.getcwd()
+        # The app starts them again as it opens, whatever the outcome: the
+        # launcher that updates it predates this.
+        running.remember(stopped)
+        # The project open now, so the launcher reopens it afterwards. `to`
+        # is the version to install; `pre` stays off, which a launcher that
+        # doesn't know `to` reads as "upgrade without letting in pre-releases
+        # of everything": a pre-release of civex still comes, by the
+        # pre-release its install names.
+        attempt.update(project=os.getcwd(), pre=False, to=target)
         Path(os.environ[REQUEST_ENV]).write_text(json.dumps(attempt), "utf-8")
         return _quit_app
     _start_helper(
         {
             **attempt,
             "wait_pid": os.getpid(),
-            "upgrade": upgrade_command(installer, pre=pre),
+            "upgrade": upgrade_command(installer, pre=pre, target=target),
             "env": upgrade_env(installer),
+            "free": _must_be_free(installer),
             "version": [sys.executable, "-c", _VERSION_SNIPPET],
             "restart": [
                 sys.executable,
@@ -414,6 +542,7 @@ def begin(pre: bool) -> Callable[[], None]:
                 "civex.main",
                 *restart_args(json.loads(os.environ[SERVE_ARGS_ENV])),
             ],
+            "also_start": _also_start(stopped),
             "cwd": os.getcwd(),
             "log": str(result_path().with_name("update.log")),
         }
@@ -421,20 +550,38 @@ def begin(pre: bool) -> Callable[[], None]:
     return _stop_server
 
 
-def update_after_exit(pre: bool) -> None:
+def _must_be_free(installer: str) -> list[str]:
+    """Files the helper waits to be free before upgrading (Windows: the
+    desktop app's command, which anything running its copy holds)."""
+    if installer == "app" and sys.platform == "win32":
+        return [str(app_home() / "bin" / "civex.exe")]
+    return []
+
+
+def _also_start(stopped: list[Any]) -> list[dict[str, Any]]:
+    running = _running()
+    return [{"command": running.start_command(r), "cwd": r.cwd} for r in stopped]
+
+
+def update_after_exit(
+    pre: bool, target: str | None = None, stopped: list[Any] | None = None
+) -> None:
     """`civex update` on the desktop app's copy on Windows: the upgrade can't
     replace the files this very command runs from, so the helper does it once
-    this process has exited, in the same terminal, and says how it went."""
+    this process has exited, in the same terminal, says how it went, and
+    starts again the servers stopped for it."""
     _start_helper(
         {
             "from": __version__,
             "pre": pre,
             "result": str(result_path()),
             "wait_pid": os.getpid(),
-            "upgrade": upgrade_command("app", pre=pre),
+            "upgrade": upgrade_command("app", pre=pre, target=target),
             "env": upgrade_env("app"),
+            "free": _must_be_free("app"),
             "version": [sys.executable, "-c", _VERSION_SNIPPET],
             "restart": None,
+            "also_start": _also_start(stopped or []),
             "log": str(result_path().with_name("update.log")),
         },
         attached=True,
