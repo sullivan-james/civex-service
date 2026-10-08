@@ -244,3 +244,42 @@ def test_an_explicit_source_is_installed_even_over_an_install(
     monkeypatch.setenv("CIVEX_LAUNCHER_SOURCE", "civex[desktop] @ file:///w.whl")
     launcher.ensure_installed(home, Path("/u/uv"), {}, tmp_path / "log")
     assert ran and ran[0][-1].endswith("w.whl")
+
+
+def test_civex_knows_the_apps_folders_as_the_launcher_does(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`civex update` from a terminal updates the app's copy itself, so civex
+    must find the app's folder and give uv the same folders the launcher does
+    (it can't import the launcher, nor the launcher civex)."""
+    from civex import updates
+
+    monkeypatch.delenv("CIVEX_APP_HOME", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    assert updates.app_home() == launcher.app_home()
+    monkeypatch.setenv("CIVEX_APP_HOME", str(tmp_path / "app"))
+    home = launcher.app_home()
+    assert updates.app_home() == home
+
+    theirs = launcher.environment(home, Path("/bundled/uv"))
+    ours = updates.app_uv_env()
+    for name in (
+        "UV_TOOL_DIR",
+        "UV_TOOL_BIN_DIR",
+        "UV_PYTHON_INSTALL_DIR",
+        "UV_CACHE_DIR",
+        "UV_PYTHON_PREFERENCE",
+    ):
+        assert ours[name] == theirs[name], name
+    assert (
+        updates.upgrade_command("app", pre=True)[1:]
+        == launcher.upgrade_command(Path("/bundled/uv"), pre=True)[1:]
+    )
+
+
+def test_the_launcher_says_where_its_uv_is(home: Path) -> None:
+    home.mkdir(parents=True)
+    launcher.record_where(home, Path("/bundled/uv"))
+    recorded = json.loads((home / "launcher.json").read_text())
+    assert recorded["uv"] == str(Path("/bundled/uv"))

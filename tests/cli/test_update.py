@@ -193,3 +193,79 @@ def test_repairing_a_uv_install_does_not_pin_it(
     monkeypatch.setattr(update_mod.shutil, "which", lambda name: "/usr/bin/" + name)
     cmd = update_mod.repair_command("uv", "1.3.0rc1")
     assert cmd[-1] == "civex>=1.3.0rc1" and "--reinstall" in cmd
+
+
+# -- The desktop app's copy, run from a terminal ------------------------------
+
+
+@pytest.fixture
+def app_copy(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    from civex import updates
+
+    home = tmp_path / "app"
+    uv = tmp_path / "Programs" / "civex" / "uv.exe"
+    uv.parent.mkdir(parents=True)
+    uv.write_text("")
+    home.mkdir()
+    (home / "launcher.json").write_text(f'{{"uv": "{uv.as_posix()}"}}')
+    monkeypatch.setenv("CIVEX_APP_HOME", str(home))
+    monkeypatch.delenv("CIVEX_UV_BIN", raising=False)
+    monkeypatch.setattr(update_mod, "detect_installer", lambda: "app")
+    monkeypatch.setattr(updates, "app_is_open", lambda: False)
+    monkeypatch.setattr(update_mod, "__version__", "2.0.0rc4")
+    monkeypatch.setattr(update_mod, "latest_version", lambda pre=False: "2.0.0rc5")
+    return home, uv
+
+
+def test_the_app_copy_updates_with_its_uv_and_its_folders(
+    monkeypatch: pytest.MonkeyPatch, app_copy
+) -> None:
+    home, uv = app_copy
+    monkeypatch.setattr(update_mod.sys, "platform", "linux")
+
+    class _Done:
+        returncode = 0
+
+    ran: list[tuple[list[str], dict]] = []
+    monkeypatch.setattr(
+        update_mod.subprocess,
+        "run",
+        lambda cmd, env=None: ran.append((cmd, env)) or _Done(),
+    )
+    monkeypatch.setattr(update_mod, "installed_version", lambda pre=False: "2.0.0rc5")
+    result = runner.invoke(app, ["update", "--pre"])
+    assert result.exit_code == 0, result.output
+    [(cmd, env)] = ran
+    assert cmd == [str(uv), "tool", "upgrade", "--prerelease", "allow", "civex"]
+    assert env["UV_TOOL_DIR"] == str(home / "tools")
+    assert env["UV_TOOL_BIN_DIR"] == str(home / "bin")
+    assert env["UV_PYTHON_PREFERENCE"] == "only-managed"
+
+
+def test_on_windows_the_app_copy_is_updated_after_the_command_exits(
+    monkeypatch: pytest.MonkeyPatch, app_copy
+) -> None:
+    monkeypatch.setattr(update_mod.sys, "platform", "win32")
+    handed: list[bool] = []
+    monkeypatch.setattr(update_mod, "update_after_exit", handed.append)
+    monkeypatch.setattr(
+        update_mod.subprocess, "run", lambda *a, **k: pytest.fail("ran in-process")
+    )
+    result = runner.invoke(app, ["update", "--pre"])
+    assert result.exit_code == 0, result.output
+    assert handed == [True]
+    assert "as soon as this command has finished" in result.output
+
+
+def test_the_app_copy_is_not_updated_while_the_app_is_open(
+    monkeypatch: pytest.MonkeyPatch, app_copy
+) -> None:
+    from civex import updates
+
+    monkeypatch.setattr(updates, "app_is_open", lambda: True)
+    result = runner.invoke(app, ["update"])
+    assert result.exit_code == 1
+    assert "close it first" in result.output
+    # --check still says what is there.
+    result = runner.invoke(app, ["update", "--check", "--pre"])
+    assert "2.0.0rc5 is available" in result.output

@@ -2,12 +2,14 @@
 
     python -I civex_update_helper.py PLAN.json
 
-Started by `civex.updates.begin`, from a copy outside the package, with the
-base interpreter. Standard library only, and it never imports civex: civex is
-what it is replacing. It waits for the server to stop, runs the upgrade
-command it was given (the same one `civex update` runs), writes what happened
-to the plan's `result` file, and starts the server again whatever the outcome,
-so a failed update leaves the old version running rather than nothing.
+Started by `civex.updates.begin` (or `civex update`, for the desktop app's copy
+on Windows), from a copy outside the package, with the base interpreter.
+Standard library only, and it never imports civex: civex is what it is
+replacing. It waits for civex to stop, runs the upgrade command it was given
+(the same one `civex update` runs, with the plan's `env` if it has one), writes
+what happened to the plan's `result` file, and starts the server again whatever
+the outcome, so a failed update leaves the old version running rather than
+nothing. A plan with no `restart` (from `civex update`) only says how it went.
 """
 
 from __future__ import annotations
@@ -84,7 +86,8 @@ def main(plan_file: str) -> int:
         time.sleep(0.2)
 
     print("running: " + " ".join(plan["upgrade"]), flush=True)
-    upgrade = subprocess.run(plan["upgrade"], stdin=subprocess.DEVNULL)
+    env = plan.get("env")
+    upgrade = subprocess.run(plan["upgrade"], stdin=subprocess.DEVNULL, env=env)
     after = subprocess.run(plan["version"], capture_output=True, text=True)
     now = after.stdout.strip() if after.returncode == 0 else None
     if upgrade.returncode != 0:
@@ -97,8 +100,16 @@ def main(plan_file: str) -> int:
         )
         _write_result(plan, ok=False, to=now, message=message)
     else:
+        message = ""
         _write_result(plan, ok=True, to=now, message="")
 
+    if not plan.get("restart"):
+        # `civex update` from a terminal: say how it went there, and stop.
+        if message:
+            print(f"Update failed: {message}", flush=True)
+            return 1
+        print(f"Updated civex {plan['from']} -> {now}.", flush=True)
+        return 0
     print("starting: " + " ".join(plan["restart"]), flush=True)
     subprocess.Popen(
         plan["restart"],

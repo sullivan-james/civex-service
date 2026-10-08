@@ -83,6 +83,18 @@ def bundled_uv() -> Path:
     raise RuntimeError(f"This copy of the civex app is missing its uv ({inside}).")
 
 
+def record_where(home: Path, uv: Path) -> None:
+    """Say where this app and its uv are, in its own folder, each time it
+    starts: so `civex update` run from a terminal can update the app's copy
+    with the app's uv (`civex.updates.app_uv`) wherever the app was put."""
+    try:
+        (home / "launcher.json").write_text(
+            json.dumps({"uv": str(uv), "app": sys.executable}), "utf-8"
+        )
+    except OSError:
+        pass  # only a convenience: civex also looks in the standard places
+
+
 def tool_python(home: Path, windowed: bool = False) -> Path:
     """The Python civex is installed in. `windowed`: on Windows the one that
     never opens a console window (pythonw), for the desktop window."""
@@ -440,6 +452,7 @@ def main(argv: list[str]) -> int:
     log = log_dir() / "launcher.log"
     try:
         uv = bundled_uv()
+        record_where(home, uv)
         env = environment(home, uv)
         ensure_installed(home, uv, env, log)
         if "--install-only" in argv:

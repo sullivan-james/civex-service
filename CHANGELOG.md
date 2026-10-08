@@ -83,6 +83,12 @@ from the next tag forward.
 
 ### Fixes
 
+- **`civex update` in a terminal updates the desktop app's copy** (the `civex`
+  command the app puts on PATH). It used to try pip, which that copy hasn't got.
+  It now upgrades with the app's own uv and folders. On Windows it refuses while
+  the app is open, and finishes the upgrade once the command has exited, in the
+  same window.
+
 - **The page froze after using the navigation drawer** (a narrow window, as
   the macOS desktop app often is): closing it left the rest of the page
   unclickable. It is handed back now.

@@ -233,3 +233,69 @@ def test_starting_an_update_that_cannot_happen_is_409(
     response = client.post("/api/update", json={"pre": False})
     assert response.status_code == 409
     assert "development (editable) install" in response.json()["detail"]
+
+
+# -- The desktop app's copy, from a terminal ----------------------------------
+
+
+def test_the_desktop_apps_copy_is_known_by_where_it_is(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "app"
+    (home / "tools" / "civex").mkdir(parents=True)
+    monkeypatch.setenv("CIVEX_APP_HOME", str(home))
+    monkeypatch.setattr(updates.sys, "prefix", str(home / "tools" / "civex"))
+    assert updates.detect_installer() == "app"
+    # Started by the app itself, it is the app's to update.
+    monkeypatch.setenv(updates.REQUEST_ENV, str(tmp_path / "request.json"))
+    assert updates.detect_installer() == "desktop"
+
+
+def test_the_apps_uv_is_found_where_the_launcher_said(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "app"
+    home.mkdir()
+    monkeypatch.setenv("CIVEX_APP_HOME", str(home))
+    monkeypatch.delenv("CIVEX_UV_BIN", raising=False)
+    monkeypatch.setattr(updates.shutil, "which", lambda name: "/usr/bin/uv")
+    assert updates.app_uv() == Path("/usr/bin/uv")  # nothing recorded: any uv
+
+    uv = tmp_path / "somewhere" / "uv"
+    uv.parent.mkdir()
+    uv.write_text("")
+    (home / "launcher.json").write_text(json.dumps({"uv": str(uv)}))
+    assert updates.app_uv() == uv
+    monkeypatch.setenv("CIVEX_UV_BIN", "/given/uv")
+    assert updates.app_uv() == Path("/given/uv")
+
+
+def test_the_apps_copy_can_update_unless_its_uv_is_missing_or_the_app_is_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(updates, "app_uv", lambda: Path("/uv"))
+    monkeypatch.setattr(updates, "app_is_open", lambda: False)
+    assert updates.why_not("app", from_app=False) == ""
+    monkeypatch.setattr(updates, "app_is_open", lambda: True)
+    assert "close it first" in updates.why_not("app", from_app=False)
+    monkeypatch.setattr(updates, "app_uv", lambda: None)
+    assert "uv can't be found" in updates.why_not("app", from_app=False)
+
+
+def test_the_helper_can_just_update_and_say_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`civex update` on Windows: the helper upgrades with the app's folders
+    once the command has gone, prints how it went, and starts nothing."""
+    plan_file = _plan(
+        tmp_path,
+        upgrade="import os; assert os.environ['UV_TOOL_DIR'] == 'app-tools'",
+        version="1.3.0",
+    )
+    plan = json.loads(plan_file.read_text())
+    plan["restart"] = None
+    plan["env"] = {**__import__("os").environ, "UV_TOOL_DIR": "app-tools"}
+    plan_file.write_text(json.dumps(plan))
+    assert helper.main(str(plan_file)) == 0
+    assert "Updated civex 1.2.0 -> 1.3.0." in capsys.readouterr().out
+    assert not (tmp_path / "started").exists()

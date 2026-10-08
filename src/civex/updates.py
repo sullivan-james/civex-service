@@ -89,14 +89,113 @@ def is_prerelease(version: str) -> bool:
 # -- How this copy was installed ---------------------------------------------
 
 
+def app_home() -> Path:
+    """The desktop app's own folder, by the launcher's rule
+    (`desktop-launcher/civex_launcher.py` `app_home`, which can't import civex;
+    `tests/test_desktop_launcher.py` holds the two together)."""
+    if override := os.environ.get("CIVEX_APP_HOME"):
+        return Path(override)
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+    return base / "civex" / "app"
+
+
+def _is_app_copy() -> bool:
+    """This civex is the one the desktop app installed (in its own folder),
+    however it was started: by the app, or as the `civex` command it can put
+    on PATH."""
+    try:
+        return Path(sys.prefix).resolve() == (app_home() / "tools" / "civex").resolve()
+    except OSError:
+        return False
+
+
+def _app_uv_candidates() -> list[Path]:
+    """Where the desktop app's own uv may be: where its launcher last said it
+    is, else the app's standard install folder (PyInstaller puts it in
+    `_internal\\uv` on Windows and `Contents/Frameworks/uv` in the macOS app)."""
+    out: list[Path] = []
+    try:
+        recorded = json.loads((app_home() / "launcher.json").read_text("utf-8"))
+        if isinstance(recorded, dict) and recorded.get("uv"):
+            out.append(Path(str(recorded["uv"])))
+    except (OSError, ValueError):
+        pass
+    if sys.platform == "win32":
+        local = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local")
+        out.append(local / "Programs" / "civex" / "_internal" / "uv" / "uv.exe")
+    elif sys.platform == "darwin":
+        for apps in (Path("/Applications"), Path.home() / "Applications"):
+            out.append(apps / "civex.app" / "Contents" / "Frameworks" / "uv" / "uv")
+    return out
+
+
+def app_uv() -> Path | None:
+    """The uv that updates the desktop app's copy: the one the app gave civex
+    (`CIVEX_UV_BIN`, set when the app starts it), the app's own, or any uv on
+    PATH (it is told the app's folders, so any uv updates the right copy)."""
+    if given := os.environ.get("CIVEX_UV_BIN"):
+        return Path(given)
+    for candidate in _app_uv_candidates():
+        if candidate.is_file():
+            return candidate
+    found = shutil.which("uv")
+    return Path(found) if found else None
+
+
+def app_uv_env() -> dict[str, str]:
+    """The environment uv updates the desktop app's copy with: the launcher's
+    own folders (`civex_launcher.environment`), so it finds that copy and uses
+    the Python and cache the app already has."""
+    home = app_home()
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("VIRTUAL_ENV", "PYTHONHOME", "PYTHONPATH", "CONDA_PREFIX")
+    }
+    env.update(
+        {
+            "UV_TOOL_DIR": str(home / "tools"),
+            "UV_TOOL_BIN_DIR": str(home / "bin"),
+            "UV_PYTHON_INSTALL_DIR": str(home / "python"),
+            "UV_CACHE_DIR": str(home / "cache"),
+            "UV_PYTHON_PREFERENCE": "only-managed",
+        }
+    )
+    return env
+
+
+def app_is_open() -> bool:
+    """Whether the desktop app is running from its copy. On Windows its window
+    runs the copy's `pythonw.exe`, which can't be opened for writing while it
+    runs; elsewhere files in use can be replaced, so this is False."""
+    if sys.platform != "win32":
+        return False
+    pythonw = app_home() / "tools" / "civex" / "Scripts" / "pythonw.exe"
+    try:
+        os.close(os.open(pythonw, os.O_RDWR))
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def detect_installer() -> str:
-    """How this civex was installed: ``desktop`` (the desktop launcher) |
-    ``frozen`` (an old all-in-one desktop build) | ``editable`` | ``pipx`` |
-    ``uv`` | ``pip``."""
+    """How this civex was installed: ``desktop`` (the desktop app, started by
+    its launcher) | ``app`` (the desktop app's copy, started from a terminal:
+    nothing waits to update it) | ``frozen`` (an old all-in-one desktop build)
+    | ``editable`` | ``pipx`` | ``uv`` | ``pip``."""
     if os.environ.get(REQUEST_ENV):
         return "desktop"
     if getattr(sys, "frozen", False):
         return "frozen"
+    if _is_app_copy():
+        return "app"
     try:
         direct_url = distribution("civex").read_text("direct_url.json")
         if direct_url and json.loads(direct_url).get("dir_info", {}).get("editable"):
@@ -133,6 +232,16 @@ def upgrade_command(installer: str, pre: bool = False) -> list[str]:
     isn't on PATH (pip is always present in a pipx venv; uv tool venvs may
     not have it, so that case is reported by `why_not` instead).
     """
+    if installer == "app":
+        # As the launcher upgrades it (`civex_launcher.upgrade_command`).
+        uv = app_uv()
+        return [
+            str(uv or "uv"),
+            "tool",
+            "upgrade",
+            *(["--prerelease", "allow"] if pre else []),
+            "civex",
+        ]
     if installer == "pipx" and shutil.which("pipx"):
         return ["pipx", "upgrade", *(["--pip-args=--pre"] if pre else []), "civex"]
     if installer == "uv" and shutil.which("uv"):
@@ -154,6 +263,11 @@ def upgrade_command(installer: str, pre: bool = False) -> list[str]:
     ]
 
 
+def upgrade_env(installer: str) -> dict[str, str] | None:
+    """The environment the upgrade command runs with; None: this one."""
+    return app_uv_env() if installer == "app" else None
+
+
 def why_not(installer: str, *, from_app: bool) -> str:
     """Why this copy can't update itself, in plain words; blank when it can.
     `from_app` is the app's Update button, which also has to start civex
@@ -165,6 +279,17 @@ def why_not(installer: str, *, from_app: bool) -> str:
             "This copy of the desktop app can't update itself. Download the "
             "current desktop app, which keeps itself up to date."
         )
+    if installer == "app":
+        if app_uv() is None:
+            return (
+                "This is the desktop app's copy of civex, and its uv can't be "
+                "found. Update it from the app (Settings > Updates)."
+            )
+        if app_is_open():
+            return (
+                "The desktop app is open and using this copy of civex: close it "
+                "first, or update from the app (Settings > Updates)."
+            )
     if installer == "uv" and not shutil.which("uv"):
         return "civex was installed with uv, but `uv` isn't on PATH here."
     if from_app and installer != "desktop":
@@ -281,6 +406,7 @@ def begin(pre: bool) -> Callable[[], None]:
             **attempt,
             "wait_pid": os.getpid(),
             "upgrade": upgrade_command(installer, pre=pre),
+            "env": upgrade_env(installer),
             "version": [sys.executable, "-c", _VERSION_SNIPPET],
             "restart": [
                 sys.executable,
@@ -295,9 +421,30 @@ def begin(pre: bool) -> Callable[[], None]:
     return _stop_server
 
 
-def _start_helper(plan: dict[str, Any]) -> None:
+def update_after_exit(pre: bool) -> None:
+    """`civex update` on the desktop app's copy on Windows: the upgrade can't
+    replace the files this very command runs from, so the helper does it once
+    this process has exited, in the same terminal, and says how it went."""
+    _start_helper(
+        {
+            "from": __version__,
+            "pre": pre,
+            "result": str(result_path()),
+            "wait_pid": os.getpid(),
+            "upgrade": upgrade_command("app", pre=pre),
+            "env": upgrade_env("app"),
+            "version": [sys.executable, "-c", _VERSION_SNIPPET],
+            "restart": None,
+            "log": str(result_path().with_name("update.log")),
+        },
+        attached=True,
+    )
+
+
+def _start_helper(plan: dict[str, Any], attached: bool = False) -> None:
     """Copy the helper out of the package it will replace and start it on its
-    own, so it outlives this process."""
+    own, so it outlives this process. `attached`: in this terminal, its
+    output shown there (`civex update`), rather than detached into the log."""
     workdir = Path(tempfile.mkdtemp(prefix="civex-update-"))
     helper = workdir / "civex_update_helper.py"
     shutil.copyfile(Path(__file__).with_name("_update_helper.py"), helper)
@@ -307,6 +454,11 @@ def _start_helper(plan: dict[str, Any]) -> None:
     # inside the environment would stop the upgrade on Windows.
     python = getattr(sys, "_base_executable", None) or sys.executable
     kwargs: dict[str, Any] = {"stdin": subprocess.DEVNULL, "close_fds": True}
+    if attached:
+        subprocess.Popen(
+            [python, "-I", str(helper), str(workdir / "plan.json")], **kwargs
+        )
+        return
     if sys.platform == "win32":
         kwargs["creationflags"] = (
             subprocess.DETACHED_PROCESS

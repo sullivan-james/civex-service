@@ -140,7 +140,11 @@ installed if you ask: `civex update --pre`. Once you're on one, a plain
 `civex update` moves you on when the final release is out.
 
 `civex update` detects whether civex was installed with pipx, `uv tool` or pip
-and runs the matching upgrade. Restart `civex serve` afterwards if it's
+and runs the matching upgrade. Run from a terminal on the desktop app's copy
+(the `civex` command the app can put on PATH), it updates that copy with the
+app's own uv. Close the app first on Windows: its files can't be replaced while
+it runs. The upgrade then finishes a moment after the command returns, and the
+same window says how it went. Restart `civex serve` afterwards if it's
 running. Project databases migrate themselves the next time they're opened.
 `civex update` confirms the installed version actually changed, and says so if
 it didn't. It also checks that every package civex needs is installed (even
