@@ -123,6 +123,8 @@ function DownloadLink({
     link.href = href
     link.download = name
     link.click()
+    // The desktop app asks where to save it, which says enough.
+    if (window.pywebview) return
     setNote({
       tone: 'info',
       text: "Download started. It's in your browser's downloads.",

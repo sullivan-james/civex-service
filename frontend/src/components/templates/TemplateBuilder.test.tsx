@@ -72,7 +72,7 @@ describe('TemplateBuilder', () => {
   it('previews what the server renders and shows its error', async () => {
     const user = userEvent.setup()
     render(<Harness initial="{site}" />)
-    expect(await screen.findByText('e.g. rendered {site}')).toBeInTheDocument()
+    expect(await screen.findByText('rendered {site}')).toBeInTheDocument()
 
     await user.type(screen.getByLabelText('Record name'), '{{ghost}')
     await waitFor(() =>
@@ -119,8 +119,67 @@ describe('TemplateBuilder', () => {
     expect(screen.getByTestId('value')).toHaveTextContent('{site.code}')
     unmount()
 
-    // A file's name can't use another record's values.
+    // A file's name can use them too, and says its extension is its own.
     render(<Reach kind="file" />)
-    expect(screen.queryByText('Via Site')).toBeNull()
+    expect(screen.getByText('Via Site')).toBeInTheDocument()
+    expect(screen.getByText('.ext')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /ext/ })).toBeNull()
+  })
+
+  it('takes a value out with the separator beside it', async () => {
+    const user = userEvent.setup()
+    render(<Harness initial="{site}_{taken_on}" />)
+    await user.click(screen.getByRole('button', { name: 'Remove Taken on' }))
+    expect(screen.getByTestId('value')).toHaveTextContent(/^{site}$/)
+  })
+
+  it('lists many values in a searchable picker, grouped by where they come from', async () => {
+    const user = userEvent.setup()
+    const many: TemplateField[] = [
+      ...Array.from({ length: 6 }, (_, i) => ({
+        name: `f${i}`,
+        label: `Field ${i}`,
+        dtype: 'string',
+      })),
+      {
+        name: 'species',
+        label: 'Species',
+        dtype: 'reference',
+        source: 'Encounter',
+        reach: [{ name: 'common', label: 'Common name', dtype: 'string' }],
+      },
+      { name: 'site', label: 'Site', dtype: 'string', source: 'Encounter' },
+    ]
+    function Many() {
+      const [value, setValue] = useState('{f0}_')
+      return (
+        <QueryClientProvider client={new QueryClient()}>
+          <TemplateBuilder
+            schemaName="selection"
+            kind="file"
+            value={value}
+            onChange={setValue}
+            fields={many}
+            label="Download name"
+          />
+          <div data-testid="value">{value}</div>
+        </QueryClientProvider>
+      )
+    }
+    render(<Many />)
+    expect(screen.queryByRole('button', { name: 'Field 1' })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Insert a value' }))
+    expect(
+      screen.getByRole('group', { name: 'Via Species (Encounter)' }),
+    ).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Search values'), 'common')
+    expect(screen.queryByRole('group', { name: 'This type' })).toBeNull()
+    await user.keyboard('{Enter}')
+
+    expect(screen.getByTestId('value')).toHaveTextContent(
+      '{f0}_{species.common}',
+    )
+    expect(screen.getByText('Species › Common name')).toBeInTheDocument()
   })
 })

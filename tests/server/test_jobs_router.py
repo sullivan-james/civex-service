@@ -102,3 +102,79 @@ def test_runs_can_be_filtered_searched_and_sorted(client: TestClient) -> None:
         for j in client.get("/api/jobs", params={"sort": "workflow_name:desc"}).json()
     ]
     assert newest_name_first == sorted(names, reverse=True)
+
+
+def _finished_runs(client: TestClient) -> dict[str, str]:
+    """Four runs of one record: two failed (one with a step log), one
+    completed and one still waiting. Returns their ids by role."""
+    from civex.config import load_config
+    from civex.context import build_local_context
+
+    client.post("/api/schemas", json={"name": "doc", "description": None})
+    client.post("/api/collections", json={"name": "study", "description": None})
+    rec = client.post(
+        "/api/collections/study/records",
+        json={"schema_name": "doc", "data": {}},
+    ).json()
+    record_id = uuid.UUID(rec["id"])
+    step = {"step_id": "a", "plugin": "civex.get_field", "status": "failed"}
+    ctx = build_local_context(load_config())
+    try:
+        repo = ctx.job_svc._repo
+        ids = {}
+        for role in ("failed", "failed_too", "completed", "waiting"):
+            ids[role] = repo.enqueue(f"flow-{role}", record_id, "manual").id
+        repo.mark_failed(
+            ids["failed"], {"kind": "x", "message": "broke"}, step_executions=[step]
+        )
+        repo.mark_failed(ids["failed_too"], {"kind": "x", "message": "broke"})
+        repo.mark_completed(ids["completed"])
+        ctx.commit()
+    finally:
+        ctx.close()
+    return {role: str(i) for role, i in ids.items()}
+
+
+def test_deleting_every_failed_run_the_filter_matches(client: TestClient) -> None:
+    ids = _finished_runs(client)
+    failed = {"field": "status", "op": "eq", "value": "failed"}
+
+    resp = client.post("/api/jobs/delete", json={"filter": failed})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": 2}
+    left = {j["id"] for j in client.get("/api/jobs").json()}
+    assert left == {ids["completed"], ids["waiting"]}
+
+
+def test_deleting_runs_by_id_whatever_their_state(client: TestClient) -> None:
+    ids = _finished_runs(client)
+
+    resp = client.post(
+        "/api/jobs/delete", json={"ids": [ids["completed"], ids["waiting"]]}
+    )
+
+    assert resp.json() == {"deleted": 2}
+    assert client.get(f"/api/jobs/{ids['waiting']}").status_code == 404
+    assert client.get(f"/api/jobs/{ids['completed']}").status_code == 404
+
+
+def test_deleting_runs_by_search_alone_and_refusing_nothing(
+    client: TestClient,
+) -> None:
+    ids = _finished_runs(client)
+
+    resp = client.post("/api/jobs/delete", json={"search": "failed_too"})
+
+    assert resp.json()["deleted"] == 1
+    assert client.get(f"/api/jobs/{ids['failed_too']}").status_code == 404
+    assert client.post("/api/jobs/delete", json={}).status_code == 422
+
+
+def test_deleting_every_run(client: TestClient) -> None:
+    _finished_runs(client)
+
+    resp = client.post("/api/jobs/delete", json={"every": True})
+
+    assert resp.json() == {"deleted": 4}
+    assert client.get("/api/jobs").json() == []

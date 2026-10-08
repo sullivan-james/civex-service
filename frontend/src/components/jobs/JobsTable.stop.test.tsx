@@ -43,6 +43,7 @@ let recordGroups: Record<string, unknown>[]
 let groupQueries: URLSearchParams[]
 let rerunPayloads: Record<string, unknown>[]
 let deletePayloads: Record<string, unknown>[]
+let matchingTotal: number | null
 
 const RUN_FIELDS = [
   ['workflow', 'Workflow', 'string', ['eq', 'ne', 'in', 'is_null']],
@@ -80,6 +81,7 @@ beforeEach(() => {
   groupQueries = []
   rerunPayloads = []
   deletePayloads = []
+  matchingTotal = null
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -130,7 +132,7 @@ beforeEach(() => {
         )
       }
       if (url.pathname === '/api/jobs/count')
-        return json({ total: jobs.length })
+        return json({ total: matchingTotal ?? jobs.length })
       if (url.pathname === '/api/jobs') {
         jobQueries.push(url.searchParams)
         return json(jobs)
@@ -170,7 +172,7 @@ describe('Runs table: deleting runs', () => {
     await user.click(screen.getByRole('button', { name: /Delete 1/ }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText(/A waiting run never starts/)).toBeTruthy()
-    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Delete 1' }))
 
     await waitFor(() =>
       expect(deletePayloads).toEqual([
@@ -561,6 +563,75 @@ describe('Runs table: stopping and what started a run', () => {
       await screen.findByText(/1 couldn't be repeated/),
     ).toBeInTheDocument()
     expect(screen.getByText(/Its record no longer exists/)).toBeInTheDocument()
+  })
+
+  it('selects every run that matches, past this page, and deletes them in one request', async () => {
+    jobs = [1, 2].map((n) =>
+      job({
+        id: `aaaaaaaa-0000-4000-8000-0000000000d${n}`,
+        status: 'failed',
+      }),
+    )
+    matchingTotal = 30
+    const failed = { field: 'status', op: 'eq', value: 'failed' }
+    const user = userEvent.setup()
+    renderIt(
+      undefined,
+      `/?filter=${encodeURIComponent(JSON.stringify(failed))}&q=compute`,
+    )
+
+    await user.click(
+      await screen.findByRole('checkbox', {
+        name: 'Select all runs on this page',
+      }),
+    )
+    await user.click(
+      screen.getByRole('button', { name: 'Select all 30 matching' }),
+    )
+    const bar = screen.getByRole('region', { name: 'Bulk actions' })
+    expect(bar).toHaveTextContent('All 30 matching selected')
+    await user.click(within(bar).getByRole('button', { name: 'Delete 30' }))
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', {
+        name: 'Delete 30',
+      }),
+    )
+
+    await waitFor(() => expect(deletePayloads).toHaveLength(1))
+    // The list's own filter and search, never the ids of one page.
+    expect(deletePayloads[0]).toEqual({ filter: failed, search: 'compute' })
+    expect(await screen.findByText(/Deleted 1 run\./)).toBeInTheDocument()
+  })
+
+  it('deletes just the runs ticked on the page', async () => {
+    jobs = [1, 2, 3].map((n) =>
+      job({
+        id: `aaaaaaaa-0000-4000-8000-0000000000e${n}`,
+        status: 'failed',
+      }),
+    )
+    const user = userEvent.setup()
+    renderIt()
+
+    const boxes = await screen.findAllByRole('checkbox', {
+      name: 'Select the compute run',
+    })
+    await user.click(boxes[0])
+    await user.click(boxes[1])
+    await user.click(screen.getByRole('button', { name: 'Delete 2' }))
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', {
+        name: 'Delete 2',
+      }),
+    )
+
+    await waitFor(() => expect(deletePayloads).toHaveLength(1))
+    expect(deletePayloads[0]).toEqual({
+      ids: [
+        'aaaaaaaa-0000-4000-8000-0000000000e1',
+        'aaaaaaaa-0000-4000-8000-0000000000e2',
+      ],
+    })
   })
 
   it('can clear a selection without doing anything', async () => {

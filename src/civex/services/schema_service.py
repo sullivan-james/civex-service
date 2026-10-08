@@ -151,15 +151,29 @@ def _validate_restriction_keys(dtype: str, restrictions: dict[str, Any] | None) 
 
 
 def _validate_filename_template(
-    restrictions: dict[str, Any] | None, known_field_names: set[str]
+    restrictions: dict[str, Any] | None,
+    known_field_names: set[str],
+    reference_targets: dict[str, set[str]] | None = None,
 ) -> None:
+    """Check a file field's `filename_template` and store it as the stem only:
+    a trailing `.{ext}` is dropped (the file's own extension is always added),
+    and `{ext}` anywhere else is refused. Fields of the records above
+    (inherited) and `{ref.field}` through any reference are allowed."""
     template = (restrictions or {}).get("filename_template")
     if not template:
         return
+    assert restrictions is not None
     try:
-        templating.validate(template, known_field_names, templating.BUILTINS_FILE)
+        stem = templating.check_file_template(template)
+        templating.validate(
+            stem, known_field_names, templating.BUILTINS_FILE, reference_targets
+        )
     except ValidationError as e:
         raise ValidationError(f"filename_template: {e}") from e
+    if stem:
+        restrictions["filename_template"] = stem
+    else:
+        del restrictions["filename_template"]
 
 
 def _suggest(name: str) -> str | None:
@@ -327,7 +341,11 @@ class SchemaService:
             )
 
         known_field_names = {rf.field.name for rf in self.collect_fields(schema)}
-        _validate_filename_template(restrictions, known_field_names)
+        if restrictions:
+            restrictions = dict(restrictions)
+            _validate_filename_template(
+                restrictions, known_field_names, self._reference_targets(schema)
+            )
 
         field = self._repo.add_field(
             schema_id=schema.id,
@@ -492,40 +510,36 @@ class SchemaService:
         """What `template` would render for a record with `values`, without
         saving anything. Raises ValidationError if the template is not valid
         for this schema. `kind` is "record" (a record's name) or "file" (a
-        download name, where a blank value makes the whole result None and
-        `{ext}` is available)."""
+        download name: the stem only, shown with an example extension)."""
         schema = self.get(schema_name)
         names = {rf.field.name for rf in self.collect_fields(schema)}
         builtins_allowed = (
             templating.BUILTINS_FILE if kind == "file" else templating.BUILTINS_RECORD
         )
+        if kind == "file":
+            template = templating.check_file_template(template)
         templating.validate(
-            template,
-            names,
-            builtins_allowed,
-            self._reference_targets(schema) if kind != "file" else None,
+            template, names, builtins_allowed, self._reference_targets(schema)
         )
         builtins: dict[str, Any] = {"schema": schema.name, "id": "1a2b3c4d"}
-        if kind == "file":
-            builtins["ext"] = "pdf"
-        return templating.render(
-            template,
-            values or {},
-            builtins,
-            "fallback" if kind == "file" else "skip",
-        )
+        rendered = templating.render(template, values or {}, builtins, "skip")
+        if kind == "file" and rendered:
+            return templating.with_extension(rendered, "example.pdf")
+        return rendered
 
     def _template_holders(
         self, target_field: FieldDTO
-    ) -> list[tuple[SchemaDTO, list[str | None], list[FieldDTO]]]:
+    ) -> list[
+        tuple[SchemaDTO, list[str | None], list[tuple[FieldDTO, list[str | None]]]]
+    ]:
         """Everything whose template mentions `target_field`, as
-        (schema, display_template_vias, [file fields]) rows.
+        (schema, display_template_vias, [(file field, its vias)]) rows.
 
         `display_template_vias` says how a schema's record name template uses
         the field: `None` for directly (`{f}`, or `{f.x}` when `f` is itself a
         reference field), or the name of a reference field `r` of that schema
-        when it reaches the field through `{r.f}`. File fields are listed
-        when their `filename_template` mentions it.
+        when it reaches the field through `{r.f}`. A file field's
+        `filename_template` is read the same way.
 
         A name resolves by field identity (not just text) through the
         inheritance chain, so a schema whose own field of the same name
@@ -539,30 +553,39 @@ class SchemaService:
                 found = resolved.get(name.partition(".")[0])
                 return found is not None and found.id == target_field.id
 
-            vias: list[str | None] = []
-            for name in templating.referenced_names(schema.display_template or ""):
-                base, _, sub = name.partition(".")
-                if direct(name) and None not in vias:
-                    vias.append(None)
-                ref = resolved.get(base)
-                target_name = (ref.restrictions or {}).get("schema") if ref else None
-                if sub and ref and ref.dtype == "reference" and target_name:
-                    try:
-                        target_schema = self.get(target_name)
-                    except NotFoundError:
-                        continue
-                    through = {
-                        rf.field.name: rf.field.id
-                        for rf in self.collect_fields(target_schema)
-                    }
-                    if through.get(sub) == target_field.id and base not in vias:
-                        vias.append(base)
+            def vias_in(template: str) -> list[str | None]:
+                vias: list[str | None] = []
+                try:
+                    names = templating.referenced_names(template)
+                except ValidationError:
+                    return vias
+                for name in names:
+                    base, _, sub = name.partition(".")
+                    if direct(name) and None not in vias:
+                        vias.append(None)
+                    ref = resolved.get(base)
+                    target_name = (
+                        (ref.restrictions or {}).get("schema") if ref else None
+                    )
+                    if sub and ref and ref.dtype == "reference" and target_name:
+                        try:
+                            target_schema = self.get(target_name)
+                        except NotFoundError:
+                            continue
+                        through = {
+                            rf.field.name: rf.field.id
+                            for rf in self.collect_fields(target_schema)
+                        }
+                        if through.get(sub) == target_field.id and base not in vias:
+                            vias.append(base)
+                return vias
+
+            vias = vias_in(schema.display_template or "")
             file_fields = [
-                f
+                (f, found)
                 for f in schema.fields
-                if any(
-                    direct(n)
-                    for n in templating.referenced_names(
+                if (
+                    found := vias_in(
                         (f.restrictions or {}).get("filename_template") or ""
                     )
                 )
@@ -573,11 +596,13 @@ class SchemaService:
 
     def _rewrite_templates(
         self,
-        holders: list[tuple[SchemaDTO, list[str | None], list[FieldDTO]]],
+        holders: list[
+            tuple[SchemaDTO, list[str | None], list[tuple[FieldDTO, list[str | None]]]]
+        ],
         rewrite: Any,
     ) -> None:
         """Apply `rewrite(template, via) -> template` to every template in
-        `holders` (`via` as in `_template_holders`; file names use None).
+        `holders` (`via` as in `_template_holders`).
 
         Each template changed is a change to its schema or field, so it is in
         history like any other edit: a device that only reads history would
@@ -601,9 +626,11 @@ class SchemaService:
                         schema.to_dict(),
                         updated.to_dict(),
                     )
-            for f in file_fields:
+            for f, file_vias in file_fields:
                 restrictions = dict(f.restrictions)
-                new_template = rewrite(restrictions["filename_template"], None)
+                new_template = restrictions["filename_template"]
+                for via in file_vias:
+                    new_template = rewrite(new_template, via)
                 if new_template:
                     restrictions["filename_template"] = new_template
                 else:
@@ -739,7 +766,10 @@ class SchemaService:
         if restrictions is not None:
             _validate_restriction_keys(field.dtype, restrictions)
             known_field_names = {rf.field.name for rf in self.collect_fields(schema)}
-            _validate_filename_template(restrictions, known_field_names)
+            restrictions = dict(restrictions)
+            _validate_filename_template(
+                restrictions, known_field_names, self._reference_targets(schema)
+            )
         old_dict = field.to_dict()
         kwargs: dict[str, Any] = dict(
             name=new_name, required=required, restrictions=restrictions

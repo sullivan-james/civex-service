@@ -200,12 +200,12 @@ def rerun_jobs(
     an unknown run, a record that has since been deleted) is listed under
     `skipped` with the reason, and the rest are still queued. Refused (422) while
     automation is paused."""
-    if (body.ids is None) == (body.filter is None):
-        raise HTTPException(422, detail="Give either ids or filter.")
+    if (body.ids is None) == (body.filter is None and not body.search):
+        raise HTTPException(422, detail="Give either ids, or a filter or search.")
     ids = (
         body.ids
         if body.ids is not None
-        else [str(i) for i in ctx.job_svc.run_ids(body.filter)]
+        else [str(i) for i in ctx.job_svc.run_ids(body.filter, search=body.search)]
     )
     started = []
     skipped = []
@@ -247,16 +247,22 @@ def drain_jobs(background_tasks: BackgroundTasks):
 def delete_jobs(body: DeleteJobsRequest, ctx: AppContext = Depends(get_ctx)):
     """Delete runs, whatever their state. A waiting run never starts; a running
     one stops before its next step; a finished one is removed with its step
-    log. What a run already changed in records stays (and is in their history)."""
-    if (body.ids is None) == (body.filter is None):
-        raise HTTPException(422, detail="Give either ids or filter.")
+    log. What a run already changed in records stays (and is in their history).
+    Which: `ids`, or every run the list shows for `filter` and/or `search`, or
+    every run with `every`."""
+    narrowed = body.filter is not None or bool(body.search)
+    if (body.ids is not None) == (narrowed or body.every):
+        raise HTTPException(
+            422, detail="Give either ids, or a filter, a search or every."
+        )
     if body.ids is not None:
         try:
             ids = [uuid.UUID(i) for i in body.ids]
         except ValueError:
             raise HTTPException(422, detail="Not a run id.")
     else:
-        ids = ctx.job_svc.run_ids(body.filter)
+        # Every run the list shows for this filter and search, however many.
+        ids = ctx.job_svc.run_ids(body.filter, limit=None, search=body.search)
     deleted = ctx.job_svc.delete_runs(ids)
     ctx.commit()
     return DeleteJobsResponse(deleted=deleted)

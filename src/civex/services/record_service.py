@@ -262,24 +262,32 @@ def resolve_filename(
     builtins: dict[str, Any] | None = None,
 ) -> str:
     """Resolve a `filename_template` restriction against a record's
-    (name-keyed) field values. Falls back to the file's original name if no
-    template is set, or if any referenced field is blank/unset — a
-    partially-substituted name (e.g. "_.pdf") is worse than the original.
-    `builtins` supplies `schema` and `id`; `ext` comes from the file.
+    (name-keyed) field values, plus those of the records above it and the ones
+    its references point at (`ref.field`), when the caller supplies them.
+
+    The template names the stem; the file's own extension is always added. A
+    blank value is skipped with the separator beside it, as in a record's name;
+    only when nothing at all is left does the file keep its original name.
+    `builtins` supplies `schema` and `id`.
     """
     if not template:
         return ref.filename
+    # A template saved before the extension was added for you may still use
+    # `{ext}` in the middle; it keeps rendering.
     ext = Path(ref.filename).suffix.lstrip(".")
     try:
-        resolved = templating.render(
-            template, field_values, {**(builtins or {}), "ext": ext}, "fallback"
+        stem = templating.render(
+            templating.file_stem_template(template),
+            field_values,
+            {**(builtins or {}), "ext": ext},
+            "skip",
         )
     except ValidationError:
         return ref.filename  # a template stored before the rules tightened
-    if resolved is None:
+    stem = _UNSAFE_FILENAME_CHARS_RE.sub("_", stem or "").strip().rstrip(". ")
+    if not stem:
         return ref.filename
-    resolved = _UNSAFE_FILENAME_CHARS_RE.sub("_", resolved).strip()
-    return resolved or ref.filename
+    return templating.with_extension(stem, ref.filename)
 
 
 def _audit_batch(audit: AuditRepository | None, kind: str, many: bool):
@@ -374,30 +382,70 @@ def _unique_zip_name(name: str, used: set[str]) -> str:
         n += 1
 
 
+def _outside_columns(template: str | None, own: set[str]) -> list[str]:
+    """The values a file name template needs that the record's own data can't
+    answer: fields inherited from a record above it, and `ref.field` joins.
+    Built-ins and a malformed template need nothing."""
+    if not template:
+        return []
+    try:
+        names = templating.referenced_names(templating.file_stem_template(template))
+    except ValidationError:
+        return []
+    return [
+        n
+        for n in names
+        if n not in own and n not in templating.BUILTINS_FILE + ("ext",)
+    ]
+
+
 def _apply_filename_templates(
     data: dict[str, Any],
     fields: list[ResolvedField],
     builtins: dict[str, Any] | None = None,
+    *,
+    own: set[str] | None = None,
+    relatives: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Annotate every file/file_list value in `data` with `resolved_filename`,
-    derived from that field's `filename_template` restriction (if any)."""
+    derived from that field's `filename_template` restriction (if any).
+
+    With `own` (the schema's own field names) and no `relatives`, a template
+    that needs values from other records is left alone: the batch pass that
+    fetches them (`_name_files_from_relatives`) names those files. With
+    `relatives`, only those templates are filled, from them."""
+    values = {**data, **(relatives or {})}
     result = dict(data)
     for rf in fields:
         f = rf.field
         if f.dtype not in ("file", "file_list"):
             continue
         template = (f.restrictions or {}).get("filename_template")
+        if own is not None:
+            needs_others = bool(_outside_columns(template, own))
+            if needs_others != (relatives is not None):
+                continue
         value = result.get(f.name)
         if isinstance(value, dict):
-            result[f.name] = _with_resolved_filename(value, template, data, builtins)
+            result[f.name] = _with_resolved_filename(value, template, values, builtins)
         elif isinstance(value, list):
             result[f.name] = [
-                _with_resolved_filename(item, template, data, builtins)
+                _with_resolved_filename(item, template, values, builtins)
                 if isinstance(item, dict)
                 else item
                 for item in value
             ]
     return result
+
+
+def _own_names(shape: ResolvedSchema) -> set[str]:
+    """The fields a record of `shape` holds itself (not inherited ones, which
+    live on the record above it)."""
+    return {
+        rf.field.name
+        for rf in shape.fields
+        if rf.source_schema_name == shape.schema.name
+    }
 
 
 def _name_builtins(schema_name: str, record_id: Any) -> dict[str, Any]:
@@ -523,7 +571,9 @@ class RecordService:
         natural_name = _natural_name(
             named_data, shape.fields, shape.schema.display_template, builtins
         )
-        named_data = _apply_filename_templates(named_data, shape.fields, builtins)
+        named_data = _apply_filename_templates(
+            named_data, shape.fields, builtins, own=_own_names(shape)
+        )
         return dataclasses.replace(
             dto,
             data=named_data,
@@ -563,9 +613,70 @@ class RecordService:
         collection names (`_label_references`), and where each file is stored
         (`_attach_file_locations`). Audit snapshots use `_with_names` alone, so
         none of this -- all of it momentary -- is ever frozen into the log."""
+        shapes = shapes or self._schema_svc.resolver()
         return self._attach_file_locations(
-            self._label_references(records, shapes), shapes
+            self._label_references(
+                self._name_files_from_relatives(records, shapes), shapes
+            ),
+            shapes,
         )
+
+    def _name_files_from_relatives(
+        self, records: list[RecordDTO], shapes: SchemaResolver
+    ) -> list[RecordDTO]:
+        """Name the files whose `filename_template` uses values from other
+        records (a field of the record above, `{species.common}` through a
+        reference, also from above). Batched like a table's derived columns: per
+        schema, one lookup per level up and one for the references, however
+        many records."""
+        groups: dict[uuid.UUID, list[int]] = {}
+        wanted: dict[uuid.UUID, list[str]] = {}
+        for i, r in enumerate(records):
+            shape = shapes(r.schema_id)
+            if shape is None:
+                continue
+            if r.schema_id not in wanted:
+                own = _own_names(shape)
+                wanted[r.schema_id] = list(
+                    dict.fromkeys(
+                        col
+                        for rf in shape.fields
+                        if rf.field.dtype in ("file", "file_list")
+                        for col in _outside_columns(
+                            (rf.field.restrictions or {}).get("filename_template"),
+                            own,
+                        )
+                    )
+                )
+            if wanted[r.schema_id] and any(
+                r.data.get(rf.field.name)
+                for rf in shape.fields
+                if rf.field.dtype in ("file", "file_list")
+            ):
+                groups.setdefault(r.schema_id, []).append(i)
+        if not groups:
+            return records
+        out = list(records)
+        for schema_id, indexes in groups.items():
+            shape = shapes(schema_id)
+            assert shape is not None
+            own = _own_names(shape)
+            values = self._derived_values(
+                shape.schema.name, [records[i] for i in indexes], wanted[schema_id]
+            )
+            for i, extra in zip(indexes, values):
+                r = records[i]
+                out[i] = dataclasses.replace(
+                    r,
+                    data=_apply_filename_templates(
+                        r.data,
+                        shape.fields,
+                        _name_builtins(shape.schema.name, r.id),
+                        own=own,
+                        relatives=extra,
+                    ),
+                )
+        return out
 
     def _attach_file_locations(
         self, records: list[RecordDTO], shapes: SchemaResolver | None = None
@@ -2061,13 +2172,29 @@ class RecordService:
         self, schema_name: str, records: list[RecordDTO], columns: list[str]
     ) -> list[RecordDTO]:
         """Fill `derived` with the requested columns a record's own data
-        can't answer: fields inherited from an ancestor record, and
-        `ref_field.target_field` joins. Ancestors and join targets are each
-        batch-loaded once per level, not once per row. A column that no
-        longer resolves (a field or target schema renamed after a view was
-        saved) is left out rather than raised -- this runs at read time,
-        long after create/update validation."""
-        schema = self._schema_svc.get(schema_name)
+        can't answer (see `_derived_values`)."""
+        values = self._derived_values(schema_name, records, columns)
+        if not any(values):
+            return records
+        return [
+            dataclasses.replace(record, derived=derived)
+            for record, derived in zip(records, values)
+        ]
+
+    def _derived_values(
+        self, schema_name: str, records: list[RecordDTO], columns: list[str]
+    ) -> list[dict[str, Any]]:
+        """Per record (all of one schema, name-keyed), the requested columns its
+        own data can't answer: fields inherited from an ancestor record, and
+        `ref_field.target_field` joins (the reference may itself be inherited).
+        Ancestors and join targets are each batch-loaded once per level, not
+        once per row. A column that no longer resolves (a field or target
+        schema renamed after a view was saved) is left out rather than raised
+        -- this runs at read time, long after create/update validation."""
+        try:
+            schema = self._schema_svc.get(schema_name)
+        except NotFoundError:
+            return [{} for _ in records]
         related = self._relations(schema)
         own = {f.name for f in schema.fields}
 
@@ -2111,7 +2238,7 @@ class RecordService:
             elif col not in own and (located := plain(col)) is not None:
                 plans[col] = ("inherited", located)
         if not plans:
-            return records
+            return [{} for _ in records]
 
         chains = self._ancestor_chains(records, max(p[1][1] for p in plans.values()))
         id_to_name = self._schema_svc.id_to_name_map(schema)
@@ -2149,7 +2276,7 @@ class RecordService:
                         else None
                     )
                     derived[col] = target.data.get(plan[2]) if target else None
-            out.append(dataclasses.replace(record, derived=derived))
+            out.append(derived)
         return out
 
     def _ancestor_chains(

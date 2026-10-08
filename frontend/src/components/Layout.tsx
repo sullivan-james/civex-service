@@ -17,6 +17,7 @@ import {
 } from 'react-resizable-panels'
 import { useUISettings } from '../hooks/useUISettings'
 import { useRefreshOnSync, useRemoteStatus } from '../hooks/useRemote'
+import { useDesktopKeys } from '../hooks/useDesktopKeys'
 import { syncButtonState } from '../utils/syncState'
 import { useManualSync } from '../hooks/useSyncToasts'
 import { useFrequentCollections } from '../hooks/useFrequentCollections'
@@ -305,6 +306,7 @@ function SyncButton() {
 
 export default function Layout({ children }: { children: ReactNode }) {
   useRefreshOnSync()
+  useDesktopKeys()
   useDesktopZoomKeys()
   const isDesktop = useIsDesktop()
   const [aiOpen, setAiOpen] = useState(false)

@@ -190,7 +190,14 @@ def test_resolve_filename_no_template_returns_original() -> None:
     assert resolve_filename(_ref("original.pdf"), None, {}) == "original.pdf"
 
 
-def test_resolve_filename_substitutes_field_and_ext() -> None:
+def test_resolve_filename_substitutes_field_and_keeps_the_extension() -> None:
+    ref = _ref("upload.pdf")
+    assert resolve_filename(ref, "{invoice_number}", {"invoice_number": "INV-42"}) == (
+        "INV-42.pdf"
+    )
+
+
+def test_resolve_filename_reads_a_template_saved_with_the_extension() -> None:
     ref = _ref("upload.pdf")
     result = resolve_filename(
         ref, "{invoice_number}.{ext}", {"invoice_number": "INV-42"}
@@ -198,36 +205,34 @@ def test_resolve_filename_substitutes_field_and_ext() -> None:
     assert result == "INV-42.pdf"
 
 
-def test_resolve_filename_falls_back_when_field_blank() -> None:
+@pytest.mark.parametrize("blank", [None, "", "   "])
+def test_resolve_filename_skips_a_blank_value_and_its_separator(blank) -> None:
     ref = _ref("upload.pdf")
-    result = resolve_filename(ref, "{invoice_number}.{ext}", {"invoice_number": None})
-    assert result == "upload.pdf"
+    result = resolve_filename(
+        ref, "{site}_{invoice_number}", {"site": "north", "invoice_number": blank}
+    )
+    assert result == "north.pdf"
 
 
-def test_resolve_filename_falls_back_when_field_missing() -> None:
+def test_resolve_filename_keeps_the_original_only_when_nothing_is_left() -> None:
     ref = _ref("upload.pdf")
-    assert resolve_filename(ref, "{invoice_number}.{ext}", {}) == "upload.pdf"
-
-
-def test_resolve_filename_falls_back_when_field_blank_string() -> None:
-    ref = _ref("upload.pdf")
-    result = resolve_filename(ref, "{invoice_number}.{ext}", {"invoice_number": "   "})
-    assert result == "upload.pdf"
+    assert resolve_filename(ref, "{invoice_number}", {}) == "upload.pdf"
 
 
 def test_resolve_filename_sanitizes_path_separators_from_field_value() -> None:
     ref = _ref("upload.pdf")
     result = resolve_filename(
-        ref, "{invoice_number}.{ext}", {"invoice_number": "../../etc/passwd"}
+        ref, "{invoice_number}", {"invoice_number": "../../etc/passwd"}
     )
     assert "/" not in result
     assert result == ".._.._etc_passwd.pdf"
 
 
-def test_resolve_filename_ext_reflects_original_extension() -> None:
-    ref = _ref("scan.JPEG")
-    result = resolve_filename(ref, "photo.{ext}", {})
-    assert result == "photo.JPEG"
+def test_resolve_filename_keeps_the_original_extension_as_written() -> None:
+    assert resolve_filename(_ref("scan.JPEG"), "photo", {}) == "photo.JPEG"
+    assert resolve_filename(_ref("README"), "notes", {}) == "notes"
+    # A value that already ends with it isn't given it twice.
+    assert resolve_filename(_ref("a.wav"), "{n}", {"n": "take.wav"}) == "take.wav"
 
 
 def test_naive_datetime_assumed_utc() -> None:

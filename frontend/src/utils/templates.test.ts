@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   formatsFor,
   insertAt,
+  removeVariable,
   sampleValue,
   setVariableFormat,
   variablesIn,
@@ -52,5 +53,21 @@ describe('formats and samples', () => {
   it('samples a value of the right type', () => {
     expect(sampleValue('integer', 'n')).toBe(7)
     expect(sampleValue('string', 'Site')).toBe('Site')
+  })
+})
+
+describe('removeVariable', () => {
+  it('drops a variable with the separator before it', () => {
+    expect(removeVariable('{a}_{b}_{c}', 1)).toBe('{a}_{c}')
+    expect(removeVariable('{a} - {b}', 1)).toBe('{a}')
+  })
+
+  it('drops the separator after the first variable', () => {
+    expect(removeVariable('{a}_{b}', 0)).toBe('{b}')
+    expect(removeVariable('{a}', 0)).toBe('')
+  })
+
+  it('leaves the template alone for an unknown index', () => {
+    expect(removeVariable('{a}', 3)).toBe('{a}')
   })
 })

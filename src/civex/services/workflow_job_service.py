@@ -352,9 +352,12 @@ class WorkflowJobService:
             affected_schema=affected_schema,
         )
 
-    def run_ids(self, where: Any, limit: int = 1000) -> list[uuid.UUID]:
-        """Ids of every run a filter matches (newest first, at most `limit`)."""
-        return self._repo.ids_matching(_parsed(where), limit)
+    def run_ids(
+        self, where: Any, limit: int | None = 1000, search: str | None = None
+    ) -> list[uuid.UUID]:
+        """Ids of every run a filter (and search) matches, newest first, at
+        most `limit` (None: all of them)."""
+        return self._repo.ids_matching(_parsed(where), limit, search)
 
     def failure_groups(self, where: Any = None) -> list[dict]:
         """Failed runs a filter matches, grouped by workflow and what went wrong."""

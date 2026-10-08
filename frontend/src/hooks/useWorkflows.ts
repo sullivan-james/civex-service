@@ -10,6 +10,7 @@ import {
   jobsApi,
   workflowsApi,
   type AutomationStatus,
+  type RunPick,
   type RunQuery,
   type WorkflowJob,
 } from '../api/workflows'
@@ -208,8 +209,7 @@ export function useJob(id: string) {
 export function useRerunJobs() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (which: { ids: string[] } | { filter: FilterTreeWire }) =>
-      jobsApi.rerunMany(which),
+    mutationFn: (which: RunPick) => jobsApi.rerunMany(which),
     onSuccess: () => refreshRuns(qc),
   })
 }
@@ -219,8 +219,7 @@ export function useRerunJobs() {
 export function useDeleteJobs() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (which: { ids: string[] } | { filter: FilterTreeWire }) =>
-      jobsApi.deleteMany(which),
+    mutationFn: (which: RunPick) => jobsApi.deleteMany(which),
     onSuccess: () => {
       refreshRuns(qc)
       qc.invalidateQueries({ queryKey: ['job'] })

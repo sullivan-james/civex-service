@@ -11,9 +11,11 @@ joined by ``|``::
     {title:slug|trunc(20)}       chained, left to right
 
 Variables are field names or one of the reserved built-ins a caller supplies
-(``schema``, ``id``, ``ext``). ``{site.name}`` reaches one field of the record
-a reference field ``site`` points at (one hop, never deeper); the caller
-resolves it and hands ``render`` a value under the key ``"site.name"``. Rendering only reads values it is handed, so
+(``schema``, ``id``). ``{site.name}`` reaches one field of the record a
+reference field ``site`` points at (one hop, never deeper); the caller resolves
+it and hands ``render`` a value under the key ``"site.name"``. A file name
+template names only the file's stem: the extension is always the file's own,
+added after rendering (``file_stem_template``), never written by a person. Rendering only reads values it is handed, so
 nothing here touches a database; ``rename_field`` / ``remove_field`` keep a
 stored template pointing at fields that exist.
 
@@ -37,7 +39,10 @@ UNNAMEABLE_DTYPES = frozenset(
 )
 
 BUILTINS_RECORD = ("schema", "id")
-BUILTINS_FILE = ("schema", "id", "ext")
+# `{ext}` is no longer offered: the extension is added for you. Templates saved
+# before keep rendering (a trailing `.{ext}` is dropped by file_stem_template).
+BUILTINS_FILE = ("schema", "id")
+_TRAILING_EXT_RE = re.compile(r"\.?\{ext\}\s*\Z")
 
 OnMissing = Literal["skip", "fallback", "empty"]
 
@@ -196,6 +201,34 @@ def validate(
             )
     if unknown:
         raise ValidationError(f"Template uses unknown variable(s) {sorted(unknown)}")
+
+
+def file_stem_template(template: str) -> str:
+    """A file name template without the extension a template saved before the
+    extension was added automatically ended with (``{a}.{ext}`` -> ``{a}``)."""
+    return _TRAILING_EXT_RE.sub("", template).rstrip()
+
+
+def check_file_template(template: str) -> str:
+    """The file name template to store: a trailing ``.{ext}`` dropped (the file
+    keeps its own extension anyway). Raises ValidationError if ``{ext}`` is
+    still used elsewhere, since the extension is never chosen by a template."""
+    stem = file_stem_template(template)
+    if "ext" in referenced_names(stem):
+        raise ValidationError(
+            "{ext} can't be used: the file's own extension is added at the end for you"
+        )
+    return stem
+
+
+def with_extension(stem: str, original: str) -> str:
+    """`stem` with the extension of the file name `original`, unless it
+    already ends with it."""
+    dot = original.rfind(".")
+    ext = original[dot:] if dot > 0 else ""
+    if not ext or stem.lower().endswith(ext.lower()):
+        return stem
+    return stem + ext
 
 
 def _is_blank(value: Any) -> bool:

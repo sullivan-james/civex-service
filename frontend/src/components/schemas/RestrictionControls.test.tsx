@@ -275,9 +275,10 @@ describe('filename template and schema controls', () => {
       />,
     )
     await userEvent.click(screen.getByRole('button', { name: 'Deployment' }))
-    await userEvent.type(screen.getByLabelText('Download file name'), '_clip.')
-    await userEvent.click(screen.getByRole('button', { name: '{ext}' }))
-    expect(rules()).toEqual({ filename_template: '{deployment_id}_clip.{ext}' })
+    await userEvent.type(screen.getByLabelText('Download file name'), '_clip')
+    // The extension is the file's own: nothing to insert for it.
+    expect(screen.queryByRole('button', { name: /ext/ })).toBeNull()
+    expect(rules()).toEqual({ filename_template: '{deployment_id}_clip' })
   })
 
   it('wants a target schema', async () => {

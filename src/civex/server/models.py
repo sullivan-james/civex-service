@@ -143,8 +143,9 @@ class PreviewNameRequest(BaseModel):
     kind: Literal["record", "file"] = Field(
         default="record",
         description=(
-            "'record' renders a record's name; 'file' renders a download name, "
-            "where `{ext}` is available and a blank value makes the result null."
+            "'record' renders a record's name; 'file' renders a download name: "
+            "the stem, with an example extension added (the file always keeps "
+            "its own), so `{ext}` can't be used."
         ),
     )
 
@@ -1266,6 +1267,16 @@ class RerunJobsRequest(BaseModel):
         description="Instead of ids: repeat every run this filter matches (the "
         "same filter tree as GET /jobs, at most 1000 runs).",
     )
+    search: str | None = Field(
+        default=None,
+        description="Instead of ids, or with filter: only the runs this search "
+        "matches, as GET /jobs?search= lists them.",
+    )
+
+
+class SkippedJob(BaseModel):
+    id: str
+    reason: str = Field(description="Why this run could not be repeated.")
 
 
 class DeleteJobsRequest(BaseModel):
@@ -1278,17 +1289,21 @@ class DeleteJobsRequest(BaseModel):
     filter: dict[str, Any] | None = Field(
         default=None,
         description="Instead of ids: delete every run this filter matches (the "
-        "same filter tree as GET /jobs, at most 1000 runs).",
+        "same filter tree as GET /jobs), however many.",
+    )
+    search: str | None = Field(
+        default=None,
+        description="Instead of ids, or with filter: only the runs this search "
+        "matches, as GET /jobs?search= lists them.",
+    )
+    every: bool = Field(
+        default=False,
+        description="With no ids, filter or search: delete every run.",
     )
 
 
 class DeleteJobsResponse(BaseModel):
     deleted: int = Field(description="How many runs were deleted.")
-
-
-class SkippedJob(BaseModel):
-    id: str
-    reason: str = Field(description="Why this run could not be repeated.")
 
 
 class RerunJobsResponse(BaseModel):

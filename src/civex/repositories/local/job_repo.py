@@ -413,15 +413,21 @@ class LocalWorkflowJobRepository:
         many there were."""
         if not ids:
             return 0
-        criteria = [WorkflowJob.id.in_(ids)]
-        runs = self._s.query(WorkflowJob).filter(*criteria).count()
-        bulk_delete_jobs(self._s, *criteria)
+        runs = 0
+        # In chunks: SQLite allows only so many parameters in one statement.
+        for start in range(0, len(ids), 500):
+            criteria = [WorkflowJob.id.in_(ids[start : start + 500])]
+            runs += self._s.query(WorkflowJob).filter(*criteria).count()
+            bulk_delete_jobs(self._s, *criteria)
         self._s.expire_all()
         return runs
 
-    def ids_matching(self, where: FilterNode | None, limit: int) -> list[uuid.UUID]:
-        """Ids of the runs a filter matches, newest first, at most `limit`."""
-        q = _narrow(self._s.query(WorkflowJob.id), None, None, None, None, where)
+    def ids_matching(
+        self, where: FilterNode | None, limit: int | None, search: str | None = None
+    ) -> list[uuid.UUID]:
+        """Ids of the runs a filter (and search) matches, newest first, at
+        most `limit` (None: all of them)."""
+        q = _narrow(self._s.query(WorkflowJob.id), None, None, search, None, where)
         return [r[0] for r in q.order_by(*_order(None)).limit(limit).all()]
 
     def failure_groups(self, where: FilterNode | None) -> list[dict]:

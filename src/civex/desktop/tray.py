@@ -657,6 +657,10 @@ def main() -> None:
     _setup_logging()
     _log.info("civex desktop starting (log: %s)", _LOG_FILE)
 
+    # Off by default in pywebview: every download (a file, a zip, a dump) was
+    # silently cancelled. On, each one opens the OS's own Save dialog.
+    webview.settings["ALLOW_DOWNLOADS"] = True
+
     api = _Api()
     _window = webview.create_window(
         "civex",
