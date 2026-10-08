@@ -408,6 +408,17 @@ class LocalWorkflowJobRepository:
         self._s.expire_all()
         return runs
 
+    def delete_jobs(self, ids: list[uuid.UUID]) -> int:
+        """Remove these runs, whatever their state, with their step logs. How
+        many there were."""
+        if not ids:
+            return 0
+        criteria = [WorkflowJob.id.in_(ids)]
+        runs = self._s.query(WorkflowJob).filter(*criteria).count()
+        bulk_delete_jobs(self._s, *criteria)
+        self._s.expire_all()
+        return runs
+
     def ids_matching(self, where: FilterNode | None, limit: int) -> list[uuid.UUID]:
         """Ids of the runs a filter matches, newest first, at most `limit`."""
         q = _narrow(self._s.query(WorkflowJob.id), None, None, None, None, where)

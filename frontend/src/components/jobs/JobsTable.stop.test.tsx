@@ -42,6 +42,7 @@ let groups: Record<string, unknown>[]
 let recordGroups: Record<string, unknown>[]
 let groupQueries: URLSearchParams[]
 let rerunPayloads: Record<string, unknown>[]
+let deletePayloads: Record<string, unknown>[]
 
 const RUN_FIELDS = [
   ['workflow', 'Workflow', 'string', ['eq', 'ne', 'in', 'is_null']],
@@ -78,6 +79,7 @@ beforeEach(() => {
   recordGroups = []
   groupQueries = []
   rerunPayloads = []
+  deletePayloads = []
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -99,6 +101,10 @@ beforeEach(() => {
         )
       }
       if (url.pathname === '/api/schemas') return json([])
+      if (url.pathname === '/api/jobs/delete') {
+        deletePayloads.push(JSON.parse(String(init?.body)))
+        return json({ deleted: 1 })
+      }
       if (url.pathname === '/api/jobs/rerun') {
         const payload = JSON.parse(String(init?.body)) as {
           ids?: string[]
@@ -151,6 +157,29 @@ function renderIt(recordId?: string, url = '/') {
     </QueryClientProvider>,
   )
 }
+
+describe('Runs table: deleting runs', () => {
+  it('deletes the ticked runs after asking, so a waiting one never starts', async () => {
+    jobs = [job({ status: 'pending' })]
+    const user = userEvent.setup()
+    renderIt()
+
+    await user.click(
+      await screen.findByRole('checkbox', { name: 'Select the compute run' }),
+    )
+    await user.click(screen.getByRole('button', { name: /Delete 1/ }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/A waiting run never starts/)).toBeTruthy()
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() =>
+      expect(deletePayloads).toEqual([
+        { ids: ['aaaaaaaa-0000-4000-8000-000000000001'] },
+      ]),
+    )
+    expect(await screen.findByText('Deleted 1 run.')).toBeTruthy()
+  })
+})
 
 describe('Runs table: stopping and what started a run', () => {
   it('can cancel a run that is waiting or running, but not one that finished', async () => {

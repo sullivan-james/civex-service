@@ -96,9 +96,17 @@ class SyncConfig:
     # (fetched when opened or exported; its copies can be removed to free
     # space). Keyed by id like placement, so a rename changes nothing.
     collection_files: dict[str, str] = field(default_factory=dict)
+    # Serving: what devices may publish to this authority's library of shared
+    # workflows and plugins (`LIBRARY_MODES`, `domain/library.py`). "off": none;
+    # "workflows": workflow files only (they can name only plugins already
+    # shared or built in); "all": plugins too, which are code that a person who
+    # installs them runs. Only devices allowed to publish may (`civex sync
+    # device allow-publish`); downloading needs only being a device.
+    library: str = "workflows"
 
 
 DOWNLOAD_MODES = ("all", "opened")
+LIBRARY_MODES = ("off", "workflows", "all")
 COLLECTION_FILE_MODES = ("keep", "opened")
 
 
@@ -400,6 +408,11 @@ def load_config() -> Config:
             for cid, mode in (sync_data.get("collection_files") or {}).items()
             if mode in COLLECTION_FILE_MODES
         },
+        library=(
+            str(sync_data.get("library"))
+            if sync_data.get("library") in LIBRARY_MODES
+            else "workflows"
+        ),
     )
 
     return Config(
@@ -548,6 +561,7 @@ def save_config(config: Config) -> None:
         or sync.paused
         or sync.interval_seconds != 60
         or sync.download_files != "all"
+        or sync.library != "workflows"
     ):
         lines.append("\n[sync]\n")
         if sync.remote:
@@ -560,6 +574,8 @@ def save_config(config: Config) -> None:
             lines.append(f"interval_seconds = {sync.interval_seconds}\n")
         if sync.download_files != "all":
             lines.append(f"download_files = {_tv(sync.download_files)}\n")
+        if sync.library != "workflows":
+            lines.append(f"library = {_tv(sync.library)}\n")
     if sync.collection_files:
         lines.append("\n[sync.collection_files]\n")
         for cid, mode in sorted(sync.collection_files.items()):

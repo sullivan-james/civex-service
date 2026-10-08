@@ -262,6 +262,60 @@ schema change can touch several fields. If such an action can't go in whole, non
 of it goes in: the device is sent back the authority's state, and the review says
 it was **not taken**.
 
+## Sharing workflows and plugins
+
+Workflows and plugins don't sync as you edit them. A plugin is code, and running
+it means trusting whoever wrote it. So you share them on purpose instead, through
+the authority's **library**: one person publishes, and a person on another
+computer installs.
+
+- **Nothing arrives by itself.** What you publish is kept as text in the
+  authority's database. It is never written into a project's `_civex/workflows`
+  or `_civex/plugins`, so nothing anyone sent can run until someone on that
+  computer chooses to install it. That includes the authority itself: civex runs
+  a plugin just to find out what it does, so even that waits for an install.
+- **A workflow goes with its plugins.** Publishing a workflow also sends the
+  plugins its steps use (not the built-in ones). Installing it installs them too.
+  A workflow whose plugins are nowhere can't be published or installed.
+- **Installing shows what it writes first:** every file, whether it is new or
+  replaces yours, who published it, its version and hash, and what starts the
+  workflow by itself. A plugin's code can be read before it is installed, and the
+  app asks you to confirm you trust it. A file that differs from yours is only
+  replaced if you say so.
+- **The authority checks what it is sent without running it.** It checks the
+  names (so no file can land outside its folder) and the size (256 KB at most).
+  A workflow must parse, and YAML aliases are refused, because a few lines of them
+  can expand into gigabytes. A plugin must be valid Python that defines `Plugin`,
+  and can't take a built-in plugin's id. What arrives is checked against its hash,
+  on the authority and again when it is installed.
+
+The authority's admin decides who may publish and what:
+
+```bash
+civex sync authority library workflows   # off | workflows (the default) | all
+civex sync device allow-publish laptop   # deny-publish takes it back
+```
+
+`workflows` takes workflow files only, which can use only built-in plugins and
+plugins already in the library. `all` also takes plugins. No device may publish
+until it is allowed, and every device may read the library. The authority's own
+computer may always publish. Settings → Sync has the same controls.
+
+On any computer, the library is under **Workflows → Shared**, or:
+
+```bash
+civex sync library list                     # what is shared, and where each stands here
+civex sync library publish workflow tidy    # with the plugins it uses
+civex sync library show plugin my_step      # read it first
+civex sync library install workflow tidy    # asks before writing anything
+civex sync library remove workflow tidy     # copies already installed stay
+```
+
+The authority installs from its library just as a device does. A workflow it
+installs runs there like on any other computer: when someone edits a record on
+the authority, or runs the workflow by hand. Changes that arrive by sync never
+start a workflow, on the authority or on a device.
+
 ## When changes collide
 
 | What happened | Result |
@@ -387,7 +441,8 @@ with an invite of its own.
 Schemas, fields, collections, saved views, records and their files sync. These
 don't, and stay on each computer:
 
-- Saved exports (export definitions) and workflows.
+- Saved exports (export definitions). Workflows and plugins are shared on purpose
+  instead (see [Sharing workflows and plugins](#sharing-workflows-and-plugins)).
 - Settings in `config.toml`: storage volumes, retention, the map, automation.
 - Workflow runs and their logs.
 - Pins and recent items, which are kept by each browser.

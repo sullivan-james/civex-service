@@ -11,6 +11,8 @@ from civex.server.deps import get_ctx
 from civex.domain.run_filters import RUN_FIELDS
 from civex.server.models import (
     AutomationStatusResponse,
+    DeleteJobsRequest,
+    DeleteJobsResponse,
     FailureGroupResponse,
     RunFieldResponse,
     RerunJobsRequest,
@@ -239,6 +241,37 @@ def drain_jobs(background_tasks: BackgroundTasks):
     """Kick off the worker to process all pending jobs."""
     background_tasks.add_task(run_pending_jobs)
     return {"status": "draining"}
+
+
+@router.post("/delete", response_model=DeleteJobsResponse)
+def delete_jobs(body: DeleteJobsRequest, ctx: AppContext = Depends(get_ctx)):
+    """Delete runs, whatever their state. A waiting run never starts; a running
+    one stops before its next step; a finished one is removed with its step
+    log. What a run already changed in records stays (and is in their history)."""
+    if (body.ids is None) == (body.filter is None):
+        raise HTTPException(422, detail="Give either ids or filter.")
+    if body.ids is not None:
+        try:
+            ids = [uuid.UUID(i) for i in body.ids]
+        except ValueError:
+            raise HTTPException(422, detail="Not a run id.")
+    else:
+        ids = ctx.job_svc.run_ids(body.filter)
+    deleted = ctx.job_svc.delete_runs(ids)
+    ctx.commit()
+    return DeleteJobsResponse(deleted=deleted)
+
+
+@router.delete("/{job_id}", status_code=204)
+def delete_job(job_id: str, ctx: AppContext = Depends(get_ctx)):
+    """Delete one run, whatever its state (see POST /jobs/delete)."""
+    try:
+        run = uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(400, detail="Invalid job ID")
+    if not ctx.job_svc.delete_runs([run]):
+        raise HTTPException(404, detail=f"Job '{job_id}' not found")
+    ctx.commit()
 
 
 @router.post("/{job_id}/rerun", response_model=WorkflowJobResponse, status_code=202)

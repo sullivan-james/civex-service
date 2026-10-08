@@ -334,3 +334,51 @@ def worker_cancel(
     console.print(
         f"[warning]Cancelled {job.workflow_name} ({str(job.id)[:8]}…).[/warning]"
     )
+
+
+@app.command("delete")
+def worker_delete(
+    job_ids: list[str] = typer.Argument(None, help="Run IDs or short prefixes"),
+    pending: bool = typer.Option(
+        False, "--pending", help="Every run still waiting to start."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask first."),
+) -> None:
+    """Delete runs, so a waiting one never starts.
+
+    A running run stops before its next step; a finished one is removed with its
+    log. What a run already changed in records stays, in their history.
+    """
+    if not job_ids and not pending:
+        console.print("[error]Name runs to delete, or use --pending.[/error]")
+        raise typer.Exit(1)
+    ctx = get_ctx()
+    try:
+        jobs = ctx.job_svc.list_jobs(status="pending") if pending else []
+        if job_ids:
+            every = ctx.job_svc.list_jobs()
+            for prefix in job_ids:
+                found = [j for j in every if str(j.id).startswith(prefix)]
+                if len(found) != 1:
+                    console.print(
+                        f"[error]'{prefix}' matches {len(found)} runs: give more of "
+                        "its id.[/error]"
+                    )
+                    raise typer.Exit(1)
+                jobs.append(found[0])
+        jobs = list({j.id: j for j in jobs}.values())
+        if not jobs:
+            console.print("Nothing to delete.")
+            return
+        for j in jobs:
+            console.print(
+                f"  {str(j.id)[:8]}…  {j.workflow_name}  [dim]{j.status}[/dim]"
+            )
+        noun = "run" if len(jobs) == 1 else "runs"
+        if not yes and not typer.confirm(f"Delete {len(jobs)} {noun}?"):
+            raise typer.Exit(1)
+        deleted = ctx.job_svc.delete_runs([j.id for j in jobs])
+        ctx.commit()
+    finally:
+        ctx.close()
+    console.print(f"Deleted {deleted} {'run' if deleted == 1 else 'runs'}.")

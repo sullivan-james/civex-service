@@ -87,6 +87,11 @@ class DeviceKeys:
     def revoke_device(self, name: str) -> bool:
         return self._repo.revoke_device(name)
 
+    def allow_publish(self, name: str, allowed: bool) -> bool:
+        """Whether a device may publish workflows (and, if the library takes
+        them, plugins) to the library. False: no such device."""
+        return self._repo.set_may_publish(name, allowed)
+
     def has_key(self) -> bool:
         return self._repo.authority_key() is not None
 

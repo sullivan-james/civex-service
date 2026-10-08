@@ -214,6 +214,9 @@ export const jobsApi = {
   /** Repeat several runs in one request. */
   rerunMany: (which: { ids: string[] } | { filter: FilterTreeWire }) =>
     api.post<RerunResult>('/jobs/rerun', which),
+  /** Delete runs, whatever their state: a waiting one never starts. */
+  deleteMany: (which: { ids: string[] } | { filter: FilterTreeWire }) =>
+    api.post<{ deleted: number }>('/jobs/delete', which),
   filterFields: () => api.get<RunFilterField[]>('/jobs/filter-fields'),
   failureGroups: (filter?: FilterTreeWire | null) =>
     api.get<FailureGroup[]>(

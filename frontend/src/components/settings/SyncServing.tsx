@@ -1,16 +1,24 @@
 import { useState } from 'react'
-import type { SyncDevice, SyncInvite } from '../../api/remote'
+import type { LibraryMode, SyncDevice, SyncInvite } from '../../api/remote'
 import { useAuthority, useAuthorityActions } from '../../hooks/useRemote'
 import { errorMessage } from '../../lib/errors'
 import {
   Button,
   Card,
+  Checkbox,
   ConfirmDialog,
   DataTable,
   Field,
   Input,
+  SegmentedControl,
   type DataTableColumn,
 } from '../ui'
+
+const LIBRARY_MODES: { value: LibraryMode; label: string }[] = [
+  { value: 'off', label: 'Nothing' },
+  { value: 'workflows', label: 'Workflows' },
+  { value: 'all', label: 'Workflows and plugins' },
+]
 
 function when(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString() : 'never'
@@ -41,8 +49,14 @@ const INVITES: DataTableColumn<SyncInvite>[] = [
  * authority` and `civex sync device`, through the same calls. */
 export function SyncServing() {
   const { data } = useAuthority()
-  const { setServing, invite, cancelInvite, revokeDevice } =
-    useAuthorityActions()
+  const {
+    setServing,
+    invite,
+    cancelInvite,
+    revokeDevice,
+    setLibrary,
+    allowPublish,
+  } = useAuthorityActions()
   const [name, setName] = useState('')
   const [issued, setIssued] = useState<{ name: string; invite: string } | null>(
     null,
@@ -50,7 +64,30 @@ export function SyncServing() {
   const [revoking, setRevoking] = useState<string | null>(null)
   if (!data) return null
   const failure =
-    setServing.error ?? invite.error ?? cancelInvite.error ?? revokeDevice.error
+    setServing.error ??
+    invite.error ??
+    cancelInvite.error ??
+    revokeDevice.error ??
+    setLibrary.error ??
+    allowPublish.error
+  const devices: DataTableColumn<SyncDevice>[] = [
+    ...DEVICES,
+    {
+      key: 'publish',
+      header: 'May publish',
+      render: (d) =>
+        d.revoked ? null : (
+          <Checkbox
+            checked={d.may_publish}
+            disabled={allowPublish.isPending || data.library === 'off'}
+            aria-label={`${d.name} may publish to the library`}
+            onChange={(e) =>
+              allowPublish.mutate({ name: d.name, allowed: e.target.checked })
+            }
+          />
+        ),
+    },
+  ]
 
   return (
     <Card
@@ -79,7 +116,7 @@ export function SyncServing() {
         )}
         {data.devices.length > 0 && (
           <DataTable
-            columns={DEVICES}
+            columns={devices}
             rows={data.devices}
             getRowId={(d) => `${d.name}-${d.created_at}`}
             dense
@@ -95,6 +132,20 @@ export function SyncServing() {
               )
             }
           />
+        )}
+        {data.serving && (
+          <Field
+            label="Devices may share"
+            info="Ticked devices may publish to the library, for others to install. Plugins are code: whoever installs one runs it."
+          >
+            <SegmentedControl
+              label="What devices may share"
+              size="sm"
+              options={LIBRARY_MODES}
+              value={data.library}
+              onChange={(mode) => setLibrary.mutate(mode)}
+            />
+          </Field>
         )}
         {data.invites.length > 0 && (
           <DataTable

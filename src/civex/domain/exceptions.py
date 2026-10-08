@@ -41,6 +41,13 @@ class ValidationError(CivexError):
     kind = "validation_error"
 
 
+class NotAllowedError(CivexError):
+    """Whoever asked may not do this (a device publishing to a library it
+    hasn't been allowed to). The API answers 403."""
+
+    kind = "not_allowed"
+
+
 class FieldValueError(ValidationError):
     """A value its field doesn't allow. `path` names the field as a history
     entry does (`data.<field id>`), so whoever shows the refusal can show the

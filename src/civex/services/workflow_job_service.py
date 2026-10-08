@@ -137,6 +137,15 @@ class WorkflowJobService:
             raise NotFoundError(f"No job '{job_id}'")
         return job
 
+    def delete_runs(self, ids: list[uuid.UUID]) -> int:
+        """Delete runs, whatever their state, with their step logs. A waiting
+        run never starts (claiming takes only a row still there); a running one
+        stops before its next step (`should_stop` finds no row) and what it
+        reports at the end is dropped; a finished one is just gone. The changes
+        a run already made to records stay, in their history. How many were
+        deleted."""
+        return self._repo.delete_jobs(list(dict.fromkeys(ids)))
+
     def should_stop(self, job_id: uuid.UUID) -> bool:
         """Asked by a running job between steps: has it been cancelled (from
         another request or process), or has automation been paused?"""

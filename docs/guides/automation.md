@@ -159,7 +159,14 @@ civex automation stop            # pause everything and cancel waiting and runni
 civex automation status          # paused or running, and how many runs wait or run
 civex automation resume          # start again
 civex automation cancel <job>    # one run
+civex automation delete <job>…   # delete runs; a waiting one never starts
+civex automation delete --pending  # every run still waiting
 ```
+
+**Delete** runs from the Runs page by ticking them (or with a filter: **Delete
+all N…**). Deleting is stronger than cancelling. A waiting run never starts, a
+running one stops before its next step, and a finished one is removed with its log.
+What a run already changed in records stays, and is in their history.
 
 The pause is saved in `_civex/config.toml` (`[automation] paused = true`), so it
 survives a restart and applies to the server and every terminal alike.
