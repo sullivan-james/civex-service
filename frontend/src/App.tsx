@@ -17,6 +17,7 @@ const RecordDetailPage = lazy(() => import('./pages/RecordDetailPage'))
 const NewRecordPage = lazy(() => import('./pages/NewRecordPage'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 const WorkflowEditorPage = lazy(() => import('./pages/WorkflowEditorPage'))
+const WorkflowPage = lazy(() => import('./pages/WorkflowPage'))
 const JobsPage = lazy(() => import('./pages/JobsPage'))
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
 /** The old Recently Deleted address: history showing what is deleted. */
@@ -102,6 +103,7 @@ export default function App() {
               path="/workflows/new"
               element={<WorkflowEditorPage isNew />}
             />
+            <Route path="/workflows/:stem" element={<WorkflowPage />} />
             <Route
               path="/workflows/:stem/edit"
               element={<WorkflowEditorPage />}

@@ -59,5 +59,20 @@ class WorkflowDef(BaseModel):
     steps: list[StepDef]
 
 
+def trigger_summaries(wf: WorkflowDef) -> list[str]:
+    """What starts a workflow by itself, one line per trigger ("record_created
+    on sample (site, depth)"): what the list and the library show."""
+    out = []
+    for event in ("record_created", "record_updated"):
+        trigger = getattr(wf.triggers, event, None) if wf.triggers else None
+        if trigger is None:
+            continue
+        text = f"{event} on {trigger.schema_name}"
+        if trigger.fields:
+            text += f" ({', '.join(trigger.fields)})"
+        out.append(text)
+    return out
+
+
 def load_workflow(path: Path) -> WorkflowDef:
     return WorkflowDef.model_validate(yaml.safe_load(path.read_text()))

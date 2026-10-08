@@ -34,7 +34,7 @@ from civex.server.models import (
     WorkflowStepResponse,
     WorkflowTriggerResponse,
 )
-from civex.workflows.definition import WorkflowDef
+from civex.workflows.definition import WorkflowDef, trigger_summaries
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
@@ -86,6 +86,7 @@ def list_workflows(ctx: AppContext = Depends(get_ctx)):
                 for k, v in (wf.inputs or {}).items()
             }
             or None,
+            runs_on=trigger_summaries(wf),
         )
         for path, wf in ctx.workflow_svc.list_defs()
     ]

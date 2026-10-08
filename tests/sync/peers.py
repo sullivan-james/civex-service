@@ -228,24 +228,22 @@ class Loopback:
             lambda lib: [i.to_dict(with_content=False) for i in lib.listing()]
         )
 
-    def library_item(self, kind, name):
+    def library_item(self, kind, name, version=None):
         self.calls.append("library_item")
-        return self._library(lambda lib: lib.item(kind, name).to_dict())
+        return self._library(lambda lib: lib.item(kind, name, version).to_dict())
 
     def publish(self, items):
         from civex.domain.library import LibraryItemDTO
 
         self.calls.append("publish")
         sent = [LibraryItemDTO.from_dict(wire(i)) for i in items]
-        return self._library(
-            lambda lib: [
-                i.to_dict(with_content=False) for i in lib.accept(self._device, sent)
-            ]
-        )
+        return self._library(lambda lib: lib.accept(self._device, sent).to_dict())
 
-    def unpublish(self, kind, name, force=False):
+    def unpublish(self, kind, name, version=None, force=False):
         self.calls.append("unpublish")
-        self._library(lambda lib: lib.withdraw(self._device, kind, name, force))
+        self._library(
+            lambda lib: lib.withdraw(self._device, kind, name, version, force)
+        )
 
 
 class Flaky:

@@ -277,17 +277,43 @@ computer installs.
 - **A workflow goes with its plugins.** Publishing a workflow also sends the
   plugins its steps use (not the built-in ones). Installing it installs them too.
   A workflow whose plugins are nowhere can't be published or installed.
-- **Installing shows what it writes first:** every file, whether it is new or
-  replaces yours, who published it, its version and hash, and what starts the
-  workflow by itself. A plugin's code can be read before it is installed, and the
-  app asks you to confirm you trust it. A file that differs from yours is only
-  replaced if you say so.
+- **Installing shows what it writes first:** every file, whether it is new, an
+  update or replaces yours, who published it, its version and hash, and what
+  starts the workflow by itself. A plugin's code can be read before it is
+  installed, and the app asks you to confirm you trust it.
 - **The authority checks what it is sent without running it.** It checks the
   names (so no file can land outside its folder) and the size (256 KB at most).
   A workflow must parse, and YAML aliases are refused, because a few lines of them
   can expand into gigabytes. A plugin must be valid Python that defines `Plugin`,
   and can't take a built-in plugin's id. What arrives is checked against its hash,
   on the authority and again when it is installed.
+
+### Versions
+
+Every time you publish something that has changed, it becomes the next version
+(v1, v2, v3…), and every version is kept. Publishing the same text again changes
+nothing.
+
+- **A workflow remembers its plugins' versions.** It is published together with
+  the plugins it uses, and remembers which version of each that was. Installing it
+  installs those versions, not the newest. Publishing a new version of a plugin
+  therefore changes nothing for anyone until they choose to update.
+- **An update is checked before it goes in.** Each plugin version carries what it
+  takes and gives (its inputs, outputs and settings). Before installing, civex
+  checks every workflow on your computer that uses the plugin against the new
+  version. If any would break, it names them and installs nothing unless you
+  choose **Install anyway**. It checks again against the new code itself before
+  writing anything.
+- **Breaking changes are better as a new plugin.** A plugin keeps its id in every
+  version. A change that breaks the workflows using it is better published as a
+  new plugin, with a new id and name, which can be installed beside the old one.
+  When you publish a version that would break a shared workflow, you are told so.
+  That workflow stays on the version it was published with.
+- **Rolling back** is installing an earlier version.
+- **A file you changed is never overwritten** unless you say so. Updating from one
+  library version to another needs no confirmation.
+
+### Who may publish
 
 The authority's admin decides who may publish and what:
 
@@ -301,14 +327,27 @@ plugins already in the library. `all` also takes plugins. No device may publish
 until it is allowed, and every device may read the library. The authority's own
 computer may always publish. Settings → Sync has the same controls.
 
-On any computer, the library is under **Workflows → Shared**, or:
+### In the app and the terminal
+
+The **Workflows** page lists your workflows and, while the project shares with a
+server, the ones in the library. A **Sharing** column says how each stands:
+*Not shared*, *Shared · v3*, *v2 here · v3 available*, *Changed here*, or
+*In the library* (not installed). Search and the **Show…** filter work on all of
+them, and each row's menu publishes, updates or installs.
+
+Each workflow has its own page. **Overview** says what it does. **Sharing** lists
+every version in the library, with the plugin versions each uses and which one
+you have. From there you install, update, roll back, publish changes or remove a
+version.
 
 ```bash
-civex sync library list                     # what is shared, and where each stands here
-civex sync library publish workflow tidy    # with the plugins it uses
-civex sync library show plugin my_step      # read it first
-civex sync library install workflow tidy    # asks before writing anything
-civex sync library remove workflow tidy     # copies already installed stay
+civex sync library list                          # what is shared, and where each stands here
+civex sync library publish workflow tidy         # with the plugins it uses
+civex sync library show plugin my_step -v 2      # read a version first
+civex sync library install workflow tidy         # the newest; asks before writing anything
+civex sync library install plugin my_step -v 1   # roll back
+civex sync library install plugin my_step --force  # even though it breaks a workflow here
+civex sync library remove workflow tidy -v 1     # one version; copies already installed stay
 ```
 
 The authority installs from its library just as a device does. A workflow it

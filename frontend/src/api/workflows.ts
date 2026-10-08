@@ -15,6 +15,8 @@ export interface Workflow {
   stem: string
   record_schema: string | null
   inputs: Record<string, WorkflowInput> | null
+  /** What starts it by itself, one line each; empty if only run by hand. */
+  runs_on: string[]
 }
 
 export interface WorkflowTrigger {

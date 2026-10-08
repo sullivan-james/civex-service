@@ -1,8 +1,11 @@
 """sync: a library of shared workflows and plugins
 
-An authority keeps workflows and plugins that devices publish (`library_items`)
-as text, for a person on another computer to install (`domain/library.py`). A
-device may publish only once the admin allows it (`sync_devices.may_publish`).
+An authority keeps every version of the workflows and plugins that devices
+publish (`library_items`, one row per version) as text, for a person on another
+computer to install (`domain/library.py`). A workflow version pins the plugin
+versions it was published with; a plugin version carries the contract its
+publisher described. A device may publish only once the admin allows it
+(`sync_devices.may_publish`).
 
 Revision ID: b2d6f8a3c517
 Revises: a8c4e2f6b1d9
@@ -54,9 +57,13 @@ def upgrade() -> None:
             sa.Column("provides", sa.String(200), nullable=True),
             sa.Column("needs", _JSON, nullable=False),
             sa.Column("triggers", _JSON, nullable=False),
+            sa.Column("pins", _JSON, nullable=False),
+            sa.Column("contract", _JSON, nullable=True),
             sa.Column("published_by", sa.String(100), nullable=True),
             sa.Column("published_at", civex.db.models._UTCDateTime(), nullable=False),
-            sa.UniqueConstraint("kind", "name", name="uq_library_items_kind_name"),
+            sa.UniqueConstraint(
+                "kind", "name", "version", name="uq_library_items_kind_name_version"
+            ),
         )
 
 

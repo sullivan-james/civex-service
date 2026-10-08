@@ -23,6 +23,7 @@ const wf = (name: string, over: Partial<Workflow> = {}): Workflow => ({
   stem: name,
   record_schema: null,
   inputs: null,
+  runs_on: [],
   ...over,
 })
 

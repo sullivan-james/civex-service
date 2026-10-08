@@ -64,14 +64,28 @@ export interface Authority {
 
 export type LibraryMode = 'off' | 'workflows' | 'all'
 
-/** A workflow or plugin shared through the authority's library. */
+/** One published version of a library item. */
+export interface LibraryVersion {
+  version: number
+  sha256: string
+  published_by: string | null
+  published_at: string | null
+  /** A workflow: the plugin versions it was published with. */
+  pins: Record<string, number>
+}
+
+/** Where this computer's copy stands against a version: not here, exactly
+ * it, an earlier version from the library, or changed here. */
+export type LibraryHere = 'absent' | 'same' | 'older' | 'different'
+
+/** A workflow or plugin shared through the authority's library: one version
+ * (the newest, in a list), with its history. */
 export interface LibraryItem {
   kind: 'workflow' | 'plugin'
   name: string
   filename: string
   sha256: string
   size: number
-  /** How many times it has been published. */
   version: number
   /** A workflow's own name. */
   title: string | null
@@ -80,24 +94,49 @@ export interface LibraryItem {
   provides: string | null
   /** A workflow: the plugins its steps use. */
   needs: string[]
+  /** A workflow: the plugin versions it was published with. */
+  pins: Record<string, number>
   /** A workflow: what starts it by itself. */
   triggers: string[]
   published_by: string | null
   published_at: string | null
-  /** On this computer. */
-  here: 'absent' | 'same' | 'different' | null
+  /** Every version, newest first. */
+  history: LibraryVersion[]
+  here: LibraryHere | null
+  /** The library version this computer has, if any. */
+  local_version: number | null
   /** Plugins it needs that are neither here nor in the library. */
   missing: string[]
   content: string | null
 }
 
 export interface InstallPlan {
-  steps: { item: LibraryItem; path: string; here: LibraryItem['here'] }[]
+  steps: {
+    item: LibraryItem
+    path: string
+    here: LibraryHere
+    local_version: number | null
+  }[]
   /** Why it can't be installed as asked. */
   blocked: string[]
   warnings: string[]
+  /** What the new plugin versions would break among the workflows here. */
+  breaks: string[]
   /** It writes a plugin: code this computer will run. */
   runs_code: boolean
+}
+
+export interface PublishResult {
+  items: LibraryItem[]
+  /** Shared workflows still on an older version of a plugin that the new
+   * version would break. */
+  warnings: string[]
+}
+
+export interface InstallOptions {
+  version?: number | null
+  replace?: boolean
+  force?: boolean
 }
 
 export interface SyncProgress {
@@ -292,22 +331,40 @@ export const remoteApi = {
   /** The library: the same calls whether this project is the authority or
    * follows one. */
   library: () => api.get<LibraryItem[]>('/remote/library'),
-  libraryItem: (kind: string, name: string) =>
-    api.get<LibraryItem>(`/remote/library/${kind}/${encodeURIComponent(name)}`),
-  publish: (body: { kind: string; name: string; with_plugins: boolean }) =>
-    api.post<LibraryItem[]>('/remote/library/publish', body),
-  installPlan: (kind: string, name: string, replace: boolean) =>
-    api.get<InstallPlan>(
-      `/remote/library/${kind}/${encodeURIComponent(name)}/install?replace=${replace}`,
+  libraryItem: (kind: string, name: string, version?: number | null) =>
+    api.get<LibraryItem>(
+      `/remote/library/${kind}/${encodeURIComponent(name)}${version ? `?version=${version}` : ''}`,
     ),
-  install: (kind: string, name: string, replace: boolean) =>
+  publish: (body: { kind: string; name: string; with_plugins: boolean }) =>
+    api.post<PublishResult>('/remote/library/publish', body),
+  installPlan: (kind: string, name: string, options: InstallOptions) => {
+    const p = new URLSearchParams({
+      replace: String(!!options.replace),
+      force: String(!!options.force),
+    })
+    if (options.version) p.set('version', String(options.version))
+    return api.get<InstallPlan>(
+      `/remote/library/${kind}/${encodeURIComponent(name)}/install?${p}`,
+    )
+  },
+  install: (kind: string, name: string, options: InstallOptions) =>
     api.post<InstallPlan>(
       `/remote/library/${kind}/${encodeURIComponent(name)}/install`,
-      { replace, with_plugins: true },
+      {
+        version: options.version ?? null,
+        replace: !!options.replace,
+        force: !!options.force,
+        with_plugins: true,
+      },
     ),
-  unpublish: (kind: string, name: string, force: boolean) =>
+  unpublish: (
+    kind: string,
+    name: string,
+    version: number | null,
+    force: boolean,
+  ) =>
     api.delete<void>(
-      `/remote/library/${kind}/${encodeURIComponent(name)}?force=${force}`,
+      `/remote/library/${kind}/${encodeURIComponent(name)}?force=${force}${version ? `&version=${version}` : ''}`,
     ),
   /** Starts connecting: the answer comes once the address and invite are
    * checked (this computer joins with the invite then); copying then runs in
