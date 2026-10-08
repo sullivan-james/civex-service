@@ -422,21 +422,35 @@ class LibraryItemBody(BaseModel):
     provides: str | None = Field(
         default=None, description="A plugin: the plugin id it registers as."
     )
+    contract: dict[str, Any] | None = Field(
+        default=None,
+        description="A plugin: its contract (inputs, outputs, config schema) as "
+        "the publisher's computer described it.",
+    )
 
 
 class LibraryPublishRequest(BaseModel):
     items: list[LibraryItemBody] = Field(
         description="A workflow and the plugins it uses, or a plugin. Taken whole "
-        "or not at all.",
+        "or not at all; new text becomes the next version.",
         max_length=MAX_BUNDLE,
     )
 
 
 class LibraryListResponse(BaseModel):
     items: list[dict[str, Any]] = Field(
-        description="What the library holds, without the files' text: kind, name, "
-        "sha256, size, version, title, description, provides, needs, triggers, "
-        "published_by, published_at."
+        description="The newest version of each item, without its text: kind, "
+        "name, sha256, size, version, title, description, provides, needs, "
+        "triggers, pins, contract, published_by, published_at, and its history "
+        "(every version)."
+    )
+
+
+class LibraryPublishResponse(LibraryListResponse):
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="What to know: shared workflows still on an older version of "
+        "a plugin that the new version would break.",
     )
 
 
@@ -453,22 +467,31 @@ def _library_call(call):
 
 @router.get("/library", response_model=LibraryListResponse)
 def library(call: Peer = Depends(peer)):
-    """The workflows and plugins shared through this server, without their text."""
+    """The workflows and plugins shared through this server: the newest version
+    of each, with its history, without its text."""
     items = call.ctx.library_svc.listing()
     return LibraryListResponse(items=[i.to_dict(with_content=False) for i in items])
 
 
 @router.get("/library/{kind}/{name}")
-def library_item(kind: str, name: str, call: Peer = Depends(peer)) -> dict[str, Any]:
-    """One shared workflow or plugin, with its text."""
-    return _library_call(lambda: call.ctx.library_svc.item(kind, name)).to_dict()
+def library_item(
+    kind: str,
+    name: str,
+    version: int | None = Query(default=None, description="Omit for the newest."),
+    call: Peer = Depends(peer),
+) -> dict[str, Any]:
+    """One version of a shared workflow or plugin, with its text."""
+    return _library_call(
+        lambda: call.ctx.library_svc.item(kind, name, version)
+    ).to_dict()
 
 
-@router.post("/library", response_model=LibraryListResponse)
+@router.post("/library", response_model=LibraryPublishResponse)
 def publish(body: LibraryPublishRequest, call: Peer = Depends(peer)):
     """Publish to the library. Refused (403) unless the admin allowed this
     device, and for plugins unless the server takes them; checked without being
-    run, and taken whole or not at all."""
+    run, and taken whole or not at all. A workflow is pinned to the plugin
+    versions it is published with."""
     items = [
         LibraryItemDTO(
             kind=i.kind,
@@ -477,24 +500,31 @@ def publish(body: LibraryPublishRequest, call: Peer = Depends(peer)):
             size=i.size,
             provides=i.provides,
             content=i.content,
+            contract=i.contract,
         )
         for i in body.items
     ]
-    stored = _library_call(lambda: call.ctx.library_svc.accept(call.who, items))
-    return LibraryListResponse(items=[i.to_dict(with_content=False) for i in stored])
+    result = _library_call(lambda: call.ctx.library_svc.accept(call.who, items))
+    return LibraryPublishResponse(**result.to_dict())
 
 
 @router.delete("/library/{kind}/{name}", status_code=204)
 def unpublish(
     kind: str,
     name: str,
+    version: int | None = Query(
+        default=None, description="One version; omit to remove every version."
+    ),
     force: bool = Query(
-        default=False, description="Remove a plugin even if shared workflows use it."
+        default=False,
+        description="Remove a plugin version even if shared workflows are pinned to it.",
     ),
     call: Peer = Depends(peer),
 ):
     """Take something out of the library. Copies already installed stay."""
-    _library_call(lambda: call.ctx.library_svc.withdraw(call.who, kind, name, force))
+    _library_call(
+        lambda: call.ctx.library_svc.withdraw(call.who, kind, name, version, force)
+    )
 
 
 __all__ = ["router"]

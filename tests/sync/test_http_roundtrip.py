@@ -115,3 +115,32 @@ def test_an_unreachable_authority_is_retryable(project):
     with pytest.raises(SyncError) as e:
         ctx.sync_svc.connect("http://127.0.0.1:9", "civex_inv_x")
     assert e.value.retryable
+
+
+def test_the_library_over_a_socket(project, server):
+    """Versions, a refusal (403, kept apart from a sign-in failure) and a
+    removal (204, no body) through the real transport."""
+    from civex.domain.exceptions import NotAllowedError
+    from civex.domain.library import WORKFLOW
+
+    url, invite, authority = server
+    laptop = project("laptop")
+    laptop.sync_svc.connect(url, invite)
+    laptop.commit()
+    text = "name: tidy\nsteps:\n  - id: a\n    plugin: civex.get_field\n    config:\n      field: site\n"
+    laptop.workflow_svc.save("tidy", text)
+
+    with pytest.raises(NotAllowedError, match="may not publish"):
+        laptop.library_svc.publish(WORKFLOW, "tidy")
+
+    authority.device_keys.allow_publish("laptop", True)
+    authority.commit()
+    assert laptop.library_svc.publish(WORKFLOW, "tidy").items[0].version == 1
+    laptop.workflow_svc.save("tidy", text.replace("site", "depth"))
+    assert laptop.library_svc.publish(WORKFLOW, "tidy").items[0].version == 2
+
+    first = laptop.library_svc.show(WORKFLOW, "tidy", version=1)
+    assert first.content == text and first.local_version == 2
+    laptop.library_svc.unpublish(WORKFLOW, "tidy", version=1)
+    [left] = laptop.library_svc.browse()
+    assert [h["version"] for h in left.history] == [2]

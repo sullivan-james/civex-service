@@ -41,12 +41,14 @@ BUILTIN_PREFIX = "civex."
 
 MAX_BYTES = 256 * 1024  # one file; a plugin or workflow is far smaller
 MAX_BUNDLE = 50  # items in one publish
-MAX_ITEMS = 1000  # items a library holds
+MAX_VERSIONS = 5000  # versions a library holds, of everything together
+MAX_CONTRACT_BYTES = 64 * 1024  # a plugin's declared contract, as JSON
 
 # Where an item stands on this computer.
 ABSENT = "absent"  # not here
-SAME = "same"  # here, exactly as published
-DIFFERENT = "different"  # here, but not the same text (edited here, or updated there)
+SAME = "same"  # here, exactly this version
+OLDER = "older"  # here as an earlier version from the library (an update waits)
+DIFFERENT = "different"  # here, matching no version: edited here, or not from it
 
 
 def sha256_of(content: str) -> str:
@@ -107,10 +109,27 @@ def provides_problem(plugin_id: str | None) -> str | None:
     return None
 
 
-def here_status(content_sha: str, local_text: str | None) -> str:
+def local_version(history: list[dict[str, Any]], local_text: str | None) -> int | None:
+    """The library version this computer's copy is, by its text; None when it
+    is not here or matches none (edited here)."""
+    if local_text is None:
+        return None
+    sha = sha256_of(local_text)
+    return next((int(h["version"]) for h in history if h.get("sha256") == sha), None)
+
+
+def here_status(
+    target_version: int, history: list[dict[str, Any]], local_text: str | None
+) -> str:
+    """Where this computer's copy stands against one version of an item."""
     if local_text is None:
         return ABSENT
-    return SAME if sha256_of(local_text) == content_sha else DIFFERENT
+    found = local_version(history, local_text)
+    if found is None:
+        return DIFFERENT
+    if found == target_version:
+        return SAME
+    return OLDER if found < target_version else DIFFERENT
 
 
 @dataclass
@@ -134,10 +153,22 @@ class LibraryItemDTO:
     published_by: str | None = None
     published_at: str | None = None
     content: str | None = None
+    # A workflow: the version of each plugin it needs that it was published
+    # with ({plugin id: version}); installing it installs those versions.
+    pins: dict[str, int] = field(default_factory=dict)
+    # A plugin: its contract (inputs, outputs, config schema) as its publisher's
+    # computer described it, so an install can tell, before running anything,
+    # which workflows the new version would break. Re-checked when installed.
+    contract: dict[str, Any] | None = None
+    # Every version of this item, newest first: {version, sha256, published_by,
+    # published_at, pins}. Filled in when the library is read.
+    history: list[dict[str, Any]] = field(default_factory=list)
     # Response-only, worked out on the computer asking: where it stands here
-    # (`ABSENT`/`SAME`/`DIFFERENT`), and the plugins a workflow needs that are
+    # (`ABSENT`/`SAME`/`OLDER`/`DIFFERENT`, against the latest version), the
+    # version this computer has, and the plugins a workflow needs that are
     # neither here nor in the library.
     here: str | None = None
+    local_version: int | None = None
     missing: list[str] = field(default_factory=list)
 
     @property
@@ -158,6 +189,9 @@ class LibraryItemDTO:
             "triggers": list(self.triggers),
             "published_by": self.published_by,
             "published_at": self.published_at,
+            "pins": dict(self.pins),
+            "contract": self.contract,
+            "history": [dict(h) for h in self.history],
         }
         if with_content and self.content is not None:
             out["content"] = self.content
@@ -179,11 +213,21 @@ class LibraryItemDTO:
             published_by=data.get("published_by"),
             published_at=data.get("published_at"),
             content=data.get("content"),
+            pins={str(k): int(v) for k, v in (data.get("pins") or {}).items()},
+            contract=data.get("contract")
+            if isinstance(data.get("contract"), dict)
+            else None,
+            history=[dict(h) for h in data.get("history") or [] if isinstance(h, dict)],
         )
 
     @classmethod
     def of(
-        cls, kind: str, name: str, content: str, provides: str | None = None
+        cls,
+        kind: str,
+        name: str,
+        content: str,
+        provides: str | None = None,
+        contract: dict[str, Any] | None = None,
     ) -> LibraryItemDTO:
         """A file about to be published (its details are filled in by whoever
         reads it: the authority, from the text alone)."""
@@ -194,6 +238,7 @@ class LibraryItemDTO:
             size=len(content.encode("utf-8")),
             provides=provides,
             content=content,
+            contract=contract,
         )
 
 
@@ -203,33 +248,67 @@ class InstallStep:
 
     item: LibraryItemDTO
     path: str
-    here: str  # ABSENT / SAME / DIFFERENT
+    here: str  # ABSENT / SAME / OLDER / DIFFERENT, against this version
+    local_version: int | None = None  # the library version here now, if any
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "item": self.item.to_dict(with_content=False),
             "path": self.path,
             "here": self.here,
+            "local_version": self.local_version,
         }
 
 
 @dataclass
 class InstallPlan:
-    """What installing would do. `blocked` says why it can't (a file here that
-    differs, unless replacing; a plugin the workflow needs that is nowhere)."""
+    """What installing would do. `blocked` says why it can't (a file edited here,
+    unless replacing; a plugin the workflow needs that is nowhere; workflows
+    here that the new plugin versions would break, unless installing anyway)."""
 
     steps: list[InstallStep]
     blocked: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # What the new plugin versions would break among the workflows here, one
+    # line each ("tidy: step 'read' ..."). Blocks unless installed anyway.
+    breaks: list[str] = field(default_factory=list)
 
     @property
     def runs_code(self) -> bool:
         return any(s.item.kind == PLUGIN and s.here != SAME for s in self.steps)
+
+    @property
+    def nothing_to_do(self) -> bool:
+        return all(s.here == SAME for s in self.steps)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "steps": [s.to_dict() for s in self.steps],
             "blocked": list(self.blocked),
             "warnings": list(self.warnings),
+            "breaks": list(self.breaks),
             "runs_code": self.runs_code,
         }
+
+
+@dataclass
+class PublishResult:
+    """What a publish stored (a version each, a repeat answered with the
+    version it already is) and what to know: a new plugin version that would
+    break workflows in the library still pinned to an older one."""
+
+    items: list[LibraryItemDTO]
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "items": [i.to_dict(with_content=False) for i in self.items],
+            "warnings": list(self.warnings),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PublishResult:
+        return cls(
+            items=[LibraryItemDTO.from_dict(i) for i in data.get("items") or []],
+            warnings=[str(w) for w in data.get("warnings") or []],
+        )

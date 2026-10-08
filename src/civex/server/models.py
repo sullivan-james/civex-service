@@ -1149,6 +1149,11 @@ class WorkflowResponse(BaseModel):
     stem: str
     record_schema: str | None = None
     inputs: dict[str, WorkflowInputResponse] | None = None
+    runs_on: list[str] = Field(
+        default_factory=list,
+        description="What starts it by itself, one line each "
+        '("record_created on sample (site)"); empty if only run by hand.',
+    )
 
 
 class WorkflowTriggerResponse(BaseModel):

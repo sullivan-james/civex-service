@@ -127,8 +127,12 @@ class HttpSyncTransport:
     def library(self) -> list[dict[str, Any]]:
         return list(self._json("GET", "/library")["items"])
 
-    def library_item(self, kind: str, name: str) -> dict[str, Any]:
+    def library_item(
+        self, kind: str, name: str, version: int | None = None
+    ) -> dict[str, Any]:
         path = f"/library/{urllib.parse.quote(kind)}/{urllib.parse.quote(name)}"
+        if version is not None:
+            path += f"?version={int(version)}"
         try:
             return self._json("GET", path)
         except SyncError as e:
@@ -136,13 +140,19 @@ class HttpSyncTransport:
                 raise FileNotFoundError(f"{kind} {name}") from e
             raise
 
-    def publish(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return list(self._json("POST", "/library", {"items": items})["items"])
+    def publish(self, items: list[dict[str, Any]]) -> dict[str, Any]:
+        return self._json("POST", "/library", {"items": items})
 
-    def unpublish(self, kind: str, name: str, force: bool = False) -> None:
-        path = f"/library/{urllib.parse.quote(kind)}/{urllib.parse.quote(name)}"
+    def unpublish(
+        self, kind: str, name: str, version: int | None = None, force: bool = False
+    ) -> None:
+        query = urllib.parse.urlencode(
+            {"force": "true" if force else "false"}
+            | ({"version": int(version)} if version is not None else {})
+        )
+        path = f"/library/{urllib.parse.quote(kind)}/{urllib.parse.quote(name)}?{query}"
         try:
-            self._json("DELETE", path + ("?force=true" if force else ""))
+            self._json("DELETE", path)
         except SyncError as e:
             if e.status == 404:
                 raise FileNotFoundError(f"{kind} {name}") from e
@@ -221,7 +231,9 @@ class HttpSyncTransport:
             if data is not None:
                 request.add_header("Content-Type", "application/json")
             with self._open(request) as response:
-                return json.loads(response.read().decode("utf-8"))
+                raw = response.read()
+                # 204 (a removal) has no body.
+                return json.loads(raw.decode("utf-8")) if raw else {}
 
         return self._again_if_expired(call)
 
