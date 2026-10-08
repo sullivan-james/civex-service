@@ -14,6 +14,9 @@ def _not_editable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(update_mod, "detect_installer", lambda: "pip")
     monkeypatch.setattr(update_mod, "installed_missing_requirements", lambda: [])
     monkeypatch.setattr(update_mod, "_warn_if_shadowed", lambda expected: None)
+    # Nothing else running from this copy, whatever runs on this computer
+    # (another test's `civex serve`, a real one).
+    monkeypatch.setattr(update_mod.running, "others", lambda prefix=None: [])
 
 
 def test_up_to_date(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -185,7 +188,12 @@ def test_pre_upgrade_commands(monkeypatch: pytest.MonkeyPatch) -> None:
         "--force",
         "civex>=1.3.0rc1",
     ]
-    assert update_mod.upgrade_command("uv", pre=True) == ["uv", "tool", "upgrade", "civex"]
+    assert update_mod.upgrade_command("uv", pre=True) == [
+        "uv",
+        "tool",
+        "upgrade",
+        "civex",
+    ]
 
 
 def test_a_uv_install_keeps_its_extras(
@@ -199,7 +207,10 @@ def test_a_uv_install_keeps_its_extras(
     )
     monkeypatch.setattr(updates.sys, "prefix", str(tmp_path))
     monkeypatch.setattr(update_mod.shutil, "which", lambda name: "/usr/bin/" + name)
-    assert update_mod.upgrade_command("uv", target="2.0.1")[-1] == "civex[server,ai]>=2.0.1"
+    assert (
+        update_mod.upgrade_command("uv", target="2.0.1")[-1]
+        == "civex[server,ai]>=2.0.1"
+    )
 
 
 def test_repairing_a_uv_install_does_not_pin_it(

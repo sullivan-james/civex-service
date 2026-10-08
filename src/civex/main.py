@@ -221,11 +221,6 @@ def serve(
 
         os.environ[SERVE_ARGS_ENV] = json.dumps(sys.argv[1:])
 
-        # So an update of this copy can stop this server and start it again.
-        from civex import running
-
-        running.register(host, port)
-
     _refuse_newer_database()
 
     if open_browser:
@@ -253,6 +248,14 @@ def serve(
     from pathlib import Path
 
     reload_dirs = [str(Path(__file__).resolve().parent)] if reload else None
+
+    # So an update of this copy can stop this server and start it again. Only
+    # now, once nothing above has refused to start: a record of a server that
+    # never ran would be found by an update.
+    if not reload:
+        from civex import running
+
+        running.register(host, port)
 
     # log_config=None: defer all logging to civex's own structlog pipeline
     # (configured in create_app) so uvicorn's records flow through the same sinks.
