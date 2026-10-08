@@ -60,6 +60,7 @@ const UpdatesSection = lazy(
 )
 const SyncReviewPage = lazy(() => import('./pages/SyncReviewPage'))
 const MapSection = lazy(() => import('./components/settings/MapSection'))
+const LogsSection = lazy(() => import('./components/settings/LogsSection'))
 const AdvancedSection = lazy(
   () => import('./components/settings/AdvancedSection'),
 )
@@ -148,6 +149,7 @@ export default function App() {
               <Route path="sync" element={<SyncSection />} />
               <Route path="map" element={<MapSection />} />
               <Route path="updates" element={<UpdatesSection />} />
+              <Route path="logs" element={<LogsSection />} />
               <Route path="advanced" element={<AdvancedSection />} />
             </Route>
             {/* Legacy redirect — Storage lives under Settings */}

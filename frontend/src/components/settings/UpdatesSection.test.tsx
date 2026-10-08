@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router'
 import UpdatesSection from './UpdatesSection'
 
 const upToDate = {
@@ -14,6 +15,7 @@ const upToDate = {
   blocked: '',
   error: '',
   last: null,
+  running: [] as string[],
 }
 
 function json(body: unknown) {
@@ -37,7 +39,9 @@ function renderWith(commandLine: Record<string, unknown>) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={qc}>
-      <UpdatesSection />
+      <MemoryRouter>
+        <UpdatesSection />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
   return calls
@@ -68,5 +72,88 @@ describe('UpdatesSection: command line', () => {
       expect(screen.getByText(/is up to date/)).toBeInTheDocument(),
     )
     expect(screen.queryByText('Command line')).not.toBeInTheDocument()
+  })
+})
+
+function renderStatus(status: Record<string, unknown>) {
+  const calls: { method: string; url: string; body?: unknown }[] = []
+  let current = status
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      calls.push({
+        method,
+        url,
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      })
+      if (method === 'DELETE') {
+        current = { ...current, last: null }
+        return new Response(null, { status: 204 })
+      }
+      if (url.startsWith('/api/update') && method === 'POST')
+        return json({ restarting: true })
+      if (url.startsWith('/api/update')) return json(current)
+      return json({ available: false })
+    }),
+  )
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter>
+        <UpdatesSection />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+  return calls
+}
+
+describe('UpdatesSection: updating', () => {
+  it('says what else runs from this copy, and stops it to update', async () => {
+    const calls = renderStatus({
+      ...upToDate,
+      latest: '2.0.0rc6',
+      newer: true,
+      running: ['civex serve --port 8100 --allow-remote (in C:\\ocean)'],
+    })
+    expect(
+      await screen.findByText(
+        'civex serve --port 8100 --allow-remote (in C:\\ocean)',
+      ),
+    ).toBeTruthy()
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: 'Stop it, update to 2.0.0rc6 and restart',
+      }),
+    )
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
+        pre: false,
+        version: '2.0.0rc6',
+        stop_others: true,
+      }),
+    )
+  })
+
+  it('dismisses the last update’s outcome on the server', async () => {
+    const calls = renderStatus({
+      ...upToDate,
+      last: {
+        at: '2026-10-08T10:46:44Z',
+        from_version: '2.0.0rc4',
+        to_version: '2.0.0rc4',
+        ok: false,
+        message: 'Not updated.',
+      },
+    })
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Dismiss' }),
+    )
+    await waitFor(() =>
+      expect(screen.queryByText(/didn’t install a new version/)).toBeNull(),
+    )
+    expect(
+      calls.some((c) => c.method === 'DELETE' && c.url === '/api/update/last'),
+    ).toBe(true)
   })
 })

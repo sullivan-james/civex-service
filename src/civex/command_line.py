@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from civex.updates import detect_installer
+from civex.updates import app_home, detect_installer
 
 EXE = ".exe" if sys.platform == "win32" else ""
 
@@ -45,11 +45,12 @@ class CommandLineState:
 
 def app_bin() -> Path | None:
     """The desktop app's command folder (where its `civex` is), or None when
-    this isn't the desktop app's copy. The launcher sets UV_TOOL_BIN_DIR to it."""
-    if detect_installer() != "desktop":
+    this isn't the desktop app's copy. The launcher sets UV_TOOL_BIN_DIR to it;
+    run from a terminal, it is the bin folder in the app's own folder."""
+    if detect_installer() not in ("desktop", "app"):
         return None
     folder = os.environ.get("UV_TOOL_BIN_DIR")
-    return Path(folder) if folder else None
+    return Path(folder) if folder else app_home() / "bin"
 
 
 def _link() -> Path:

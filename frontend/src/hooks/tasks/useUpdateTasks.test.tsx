@@ -16,6 +16,7 @@ const upToDate: UpdateStatus = {
   blocked: '',
   error: '',
   last: null,
+  running: [],
 }
 
 function json(body: unknown, status = 200) {
@@ -25,9 +26,15 @@ function json(body: unknown, status = 200) {
   })
 }
 
-function tasksFor(status: UpdateStatus, fetchMock = vi.fn()) {
-  fetchMock.mockImplementation(async (url: string) =>
-    url.startsWith('/api/update') ? json(status) : json({}),
+function tasksFor(
+  status: UpdateStatus,
+  fetchMock = vi.fn(),
+  answer?: (url: string, init?: RequestInit) => Promise<Response>,
+) {
+  fetchMock.mockImplementation(
+    answer ??
+      (async (url: string) =>
+        url.startsWith('/api/update') ? json(status) : json({})),
   )
   vi.stubGlobal('fetch', fetchMock)
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -71,16 +78,27 @@ describe('useUpdateTasks', () => {
     expect(result.current).toEqual([])
   })
 
-  it('says once that the last update did not work', async () => {
-    const { result } = tasksFor({
-      ...upToDate,
-      last: {
-        at: '2026-10-07T10:00:00Z',
-        from_version: '1.2.0',
-        to_version: '1.2.0',
-        ok: false,
-        message: 'The upgrade failed (exit 1).',
-      },
+  it('says the last update did not work until it is dismissed, for good', async () => {
+    let dismissed = false
+    const deletes: string[] = []
+    const { result } = tasksFor(upToDate, vi.fn(), async (url, init) => {
+      if (init?.method === 'DELETE') {
+        deletes.push(url)
+        dismissed = true
+        return new Response(null, { status: 204 })
+      }
+      return json({
+        ...upToDate,
+        last: dismissed
+          ? null
+          : {
+              at: '2026-10-07T10:00:00Z',
+              from_version: '1.2.0',
+              to_version: '1.2.0',
+              ok: false,
+              message: 'The upgrade failed (exit 1).',
+            },
+      })
     })
     await waitFor(() => expect(result.current).toHaveLength(1))
     expect(result.current[0]).toMatchObject({
@@ -91,7 +109,23 @@ describe('useUpdateTasks', () => {
       (a) => a.label === 'Dismiss',
     )
     act(() => dismiss?.onClick?.())
-    expect(result.current).toEqual([])
+    // Forgotten by the server, so it stays gone in the next window too.
+    await waitFor(() => expect(result.current).toEqual([]))
+    expect(deletes).toEqual(['/api/update/last'])
+  })
+
+  it('sends a newer version with others running to the Updates page', async () => {
+    const { result } = tasksFor({
+      ...upToDate,
+      latest: '1.3.0',
+      newer: true,
+      running: ['civex serve --port 8100 (in C:\\p)'],
+    })
+    await waitFor(() => expect(result.current).toHaveLength(1))
+    expect(result.current[0].actions?.[0]).toMatchObject({
+      label: 'Update…',
+      to: '/settings/updates',
+    })
   })
 
   it('says why when civex refuses to start the update', async () => {
@@ -100,7 +134,7 @@ describe('useUpdateTasks', () => {
     fetchMock.mockImplementation(async () =>
       json({ detail: 'This server is open to other computers.' }, 409),
     )
-    await act(() => restartForUpdate(false))
+    await act(() => restartForUpdate({ pre: false }))
     expect(result.current[0]).toMatchObject({
       tone: 'attention',
       title: 'civex couldn’t start the update',

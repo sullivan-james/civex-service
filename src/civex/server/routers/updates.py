@@ -36,12 +36,27 @@ class UpdateStatusResponse(BaseModel):
     blocked: str = Field(description="Why it can't, in plain words; blank when it can.")
     error: str = Field(description="Why PyPI couldn't be asked; blank when it was.")
     last: UpdateAttempt | None = Field(
-        description="The outcome of the last update started from the app."
+        description="The outcome of the last update started from the app, "
+        "while it is news (until civex moves on from both its versions, or it "
+        "is dismissed)."
+    )
+    running: list[str] = Field(
+        default_factory=list,
+        description="Other servers running from this copy: updating stops them "
+        "and starts them again afterwards.",
     )
 
 
 class StartUpdateRequest(BaseModel):
     pre: bool = Field(False, description="Install a pre-release if it is the newest.")
+    version: str | None = Field(
+        None, description="The version to install: the one the status showed."
+    )
+    stop_others: bool = Field(
+        False,
+        description="Stop the other servers running from this copy, and start "
+        "them again afterwards. Without it, an update with any refuses (409).",
+    )
 
 
 class StartUpdateResponse(BaseModel):
@@ -83,6 +98,7 @@ def update_status(
         blocked=found.blocked,
         error=found.error,
         last=_attempt(found.last),
+        running=found.running,
     )
 
 
@@ -93,7 +109,9 @@ def start_update(body: StartUpdateRequest) -> StartUpdateResponse:
     Windows), and its outcome is in `last` on the next status. 409 when this
     copy can't be updated from the app (`blocked` says why)."""
     try:
-        exit_now = updates.begin(pre=body.pre)
+        exit_now = updates.begin(
+            pre=body.pre, version=body.version, stop=body.stop_others
+        )
     except RuntimeError as e:
         raise HTTPException(409, detail=str(e))
 
@@ -103,3 +121,9 @@ def start_update(body: StartUpdateRequest) -> StartUpdateResponse:
 
     threading.Thread(target=_later, daemon=True).start()
     return StartUpdateResponse(restarting=True)
+
+
+@router.delete("/last", status_code=204)
+def dismiss_last() -> None:
+    """Forget the outcome of the last update: it was seen."""
+    updates.dismiss_last()

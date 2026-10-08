@@ -111,9 +111,12 @@ def test_the_desktop_app_asks_its_launcher_and_closes(
         updates.begin(pre=False)
     closed: list[bool] = []
     updates.on_quit_for_update(lambda: closed.append(True))
-    exit_now = updates.begin(pre=True)
+    exit_now = updates.begin(pre=True, version="1.3.0rc1")
     asked = json.loads(request.read_text())
-    assert asked["pre"] is True and asked["result"] == str(updates.result_path())
+    # The version to install, and no "pre" for an older launcher to turn into
+    # pre-releases of every package.
+    assert (asked["to"], asked["pre"]) == ("1.3.0rc1", False)
+    assert asked["result"] == str(updates.result_path())
     assert not closed  # the caller closes it, once its answer is sent
     exit_now()
     assert closed == [True]
@@ -126,9 +129,9 @@ def test_civex_serve_hands_over_to_the_helper(
     monkeypatch.setenv(updates.SERVE_ARGS_ENV, '["serve", "--port", "9000", "--open"]')
     plans: list[dict] = []
     monkeypatch.setattr(updates, "_start_helper", plans.append)
-    assert updates.begin(pre=True) is updates._stop_server
+    assert updates.begin(pre=True, version="1.3.0rc1") is updates._stop_server
     (plan,) = plans
-    assert plan["upgrade"][-3:] == ["--upgrade", "--pre", "civex"]
+    assert plan["upgrade"][-2:] == ["--upgrade", "civex>=1.3.0rc1"]
     assert plan["restart"][-4:] == ["civex.main", "serve", "--port", "9000"]
     assert plan["wait_pid"] > 0
 
@@ -217,7 +220,9 @@ def test_starting_an_update_answers_then_exits(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     exited: list[bool] = []
-    monkeypatch.setattr(updates, "begin", lambda pre: lambda: exited.append(pre))
+    monkeypatch.setattr(
+        updates, "begin", lambda pre, version, stop: lambda: exited.append(pre)
+    )
     response = client.post("/api/update", json={"pre": False})
     assert response.status_code == 202 and response.json() == {"restarting": True}
     deadline = time.monotonic() + 5
@@ -233,3 +238,157 @@ def test_starting_an_update_that_cannot_happen_is_409(
     response = client.post("/api/update", json={"pre": False})
     assert response.status_code == 409
     assert "development (editable) install" in response.json()["detail"]
+
+
+# -- The desktop app's copy, from a terminal ----------------------------------
+
+
+def test_the_desktop_apps_copy_is_known_by_where_it_is(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "app"
+    (home / "tools" / "civex").mkdir(parents=True)
+    monkeypatch.setenv("CIVEX_APP_HOME", str(home))
+    monkeypatch.setattr(updates.sys, "prefix", str(home / "tools" / "civex"))
+    assert updates.detect_installer() == "app"
+    # Started by the app itself, it is the app's to update.
+    monkeypatch.setenv(updates.REQUEST_ENV, str(tmp_path / "request.json"))
+    assert updates.detect_installer() == "desktop"
+
+
+def test_the_apps_uv_is_found_where_the_launcher_said(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "app"
+    home.mkdir()
+    monkeypatch.setenv("CIVEX_APP_HOME", str(home))
+    monkeypatch.delenv("CIVEX_UV_BIN", raising=False)
+    monkeypatch.setattr(updates.shutil, "which", lambda name: "/usr/bin/uv")
+    assert updates.app_uv() == Path("/usr/bin/uv")  # nothing recorded: any uv
+
+    uv = tmp_path / "somewhere" / "uv"
+    uv.parent.mkdir()
+    uv.write_text("")
+    (home / "launcher.json").write_text(json.dumps({"uv": str(uv)}))
+    assert updates.app_uv() == uv
+    monkeypatch.setenv("CIVEX_UV_BIN", "/given/uv")
+    assert updates.app_uv() == Path("/given/uv")
+
+
+def test_the_apps_copy_can_update_unless_its_uv_is_missing_or_the_app_is_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(updates, "app_uv", lambda: Path("/uv"))
+    monkeypatch.setattr(updates, "app_is_open", lambda: False)
+    assert updates.why_not("app", from_app=False) == ""
+    monkeypatch.setattr(updates, "app_is_open", lambda: True)
+    assert "close it first" in updates.why_not("app", from_app=False)
+    monkeypatch.setattr(updates, "app_uv", lambda: None)
+    assert "uv can't be found" in updates.why_not("app", from_app=False)
+
+
+def test_the_helper_can_just_update_and_say_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`civex update` on Windows: the helper upgrades with the app's folders
+    once the command has gone, prints how it went, and starts nothing."""
+    plan_file = _plan(
+        tmp_path,
+        upgrade="import os; assert os.environ['UV_TOOL_DIR'] == 'app-tools'",
+        version="1.3.0",
+    )
+    plan = json.loads(plan_file.read_text())
+    plan["restart"] = None
+    plan["env"] = {**__import__("os").environ, "UV_TOOL_DIR": "app-tools"}
+    plan_file.write_text(json.dumps(plan))
+    assert helper.main(str(plan_file)) == 0
+    assert "Updated civex 1.2.0 -> 1.3.0." in capsys.readouterr().out
+    assert not (tmp_path / "started").exists()
+
+
+# -- What is news, and stopping what else runs --------------------------------
+
+
+def test_an_updates_outcome_is_news_only_until_civex_moves_on() -> None:
+    failed = {"from": "2.0.0rc4", "to": "2.0.0rc4", "ok": False, "message": "x"}
+    assert updates.relevant(failed, "2.0.0rc4") == failed  # still on it
+    assert updates.relevant(failed, "2.0.0rc6") is None  # moved on since
+    # civex got there, though the installer complained: not a failure.
+    tripped = {"from": "2.0.0rc4", "to": "2.0.0rc5", "ok": False, "message": "busy"}
+    assert updates.relevant(tripped, "2.0.0rc5") == {
+        **tripped,
+        "ok": True,
+        "message": "",
+    }
+    assert updates.relevant(None, "2.0.0") is None
+
+
+def test_a_dismissed_outcome_is_forgotten(tmp_path: Path) -> None:
+    updates.result_path().parent.mkdir(parents=True, exist_ok=True)
+    updates.result_path().write_text(json.dumps({"from": "1", "ok": False}))
+    updates.dismiss_last()
+    assert updates.last_result() is None
+    updates.dismiss_last()  # nothing there: fine
+
+
+def test_updating_with_others_running_waits_to_be_told_to_stop_them(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from civex import running
+
+    request = tmp_path / "request.json"
+    monkeypatch.setenv(updates.REQUEST_ENV, str(request))
+    monkeypatch.setenv("CIVEX_APP_HOME", str(tmp_path / "app"))
+    updates.on_quit_for_update(lambda: None)
+    other = running.Running(
+        1, "p", ["serve", "--port", "8100"], "/w", "127.0.0.1", 8100, "t", ""
+    )
+    monkeypatch.setattr(running, "others", lambda: [other])
+    stopped: list[int] = []
+    monkeypatch.setattr(running, "stop", lambda r: stopped.append(r.pid) or True)
+
+    with pytest.raises(RuntimeError, match="civex serve --port 8100"):
+        updates.begin(pre=False, version="2.0.1")
+    assert not stopped and not request.exists()
+
+    updates.begin(pre=False, version="2.0.1", stop=True)
+    assert stopped == [1]
+    # The app starts it again as it opens.
+    remembered = json.loads(running.pending_file().read_text())
+    assert [r["argv"] for r in remembered] == [["serve", "--port", "8100"]]
+
+
+def test_one_that_will_not_stop_means_nothing_is_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from civex import running
+
+    a = running.Running(1, "p", ["serve"], "/w", "h", 1, "t", "")
+    b = running.Running(2, "p", ["serve"], "/w", "h", 2, "t", "")
+    monkeypatch.setattr(running, "stop", lambda r: r.pid == 1)
+    restarted: list[int] = []
+    monkeypatch.setattr(running, "start", lambda r: restarted.append(r.pid))
+    with pytest.raises(RuntimeError, match="didn't stop"):
+        updates.stop_others([a, b])
+    assert restarted == [1]
+
+
+def test_the_helper_starts_again_what_was_stopped_and_waits_for_free_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    started = tmp_path / "other-started"
+    plan_file = _plan(tmp_path, upgrade="raise SystemExit(1)", version="1.3.0")
+    plan = json.loads(plan_file.read_text())
+    plan["restart"] = None
+    plan["free"] = [str(tmp_path / "not-there.exe")]
+    plan["also_start"] = [
+        {
+            "command": [sys.executable, "-c", f"open({str(started)!r}, 'w').close()"],
+            "cwd": str(tmp_path),
+        }
+    ]
+    plan_file.write_text(json.dumps(plan))
+    # The upgrade exited 1 but civex is a new version: it went through.
+    assert helper.main(str(plan_file)) == 0
+    assert json.loads((tmp_path / "result.json").read_text())["ok"] is True
+    _wait_for(started)

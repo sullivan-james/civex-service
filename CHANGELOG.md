@@ -30,6 +30,12 @@ from the next tag forward.
 
 ### Added
 
+- **Settings → Logs and `civex logs`**: every log civex keeps on this computer
+  (this project's server, the desktop app and its launcher, updates) in one
+  place, with the latest lines, a level filter, search, following, download and
+  opening the folder. A failed update and a failing sync link to the log that
+  says why.
+
 - **Sync with an authority** (`civex sync`, `civex clone`): a project can follow
   another civex over HTTP. Changes merge field by field; the authority's value
   wins a clash and yours is kept as a conflict you can take back. Retries are
@@ -82,6 +88,32 @@ from the next tag forward.
 - Install with `uv tool install civex`, which needs no Python on the computer.
 
 ### Fixes
+
+- **The desktop app's window fits the screen**: on a small one (a 13-inch
+  laptop, up to 1440 × 900) a project opens filling it, on a larger one at a
+  comfortable size, centred, instead of a fixed 1280 × 800 that didn't fit a
+  13-inch MacBook's screen. It opens as you last left it, kept on the screen.
+  Its Size (⌘ + / −) now lasts too.
+
+- **Updating stops, and starts again, the other servers running from the same
+  copy**, after asking (the Updates page lists them; `civex update` asks). An
+  update from the app used to fail half way while a `civex serve` from the same
+  copy ran in a terminal (on Windows a file in use can't be replaced).
+- **Including pre-releases no longer brings in pre-releases of everything civex
+  depends on** (a beta pydantic, an alpha sentry-sdk): the version found is
+  installed by name instead.
+- **An update's outcome is shown only while it is news**, and **Dismiss**
+  forgets it for good. An update that got civex to the new version is no longer
+  called failed because the installer tripped over a file in use.
+- **The desktop app keeps what its pages remember** (pins, recent items,
+  dismissed notices, the pre-releases choice) from one opening to the next: its
+  window no longer starts in private mode.
+
+- **`civex update` in a terminal updates the desktop app's copy** (the `civex`
+  command the app puts on PATH). It used to try pip, which that copy hasn't got.
+  It now upgrades with the app's own uv and folders. On Windows it refuses while
+  the app is open, and finishes the upgrade once the command has exited, in the
+  same window.
 
 - **The page froze after using the navigation drawer** (a narrow window, as
   the macOS desktop app often is): closing it left the rest of the page

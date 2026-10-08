@@ -15,19 +15,23 @@ import urllib.error
 
 import typer
 
-from civex import __version__
+from civex import __version__, running
 from civex.console import console
 
 # The rules live in civex.updates, shared with the app's Updates page; these
 # names are imported here so the command (and its tests) read them from one
 # place.
 from civex.updates import (
+    app_uv,
     detect_installer,
     installed_version,
     is_prerelease,
     latest_version,
     newest_release,  # noqa: F401  (re-exported for callers of the old module)
+    stop_others,
+    update_after_exit,
     upgrade_command,
+    upgrade_env,
     why_not,
 )
 
@@ -51,6 +55,13 @@ def installed_missing_requirements() -> list[str]:
         return []
 
 
+def _run(cmd: list[str], installer: str):  # noqa: ANN202 - CompletedProcess
+    """Run an upgrade or repair, with the installer's own environment if it
+    has one (the desktop app's copy: the app's folders)."""
+    env = upgrade_env(installer)
+    return subprocess.run(cmd, env=env) if env is not None else subprocess.run(cmd)
+
+
 def repair_command(installer: str, version: str) -> list[str]:
     """Reinstall civex at `version`, which also installs any dependency that
     is missing (an upgrade alone doesn't when the version is unchanged).
@@ -60,6 +71,16 @@ def repair_command(installer: str, version: str) -> list[str]:
     every later `civex update` quietly did nothing."""
     if installer == "uv" and shutil.which("uv"):
         return ["uv", "tool", "install", "--force", "--reinstall", f"civex>={version}"]
+    if installer == "app":
+        uv = app_uv()
+        return [
+            str(uv or "uv"),
+            "tool",
+            "install",
+            "--force",
+            "--reinstall",
+            f"civex[desktop]>={version}",
+        ]
     return [sys.executable, "-m", "pip", "install", f"civex=={version}"]
 
 
@@ -69,13 +90,21 @@ def ensure_requirements(installer: str, version: str) -> bool:
     missing = installed_missing_requirements()
     if not missing:
         return True
+    if installer == "app" and sys.platform == "win32":
+        # Reinstalling would replace the files this command runs from.
+        console.print(
+            "[warning]Some packages civex needs are missing: "
+            f"{', '.join(missing)}. Update from the desktop app (Settings > "
+            "Updates) to put them back.[/warning]"
+        )
+        return False
     console.print(
         "[warning]Some packages civex needs are missing: "
         f"{', '.join(missing)}. Reinstalling.[/warning]"
     )
     cmd = repair_command(installer, version)
     console.print(f"[dim]{' '.join(cmd)}[/dim]")
-    subprocess.run(cmd)
+    _run(cmd, installer)
     still = installed_missing_requirements()
     if still:
         console.print(
@@ -97,23 +126,37 @@ def update(
         help="Include pre-releases (release candidates, betas) when looking "
         "for a newer version.",
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Stop other servers running from this copy without asking (they "
+        "start again afterwards).",
+    ),
 ) -> None:
     """Update civex to the latest release.
 
     Detects whether civex was installed with pipx, uv tool or pip and runs the
-    matching upgrade. Restart any running `civex serve` afterwards.
+    matching upgrade. Other `civex serve` running from the same copy are
+    stopped first and started again afterwards, after asking.
 
     Pre-releases are only installed with --pre. Once on one, a plain
     `civex update` moves on when the final release is out.
     """
     installer = detect_installer()
+    # A copy that can't update itself from here still says what is available.
+    blocked = ""
     if installer in ("editable", "frozen", "desktop"):
-        reason = why_not(installer, from_app=False) or (
+        blocked = why_not(installer, from_app=False) or (
             "This is the desktop app's copy of civex: update it from the app "
             "(Settings > Updates)."
         )
-        console.print(f"[warning]{reason}[/warning]")
-        raise typer.Exit(1)
+    elif installer == "app":
+        blocked = why_not(installer, from_app=False)
+    if blocked:
+        if not check:
+            console.print(f"[warning]{blocked}[/warning]")
+            raise typer.Exit(1)
 
     # Imported here, not at module top: a stale environment missing this
     # dependency must not break every other civex command.
@@ -142,15 +185,35 @@ def update(
         return
     if check:
         console.print(f"civex {latest} is available (you have {__version__}).")
-        command = "civex update --pre" if pre else "civex update"
-        console.print(f"Run [cyan]{command}[/cyan] to install it.")
+        if blocked:
+            console.print(blocked)
+        else:
+            command = "civex update --pre" if pre else "civex update"
+            console.print(f"Run [cyan]{command}[/cyan] to install it.")
         raise typer.Exit(1)
 
-    cmd = upgrade_command(installer, pre=pre)
+    target = latest if latest != "unknown" else None
+    cmd = upgrade_command(installer, pre=pre, target=target)
+    stopped = _stop_others(yes)
     console.print(
         f"Updating civex {__version__} -> {latest}: [dim]{' '.join(cmd)}[/dim]"
     )
-    result = subprocess.run(cmd)
+    if installer == "app" and sys.platform == "win32":
+        # This command runs from the files the upgrade replaces, which Windows
+        # won't let go while it runs: the helper does it once this has exited,
+        # and starts again what was stopped.
+        update_after_exit(pre, target, stopped)
+        console.print(
+            "[dim]It runs as soon as this command has finished; this window "
+            "shows how it went.[/dim]"
+        )
+        return
+    try:
+        result = _run(cmd, installer)
+    finally:
+        for record in stopped:
+            running.start(record)
+            console.print(f"Started again: {record.describe()}")
     if result.returncode != 0:
         console.print("[error]Update failed -- see the output above.[/error]")
         raise typer.Exit(result.returncode)
@@ -172,6 +235,27 @@ def update(
     ok = ensure_requirements(installer, now or latest)
     _warn_if_shadowed(now or latest)
     if not ok:
+        raise typer.Exit(1)
+
+
+def _stop_others(yes: bool) -> list:
+    """Stop the other servers running from this copy, after asking: they hold
+    its files (Windows won't replace them) and would run old code. They start
+    again after the upgrade, whatever its outcome."""
+    others = running.others()
+    if not others:
+        return []
+    console.print("Running from this copy of civex, so stopped for the update:")
+    for record in others:
+        console.print(f"  {record.describe()}")
+    if not yes and not typer.confirm(
+        "Stop them, update, and start them again?", default=True
+    ):
+        raise typer.Exit(1)
+    try:
+        return stop_others(others)
+    except RuntimeError as e:
+        console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
 

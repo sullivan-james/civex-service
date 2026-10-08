@@ -83,6 +83,18 @@ def bundled_uv() -> Path:
     raise RuntimeError(f"This copy of the civex app is missing its uv ({inside}).")
 
 
+def record_where(home: Path, uv: Path) -> None:
+    """Say where this app and its uv are, in its own folder, each time it
+    starts: so `civex update` run from a terminal can update the app's copy
+    with the app's uv (`civex.updates.app_uv`) wherever the app was put."""
+    try:
+        (home / "launcher.json").write_text(
+            json.dumps({"uv": str(uv), "app": sys.executable}), "utf-8"
+        )
+    except OSError:
+        pass  # only a convenience: civex also looks in the standard places
+
+
 def tool_python(home: Path, windowed: bool = False) -> Path:
     """The Python civex is installed in. `windowed`: on Windows the one that
     never opens a console window (pythonw), for the desktop window."""
@@ -159,6 +171,9 @@ def install_command(uv: Path) -> list[str]:
 
 
 def upgrade_command(uv: Path, pre: bool) -> list[str]:
+    """For an app that doesn't say which version to install (older civex).
+    `--prerelease allow` lets in pre-releases of *every* package; a request
+    that names the version (`to_command`) lets in civex's alone."""
     return [
         str(uv),
         "tool",
@@ -166,6 +181,43 @@ def upgrade_command(uv: Path, pre: bool) -> list[str]:
         *(["--prerelease", "allow"] if pre else []),
         "civex",
     ]
+
+
+def to_command(uv: Path, version: str) -> list[str]:
+    """Install exactly the civex the app found (or newer): a requirement that
+    names a pre-release allows a pre-release for civex and for nothing else
+    (`civex.updates.upgrade_command` builds the same)."""
+    return [str(uv), "tool", "install", "--force", f"{REQUIREMENT}>={version}"]
+
+
+def command_busy(home: Path) -> bool:
+    """Whether something still runs this app's `civex` command (a `civex serve`
+    in a terminal): Windows then won't let the update replace it."""
+    if sys.platform != "win32":
+        return False
+    try:
+        os.close(os.open(home / "bin" / f"civex{EXE}", os.O_RDWR))
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def ask_retry(title: str, message: str) -> bool:
+    """Retry (True) or Cancel; Cancel without a window to ask in."""
+    if HEADLESS:
+        print(f"{title}: {message}", file=sys.stderr)
+        return False
+    root = _new_window()
+    if root is None:
+        return False
+    from tkinter import messagebox
+
+    root.withdraw()
+    again = messagebox.askretrycancel(title, message, parent=root)
+    root.destroy()
+    return bool(again)
 
 
 def civex_version(home: Path, env: dict[str, str]) -> str | None:
@@ -397,24 +449,49 @@ def ensure_installed(home: Path, uv: Path, env: dict[str, str], log: Path) -> No
     with_progress(title, message, _install)
 
 
+_BUSY = (
+    "civex is still running from this app's copy, outside the app (a `civex "
+    "serve` in a terminal?), so it can't be updated. Stop it (Ctrl+C in its "
+    "window), then press Retry."
+)
+
+
 def update(home: Path, uv: Path, env: dict[str, str], log: Path, request: dict) -> None:
     """Upgrade as the app asked, and record what happened for it to show."""
     before = request.get("from") or civex_version(home, env)
+    while command_busy(home):
+        if not ask_retry("civex", _BUSY):
+            if request.get("result"):
+                write_result(
+                    request["result"],
+                    **{
+                        "from": before,
+                        "to": before,
+                        "ok": False,
+                        "message": "Not updated: civex was still running from "
+                        "this copy outside the app.",
+                    },
+                )
+            return
+    to = request.get("to")
+    command = (
+        to_command(uv, to) if to else upgrade_command(uv, bool(request.get("pre")))
+    )
     code: list[int] = []
     with_progress(
         "Updating civex",
         "civex opens again when it's done.",
-        lambda: code.append(
-            run_logged(upgrade_command(uv, bool(request.get("pre"))), env, log)
-        ),
+        lambda: code.append(run_logged(command, env, log)),
     )
     after = civex_version(home, env)
-    if code and code[0] != 0:
-        ok, message = False, f"The update failed; see {log}."
-    elif after == before:
-        ok, message = False, "There was nothing newer to install."
-    else:
+    if after and after != before:
+        # civex got there, whatever uv's exit said (an entry point left behind
+        # by a file in use is not worth calling the update failed).
         ok, message = True, ""
+    elif code and code[0] != 0:
+        ok, message = False, f"The update failed; see {log}."
+    else:
+        ok, message = False, "There was nothing newer to install."
     if request.get("result"):
         write_result(
             request["result"],
@@ -440,6 +517,7 @@ def main(argv: list[str]) -> int:
     log = log_dir() / "launcher.log"
     try:
         uv = bundled_uv()
+        record_where(home, uv)
         env = environment(home, uv)
         ensure_installed(home, uv, env, log)
         if "--install-only" in argv:

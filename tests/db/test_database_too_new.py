@@ -52,15 +52,25 @@ def test_the_message_is_a_panel_with_the_facts_and_the_fix(newer_db: Path) -> No
     assert "hasn't been changed" in text
 
 
-def test_serve_refuses_before_starting(newer_db: Path, monkeypatch) -> None:
+def test_serve_refuses_before_starting(
+    newer_db: Path, monkeypatch, tmp_path: Path
+) -> None:
     import uvicorn
 
+    from civex import running
+
+    monkeypatch.setenv("CIVEX_USER_STATE", str(tmp_path / "state" / "sync.toml"))
     started: list[object] = []
     monkeypatch.setattr(uvicorn, "run", lambda *a, **k: started.append(1))
     result = runner.invoke(app, ["serve"])
     assert result.exit_code == 1
     assert "Database is from a newer civex" in _text(result)
     assert started == []
+    # A server that never ran says nothing about running (an update would
+    # find it and offer to stop it).
+    assert not running.running_dir().exists() or not list(
+        running.running_dir().iterdir()
+    )
 
 
 def test_the_api_answers_503_with_the_details(newer_db: Path) -> None:

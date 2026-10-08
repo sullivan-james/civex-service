@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { settingsApi } from '../../api/settings'
 import type { UpdateAttempt, UpdateStatus } from '../../api/updates'
+import { logHref } from '../../api/logs'
 import { errorMessage } from '../../lib/errors'
 import {
+  useDismissLastUpdate,
   usePreReleases,
   useUpdateStatus,
   writeUpdatePref,
@@ -101,18 +103,65 @@ function Availability({ status }: { status: UpdateStatus }) {
   )
 }
 
-function LastUpdate({ last }: { last: UpdateAttempt }) {
+/** Where an update's own log is: the launcher's for the desktop app, the
+ * update helper's for `civex serve`. */
+function updateLog(installer: string): string {
+  return logHref(installer === 'desktop' ? 'launcher' : 'update')
+}
+
+function LastUpdate({
+  last,
+  installer,
+}: {
+  last: UpdateAttempt
+  installer: string
+}) {
   const when = formatDateTime(last.at)
-  if (last.ok)
-    return (
-      <Status tone="ok">
-        Updated from {last.from_version} to {last.to_version} on {when}
-      </Status>
-    )
+  const dismiss = useDismissLastUpdate()
   return (
-    <Status tone="danger" why={last.message}>
-      The update on {when} didn’t install a new version
-    </Status>
+    <div className="flex flex-wrap items-center gap-2">
+      {last.ok ? (
+        <Status tone="ok">
+          Updated from {last.from_version} to {last.to_version} on {when}
+        </Status>
+      ) : (
+        <>
+          <Status tone="danger" why={last.message}>
+            The update on {when} didn’t install a new version
+          </Status>
+          <Button size="sm" variant="link" to={updateLog(installer)}>
+            View log
+          </Button>
+        </>
+      )}
+      <Button
+        size="sm"
+        variant="link"
+        disabled={dismiss.isPending}
+        onClick={() => dismiss.mutate()}
+      >
+        Dismiss
+      </Button>
+    </div>
+  )
+}
+
+/** The other servers running from this copy, which updating stops and starts
+ * again (they hold its files, and would run the old version). */
+function RunningAlongside({ running }: { running: string[] }) {
+  return (
+    <div className="space-y-1 text-sm">
+      <p className="text-fg-muted">
+        Also running from this copy of civex. Updating stops{' '}
+        {running.length === 1 ? 'it' : 'them'} and starts{' '}
+        {running.length === 1 ? 'it' : 'them'} again afterwards:
+      </p>
+      <ul className="list-disc space-y-0.5 pl-5 font-mono text-xs">
+        {running.map((r) => (
+          <li key={r}>{r}</li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -133,7 +182,7 @@ function Restarting({ phase }: { phase: RestartPhase }) {
     return (
       <Status
         tone="danger"
-        why="It may still be updating, or it may not have started again. Start civex yourself; the log is update.log in the .civex folder in your home folder."
+        why="It may still be updating, or it may not have started again. Start civex yourself; the update’s log says what happened."
       >
         civex hasn’t come back
       </Status>
@@ -163,7 +212,12 @@ export default function UpdatesSection() {
           {status.newer && !status.error && status.blocked && (
             <p className="text-sm text-fg-muted">{status.blocked}</p>
           )}
-          {status.last && <LastUpdate last={status.last} />}
+          {status.last && (
+            <LastUpdate last={status.last} installer={status.installer} />
+          )}
+          {status.newer && status.can_update && status.running.length > 0 && (
+            <RunningAlongside running={status.running} />
+          )}
         </div>
       )}
 
@@ -190,10 +244,16 @@ export default function UpdatesSection() {
             disabled={busy}
             onClick={() => {
               writeUpdatePref('later', null)
-              void restartForUpdate(pre)
+              void restartForUpdate({
+                pre,
+                version: status.latest,
+                stopOthers: status.running.length > 0,
+              })
             }}
           >
-            Update to {status.latest} and restart
+            {status.running.length > 0
+              ? `Stop ${status.running.length === 1 ? 'it' : 'them'}, update to ${status.latest} and restart`
+              : `Update to ${status.latest} and restart`}
           </Button>
         )}
         <Button

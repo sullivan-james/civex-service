@@ -15,6 +15,7 @@ from civex.cli import (
     schema,
     files,
     store,
+    logs as logs_cli,
     sync as sync_cli,
     trash,
     view,
@@ -85,6 +86,7 @@ app.add_typer(sync_cli.app, name="sync", rich_help_panel=_COLLAB)
 app.command("clone", rich_help_panel=_COLLAB)(sync_cli.clone)
 app.add_typer(retention.app, name="retention", rich_help_panel=_WORK)
 app.add_typer(history.app, name="history", rich_help_panel=_WORK)
+app.add_typer(logs_cli.app, name="logs", rich_help_panel=_WORK)
 app.add_typer(view.app, name="view", rich_help_panel=_WORK)
 app.command("resolve", rich_help_panel=_WORK)(resolve)
 app.command("doctor", rich_help_panel=_WORK)(doctor)
@@ -246,6 +248,14 @@ def serve(
     from pathlib import Path
 
     reload_dirs = [str(Path(__file__).resolve().parent)] if reload else None
+
+    # So an update of this copy can stop this server and start it again. Only
+    # now, once nothing above has refused to start: a record of a server that
+    # never ran would be found by an update.
+    if not reload:
+        from civex import running
+
+        running.register(host, port)
 
     # log_config=None: defer all logging to civex's own structlog pipeline
     # (configured in create_app) so uvicorn's records flow through the same sinks.

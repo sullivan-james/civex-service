@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { updatesApi } from '../api/updates'
+import { updatesApi, type StartUpdate } from '../api/updates'
 import { errorMessage } from '../lib/errors'
 
 /** Where an update started from the app has got to. It lives outside any
@@ -57,11 +57,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /** Ask civex to update and start again, then reload once it is back. It must
  * be seen going away first: for a moment after answering it still does. */
-export async function restartForUpdate(pre: boolean): Promise<void> {
+export async function restartForUpdate(start: StartUpdate): Promise<void> {
   if (phase.kind === 'closing' || phase.kind === 'restarting') return
   set({ kind: 'closing' })
   try {
-    await updatesApi.start(pre)
+    await updatesApi.start(start)
   } catch (e) {
     set({ kind: 'failed', message: errorMessage(e) })
     return

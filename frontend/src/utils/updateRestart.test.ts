@@ -25,7 +25,7 @@ describe('restartForUpdate', () => {
     const reload = vi.fn()
     vi.stubGlobal('location', { ...window.location, reload })
 
-    const done = restartForUpdate(false)
+    const done = restartForUpdate({ pre: false })
     for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(1000)
     await done
     expect(reload).toHaveBeenCalledTimes(1)
