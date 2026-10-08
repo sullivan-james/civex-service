@@ -166,6 +166,104 @@ def _wait_for_server(url: str, timeout: float = 30.0) -> bool:
     return False
 
 
+# ── Window size ───────────────────────────────────────────────────────────────
+
+_WINDOW_FILE = _RECENT_FILE.parent / "window.json"
+#: What a project window would like, on a screen with room for it.
+_WANT = (1280, 860)
+#: At or below this (points: what macOS calls "looks like"), a project window
+#: opens filling the screen: a 13-inch laptop has no room to spare around one.
+_SMALL_SCREEN = (1440, 900)
+
+
+def window_place(
+    screen: tuple[int, int, int, int] | None, saved: dict | None
+) -> tuple[str, int, int, int, int]:
+    """Where a project window opens, as ("maximize", ...) or ("place", x, y,
+    width, height). `screen` is (x, y, width, height) of the screen it is on;
+    `saved` what it was when last closed. The size it was left at wins, kept
+    within the screen; else it fills a small screen, or sits centred at a
+    comfortable size on a larger one."""
+    if screen is None:
+        return ("place", 0, 0, *_WANT)
+    sx, sy, sw, sh = screen
+    if saved:
+        if saved.get("maximized"):
+            return ("maximize", sx, sy, sw, sh)
+        try:
+            w = max(640, min(int(saved["width"]), sw))
+            h = max(480, min(int(saved["height"]), sh))
+            x = min(max(int(saved["x"]), sx), sx + sw - w)
+            y = min(max(int(saved["y"]), sy), sy + sh - h)
+            return ("place", x, y, w, h)
+        except (KeyError, TypeError, ValueError):
+            pass
+    if sw <= _SMALL_SCREEN[0] or sh <= _SMALL_SCREEN[1]:
+        return ("maximize", sx, sy, sw, sh)
+    w, h = min(_WANT[0], sw), min(_WANT[1], sh)
+    return ("place", sx + (sw - w) // 2, sy + (sh - h) // 2, w, h)
+
+
+def _screen() -> tuple[int, int, int, int] | None:
+    import webview
+
+    try:
+        first = webview.screens[0]
+    except Exception:  # no display information: let the window be
+        return None
+    return (
+        int(getattr(first, "x", 0)),
+        int(getattr(first, "y", 0)),
+        int(first.width),
+        int(first.height),
+    )
+
+
+def _read_window() -> dict | None:
+    try:
+        data = json.loads(_WINDOW_FILE.read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+_remembering: set[int] = set()
+
+
+def _remember_window(window: "webview.Window") -> None:
+    """Keep the project window's size and place as it changes, to open it the
+    same way next time (once per window, however many projects it opens)."""
+    if id(window) in _remembering:
+        return
+    _remembering.add(id(window))
+    state = dict(_read_window() or {})
+
+    def save(**changes: object) -> None:
+        state.update(changes)
+        try:
+            _WINDOW_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _WINDOW_FILE.write_text(json.dumps(state), "utf-8")
+        except OSError:
+            pass
+
+    window.events.resized += lambda width, height: save(
+        width=width, height=height, maximized=False
+    )
+    window.events.moved += lambda x, y: save(x=x, y=y)
+    window.events.maximized += lambda: save(maximized=True)
+    window.events.restored += lambda: save(maximized=False)
+
+
+def _place_project_window(window: "webview.Window") -> None:
+    how, x, y, w, h = window_place(_screen(), _read_window())
+    if how == "maximize":
+        window.maximize()
+    else:
+        window.resize(w, h)
+        window.move(x, y)
+    _remember_window(window)
+
+
 def _launch_project(path: Path) -> dict:
     """Start the server for path and navigate the window to it."""
     _save_recent(path)
@@ -180,7 +278,7 @@ def _launch_project(path: Path) -> dict:
     def _navigate() -> None:
         assert _window is not None
         if _wait_for_server(url):
-            _window.resize(1280, 800)
+            _place_project_window(_window)
             _window.load_url(url)
         else:
             detail = errors[0] if errors else "The server did not respond within 30 s."

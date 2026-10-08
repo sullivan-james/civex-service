@@ -89,6 +89,12 @@ from the next tag forward.
 
 ### Fixes
 
+- **The desktop app's window fits the screen**: on a small one (a 13-inch
+  laptop, up to 1440 × 900) a project opens filling it, on a larger one at a
+  comfortable size, centred, instead of a fixed 1280 × 800 that didn't fit a
+  13-inch MacBook's screen. It opens as you last left it, kept on the screen.
+  Its Size (⌘ + / −) now lasts too.
+
 - **Updating stops, and starts again, the other servers running from the same
   copy**, after asking (the Updates page lists them; `civex update` asks). An
   update from the app used to fail half way while a `civex serve` from the same

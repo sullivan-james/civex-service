@@ -44,3 +44,31 @@ def test_there_is_no_civex_desktop_command() -> None:
     scripts = pyproject["project"].get("scripts", {})
     assert "civex-desktop" not in scripts
     assert "civex-desktop" not in pyproject["project"].get("gui-scripts", {})
+
+
+# -- Where the project window opens -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("screen", "saved", "expected"),
+    [
+        # A 13-inch MacBook Pro (2016): no room around a window, so it fills it.
+        ((0, 0, 1280, 800), None, ("maximize", 0, 0, 1280, 800)),
+        ((0, 0, 1440, 900), None, ("maximize", 0, 0, 1440, 900)),
+        # A larger screen: a comfortable size, centred.
+        ((0, 0, 2560, 1440), None, ("place", 640, 290, 1280, 860)),
+        # As it was left, kept on the screen.
+        (
+            (0, 0, 1920, 1080),
+            {"x": 1800, "y": -50, "width": 3000, "height": 700},
+            ("place", 0, 0, 1920, 700),
+        ),
+        ((0, 0, 2560, 1440), {"maximized": True}, ("maximize", 0, 0, 2560, 1440)),
+        # Nothing known about the screen.
+        (None, None, ("place", 0, 0, 1280, 860)),
+    ],
+)
+def test_the_project_window_fits_the_screen(screen, saved, expected) -> None:
+    from civex.desktop.tray import window_place
+
+    assert window_place(screen, saved) == expected
