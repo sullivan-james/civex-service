@@ -39,12 +39,51 @@ export interface FileRef {
  * out, not because civex refused it: trying again can help. */
 export class UploadConnectionError extends Error {}
 
-/** What `uploadStreaming` reports as it goes. */
+/** What `uploadBatch` reports as it goes. */
 export interface UploadInfo {
   loaded: number
   total: number
   /** Every byte is sent; the server is still saving the file. */
   saving: boolean
+}
+
+/** What `PUT /files/batch` answers: the files stored, in order, and where it
+ * stopped if one couldn't be stored. */
+export interface BatchResult {
+  files: FileRef[]
+  stopped: { index: number; message: string } | null
+}
+
+/** Most files, and most bytes, sent in one request. A file larger than the
+ * byte limit goes in a request of its own. */
+export const BATCH_FILES = 64
+export const BATCH_BYTES = 256 * 1024 * 1024
+
+/** A selection split into requests: in order, each at most `BATCH_FILES`
+ * files and `BATCH_BYTES` (or one larger file alone). */
+export function fileBatches<T>(
+  files: T[],
+  maxFiles = BATCH_FILES,
+  maxBytes = BATCH_BYTES,
+  sizeOf: (item: T) => number = (item) => (item as { size: number }).size,
+): T[][] {
+  const batches: T[][] = []
+  let batch: T[] = []
+  let bytes = 0
+  for (const file of files) {
+    if (
+      batch.length &&
+      (batch.length >= maxFiles || bytes + sizeOf(file) > maxBytes)
+    ) {
+      batches.push(batch)
+      batch = []
+      bytes = 0
+    }
+    batch.push(file)
+    bytes += sizeOf(file)
+  }
+  if (batch.length) batches.push(batch)
+  return batches
 }
 
 export interface FileCopy {
@@ -89,51 +128,43 @@ const collectionQuery = (collectionId?: string, first = false) =>
 export const filesApi = {
   info: (sha256: string) => api.get<FileInfo>(`/files/${sha256}/info`),
 
-  upload: (file: File, collectionId?: string) => {
-    const form = new FormData()
-    form.append('file', file)
-    return api.upload<FileRef>(
-      `/files${collectionQuery(collectionId, true)}`,
-      form,
-    )
-  },
-
-  /** Streams `file`'s raw bytes directly (no multipart wrapping) so the
-   * server can write straight to the object store instead of buffering the
-   * whole upload first, and so `onProgress` gets real upload-progress
-   * events -- `fetch()` request bodies don't expose those, only XHR does.
+  /** Adds files to civex in one streamed request (`PUT /files/batch`): a
+   * line listing their names and sizes, then their bytes back to back, so
+   * the server writes each straight to storage and many files cost one
+   * request. The body is a `Blob` of the `File`s, which the browser reads
+   * from disk as it sends (nothing is copied into memory). Use `fileBatches`
+   * to split a selection into requests of a sensible size.
    *
-   * `onProgress` is told the fraction sent and the bytes; once every byte is
-   * sent it is called again with `saving: true`, because the server is then
-   * still hashing and writing the file (which, for a large file on a slow
-   * drive, takes a while the bar can't show). Aborting `signal` stops the
-   * upload and rejects with an `AbortError`. */
-  uploadStreaming: (
-    file: File,
-    onProgress?: (fraction: number, info?: UploadInfo) => void,
+   * `onProgress` is told the bytes sent of the files (not counting the list);
+   * once every byte is sent it is called again with `saving: true`, because
+   * the server is still hashing and writing the last file. A file the server
+   * couldn't store ends the batch: the answer holds those before it and
+   * `stopped` says which and why. A dropped connection rejects with an
+   * `UploadConnectionError`; aborting `signal` with an `AbortError`. */
+  uploadBatch: (
+    files: File[],
+    onProgress?: (info: UploadInfo) => void,
     collectionId?: string,
     signal?: AbortSignal,
-  ): Promise<FileRef> =>
+  ): Promise<BatchResult> =>
     new Promise((resolve, reject) => {
       if (signal?.aborted) {
         reject(new DOMException('Upload cancelled', 'AbortError'))
         return
       }
-      const xhr = new XMLHttpRequest()
-      xhr.open(
-        'PUT',
-        `/api/files/stream?filename=${encodeURIComponent(file.name)}${collectionQuery(collectionId)}`,
+      const list = new TextEncoder().encode(
+        JSON.stringify(files.map((f) => ({ name: f.name, size: f.size }))) +
+          '\n',
       )
-      xhr.upload.onprogress = (e) => {
-        if (onProgress && e.lengthComputable)
-          onProgress(e.loaded / e.total, {
-            loaded: e.loaded,
-            total: e.total,
-            saving: false,
-          })
-      }
+      const total = files.reduce((n, f) => n + f.size, 0)
+      const sent = (loaded: number) =>
+        Math.min(total, Math.max(0, loaded - list.length))
+      const xhr = new XMLHttpRequest()
+      xhr.open('PUT', `/api/files/batch${collectionQuery(collectionId, true)}`)
+      xhr.upload.onprogress = (e) =>
+        onProgress?.({ loaded: sent(e.loaded), total, saving: false })
       xhr.upload.onload = () =>
-        onProgress?.(1, { loaded: file.size, total: file.size, saving: true })
+        onProgress?.({ loaded: total, total, saving: true })
       signal?.addEventListener('abort', () => xhr.abort(), { once: true })
       xhr.onabort = () =>
         reject(new DOMException('Upload cancelled', 'AbortError'))
@@ -142,9 +173,7 @@ export const filesApi = {
           try {
             resolve(JSON.parse(xhr.responseText))
           } catch {
-            reject(
-              new Error('Upload succeeded but response was not valid JSON'),
-            )
+            reject(new Error('civex sent an answer that could not be read'))
           }
         } else if (xhr.status === 502 || xhr.status === 504) {
           // A proxy in front of civex (the dev server) couldn't reach it.
@@ -164,9 +193,9 @@ export const filesApi = {
       xhr.onerror = () =>
         reject(
           new UploadConnectionError(
-            'The connection to civex dropped while adding the file',
+            'The connection to civex dropped while adding the files',
           ),
         )
-      xhr.send(file)
+      xhr.send(new Blob([list, ...files]))
     }),
 }

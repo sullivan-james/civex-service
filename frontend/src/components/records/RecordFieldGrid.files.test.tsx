@@ -9,12 +9,12 @@ import {
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { RecordFieldGrid } from './RecordFieldGrid'
-import { filesApi } from '../../api/files'
+import { filesApi, type FileRef } from '../../api/files'
 import type { Field } from '../../api/schemas'
 
 vi.mock('../../api/files', async (original) => ({
   ...(await original<typeof import('../../api/files')>()),
-  filesApi: { uploadStreaming: vi.fn() },
+  filesApi: { uploadBatch: vi.fn() },
 }))
 
 const ref = (name: string, sha: string) => ({
@@ -64,7 +64,9 @@ function pick(name: string, mime = 'audio/wav', size = 1) {
     .upload(input, new File([new Uint8Array(size)], name, { type: mime }))
 }
 
-const upload = vi.mocked(filesApi.uploadStreaming)
+const upload = vi.mocked(filesApi.uploadBatch)
+/** What civex answers when every file of a batch went in. */
+const stored = (...files: FileRef[]) => ({ files, stopped: null })
 
 beforeEach(() => {
   upload.mockReset()
@@ -72,7 +74,7 @@ beforeEach(() => {
 
 describe('attaching files to a record', () => {
   it('attaches as soon as the file is chosen, with nothing to approve', async () => {
-    upload.mockResolvedValue(ref('a.wav', 'aa'))
+    upload.mockResolvedValue(stored(ref('a.wav', 'aa')))
     const onSave = renderGrid('file', {})
 
     await pick('a.wav')
@@ -85,9 +87,7 @@ describe('attaching files to a record', () => {
   })
 
   it('adds a batch to a file_list alongside what is already there', async () => {
-    upload
-      .mockResolvedValueOnce(ref('b.wav', 'bb'))
-      .mockResolvedValueOnce(ref('c.wav', 'cc'))
+    upload.mockResolvedValueOnce(stored(ref('b.wav', 'bb'), ref('c.wav', 'cc')))
     const onSave = renderGrid('file_list', { clip: [ref('a.wav', 'aa')] })
 
     await userEvent.upload(screen.getByLabelText('Add Clip'), [
@@ -105,7 +105,7 @@ describe('attaching files to a record', () => {
   })
 
   it('takes a file dropped onto the field', async () => {
-    upload.mockResolvedValue(ref('dropped.wav', 'dd'))
+    upload.mockResolvedValue(stored(ref('dropped.wav', 'dd')))
     const onSave = renderGrid('file', {})
     const zone = screen.getByLabelText('Add Clip').closest('label')!
 
@@ -156,9 +156,10 @@ describe('attaching files to a record', () => {
 
   it('saves the files added before one failed, and offers the rest', async () => {
     const user = userEvent.setup()
-    upload
-      .mockResolvedValueOnce(ref('a.wav', 'aa'))
-      .mockRejectedValueOnce(new Error('No space left on the drive'))
+    upload.mockResolvedValueOnce({
+      files: [ref('a.wav', 'aa')],
+      stopped: { index: 1, message: 'No space left on the drive' },
+    })
     const onSave = renderGrid('file_list', {})
 
     await user.upload(screen.getByLabelText('Add Clip'), [
@@ -172,12 +173,14 @@ describe('attaching files to a record', () => {
     expect(alert).toHaveTextContent('Couldn’t add b.wav')
     expect(onSave).toHaveBeenCalledWith('clip', [ref('a.wav', 'aa')])
 
-    upload.mockImplementation(async (f) => ref(f.name, f.name))
+    upload.mockImplementation(async (files) =>
+      stored(...files.map((f) => ref(f.name, f.name))),
+    )
     await user.click(
       within(alert).getByRole('button', { name: 'Add the remaining 2' }),
     )
-    await waitFor(() => expect(upload).toHaveBeenCalledTimes(4))
-    expect(upload.mock.calls.slice(2).map((c) => c[0].name)).toEqual([
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(2))
+    expect(upload.mock.calls[1][0].map((f) => f.name)).toEqual([
       'b.wav',
       'c.wav',
     ])
@@ -228,7 +231,7 @@ describe('removing and replacing files', () => {
   })
 
   it('asks before replacing a file, since that removes the current one', async () => {
-    upload.mockResolvedValue(ref('new.wav', 'nn'))
+    upload.mockResolvedValue(stored(ref('new.wav', 'nn')))
     const user = userEvent.setup()
     const onSave = renderGrid('file', { clip: ref('old.wav', 'oo') })
 
@@ -263,7 +266,7 @@ describe('removing and replacing files', () => {
   })
 
   it('adds to a list without asking, because nothing is removed', async () => {
-    upload.mockResolvedValue(ref('b.wav', 'bb'))
+    upload.mockResolvedValue(stored(ref('b.wav', 'bb')))
     const onSave = renderGrid('file_list', { clip: [ref('a.wav', 'aa')] })
 
     await pick('b.wav')
@@ -275,10 +278,10 @@ describe('removing and replacing files', () => {
 
 describe('upload progress', () => {
   it('shows live progress while uploading, and the server saving at the end', async () => {
-    let report!: Parameters<typeof filesApi.uploadStreaming>[1]
-    let finish!: (r: ReturnType<typeof ref>) => void
+    let report!: Parameters<typeof filesApi.uploadBatch>[1]
+    let finish!: (r: ReturnType<typeof stored>) => void
     upload.mockImplementation(
-      (_file, onProgress) =>
+      (_files, onProgress) =>
         new Promise((resolve) => {
           report = onProgress
           finish = resolve as typeof finish
@@ -286,17 +289,17 @@ describe('upload progress', () => {
     )
     const onSave = renderGrid('file', {})
 
-    await pick('big.wav')
+    await pick('big.wav', 'audio/wav', 1024)
     expect(await screen.findByText('big.wav')).toBeInTheDocument()
     expect(screen.getByLabelText('Add Clip')).toBeDisabled()
 
-    report?.(0.5, { loaded: 512, total: 1024, saving: false })
+    report?.({ loaded: 512, total: 1024, saving: false })
     expect(await screen.findByText(/50%/)).toBeInTheDocument()
 
-    report?.(1, { loaded: 1024, total: 1024, saving: true })
+    report?.({ loaded: 1024, total: 1024, saving: true })
     expect(await screen.findByText('Saving to storage…')).toBeInTheDocument()
 
-    finish(ref('big.wav', 'bb'))
+    finish(stored(ref('big.wav', 'bb')))
     await waitFor(() =>
       expect(onSave).toHaveBeenCalledWith('clip', ref('big.wav', 'bb')),
     )
@@ -305,7 +308,7 @@ describe('upload progress', () => {
 
   it('cancelling an upload stops it and saves nothing', async () => {
     upload.mockImplementation(
-      (_file, _progress, _collection, signal) =>
+      (_files, _progress, _collection, signal) =>
         new Promise((_resolve, reject) => {
           signal?.addEventListener('abort', () =>
             reject(new DOMException('cancelled', 'AbortError')),

@@ -6,7 +6,7 @@ import { schemasApi, type Schema } from '../../api/schemas'
 import { auditApi } from '../../api/audit'
 import { recordsApi, type CivexRecord } from '../../api/records'
 import { collectionsApi } from '../../api/collections'
-import { filesApi } from '../../api/files'
+import { fileBatches, filesApi, type FileRef } from '../../api/files'
 import { workflowsApi } from '../../api/workflows'
 import { Stepper } from '../ui'
 import { parseCsv, type ParsedCsv } from '../../utils/csv'
@@ -473,38 +473,77 @@ export default function ImportWizard({
           if (filePlan.skip) {
             skipped.push({ label: filePlan.file.name, reason: filePlan.skip })
             setProgress((p) => p + 1)
-            continue
           }
+        }
+        // The files go in a few requests however many there are
+        // (`fileBatches`), then each becomes or updates its record.
+        const toAdd = filesPlan.filter((f) => !f.skip)
+        for (const batch of fileBatches(
+          toAdd,
+          undefined,
+          undefined,
+          (f) => f.file.size,
+        )) {
+          let refs: (FileRef | undefined)[] = []
+          let failure = ''
           try {
-            const ref = await filesApi.upload(filePlan.file, finalCollectionId)
-            if (filePlan.matchedRecord) {
-              const rec = await recordsApi.update(
-                filePlan.matchedRecord.id,
-                {
-                  data: {
-                    ...filePlan.matchedRecord.data,
-                    [fileFieldName]: ref,
-                  },
-                },
-                batchOptions,
-              )
-              updated.push(rec)
-            } else {
-              const rec = await recordsApi.create(
-                finalDatasetName,
-                {
-                  schema_name: schemaName,
-                  data: { ...filePlan.data, [fileFieldName]: ref },
-                  parent_record_id: mapState.parentRecordId || undefined,
-                },
-                batchOptions,
-              )
-              created.push(rec)
-            }
+            const result = await filesApi.uploadBatch(
+              batch.map((f) => f.file),
+              undefined,
+              finalCollectionId,
+            )
+            refs = result.files
+            failure = result.stopped?.message ?? ''
           } catch (e) {
-            skipped.push({ label: filePlan.file.name, reason: errorMessage(e) })
+            failure = errorMessage(e)
           }
-          setProgress((p) => p + 1)
+          for (const [i, filePlan] of batch.entries()) {
+            const ref = refs[i]
+            if (!ref) {
+              skipped.push({
+                label: filePlan.file.name,
+                reason: failure || "The file couldn't be added",
+              })
+              setProgress((p) => p + 1)
+              continue
+            }
+            await placeFile(filePlan, ref)
+            setProgress((p) => p + 1)
+          }
+        }
+      }
+
+      async function placeFile(
+        filePlan: (typeof filesPlan)[number],
+        ref: FileRef,
+      ) {
+        try {
+          if (filePlan.matchedRecord) {
+            const rec = await recordsApi.update(
+              filePlan.matchedRecord.id,
+              {
+                data: {
+                  ...filePlan.matchedRecord.data,
+                  [fileFieldName]: ref,
+                },
+              },
+              batchOptions,
+            )
+            updated.push(rec)
+          } else {
+            const rec = await recordsApi.create(
+              finalDatasetName,
+              {
+                schema_name: schemaName,
+                data: { ...filePlan.data, [fileFieldName]: ref },
+                parent_record_id: mapState.parentRecordId || undefined,
+              },
+              batchOptions,
+            )
+            created.push(rec)
+          }
+        } catch (e) {
+          skipped.push({ label: filePlan.file.name, reason: errorMessage(e) })
         }
       }
 

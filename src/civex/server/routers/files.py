@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from dataclasses import asdict
 
 from civex.domain.sync import SyncError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from civex.context import AppContext
 from civex.domain.exceptions import AllVolumesFull, VolumeUnavailableError
@@ -85,6 +87,100 @@ async def upload_file_stream(
     return FileRefResponse(
         sha256=ref.sha256, filename=ref.filename, size=ref.size, volume=ref.volume
     )
+
+
+class BatchStop(BaseModel):
+    index: int = Field(description="Which file of the batch (from 0) was not stored.")
+    message: str = Field(description="Why, in plain words.")
+
+
+class BatchUploadResponse(BaseModel):
+    files: list[FileRefResponse] = Field(
+        description="The files stored, in the order sent; fewer than were sent "
+        "when one couldn't be stored (see `stopped`)."
+    )
+    stopped: BatchStop | None = Field(
+        default=None,
+        description="The file the batch stopped at and why; the files after it "
+        "were not stored either.",
+    )
+
+
+class _Body:
+    """A request body read in pieces of exact length: a line, then each file."""
+
+    def __init__(self, request: Request) -> None:
+        self._chunks = request.stream().__aiter__()
+        self._held = b""
+
+    async def _more(self) -> bool:
+        try:
+            self._held += await self._chunks.__anext__()
+            return True
+        except StopAsyncIteration:
+            return False
+
+    async def line(self, limit: int) -> bytes:
+        while b"\n" not in self._held:
+            if len(self._held) > limit or not await self._more():
+                raise HTTPException(422, detail="The batch has no list of its files")
+        line, _, self._held = self._held.partition(b"\n")
+        return line
+
+    async def exactly(self, size: int) -> AsyncIterator[bytes]:
+        left = size
+        while left:
+            if not self._held and not await self._more():
+                raise HTTPException(422, detail="The batch ended before its files did")
+            piece, self._held = self._held[:left], self._held[left:]
+            left -= len(piece)
+            yield piece
+
+    async def drain(self) -> None:
+        self._held = b""
+        while await self._more():
+            self._held = b""
+
+
+@router.put("/batch", response_model=BatchUploadResponse)
+async def upload_batch(
+    request: Request,
+    collection: str | None = _COLLECTION_PARAM,
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Store several files sent in one streamed request, so adding hundreds of
+    files is a few requests rather than hundreds. The body is one line of JSON,
+    `[{"name": ..., "size": ...}, ...]`, then each file's bytes back to back in
+    that order. Each file is stored as `PUT /files/stream` stores one (hashed
+    as it arrives, never held in memory, its size known before it is written).
+    A file that can't be stored (no room on any volume) ends the batch: the
+    answer lists those stored before it and says why it stopped."""
+    body = _Body(request)
+    try:
+        manifest = json.loads(await body.line(limit=1024 * 1024))
+        items = [(str(m["name"]), int(m["size"])) for m in manifest]
+    except (ValueError, KeyError, TypeError):
+        raise HTTPException(422, detail="The batch's list of files can't be read")
+    stored: list[FileRefResponse] = []
+    for index, (name, size) in enumerate(items):
+        try:
+            ref = await ctx.file_svc.store_stream(
+                body.exactly(size), name or "upload", size, collection
+            )
+        except (AllVolumesFull, VolumeUnavailableError) as e:
+            await body.drain()  # the answer goes back whole, not as a reset
+            return BatchUploadResponse(
+                files=stored, stopped=BatchStop(index=index, message=str(e))
+            )
+        stored.append(
+            FileRefResponse(
+                sha256=ref.sha256,
+                filename=ref.filename,
+                size=ref.size,
+                volume=ref.volume,
+            )
+        )
+    return BatchUploadResponse(files=stored)
 
 
 @router.get("/{sha256}")
