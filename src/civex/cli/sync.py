@@ -398,7 +398,9 @@ def status() -> None:
 @app.command("connect")
 def connect(
     url: str = typer.Argument(
-        help="The authority's address, e.g. https://civex.example.com"
+        help="The authority's address: https://civex.example.com, or "
+        "ssh://you@lab-machine/~/projects/birds to reach a project on a machine "
+        "you can SSH into (nothing needs to be running there)."
     ),
     invite: str | None = typer.Option(
         None,
@@ -420,6 +422,18 @@ def connect(
     finally:
         c.close()
     console.print(f"[success]Connected ({mode}).[/success]")
+
+
+@app.command("ssh-serve", hidden=True)
+def ssh_serve(
+    project: str = typer.Argument(help="The project's folder on this machine."),
+    socket: str = typer.Option(..., "--socket", help="Where to listen."),
+) -> None:
+    """Serve one device that reached this project over SSH. Started by that
+    device for an ssh:// address; not run by hand."""
+    from civex.server.ssh_end import serve_over_ssh
+
+    raise typer.Exit(serve_over_ssh(project, socket))
 
 
 @app.command("disconnect")

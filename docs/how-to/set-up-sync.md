@@ -8,7 +8,9 @@ This guide uses [Tailscale](https://tailscale.com) to give the authority a priva
 `https://` address, because devices only connect over HTTPS. It is free for
 personal use and small teams, and needs nothing configured on the civex side.
 (Already run a server? Put any HTTPS reverse proxy in front of
-`civex serve --sync-only --host 127.0.0.1` instead, and skip step 1.)
+`civex serve --sync-only --host 127.0.0.1` instead, and skip step 1. Can you SSH
+into the machine, such as a university lab machine? See
+[Over SSH instead](#over-ssh-instead): nothing needs to run there.)
 
 ```mermaid
 flowchart LR
@@ -163,6 +165,47 @@ civex sync free archive-2019      # remove local copies the server holds
 ```
 
 A file that isn't here downloads when you open or export it.
+
+## Over SSH instead
+
+If you can SSH into the machine that holds the authority, a device can reach it
+at an `ssh://` address, the way git reaches a remote. Nothing runs there between
+syncs: each sync starts civex on that machine over SSH, and SSH carries the same
+sync API.
+
+On the machine you SSH into (once):
+
+```bash
+uv tool install "civex[server]"        # civex must be on PATH or in ~/.local/bin
+cd ~/projects/birds && civex init      # or an existing project
+civex sync authority enable
+civex sync device invite laptop
+```
+
+On each device:
+
+```bash
+civex clone ssh://you@lab-machine/~/projects/birds --invite civex_inv_…
+```
+
+The address is `ssh://[user@]host[:port]/path`. `/~/` starts in your home folder,
+`?civex=/path/to/civex` says where civex is if it is elsewhere, and hosts in your
+`~/.ssh/config` work (`ssh://lab/~/birds`).
+
+- **SSH must sign in without asking**, since syncing runs in the background: use a
+  key (an agent is fine). If the machine asks for a password or a code every time,
+  share one connection (`ControlMaster auto`, `ControlPersist 8h` in
+  `~/.ssh/config`) and sign in to it once with `ssh lab`.
+- **Accept the host key first:** run `ssh lab` once in a terminal.
+- **One machine at a time.** Lab machines often share one home folder. While one
+  serves the project it says so in `_civex/open-on-host.json`, and another refuses
+  until two minutes after the last sync: two machines writing one database over a
+  network drive can damage it. Use one machine's name in the address.
+- **SSH forwarding must be allowed** (it is by default). If an administrator has
+  turned it off, use Tailscale instead.
+- civex there stops five minutes after the last request, and the next sync starts
+  it again (about a second). `CIVEX_SSH_COMMAND` replaces `ssh`, as
+  `GIT_SSH_COMMAND` does for git.
 
 ## Manage devices
 
