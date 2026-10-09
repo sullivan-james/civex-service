@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { fileAccessApi, type FilePick } from '../../api/fileAccess'
+import {
+  fileAccessApi,
+  type FilePick,
+  type MovePlan,
+} from '../../api/fileAccess'
 import { PROJECT, useDriveChoice } from '../../hooks/useDriveChoice'
 import { useFileListing } from '../../hooks/useFileListing'
 import { useVolumes } from '../../hooks/useStore'
@@ -54,6 +58,15 @@ export function MoveToDriveButton({
 /** Move the picked files onto one drive: the drive and whether they fit
  * (the shared drive-and-free-space rule), what has to be downloaded first and
  * what can't move; the move itself then runs as a job in the status bar. */
+/** Whether a move would change nothing: nothing to copy, download or point
+ * elsewhere. */
+function nothingToDo(plan: MovePlan): boolean {
+  return plan.files === 0 && plan.from_server === 0 && plan.repointed === 0
+}
+
+const plural = (n: number, word: string) =>
+  `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`
+
 export function MoveDialog({
   what,
   pick,
@@ -116,22 +129,34 @@ export function MoveDialog({
           onChange={setChosen}
         />
         {plan && (
-          <p>
-            {plan.files === 0 && plan.from_server === 0
-              ? 'Nothing to move: they are there already.'
-              : `Moves ${plan.files.toLocaleString()} file${plan.files === 1 ? '' : 's'} (${formatSize(plan.bytes)}).`}
-            {plan.copied > 0 && (
-              <>
-                {` ${plan.copied.toLocaleString()} copied, not moved.`}
-                <InfoTip>
-                  Their drive is the home of a collection that uses them, and
-                  keeps its copies.
-                </InfoTip>
-              </>
+          <ul className="space-y-1">
+            <li>
+              {nothingToDo(plan)
+                ? 'Nothing to do: they are there already.'
+                : plan.files > 0
+                  ? `Copies ${plural(plan.files, 'file')} there (${formatSize(plan.bytes)}).`
+                  : 'Nothing to copy.'}
+              {plan.copied > 0 && (
+                <>
+                  {` ${plan.copied.toLocaleString()} stay where they are too.`}
+                  <InfoTip>
+                    Other records use those copies, so they keep them; these
+                    records use the new ones.
+                  </InfoTip>
+                </>
+              )}
+            </li>
+            {plan.repointed > 0 && (
+              <li>
+                {`${plural(plan.repointed, 'file')} ${plan.repointed === 1 ? 'is' : 'are'} there already: these records will use ${plan.repointed === 1 ? 'that copy' : 'those copies'}.`}
+              </li>
             )}
-            {plan.already_there > 0 &&
-              ` ${plan.already_there.toLocaleString()} are there already.`}
-          </p>
+            {plan.freed_bytes > 0 && (
+              <li>
+                {`Frees ${formatSize(plan.freed_bytes)} on other drives: copies nothing will use any more.`}
+              </li>
+            )}
+          </ul>
         )}
         {plan && plan.from_server > 0 && (
           <ToDownloadNotice toFetch={{ files: plan.from_server, bytes: 0 }} />
@@ -156,7 +181,7 @@ export function MoveDialog({
             !drive.target ||
             drive.target === PROJECT ||
             !plan ||
-            (plan.files === 0 && plan.from_server === 0)
+            nothingToDo(plan)
           }
           onClick={() => {
             void moveFiles(

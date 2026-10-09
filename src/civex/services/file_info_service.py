@@ -67,7 +67,7 @@ class FileInfoService:
     ) -> dict[str, CollectionStorage]:
         """The same for several collections (all, if none are named), in a few
         queries. A collection with no files is still answered, with none."""
-        found = self._refs.volume_breakdowns(collection_ids, self._store.homes())
+        found = self._refs.volume_breakdowns(collection_ids)
         status: dict[str, tuple[str, bool]] = {}  # a volume's state, asked once
 
         def state(volume: str) -> tuple[str, bool]:
@@ -86,10 +86,13 @@ class FileInfoService:
                     files=files,
                     bytes=size,
                     shared_files=shared,
+                    shared_bytes=shared_size,
                     state=state(volume)[0],
                     available=state(volume)[1],
                 )
-                for volume, files, size, shared in sorted(rows, key=lambda r: -r[2])
+                for volume, files, size, shared, shared_size in sorted(
+                    rows, key=lambda r: -r[2]
+                )
             ]
             out[cid] = CollectionStorage(
                 collection_id=cid,
@@ -106,6 +109,9 @@ class FileInfoService:
         and workflow runs that use it. Raises NotFoundError for content that is
         neither stored anywhere nor used by anything."""
         copies = self._store.copies_of(sha256)
+        pointing = self._refs.copy_users([sha256])
+        for copy in copies:
+            copy.records = len(pointing.get((sha256, copy.volume), ()))
         by_collection, jobs, deleted = self._refs.usage(sha256)
         if not copies and not by_collection and not jobs and not deleted:
             raise NotFoundError(f"No file with hash {sha256} is stored or used.")

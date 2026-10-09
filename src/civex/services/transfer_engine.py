@@ -26,14 +26,19 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
+from itertools import islice
 from typing import TYPE_CHECKING, Callable, Iterator
 
 from civex.domain.placement import (
     STEP_COPY,
+    STEP_MOVE,
     STEP_THERE,
+    Pointer,
+    Scope,
     file_step,
-    homes_keeping,
+    keeping,
 )
 from civex.domain.rates import RateWindow, eta_seconds
 from civex.domain.transfers import (
@@ -124,34 +129,48 @@ class _Item:
     sha256: str
     source: str
     size: int | None = None  # None until it has been looked at
-    # Copied, not moved: the source is a home that keeps it (domain.placement).
+    # Copied, not moved: owners the move doesn't cover point at the source.
     keep_source: bool = False
+    # The pointers (file_references ids) the move points at the target.
+    rows: list[uuid.UUID] = field(default_factory=list)
+    # Copies to remove once nothing points at them (besides `source`).
+    drop: list[str] = field(default_factory=list)
+    # A target that already holds the file: nothing is copied, only pointers.
+    there: str | None = None
 
 
 @dataclass
 class Step:
     """What a transfer does with one file (`plan_steps`): `step` is a
-    domain.placement STEP_*, `source` the drive it comes from."""
+    domain.placement STEP_*, `source` the drive it comes from, `rows` the
+    pointers it moves to the target, `drop` the copies it leaves unused (freed
+    once nothing points at them) and `there` the target already holding it."""
 
     sha256: str
     step: str
     source: str | None
     size: int
+    rows: list[uuid.UUID] = field(default_factory=list)
+    drop: list[str] = field(default_factory=list)
+    there: str | None = None
 
 
 @dataclass
 class _Moved:
-    """A file copied to its destination but not yet committed."""
+    """A file copied to its destination (or found there) but not yet committed."""
 
     sha256: str
-    source: str
+    source: str | None
     target: str
     size: int
     name: str | None = None  # the file's original name, for the target's manifest
     # False for a file whose move an earlier run already committed and counted,
     # leaving only its original to be removed: cleaning that up isn't another move.
     counted: bool = True
-    keep_source: bool = False  # copied: the original stays (a home keeps it)
+    keep_source: bool = False  # copied: owners not moved point at the original
+    rows: list[uuid.UUID] = field(default_factory=list)
+    drop: list[str] = field(default_factory=list)
+    there: bool = False  # nothing copied: the target already had it
 
 
 class _Run:
@@ -160,6 +179,7 @@ class _Run:
     def __init__(
         self,
         store: FileObjectStore,
+        refs: FileReferenceRepository,
         spec: TransferSpec,
         control: TransferControl,
         progress_hook: ProgressFn,
@@ -168,6 +188,7 @@ class _Run:
         clock: Callable[[], float],
     ) -> None:
         self.store = store
+        self.refs = refs
         self.spec = spec
         self.control = control
         self.hook = progress_hook
@@ -229,9 +250,10 @@ class _Run:
     # -- committing ----------------------------------------------------------
 
     def flush(self) -> None:
-        """Commit the files copied so far, then (and only then) remove their
-        originals. Counted as done only now, so the persisted numbers never
-        include a file whose move could still be undone by a crash."""
+        """Commit the files copied so far, with the pointers they carry, then
+        (and only then) remove the copies nothing points at any more. Counted
+        as done only now, so the persisted numbers never include a file whose
+        move could still be undone by a crash."""
         if not self.batch:
             self.last_flush = self.clock()
             return
@@ -240,24 +262,39 @@ class _Run:
         self.pending_files = 0
         self.pending.clear()
         self.store.record_moves(
-            [(m.sha256, m.target, m.size) for m in moved],
-            [(m.sha256, m.source) for m in moved if not m.keep_source],
+            [(m.sha256, m.target, m.size) for m in moved if not m.there]
         )
-        self.commit()
         for m in moved:
+            if m.rows:
+                self.refs.point_rows(m.rows, m.target)
+        # A copy goes only when nothing points at it now, asked in the same
+        # transaction as the pointers moved: a copy others use always stays.
+        gone: list[tuple[str, str]] = []
+        for m in moved:
+            candidates = list(m.drop)
+            if m.source and not m.keep_source and m.source not in candidates:
+                candidates.append(m.source)
+            for volume in candidates:
+                if volume != m.target and not self.refs.pointing_at(m.sha256, volume):
+                    gone.append((m.sha256, volume))
+        self.store.record_moves([], gone)
+        self.commit()
+        for sha, volume in gone:
             try:
-                if not m.keep_source:
-                    self.store.remove_from_volume(m.sha256, m.source)
+                self.store.remove_from_volume(sha, volume)
             except OSError as exc:  # it is safely on the target; a stray copy remains
                 log.warning(
-                    "Transfer: %s is on %s but its original on %s couldn't be removed: %s",
-                    m.sha256,
-                    m.target,
-                    m.source,
+                    "Transfer: %s's copy on %s couldn't be removed: %s",
+                    sha,
+                    volume,
                     exc,
                 )
-            self.store.append_manifest(m.target, m.sha256, m.name, m.size)
-            if m.counted:
+        for m in moved:
+            if not m.there:
+                self.store.append_manifest(m.target, m.sha256, m.name, m.size)
+            if m.there:
+                self.p.files_skipped += 1
+            elif m.counted:
                 self.p.files_done += 1
                 self.p.bytes_done += m.size
             elif not self.total_known or _accounted(self.p) < self.p.files_total:
@@ -287,20 +324,27 @@ def _items(
     store: FileObjectStore,
     refs: FileReferenceRepository,
     spec: TransferSpec,
-    placements: dict[str, str],
     run: _Run,
 ) -> Iterator[_Item]:
     if spec.kind == KIND_DRAIN:
         for source in spec.sources:
-            for obj in store.iter_volume_objects(source):
-                yield _Item(obj.sha256, source, obj.size)
+            objects = store.iter_volume_objects(source)
+            while page := list(islice(objects, PAGE)):
+                # Whatever points at the drive being emptied points at the
+                # target afterwards.
+                pointers = refs.pointers(o.sha256 for o in page)
+                for obj in page:
+                    rows = [
+                        p.id for p in pointers.get(obj.sha256, []) if p.volume == source
+                    ]
+                    yield _Item(obj.sha256, source, obj.size, rows=rows)
             # A drive that went quiet part-way through the listing would look
             # exactly like one that has been emptied. It hasn't been.
             status = store.volume_status(source)
             if not status.reachable:
                 raise VolumeNotResponding(source, status.reason)
     elif spec.kind in (KIND_CONSOLIDATE, KIND_FILES):
-        yield from _file_items(store, refs, spec, placements, run)
+        yield from _file_items(store, refs, spec, run)
     else:
         raise ValueError(f"Unknown transfer kind '{spec.kind}'")
 
@@ -309,13 +353,22 @@ def _file_items(
     store: FileObjectStore,
     refs: FileReferenceRepository,
     spec: TransferSpec,
-    placements: dict[str, str],
     run: _Run,
 ) -> Iterator[_Item]:
     """The files `plan_steps` says go somewhere, re-found from where each is
-    now, so a resumed transfer carries on with what is left."""
-    for step in plan_steps(store, refs, spec, placements):
-        if step.step == STEP_THERE:
+    and what points at it now, so a resumed transfer carries on with what is
+    left."""
+    for step in plan_steps(store, refs, spec):
+        if step.step == STEP_THERE and step.there and (step.rows or step.drop):
+            yield _Item(
+                step.sha256,
+                step.there,
+                step.size or None,
+                rows=step.rows,
+                drop=step.drop,
+                there=step.there,
+            )
+        elif step.step == STEP_THERE:
             run.p.files_skipped += 1
         elif step.source is not None:
             yield _Item(
@@ -323,22 +376,35 @@ def _file_items(
                 step.source,
                 step.size or None,
                 keep_source=step.step == STEP_COPY,
+                rows=step.rows,
+                drop=step.drop,
             )
+
+
+def scope_of(spec: TransferSpec) -> Scope:
+    """The pointers a transfer moves (domain.placement.Scope)."""
+    if spec.kind == KIND_DRAIN:
+        return Scope(drives=frozenset(spec.sources))
+    if spec.kind == KIND_CONSOLIDATE:
+        return Scope(collections=frozenset(spec.collection_ids))
+    return Scope(records=frozenset(spec.record_ids))
 
 
 def plan_steps(
     store: FileObjectStore,
     refs: FileReferenceRepository,
     spec: TransferSpec,
-    placements: dict[str, str],
 ) -> Iterator[Step]:
     """What gathering files onto `spec.targets` does with each: the named files
     (`files`) or every file of the collections (`consolidate`), a page at a
-    time, from the inventory. The one rule (`domain.placement.file_step`)
-    behind a transfer's preview and the transfer: a file is copied, not moved,
-    when the drive it comes from is the home of a collection that uses it
-    (gathering a collection, its own home doesn't count: it is being moved)."""
-    selected = set(spec.collection_ids)
+    time, from the inventory and what points at each copy. The one rule
+    (`domain.placement.file_step`) behind a transfer's preview and the
+    transfer: the move's own pointers go to the target; the file is copied
+    there unless it is there already (then nothing is copied); the copy it
+    came from stays while owners the move doesn't cover point at it (copied,
+    not moved), and a copy left with nothing pointing at it is freed."""
+    scope = scope_of(spec)
+    targets = set(spec.targets)
     for shas in _pages(refs, spec):
         copies = store.copies(shas)
         unknown = [s for s in shas if s not in copies]
@@ -351,12 +417,28 @@ def plan_steps(
                 store.readable_first(v for rows in copies.values() for v, _ in rows)
             )
         }
-        users = refs.collections_using(shas)
+        pointers = refs.pointers(shas)
         for sha in shas:
-            rows = sorted(copies.get(sha, []), key=lambda r: order[r[0]])
-            keeping = homes_keeping(users.get(sha, set()) - selected, placements)
-            step, source = file_step([v for v, _ in rows], spec.targets, keeping)
-            yield Step(sha, step, source, rows[0][1] if rows else 0)
+            owners: list[Pointer] = pointers.get(sha, [])
+            mine = [p for p in owners if scope.covers(p)]
+            mine_on = {p.volume for p in mine if p.volume}
+            # Copy from the copy the move's own owners use, if it can.
+            rows = sorted(
+                copies.get(sha, []), key=lambda r: (r[0] not in mine_on, order[r[0]])
+            )
+            keep = keeping(owners, scope)
+            step, source = file_step([v for v, _ in rows], targets, keep)
+            there = next((v for v, _ in rows if v in targets), None)
+            vacated = mine_on | ({source} if step == STEP_MOVE and source else set())
+            yield Step(
+                sha,
+                step,
+                source,
+                rows[0][1] if rows else 0,
+                rows=[p.id for p in mine if p.volume not in targets],
+                drop=sorted(vacated - keep - targets),
+                there=there,
+            )
 
 
 def _pages(refs: FileReferenceRepository, spec: TransferSpec) -> Iterator[list[str]]:
@@ -400,7 +482,6 @@ def run_transfer(
     refs: FileReferenceRepository,
     spec: TransferSpec,
     *,
-    placements: dict[str, str] | None = None,
     progress: ProgressFn,
     commit: Callable[[], None],
     control: TransferControl | None = None,
@@ -412,14 +493,14 @@ def run_transfer(
     safe to remove from its source). Never raises for anything that happens to a
     file or a volume: the way it ended is the returned Outcome."""
     control = control or TransferControl()
-    run = _Run(store, spec, control, progress, commit, seed or Seed(), clock)
+    run = _Run(store, refs, spec, control, progress, commit, seed or Seed(), clock)
     status = STATUS_COMPLETED
     reason: str | None = None
     auto_resume = False
     error: str | None = None
     try:
         run.emit(force=True)
-        for item in _items(store, refs, spec, placements or {}, run):
+        for item in _items(store, refs, spec, run):
             run.check_stop()
             _move(store, run, item)
             run.maybe_flush()
@@ -474,6 +555,22 @@ def _accounted(p: TransferProgress) -> int:
 
 def _move(store: FileObjectStore, run: _Run, item: _Item) -> None:
     """Move one file, or record why it couldn't be."""
+    if item.there is not None:
+        # On the target already: only its pointers move (and copies they
+        # leave unused go), committed with the batch.
+        run.batch.append(
+            _Moved(
+                item.sha256,
+                None,
+                item.there,
+                item.size or 0,
+                counted=False,
+                rows=item.rows,
+                drop=item.drop,
+                there=True,
+            )
+        )
+        return
     status = store.volume_status(item.source)
     if not status.reachable:
         raise VolumeNotResponding(item.source, status.reason)
@@ -517,6 +614,8 @@ def _move(store: FileObjectStore, run: _Run, item: _Item) -> None:
                 run.name_of(item.source, item.sha256),
                 counted,
                 item.keep_source,
+                rows=item.rows,
+                drop=item.drop,
             )
         )
         run.batch_bytes += size

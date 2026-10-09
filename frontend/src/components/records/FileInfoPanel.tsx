@@ -72,6 +72,11 @@ export function FileInfoPanel({ sha256 }: { sha256: string }) {
                       {copy.state.replace('_', ' ')}
                     </Badge>
                   )}
+                  <span className="text-fg-muted">
+                    {copy.records > 0
+                      ? `· used by ${copy.records.toLocaleString()} ${copy.records === 1 ? 'record' : 'records'}`
+                      : '· used by nothing (a clean-up removes it)'}
+                  </span>
                 </p>
                 <p className="flex items-start gap-2">
                   <span className="min-w-0 break-all font-mono text-fg-muted">

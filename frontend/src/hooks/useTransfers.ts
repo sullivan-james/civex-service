@@ -1,5 +1,6 @@
 import {
   keepPreviousData,
+  type QueryClient,
   useMutation,
   useQuery,
   useQueryClient,
@@ -13,11 +14,36 @@ import { isBusy } from '../utils/transfers'
 
 const KEY = ['store', 'transfers']
 
-/** Recent transfers. Polls quickly while one is running and slowly otherwise. */
+/** Everything that says how much is where: a move changes all of it. */
+function refreshStorage(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ['store', 'volumes'] })
+  qc.invalidateQueries({ queryKey: ['store', 'collection'] })
+  qc.invalidateQueries({ queryKey: ['file-listing'] })
+}
+
+/** Whether a move that was under way has stopped since the last look. */
+export function someEnded(
+  before: Transfer[] | undefined,
+  now: Transfer[],
+): boolean {
+  if (!before) return false
+  const busy = new Set(before.filter(isBusy).map((t) => t.id))
+  return now.some((t) => busy.has(t.id) && !isBusy(t))
+}
+
+/** Recent transfers. Polls quickly while one is running and slowly otherwise.
+ * When a move ends, the volumes' sizes and where each collection's files are
+ * are asked again, so they don't wait for a page reload. */
 export function useTransfers() {
+  const qc = useQueryClient()
   return useQuery({
     queryKey: KEY,
-    queryFn: transfersApi.list,
+    queryFn: async () => {
+      const before = qc.getQueryData<Transfer[]>(KEY)
+      const now = await transfersApi.list()
+      if (someEnded(before, now)) refreshStorage(qc)
+      return now
+    },
     refetchInterval: (q) => (q.state.data?.some(isBusy) ? 1000 : 15_000),
   })
 }
@@ -39,8 +65,7 @@ function useAction<A>(fn: (arg: A) => Promise<Transfer>) {
     mutationFn: fn,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY })
-      qc.invalidateQueries({ queryKey: ['store', 'volumes'] })
-      qc.invalidateQueries({ queryKey: ['store', 'collection'] })
+      refreshStorage(qc)
     },
   })
 }

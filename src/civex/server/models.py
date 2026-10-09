@@ -738,6 +738,12 @@ class VolumeStatsResponse(BaseModel):
         description="Files kept only because a workflow run took them as an input.",
     )
     history_bytes: int = 0
+    shared_files: int = Field(
+        default=0,
+        description="Files the records of more than one collection use (each "
+        "collection counts them), so collections' shares overlap by these.",
+    )
+    shared_bytes: int = 0
     name: str
     path: str
     allocated_gb: float | None
@@ -802,6 +808,10 @@ class FileCopyResponse(BaseModel):
         description="The volume's state: online, offline, wrong_drive, readonly or retired."
     )
     network: bool = Field(description="The volume is on a network drive.")
+    records: int = Field(
+        default=0,
+        description="Live records whose file is this copy (each points at one).",
+    )
 
 
 class CollectionUseResponse(BaseModel):
@@ -917,8 +927,10 @@ class CollectionVolumeShareResponse(BaseModel):
     files: int = Field(description="Files of the collection on this volume.")
     bytes: int
     shared_files: int = Field(
-        description="Of those, files another collection uses too (moving one affects both)."
+        description="Of those, files another collection's records use too (the "
+        "same copies, counted under each collection)."
     )
+    shared_bytes: int = Field(default=0, description="The size of those files.")
     state: str = Field(
         description="The volume's state now: online, offline, wrong_drive, readonly or retired."
     )

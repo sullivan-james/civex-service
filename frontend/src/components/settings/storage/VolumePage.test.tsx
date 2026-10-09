@@ -30,14 +30,23 @@ const volume = (name: string, over: Record<string, unknown> = {}) => ({
   unused_bytes: 0,
   history_files: 0,
   history_bytes: 0,
+  shared_files: 0,
+  shared_bytes: 0,
   ...over,
 })
 
-const share = (v: string, files: number, bytes: number, shared = 0) => ({
+const share = (
+  v: string,
+  files: number,
+  bytes: number,
+  shared = 0,
+  sharedBytes = 0,
+) => ({
   volume: v,
   files,
   bytes,
   shared_files: shared,
+  shared_bytes: sharedBytes,
   state: 'online',
   available: true,
 })
@@ -57,6 +66,8 @@ beforeEach(() => {
       unused_bytes: 439 * MB,
       history_files: 10,
       history_bytes: 3 * MB,
+      shared_files: 2,
+      shared_bytes: 20 * MB,
     }),
     volume('archive'),
   ]
@@ -67,7 +78,7 @@ beforeEach(() => {
       bytes: 300 * MB,
       unlocated_files: 0,
       volumes: [
-        share('default', 9, 200 * MB, 2),
+        share('default', 9, 200 * MB, 2, 20 * MB),
         share('archive', 3, 100 * MB),
       ],
     },
@@ -160,14 +171,20 @@ describe('a volume’s page', () => {
     const table = await screen.findByRole('table')
     const rows = within(table).getAllByRole('row').slice(1)
     expect(within(rows[0]).getByText('study')).toBeInTheDocument()
-    expect(rows[0]).toHaveTextContent('9')
-    expect(rows[0]).toHaveTextContent('200 MB')
+    // Its own files only: the 2 it shares are counted once, in their own row,
+    // so the rows add up to what the drive holds.
+    expect(rows[0]).toHaveTextContent('7')
+    expect(rows[0]).toHaveTextContent('180 MB')
     await userEvent.click(
       within(rows[0]).getByRole('button', { name: 'More information' }),
     )
     expect(screen.getByRole('tooltip')).toHaveTextContent(
-      '2 files are also used by other collections',
+      'Also uses 2 files (20.0 MB) that other collections use too',
     )
+    const shared = within(table)
+      .getByText('Shared by several collections')
+      .closest('tr')!
+    expect(shared).toHaveTextContent('20.0 MB')
     // field-notes has nothing on default, so isn't listed here
     expect(within(table).queryByText('field-notes')).toBeNull()
   })

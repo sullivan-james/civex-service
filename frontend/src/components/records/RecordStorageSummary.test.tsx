@@ -87,6 +87,8 @@ describe('RecordStorageSummary', () => {
             from_server: 0,
             already_there: 0,
             copied: 1,
+            repointed: 0,
+            freed_bytes: 2048,
           },
         }),
       '/api/remote': { configured: false },
@@ -96,7 +98,12 @@ describe('RecordStorageSummary', () => {
     await userEvent.click(
       await screen.findByRole('button', { name: 'Move to drive…' }),
     )
-    expect(await screen.findByText(/1 copied, not moved/)).toBeInTheDocument()
+    expect(
+      await screen.findByText(
+        /Copies 3 files there .* 1 stay where they are too/,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Frees 2.0 KB on other drives/)).toBeInTheDocument()
     const preview = calls.find((c) => c.path === '/api/file-access/gather')
     expect(preview?.body).toMatchObject({ within: 'enc7', volume: 'archive' })
   })

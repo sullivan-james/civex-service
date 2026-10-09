@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from civex.domain.file_access import FileSelection
+from civex.domain.file_access import FileSelection, copy_key
 from civex.domain.query import RecordQuery
 
 from .test_file_access_service import Study, _unplug, archive, study  # noqa: F401
@@ -111,9 +111,10 @@ def test_records_beneath_count_only_if_they_match_the_filter_at_their_level(
     assert sorted(i.filename for i in items) == ["s1.txt", "s2.txt"]
 
 
-def test_a_file_other_records_use_moves_like_any_other(ctx, study, archive):  # noqa: F811
-    """Every file picked moves, whoever else uses it: the others keep using
-    the same file, on its new drive. The listing still says who else does."""
+def test_a_file_other_records_use_is_copied_for_the_picked_ones(ctx, study, archive):  # noqa: F811
+    """Every file picked goes, and only the picked records' copies move: a
+    copy other records point at stays (copied, not moved), so they keep it
+    where it is. The listing says who else uses it."""
     svc = ctx.file_access_svc
     study.selection(study.rec_a, "s1", b"the same table")
     study.selection(study.rec_b, "s2", b"the same table")  # same content
@@ -122,13 +123,13 @@ def test_a_file_other_records_use_moves_like_any_other(ctx, study, archive):  # 
     only_a = _within(study.rec_a)
     _, items = svc.chosen(only_a)
     listing = svc.listing(only_a)
-    assert {i.filename: listing.others[i.sha256] for i in listing.items} == {
+    assert {i.filename: listing.others[copy_key(i)] for i in listing.items} == {
         "s1.txt": 1,
         "s3.txt": 0,
     }
 
     plan = svc.plan_move(items, "archive")
-    assert (plan.files, plan.copied) == (2, 0)
+    assert (plan.files, plan.copied) == (2, 1)  # s1 stays for rec_b
     shas, _, _ = svc.to_move(items, "archive")
     assert len(shas) == 2
 
@@ -184,8 +185,11 @@ def test_a_file_several_records_use_is_one_row_and_one_file(ctx, study, archive)
     (row,) = listing.items
     assert listing.total == 1
     assert sum(p.files for p in listing.summary) == 1
-    assert sorted(u.filename for u in listing.uses[row.sha256]) == ["s1.txt", "s2.txt"]
-    assert listing.others[row.sha256] == 0
+    assert sorted(u.filename for u in listing.uses[copy_key(row)]) == [
+        "s1.txt",
+        "s2.txt",
+    ]
+    assert listing.others[copy_key(row)] == 0
 
     _, picked = svc.chosen(everything, shas=[row.sha256])
     assert len(picked) == 2
@@ -202,7 +206,7 @@ def test_files_are_picked_by_how_many_records_use_them(ctx, study, archive):  # 
     ctx.commit()
     everything = _within(study.e7)
     listing = svc.listing(everything, used_by=[2])
-    assert [len(listing.uses[i.sha256]) for i in listing.items] == [2]
+    assert [len(listing.uses[copy_key(i)]) for i in listing.items] == [2]
     assert listing.sharing == [{"records": 1, "files": 1}, {"records": 2, "files": 1}]
     _, picked = svc.chosen(everything, used_by=[1])  # actions follow the list
     assert [i.filename for i in picked] == ["s3.txt"]
@@ -247,3 +251,42 @@ def test_a_records_list_of_what_it_contains_can_take_its_own_files_too(
     assert sorted(i.filename for i in svc.listing(both).items) == ["rec.wav", "s1.txt"]
     everything = svc.listing(_within(study.rec_a)).total
     assert svc.listing(both).total == everything
+
+
+def test_moving_onto_a_drive_that_has_the_content_copies_nothing(
+    ctx, study, archive  # noqa: F811
+):
+    """De-duplication: s2's records point at a copy on the archive, and the
+    project drive already holds the same content (s1's). Moving s2 there copies
+    nothing: its record points at that copy, and the archive copy, used by
+    nothing any more, is freed. The preview says exactly that first."""
+    from civex.services.transfer_engine import run_transfer
+
+    svc = ctx.file_access_svc
+    study.selection(study.rec_a, "s1", b"the same bytes")  # on default
+    s2 = study.selection(
+        study.rec_b, "s2", b"the same bytes", on=str(study.collection.id)
+    )  # its own copy, on the archive (the collection's home)
+    ctx.commit()
+    store = ctx.file_svc._store
+    sha = next(iter(store.copies_used([s2.id]).keys()))[1]
+    assert store.copies_used([s2.id]) == {(s2.id, sha): "archive"}
+    _, items = svc.chosen(_within(study.rec_b))
+
+    plan = svc.plan_move(items, "default")
+
+    assert (plan.files, plan.already_there, plan.repointed) == (0, 1, 1)
+    assert plan.freed_bytes == len(b"the same bytes")
+
+    shas, _, _ = svc.to_move(items, "default")
+    outcome = run_transfer(
+        store,
+        svc.refs,
+        svc.move_spec(shas, "default", [str(s2.id)]),
+        progress=lambda p: None,
+        commit=ctx.commit,
+    )
+
+    assert outcome.status == "completed"
+    assert store.copies_used([s2.id]) == {(s2.id, sha): "default"}
+    assert [v for v, _ in store.copies([sha])[sha]] == ["default"]  # archive freed

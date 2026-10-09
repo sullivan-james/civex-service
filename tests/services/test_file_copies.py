@@ -25,9 +25,11 @@ def two_homes(
     one, two = make_collection("one"), make_collection("two")
     ctx.store_svc.set_placement(str(one.id), "a")
     ctx.store_svc.set_placement(str(two.id), "b")
+    # Each collection's record is made right after its upload, as in the app:
+    # it uses the copy just written (the newest).
     ref = ctx.file_svc.store_bytes(b"shared " * 30, "shared.txt", str(one.id))
-    ctx.file_svc.store_bytes(b"shared " * 30, "shared.txt", str(two.id))
     make_record("one", "doc", {"scan": ref.to_dict()})
+    ctx.file_svc.store_bytes(b"shared " * 30, "shared.txt", str(two.id))
     make_record("two", "doc", {"scan": ref.to_dict()})
     ctx.commit()
     return drives, ref, one, two
@@ -93,7 +95,7 @@ def test_clean_up_keeps_every_copy_of_a_file_in_use_and_removes_unused_ones(
     assert unused.sha256 not in store.copies([unused.sha256])
 
 
-def test_a_collection_counts_a_file_once_on_its_own_home(
+def test_a_collection_counts_a_file_on_the_copy_its_records_use(
     ctx: AppContext, two_homes
 ) -> None:
     _, _, one, two = two_homes

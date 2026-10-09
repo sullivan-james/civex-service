@@ -21,6 +21,10 @@ export interface VolumeStats {
   /** Files here kept only because a workflow run took them as an input. */
   history_files: number
   history_bytes: number
+  /** Copies the records of more than one collection use: each collection
+   * counts them, so collections' shares overlap by these. */
+  shared_files: number
+  shared_bytes: number
 }
 
 export interface StorageLocation {
@@ -50,8 +54,11 @@ export interface CollectionVolumeShare {
   volume: string
   files: number
   bytes: number
-  /** Of those, files another collection uses too. */
+  /** Of those, files another collection's records use too (the same
+   * copies, counted under each collection). */
   shared_files: number
+  /** The size of those. */
+  shared_bytes: number
   state: VolumeStats['state']
   available: boolean
 }

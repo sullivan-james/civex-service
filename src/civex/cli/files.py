@@ -537,7 +537,7 @@ def files_gather(
     with the same options first to see what you are selecting.
     """
     from civex.cli.transfers import _start
-    from civex.domain.transfers import KIND_FILES, TransferSpec
+    from civex.services.file_access_service import FileAccessService
 
     selection = _selection(
         collection, schema, under, field, where, search, view, None, export
@@ -556,16 +556,21 @@ def files_gather(
                 )
             if p.copied:
                 console.print(
-                    f"[dim]{p.copied} file(s) would be copied, not moved: their "
-                    "drive is the home of a collection that uses them.[/dim]"
+                    f"[dim]{p.copied} file(s) would be copied, not moved: other "
+                    "records still use the copies they come from.[/dim]"
+                )
+            if p.repointed:
+                console.print(
+                    f"[dim]{p.repointed} file(s) are on '{escape(to)}' already: "
+                    "these records will use those copies (nothing copied).[/dim]"
+                )
+            if p.freed_bytes:
+                console.print(
+                    f"[dim]{format_bytes(p.freed_bytes)} freed on other drives: "
+                    "copies nothing will use any more.[/dim]"
                 )
             if shas:
-                _start(
-                    TransferSpec(
-                        kind=KIND_FILES, targets=[to], shas=shas, freeze_sources=False
-                    ),
-                    True,
-                )
+                _start(svc.move_spec(shas, to, _records_of(items)), True)
             return
         shas, downloaded, plan = svc.to_move(items, to)
         ctx.commit()
@@ -580,8 +585,8 @@ def files_gather(
         )
     if plan.copied:
         console.print(
-            f"[dim]{plan.copied} file(s) are copied, not moved: their drive is "
-            "the home of a collection that uses them.[/dim]"
+            f"[dim]{plan.copied} file(s) are copied, not moved: other records "
+            "still use the copies they come from.[/dim]"
         )
     if not shas:
         if not downloaded:
@@ -589,10 +594,12 @@ def files_gather(
                 f"[dim]Every file that can move is already on '{escape(to)}'.[/dim]"
             )
         return
-    _start(
-        TransferSpec(kind=KIND_FILES, targets=[to], shas=shas, freeze_sources=False),
-        dry_run,
-    )
+    _start(FileAccessService.move_spec(shas, to, _records_of(items)), dry_run)
+
+
+def _records_of(items) -> list[str]:
+    """The records whose files these are: a move points only them elsewhere."""
+    return sorted({i.record_id for i in items})
 
 
 @app.command("fetch")

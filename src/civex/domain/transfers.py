@@ -94,6 +94,10 @@ class TransferSpec:
     collection_ids: list[str] = field(default_factory=list)
     # files: the content to move, by sha256. Files already on a target stay put.
     shas: list[str] = field(default_factory=list)
+    # files: the records (by id) whose files these are: only they are pointed
+    # at the target, and a copy other records point at stays. Empty: every
+    # record that uses the files.
+    record_ids: list[str] = field(default_factory=list)
     verify: str = VERIFY_COPY
     # drain: stop new files being written to the sources while it runs, and put
     # them back as they were afterwards (otherwise a busy volume never empties).
