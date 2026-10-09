@@ -356,3 +356,22 @@ def test_dedupe_hit_refreshes_mtime_so_grace_protects_it(ctx: AppContext) -> Non
     assert path.stat().st_mtime > old + 86400
     report = ctx.gc_svc.run(dry_run=False, grace_days=14)
     assert report.deleted_count == 0
+
+
+def test_no_grace_period_spares_nothing_even_a_file_stamped_ahead(
+    ctx: AppContext, monkeypatch
+) -> None:
+    """With grace_days=0 nothing is protected, even a file whose timestamp is a
+    little ahead of the clock (Windows file times can be), which compared with
+    "now" once made the last file written look too new to collect."""
+    import civex.services.gc_service as gc
+
+    ref = _store(ctx, b"written just now", "now.txt")
+    path = ctx.file_svc._store.object_path(ref.sha256)
+    ahead = gc.time.time() + 5
+    os.utime(path, (ahead, ahead))
+
+    report = ctx.gc_svc.run(dry_run=False, grace_days=0)
+
+    assert [o.sha256 for o in report.deleted] == [ref.sha256]
+    assert report.protected_by_grace == 0
