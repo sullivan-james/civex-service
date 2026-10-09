@@ -1,195 +1,119 @@
 # Workflows
 
-Workflows are YAML files stored in `_civex/workflows/`. Each workflow defines a series of steps — each backed by a plugin — that run in dependency order. Workflows can be triggered automatically when records change, or run manually against a specific record.
+A workflow is a YAML file in `_civex/workflows/` whose steps each run a
+[plugin](../reference/plugins/get_field.md). It runs when a record changes, or
+when you start it. Runs are covered in [Automation](automation.md).
 
-## Workflow file structure
+## A complete example
 
 ```yaml
-name: my-workflow
-description: Optional human-readable description.
+name: extract-start-time
+description: Read the recording's start time from its file name.
 
-# Optional: restrict manual runs to records of this schema
-record_schema: Encounter
-
-# Optional: declare inputs for manual runs
-inputs:
-  files:
-    type: files
-    label: Source files
-    description: WAV recordings to process.
-
-# Optional: automatic triggers
 triggers:
-  record_created:
-    schema: Recording
   record_updated:
-    schema: Recording
-    fields:
-      - audio_file     # only trigger if this field changed
+    schema: recording
+    fields: [audio]              # only when audio is set or changed
 
 steps:
-  - id: step_one
-    plugin: civex.some_plugin
+  - id: extract
+    plugin: civex.extract_from_filename
     config:
-      field: audio_file
+      field: audio
+      pattern: '(\d{8}[-_]\d{6})'
+      output_type: datetime
+      date_format: 'YYYYMMDD[-_]HHmmSS'
 
-  - id: step_two
+  - id: save
     plugin: civex.save_field
     config:
-      field: result
+      field: start_time
     inputs:
-      value: step_one.output_name   # reference step_one's output
+      value: extract.value       # <step id>.<output name>
 ```
+
+Attaching `20240315_093000.wav` to a recording sets its `start_time` to
+`2024-03-15T09:30:00`. [Fill fields from file names](../how-to/fill-fields-from-filenames.md)
+walks through it.
+
+## The file
+
+| Key | Required | Means |
+|---|---|---|
+| `name` | yes | How the workflow is referred to (`civex workflow run <name>`) |
+| `description` | | Shown in lists |
+| `triggers` | | When it runs by itself (below) |
+| `record_schema` | | Manual runs only on records of this schema |
+| `inputs` | | What a manual run asks for (below) |
+| `steps` | yes | `id`, `plugin`, `config` (the plugin's settings), `inputs` (other steps' outputs) |
+
+Steps run in dependency order: a step that takes `extract.value` runs after
+`extract`. Each plugin's settings, inputs and outputs are in the
+[plugin reference](../reference/plugins/get_field.md), and `civex plugin list`
+shows what's installed here.
 
 ## Triggers
 
-### `record_created`
-
-Fires whenever a record of the given schema is created.
-
 ```yaml
 triggers:
   record_created:
-    schema: Selection
-```
-
-### `record_updated`
-
-Fires when a record of the given schema is updated. Add a `fields` list to restrict firing to updates that touch specific fields — only records where at least one of those fields changed will trigger the workflow.
-
-```yaml
-triggers:
+    schema: selection          # every new selection
   record_updated:
-    schema: Recording
-    fields:
-      - audio_file    # only fires if audio_file was set or changed
+    schema: recording
+    fields: [audio, notes]     # only when one of these changed
 ```
 
-!!! note
-    When a record is **created**, civex also fires `record_updated` for any fields that were given a non-null value at creation time. This means a `record_updated` trigger with `fields: [audio_file]` will fire when a new record is created with `audio_file` already filled in — you don't need both `record_created` and `record_updated` declared just to cover creation.
+Creating a record also fires `record_updated` for each field given a value, so a
+`record_updated` trigger on `audio` covers a recording created with its audio
+already attached. You don't need both.
 
-Both `record_created` and `record_updated` can still be declared at the same time if you need to react differently, or if `record_created` doesn't have a `fields` restriction available to it (it always fires, since a newly created record has no "previous" state to diff against).
+Changes that arrive by [sync](sync.md) never trigger workflows. A chain of
+workflows triggering each other stops after 10 hops. See
+[Stopping automation](automation.md#stopping-automation).
 
-## Step inputs
+## Manual runs and inputs
 
-Steps pass data to each other using `step_id.output_name` references:
-
-```yaml
-steps:
-  - id: extract
-    plugin: civex.extract_from_filename
-    config:
-      field: audio_file
-      pattern: '(\d{8}[-_]\d{6})'
-      output_type: datetime
-      date_format: 'YYYYMMDD[-_]HHmmSS'
-
-  - id: save
-    plugin: civex.save_field
-    config:
-      field: start_time
-    inputs:
-      value: extract.value    # use extract step's "value" output
-```
-
-Steps are executed in topological order — if step B declares an input from step A, A always runs first.
-
-## Manual inputs
-
-Declare workflow-level inputs to accept data when running manually (via the UI or `civex workflow run`):
-
-```yaml
-inputs:
-  files:
-    type: files
-    label: Recording files
-
-steps:
-  - id: insert
-    plugin: civex.create_records_from_files
-    config:
-      schema: Recording
-      file_field: audio_file
-    inputs:
-      files: __input__.files    # reference the declared input
-```
-
-| Type | Accepts |
-|---|---|
-| `files` | A list of uploaded files (FileRef dicts). In the UI, a multi-file picker is shown. Via CLI, pass a glob pattern with `--input files=*.wav`. |
-| `value` | An arbitrary scalar (string, number). |
-
-## Creating and editing a workflow
-
-=== "CLI"
-    Workflow YAML files live in `_civex/workflows/` — create or edit them with any text editor. `civex workflow list` picks up changes on the next run; there is no separate "register" step.
-
-=== "Web UI"
-    Go to **Workflows → New workflow** (or select an existing one) and edit the YAML directly in the browser. Saving writes the same file under `_civex/workflows/`.
-
-## Running workflows manually
-
-=== "CLI"
-    ```bash
-    # Basic run against a record
-    civex workflow run my-workflow --record abc123
-
-    # With file inputs (glob pattern)
-    civex workflow run load-recordings --record abc123 --input files=recordings/*.wav
-    ```
-
-=== "Web UI"
-    Navigate to a record's detail page. The **Run** button in the header runs a workflow compatible with that record's schema: with one it is **Run &lt;name&gt;**, with several it is **Run workflow** and a list. It starts immediately and a message offers **View run**; a workflow that takes file inputs asks for them first.
-
-## Monitoring jobs
-
-Every workflow execution — automatic or manual — creates a job. See [Automation](automation.md) for managing and inspecting the job queue.
-
-## Example: extract datetime from a filename
-
-Two workflows work together — one reactive (per record), one for bulk loading.
-
-**`extract-start-time.yml`** — fires automatically when a recording file is attached:
-```yaml
-name: extract-start-time
-triggers:
-  record_updated:
-    schema: Recording
-    fields:
-      - audio_file
-
-steps:
-  - id: extract
-    plugin: civex.extract_from_filename
-    config:
-      field: audio_file
-      pattern: '(\d{8}[-_]\d{6})'
-      output_type: datetime
-      date_format: 'YYYYMMDD[-_]HHmmSS'
-
-  - id: save
-    plugin: civex.save_field
-    config:
-      field: start_time
-    inputs:
-      value: extract.value
-```
-
-**`load-recordings.yml`** — run manually to bulk-insert recordings (the above workflow fires for each):
 ```yaml
 name: load-recordings
-record_schema: Encounter
+record_schema: encounter
 inputs:
   files:
-    type: files
+    type: files                # or: value, a single string or number
     label: WAV files
 
 steps:
   - id: insert
     plugin: civex.create_records_from_files
     config:
-      schema: Recording
-      file_field: audio_file
+      schema: recording
+      file_field: audio
     inputs:
-      files: __input__.files
+      files: __input__.files   # the run's input
 ```
+
+```bash
+civex workflow list
+civex workflow run load-recordings --record 2d69dc46 --input "files=recordings/*.wav"
+```
+
+```text
+  → workflow 'load-recordings' (trigger: manual)
+    ✓ done
+  → workflow 'extract-start-time' (trigger: record_updated)
+    ✓ done
+```
+
+Each new recording triggered `extract-start-time`, so the start times were filled
+in as well.
+
+**In the app:** a record's header has **Run …** for the workflows that fit it. A
+workflow with `files` inputs asks for them first, and others start at once. To
+run on many records, tick them in a list and choose **Run workflow on N**.
+
+## Editing
+
+Edit the YAML in any editor, or in the app under **Workflows → New workflow** (or
+open one). Both write the same file, and changes take effect on the next run with
+nothing to register. To share workflows with other computers, see
+[the library](sync.md#sharing-workflows-and-plugins). For your own steps, see
+[Writing a plugin](../extending/writing-a-plugin.md).

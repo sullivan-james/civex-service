@@ -1,33 +1,45 @@
 # Views
 
-A **view** is a saved selection on a schema: which columns to show, how to filter, and how to sort. In the web UI views appear as the **saved filters** above a record list, so the filters a team keeps reaching for are one click away. Views belong to a schema, not to a person or a collection: a view on `recording` applies to every `recording` record, in every collection.
+A **view** is a saved filter, column set and sort on a schema. Views show as
+chips above a list of records, so the lists a team keeps reaching for are one
+click away. A view belongs to its schema, not to a person or a collection: a view
+on `recording` works on recordings in every collection, for everyone.
 
-## Creating a view
+## Save one
 
-Open a collection (or a schema's **Browse records** page, which spans every collection), set up the list the way you want it, and click **Save as view…**:
+Set up a list in a collection the way you want it, then **Save as view…**. It
+keeps:
 
-- **Filters** — an AND/OR tree of conditions. A condition can test the schema's own fields, a **parent** record's fields, or **any child** record's fields, so a view on `encounter` can be "encounters that have a selection whose `selection_table` is empty".
-- **Columns** — pick fields and their order. A column may be inherited from a parent schema, or join one hop through a `reference` field using dotted notation, e.g. `customer.email`.
-- **Sort** — a field, ascending or descending; it may be an inherited field.
+- **Filters**: an AND/OR tree that may test this schema's fields, a parent's
+  fields, or any child's ("encounters that have a selection whose `quality` is
+  empty").
+- **Columns**, in order: including parents' fields and one hop through a
+  reference (`site.code`).
+- **Sort**: one field, ascending or descending.
 
-Name it however you like — spaces, capitals, punctuation and accents are all fine (`Needs review (QC)`). The only things a name can't contain are `/`, `\` and control characters.
+Any name works except one containing `/`, `\` or control characters
+(`Needs review (QC)` is fine).
 
-## Using, changing and removing a view
+## Use, change, remove
 
-Click a saved filter to apply it; click it again to drop it. Change the filters, sort or columns and the view shows as **modified**: **Save** overwrites it, **Save as view…** makes a new one. Use the **⋮** menu next to the applied view to rename or delete it. Deleting a view only removes the saved selection; no records are affected.
+- Click a chip to apply it, and click again to drop it.
+- Change the list and the chip shows **modified**. **Save** overwrites, and
+  **Save as view…** makes another.
+- The **⋮** beside an applied view renames or deletes it. Deleting a view never
+  touches records.
 
-## Exporting a view
+## Export one
 
-=== "CLI"
-    ```bash
-    civex view export <schema> "<view name>"
-    civex view export trial "Active trials" --format json
-    civex view export trial active --output active.csv
-    ```
+```bash
+civex view export recording "Needs review (QC)"                 # → Needs review (QC).csv
+civex view export recording "Needs review (QC)" --format xlsx
+civex view export recording qc --output qc.csv
+```
 
-    Output defaults to `<view>.csv` (or `.json` with `--format json`). If any column is a `file`/`file_list` field, the export is a `.zip` bundling the data file alongside the referenced attachments instead.
+Formats: `csv`, `tsv`, `xlsx`, `json`, `jsonl`. If the view has file columns,
+the output is a zip of the table plus the files, and each file cell holds the
+file's path inside the zip. Joined columns are named `site.code`, and in JSON
+they nest as `{"site": {"code": …}}`.
 
-=== "Web UI"
-    Apply the view and click **Export**, or export any list you have filtered in a collection — it downloads exactly the rows listed.
-
-Both paths honor the view's saved filter and sort. CSV headers use the dotted `ref_field.target_field` convention for joined columns; JSON nests them instead — `{"customer.email": "a@x"}` becomes `{"customer": {"email": "a@x"}}`.
+A view can also drive a folder export or a move:
+`civex files export --view recording/qc`, `civex files gather --view recording/qc --to archive`.

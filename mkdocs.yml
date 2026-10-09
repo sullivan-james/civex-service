@@ -89,18 +89,32 @@ nav:
       - Install: getting-started/install.md
       - Your first project: getting-started/first-project.md
       - Five-minute tour: getting-started/tour.md
+  - How-to:
+      - Import data: how-to/import-data.md
+      - Fill fields from file names: how-to/fill-fields-from-filenames.md
+      - Put files on another drive: how-to/storage-drives.md
+      - Get files out: how-to/export-files.md
+      - Sync a project: how-to/set-up-sync.md
+      - Undo a mistake: how-to/undo-mistakes.md
+      - Back up a project: how-to/back-up.md
   - Guides:
-      - Schemas & fields: guides/schemas-and-fields.md
-      - Collections & records: guides/collections-and-records.md
-      - Views: guides/views.md
-      - Deleting & restoring data: guides/deleting-and-restoring.md
-      - Files: guides/files.md
-      - Syncing between machines: guides/sync.md
-      - Workflows: guides/workflows.md
-      - Automation: guides/automation.md
-      - Server & web UI: guides/server-and-web-ui.md
-      - PostgreSQL: guides/postgresql.md
-      - Logging & telemetry: guides/logging-and-telemetry.md
+      - Data:
+          - Schemas & fields: guides/schemas-and-fields.md
+          - Collections & records: guides/collections-and-records.md
+          - Views: guides/views.md
+          - Deleting & restoring: guides/deleting-and-restoring.md
+      - Files:
+          - Files: guides/files.md
+          - Storage volumes: guides/storage.md
+          - Exports: guides/exports.md
+      - Automation:
+          - Workflows: guides/workflows.md
+          - Runs & automation: guides/automation.md
+      - Running civex:
+          - Server & web UI: guides/server-and-web-ui.md
+          - Syncing between machines: guides/sync.md
+          - PostgreSQL: guides/postgresql.md
+          - Logging & telemetry: guides/logging-and-telemetry.md
   - Extending:
       - Writing a plugin: extending/writing-a-plugin.md
       - Container plugins: extending/container-plugins.md

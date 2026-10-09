@@ -25,7 +25,7 @@ By default only this computer can. Pick the row that matches what you want:
 | You want… | Do this |
 | --- | --- |
 | To use civex yourself, on this computer | `civex serve` (the default) |
-| Other computers to **sync** with this project | `civex serve --sync-only`, reached over HTTPS: see [Syncing with Tailscale](sync.md#syncing-with-tailscale) |
+| Other computers to **sync** with this project | `civex serve --sync-only`, reached over HTTPS: see [Sync a project between computers](../how-to/set-up-sync.md) |
 | To use this computer's civex **from another computer** | Forward the port over SSH: `ssh -L 8000:localhost:8000 <this computer>`, then open `http://localhost:8000` there |
 
 Sharing the web app itself on a network isn't supported: it has no sign-in, so
@@ -47,7 +47,7 @@ The left-hand navigation has:
 | --- | --- | --- |
 | **Home** | Your pinned saved filters with live counts, and what you opened lately | |
 | **Collections** | Browse and edit records, their files and everything under them; search, filter, save views, export | [Collections & records](collections-and-records.md), [Views](views.md) |
-| **Exports** | Saved exports, and the folders they've made | [Files](files.md) |
+| **Exports** | Saved exports, and the folders they've made | [Exports](exports.md) |
 | **Activity** | Every change, who made it, and restoring what was deleted | [Deleting & restoring](deleting-and-restoring.md) |
 | **Schemas** | The kinds of record, their fields and rules | [Schemas & fields](schemas-and-fields.md) |
 | **Workflows**, **Runs** | Automations and each time one ran | [Workflows](workflows.md), [Automation](automation.md) |
