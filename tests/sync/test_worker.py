@@ -27,7 +27,7 @@ class Rig:
         return SimpleNamespace(sync=self.sync_config)
 
     def _ctx(self, _config):
-        def sync(check_files=True):
+        def sync(check_files=True, progress=None):
             self.calls += 1
             out = self.outcomes.pop(0) if self.outcomes else "report"
             if isinstance(out, Exception):

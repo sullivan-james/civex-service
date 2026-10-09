@@ -20,6 +20,10 @@ export interface FileLocation {
   reason?: string
   /** What to do about it, e.g. which drive to plug in (blank when nothing). */
   fix?: string
+  /** `false`: on this computer, but the server hasn't said it holds it, so
+   * other computers can't open it yet. Absent when it has, or when the project
+   * doesn't sync. */
+  sent?: false
 }
 
 export interface FileRef {

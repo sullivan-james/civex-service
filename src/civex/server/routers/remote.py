@@ -57,6 +57,12 @@ class RemoteStatusResponse(BaseModel):
     files_to_fetch: int = Field(
         description="Files records here cite that aren't on this computer yet."
     )
+    files_to_send: int = Field(
+        default=0,
+        description="Files records here cite that the server hasn't said it "
+        "holds yet: still to be sent (or not sent yet because they can't be read "
+        "here).",
+    )
     last_result: SyncResultResponse | None = Field(
         default=None,
         description="What the last sync run by this server did; null after a "
@@ -298,6 +304,7 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         running=s.running,
         download_files=s.download_files,
         files_to_fetch=s.files_to_fetch,
+        files_to_send=s.files_to_send,
         last_result=_last_result(),
         progress=(
             SyncProgressResponse(**p.to_dict()) if (p := sync_jobs.progress) else None

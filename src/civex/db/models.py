@@ -998,6 +998,19 @@ class SyncMeta(Base):
     authority_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
+class ServerFile(Base):
+    """Device: a file the authority it follows has said it holds (it answered
+    that it has it, it took an upload of it, or this device downloaded it from
+    there). Only a record of what was confirmed, never a list of what is owed:
+    a file not here is simply not confirmed yet, and what to send is still
+    worked out from the records each time. Cleared on following another
+    authority (`forget_numbers`)."""
+
+    __tablename__ = "server_files"
+
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+
 class SyncOp(Base):
     """Authority: a change a device sent, and what became of it. Seen again
     (the device never got the answer), it is answered from here and not done a

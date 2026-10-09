@@ -65,9 +65,13 @@ that waiting can't fix, such as a revoked device, says so and waits for you.
 
 Changes and files travel separately, so a missing file never holds up a change.
 
-- **Sending:** a device uploads files its records use that the authority lacks.
-  A file on an unplugged drive is sent once it can be read. civex checks every
-  few minutes and on every manual sync.
+- **Sending:** a device uploads files its records use that the authority lacks,
+  with progress in the status bar. A file on an unplugged drive is sent once it
+  can be read. Until the server has a file, its chip says **not on the server
+  yet** (other computers can't open it) and the status bar counts such files,
+  with **Send now**. civex remembers which files the server has said it holds and
+  asks only about the rest; every few minutes and on every manual sync it asks
+  about all of them again.
 - **Receiving:** a file another device added arrives in the background (for
   collections this computer keeps), when you open it, or before an export. Until
   then it is marked **on the server**.

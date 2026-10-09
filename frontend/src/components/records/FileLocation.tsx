@@ -5,7 +5,7 @@ import { useFileLocationDisplay } from '../../hooks/useFileLocationDisplay'
 import { formatSize } from '../../utils/storage'
 import { PlaceStatus, VolumeStatus } from '../files/Where'
 import { Button, Chip, TriggerPopover } from '../ui'
-import { AlertTriangle, HardDrive } from '../ui/icons'
+import { AlertTriangle, HardDrive, Upload } from '../ui/icons'
 import { FileInfoPanel } from './FileInfoPanel'
 
 type FileLike = Pick<
@@ -167,8 +167,13 @@ function chipText(file: FileLike): string {
   if (loc.volume === null) return 'location unknown'
   if (loc.available === false)
     return `${loc.volume} · ${loc.state.replace('_', ' ')}`
+  if (loc.sent === false) return `${loc.volume} · not on the server yet`
   return loc.volume
 }
+
+/** Said of a file here that the server hasn't said it holds. */
+const NOT_SENT =
+  "Not on the server yet: other computers can't open it until it is sent. It goes with the next sync."
 
 /** What the chip says on hover, before anything is clicked: where, whether it
  * is there, and that there is more. */
@@ -180,6 +185,7 @@ function hint(file: FileLike): string {
     return 'Not found on any drive yet. Click for details.'
   if (loc.available === false)
     return `On '${loc.volume}', which can't be reached now. Click for what to do.`
+  if (loc.sent === false) return `On '${loc.volume}'. ${NOT_SENT}`
   return `On '${loc.volume}'. Click for details.`
 }
 
@@ -216,6 +222,8 @@ function LocationChip({ file }: { file: FileLike }) {
         >
           {unavailable ? (
             <AlertTriangle size={11} aria-hidden="true" />
+          ) : file.location?.sent === false ? (
+            <Upload size={11} aria-hidden="true" />
           ) : (
             <HardDrive size={11} aria-hidden="true" />
           )}
@@ -276,6 +284,9 @@ function FileLocationPanel({
             </>
           )}
         </p>
+        {loc.sent === false && loc.state !== 'remote' && (
+          <p className="text-fg-muted">{NOT_SENT}</p>
+        )}
         {loc.available === false && loc.volume && (
           <Link
             to={`/settings/storage/volumes/${encodeURIComponent(loc.volume)}`}

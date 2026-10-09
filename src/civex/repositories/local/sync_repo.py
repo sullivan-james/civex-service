@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import BigInteger, and_, func, or_, select, update
+from sqlalchemy import BigInteger, and_, delete, func, or_, select, update
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -28,6 +28,7 @@ from civex.db.models import (
     Record,
     RecordReference,
     Schema,
+    ServerFile,
     SyncConflict,
     SyncDevice,
     SyncInvite,
@@ -153,21 +154,59 @@ class LocalSyncRepository:
             or 0
         )
 
-    def referenced_shas(self, after: str, limit: int) -> list[str]:
+    def referenced_shas(
+        self, after: str, limit: int, unconfirmed: bool = False
+    ) -> list[str]:
         """Hashes of the files live records cite (a deleted record's are sent if
         it is restored), in hash order, `limit` of them
-        after `after`. The catalog is kept up to date as records are written, so
+        after `after`; `unconfirmed`: only those the authority hasn't said it
+        holds. The catalog is kept up to date as records are written, so
         what a device still owes its authority is worked out from it each time
         rather than remembered."""
-        rows = self._s.execute(
+        query = self._referenced().where(FileReference.sha256 > after)
+        if unconfirmed:
+            query = query.where(FileReference.sha256.not_in(select(ServerFile.sha256)))
+        rows = self._s.execute(query.order_by(FileReference.sha256).limit(limit))
+        return [sha for (sha,) in rows]
+
+    def _referenced(self):  # type: ignore[no-untyped-def]
+        return (
             select(FileReference.sha256)
             .join(Record, Record.id == FileReference.record_id)
-            .where(FileReference.sha256 > after, Record.deleted_at.is_(None))
+            .where(Record.deleted_at.is_(None))
             .distinct()
-            .order_by(FileReference.sha256)
-            .limit(limit)
         )
-        return [sha for (sha,) in rows]
+
+    def count_unconfirmed(self) -> int:
+        """How many files live records cite that the authority hasn't said it
+        holds: not on the server yet, as far as this device knows."""
+        query = self._referenced().where(
+            FileReference.sha256.not_in(select(ServerFile.sha256))
+        )
+        return self._s.execute(
+            select(func.count()).select_from(query.subquery())
+        ).scalar_one()
+
+    def unconfirmed_of(self, shas: set[str]) -> set[str]:
+        """Of these files, those the authority hasn't said it holds."""
+        confirmed: set[str] = set()
+        listed = sorted(shas)
+        for at in range(0, len(listed), 500):
+            confirmed.update(
+                self._s.scalars(
+                    select(ServerFile.sha256).where(
+                        ServerFile.sha256.in_(listed[at : at + 500])
+                    )
+                )
+            )
+        return shas - confirmed
+
+    def confirm_on_server(self, shas: Iterable[str]) -> None:
+        """The authority has said it holds these files."""
+        new = self.unconfirmed_of(set(shas))
+        if new:
+            self._s.add_all(ServerFile(sha256=sha) for sha in sorted(new))
+            self._s.flush()
 
     def _not_here(self):  # type: ignore[no-untyped-def]
         """Files live records here cite that no drive here is recorded to hold
@@ -1027,13 +1066,16 @@ class LocalSyncRepository:
 
     def forget_numbers(self) -> None:
         """Clear the numbers another authority gave this project's history (it
-        now follows a different one, whose numbers mean other changes)."""
+        now follows a different one, whose numbers mean other changes), and the
+        files it said it holds."""
         self._s.execute(
             update(AuditLog)
             .where(AuditLog.hub_seq.is_not(None))
             .values(hub_seq=None)
             .execution_options(synchronize_session=False)
         )
+        # And which files it said it holds: the new one is asked afresh.
+        self._s.execute(delete(ServerFile))
         self._s.expire_all()
 
     def never_taken(self, things: set[tuple[str, uuid.UUID]]) -> set[uuid.UUID]:
