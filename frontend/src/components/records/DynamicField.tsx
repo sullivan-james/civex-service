@@ -48,7 +48,7 @@ import {
 import type { FileRef } from '../../api/files'
 import { FileLink, FileLocationChip } from './FileLocation'
 import { acceptProblem } from '../../utils/fileChecks'
-import { UploadProgress } from './UploadProgress'
+import { UploadProgress, UploadStopped } from './UploadProgress'
 
 export type { FileRef }
 
@@ -84,7 +84,8 @@ function FileField({
 }: Props) {
   const [error, setError] = useState<string | null>(null)
   const collectionId = useUploadCollection()
-  const { current, uploading, run, cancel } = useFileUploads(collectionId)
+  const { current, uploading, run, cancel, stopped, dismiss } =
+    useFileUploads(collectionId)
   const ref = value as FileRef | null | undefined
   const { accept, maxSize } = toInputProps(field)
 
@@ -104,7 +105,7 @@ function FileField({
       const { refs } = await run([file])
       if (refs[0]) onChange(refs[0])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed')
+      setError(err instanceof Error ? err.message : "Couldn't add the file")
     }
   }
 
@@ -152,6 +153,13 @@ function FileField({
         ) : undefined}
       </FileDropZone>
       {current && <UploadProgress state={current} onCancel={cancel} />}
+      {stopped && !current && (
+        <UploadStopped
+          stop={stopped}
+          onRetry={(rest) => void handleFiles(rest)}
+          onDismiss={dismiss}
+        />
+      )}
       {error && (
         <p role="alert" className="text-xs text-danger">
           {error}
@@ -171,7 +179,8 @@ function FileListField({
 }: Props) {
   const [error, setError] = useState<string | null>(null)
   const collectionId = useUploadCollection()
-  const { current, uploading, run, cancel } = useFileUploads(collectionId)
+  const { current, uploading, run, cancel, stopped, dismiss } =
+    useFileUploads(collectionId)
   const existing = (value as FileRef[] | null | undefined) ?? []
   const { accept, maxSize } = toInputProps(field)
 
@@ -188,11 +197,12 @@ function FileListField({
     }
     setError(null)
     try {
-      // Files that finished before a cancel are kept.
+      // Files that finished are kept, whether the batch was cancelled or
+      // stopped on one that couldn't be added (`UploadStopped` offers the rest).
       const { refs } = await run(files)
       if (refs.length) onChange([...existing, ...refs])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed')
+      setError(err instanceof Error ? err.message : "Couldn't add the file")
     }
   }
 
@@ -238,6 +248,13 @@ function FileListField({
         onFiles={(files) => void handleFiles(files)}
       />
       {current && <UploadProgress state={current} onCancel={cancel} />}
+      {stopped && !current && (
+        <UploadStopped
+          stop={stopped}
+          onRetry={(rest) => void handleFiles(rest)}
+          onDismiss={dismiss}
+        />
+      )}
       {error && (
         <p role="alert" className="text-xs text-danger">
           {error}

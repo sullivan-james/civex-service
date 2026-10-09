@@ -41,7 +41,7 @@ describe('UploadProgress', () => {
         onCancel={() => {}}
       />,
     )
-    expect(screen.getByText(/File 2 of 3:/)).toBeInTheDocument()
+    expect(screen.getByText(/Adding file 2 of 3:/)).toBeInTheDocument()
   })
 
   it('says the server is saving once every byte is sent, instead of sitting at 100%', () => {
@@ -51,7 +51,7 @@ describe('UploadProgress', () => {
         onCancel={() => {}}
       />,
     )
-    expect(screen.getByText('Sent. Saving to storage…')).toBeInTheDocument()
+    expect(screen.getByText('Saving to storage…')).toBeInTheDocument()
     expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow')
   })
 
@@ -71,7 +71,7 @@ describe('UploadProgress', () => {
     const onCancel = vi.fn()
     render(<UploadProgress state={state()} onCancel={onCancel} />)
 
-    await userEvent.click(screen.getByRole('button', { name: 'Cancel upload' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Stop' }))
 
     expect(onCancel).toHaveBeenCalledOnce()
   })

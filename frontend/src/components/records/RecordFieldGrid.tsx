@@ -21,7 +21,7 @@ import { ReferenceChips } from './ReferenceChips'
 import type { FieldSaveError } from './saveErrors'
 import { FieldValue } from './FieldValue'
 import { FileLink, FileLocationChip } from './FileLocation'
-import { UploadProgress } from './UploadProgress'
+import { UploadProgress, UploadStopped } from './UploadProgress'
 
 const isEmpty = (v: unknown) =>
   v === null ||
@@ -96,7 +96,8 @@ function FileControl({
   const [removing, setRemoving] = useState<FileRef | null>(null)
   const [replacement, setReplacement] = useState<File | null>(null)
   const collectionId = useUploadCollection()
-  const { current, uploading, run, cancel } = useFileUploads(collectionId)
+  const { current, uploading, run, cancel, stopped, dismiss } =
+    useFileUploads(collectionId)
   const { accept, maxSize } = toInputProps(field)
   const label = displayLabel(field.name, field.label)
 
@@ -111,11 +112,12 @@ function FileControl({
       }
     }
     try {
-      // Files that finished before a cancel are kept.
+      // Files that finished are kept, whether the batch was cancelled or
+      // stopped on one that couldn't be added (`UploadStopped` offers the rest).
       const { refs: done } = await run(files)
       if (done.length) onSave(multiple ? [...refs, ...done] : done[0])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed')
+      setError(err instanceof Error ? err.message : "Couldn't add the file")
     }
   }
 
@@ -166,7 +168,7 @@ function FileControl({
         multiple={multiple}
         accept={accept}
         disabled={uploading}
-        inputLabel={`Upload ${label}`}
+        inputLabel={`Add ${label}`}
         onFiles={pick}
       >
         {multiple ? undefined : refs.length ? (
@@ -177,6 +179,13 @@ function FileControl({
         ) : undefined}
       </FileDropZone>
       {current && <UploadProgress state={current} onCancel={cancel} />}
+      {stopped && !current && (
+        <UploadStopped
+          stop={stopped}
+          onRetry={(rest) => void attach(rest)}
+          onDismiss={dismiss}
+        />
+      )}
       {error && (
         <p role="alert" className="text-xs text-danger">
           {error}

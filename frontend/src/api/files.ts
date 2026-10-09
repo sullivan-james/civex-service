@@ -35,6 +35,10 @@ export interface FileRef {
   location?: FileLocation | null
 }
 
+/** Adding a file failed because the connection to civex dropped or timed
+ * out, not because civex refused it: trying again can help. */
+export class UploadConnectionError extends Error {}
+
 /** What `uploadStreaming` reports as it goes. */
 export interface UploadInfo {
   loaded: number
@@ -142,6 +146,11 @@ export const filesApi = {
               new Error('Upload succeeded but response was not valid JSON'),
             )
           }
+        } else if (xhr.status === 502 || xhr.status === 504) {
+          // A proxy in front of civex (the dev server) couldn't reach it.
+          reject(
+            new UploadConnectionError(`Couldn't reach civex (${xhr.status})`),
+          )
         } else {
           let detail = `HTTP ${xhr.status}`
           try {
@@ -152,7 +161,12 @@ export const filesApi = {
           reject(new Error(detail))
         }
       }
-      xhr.onerror = () => reject(new Error('Network error during upload'))
+      xhr.onerror = () =>
+        reject(
+          new UploadConnectionError(
+            'The connection to civex dropped while adding the file',
+          ),
+        )
       xhr.send(file)
     }),
 }

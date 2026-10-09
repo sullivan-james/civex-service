@@ -1,9 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { filesApi, type FileRef, type UploadInfo } from '../api/files'
+import {
+  filesApi,
+  UploadConnectionError,
+  type FileRef,
+  type UploadInfo,
+} from '../api/files'
 import { useFileUploads } from './useFileUploads'
 
-vi.mock('../api/files', () => ({ filesApi: { uploadStreaming: vi.fn() } }))
+vi.mock('../api/files', async (original) => ({
+  ...(await original<typeof import('../api/files')>()),
+  filesApi: { uploadStreaming: vi.fn() },
+}))
 
 const ref = (name: string): FileRef => ({
   sha256: name.padEnd(64, '0'),
@@ -107,15 +115,50 @@ describe('useFileUploads', () => {
     expect(result.current.current).toBeNull()
   })
 
-  it('throws any other failure for the caller to show', async () => {
-    upload.mockRejectedValue(new Error('No space left'))
+  it('stops on a file it cannot add, keeping what finished and the rest', async () => {
+    upload
+      .mockImplementationOnce(async (f) => ref(f.name))
+      .mockRejectedValueOnce(new Error('No space left'))
     const { result } = renderHook(() => useFileUploads())
 
-    await expect(
-      act(async () => {
-        await result.current.run([file('a')])
-      }),
-    ).rejects.toThrow('No space left')
+    let outcome!: Awaited<ReturnType<typeof result.current.run>>
+    await act(async () => {
+      outcome = await result.current.run([file('a'), file('b'), file('c')])
+    })
+
+    expect(outcome.refs.map((r) => r.filename)).toEqual(['a'])
+    expect(outcome.stopped).toMatchObject({
+      name: 'b',
+      message: 'No space left',
+      added: 1,
+      total: 3,
+    })
+    expect(outcome.stopped?.rest.map((f) => f.name)).toEqual(['b', 'c'])
+    expect(result.current.stopped?.name).toBe('b')
+    expect(upload).toHaveBeenCalledTimes(2) // a refusal isn't tried again
     expect(result.current.current).toBeNull()
+  })
+
+  it('tries a file again when the connection drops', async () => {
+    vi.useFakeTimers()
+    try {
+      upload
+        .mockRejectedValueOnce(new UploadConnectionError('dropped'))
+        .mockImplementationOnce(async (f) => ref(f.name))
+      const { result } = renderHook(() => useFileUploads())
+
+      let outcome!: Awaited<ReturnType<typeof result.current.run>>
+      await act(async () => {
+        const running = result.current.run([file('a')])
+        await vi.advanceTimersByTimeAsync(1000)
+        outcome = await running
+      })
+
+      expect(outcome.refs.map((r) => r.filename)).toEqual(['a'])
+      expect(outcome.stopped).toBeNull()
+      expect(upload).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
