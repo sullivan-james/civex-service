@@ -719,6 +719,34 @@ def test_a_file_on_another_collections_home_is_copied_not_moved(
     assert again.progress.files_done == 0 and again.progress.files_skipped == 2
 
 
+def test_emptying_a_drive_whose_files_the_target_has_says_they_were_there(
+    ctx: AppContext, tmp_path: Path, make_schema, make_collection, make_record
+) -> None:
+    """Draining a drive whose files the target already holds only removes the
+    originals: each counts as already there, so the move doesn't finish at
+    "0 of N files" after emptying the drive."""
+    _volumes(ctx, tmp_path, "a", "b")
+    make_schema("doc", fields=[("scan", "file")])
+    make_collection("mine")
+    ctx.store_svc.set_queue(["a"])
+    refs = [ctx.file_svc.store_bytes(d, "f.txt") for d in (b"x" * 90, b"y" * 70)]
+    for ref in refs:
+        make_record("mine", "doc", {"scan": ref.to_dict()})
+    ctx.commit()
+    home = {str(ctx.dataset_svc.get("mine").id): "a"}
+    shas = [r.sha256 for r in refs]
+    _run(ctx, TransferSpec(kind=KIND_FILES, targets=["b"], shas=shas), placements=home)
+    assert set(_catalog(ctx, shas).values()) == {"a+b"}  # copied: a is the home
+
+    emptied = _run(ctx, _drain(["b"], ["a"]), placements=home)
+
+    p = emptied.progress
+    assert (p.files_done, p.files_skipped, p.files_total) == (0, 2, 2)
+    assert p.bytes_total == 0  # nothing had to be carried
+    assert _on_disk(ctx, "b") == set()
+    assert set(_catalog(ctx, shas).values()) == {"a"}
+
+
 # -- progress --------------------------------------------------------------------
 
 

@@ -12,17 +12,11 @@ import {
   RESUMABLE,
   STATUS_LABEL,
   STATUS_VARIANT,
+  describeTransfer,
+  filesLine,
   percentDone,
 } from '../../../utils/transfers'
 import { Badge, Button, ConfirmDialog, Disclosure, ProgressBar } from '../../ui'
-
-export function describeTransfer(t: Transfer): string {
-  if (t.kind === 'drain')
-    return `Empty ${t.spec.sources.join(', ')} onto ${t.spec.targets.join(', ')}`
-  if (t.kind === 'files')
-    return `Move ${(t.spec.shas ?? []).length.toLocaleString()} selected file(s) onto ${t.spec.targets.join(', ')}`
-  return `Gather ${t.spec.collection_ids.length} collection(s) onto ${t.spec.targets.join(', ')}`
-}
 
 /** `ahead` is how many moves must finish before a waiting one starts. */
 export function TransferCard({
@@ -53,7 +47,7 @@ export function TransferCard({
                 (ahead > 0
                   ? `starts after ${ahead} other move${ahead === 1 ? '' : 's'}`
                   : 'starts next')
-              : `${p.files_done} of ${p.files_total} files · ${formatSize(p.bytes_done)} of ${formatSize(p.bytes_total)}`}
+              : `${filesLine(p)} · ${formatSize(p.bytes_done)} of ${formatSize(p.bytes_total)}`}
           </p>
         </div>
         <Badge variant={STATUS_VARIANT[t.status]}>

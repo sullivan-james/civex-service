@@ -8,7 +8,6 @@ import { placeLabel } from '../../utils/places'
 import { formatSize } from '../../utils/storage'
 import {
   Button,
-  CheckRow,
   InfoTip,
   Modal,
   ModalBody,
@@ -85,7 +84,6 @@ export function MoveDialog({
     (v) => v.available && v.state === 'online' && v.name !== from,
   )?.name
   const [chosen, setChosen] = useState<string | null>(null)
-  const [includeShared, setIncludeShared] = useState(false)
   const drive = useDriveChoice({
     holding: elsewhere,
     need: 0,
@@ -95,8 +93,8 @@ export function MoveDialog({
   // What it would do, asked of the server for the drive chosen: the same
   // rule the move itself follows.
   const { data: preview } = useQuery({
-    queryKey: ['move-plan', pick, drive.target, includeShared],
-    queryFn: () => fileAccessApi.planMove(pick, drive.target, includeShared),
+    queryKey: ['move-plan', pick, drive.target],
+    queryFn: () => fileAccessApi.planMove(pick, drive.target),
     enabled: !!drive.target && drive.target !== PROJECT,
   })
   const plan = preview?.plan
@@ -138,18 +136,6 @@ export function MoveDialog({
         {plan && plan.from_server > 0 && (
           <ToDownloadNotice toFetch={{ files: plan.from_server, bytes: 0 }} />
         )}
-        {plan && (plan.shared_left > 0 || includeShared) && (
-          <CheckRow
-            checked={includeShared}
-            onChange={setIncludeShared}
-            title={
-              includeShared
-                ? 'Moving the files other records also use too'
-                : `Also move ${plan.shared_left.toLocaleString()} file${plan.shared_left === 1 ? '' : 's'} other records use (${formatSize(plan.shared_bytes)})`
-            }
-            description="Some of these files are also used by records you didn't pick. They stay where they are unless you tick this; ticked, they move for those records too."
-          />
-        )}
         {stuck.length > 0 && (
           <p className="text-attention">
             Left where they are:{' '}
@@ -177,7 +163,6 @@ export function MoveDialog({
               { toast, qc, problem: () => undefined },
               pick,
               drive.target,
-              includeShared,
             )
             onStarted?.()
             onClose()

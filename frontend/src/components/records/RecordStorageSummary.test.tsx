@@ -85,8 +85,6 @@ describe('RecordStorageSummary', () => {
             files: 3,
             bytes: 3072,
             from_server: 0,
-            shared_left: 0,
-            shared_bytes: 0,
             already_there: 0,
             copied: 1,
           },

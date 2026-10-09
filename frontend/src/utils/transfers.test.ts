@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Transfer } from '../api/transfers'
-import { isBusy, queueAhead } from './transfers'
+import { describeTransfer, isBusy, queueAhead } from './transfers'
 
 const t = (over: Partial<Transfer>): Transfer =>
   ({
@@ -44,5 +44,40 @@ describe('queueAhead', () => {
   it('is next in line (0 ahead) when nothing is running', () => {
     const ahead = queueAhead([t({ id: 'a', status: 'queued' })])
     expect(ahead.get('a')).toBe(0)
+  })
+})
+
+describe('describeTransfer', () => {
+  const files = (plan: { files: number; copied: number } | null) =>
+    t({
+      kind: 'files',
+      spec: {
+        kind: 'files',
+        targets: ['vol-b'],
+        sources: [],
+        collection_ids: [],
+        verify: 'copy',
+        freeze_sources: false,
+      },
+      plan: plan as Transfer['plan'],
+      progress: { files_total: 1519 } as Transfer['progress'],
+    })
+
+  it("counts a move of picked files from its plan, not the file list the server doesn't send", () => {
+    expect(describeTransfer(files({ files: 1519, copied: 0 }))).toBe(
+      'Move 1,519 files onto vol-b',
+    )
+    expect(describeTransfer(files(null), true)).toBe(
+      'Moving 1,519 files to vol-b',
+    )
+  })
+
+  it('says Copy when every file stays on its home drive too', () => {
+    expect(describeTransfer(files({ files: 1519, copied: 1519 }))).toBe(
+      'Copy 1,519 files onto vol-b',
+    )
+    expect(describeTransfer(files({ files: 10, copied: 4 }))).toBe(
+      'Move 10 files onto vol-b (4 copied, not moved)',
+    )
   })
 })

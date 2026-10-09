@@ -520,8 +520,8 @@ def files_gather(
     include_shared: bool = typer.Option(
         False,
         "--include-shared",
-        help="Also move files that other records use (they move for them "
-        "too). By default those stay where they are.",
+        hidden=True,
+        help="No longer needed: every file picked moves. Kept so old scripts run.",
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would move and stop."
@@ -547,18 +547,17 @@ def files_gather(
         svc = ctx.file_access_svc
         _, items = svc.chosen(selection, on, name)
         if dry_run:  # the move's usual preview; nothing is downloaded or moved
-            p = svc.plan_move(items, to, include_shared)
-            shas = svc.shas_to_move(items, to, include_shared)
+            p = svc.plan_move(items, to)
+            shas = svc.shas_to_move(items, to)
             if p.from_server:
                 console.print(
                     f"{p.from_server} file(s) would be downloaded from the server "
                     f"straight onto '{escape(to)}'."
                 )
-            if p.shared_left:
+            if p.copied:
                 console.print(
-                    f"[dim]{p.shared_left} file(s) that other records also use "
-                    "would stay where they are (--include-shared moves them "
-                    "too).[/dim]"
+                    f"[dim]{p.copied} file(s) would be copied, not moved: their "
+                    "drive is the home of a collection that uses them.[/dim]"
                 )
             if shas:
                 _start(
@@ -568,7 +567,7 @@ def files_gather(
                     True,
                 )
             return
-        shas, downloaded, plan = svc.to_move(items, to, include_shared=include_shared)
+        shas, downloaded, plan = svc.to_move(items, to)
         ctx.commit()
     except CivexError as e:
         console.print(f"[error]{escape(str(e))}[/error]")
@@ -579,10 +578,10 @@ def files_gather(
         console.print(
             f"Downloaded {downloaded} file(s) from the server onto '{escape(to)}'."
         )
-    if plan.shared_left:
+    if plan.copied:
         console.print(
-            f"[dim]{plan.shared_left} file(s) that other records also use stay "
-            "where they are (--include-shared moves them too).[/dim]"
+            f"[dim]{plan.copied} file(s) are copied, not moved: their drive is "
+            "the home of a collection that uses them.[/dim]"
         )
     if not shas:
         if not downloaded:

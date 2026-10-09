@@ -349,11 +349,11 @@ page), then:
 - **Move to drive…** moves just those files onto one drive, in the background.
   Files not on this computer are downloaded straight onto it, and files on a
   drive that isn't plugged in stay where they are. A file is stored once
-  however many records use it, so moving it moves it for all of them: a file
-  that records not in the list also use ("Used by 4 records (3 not listed)")
-  stays where it is, unless you choose **Also move** in the dialog,
-  which says how many there are before anything moves
-  (`civex files gather --include-shared`).
+  however many records use it, so moving it moves it for all of them ("Used
+  by 4 records (3 not listed)" says when others use it); they keep using it,
+  on its new drive. A file on the home drive of a collection that uses it is
+  copied instead, so that drive keeps it; the dialog says how many before
+  anything moves.
 - **Download to this computer** fetches the ones not on this computer from
   the server. Any the server hasn't got yet (the device that added them
   hasn't sent them) are named.

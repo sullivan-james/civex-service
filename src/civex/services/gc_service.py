@@ -84,7 +84,10 @@ class GCService:
                 for obj in batch:
                     if obj.sha256 in live:
                         continue
-                    if obj.mtime > cutoff:
+                    # No grace period means none: comparing with "now" would
+                    # still spare a file just written whose timestamp is a
+                    # little ahead of time.time() (Windows file times).
+                    if grace_days and obj.mtime > cutoff:
                         counts["protected"] += 1
                         continue
                     collectible.append(obj)

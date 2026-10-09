@@ -2538,11 +2538,6 @@ class FileGatherRequest(FilePickRequest):
         "onto. Only the files in the selection move, not the rest of their "
         "collections.",
     )
-    include_shared: bool = Field(
-        default=False,
-        description="Also move files that records not picked use (they move "
-        "for those records too). By default those stay where they are.",
-    )
 
 
 class FileZipRequest(FileSelectionRequest):

@@ -82,7 +82,7 @@ def test_files_are_picked_by_kind_and_every_kind_is_still_counted(ctx, study, sp
 
 def test_records_beneath_count_only_if_they_match_the_filter_at_their_level(
     ctx,
-    study,
+    study,  # noqa: F811
     spread,  # noqa: F811
 ):
     """Encounters "with a Selection named s1" take that Selection's files, not
@@ -111,13 +111,13 @@ def test_records_beneath_count_only_if_they_match_the_filter_at_their_level(
     assert sorted(i.filename for i in items) == ["s1.txt", "s2.txt"]
 
 
-def test_a_file_other_records_use_stays_put_unless_asked(ctx, study, archive):  # noqa: F811
-    """Moving one record's files leaves a file other records also use where
-    it is (moving it would move it for them too), unless asked."""
+def test_a_file_other_records_use_moves_like_any_other(ctx, study, archive):  # noqa: F811
+    """Every file picked moves, whoever else uses it: the others keep using
+    the same file, on its new drive. The listing still says who else does."""
     svc = ctx.file_access_svc
-    shared = study.selection(study.rec_a, "s1", b"the same table")
+    study.selection(study.rec_a, "s1", b"the same table")
     study.selection(study.rec_b, "s2", b"the same table")  # same content
-    own = study.selection(study.rec_a, "s3", b"only s3's")
+    study.selection(study.rec_a, "s3", b"only s3's")
     ctx.commit()
     only_a = _within(study.rec_a)
     _, items = svc.chosen(only_a)
@@ -128,13 +128,48 @@ def test_a_file_other_records_use_stays_put_unless_asked(ctx, study, archive):  
     }
 
     plan = svc.plan_move(items, "archive")
-    assert (plan.files, plan.shared_left) == (2 - 1, 1)
+    assert (plan.files, plan.copied) == (2, 0)
     shas, _, _ = svc.to_move(items, "archive")
-    assert len(shas) == 1  # only s3's own file
+    assert len(shas) == 2
 
-    with_shared = svc.plan_move(items, "archive", include_shared=True)
-    assert (with_shared.files, with_shared.shared_left) == (2, 0)
-    assert shared and own
+
+def test_a_shared_file_its_home_keeps_is_copied(ctx, study, archive):  # noqa: F811
+    """On a drive that is the home of a collection using it, a picked file is
+    copied, not moved: the home keeps it."""
+    svc = ctx.file_access_svc
+    home = str(study.collection.id)  # its home is the archive drive
+    study.selection(study.rec_a, "s1", b"the same table", on=home)
+    study.selection(study.rec_b, "s2", b"the same table", on=home)
+    ctx.commit()
+    _, items = svc.chosen(_within(study.rec_a))
+
+    plan = svc.plan_move(items, "default")
+
+    assert (plan.files, plan.copied) == (1, 1)
+    shas, _, _ = svc.to_move(items, "default")
+    assert len(shas) == 1
+
+
+def test_a_move_says_what_it_is_doing_while_it_works_it_out(ctx, study, archive):  # noqa: F811
+    """The move request reports each stage, so "Preparing the move" shows
+    what it is busy with instead of an empty bar."""
+    stages: list[str] = []
+
+    class Seen:
+        def phase(self, label, total=0, total_bytes=0):
+            stages.append(label)
+
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    study.selection(study.rec_a, "s1", b"one", on=str(study.collection.id))
+    ctx.commit()
+    svc = ctx.file_access_svc
+    _, items = svc.chosen(_within(study.rec_a), progress=Seen())
+    svc.to_move(items, "default", Seen())
+
+    assert stages[0] != "Working out what moves"  # finding the files came first
+    assert "Working out what moves" in stages
 
 
 def test_a_file_several_records_use_is_one_row_and_one_file(ctx, study, archive):  # noqa: F811
@@ -154,7 +189,7 @@ def test_a_file_several_records_use_is_one_row_and_one_file(ctx, study, archive)
 
     _, picked = svc.chosen(everything, shas=[row.sha256])
     assert len(picked) == 2
-    assert svc.plan_move(picked, "archive").shared_left == 0  # both are picked
+    assert svc.plan_move(picked, "archive").files == 1  # one stored file
 
 
 def test_files_are_picked_by_how_many_records_use_them(ctx, study, archive):  # noqa: F811

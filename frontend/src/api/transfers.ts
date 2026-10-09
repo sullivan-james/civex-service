@@ -5,8 +5,6 @@ export interface TransferSpec {
   targets: string[]
   sources: string[]
   collection_ids: string[]
-  /** files: the content moved, by hash. */
-  shas?: string[]
   verify: 'copy' | 'full'
   freeze_sources: boolean
 }
