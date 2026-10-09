@@ -70,6 +70,7 @@ from civex.repositories.protocols import (
 from civex.services.record_service import RecordService
 from civex.services.sync_applier import SyncApplier
 from civex.services.sync_lock import sync_lock, sync_running
+from civex.services import ssh_tunnel
 
 PUSH_BATCH = 100
 # How many referenced files are checked against the authority per request.
@@ -1718,15 +1719,19 @@ def _counted(
 
 
 def _check_address(url: str) -> None:
-    """An authority is reached over HTTPS: an invite and a session token travel
-    in requests, readable by anyone on the network over plain HTTP. Plain HTTP
-    is left for this machine itself (tests, a local authority)."""
+    """An authority is reached over HTTPS or SSH: an invite and a session token
+    travel in requests, readable by anyone on the network over plain HTTP.
+    Plain HTTP is left for this machine itself (tests, a local authority)."""
     parts = urllib.parse.urlsplit(url)
     if parts.scheme == "https" and parts.hostname:
+        return
+    if parts.scheme == ssh_tunnel.SCHEME:
+        ssh_tunnel.SshAddress.parse(url)  # says what is wrong with it
         return
     if parts.scheme == "http" and parts.hostname and is_loopback(parts.hostname):
         return
     raise SyncError(
-        "The address must start with https:// (http:// only for this computer)",
+        "The address must start with https:// or ssh:// (http:// only for this "
+        "computer)",
         retryable=False,
     )

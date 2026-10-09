@@ -297,6 +297,12 @@ def _mismatch(detail: Any) -> str:
 
 
 def build_transport(base_url: str, credentials: DeviceCredentials) -> HttpSyncTransport:
+    """The transport for an authority's address. An `ssh://` one is the same
+    HTTP, through a tunnel SSH opens to a port here (`ssh_tunnel`)."""
+    from civex.services import ssh_tunnel
+
+    if ssh_tunnel.is_ssh(base_url):
+        base_url = ssh_tunnel.local_url(base_url)
     return HttpSyncTransport(base_url, credentials)
 
 

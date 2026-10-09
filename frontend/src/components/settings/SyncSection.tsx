@@ -45,7 +45,7 @@ function ConnectForm() {
     <div className="max-w-xl space-y-3">
       <Field
         label="Authority address"
-        info="An empty project becomes a copy of the authority; a project with data fills an empty authority."
+        info="https://… for a server, or ssh://you@host/~/path/to/project for a project on a machine you can SSH into. An empty project becomes a copy of the authority; a project with data fills an empty authority."
       >
         <Input
           value={url}
