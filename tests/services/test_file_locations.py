@@ -110,7 +110,7 @@ def test_only_file_fields_are_decorated(
     assert "location" in data["scan"]
 
 
-def test_a_batch_of_records_costs_one_inventory_lookup(
+def test_a_batch_of_records_costs_one_location_lookup(
     ctx: AppContext, docs, make_record
 ) -> None:
     for i in range(12):
@@ -121,7 +121,9 @@ def test_a_batch_of_records_costs_one_inventory_lookup(
     engine = ctx._session.get_bind()
 
     def count(conn, cursor, statement, *rest):
-        if "stored_objects" in statement:
+        # Where each record's file is: the copy it points at (file_references),
+        # or, for one it doesn't point at yet, the inventory.
+        if "stored_objects" in statement or "FROM file_references" in statement:
             lookups.append(statement)
 
     event.listen(engine, "before_cursor_execute", count)

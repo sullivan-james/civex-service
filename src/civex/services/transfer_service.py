@@ -161,9 +161,6 @@ class TransferService:
 
     # -- planning ---------------------------------------------------------------
 
-    def _placements(self) -> dict[str, str]:
-        return self._config.store_config.homes()
-
     def _is_network(self, volume: str) -> bool:
         path = fs_locations.normalise(str(self._store.volume_path(volume)))
         return fs_locations.is_network_path(path)
@@ -268,7 +265,7 @@ class TransferService:
         """Count what gathering would move, copy and leave, from the catalog,
         by the steps the transfer itself takes (`plan_steps`)."""
         unknown = 0
-        for step in plan_steps(self._store, self._refs, spec, self._placements()):
+        for step in plan_steps(self._store, self._refs, spec):
             if step.step == STEP_THERE:
                 plan.already_there += 1
             elif step.step == STEP_NOWHERE:
@@ -554,7 +551,6 @@ class TransferService:
             self._store,
             self._refs,
             record.spec,
-            placements=self._placements(),
             progress=saving,
             commit=self._commit,
             control=control,

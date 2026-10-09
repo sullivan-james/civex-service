@@ -36,7 +36,9 @@ from civex.domain.query import RecordQuery
 from civex.domain.placement import STEP_COPY, STEP_MOVE, STEP_THERE
 from civex.domain.transfers import KIND_FILES, TransferSpec
 from civex.services.transfer_engine import Step, plan_steps
+from civex.domain.file_refs import collect_sha256_refs
 from civex.domain.file_access import (
+    copy_key,
     MovePlan,
     FileListing,
     PlaceSummary,
@@ -802,8 +804,15 @@ class FileAccessService:
         if selection.below and found:
             if progress:
                 progress.phase("Finding what is inside")
+            # Without tables, only the records holding files are used (folder
+            # names come from their ancestors, looked up apart): the rest are
+            # walked through, not put in full form.
             beneath = self._records.beneath(
-                found, (lambda n: progress.advance(n)) if progress else None
+                found,
+                (lambda n: progress.advance(n)) if progress else None,
+                keep=None
+                if selection.tables or not selection.files
+                else (lambda r: bool(collect_sha256_refs(r.data))),
             )
             if selection.record_ids is None and selection.query.filter_tree:
                 beneath = self._as_listed(beneath, selection.query)
@@ -1196,19 +1205,20 @@ class FileAccessService:
         ]
         if used_by:
             counts = self.use_counts(items)
-            items = [i for i in items if counts[i.sha256] in set(used_by)]
+            items = [i for i in items if counts[copy_key(i)] in set(used_by)]
         return plan, items
 
     def use_counts(self, items: list[FileItem]) -> dict[str, int]:
-        """How many live records use each of these files, anywhere (at least
-        the records among these that do)."""
-        users = self.refs.records_using(i.sha256 for i in items) if self.refs else {}
+        """How many live records use each of these files as stored (by
+        `copy_key`: the copy they point at), anywhere (at least the records
+        among these that do). A duplicate on another drive is another file."""
+        users = self.refs.copy_users(i.sha256 for i in items) if self.refs else {}
         here: dict[str, set[str]] = {}
         for i in items:
-            here.setdefault(i.sha256, set()).add(i.record_id)
+            here.setdefault(copy_key(i), set()).add(i.record_id)
         return {
-            sha: max(len(users.get(sha, ())), len(records))
-            for sha, records in here.items()
+            key: max(len(users.get(_key_parts(key), ())), len(records))
+            for key, records in here.items()
         }
 
     def listing(
@@ -1238,12 +1248,12 @@ class FileAccessService:
         )
         uses: dict[str, list[FileItem]] = {}
         for item in sorted(items, key=lambda i: i.path.casefold()):
-            uses.setdefault(item.sha256, []).append(item)
+            uses.setdefault(copy_key(item), []).append(item)
         rows = [found[0] for found in uses.values()]
         used = self.use_counts(items)
-        counts = Counter(used[i.sha256] for i in rows)
+        counts = Counter(used[copy_key(i)] for i in rows)
         if used_by:
-            rows = [i for i in rows if used[i.sha256] in set(used_by)]
+            rows = [i for i in rows if used[copy_key(i)] in set(used_by)]
         key, reverse = sort.lstrip("-"), sort.startswith("-")
         order: dict[str, Callable[[FileItem], Any]] = {
             "path": lambda i: i.path.casefold(),
@@ -1261,23 +1271,24 @@ class FileAccessService:
             summary=_places(_one_each(of_kind)),
             items=page,
             kinds=_kinds(plan.items),
-            uses={i.sha256: uses[i.sha256] for i in page},
+            uses={copy_key(i): uses[copy_key(i)] for i in page},
             others={
-                i.sha256: used[i.sha256] - len({u.record_id for u in uses[i.sha256]})
+                copy_key(i): used[copy_key(i)]
+                - len({u.record_id for u in uses[copy_key(i)]})
                 for i in page
             },
             sharing=[{"records": n, "files": counts[n]} for n in sorted(counts)],
         )
 
     def plan_move(self, items: list[FileItem], volume: str) -> MovePlan:
-        """What moving these files onto `volume` would do: what moves or is
-        copied from another drive (the transfer's own steps, `plan_steps`: a
-        file stays on a drive that is the home of a collection using it, so it
-        is copied) and what comes from the server straight there. Every file
-        picked goes, whoever else uses it: a home that keeps a file keeps its
-        copy, and otherwise the others still have it, on its new drive. The
-        one rule behind the move dialog's preview and the move itself.
-        Unreachable and missing files can't move and are left out."""
+        """What moving these files onto `volume` would do. The picked records
+        point at the drive's copy afterwards; each file is carried there unless
+        a copy is there already (then nothing is copied: they share it), and
+        the copy it came from stays while records not picked point at it
+        (copied, not moved), else it is freed. Files only on the server come
+        straight there. The transfer's own steps (`plan_steps`), so the move
+        dialog's preview and the move itself can't disagree. Unreachable and
+        missing files can't move and are left out."""
         return self._move(items, volume)[0]
 
     def _move(
@@ -1295,11 +1306,16 @@ class FileAccessService:
         remote = {i.sha256 for i in items if place_of(i)[1] == "server"}
         plan = MovePlan(files=0, bytes=0, from_server=len(remote), already_there=0)
         moving: list[str] = []
+        records = sorted({i.record_id for i in items})
         if progress:
             progress.phase("Working out what moves", len(on_drives))
-        for n, step in enumerate(self._steps(on_drives, volume), 1):
+        for n, step in enumerate(self._steps(on_drives, volume, records), 1):
+            plan.freed_bytes += len(step.drop) * size[step.sha256]
             if step.step == STEP_THERE:
                 plan.already_there += 1
+                if step.rows or step.drop:
+                    plan.repointed += 1
+                    moving.append(step.sha256)
             elif step.step in (STEP_MOVE, STEP_COPY):
                 plan.files += 1
                 plan.bytes += size[step.sha256]
@@ -1310,13 +1326,26 @@ class FileAccessService:
                 progress.advance(n)
         return plan, moving
 
-    def _steps(self, shas: list[str], volume: str) -> Iterator[Step]:
-        """What gathering these files onto `volume` does with each (the
-        transfer's own rule)."""
+    def _steps(
+        self, shas: list[str], volume: str, records: list[str]
+    ) -> Iterator[Step]:
+        """What gathering these records' files onto `volume` does with each
+        (the transfer's own rule)."""
         if self.refs is None:
             return iter(())
-        spec = TransferSpec(kind=KIND_FILES, targets=[volume], shas=shas)
-        return plan_steps(self._store, self.refs, spec, self._store.homes())
+        return plan_steps(self._store, self.refs, self.move_spec(shas, volume, records))
+
+    @staticmethod
+    def move_spec(shas: list[str], volume: str, records: list[str]) -> TransferSpec:
+        """The transfer that moves these records' copies of these files onto
+        `volume` (only their pointers move; others' copies stay)."""
+        return TransferSpec(
+            kind=KIND_FILES,
+            targets=[volume],
+            shas=shas,
+            record_ids=records,
+            freeze_sources=False,
+        )
 
     def to_move(
         self,
@@ -1690,9 +1719,14 @@ def _places(items: list[FileItem]) -> list[PlaceSummary]:
 
 
 def _one_each(items: list[FileItem]) -> list[FileItem]:
-    """One item per file as stored: however many records use a file, it is
-    one file in a count and its bytes are on disk once."""
-    return list({i.sha256: i for i in reversed(items)}.values())
+    """One item per file as stored (`copy_key`): however many records use a
+    copy, it is one file in a count and its bytes are on disk once."""
+    return list({copy_key(i): i for i in reversed(items)}.values())
+
+
+def _key_parts(key: str) -> tuple[str, str | None]:
+    sha, _, volume = key.partition("@")
+    return sha, volume or None
 
 
 def _kinds(items: list[FileItem]) -> list[dict[str, Any]]:

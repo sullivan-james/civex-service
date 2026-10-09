@@ -44,8 +44,9 @@ interface ContentRow {
   collectionId?: string
   home?: boolean
   shared?: number
+  sharedBytes?: number
   note?: string
-  kind: 'collection' | 'history' | 'unused'
+  kind: 'collection' | 'shared' | 'history' | 'unused'
 }
 
 /** One volume: its state and space in the header, then tabs for what is on it
@@ -76,6 +77,7 @@ export default function VolumePage() {
         files: number
         bytes: number
         shared: number
+        sharedBytes: number
         home: boolean
       }
     >()
@@ -87,6 +89,7 @@ export default function VolumePage() {
           files: share.files,
           bytes: share.bytes,
           shared: share.shared_files,
+          sharedBytes: share.shared_bytes ?? 0,
           home: false,
         })
     }
@@ -99,6 +102,7 @@ export default function VolumePage() {
           files: 0,
           bytes: 0,
           shared: 0,
+          sharedBytes: 0,
           home: true,
         })
     }
@@ -134,17 +138,32 @@ export default function VolumePage() {
   )
   const homed = placements.filter((p) => p.volume === vol.name).length
 
+  // Each collection's own files, then the copies several collections use,
+  // counted once: so the rows add up to what the drive holds.
   const contents: ContentRow[] = [
     ...rows.map((r): ContentRow => ({
       key: r.id,
       name: r.name,
-      files: r.files,
-      bytes: r.bytes,
+      files: r.files - r.shared,
+      bytes: r.bytes - r.sharedBytes,
       collectionId: r.id,
       home: r.home,
       shared: r.shared,
+      sharedBytes: r.sharedBytes,
       kind: 'collection',
     })),
+    ...(vol.shared_files > 0
+      ? [
+          {
+            key: '__shared',
+            name: 'Shared by several collections',
+            files: vol.shared_files,
+            bytes: vol.shared_bytes,
+            note: "The records of more than one collection use these copies. Each collection's own size leaves them out; they're counted once, here.",
+            kind: 'shared' as const,
+          },
+        ]
+      : []),
     ...(vol.history_files > 0
       ? [
           {
@@ -291,9 +310,10 @@ export default function VolumePage() {
                   {r.note && <InfoTip>{r.note}</InfoTip>}
                   {!!r.shared && (
                     <InfoTip>
-                      {r.shared} {r.shared === 1 ? 'file is' : 'files are'} also
-                      used by other collections, so rows can add up to more than
-                      the volume holds.
+                      Also uses {r.shared.toLocaleString()}{' '}
+                      {r.shared === 1 ? 'file' : 'files'} (
+                      {formatSize(r.sharedBytes ?? 0)}) that other collections
+                      use too, counted under Shared by several collections.
                     </InfoTip>
                   )}
                 </>

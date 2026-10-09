@@ -207,7 +207,7 @@ def test_unreadable_reference_source_reports_error_and_deletes_nothing(
     def _boom():
         raise RuntimeError("corrupt row")
 
-    monkeypatch.setattr(ctx.gc_svc._refs, "referenced_subset", lambda shas: _boom())
+    monkeypatch.setattr(ctx.gc_svc._refs, "copies_in_use", lambda copies: _boom())
 
     report = ctx.gc_svc.run(dry_run=False, grace_days=0)
 
@@ -375,3 +375,61 @@ def test_no_grace_period_spares_nothing_even_a_file_stamped_ahead(
 
     assert [o.sha256 for o in report.deleted] == [ref.sha256]
     assert report.protected_by_grace == 0
+
+
+def test_a_duplicate_nothing_points_at_is_reclaimed_and_the_used_copy_kept(
+    ctx: AppContext, make_schema, make_collection, make_record, tmp_path
+) -> None:
+    """A record uses one copy of a file; an identical copy on another drive that
+    nothing points at is a duplicate, reclaimable like any unused file. The
+    copy in use stays."""
+    other = tmp_path / "other-drive"
+    ctx.store_svc.add_volume("other", str(other))
+    make_schema("doc", fields=[("scan", "file")])
+    make_collection("study")
+    ref = _store(ctx, b"the same bytes", "a.txt")  # on default
+    record = make_record("study", "doc", {"scan": ref.to_dict()})
+    store = ctx.file_svc._store
+    store.record_moves([(ref.sha256, "other", ref.size)])  # a second copy...
+    path = store.path_on(ref.sha256, "other")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"the same bytes")  # ...really there, that nothing uses
+    ctx.commit()
+    assert store.copies_used([record.id]) == {(record.id, ref.sha256): "default"}
+
+    report = ctx.gc_svc.run(dry_run=False, grace_days=0)
+
+    assert [(o.sha256, o.volume) for o in report.deleted] == [(ref.sha256, "other")]
+    assert not path.exists()
+    assert store.path_on(ref.sha256, "default").exists()
+
+
+def test_every_copy_stays_when_the_one_records_point_at_is_missing(
+    ctx: AppContext, make_schema, make_collection, make_record, tmp_path
+) -> None:
+    """If the copy a record points at isn't recorded, the clean-up can't tell a
+    duplicate from the last real copy: it keeps them all."""
+    other = tmp_path / "other-drive"
+    ctx.store_svc.add_volume("other", str(other))
+    make_schema("doc", fields=[("scan", "file")])
+    make_collection("study")
+    ref = _store(ctx, b"precious", "p.txt")
+    make_record("study", "doc", {"scan": ref.to_dict()})
+    store = ctx.file_svc._store
+    store.record_moves([(ref.sha256, "other", ref.size)])
+    path = store.path_on(ref.sha256, "other")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"precious")
+    from sqlalchemy import text
+
+    # The record still points at "default", but that copy has gone from the
+    # inventory (drift): "other" is the only copy known.
+    ctx._session.execute(
+        text("DELETE FROM stored_objects WHERE sha256 = :s AND volume = 'default'"),
+        {"s": ref.sha256},
+    )
+    ctx.commit()
+
+    report = ctx.gc_svc.run(dry_run=True, grace_days=0)
+
+    assert all(o.sha256 != ref.sha256 for o in report.deleted)

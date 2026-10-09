@@ -346,9 +346,14 @@ export interface MovePlan {
   /** Only on the server: downloaded straight onto the drive. */
   from_server: number
   already_there: number
-  /** Of `files`, those copied, not moved: their drive is the home of a
-   * collection that uses them, and keeps its copy. */
+  /** Of `files`, those copied, not moved: records not picked use the copy
+   * they come from, so it stays. */
   copied: number
+  /** Of `already_there`, those whose records use another copy now: they will
+   * use the one on the drive (nothing is copied). */
+  repointed: number
+  /** Space given back on other drives: copies nothing will use any more. */
+  freed_bytes: number
 }
 
 export interface FileListing {

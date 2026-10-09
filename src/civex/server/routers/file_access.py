@@ -10,6 +10,7 @@ from civex.context import AppContext
 from civex.domain.exceptions import CivexError, NotFoundError, ValidationError
 from civex.domain.hosts import is_loopback
 from civex.domain.file_access import (
+    copy_key,
     place_of,
     FileSelection,
     FilesScatteredError,
@@ -20,7 +21,6 @@ from civex.domain.naming import safe_filename
 from civex.domain.query import RecordQuery
 from civex.domain.sync import SyncError
 from civex.domain.tables import TableSpec
-from civex.domain.transfers import KIND_FILES, TransferSpec
 from civex.server.deps import get_ctx
 from civex.server.downloads import new_temp_dir, serve, temp_paths
 from civex.server.models import (
@@ -290,9 +290,7 @@ def gather_files(
             422, detail=f"Every file that can move is already on '{body.volume}'."
         )
     record = jobs.start(
-        TransferSpec(
-            kind=KIND_FILES, targets=[body.volume], shas=shas, freeze_sources=False
-        )
+        svc.move_spec(shas, body.volume, sorted({i.record_id for i in items}))
     )
     return {
         "transfer_id": record.id,
@@ -352,7 +350,7 @@ def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
                 **i.to_dict(),
                 "place": place_of(i)[0],
                 "place_kind": place_of(i)[1],
-                "others": listing.others.get(i.sha256, 0),
+                "others": listing.others.get(copy_key(i), 0),
                 "uses": [
                     {
                         "record_id": u.record_id,
@@ -362,7 +360,7 @@ def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
                         "filename": u.filename,
                         "trail": u.path.split("/")[:-2],
                     }
-                    for u in listing.uses.get(i.sha256, [i])
+                    for u in listing.uses.get(copy_key(i), [i])
                 ],
             }
             for i in listing.items
