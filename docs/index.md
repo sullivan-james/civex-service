@@ -1,38 +1,46 @@
 # Civex
 
-Civex is a local-first research data management tool. It gives you structured storage for your research data — typed schemas, file attachments, and automated processing workflows — without requiring a cloud service or a database administrator.
+Civex keeps research data in order on your own computer: typed records, the files
+that belong to them, and workflows that process them. No cloud service and no
+database administrator are needed. Use it from the web app or the command line.
 
-## Core concepts
+## Start here
 
-| Concept | What it is |
+1. [Install](getting-started/install.md)
+2. [Your first project](getting-started/first-project.md)
+3. [Five-minute tour](getting-started/tour.md)
+
+## I want to…
+
+| | Guide |
 |---|---|
-| **Schema** | A template that defines the shape of your data — its field names, types, and validation rules. |
-| **Collection** | A named container of records. Think of it as a project or experiment container. |
-| **Record** | One row of data that conforms to a schema, stored inside a collection. |
-| **Field** | A typed column on a schema. Types include text, numbers, dates, file attachments, and references to other records. |
-| **Workflow** | A YAML-defined automation that runs when records are created or updated, or when triggered manually. |
-| **Plugin** | A Python class that implements one step of a workflow. |
+| Bring in a spreadsheet or a folder of files | [Import data](how-to/import-data.md) |
+| Fill fields from file names automatically | [Fill fields from file names](how-to/fill-fields-from-filenames.md) |
+| Keep files on an external or network drive | [Put files on another drive](how-to/storage-drives.md) |
+| Hand over files as a folder, zip or table | [Get files out](how-to/export-files.md) |
+| Work on the same project from several computers | [Sync a project](how-to/set-up-sync.md) |
+| Put back something changed or deleted | [Undo a mistake](how-to/undo-mistakes.md) |
+| Back up a project | [Back up a project](how-to/back-up.md) |
 
-## How data flows
+## The pieces
 
 ```mermaid
 flowchart LR
     S[Schema] -->|defines| R[Record]
-    R -->|stored in| C[Collection]
-    R -->|has| F["Files<br>(content-addressed objects)"]
-    R -->|triggers| W[Workflow jobs]
+    C[Collection] -->|holds| R
+    R -->|has| F[Files]
+    R -->|triggers| W[Workflow]
 ```
 
-Schemas can inherit from a parent schema. A child schema's records are linked to a parent record, allowing you to model hierarchical data (e.g. an Encounter containing many Selections, each containing many Recordings).
+| | What it is | Example |
+|---|---|---|
+| **Schema** | A kind of record: its fields and rules. Schemas nest | Encounter › Recording › Selection |
+| **Field** | A typed value on a schema | `take` (integer), `audio` (file) |
+| **Collection** | Holds records of the schemas it lists | `humpbacks-2024` |
+| **Record** | One encounter, one recording… | *South Bay › Take 03* |
+| **Volume** | A folder or drive where files are stored | `_civex/objects`, `/media/archive` |
+| **Workflow** | YAML steps that run when records change | read a start time from a file name |
+| **Authority** | The civex other computers sync with | `https://lab-pc.tail1234.ts.net` |
 
-## Two interfaces
-
-Everything is available via both the **CLI** and the **web UI + HTTP API**. The CLI is useful for scripting and batch operations; the UI is better for exploring and editing data interactively.
-
-## Next steps
-
-- [Install civex →](getting-started/install.md)
-- [Create your first project →](getting-started/first-project.md)
-- [Take the five-minute tour →](getting-started/tour.md)
-- [Understand schemas and field types →](guides/schemas-and-fields.md)
-- [Automate with workflows →](guides/workflows.md)
+The [guides](guides/schemas-and-fields.md) explain each in depth, and the
+[reference](reference/cli/index.md) lists every command and endpoint.

@@ -1,280 +1,229 @@
 # Schemas & fields
 
-A schema defines the structure of a record: what fields it has, what types those fields accept, and any validation rules.
+A **schema** is a kind of record: its fields, their types and their rules. Schemas
+can nest (an Encounter holds Recordings, which hold Selections), and every
+record belongs to a [collection](collections-and-records.md).
+
+## A worked example
+
+```bash
+civex schema create encounter --label "Encounter"
+civex schema add-field encounter site --type string --required
+civex schema add-field encounter seen_on --type date --precision month
+
+civex schema create recording --parent encounter --label "Recording"
+civex schema add-field recording take --type integer --min 1
+civex schema add-field recording audio --type file --accept ".wav,.flac"
+civex schema add-field recording depth --type float --unit m --min 0
+civex schema update recording --display-template "Take {take:02}"
+
+civex schema show recording
+```
+
+```text
+Recording (recording)
+  Inherits: encounter
+Label    Field    Type     Required  Source
+Take     take     integer            recording
+Audio    audio    file               recording
+Depth    depth    float              recording
+Site     site     string   yes       ↑ encounter
+Seen On  seen_on  date               ↑ encounter
+```
+
+**In the app:** **Schemas → New schema**, then **Add field** on the schema's
+page. Type the label and the name fills itself in. The rules offered depend on
+the kind of field you pick.
+
+## Field types
+
+| Type | In the app | Stores | Typed as |
+|---|---|---|---|
+| `string` | Text | One line of text | `North Ridge` |
+| `longtext` | Text box | Several lines | (newlines kept) |
+| `integer` | Whole number | | `42` |
+| `float` | Number | Optionally in a fixed unit | `3.14`, `1024 ft` |
+| `boolean` | Yes/no | | `yes`, `true`, `1` / `no`, `false`, `0` |
+| `date` | Date | A day, or a month or year if allowed | `2024-03-15`, `2024-03`, `2024` |
+| `datetime` | Date and time | A UTC instant, to the second | `2024-03-15T09:30:00` |
+| `geo` | Location | A GeoJSON point, line or area | `56.12, -3.41` |
+| `file` / `file_list` | File / Files | References to stored files | a path |
+| `reference` / `reference_list` | Link(s) to records | Record ids | an id or unique prefix |
+| `tags` | Tags | A list of short labels | `seal, tagged` |
+| `url` | Web address | `http(s)://` text | `https://example.org` |
+| `enum` | Choice (legacy) | Use `string` with `--choices` instead | |
+
+## Rules on a field
+
+Rules are checked whenever a record is saved: in the app, the CLI, the API,
+imports and workflows.
+
+| Flag | Types | Example |
+|---|---|---|
+| `--required` / `--optional` | all | |
+| `--min` / `--max` | `integer`, `float` | `--min 0 --max 100` |
+| `--choices` | `string` | `--choices "pass,fail,inconclusive"` (a dropdown in the app) |
+| `--max-length` | `string`, `longtext` | `--max-length 500` |
+| `--unit` | `float` | `--unit m`, `--unit degC` |
+| `--precision` | `date` | `--precision month` (accepts `2024-03` and `2024-03-15`) |
+| `--geometry-types` | `geo` | `--geometry-types Point,Polygon` |
+| `--bbox` | `geo` | `--bbox "-12,48,4,62"` (west,south,east,north) |
+| `--accept` | `file`, `file_list` | `--accept ".wav,.flac"` |
+| `--max-size` | `file`, `file_list` | `--max-size 10485760` (bytes) |
+| `--references` | `reference`, `reference_list` | `--references encounter` |
+
+Some rules are set in the app (or over the API, as `restrictions`) only: a
+`date`/`datetime` minimum and maximum, a `datetime` field's own timezone, and a
+file's download-name template.
+
+### Units
+
+A `float` with a unit stores every value in that unit. Conversion happens only
+as data comes in: typing `1024 ft` into a metres field stores `312.1152`, and the
+CSV import asks which unit each column is in. Changing a field's unit later
+*relabels* it and converts nothing, so to switch units add a new field. Units
+civex doesn't know (`umol/kg`) are plain labels.
+
+### Partial dates
+
+`--precision` is the least precise value a date field accepts: `year` takes
+`2019`, `2019-06` and `2019-06-14`; `month` the last two; `day` (default) only
+full dates. Values are stored as written, never padded. Minimums and maximums
+compare whole periods, so `2020` fails a minimum of `2020-03`.
+
+### Times and timezones
+
+A `datetime` is stored as a UTC instant. A value *with* an offset
+(`2024-03-15T09:30:00-05:00`) is exact. A value *without* one, from a CSV, an
+instrument or a file name, is read as wall time in the field's timezone, else
+the collection's, else UTC:
+
+```bash
+civex collection update humpbacks --timezone America/Chicago
+```
+
+Times that don't exist or happen twice at a DST change are rejected rather than
+guessed: add an offset. Changing a timezone changes how values are shown and how
+new ones are read, never what is stored.
+
+### Locations
+
+A `geo` field holds GeoJSON in WGS84 (longitude first). It reads the ways people
+write coordinates:
+
+```text
+56.12, -3.41          56.12N 3.41W          56°07'12"N 3°24'36"W
+N 56° 07.2' W 3° 24.6'                      POINT(-3.41 56.12)
+```
+
+Exports and CSVs write a point as `lat, lon`, and other shapes as GeoJSON. A point
+may carry `uncertainty_m` and an elevation (negative for depth). A `--bbox` with
+west greater than east crosses the 180th meridian.
+
+On a record, **Edit on map…** places a point or draws a line or area, takes
+coordinates in any format, imports GeoJSON, GPX, KML or WKT, and changes nothing
+until **Apply**. The map works offline with built-in coastlines. For street
+detail, set a tile server in **Settings → Map** (`[map] tile_url` and
+`attribution` in `config.toml`), following that provider's terms.
 
 ## Names and labels
 
-Every schema and field carries two identifiers, and they do different jobs.
+| | `name` | `label` |
+|---|---|---|
+| Is | the machine key | the display name |
+| Looks like | `recording_date` (lowercase, digits, `_`) | `Recording Date` (anything) |
+| Used by | workflow YAML, CSV headers, templates, API paths | the app, `schema show`, forms |
+| Changing it | a real rename (see below) | always safe |
 
-| | What it is | Constraint | Where it shows up |
-|---|---|---|---|
-| `name` | The machine key | Lowercase letters, digits and underscores, not starting with a digit | Workflow YAML, CSV headers, name templates, API paths |
-| `label` | The human display name | Free text — spaces, capitals, units, anything | The web UI, `civex schema show`, form labels |
-
-The name is constrained because other things reference it *as text*: a workflow step writes `field: recording_date`, a trigger writes `schema: acoustic_recording`, a CSV column header is the field name. Keeping those as slugs is what makes workflow files readable, diffable in git, and portable between projects.
-
-The label carries everything else. Set it whenever the natural name for something isn't already a slug:
-
-```bash
-civex schema create acoustic_recording --label "Acoustic Recording"
-civex schema add-field acoustic_recording recording_date --type date --label "Recording Date"
-```
-
-If you don't set a label, civex derives one from the name for display — `recording_date` shows as "Recording Date". Labels aren't unique and changing one is always safe, so cosmetic changes should go there rather than into a rename.
-
-!!! tip "Why not reference fields by UUID in workflows?"
-    Every field does have a UUID, and record data is stored keyed by it — so renaming a field never touches stored records. But UUIDs in workflow YAML would be unreadable in diffs, unusable in `if:` expressions, and non-portable: a workflow written in one project could never be copied into another. Slug names plus free-text labels give you the readability without giving up clean display text.
-
-### Renaming
-
-Renaming a `name` is a real change: stored records are unaffected (they're keyed by field UUID), and any name template that uses it is updated for you, but **any workflow YAML that references the old name must be updated by hand**.
-
-`civex schema lint` reports any schema or field whose name isn't a valid slug — typically rows created before this rule existed, or restored from an older dump. Those names still work; the command just tells you where they are and what a slugified version would look like.
+Without a label, one is derived from the name. Records store values by field id,
+so a rename never touches stored data, and templates are updated for you. **Workflow
+YAML that names the old field must be updated by hand.**
 
 ```bash
-civex schema lint
+civex schema update-field recording take --label "Take number"   # safe
+civex schema update-field recording take --rename take_no        # update workflows
+civex schema lint                                                # names that aren't valid slugs
 ```
 
 ## Naming records and files
 
-A record has no name field of its own: its name is built from its values by a **template** on the schema. Open a schema's **Naming** tab, or set it from the CLI:
+A record's name comes from its schema's **template**. It shows in lists,
+breadcrumbs, references and export folder names.
 
 ```bash
-civex schema update sample --display-template "{site:upper}-{taken_on:YYYY-MM}-{sample_no:03}"
-civex schema update sample --clear-display-template   # back to "the first text value"
+civex schema update sample --display-template "{site.code}-{taken_on:YYYY-MM}-{sample_no:03}"
+civex schema update sample --clear-display-template
 ```
 
-A template is literal text with variables in braces. A variable is a field name, optionally followed by a colon and a format; several formats chain with `|`. Use `{{` and `}}` for a literal brace.
-
-| Write | To get |
+| Write | Gives |
 |---|---|
-| `{site}` | the field's value as entered |
-| `{site:upper}`, `{site:lower}`, `{site:title}` | the value in that case |
-| `{site:slug}` | `North Ridge` → `north_ridge` |
-| `{site:trunc(3)}` | the first 3 characters |
-| `{taken_on:YYYY-MM-DD}` | a date or datetime in that pattern (`YYYY MM DD HH mm SS`); a partial date such as `2019-06` stops at the last part it has |
-| `{sample_no:03}` | a number padded to 3 digits (`7` → `007`) |
-| `{depth:.1f}` | a number with 1 decimal place |
-| `{site.code}` | a field of the record that the reference field `site` points at (see below) |
-| `{schema}`, `{id}` | the schema's name and the record's short id |
+| `{site}` | the value |
+| `{site:upper}`, `:lower`, `:title` | `NORTH RIDGE`, … |
+| `{site:slug}` | `north_ridge` |
+| `{site:trunc(3)}` | `Nor` |
+| `{taken_on:YYYY-MM-DD}` | a date pattern (`YYYY MM DD HH mm SS`) |
+| `{sample_no:03}`, `{depth:.1f}` | `007`, `12.5` |
+| `{site.code}` | a field of the record the reference `site` points at |
+| `{schema}`, `{id}` | the schema's name, the record's short id |
+| `{{`, `}}` | literal braces |
 
-A value a record doesn't have is left out together with the separator beside it, so `{site} - {sample_no}` on a record with no site is just the sample number. The first field you add that can go in a name (not a reference, file, tags, text box or location) is used as the schema's template to begin with, so a new schema's records are named from the start; change it any time. A schema with no template uses the first value on the record, and the Naming tab says which field that is. Renaming or deleting a field updates every template that uses it.
+- A blank value is dropped with the separator beside it: `{site} - {n}` with no
+  site gives just `7`.
+- The first nameable field you add becomes the template, so new schemas name
+  records from the start.
+- `{ref.field}` reaches one level through a single `reference` field that names
+  its target schema. Editing the target renames at once.
+- Renaming or deleting a field updates every template that uses it.
 
-Fields a schema inherits from its parent can be used like its own; the builder lists them under "From <parent>" so you can tell them apart.
+A file field's **download name** (set on the field in the app) uses the same
+builder. It names the stem, keeps the file's own extension, and may use fields of
+records above and through any reference:
+`{species.common}_{site}_{take:02}`.
 
-**Reaching into a referenced record.** If a `reference` field names the schema it points at, `{field.other}` reads a field of that record, so a sample can be named `{site.code}-{sample_no:03}`. It reaches one record deep only: `{site.region.name}` isn't allowed, and a referenced record's own name doesn't expand its references. The value is read when the name is shown, so editing the site renames its samples at once. The reference field has to set its schema (a reference that may point anywhere can't be checked), only single `reference` fields work (not lists). Renaming or deleting a field on either schema updates the templates that reach it.
+## Nesting
 
-The same builder names **downloads**: a `file` field's *Download file name* rule takes a template too. It names the file's stem only: the file always keeps its own extension, added for you, so there is no `{ext}` to write (a template saved with `.{ext}` at the end has it dropped). A download name can use fields from the records above (a Selection's file named from its Recording and Encounter) and reach through any reference, including one on a record above: `{species.common}_{site}_{take:02}` on a Selection reads the Species its Encounter points at. A missing value is left out with its separator, as in a record's name; only when every value is missing does the file keep its original name. With many fields, **Insert a value** opens a searchable list grouped by where each value comes from.
+```bash
+civex schema create selection --parent recording
+```
+
+A child record sits inside a parent record of the parent schema. A child stores
+only its own fields, but filters, sorts, columns and templates can use its
+parents' fields, and parents can be filtered by their children ("encounters
+that have a selection where…"). The parent can't be changed after creation.
 
 ## Keeping records unique
 
-A schema can say that no two of its records may hold the same values in a set of fields: a plot number within a site, a recording number within an encounter. Open the schema's **Uniqueness** tab, tick the fields and press **Add rule**, or from the CLI:
-
 ```bash
-civex schema add-unique plot site number    # no two plots may share both
-civex schema unique plot                    # list the rules
+civex schema add-unique plot site number    # no two plots share both
+civex schema unique plot
 civex schema remove-unique plot site number
 ```
 
-A rule is checked among the records of that schema **under the same parent record** or, for a top-level record, **in the same collection**. The same values in another encounter, or another collection, are fine. Some details:
+In the app: the schema's **Uniqueness** tab.
 
-- A record with a **blank** in any of a rule's fields isn't held to it (use *required* to insist on a value).
-- A rule uses the schema's **own** fields, of types that compare as plain values: numbers, text, dates, yes/no, choices, links and references. Files, locations, tags and lists can't be part of one.
-- A **deleted** record frees its values; it is checked again if you restore it.
-- You can't add a rule while records already break it. The message says how many sets of records clash and names some, so you can fix them first.
-- Renaming a field keeps the rules that use it. Deleting a field removes them.
-- Saving a record never fails because of an *old* duplicate it already had, only if the rule's values change into a clash.
+- Checked among records of that schema **under the same parent**, or for top-level
+  records **in the same collection**.
+- A record with a blank in any of the rule's fields isn't held to it.
+- Only the schema's own scalar fields (text, numbers, dates, yes/no, choices,
+  links). Not files, locations, tags or lists.
+- You can't add a rule while records already break it. The message names
+  clashing records.
+- A refused save names the record that already has the values. Workflow steps
+  skip such rows and list them in a `duplicates` output.
+- A deleted record frees its values. Restoring it is refused if another record
+  took them.
 
-When a save is refused, the message names the record that already has the values, so you can open it. This applies everywhere a record is written: the web form, the CLI, imports and workflows.
-
-**Workflows.** A row a workflow step can't save because of a rule is skipped like any other row that fails validation (the step reports it as skipped or unmatched, and the run is marked as having problems). The step's output also has a `duplicates` list naming, for each refused row, the record it collided with. A step that doesn't skip (such as *Save field*) fails the run with the same message.
-
-**Restoring.** A deleted record can't come back while another record has taken its values. Its Restore window says which one (with a button to open it) and what to do: change or delete that record first, or leave this one deleted. **Restore all** and **Restore N selected** bring back everything they can, leave the clashing records deleted and count them as held back, rather than stopping.
-
-## Creating a schema
-
-=== "CLI"
-    ```bash
-    civex schema create encounter --label "Encounter" --description "A single recording session"
-    civex schema list
-    civex schema show encounter
-    ```
-
-=== "Web UI"
-    Go to **Schemas → New schema**. Type the display **label** first — the **name** fills itself in as a slug and you can override it. Add an optional description and save. The new schema appears in the schema list with a link to its detail page.
-
-## Field types
-
-| Type | Stores | CLI prompt accepts |
-|---|---|---|
-| `string` | Text | Any text |
-| `longtext` | Several lines of text (shown as a **Text box**), with an optional `--max-length` | Any text; newlines kept |
-| `integer` | Whole number | `42` |
-| `float` | Decimal number, optionally in a fixed unit | `3.14`, or `1024 ft` when the field has a unit |
-| `boolean` | True/false | `true`, `yes`, `1` / `false`, `no`, `0` |
-| `date` | Calendar date, or a year or month when the field allows it | ISO date: `2024-03-15` (`2024`, `2024-03` if allowed) |
-| `geo` | A point, line or area (GeoJSON) | `56.12, -3.41` (latitude, longitude), `POINT(-3.41 56.12)` or GeoJSON |
-| `datetime` | Point in time (UTC) | ISO datetime: `2024-03-15T09:30:00` |
-| `file` | One file attachment | Absolute or relative file path |
-| `file_list` | Multiple file attachments | File path (repeat the prompt to add more) |
-| `reference` | Link to another record | Record ID or short prefix |
-
-**Locations.** A `geo` field holds a GeoJSON geometry in WGS84 (longitude first). Restrict the shapes it accepts with `--geometry-types Point,Polygon` and the area it may fall in with `--bbox WEST,SOUTH,EAST,NORTH`; a west edge greater than the east edge crosses the 180th meridian. In CSV files and exports a point is written as `latitude, longitude`; other shapes are written as GeoJSON.
-
-Locations can be typed in the ways people write them: `56.12, -3.41`, `56.12N 3.41W`, `N56.12 W3.41`, `56°07'12"N 3°24'36"W` or `N 56° 07.2' W 3° 24.6'` (the CLI, CSV import and the web form all read these), as well as `POINT(-3.41 56.12)` and GeoJSON. A point can also carry an `uncertainty_m` (how well the position is known, in metres) and a third coordinate for elevation, negative below sea level for a depth.
-
-**The map editor.** On a record, a location field has an **Edit on map…** button. It opens a map for placing a point, or drawing a line or area; latitude and longitude boxes in decimal degrees, degrees and decimal minutes, or degrees, minutes and seconds (with N/S and E/W boxes, so no one has to remember that west is negative); a table of the points of a line or area with its length or area; **Use my current position** (with the device's accuracy); and **Import from a file** for GeoJSON, GPX, KML and WKT. Nothing changes on the record until you press **Apply**. A field's allowed shapes and area are shown on the map and enforced before you apply. The map draws built-in coastlines and a grid, so it works offline and needs no account. For street-level detail, set a tile server under **Settings → Map** (or `[map]` in `_civex/config.toml`, with `tile_url` and `attribution`); you are responsible for that provider's terms of use, and the public OpenStreetMap servers don't allow heavy use.
-
-**Partial dates.** A `date` field's `precision` names the least precise value it accepts: `year` accepts `2019`, `2019-06` and `2019-06-14`, `month` accepts the last two, and `day` (the default) accepts only full dates. Values are stored as written, never padded to a day. A minimum or maximum applies to the whole period, so `2020` fails a minimum of `2020-03`.
-
-**Units.** A `float` field can have a `unit` such as `m` or `degC`. A field has exactly one unit and every stored value is in it. Conversion happens only where data enters: typing `1024 ft` into a metres field (in the form or the CLI) stores `312.1152`, and the CSV import step asks which unit each mapped column is written in. Nothing already stored is ever converted. Changing a field's unit later only relabels it, for correcting a wrong label; to work in a different unit going forward, add a new field. Units outside the built-in table (for example `umol/kg`) work as plain labels with no conversion.
-
-Datetimes are always stored as UTC instants. What changes with a timezone is how a value *without* a UTC offset (like `2024-03-15T09:30:00`, from a CSV cell, an instrument export or a filename) is read, and how stored values are shown.
-
-**Timezones.** A timestamp from an instrument is usually wall time where it was recorded, not UTC. Set a timezone on the collection so such values land on the right instant, and so every viewer sees the same wall time:
+## Changing and deleting fields
 
 ```bash
-civex collection create my-study --timezone America/Chicago
-civex collection update my-study --timezone Asia/Kolkata
-civex collection update my-study --timezone ""   # back to unset
+civex schema update-field trial score --min 0 --max 50     # merges with existing rules
+civex schema update-field trial subject --optional
+civex schema update-field trial score --clear-restrictions
+civex schema remove-field trial score
+civex schema delete trial
 ```
 
-A `datetime` is stored to the second, and the web form's datetime box has a seconds part (a value typed or imported with seconds keeps them, and they are shown wherever the value is shown; a value with no seconds reads as before). A `datetime` field can override the collection's zone with its own **Timezone** setting (in the web UI's field form, or as a `timezone` restriction through the API). For any value, the zone is the field's own, else the collection's, else unset.
-
-- **Unset** behaves as it always has: a value with no offset is read as UTC, and the web UI shows times in the viewer's own timezone.
-- A value **with an offset** (`2024-03-15T09:30:00-05:00`) is always converted exactly; the zone is ignored.
-- Wall times that don't exist (clocks skip forward) or are ambiguous (clocks go back) are **rejected** rather than guessed. Add an offset to resolve them.
-- Changing a collection's timezone does not change stored values, only how they are shown and how future offset-less input is read. Values already stored without an offset are still read as UTC.
-
-## Adding fields
-
-Restrictions constrain what values are accepted when records are saved. They are enforced at write time — for the CLI, the API, and the web UI form alike — never at upload or entry time.
-
-=== "CLI"
-    ```bash
-    civex schema add-field <schema> <field> --type <type> [--label "Display Name"] [--required] [restrictions...]
-    ```
-
-    **integer / float**
-    ```bash
-    civex schema add-field trial score --type integer --min 0 --max 100
-    civex schema add-field measurement temp --type float --min -273.15
-    ```
-
-    **string**
-    ```bash
-    # Allow only specific values (renders as a dropdown in the UI)
-    civex schema add-field trial outcome --type string --choices "pass,fail,inconclusive"
-
-    # Limit length
-    civex schema add-field profile bio --type string --max-length 500
-    ```
-
-    **date / datetime**
-    ```bash
-    # Records must fall within a date range
-    civex schema add-field trial start_date --type date --min 2024-01-01 --max 2024-12-31
-    ```
-
-    **file / file_list**
-    ```bash
-    # Only accept specific file types
-    civex schema add-field recording audio --type file --accept ".wav,.flac"
-
-    # Limit file size (bytes — 10 MB = 10485760)
-    civex schema add-field document pdf --type file --accept ".pdf" --max-size 10485760
-    ```
-
-    **reference**
-    ```bash
-    # Links to a record of another schema
-    civex schema add-field selection encounter_id --type reference --references encounter
-    ```
-
-=== "Web UI"
-    On a schema's detail page the fields are listed on the left; select one to see and change its rules on the right. Click **Add field** and choose what kind of data it is (a quantity, a location, a file, and so on); then enter a **label** (the name auto-fills as a slug) and toggle **Required**. The rules offered depend on the kind: min/max and a unit for numbers, precision for dates, shapes and an allowed area for locations, allowed values for text, file types and size for files, and a target schema for links. Unsaved changes are flagged, and you're asked before leaving them.
-
-**Restriction flags** (on `add-field` and `update-field`):
-
-| Flag | Applies to | Description |
-|---|---|---|
-| `--label TEXT` | all | Display name; pass `""` on `update-field` to clear it |
-| `--required` / `--optional` | all | Whether the field must be set |
-| `--min VALUE` / `--max VALUE` | `integer`, `float` | Value range |
-| `--min VALUE` / `--max VALUE` | `date`, `datetime` | Date range (ISO string) |
-| `--choices A,B,C` | `string` | Comma-separated allowed values |
-| `--max-length N` | `string` | Maximum character length |
-| `--accept .ext,.ext` | `file`, `file_list` | Comma-separated allowed extensions |
-| `--max-size BYTES` | `file`, `file_list` | Maximum file size in bytes |
-| `--unit SYMBOL` | `float` | Unit every value is stored in, e.g. `m` |
-| `--precision year\|month\|day` | `date` | Least precise value accepted |
-| `--geometry-types A,B` | `geo` | Shapes accepted, e.g. `Point,Polygon` |
-| `--bbox W,S,E,N` | `geo` | Allowed area in degrees |
-| `--references SCHEMA` | `reference` | Target schema name |
-| `--clear-restrictions` | all | Remove all restrictions (on `update-field`) |
-
-## Editing fields
-
-Rename a field or change its restrictions without losing data.
-
-=== "CLI"
-    ```bash
-    # Change the display name only — always safe, nothing references it
-    civex schema update-field trial outcome --label "Trial Outcome"
-
-    # Rename the machine key — update any workflow that references it
-    civex schema update-field trial outcome --rename result
-
-    # Change restrictions (merges with existing; does not affect stored data)
-    civex schema update-field trial score --min 0 --max 50
-
-    # Mark optional/required
-    civex schema update-field trial subject --optional
-
-    # Remove all restrictions
-    civex schema update-field trial score --clear-restrictions
-    ```
-
-=== "Web UI"
-    Select a field in the list to edit it — the same label, name, required, and rule inputs as **Add field**; the type can't change once a field exists. Editing a field never re-derives its name from the label; renaming is always deliberate.
-
-## Schema inheritance
-
-Schemas can extend a parent schema. Records of a child schema are linked to a parent record, letting you model hierarchical data.
-
-=== "CLI"
-    ```bash
-    # Parent schema
-    civex schema create encounter
-
-    # Child schema
-    civex schema create selection --parent encounter
-    civex schema add-field selection start_time --type float --required
-    civex schema add-field selection end_time --type float --required
-    ```
-
-=== "Web UI"
-    On the **New schema** form, pick a **Parent** from the dropdown before saving. The parent field can't be changed later — recreate the schema if you need a different parent.
-
-When you add a `selection` record, civex prompts for the parent `encounter` record ID. The parent's fields are also visible when viewing a child record. Inheritance can be arbitrarily deep — grandchild schemas are supported.
-
-!!! note
-    A child schema only stores its own fields. Parent fields live on the parent record. This keeps the data model clean and avoids duplication. Filters, sorts and view columns can still use a parent's fields on its children — civex reads them from the parent record — and can reach the other way too ("encounters that have a selection where…"). See [Browsing a collection](collections-and-records.md#browsing-a-collection).
-
-## Deleting fields and schemas
-
-=== "CLI"
-    ```bash
-    civex schema remove-field trial score
-    civex trash list --kind field                 # the removed field's ID
-    civex schema restore-field trial <field-id>   # undoes it
-    civex schema delete trial          # moves the schema + its records to Recently Deleted
-    civex schema restore trial         # undoes it
-    ```
-
-=== "Web UI"
-    Click the **✕** on a field row to remove it, or **Delete schema** on the schema's detail page.
-
-Deleting a field is reversible too. The field leaves the schema, but every record keeps the value it held for it, so **restoring the field brings those values back**, not an empty field. While it is deleted, a record shows the value under **Deleted fields**, with when it was deleted and a **Restore…** button, and the field can be restored from **Activity** (press **Deleted**). You can add a new field with the same name in the meantime; the old one then can't come back until that name is free.
-
-Deleting a schema is reversible: it (and every record typed by it, across every collection) moves to **Recently Deleted** rather than being removed outright. See [Deleting & restoring data](deleting-and-restoring.md) for the full cascade and retention rules.
+A field's type can't change. Removing a field is reversible: records keep their
+values, shown under **Deleted fields** on the record, and restoring the field
+brings them back. A schema delete takes its records to Recently Deleted. See
+[Deleting & restoring data](deleting-and-restoring.md).
