@@ -154,3 +154,22 @@ def test_ssh_addresses_are_read(url, host, port, path, civex):
 def test_an_ssh_address_without_a_host_or_path_is_refused(url):
     with pytest.raises(SyncError, match="ssh://"):
         SshAddress.parse(url)
+
+
+def test_a_civex_too_old_at_the_far_end_is_named(project, lab, tmp_path):
+    """An older civex answers with a framed CLI error; what reaches the person
+    says what to do, not the frame's bottom border."""
+    url, invite, _ = lab
+    old = tmp_path / "old-civex"
+    old.write_text(
+        "#!/bin/sh\n"
+        'echo "╭─ Error ──╮" >&2\n'
+        "echo \"│ No such command 'ssh-serve'. │\" >&2\n"
+        'echo "╰──────────╯" >&2\n'
+        "exit 2\n"
+    )
+    old.chmod(0o755)
+    laptop = project("laptop")
+    with pytest.raises(SyncError, match="too old") as e:
+        laptop.sync_svc.connect(f"{url}?civex={old}", invite)
+    assert not e.value.retryable

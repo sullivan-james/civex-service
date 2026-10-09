@@ -38,6 +38,7 @@ _READY = (
 )
 _TRY_LATER = 75  # server/ssh_end.TRY_LATER
 _START_SECONDS = 60.0
+_FRAME = " │╭╮╰╯─┃━┏┓┗┛"
 
 
 @dataclass(frozen=True)
@@ -147,11 +148,20 @@ class _Tunnel:
                 time.sleep(0.05)
 
     def _failure(self) -> SyncError:
-        said = "\n".join(self._said)
+        # The far end's words without the frame a CLI error is drawn in.
+        lines = [s for line in self._said if (s := line.strip(_FRAME))]
+        said = " ".join(lines)
         code = self._proc.returncode
-        last = said.splitlines()[-1] if said else f"ssh exited with {code}"
+        last = said or f"ssh exited with {code}"
         if code == _TRY_LATER:
             return SyncError(last)
+        if "No such command" in said:
+            return SyncError(
+                f"The civex on {self._host} is too old to be reached by ssh:// "
+                "(it has no `civex sync ssh-serve`): update it there, or add "
+                "?civex=/path/to/a/newer/civex to the address.",
+                retryable=False,
+            )
         if "Permission denied" in said:
             return SyncError(
                 f"SSH could not sign in to {self._host}: civex can't type a "
