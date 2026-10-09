@@ -204,13 +204,18 @@ def in_place(item: FileItem, wanted: str) -> bool:
 class MovePlan:
     """What moving picked files onto a drive would do."""
 
-    files: int  # files that would move from another drive
+    files: int  # files that would be carried from another drive
     bytes: int
     from_server: int  # files only on the server, downloaded straight there
-    already_there: int
-    # Of `files`, those copied, not moved: their drive is the home of a
-    # collection that uses them, and keeps its copy.
+    already_there: int  # a copy is on the drive already: nothing to carry
+    # Of `files`, those copied, not moved: records not picked point at the
+    # copy they come from, so it stays.
     copied: int = 0
+    # Of `already_there`, those whose records point elsewhere now: they will
+    # use the copy on the drive (nothing is copied).
+    repointed: int = 0
+    # Space given back on other drives: copies nothing will point at.
+    freed_bytes: int = 0
 
 
 @dataclass
@@ -225,6 +230,12 @@ class PlaceSummary:
     fix: str = ""
 
 
+def copy_key(item: "FileItem") -> str:
+    """A file as stored: its content on the drive its record uses. Two copies
+    of the same content are two files (each with its own records)."""
+    return f"{item.sha256}@{item.volume or ''}"
+
+
 @dataclass
 class FileListing:
     """One page of a selection's files, with where all of them are."""
@@ -234,11 +245,10 @@ class FileListing:
     items: list[FileItem]
     # How many files of each kind (file field): {field, files, bytes}.
     kinds: list[dict[str, Any]] = field(default_factory=list)
-    # For each listed file (by sha256): the records here that use it (each
-    # a FileItem: the record, the kind of file, where it sits)...
+    # For each listed file (by `copy_key`): the records here that use it
+    # (each a FileItem: the record, the kind of file, where it sits)...
     uses: dict[str, list[FileItem]] = field(default_factory=dict)
-    # ...and how many live records not listed here use it too (moving it
-    # would move it for them).
+    # ...and how many live records not listed here point at the same copy.
     others: dict[str, int] = field(default_factory=dict)
     # How many files are used by how many records ({records, files}, fewest
     # records first), before narrowing by that: the "used by" pick's choices.

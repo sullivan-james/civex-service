@@ -7,6 +7,8 @@ corrupt a file under it or pull a drive out from under it at any moment.
 
 from __future__ import annotations
 
+import uuid
+
 import hashlib
 import os
 import sys
@@ -88,14 +90,12 @@ def _run(
     control: TransferControl | None = None,
     seed: Seed | None = None,
     progress=None,
-    placements: dict[str, str] | None = None,
 ) -> Outcome:
     events: list = []
     return run_transfer(
         ctx.file_svc._store,
         LocalFileReferenceRepository(ctx._session),
         spec,
-        placements=placements,
         progress=progress or events.append,
         commit=ctx.commit,
         control=control,
@@ -680,12 +680,12 @@ def test_files_already_home_are_skipped(
     assert set(_catalog(ctx, [r.sha256 for r in refs]).values()) == {"home"}
 
 
-def test_a_file_on_another_collections_home_is_copied_not_moved(
+def test_a_copy_other_records_point_at_stays_copied_not_moved(
     ctx: AppContext, tmp_path: Path, make_schema, make_collection, make_record
 ) -> None:
-    """A home keeps a copy of every file its collection uses: gathering `mine`
-    onto its home copies a file `theirs` keeps on its own home (both homes
-    then hold it) and moves the rest."""
+    """Gathering `mine` moves its records' pointers. A file `theirs` uses too
+    is copied (their records still point at the copy, so it stays); a file
+    only `mine` uses is moved (its copy is left unused, so it goes)."""
     _volumes(ctx, tmp_path, "a", "home", "elsewhere")
     make_schema("doc", fields=[("scan", "file")])
     make_collection("mine")
@@ -696,55 +696,58 @@ def test_a_file_on_another_collections_home_is_copied_not_moved(
     private = ctx.file_svc.store_bytes(b"private " * 40, "private.txt")
     make_record("mine", "doc", {"scan": shared.to_dict()})
     make_record("mine", "doc", {"scan": private.to_dict()})
-    make_record("theirs", "doc", {"scan": shared.to_dict()})
+    theirs = make_record("theirs", "doc", {"scan": shared.to_dict()})
     ctx.commit()
     mine_id = str(ctx.dataset_svc.get("mine").id)
-    theirs_id = str(ctx.dataset_svc.get("theirs").id)
-    homes = {theirs_id: "elsewhere", mine_id: "home"}
 
     spec = TransferSpec(
         kind=KIND_CONSOLIDATE, targets=["home"], collection_ids=[mine_id]
     )
-    done = _run(ctx, spec, placements=homes)
+    done = _run(ctx, spec)
 
     assert done.progress.files_done == 2
     assert _catalog(ctx, [shared.sha256, private.sha256]) == {
-        shared.sha256: "elsewhere+home",  # copied: `theirs` keeps its copy
+        shared.sha256: "elsewhere+home",  # copied: `theirs` still uses its copy
         private.sha256: "home",  # moved
     }
-    assert shared.sha256 in _on_disk(ctx, "elsewhere")
+    used = ctx.file_svc._store.copies_used([theirs.id])
+    assert used == {(theirs.id, shared.sha256): "elsewhere"}
     assert private.sha256 not in _on_disk(ctx, "a")
 
-    again = _run(ctx, spec, placements=homes)  # nothing left to do
+    again = _run(ctx, spec)  # nothing left to do
     assert again.progress.files_done == 0 and again.progress.files_skipped == 2
 
 
 def test_emptying_a_drive_whose_files_the_target_has_says_they_were_there(
     ctx: AppContext, tmp_path: Path, make_schema, make_collection, make_record
 ) -> None:
-    """Draining a drive whose files the target already holds only removes the
-    originals: each counts as already there, so the move doesn't finish at
-    "0 of N files" after emptying the drive."""
+    """Draining a drive whose files the target already holds copies nothing:
+    whatever pointed at the drive points at the target's copy, the drive's
+    copies go, and each counts as already there (not "0 of N files")."""
     _volumes(ctx, tmp_path, "a", "b")
     make_schema("doc", fields=[("scan", "file")])
     make_collection("mine")
     ctx.store_svc.set_queue(["a"])
     refs = [ctx.file_svc.store_bytes(d, "f.txt") for d in (b"x" * 90, b"y" * 70)]
-    for ref in refs:
+    moving = []
+    for ref in refs:  # two records each: one of them is moved to b
+        moving.append(str(make_record("mine", "doc", {"scan": ref.to_dict()}).id))
         make_record("mine", "doc", {"scan": ref.to_dict()})
     ctx.commit()
-    home = {str(ctx.dataset_svc.get("mine").id): "a"}
     shas = [r.sha256 for r in refs]
-    _run(ctx, TransferSpec(kind=KIND_FILES, targets=["b"], shas=shas), placements=home)
-    assert set(_catalog(ctx, shas).values()) == {"a+b"}  # copied: a is the home
+    files = TransferSpec(kind=KIND_FILES, targets=["b"], shas=shas, record_ids=moving)
+    _run(ctx, files)
+    assert set(_catalog(ctx, shas).values()) == {"a+b"}  # the others still use a
 
-    emptied = _run(ctx, _drain(["b"], ["a"]), placements=home)
+    emptied = _run(ctx, _drain(["b"], ["a"]))
 
     p = emptied.progress
     assert (p.files_done, p.files_skipped, p.files_total) == (0, 2, 2)
     assert p.bytes_total == 0  # nothing had to be carried
     assert _on_disk(ctx, "b") == set()
     assert set(_catalog(ctx, shas).values()) == {"a"}
+    ids = [uuid.UUID(r) for r in moving]
+    assert set(ctx.file_svc._store.copies_used(ids).values()) == {"a"}
 
 
 # -- progress --------------------------------------------------------------------

@@ -791,6 +791,7 @@ class FileReference(Base):
         UniqueConstraint("record_id", "sha256", name="uq_file_refs_record_sha"),
         UniqueConstraint("job_id", "sha256", name="uq_file_refs_job_sha"),
         Index("ix_file_references_sha256", "sha256"),
+        Index("ix_file_references_sha_volume", "sha256", "volume"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
@@ -801,6 +802,13 @@ class FileReference(Base):
     job_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workflow_jobs.id", ondelete="CASCADE"), nullable=True
     )
+    # The copy this owner uses: the volume holding it, on this computer. One
+    # file can be stored on several drives; each record points at exactly one
+    # of them, so where a record's file is (and what each drive holds for each
+    # collection) is a fact, not a choice among copies. NULL until a copy is
+    # here (a file another device added, not downloaded yet). Local, like the
+    # inventory: never in a record or a sync bundle.
+    volume: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 # ---------------------------------------------------------------------------
@@ -853,10 +861,27 @@ def _sync_file_refs(
     fresh = wanted - have
     if fresh:
         other = "job_id" if owner == "record_id" else "record_id"
+        # Each points at the file's newest copy: the one an upload just wrote
+        # (or reused, on the collection's own drive when it has one). None
+        # until a copy is here; recording one then points at it.
+        stored = cast(Table, StoredObject.__table__)
+        newest: dict[str, str] = {}
+        for sha, volume in connection.execute(
+            select(stored.c.sha256, stored.c.volume)
+            .where(stored.c.sha256.in_(sorted(fresh)))
+            .order_by(stored.c.created_at, stored.c.volume)
+        ):
+            newest[sha] = volume
         connection.execute(
             insert(table),
             [
-                {"id": _uuid(), "sha256": sha, owner: owner_id, other: None}
+                {
+                    "id": _uuid(),
+                    "sha256": sha,
+                    owner: owner_id,
+                    other: None,
+                    "volume": newest.get(sha),
+                }
                 for sha in sorted(fresh)
             ],
         )

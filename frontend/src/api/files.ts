@@ -47,6 +47,8 @@ export interface FileCopy {
   present: boolean | null
   state: string
   network: boolean
+  /** Live records whose file is this copy (each points at one). */
+  records: number
 }
 
 /** Where a file's content is stored and what uses it. */

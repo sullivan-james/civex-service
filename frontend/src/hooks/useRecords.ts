@@ -157,6 +157,9 @@ export function useCreateRecord(datasetName: string) {
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
       qc.invalidateQueries({ queryKey: ['collections'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
+      // A file attached changes what the drives hold.
+      qc.invalidateQueries({ queryKey: ['store', 'volumes'] })
+      qc.invalidateQueries({ queryKey: ['store', 'collection'] })
       toast.success(`Record "${created.natural_name ?? created.id}" created`)
     },
   })
@@ -199,6 +202,8 @@ export function useUpdateRecord({ quiet = false }: { quiet?: boolean } = {}) {
       // server-resolved reference labels shown in a table row.
       qc.invalidateQueries({ queryKey: ['records'] })
       qc.invalidateQueries({ queryKey: ['record-audit', vars.id] })
+      qc.invalidateQueries({ queryKey: ['store', 'volumes'] })
+      qc.invalidateQueries({ queryKey: ['store', 'collection'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
       invalidateRecordNames(qc)
     },

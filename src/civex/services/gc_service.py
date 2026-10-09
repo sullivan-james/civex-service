@@ -74,7 +74,12 @@ class GCService:
                 # rest of the run (same contract as the old per-source read
                 # errors -- an incomplete picture must never delete).
                 try:
-                    live = self._refs.referenced_subset(o.sha256 for o in batch)
+                    # Per copy: a duplicate nothing points at goes, a copy
+                    # anything uses stays (see copies_in_use for the cases that
+                    # keep every copy).
+                    live = self._refs.copies_in_use(
+                        (o.sha256, o.volume) for o in batch if o.volume
+                    )
                 except Exception as e:
                     log.error(
                         "GC: failed to read file references: %s", e, exc_info=True
@@ -82,7 +87,7 @@ class GCService:
                     errors.append(f"file references: {e}")
                     return
                 for obj in batch:
-                    if obj.sha256 in live:
+                    if not obj.volume or (obj.sha256, obj.volume) in live:
                         continue
                     # No grace period means none: comparing with "now" would
                     # still spare a file just written whose timestamp is a

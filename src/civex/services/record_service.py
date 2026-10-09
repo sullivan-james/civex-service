@@ -711,15 +711,26 @@ class RecordService:
         if not wanted:
             return records
 
-        volume_of = self._files.locate_volumes(wanted)
+        # Where each record's file is: the copy that record uses. Only a file
+        # it doesn't point at yet (not on this computer when cited) is looked
+        # up by its content.
+        used = self._files.copies_used(r.id for r in records)
+        unpointed = {
+            ref["sha256"]
+            for r, names in zip(records, file_fields)
+            for name in names
+            for ref in _file_dicts(r.data.get(name))
+            if ref.get("sha256") and (r.id, ref["sha256"]) not in used
+        }
+        volume_of = self._files.locate_volumes(unpointed) if unpointed else {}
         from_server = None in volume_of.values() and self.files_from_server()
         status = {
             name: self._files.volume_status(name)
-            for name in {v for v in volume_of.values() if v}
+            for name in {v for v in volume_of.values() if v} | set(used.values())
         }
 
-        def location(sha: str | None) -> dict[str, Any]:
-            volume = volume_of.get(sha or "")
+        def location(record_id: uuid.UUID, sha: str | None) -> dict[str, Any]:
+            volume = used.get((record_id, sha or "")) or volume_of.get(sha or "")
             if volume is None and from_server:
                 # Another device added it: it is fetched when opened or
                 # exported (and, unless this device keeps only what it opens,
@@ -752,11 +763,14 @@ class RecordService:
                 "fix": st.fix,
             }
 
-        def decorate(value: Any) -> Any:
+        def decorate(record_id: uuid.UUID, value: Any) -> Any:
             if isinstance(value, dict):
-                return {**value, "location": location(value.get("sha256"))}
+                return {
+                    **value,
+                    "location": location(record_id, value.get("sha256")),
+                }
             if isinstance(value, list):
-                return [decorate(item) for item in value]
+                return [decorate(record_id, item) for item in value]
             return value
 
         return [
@@ -764,7 +778,7 @@ class RecordService:
                 r,
                 data={
                     **r.data,
-                    **{n: decorate(r.data.get(n)) for n in names if n in r.data},
+                    **{n: decorate(r.id, r.data.get(n)) for n in names if n in r.data},
                 },
             )
             if names
@@ -2350,12 +2364,15 @@ class RecordService:
         self,
         records: list[RecordDTO],
         on_level: Callable[[int], None] | None = None,
+        keep: Callable[[RecordDTO], bool] | None = None,
     ) -> list[RecordDTO]:
         """Every live record beneath these (children, their children, and so on),
         in the full response form, found a level at a time: a few queries for the
         whole set however many records there are, not one per record. The given
         records themselves are not repeated. `on_level` is told how many have
-        been found after each level."""
+        been found after each level. `keep` (asked of each record as stored)
+        returns only those it accepts: every level is still walked, but only
+        those are named and labelled, the costly part."""
         seen = {r.id for r in records}
         frontier = [r.id for r in records]
         found: list[RecordDTO] = []
@@ -2367,9 +2384,11 @@ class RecordService:
             if not kids:
                 break
             seen.update(k.id for k in kids)
+            frontier = [k.id for k in kids]
+            if keep is not None:
+                kids = [k for k in kids if keep(k)]
             named = [self._with_names(k, shapes) for k in kids]
             found.extend(self._attach_reference_labels(named, shapes))
-            frontier = [k.id for k in kids]
             if on_level:
                 on_level(len(found))
         return found

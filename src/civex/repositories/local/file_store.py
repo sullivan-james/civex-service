@@ -605,6 +605,34 @@ class VolumeAwareFileObjectStore:
         reachable = {v: self.volume_status(v).reachable for v in names}
         return sorted(names, key=lambda v: not reachable[v])
 
+    def copies_used(
+        self, record_ids: Iterable[uuid.UUID]
+    ) -> dict[tuple[uuid.UUID, str], str]:
+        """(record, file) -> the volume of the copy that record uses, for the
+        records that point at one on a volume that exists. A few queries."""
+        wanted = list(dict.fromkeys(record_ids))
+        out: dict[tuple[uuid.UUID, str], str] = {}
+        if self._session is None or not wanted:
+            return out
+        from sqlalchemy import select
+
+        from civex.db.models import FileReference
+
+        for i in range(0, len(wanted), _LOCATE_CHUNK):
+            for record_id, sha, volume in self._session.execute(
+                select(
+                    FileReference.record_id,
+                    FileReference.sha256,
+                    FileReference.volume,
+                ).where(
+                    FileReference.record_id.in_(wanted[i : i + _LOCATE_CHUNK]),
+                    FileReference.volume.is_not(None),
+                )
+            ):
+                if volume in self._cfg.volumes and record_id is not None:
+                    out[(record_id, sha)] = volume
+        return out
+
     def locate_volumes(self, shas: Iterable[str]) -> dict[str, str | None]:
         """The volume to use for each file, for a whole batch at once: of its
         copies, one that can be read now, else one on a drive that isn't
@@ -1488,17 +1516,29 @@ class VolumeAwareFileObjectStore:
         self._upsert_inventory([(sha256, volume, size)])
 
     def _unregister(self, sha256: str, volume: str | None = None) -> None:
-        """Forget the copy on `volume`, or every copy."""
+        """Forget the copy on `volume`, or every copy. Records that pointed at
+        a copy that is gone point at the newest copy left, or at none."""
         if self._session is None:
             return
-        from sqlalchemy import delete
+        from sqlalchemy import delete, select, update
 
-        from civex.db.models import StoredObject
+        from civex.db.models import FileReference, StoredObject
 
         query = delete(StoredObject).where(StoredObject.sha256 == sha256)
         if volume is not None:
             query = query.where(StoredObject.volume == volume)
         self._session.execute(query)
+        left = (
+            select(StoredObject.volume)
+            .where(StoredObject.sha256 == sha256)
+            .order_by(StoredObject.created_at.desc(), StoredObject.volume)
+            .limit(1)
+            .scalar_subquery()
+        )
+        pointing = update(FileReference).where(FileReference.sha256 == sha256)
+        if volume is not None:
+            pointing = pointing.where(FileReference.volume == volume)
+        self._session.execute(pointing.values(volume=left))
 
     def _upsert_inventory(self, rows: list[tuple[str, str, int]]) -> None:
         assert self._session is not None
@@ -1526,6 +1566,25 @@ class VolumeAwareFileObjectStore:
             set_={"size": stmt.excluded.size},
         )
         self._session.execute(stmt)
+        # Records waiting for one of these files (cited before a copy was here,
+        # such as one another device added) point at the copy just recorded.
+        from sqlalchemy import update
+
+        from civex.db.models import FileReference
+
+        by_volume: dict[str, list[str]] = {}
+        for sha, vol, _ in rows:
+            by_volume.setdefault(vol, []).append(sha)
+        for vol, shas in by_volume.items():
+            for i in range(0, len(shas), _LOCATE_CHUNK):
+                self._session.execute(
+                    update(FileReference)
+                    .where(
+                        FileReference.sha256.in_(shas[i : i + _LOCATE_CHUNK]),
+                        FileReference.volume.is_(None),
+                    )
+                    .values(volume=vol)
+                )
 
     def reconcile_inventory(self) -> dict[str, int]:
         """Bring the `stored_objects` table back in line with disk: add rows

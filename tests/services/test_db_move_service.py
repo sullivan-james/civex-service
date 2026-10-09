@@ -229,3 +229,30 @@ def test_postgres_url_is_built_and_escaped_from_fields():
     assert "p%40ss%3Aw%2Frd" in url
     with pytest.raises(ValidationError, match="host and a database"):
         svc.postgres_url(svc.TargetSpec(kind="postgres"))
+
+
+def test_a_move_keeps_which_copy_each_record_uses(
+    ctx: AppContext, make_schema, make_collection, project_dir: Path, tmp_path: Path
+):
+    """`file_references.volume` (the copy each record's file points at) is
+    local data like the inventory: moving the database carries it, so no
+    record's file changes drive by being moved to another database."""
+    make_schema("scan", fields=[("image", "file")])
+    make_collection("study")
+    ref = ctx.file_svc.store_bytes(b"pixels", "a.png")
+    record = ctx.record_svc.add("study", "scan", {"image": ref.to_dict()})
+    ctx.commit()
+    before = ctx.file_svc._store.copies_used([record.id])
+    assert before == {(record.id, ref.sha256): "default"}
+    ctx.close()
+
+    done = svc.run_move(load_config(), _target(tmp_path))
+
+    assert done.status == "done", done.error
+    moved = create_engine(sqlite_url(tmp_path / "moved.db"))
+    with moved.connect() as conn:
+        rows = conn.exec_driver_sql(
+            "SELECT sha256, volume FROM file_references WHERE record_id IS NOT NULL"
+        ).all()
+    moved.dispose()
+    assert rows == [(ref.sha256, "default")]

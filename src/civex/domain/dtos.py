@@ -491,6 +491,7 @@ class FileCopy:
     present: bool | None  # None: recorded there, but the volume can't be checked now
     state: str  # the volume's state (VOLUME_*)
     network: bool = False
+    records: int = 0  # live records whose file is this copy
 
 
 @dataclass
@@ -536,6 +537,7 @@ class CollectionVolumeShare:
     files: int
     bytes: int
     shared_files: int  # of those, files another collection uses too
+    shared_bytes: int = 0  # and their size
     state: str = "online"  # the volume's state now (see VolumeStatus)
     available: bool = True
 
@@ -562,6 +564,10 @@ class VolumeSurplus:
     unused_bytes: int = 0
     history_files: int = 0  # only workflow run history uses them
     history_bytes: int = 0
+    # Copies the records of more than one collection point at: each collection
+    # counts them, so its share overlaps another's by these.
+    shared_files: int = 0
+    shared_bytes: int = 0
 
 
 @dataclass

@@ -39,6 +39,28 @@ def test_the_report_says_what_is_here_and_what_is_only_on_the_server(pair):
     assert (row.files_here, row.bytes_here, row.files_on_server) == (1, 12, 0)
 
 
+def test_a_record_points_at_its_file_once_the_file_is_downloaded(pair):
+    """Which copy a record uses is this computer's own: a record that arrives
+    before its file points at none, and at the copy once it is downloaded.
+    The laptop's pointer never travels."""
+    laptop, phone, record = pair
+    ref = _with_file(laptop, record, b"pointed at")
+    assert laptop.file_svc._store.copies_used([record.id]) == {
+        (record.id, ref.sha256): "default"
+    }
+    phone.sync_svc.sync()
+    assert phone.file_svc._store.copies_used([record.id]) == {}  # not here yet
+
+    phone.sync_svc.fetch_files()
+    phone.commit()
+
+    assert phone.file_svc._store.copies_used([record.id]) == {
+        (record.id, ref.sha256): "default"
+    }
+    location = phone.record_svc.get(str(record.id)).data["scan"]["location"]
+    assert (location["volume"], location["available"]) == ("default", True)
+
+
 def test_a_collection_fetched_when_opened_is_not_downloaded_in_the_background(pair):
     laptop, phone, record = pair
     ref = _with_file(laptop, record, b"later")
