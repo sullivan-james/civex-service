@@ -10,6 +10,7 @@ const status = (over: Partial<RemoteStatus> = {}): RemoteStatus => ({
   interval_seconds: 60,
   download_files: 'all',
   files_to_fetch: 0,
+  files_to_send: 0,
   serving: false,
   pending: 0,
   open_conflicts: 0,
