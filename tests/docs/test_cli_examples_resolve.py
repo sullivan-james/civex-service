@@ -102,7 +102,12 @@ def _resolve(rest: str) -> tuple[bool, str | None, list[str], Any]:
     """
     node = typer.main.get_command(cli_app)
     path: list[str] = []
-    for token in rest.split():
+    for raw in rest.split():
+        # A command quoted in prose or in sample output ends a sentence or
+        # sits in backticks: "see `civex sync conflicts`." names `conflicts`.
+        token = raw.strip("`'\".,;:")
+        if not token:
+            break
         if token.startswith("-") or _is_placeholder(token):
             break
         if not hasattr(node, "commands"):
