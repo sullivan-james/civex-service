@@ -18,7 +18,6 @@ import urllib.parse
 import urllib.request
 from collections.abc import Iterator
 from dataclasses import replace
-from pathlib import Path
 from typing import Any
 
 from civex import keys
@@ -32,6 +31,7 @@ from civex.domain.sync import (
     SnapshotPage,
     SyncEntry,
     SyncError,
+    UploadSource,
     protocol_header,
     protocol_mismatch,
     session_answer,
@@ -90,15 +90,15 @@ class HttpSyncTransport:
         body = self._json("POST", "/files/missing", {"sha256": shas})
         return list(body["missing"])
 
-    def upload_file(self, sha256: str, path: Path) -> None:
-        size = path.stat().st_size
+    def upload_file(self, sha256: str, source: UploadSource, size: int) -> None:
+        start = source.tell()
 
         def send():
-            with open(path, "rb") as f:
-                request = self._signed_in("PUT", f"/files/{sha256}", data=f)
-                request.add_header("Content-Length", str(size))
-                request.add_header("Content-Type", "application/octet-stream")
-                self._open(request).close()
+            source.seek(start)  # again from the start, when signing in again
+            request = self._signed_in("PUT", f"/files/{sha256}", data=source)
+            request.add_header("Content-Length", str(size))
+            request.add_header("Content-Type", "application/octet-stream")
+            self._open(request).close()
 
         self._again_if_expired(send)
 
@@ -297,6 +297,12 @@ def _mismatch(detail: Any) -> str:
 
 
 def build_transport(base_url: str, credentials: DeviceCredentials) -> HttpSyncTransport:
+    """The transport for an authority's address. An `ssh://` one is the same
+    HTTP, through a tunnel SSH opens to a port here (`ssh_tunnel`)."""
+    from civex.services import ssh_tunnel
+
+    if ssh_tunnel.is_ssh(base_url):
+        base_url = ssh_tunnel.local_url(base_url)
     return HttpSyncTransport(base_url, credentials)
 
 

@@ -508,6 +508,9 @@ class RecordService:
         # This project follows an authority, so a file its records cite that no
         # drive here holds can be fetched from it (set by `build_local_context`).
         self.files_from_server: Callable[[], bool] = lambda: False
+        # Of these files, those the authority hasn't said it holds (set by
+        # `context.py`; nothing when the project follows no authority).
+        self.not_on_server: Callable[[set[str]], set[str]] = lambda _: set()
         self._job_svc = job_svc
         self._audit = audit_repo
 
@@ -724,6 +727,7 @@ class RecordService:
         }
         volume_of = self._files.locate_volumes(unpointed) if unpointed else {}
         from_server = None in volume_of.values() and self.files_from_server()
+        unsent = self.not_on_server(wanted)
         status = {
             name: self._files.volume_status(name)
             for name in {v for v in volume_of.values() if v} | set(used.values())
@@ -761,6 +765,9 @@ class RecordService:
                 # a person is told which drive to plug in where the file is.
                 "reason": st.reason,
                 "fix": st.fix,
+                # Here, but the server hasn't said it holds it: other devices
+                # can't get it yet. Only said while this project syncs.
+                **({"sent": False} if sha in unsent else {}),
             }
 
         def decorate(record_id: uuid.UUID, value: Any) -> Any:

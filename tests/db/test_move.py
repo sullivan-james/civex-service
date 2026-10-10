@@ -155,6 +155,7 @@ def _add_sync_state(ctx: AppContext) -> None:
         device_name="laptop",
         message=None,
     )
+    ctx.sync_repo.confirm_on_server(["ab" * 32])  # a file the server said it has
 
 
 def _add_storage_transfer(ctx: AppContext) -> None:

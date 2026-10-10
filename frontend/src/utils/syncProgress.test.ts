@@ -51,4 +51,15 @@ describe('describeSyncProgress', () => {
       }).fraction,
     ).toBe(1)
   })
+
+  it('describes sending files to the server', () => {
+    const text = describeSyncProgress({
+      phase: 'sending',
+      done: 1,
+      total: 4,
+      kind: null,
+    })
+    expect(text.title).toBe('Sending files to the server')
+    expect(text.detail).toBe('files · 1 of 4')
+  })
 })

@@ -7,9 +7,11 @@ import { describeSyncProgress } from '../../utils/syncProgress'
 const DETAILS = '/settings/sync'
 const REVIEW = '/sync/review'
 
-/** Syncing, as a task: shown while a sync is running, when the last attempt
- * failed (it tries again by itself), or when values are waiting for a person to
- * choose. Nothing when all is well, so a quiet project has a quiet bar. */
+/** Syncing, as a task: shown while a sync is running (with a bar while files
+ * go up or come down), when the last attempt failed (it tries again by
+ * itself), when values are waiting for a person to choose, or when files here
+ * aren't on the server yet. Nothing when all is well, so a quiet project has a
+ * quiet bar. */
 export function useSyncTasks(): BackgroundTask[] {
   const { data } = useRemoteStatus()
   const syncNow = useSyncNow()
@@ -70,8 +72,7 @@ export function useSyncTasks(): BackgroundTask[] {
         icon: RefreshCw,
         spinning: true,
         title: 'Syncing…',
-        detail:
-          data.pending > 0 ? `${data.pending} change(s) to send` : undefined,
+        detail: toSend(data.pending, data.files_to_send),
         actions: [details],
       },
     ]
@@ -84,10 +85,7 @@ export function useSyncTasks(): BackgroundTask[] {
         icon: RefreshCw,
         title: 'Could not sync',
         detail: data.last_error,
-        note:
-          data.pending > 0
-            ? `${data.pending} change(s) saved here, not yet sent`
-            : undefined,
+        note: notSent(data.pending, data.files_to_send),
         actions: [
           {
             label: 'Try now',
@@ -113,5 +111,46 @@ export function useSyncTasks(): BackgroundTask[] {
       },
     ]
 
+  if (data.files_to_send > 0)
+    return [
+      {
+        id: 'sync',
+        tone: 'info',
+        icon: RefreshCw,
+        title: `${plural(data.files_to_send, 'file')} not on the server yet`,
+        detail:
+          'Other computers can’t open them yet. They go with the next sync; one on a drive that isn’t plugged in goes once it is.',
+        actions: [
+          {
+            label: 'Send now',
+            disabled: syncNow.isPending,
+            onClick: () => syncNow.mutate(),
+          },
+          details,
+        ],
+      },
+    ]
+
   return []
+}
+
+function plural(n: number, what: string): string {
+  return `${n.toLocaleString()} ${what}${n === 1 ? '' : 's'}`
+}
+
+/** What is still to go up, while a sync runs. */
+function toSend(changes: number, files: number): string | undefined {
+  const parts = [
+    changes > 0 ? `${plural(changes, 'change')}` : '',
+    files > 0 ? `${plural(files, 'file')}` : '',
+  ].filter(Boolean)
+  return parts.length ? `${parts.join(' and ')} to send` : undefined
+}
+
+/** What is saved here but not on the server, when syncing failed. */
+function notSent(changes: number, files: number): string | undefined {
+  const what = toSend(changes, files)
+  return what
+    ? what.replace(/ to send$/, ' saved here, not yet sent')
+    : undefined
 }

@@ -189,10 +189,10 @@ class Loopback:
         self.calls.append("missing_files")
         return self._done(self._svc().missing_files(list(shas)))
 
-    def upload_file(self, sha256, path):
+    def upload_file(self, sha256, source, size):
         self.calls.append("upload_file")
         self._svc()
-        stored = self._authority.file_svc.store_bytes(path.read_bytes(), "upload")
+        stored = self._authority.file_svc.store_bytes(source.read(size), "upload")
         assert stored.sha256 == sha256
         self._authority.commit()
 

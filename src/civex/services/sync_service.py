@@ -21,7 +21,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, BinaryIO
 
 from civex import user_state
 from civex.config import (
@@ -33,6 +33,7 @@ from civex.config import (
 )
 from civex.domain import hlc
 from civex.domain.audit_diff import BEFORE, apply_delta, entry_snapshots
+from civex.domain.rates import RateWindow
 from civex.domain.exceptions import (
     NotFoundError,
     CivexError,
@@ -50,6 +51,7 @@ from civex.domain.sync import (
     FILLING,
     HISTORY,
     REJECTED,
+    SENDING,
     Hello,
     SyncConflictDTO,
     SyncEntry,
@@ -70,6 +72,7 @@ from civex.repositories.protocols import (
 from civex.services.record_service import RecordService
 from civex.services.sync_applier import SyncApplier
 from civex.services.sync_lock import sync_lock, sync_running
+from civex.services import ssh_tunnel
 
 PUSH_BATCH = 100
 # How many referenced files are checked against the authority per request.
@@ -162,6 +165,8 @@ class SyncStatus:
     serving: bool = False  # this project is itself an authority
     download_files: str = "all"
     files_to_fetch: int = 0  # files records here cite that no drive here holds
+    # Files records here cite that the authority hasn't said it holds yet.
+    files_to_send: int = 0
 
 
 class SyncService:
@@ -213,6 +218,7 @@ class SyncService:
             serving=self._config.sync.serve,
             download_files=self._config.sync.download_files,
             files_to_fetch=self.files_to_fetch(),
+            files_to_send=self._repo.count_unconfirmed() if self.fetches_files else 0,
         )
 
     def conflicts(
@@ -563,17 +569,19 @@ class SyncService:
     # Syncing
     # ------------------------------------------------------------------
 
-    def sync(self, check_files: bool = True) -> SyncReport:
+    def sync(
+        self, check_files: bool = True, progress: ProgressFn | None = None
+    ) -> SyncReport:
         """Pull, push, pull. Raises `SyncBusy` when another sync is running and
         `SyncError` when the authority can't be reached or refuses this device
-        (`retryable` says whether trying later can help). `check_files` also
-        looks for files the authority lacks that can be read here now (a
-        drive plugged back in); a background sync does that every few minutes
-        rather than every time."""
+        (`retryable` says whether trying later can help). Files the authority
+        hasn't said it holds are always sent (when they can be read here);
+        `check_files` asks it about every file again, in case one it held has
+        gone. `progress` is told how sending files is going."""
         with sync_lock(self._config.civex_dir):
             log.info("sync with %s: starting", self._config.sync.remote)
             try:
-                report = self._sync(check_files)
+                report = self._sync(check_files, progress)
             except SyncError as e:
                 log.warning(
                     "sync with %s failed (%s): %s",
@@ -606,7 +614,9 @@ class SyncService:
         except Exception:  # noqa: BLE001 - nothing to save; the error matters more
             pass
 
-    def _sync(self, check_files: bool = True) -> SyncReport:
+    def _sync(
+        self, check_files: bool = True, progress: ProgressFn | None = None
+    ) -> SyncReport:
         transport = self._transport()
         hello = transport.hello()
         self._check_protocol(hello)
@@ -625,9 +635,8 @@ class SyncService:
         if meta.cursor < hello.feed_floor:
             self._copy_again(transport, hello, report)
         report.pulled += self._pull(transport)
-        report.pushed += self._push(transport, report)
-        if check_files:
-            self._send_missing_files(transport, report)
+        report.pushed += self._push(transport, report, progress)
+        self._send_missing_files(transport, report, check_files, progress)
         if report.pushed or report.conflicts:
             report.pulled += self._pull(transport)
         return report
@@ -732,14 +741,19 @@ class SyncService:
 
     # -- push -------------------------------------------------------------
 
-    def _push(self, transport: SyncTransport, report: SyncReport) -> int:
+    def _push(
+        self,
+        transport: SyncTransport,
+        report: SyncReport,
+        progress: ProgressFn | None = None,
+    ) -> int:
         total = 0
         while True:
             pending = self._repo.pending_entries(PUSH_BATCH)
             if not pending:
                 return total
             ready, folded = self._send_whole(pending)
-            ready = self._with_files(transport, ready, report)
+            ready = self._with_files(transport, ready, report, progress)
             if not ready:
                 report.waiting += len(pending)
                 return total
@@ -806,7 +820,11 @@ class SyncService:
         return ready, {k: v for k, v in folded.items() if any(e.id == k for e in ready)}
 
     def _with_files(
-        self, transport: SyncTransport, entries: list[SyncEntry], report: SyncReport
+        self,
+        transport: SyncTransport,
+        entries: list[SyncEntry],
+        report: SyncReport,
+        progress: ProgressFn | None = None,
     ) -> list[SyncEntry]:
         """Send the files these changes cite that the authority lacks. The
         changes always go: a file this computer cannot read right now (a drive
@@ -814,34 +832,33 @@ class SyncService:
         `_send_missing_files` finds it again once it can be read. Data and files
         converge separately, so a missing file never holds up a change."""
         cited = {s for e in entries for s in collect_sha256_refs(e.new_data or {})}
+        cited = self._repo.unconfirmed_of(cited)
         if cited:
-            for sha in transport.missing_files(sorted(cited)):
-                self._upload(transport, sha, report)  # unreadable: caught up later
+            self._send_files(transport, sorted(cited), report, progress)
         return entries
 
-    def _upload(self, transport: SyncTransport, sha: str, report: SyncReport) -> bool:
-        try:
-            transport.upload_file(sha, self._files.object_path(sha))
-        except (FileNotFoundError, VolumeUnavailableError):
-            return False
-        report.files_sent += 1
-        return True
-
-    def _send_missing_files(self, transport: SyncTransport, report: SyncReport) -> None:
+    def _send_missing_files(
+        self,
+        transport: SyncTransport,
+        report: SyncReport,
+        everything: bool = True,
+        progress: ProgressFn | None = None,
+    ) -> None:
         """Make the authority hold every file a live record here cites and this
-        computer can read. Nothing is remembered between syncs: what is missing
-        is worked out from the references catalog and the authority's answer, so
-        a drive plugged back in, or files added later, are simply found. A file
+        computer can read. What is missing is worked out from the references
+        catalog and the authority's answer, so a drive plugged back in, or files
+        added later, are simply found. Without `everything`, only files the
+        authority hasn't yet said it holds are asked about (no request at all
+        when there are none); with it, every file is asked about again. A file
         that still can't be read is counted and left for next time."""
+        shas: list[str] = []
         after = ""
-        while True:
-            page = self._repo.referenced_shas(after, FILE_CHECK_PAGE)
-            if not page:
-                break
+        while page := self._repo.referenced_shas(
+            after, FILE_CHECK_PAGE, unconfirmed=not everything
+        ):
+            shas.extend(page)
             after = page[-1]
-            for sha in transport.missing_files(page):
-                if not self._upload(transport, sha, report):
-                    report.owed_files.append(sha)
+        self._send_files(transport, shas, report, progress)
         if report.owed_files:
             log.info(
                 "sync with %s: %d file(s) the authority lacks cannot be read here "
@@ -850,6 +867,74 @@ class SyncService:
                 len(report.owed_files),
                 ", ".join(x[:10] for x in report.owed_files[:5]),
             )
+
+    def _send_files(
+        self,
+        transport: SyncTransport,
+        shas: list[str],
+        report: SyncReport,
+        progress: ProgressFn | None = None,
+    ) -> None:
+        """The one way files go to the authority: it is asked which of `shas`
+        it lacks, the rest are noted as on the server, and each it lacks that
+        can be read here is uploaded and noted, with `progress` told how far
+        along it is (files, and bytes as they go)."""
+        lacking: list[str] = []
+        for at in range(0, len(shas), FILE_CHECK_PAGE):
+            page = shas[at : at + FILE_CHECK_PAGE]
+            missing = set(transport.missing_files(page))
+            self._repo.confirm_on_server(set(page) - missing)
+            lacking.extend(sha for sha in page if sha in missing)
+        if not lacking:
+            return
+        rate = RateWindow()
+        done = sent_bytes = 0
+        said = 0.0
+
+        def say(force: bool = False) -> None:
+            nonlocal said
+            now = time.monotonic()
+            if progress and (force or now - said >= 0.25):
+                said = now
+                progress(
+                    SyncProgress(
+                        SENDING,
+                        done,
+                        len(lacking),
+                        bytes_done=sent_bytes,
+                        rate=rate.add(now, sent_bytes),
+                    )
+                )
+
+        def went(n: int) -> None:
+            nonlocal sent_bytes
+            sent_bytes += n
+            say()
+
+        say(force=True)
+        for sha in lacking:
+            if self._upload(transport, sha, report, went):
+                self._repo.confirm_on_server([sha])
+            elif sha not in report.owed_files:
+                report.owed_files.append(sha)
+            done += 1
+            say(force=True)
+
+    def _upload(
+        self,
+        transport: SyncTransport,
+        sha: str,
+        report: SyncReport,
+        on_bytes: Callable[[int], None] | None = None,
+    ) -> bool:
+        try:
+            path = self._files.object_path(sha)
+            with open(path, "rb") as f:
+                transport.upload_file(sha, _Counting(f, on_bytes), path.stat().st_size)
+        except (FileNotFoundError, VolumeUnavailableError):
+            return False
+        report.files_sent += 1
+        return True
 
     def _note(
         self,
@@ -1095,6 +1180,11 @@ class SyncService:
         follows one (an authority itself has nobody to fetch from)."""
         return self.configured and not self._config.sync.serve
 
+    def not_on_server(self, shas: set[str]) -> set[str]:
+        """Of these files, those the authority hasn't said it holds (none,
+        when this project follows no authority)."""
+        return self._repo.unconfirmed_of(shas) if self.fetches_files else set()
+
     def files_to_fetch(self) -> int:
         """How many files this computer keeps a copy of (those of collections
         kept here, see `collection_mode`) that no drive here holds yet: what the
@@ -1322,6 +1412,7 @@ class SyncService:
                 if stored.sha256 != sha:
                     self._files.delete(stored.sha256)
                     raise SyncError("The server sent the wrong content for a file")
+                self._repo.confirm_on_server([sha])  # it came from there
                 self._commit()
                 report.fetched += 1
                 if progress:
@@ -1707,6 +1798,29 @@ def _field_id(conflict: SyncConflictDTO) -> str | None:
     return sub if top == "data" and sub else None
 
 
+class _Counting:
+    """A file being uploaded, telling `on_bytes` how many bytes each read took
+    (and taking them back when it is read again from the start)."""
+
+    def __init__(self, f: BinaryIO, on_bytes: Callable[[int], None] | None) -> None:
+        self._f = f
+        self._on_bytes = on_bytes or (lambda _: None)
+
+    def read(self, size: int = -1) -> bytes:
+        data = self._f.read(size)
+        self._on_bytes(len(data))
+        return data
+
+    def tell(self) -> int:
+        return self._f.tell()
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        before = self._f.tell()
+        after = self._f.seek(offset, whence)
+        self._on_bytes(after - before)
+        return after
+
+
 def _counted(
     chunks: Iterator[bytes], on_bytes: Callable[[int], None] | None
 ) -> Iterator[bytes]:
@@ -1718,15 +1832,19 @@ def _counted(
 
 
 def _check_address(url: str) -> None:
-    """An authority is reached over HTTPS: an invite and a session token travel
-    in requests, readable by anyone on the network over plain HTTP. Plain HTTP
-    is left for this machine itself (tests, a local authority)."""
+    """An authority is reached over HTTPS or SSH: an invite and a session token
+    travel in requests, readable by anyone on the network over plain HTTP.
+    Plain HTTP is left for this machine itself (tests, a local authority)."""
     parts = urllib.parse.urlsplit(url)
     if parts.scheme == "https" and parts.hostname:
+        return
+    if parts.scheme == ssh_tunnel.SCHEME:
+        ssh_tunnel.SshAddress.parse(url)  # says what is wrong with it
         return
     if parts.scheme == "http" and parts.hostname and is_loopback(parts.hostname):
         return
     raise SyncError(
-        "The address must start with https:// (http:// only for this computer)",
+        "The address must start with https:// or ssh:// (http:// only for this "
+        "computer)",
         retryable=False,
     )

@@ -328,6 +328,7 @@ def build_local_context(
         return ctx.sync_svc  # whatever stands in for it by then (tests wrap it)
 
     record_svc.files_from_server = lambda: _sync().fetches_files
+    record_svc.not_on_server = lambda shas: _sync().not_on_server(shas)
     file_info_svc.files_from_server = lambda: _sync().fetches_files
     file_access_svc.fetch_missing = (
         lambda shas, on_file=None, volume=None, on_bytes=None: _sync().fetch_files(

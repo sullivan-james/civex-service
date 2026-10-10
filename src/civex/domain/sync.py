@@ -13,7 +13,6 @@ import dataclasses
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from collections.abc import Iterator
 from typing import Any, Protocol
 
@@ -478,6 +477,7 @@ COPYING = "copying"  # a device joining: reading the authority's things
 FILLING = "filling"  # a device filling an empty authority with its own
 HISTORY = "history"  # a joined device fetching the history from before it joined
 FILES = "files"  # a device downloading the files its records cite
+SENDING = "sending"  # a device uploading files the authority lacks
 
 
 @dataclass
@@ -814,6 +814,15 @@ class SyncConflictDTO:
         }
 
 
+class UploadSource(Protocol):
+    """What a file to upload is read from: an open file, or one that counts
+    the bytes read from it."""
+
+    def read(self, size: int = -1, /) -> bytes: ...
+    def seek(self, offset: int, whence: int = 0, /) -> int: ...
+    def tell(self) -> int: ...
+
+
 class SyncTransport(Protocol):
     """How a device talks to an authority. HTTP in use; tests supply one that
     calls an authority in the same process (and ones that fail on purpose).
@@ -826,7 +835,11 @@ class SyncTransport(Protocol):
     def feed(self, after: int, limit: int) -> FeedPage: ...
     def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage: ...
     def missing_files(self, shas: list[str]) -> list[str]: ...
-    def upload_file(self, sha256: str, path: Path) -> None: ...
+    def upload_file(self, sha256: str, source: UploadSource, size: int) -> None:
+        """Send `size` bytes read from `source` (from where it is now; read
+        again from the start if the call has to be repeated)."""
+        ...
+
     def file_chunks(self, sha256: str) -> Iterator[bytes]: ...
     # The library (`domain/library.py`): items as `LibraryItemDTO.to_dict`.
     def library(self) -> list[dict[str, Any]]: ...

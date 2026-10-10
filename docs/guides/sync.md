@@ -34,10 +34,12 @@ civex sync connect https://… --invite civex_inv_…   # an existing project
   short sessions, and checks the authority's key, so a different server at the
   same address gets nothing. `civex sync device revoke <name>` stops a device at
   once.
-- **HTTPS only.** Devices refuse `http://` except to this computer. Use
+- **HTTPS or SSH only.** Devices refuse `http://` except to this computer. Use
   [Tailscale](../how-to/set-up-sync.md), or bind `civex serve --sync-only` to
   `127.0.0.1` behind a reverse proxy (Caddy, nginx). `--sync-only` serves only
-  `/api/sync/v1/`. Never put the full app on a network: it has no sign-in.
+  `/api/sync/v1/`. Never put the full app on a network: it has no sign-in. On a
+  machine you can SSH into, an `ssh://` address needs no server running at all
+  ([Over SSH instead](../how-to/set-up-sync.md#over-ssh-instead)).
 - **Big projects** show progress while copying, and an interrupted copy finishes
   when you connect again. Records arrive first. History and files follow in
   the background.
@@ -63,9 +65,13 @@ that waiting can't fix, such as a revoked device, says so and waits for you.
 
 Changes and files travel separately, so a missing file never holds up a change.
 
-- **Sending:** a device uploads files its records use that the authority lacks.
-  A file on an unplugged drive is sent once it can be read. civex checks every
-  few minutes and on every manual sync.
+- **Sending:** a device uploads files its records use that the authority lacks,
+  with progress in the status bar. A file on an unplugged drive is sent once it
+  can be read. Until the server has a file, its chip says **not on the server
+  yet** (other computers can't open it) and the status bar counts such files,
+  with **Send now**. civex remembers which files the server has said it holds and
+  asks only about the rest; every few minutes and on every manual sync it asks
+  about all of them again.
 - **Receiving:** a file another device added arrives in the background (for
   collections this computer keeps), when you open it, or before an export. Until
   then it is marked **on the server**.

@@ -13,6 +13,8 @@ export interface RemoteStatus {
   download_files: 'all' | 'opened'
   /** Files the records here cite that aren't on this computer yet. */
   files_to_fetch: number
+  /** Files records here cite that the server hasn't said it holds yet. */
+  files_to_send: number
   /** This project is itself an authority. */
   serving: boolean
   /** Changes made here that have not been sent. */
@@ -142,7 +144,7 @@ export interface InstallOptions {
 export interface SyncProgress {
   /** copying: from the authority; filling: an empty authority from here;
    * history: fetching what happened before this project joined. */
-  phase: 'copying' | 'filling' | 'history' | string
+  phase: 'copying' | 'filling' | 'history' | 'files' | 'sending' | string
   done: number
   total: number | null
   kind: string | null
