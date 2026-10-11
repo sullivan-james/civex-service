@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
-from civex.config import load_config
+from civex.config import load_config_at
 from civex.context import AppContext, build_local_context
 from civex.project import scaffold_project
 
@@ -29,13 +28,7 @@ def project(tmp_path: Path) -> Iterator[Callable[[str], AppContext]]:
     def _make(name: str) -> AppContext:
         root = tmp_path / name
         scaffold_project(root, db_url=f"sqlite:///{(root / 'civex.db').as_posix()}")
-        previous = os.getcwd()
-        os.chdir(root)
-        try:
-            config = load_config()
-        finally:
-            os.chdir(previous)
-        ctx = build_local_context(config)
+        ctx = build_local_context(load_config_at(root))
         made.append(ctx)
         return ctx
 

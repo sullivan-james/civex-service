@@ -21,6 +21,17 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## Unreleased
+
+- A server serves the project it is asked for, not the one in its working
+  directory: `deps.current_project` resolves it once per request (a host
+  serving many projects installs `app.state.project_resolver`), a context is
+  built from a `Project` (`build_context`: settings, where they are kept, who
+  changes are recorded as, optionally a shared engine), and every service
+  saves settings through its `ConfigStore` rather than writing `config.toml`.
+  Nothing changes for a project in a folder; this is the seam a hosted civex
+  builds on.
+
 ## v2.0.0 — syncing between machines, updates from the app (2026-10-07)
 
 ### Breaking

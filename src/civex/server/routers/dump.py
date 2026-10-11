@@ -34,12 +34,7 @@ def export_dump(
     ctx: AppContext = Depends(get_ctx),
 ):
     """Export all schemas, datasets, records, and workflows as a YAML file download."""
-    from civex.config import load_config
-
-    try:
-        civex_dir = load_config().civex_dir
-    except Exception:
-        civex_dir = None
+    civex_dir = ctx.config.civex_dir
 
     # Written section by section into a temp file with records paged out of
     # the DB (see dump_service), so dump size is bounded by disk, not memory.
@@ -99,9 +94,7 @@ async def import_dump(
             pass
     ctx.commit()
 
-    from civex.config import load_config
-
-    config = load_config()
+    config = ctx.config
 
     workflows_restored = 0
     workflows_dir = config.civex_dir / "workflows"

@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from civex.config import load_config, read_automation_paused, save_config
+from civex.config import ConfigStore
 from civex.domain.dtos import ErrorEnvelope, RecordDTO, WorkflowJobDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.filters import FilterNode
@@ -59,9 +59,14 @@ def _summarise(value: object) -> str | None:
 
 
 class WorkflowJobService:
-    def __init__(self, repo: WorkflowJobRepository, civex_dir: Path) -> None:
+    def __init__(
+        self, repo: WorkflowJobRepository, civex_dir: Path, config_store: ConfigStore
+    ) -> None:
         self._repo = repo
         self._civex_dir = civex_dir
+        # Where the kill switch is kept (config.toml locally), asked fresh each
+        # time so a Stop in another process is seen at once.
+        self._config_store = config_store
         self._loaded: tuple[tuple, list[WorkflowDef]] | None = None
 
     def _load_workflows(self) -> list[WorkflowDef]:
@@ -109,14 +114,14 @@ class WorkflowJobService:
         """Whether automation is paused (see `AutomationConfig`). The one
         question every gate below asks, so the server, the terminal and every
         trigger agree."""
-        return read_automation_paused(self._civex_dir)
+        return self._config_store.flag("automation", "paused")
 
     def set_paused(self, paused: bool) -> None:
-        # Re-read config.toml first: it holds other settings too, and this must
+        # Re-read the settings first: they hold other things too, and this must
         # never write back a stale copy over edits made meanwhile.
-        config = load_config()
+        config = self._config_store.load()
         config.automation.paused = paused
-        save_config(config)
+        self._config_store.save(config)
 
     def stop_all(self) -> int:
         """Stop automation: pause it (so nothing new is triggered or started)

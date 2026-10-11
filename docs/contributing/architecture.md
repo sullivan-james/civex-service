@@ -29,10 +29,12 @@ These rules exist so a layer's implementation can change — a different reposit
 
 ## The `AppContext` pattern
 
-`build_local_context(config)` in `context.py` is the single place that wires everything together: it builds the SQLAlchemy engine and session, constructs every repository, and injects them into the services. Both entry points go through it:
+`build_context(project)` in `context.py` is the single place that wires everything together: it builds (or takes) the SQLAlchemy engine and session, constructs every repository, and injects them into the services. A `Project` (`civex/project.py`) is what it is built from: the project's `Config`, the `ConfigStore` the settings are kept in, the `actor` changes are recorded as, and optionally a shared `engine` and `migrated=True` (the host already brought the database up to date, so the per-request schema check is skipped). `build_local_context(config)` is `build_context(Project.local(config))`: the project in a folder on this machine, kept in its `config.toml`, with changes recorded as its chosen name or the OS user. Both entry points go through it:
 
 - CLI commands call `get_ctx()` (`cli/utils.py`), which wraps `build_local_context()`, use `ctx.<service>` to do the work, call `ctx.commit()` after mutating operations, and `ctx.close()` when done.
-- The server calls `build_local_context()` once per request, so each request gets its own session.
+- The server resolves the project once per request (`server/deps.py: current_project`, the one in its working directory unless the host installed `app.state.project_resolver`) and builds a context from it, so each request gets its own session. Routes that need only the settings (`settings`, `db`, `ai`) depend on `current_project` instead of a context.
+
+Settings are saved only through `ctx.config_store` (`ConfigStore`: `load`, `save`, and `flag` for the booleans asked on every request). `FileConfigStore` is `config.toml`; `parse_config` and `render_config` are its pure text form, so a host that keeps a project's settings elsewhere parses and renders the same text. A service never calls `save_config` itself; the database-admin paths (`db_service`, `db_move_service`) and the CLI are the exception, being the local host by definition.
 
 A command or route handler never constructs a repository or service directly — it asks `AppContext` for one, keeping the wiring in one file instead of scattered across every CLI command and router.
 

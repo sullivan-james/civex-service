@@ -153,11 +153,14 @@ def user(
     """Show or set the author name recorded on changes in this project. It is
     saved in this project's config.toml; the default is your operating-system
     user."""
+    from civex.config import FileConfigStore
     from civex.identity import choose_name, local_actor
 
     config = cli_load_config()
     if reset or name:
-        choose_name(config, None if reset else name)
+        config = choose_name(
+            FileConfigStore(config.project_root), None if reset else name
+        )
     console.print(
         f"Recorded as {escape(local_actor(config.identity.name) or '(unknown)')}"
     )

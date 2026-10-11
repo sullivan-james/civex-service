@@ -24,9 +24,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from civex.config import find_project_root, read_sync_flag
 from civex.context import AppContext
 from civex.domain.exceptions import (
+    ConfigError,
     NotAllowedError,
     NotFoundError,
     ValidationError,
@@ -43,7 +43,7 @@ from civex.domain.sync import (
     protocol_mismatch,
     protocol_range,
 )
-from civex.server.deps import get_ctx
+from civex.server.deps import current_project, get_ctx
 
 router = APIRouter(prefix="/sync/v1", tags=["sync"])
 
@@ -226,8 +226,11 @@ _attempts = _Attempts()
 
 def _serving(request: Request) -> int:
     """The protocol agreed with the caller, on a server set to serve."""
-    root = find_project_root()
-    if root is None or not read_sync_flag(root / "_civex", "serve"):
+    try:
+        serving = current_project(request).config_store.flag("sync", "serve")
+    except ConfigError:
+        serving = False
+    if not serving:
         # Indistinguishable from there being nothing here, so a server that
         # is not an authority reveals nothing.
         raise HTTPException(404, detail="Not found")

@@ -18,6 +18,7 @@ import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 from civex.domain.exceptions import ConfigError
 
@@ -282,10 +283,15 @@ def _optional_days(value: object) -> int | None:
 
 
 def load_config() -> Config:
+    """The configuration of the project the current directory is in."""
     root = find_project_root()
     if root is None:
         raise ConfigError("No civex project found. Run `civex init` to create one.")
+    return load_config_at(root)
 
+
+def load_config_at(root: Path) -> Config:
+    """The configuration of the project at `root`, read from its config.toml."""
     config_path = root / "_civex" / "config.toml"
 
     def _read() -> dict:
@@ -299,7 +305,14 @@ def load_config() -> Config:
             f"Malformed config file ({config_path}): {e}. "
             "If the database URL contains backslashes (Windows path), replace them with forward slashes."
         )
+    return parse_config(data, root)
 
+
+def parse_config(data: dict, root: Path) -> Config:
+    """A `Config` from what a config.toml holds (the parsed TOML), for the
+    project at `root`. Pure: whoever keeps the text (a file beside the
+    project, a hosted service's database) parses it with this, and writes it
+    back with `render_config`, so there is one reading of every setting."""
     store: StoreConfig | None = None
     if "store" in data:
         sd = data["store"]
@@ -457,29 +470,21 @@ def _tk(s: str) -> str:
 
 
 def read_automation_paused(civex_dir: Path) -> bool:
-    """Whether automation is paused, read straight from `config.toml`. Cheap
-    and cwd-independent, because every trigger, queue claim and workflow step
-    asks, and a worker in another process must see a Stop at once."""
-    try:
-        data = tomllib.loads((civex_dir / "config.toml").read_text("utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        return False
-    return bool(data.get("automation", {}).get("paused", False))
+    """Whether automation is paused, read straight from `config.toml` (see
+    `read_flag`): every trigger, queue claim and workflow step asks, and a
+    worker in another process must see a Stop at once."""
+    return read_flag(civex_dir, "automation", "paused")
 
 
 def read_sync_flag(civex_dir: Path, key: str) -> bool:
     """A boolean from `[sync]` (`serve`, `paused`), read straight from
-    `config.toml`: cheap and cwd-independent, for what is asked per request or
-    per background tick."""
-    try:
-        data = tomllib.loads((civex_dir / "config.toml").read_text("utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        return False
-    return bool(data.get("sync", {}).get(key, False))
+    `config.toml` (see `read_flag`)."""
+    return read_flag(civex_dir, "sync", key)
 
 
-def save_config(config: Config) -> None:
-    """Write config back to _civex/config.toml with backup/restore on failure."""
+def render_config(config: Config) -> str:
+    """A `Config` as config.toml text: only what differs from the defaults is
+    written. Pure, and the inverse of `parse_config`."""
     lines: list[str] = [
         "[db]\n",
         f'url = "{_ts(config.db.url)}"\n',
@@ -594,18 +599,22 @@ def save_config(config: Config) -> None:
     if retention_lines:
         lines += ["\n[retention]\n", *retention_lines]
 
-    config_path = config.civex_dir / "config.toml"
     content = "".join(lines)
 
-    # Validate the generated TOML before touching the file.
+    # Validate the generated TOML before anyone keeps it.
     try:
-        import tomllib
-
         tomllib.loads(content)
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(
             f"Generated config is invalid TOML: {e}\n\nContent:\n{content}"
         ) from e
+    return content
+
+
+def save_config(config: Config) -> None:
+    """Write config back to _civex/config.toml, atomically."""
+    config_path = config.civex_dir / "config.toml"
+    content = render_config(config)
 
     # Write a temporary file beside it, check that parses, then swap it in with
     # one atomic rename. Every request reads this file, and a transfer rewrites
@@ -624,3 +633,46 @@ def save_config(config: Config) -> None:
         raise ConfigError(
             f"Failed to write config (the original is untouched): {e}"
         ) from e
+
+
+class ConfigStore(Protocol):
+    """Where a project's settings are kept. The project beside a `_civex/`
+    folder keeps them in its config.toml (`FileConfigStore`); a service hosting
+    many projects keeps each project's in its own database. Services change
+    settings through the store they were given, never by writing a file, so
+    the same service runs in both places.
+
+    `flag` answers one boolean fresh from wherever the settings are kept, for
+    what is asked on every request or trigger (`[automation] paused`, `[sync]
+    serve`), which another process may have just changed."""
+
+    def load(self) -> Config: ...
+    def save(self, config: Config) -> None: ...
+    def flag(self, section: str, key: str) -> bool: ...
+
+
+class FileConfigStore:
+    """The settings of the project at `root`, in `_civex/config.toml`."""
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+
+    def load(self) -> Config:
+        return load_config_at(self._root)
+
+    def save(self, config: Config) -> None:
+        save_config(config)
+
+    def flag(self, section: str, key: str) -> bool:
+        return read_flag(self._root / "_civex", section, key)
+
+
+def read_flag(civex_dir: Path, section: str, key: str) -> bool:
+    """A boolean from one table of `config.toml`, read straight from the file:
+    cheap and cwd-independent, for what is asked per request or per background
+    tick. False when the file can't be read."""
+    try:
+        data = tomllib.loads((civex_dir / "config.toml").read_text("utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    return bool(data.get(section, {}).get(key, False))

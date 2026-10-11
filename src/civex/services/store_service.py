@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from civex.config import Config, PlacementConfig, VolumeConfig, save_config
+from civex.config import Config, ConfigStore, PlacementConfig, VolumeConfig
 from civex.domain.dtos import (
     VOLUME_CONFIG_STATES,
     VOLUME_WRONG_DRIVE,
@@ -40,9 +40,17 @@ def _prepare_path(path: str) -> str:
 
 
 class StoreService:
-    def __init__(self, config: Config, store: VolumeAwareFileObjectStore) -> None:
+    def __init__(
+        self,
+        config: Config,
+        store: VolumeAwareFileObjectStore,
+        config_store: ConfigStore,
+    ) -> None:
         self._config = config
         self._store = store
+        # Where volumes and placements are saved: config.toml for a local
+        # project. Never written to directly, so a hosted project works too.
+        self._config_store = config_store
 
     def volume_stats(self) -> list[dict]:
         return self._store.volume_stats()
@@ -85,7 +93,7 @@ class StoreService:
             raise
         if add_to_queue:
             sc.volume_queue.append(name)
-        save_config(self._config)
+        self._config_store.save(self._config)
 
     def adopt_volume(self, name: str) -> VolumeStatus:
         """Declare that the drive at the volume's path is that volume: rewrite
@@ -94,7 +102,7 @@ class StoreService:
         if name not in self._config.store_config.volumes:
             raise NotFoundError(f"Volume '{name}' not found")
         status = self._store.adopt_volume(name)
-        save_config(self._config)
+        self._config_store.save(self._config)
         return status
 
     def set_volume_state(self, name: str, state: str) -> None:
@@ -111,22 +119,18 @@ class StoreService:
         sc = self._config.store_config
         if name not in sc.volumes:
             raise NotFoundError(f"Volume '{name}' not found")
-        from civex.config import load_config
-
-        fresh = load_config()
+        fresh = self._config_store.load()
         if name not in fresh.store_config.volumes:
             raise NotFoundError(f"Volume '{name}' not found")
         fresh.store_config.volumes[name].state = state
-        save_config(fresh)
+        self._config_store.save(fresh)
         sc.volumes[name].state = state
 
     def restore_volume_state(self, name: str, before: str) -> None:
         """Put back the state a transfer changed, but only if it is still the one
         the transfer set (read-only), judged from config.toml as it is now, not
         from this process's copy: someone may have changed it since."""
-        from civex.config import load_config
-
-        fresh = load_config().store_config.volumes.get(name)
+        fresh = self._config_store.load().store_config.volumes.get(name)
         if fresh is not None and fresh.state == "readonly":
             self.set_volume_state(name, before)
 
@@ -142,7 +146,7 @@ class StoreService:
         if allocated_gb is not _UNSET:
             vc.allocated_gb = allocated_gb
         self._store._used_cache.pop(name, None)
-        save_config(self._config)
+        self._config_store.save(self._config)
 
     def remove_volume(self, name: str, force: bool = False) -> None:
         sc = self._config.store_config
@@ -171,7 +175,7 @@ class StoreService:
         for cid in homed:
             del sc.placement[cid]
         del sc.volumes[name]
-        save_config(self._config)
+        self._config_store.save(self._config)
 
     def set_queue(self, names: list[str]) -> None:
         sc = self._config.store_config
@@ -179,7 +183,7 @@ class StoreService:
             if n not in sc.volumes:
                 raise NotFoundError(f"Volume '{n}' not found")
         sc.volume_queue = list(names)
-        save_config(self._config)
+        self._config_store.save(self._config)
 
     # -- placement: which volume a collection's new files go to ------------
     #
@@ -209,7 +213,7 @@ class StoreService:
             )
         place = PlacementConfig(volume=volume, on_unavailable=on_unavailable)
         sc.placement[collection_id] = place
-        save_config(self._config)
+        self._config_store.save(self._config)
         return place
 
     def clear_placement(self, collection_id: str) -> bool:
@@ -218,7 +222,7 @@ class StoreService:
         if collection_id not in sc.placement:
             return False
         del sc.placement[collection_id]
-        save_config(self._config)
+        self._config_store.save(self._config)
         return True
 
     # -- choosing a folder: browsing and checking before adding ------------

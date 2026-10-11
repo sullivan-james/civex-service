@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
-from civex.config import load_config
-from civex.domain.exceptions import ConfigError, ValidationError
+from civex.domain.exceptions import ValidationError
+from civex.project import Project
+from civex.server.deps import current_project
 from civex.server.models import (
     ConnectionCheckResponse,
     DatabaseSummaryResponse,
@@ -26,14 +27,8 @@ router = APIRouter(prefix="/db", tags=["db"])
 # Deliberately does not use Depends(get_ctx): these routes must keep working
 # even when the configured database itself is unreachable or misconfigured
 # (that's the whole point of exposing status/migrate/set-url/docker
-# setup+teardown as their own surface — see civex.services.db_service).
-
-
-def _load_config():
-    try:
-        return load_config()
-    except ConfigError as e:
-        raise HTTPException(500, detail=str(e))
+# setup+teardown as their own surface — see civex.services.db_service). They
+# take only the project's settings (`current_project`), which needs no database.
 
 
 def _to_response(status: db_service.DbStatus) -> DbStatusResponse:
@@ -61,14 +56,14 @@ def _to_response(status: db_service.DbStatus) -> DbStatusResponse:
 
 
 @router.get("/status", response_model=DbStatusResponse)
-def get_status() -> DbStatusResponse:
-    config = _load_config()
+def get_status(project: Project = Depends(current_project)) -> DbStatusResponse:
+    config = project.config
     return _to_response(db_service.get_status(config))
 
 
 @router.post("/migrate", response_model=DbStatusResponse)
-def migrate() -> DbStatusResponse:
-    config = _load_config()
+def migrate(project: Project = Depends(current_project)) -> DbStatusResponse:
+    config = project.config
     try:
         return _to_response(db_service.migrate(config))
     except Exception as exc:
@@ -76,8 +71,10 @@ def migrate() -> DbStatusResponse:
 
 
 @router.patch("/config", response_model=DbStatusResponse)
-def set_url(body: SetDbUrlRequest) -> DbStatusResponse:
-    config = _load_config()
+def set_url(
+    body: SetDbUrlRequest, project: Project = Depends(current_project)
+) -> DbStatusResponse:
+    config = project.config
     try:
         return _to_response(db_service.set_url(config, body.url))
     except ValidationError as exc:
@@ -85,8 +82,8 @@ def set_url(body: SetDbUrlRequest) -> DbStatusResponse:
 
 
 @router.post("/docker/setup", response_model=DbStatusResponse)
-def docker_setup() -> DbStatusResponse:
-    config = _load_config()
+def docker_setup(project: Project = Depends(current_project)) -> DbStatusResponse:
+    config = project.config
     try:
         return _to_response(db_service.setup_docker(config))
     except ValidationError as exc:
@@ -94,13 +91,13 @@ def docker_setup() -> DbStatusResponse:
 
 
 @router.post("/docker/teardown", response_model=DbStatusResponse)
-def docker_teardown() -> DbStatusResponse:
+def docker_teardown(project: Project = Depends(current_project)) -> DbStatusResponse:
     """Removes the Docker container and its data volume, but leaves
     config.toml pointed at it — mirrors `civex db teardown`'s own warning
     that a subsequent setup-docker/--sqlite is needed to keep using this
     project. Returns the (now-broken) status so the UI can show what
     happened rather than a bare 204."""
-    config = _load_config()
+    config = project.config
     try:
         db_service.teardown_docker(config)
     except ValidationError as exc:
@@ -143,10 +140,10 @@ def _job(job: MoveJob) -> MoveJobResponse:
 
 
 @router.get("/summary", response_model=DatabaseSummaryResponse)
-def get_summary() -> DatabaseSummaryResponse:
+def get_summary(project: Project = Depends(current_project)) -> DatabaseSummaryResponse:
     """What is in the database now in use: its kind, location, size and
     record count."""
-    config = _load_config()
+    config = project.config
     return _summary(moves.summarize(config.db.url, config.db.docker_managed))
 
 
@@ -165,10 +162,12 @@ def test_connection(body: MoveTargetRequest) -> ConnectionCheckResponse:
 
 
 @router.post("/move/preflight", response_model=MovePreflightResponse)
-def move_preflight(body: MoveTargetRequest) -> MovePreflightResponse:
+def move_preflight(
+    body: MoveTargetRequest, project: Project = Depends(current_project)
+) -> MovePreflightResponse:
     """What moving to this destination would do, and whether it can -- with
     no side effects: nothing is created, started or written."""
-    config = _load_config()
+    config = project.config
     check = moves.preflight(config, _spec(body))
     return MovePreflightResponse(
         source=_summary(check.source),
@@ -182,12 +181,14 @@ def move_preflight(body: MoveTargetRequest) -> MovePreflightResponse:
 
 
 @router.post("/move", response_model=MoveJobResponse, status_code=202)
-def start_move(body: MoveTargetRequest) -> MoveJobResponse:
+def start_move(
+    body: MoveTargetRequest, project: Project = Depends(current_project)
+) -> MoveJobResponse:
     """Start copying the project's data into the destination, in the
     background; poll `GET /db/move/{id}`. Only when the copy has been verified
     does the project switch to the new database, and the old one is never
     modified, so a move can always be undone."""
-    config = _load_config()
+    config = project.config
     try:
         return _job(jobs.start(config, _spec(body)))
     except ValidationError as exc:
@@ -217,16 +218,18 @@ def cancel_move(job_id: str) -> MoveJobResponse:
 
 
 @router.get("/moves", response_model=list[MoveRecordResponse])
-def list_moves() -> list[MoveRecordResponse]:
+def list_moves(project: Project = Depends(current_project)) -> list[MoveRecordResponse]:
     """Past database moves, newest first."""
-    return [_record(r) for r in moves.list_moves(_load_config())]
+    return [_record(r) for r in moves.list_moves(project.config)]
 
 
 @router.post("/moves/{move_id}/revert", response_model=DbStatusResponse)
-def revert_move(move_id: str) -> DbStatusResponse:
+def revert_move(
+    move_id: str, project: Project = Depends(current_project)
+) -> DbStatusResponse:
     """Point the project back at the database a move came from. Nothing is
     copied: anything written to the new database since stays there."""
-    config = _load_config()
+    config = project.config
     try:
         moves.revert(config, move_id)
     except ValidationError as exc:

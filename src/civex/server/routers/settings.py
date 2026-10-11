@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from civex.config import load_config, save_config
 from civex import launcher
 from civex.identity import choose_name, local_actor
 from civex.domain.exceptions import ConfigError
+from civex.project import Project
+from civex.server.deps import current_project
 from civex.server.models import (
     MapSettingsResponse,
     ShortcutResponse,
@@ -18,13 +19,6 @@ from civex.server.models import (
 )
 
 router = APIRouter(prefix="/settings", tags=["settings"])
-
-
-def _load_config():
-    try:
-        return load_config()
-    except ConfigError as e:
-        raise HTTPException(500, detail=str(e))
 
 
 class IdentityResponse(BaseModel):
@@ -56,33 +50,35 @@ def _identity(config) -> IdentityResponse:  # noqa: ANN001 - Config
 
 
 @router.get("/identity", response_model=IdentityResponse)
-def get_identity():
+def get_identity(project: Project = Depends(current_project)):
     """Who changes made in this project are recorded as."""
-    return _identity(_load_config())
+    return _identity(project.config)
 
 
 @router.patch("/identity", response_model=IdentityResponse)
-def update_identity(body: UpdateIdentityRequest):
+def update_identity(
+    body: UpdateIdentityRequest, project: Project = Depends(current_project)
+):
     """Choose the name recorded on changes made in this project. It is saved
     in this project's config.toml."""
-    config = _load_config()
-    choose_name(config, body.name)
-    return _identity(config)
+    return _identity(choose_name(project.config_store, body.name))
 
 
 @router.get("/ui", response_model=UISettingsResponse)
-def get_ui_settings():
+def get_ui_settings(project: Project = Depends(current_project)):
     """Return this project's UI preferences."""
-    config = _load_config()
+    config = project.config
     return UISettingsResponse(show_advanced=config.ui.show_advanced)
 
 
 @router.patch("/ui", response_model=UISettingsResponse)
-def update_ui_settings(body: UpdateUISettingsRequest):
+def update_ui_settings(
+    body: UpdateUISettingsRequest, project: Project = Depends(current_project)
+):
     """Update this project's UI preferences."""
-    config = _load_config()
+    config = project.config
     config.ui.show_advanced = body.show_advanced
-    save_config(config)
+    project.config_store.save(config)
     return UISettingsResponse(show_advanced=config.ui.show_advanced)
 
 
@@ -95,16 +91,16 @@ def _shortcut_state(root) -> ShortcutResponse:
 
 
 @router.get("/shortcut", response_model=ShortcutResponse)
-def get_shortcut():
+def get_shortcut(project: Project = Depends(current_project)):
     """Whether this project has a Desktop shortcut that starts civex."""
-    return _shortcut_state(_load_config().project_root)
+    return _shortcut_state(project.config.project_root)
 
 
 @router.post("/shortcut", response_model=ShortcutResponse)
-def create_shortcut():
+def create_shortcut(project: Project = Depends(current_project)):
     """Put a Desktop shortcut that starts civex for this project and opens it
     in the browser. Runs on the machine civex runs on."""
-    root = _load_config().project_root
+    root = project.config.project_root
     try:
         launcher.create_shortcut(root)
     except ConfigError as e:
@@ -115,16 +111,18 @@ def create_shortcut():
 
 
 @router.get("/map", response_model=MapSettingsResponse)
-def get_map_settings():
+def get_map_settings(project: Project = Depends(current_project)):
     """Where the location editor gets street-level map tiles, if anywhere."""
-    config = _load_config()
+    config = project.config
     return MapSettingsResponse(
         tile_url=config.map.tile_url, attribution=config.map.attribution
     )
 
 
 @router.patch("/map", response_model=MapSettingsResponse)
-def update_map_settings(body: UpdateMapSettingsRequest):
+def update_map_settings(
+    body: UpdateMapSettingsRequest, project: Project = Depends(current_project)
+):
     """Set (or clear, with null) the map tile URL. It must be an http(s) XYZ
     URL containing {z}, {x} and {y}. The provider's terms of use apply."""
     url = (body.tile_url or "").strip() or None
@@ -137,10 +135,10 @@ def update_map_settings(body: UpdateMapSettingsRequest):
                 detail="Tile URL must start with http:// or https:// and "
                 "contain {z}, {x} and {y}, e.g. https://tile.example.org/{z}/{x}/{y}.png",
             )
-    config = _load_config()
+    config = project.config
     config.map.tile_url = url
     config.map.attribution = (body.attribution or "").strip() or None if url else None
-    save_config(config)
+    project.config_store.save(config)
     return MapSettingsResponse(
         tile_url=config.map.tile_url, attribution=config.map.attribution
     )
@@ -157,17 +155,19 @@ def _retention_response(config) -> RetentionSettingsResponse:
 
 
 @router.get("/retention", response_model=RetentionSettingsResponse)
-def get_retention_settings():
+def get_retention_settings(project: Project = Depends(current_project)):
     """Return how long this project keeps deleted items, change history and
     workflow runs. Nothing is removed by itself: a clean-up applies these."""
-    return _retention_response(_load_config())
+    return _retention_response(project.config)
 
 
 @router.patch("/retention", response_model=RetentionSettingsResponse)
-def update_retention_settings(body: UpdateRetentionSettingsRequest):
+def update_retention_settings(
+    body: UpdateRetentionSettingsRequest, project: Project = Depends(current_project)
+):
     """Change the retention settings. Only the fields sent change; a null
     `audit_days` or `run_days` means keep that kind forever."""
-    config = _load_config()
+    config = project.config
     sent = body.model_fields_set
     r = config.retention
     if "purge_after_days" in sent and body.purge_after_days is not None:
@@ -178,7 +178,7 @@ def update_retention_settings(body: UpdateRetentionSettingsRequest):
         r.audit_days = body.audit_days
     if "run_days" in sent:
         r.run_days = body.run_days
-    save_config(config)
+    project.config_store.save(config)
     return _retention_response(config)
 
 

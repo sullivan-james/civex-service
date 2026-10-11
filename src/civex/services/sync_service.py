@@ -29,7 +29,7 @@ from civex.config import (
     DOWNLOAD_MODES,
     LIBRARY_MODES,
     Config,
-    save_config,
+    ConfigStore,
 )
 from civex.domain import hlc
 from civex.domain.audit_diff import BEFORE, apply_delta, entry_snapshots
@@ -180,8 +180,12 @@ class SyncService:
         commit: Callable[[], None],
         make_transport: TransportFactory,
         records: RecordService,
+        config_store: ConfigStore,
     ) -> None:
         self._config = config
+        # Where `[sync]` is saved (config.toml for a local project); never
+        # written to directly, so a hosted project's settings live elsewhere.
+        self._config_store = config_store
         self._repo = repo
         self._applier = applier
         self._audit = audit
@@ -480,7 +484,7 @@ class SyncService:
             )
             self._commit()
         self._config.sync.remote = url
-        save_config(self._config)
+        self._config_store.save(self._config)
 
         with sync_lock(self._config.civex_dir):
             transport = self._transport()
@@ -501,7 +505,7 @@ class SyncService:
     def disconnect(self) -> None:
         remote = self._config.sync.remote
         self._config.sync.remote = None
-        save_config(self._config)
+        self._config_store.save(self._config)
         if remote:
             user_state.forget_authority(remote)
 
@@ -509,7 +513,7 @@ class SyncService:
         """Whether this project accepts devices (is an authority for them). The
         devices it knows stay on record either way."""
         self._config.sync.serve = on
-        save_config(self._config)
+        self._config_store.save(self._config)
 
     @property
     def library_mode(self) -> str:
@@ -523,11 +527,11 @@ class SyncService:
                 f"The library takes one of: {', '.join(LIBRARY_MODES)}"
             )
         self._config.sync.library = mode
-        save_config(self._config)
+        self._config_store.save(self._config)
 
     def set_paused(self, paused: bool) -> None:
         self._config.sync.paused = paused
-        save_config(self._config)
+        self._config_store.save(self._config)
 
     def set_interval(self, seconds: int) -> None:
         if seconds != 0 and seconds < 5:
@@ -535,7 +539,7 @@ class SyncService:
                 "The interval must be at least 5 seconds, or 0 to sync only when asked"
             )
         self._config.sync.interval_seconds = seconds
-        save_config(self._config)
+        self._config_store.save(self._config)
 
     def _check_protocol(self, hello: Hello) -> None:
         theirs = (hello.protocol_min, hello.protocol_max)
@@ -1253,7 +1257,7 @@ class SyncService:
             self._config.sync.collection_files.pop(cid, None)
         else:
             self._config.sync.collection_files[cid] = mode
-        save_config(self._config)
+        self._config_store.save(self._config)
         return self.collection_mode(cid)
 
     def free_up(self, collection: str, dry_run: bool = True) -> FreeUpReport:
@@ -1339,7 +1343,7 @@ class SyncService:
                 f"Choose one of: {', '.join(DOWNLOAD_MODES)} (got '{mode}')"
             )
         self._config.sync.download_files = mode
-        save_config(self._config)
+        self._config_store.save(self._config)
 
     def fetch_file(self, sha256: str) -> bool:
         """Download one file a record here cites from the authority, onto the

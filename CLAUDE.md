@@ -84,7 +84,7 @@ src/civex/
 
 ### AppContext pattern
 
-`build_local_context(config)` in `context.py` wires all repos and services. CLI commands call `get_ctx()` from `cli/utils.py`, then call `ctx.commit()` after mutating operations, and `ctx.close()` when done. The server calls `build_local_context()` once per request.
+`build_context(project)` in `context.py` wires all repos and services for one `Project` (`civex/project.py`: the `Config`, the `ConfigStore` it is kept in, the `actor` changes are recorded as, optionally a shared `engine` and `migrated=True` to skip the per-request schema check); `build_local_context(config)` is `build_context(Project.local(config))`, the project in a folder on this machine. CLI commands call `get_ctx()` from `cli/utils.py`, then call `ctx.commit()` after mutating operations, and `ctx.close()` when done. The server resolves the project once per request with `deps.current_project(request)` (the one in the cwd, unless the host set `app.state.project_resolver`) and builds the context from it; routes that need only the settings (`settings`, `db`, `ai`) take `Depends(current_project)` instead of `get_ctx`. **Settings are saved only through `ctx.config_store`** (`ConfigStore`: `load`/`save`/`flag`; `FileConfigStore` is config.toml; `parse_config`/`render_config` are the pure text forms), never by calling `save_config` from a service, so a hosted project can keep them elsewhere. Exceptions: the database-admin paths (`db_service.set_url`/`setup_docker`, `db_move_service`) and the CLI, which are the local host by definition.
 
 ### Data model
 

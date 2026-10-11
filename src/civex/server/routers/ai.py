@@ -6,10 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from civex.config import AIConfig, load_config, save_config
-from civex.context import AppContext, build_local_context
+from civex.config import AIConfig
+from civex.context import AppContext, build_context
 from civex.domain.exceptions import ConfigError
-from civex.server.deps import get_ctx
+from civex.project import Project
+from civex.server.deps import current_project, get_ctx
 from civex.services.ai.config import DEFAULT_MODEL
 from civex.services.ai.providers import AnthropicProvider
 from civex.services.ai.service import _sse
@@ -86,11 +87,8 @@ class AiConfigUpdate(BaseModel):
 
 
 @router.get("/config", response_model=AiConfigResponse)
-def get_ai_config():
-    try:
-        config = load_config()
-    except ConfigError as e:
-        raise HTTPException(503, detail=str(e))
+def get_ai_config(project: Project = Depends(current_project)):
+    config = project.config
     if not config.ai:
         return AiConfigResponse(
             configured=False,
@@ -113,11 +111,8 @@ def get_ai_config():
 
 
 @router.patch("/config", response_model=AiConfigResponse)
-def update_ai_config(body: AiConfigUpdate):
-    try:
-        config = load_config()
-    except ConfigError as e:
-        raise HTTPException(503, detail=str(e))
+def update_ai_config(body: AiConfigUpdate, project: Project = Depends(current_project)):
+    config = project.config
 
     current = config.ai
     new_provider = (
@@ -164,7 +159,7 @@ def update_ai_config(body: AiConfigUpdate):
         from_env=False,
     )
     try:
-        save_config(config)
+        project.config_store.save(config)
     except Exception as e:
         raise HTTPException(500, detail=str(e))
 
@@ -185,9 +180,10 @@ def update_ai_config(body: AiConfigUpdate):
 
 
 @router.post("/chat")
-async def chat(body: ChatRequest):
+async def chat(body: ChatRequest, request: Request):
     try:
-        config = load_config()
+        project = current_project(request)
+        config = project.config
     except ConfigError as err:
         message = "AI assistant unavailable: no civex project found. Run `civex init` to create one."
         if "No civex project found" not in str(err):
@@ -223,7 +219,7 @@ async def chat(body: ChatRequest):
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    ctx = build_local_context(config)
+    ctx = build_context(project)
 
     async def gen():
         try:
@@ -257,7 +253,7 @@ async def openrouter_auth_url(request: Request):
 
 
 @router.get("/openrouter/callback")
-async def openrouter_callback(code: str):
+async def openrouter_callback(code: str, request: Request):
     """Receive OAuth code from OpenRouter, exchange for key, save to config."""
     import httpx2 as httpx
 
@@ -282,7 +278,8 @@ async def openrouter_callback(code: str):
         )
 
     try:
-        config = load_config()
+        project = current_project(request)
+        config = project.config
         default_model = (
             config.ai.model
             if config.ai and "openrouter" not in (config.ai.base_url or "")
@@ -295,7 +292,7 @@ async def openrouter_callback(code: str):
             base_url=OPENROUTER_BASE_URL,
             from_env=False,
         )
-        save_config(config)
+        project.config_store.save(config)
     except Exception as e:
         return HTMLResponse(
             f"<html><body style='font-family:sans-serif;padding:2rem'>"
@@ -352,12 +349,9 @@ async def ollama_models(base_url: str = "http://localhost:11434/v1"):
 
 
 @router.get("/openrouter/limits")
-async def openrouter_limits():
+async def openrouter_limits(project: Project = Depends(current_project)):
     """Proxy GET https://openrouter.ai/api/v1/key to expose usage/rate-limit info."""
-    try:
-        config = load_config()
-    except ConfigError as e:
-        raise HTTPException(400, detail=str(e))
+    config = project.config
     if not config.ai or "openrouter.ai" not in (config.ai.base_url or ""):
         raise HTTPException(400, detail="Not configured for OpenRouter")
 

@@ -1,9 +1,12 @@
 """
 AppContext bundles all services for a single CLI command invocation (or HTTP request).
 
-build_local_context() wires together the SQLAlchemy repos and the local file store.
-An optional file_store parameter lets callers inject a custom object
-store instead of the default LocalFileObjectStore.
+build_context(project) wires together the SQLAlchemy repos and the file store
+for one `Project` (civex.project): the project's settings, where they are kept,
+who is making changes, and optionally a shared engine. build_local_context(config)
+is the same for the project in a folder on this machine, as the CLI and
+`civex serve` host it. An optional file_store parameter lets callers inject a
+custom object store instead of the default VolumeAwareFileObjectStore.
 """
 
 from __future__ import annotations
@@ -17,7 +20,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
 from civex.domain.dtos import RecordUse
-from civex.config import Config
+from civex.config import Config, ConfigStore
+from civex.project import Project
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
@@ -108,7 +112,18 @@ class AppContext:
     sync_svc: SyncService
     library_svc: LibraryService
     compaction_svc: HistoryCompactionService
+    project: Project
     _session: Session
+
+    @property
+    def config(self) -> Config:
+        """This project's settings, as they were when the context was built."""
+        return self.project.config
+
+    @property
+    def config_store(self) -> ConfigStore:
+        """Where this project's settings are kept; the one way to save them."""
+        return self.project.config_store
 
     def commit(self) -> None:
         self._session.commit()
@@ -137,11 +152,19 @@ def build_local_context(
     config: Config,
     file_store: VolumeAwareFileObjectStore | None = None,
 ) -> AppContext:
+    """A context on the project in a folder on this machine: its settings in
+    its config.toml, changes recorded as its chosen name or the OS user."""
+    return build_context(Project.local(config), file_store)
+
+
+def build_context(
+    project: Project,
+    file_store: VolumeAwareFileObjectStore | None = None,
+) -> AppContext:
     from sqlalchemy.orm import Session
 
     from civex.db.migrate import ensure_schema_current
     from civex.repositories.local.audit_repo import LocalAuditRepository
-    from civex.identity import local_actor
     from civex.repositories.local.dataset_repo import LocalDatasetRepository
     from civex.repositories.local.file_ref_repo import LocalFileReferenceRepository
     from civex.repositories.local.file_store import VolumeAwareFileObjectStore
@@ -175,8 +198,10 @@ def build_local_context(
     from civex.services.workflow_job_service import WorkflowJobService
     from civex.services.workflow_service import WorkflowService
 
-    engine = _get_engine(config.db.url)
-    ensure_schema_current(engine)
+    config = project.config
+    engine = project.engine or _get_engine(config.db.url)
+    if not project.migrated:
+        ensure_schema_current(engine)
     session = Session(engine)
     schema_repo = LocalSchemaRepository(session)
     dataset_repo = LocalDatasetRepository(session)
@@ -184,16 +209,14 @@ def build_local_context(
         session, is_postgres=engine.dialect.name == "postgresql"
     )
     job_repo = LocalWorkflowJobRepository(session)
-    device_id = None
-    if config.sync.remote:
+    device_id = project.device_id
+    if device_id is None and config.sync.remote:
         # Syncing: every entry written here carries which device made it.
         from civex import user_state
         from civex.repositories.local.sync_repo import LocalSyncRepository as _Sync
 
         device_id = user_state.device_id_for(_Sync(session).meta().project_id)
-    audit_repo = LocalAuditRepository(
-        session, actor=local_actor(config.identity.name), device_id=device_id
-    )
+    audit_repo = LocalAuditRepository(session, actor=project.actor, device_id=device_id)
     view_repo = LocalViewRepository(session)
     if file_store is None:
         file_store = VolumeAwareFileObjectStore(
@@ -201,7 +224,7 @@ def build_local_context(
         )
 
     schema_svc = SchemaService(schema_repo, audit_repo, record_repo)
-    job_svc = WorkflowJobService(job_repo, config.civex_dir)
+    job_svc = WorkflowJobService(job_repo, config.civex_dir, project.config_store)
     record_svc = RecordService(
         schema_svc, dataset_repo, record_repo, file_store, job_svc, audit_repo
     )
@@ -213,7 +236,7 @@ def build_local_context(
         on_purge=lambda collection_id: store_svc.clear_placement(str(collection_id)),
     )
     file_svc = FileService(file_store)
-    store_svc = StoreService(config, file_store)
+    store_svc = StoreService(config, file_store, project.config_store)
     gc_svc = GCService(file_store, LocalFileReferenceRepository(session))
     file_info_svc = FileInfoService(
         file_store, LocalFileReferenceRepository(session), dataset_repo
@@ -319,6 +342,7 @@ def build_local_context(
         session.commit,
         build_transport,
         record_svc,
+        project.config_store,
     )
 
     # Files another device added are fetched from the authority when opened or
@@ -340,7 +364,6 @@ def build_local_context(
     )
     file_access_svc.why_not_here = lambda shas: _sync().not_here_reasons(shas)
 
-    from civex.identity import local_actor
     from civex.repositories.local.library_repo import LocalLibraryRepository
     from civex.services.library_service import LibraryService
 
@@ -351,7 +374,7 @@ def build_local_context(
         workflow_svc,
         plugin_svc,
         transport=lambda: _sync().transport(),
-        author=lambda: local_actor(config.identity.name),
+        author=lambda: project.actor,
     )
 
     ctx: AppContext = AppContext(
@@ -383,6 +406,7 @@ def build_local_context(
         device_keys=device_keys,
         sync_svc=sync_svc,
         library_svc=library_svc,
+        project=project,
         _session=session,
     )
     ai_svc._app_ctx = ctx
