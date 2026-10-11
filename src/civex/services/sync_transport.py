@@ -21,7 +21,9 @@ from dataclasses import replace
 from typing import Any
 
 from civex import keys
+from civex.domain.dtos import DirectUpload
 from civex.domain.sync import (
+    DIRECT_FILES,
     DeviceCredentials,
     FeedPage,
     Hello,
@@ -51,6 +53,8 @@ class HttpSyncTransport:
         self._credentials = credentials
         self._timeout = timeout
         self._session: SessionGrant | None = None
+        # What the authority said it offers (`Hello.capabilities`), once asked.
+        self._capabilities: frozenset[str] | None = None
 
     # -- the protocol ----------------------------------------------------
 
@@ -69,7 +73,14 @@ class HttpSyncTransport:
         return joined
 
     def hello(self) -> Hello:
-        return Hello.from_dict(self._json("GET", "/hello"))
+        hello = Hello.from_dict(self._json("GET", "/hello"))
+        self._capabilities = frozenset(hello.capabilities)
+        return hello
+
+    def _offers(self, capability: str) -> bool:
+        if self._capabilities is None:
+            self.hello()
+        return capability in (self._capabilities or ())
 
     def push(self, entries: list[SyncEntry]) -> PushResult:
         body = {"entries": [e.to_dict() for e in entries]}
@@ -92,6 +103,8 @@ class HttpSyncTransport:
 
     def upload_file(self, sha256: str, source: UploadSource, size: int) -> None:
         start = source.tell()
+        if self._offers(DIRECT_FILES) and self._upload_direct(sha256, source, size):
+            return
 
         def send():
             source.seek(start)  # again from the start, when signing in again
@@ -102,14 +115,76 @@ class HttpSyncTransport:
 
         self._again_if_expired(send)
 
+    def _upload_direct(self, sha256: str, source: UploadSource, size: int) -> bool:
+        """Send the file straight to the authority's storage: ask where, PUT
+        the bytes there (whole, or a part at a time), then say it is done.
+        True when the authority has the file (it had it, or it went in);
+        False when it wants the bytes streamed to it after all."""
+        try:
+            answer = self._json("POST", f"/files/{sha256}/upload", {"size": size})
+        except SyncError as e:
+            if e.status == 501:  # this authority doesn't do it: stream instead
+                return False
+            raise
+        if not answer:  # 204: it has the file already
+            return True
+        target = DirectUpload.from_dict(answer)
+        start = source.tell()
+        parts: list[dict[str, Any]] = []
+        if target.url is not None:
+            self._put_to_storage(target.url, target.headers, source, size)
+        else:
+            for part in target.parts:
+                data = source.read(target.part_size)
+                etag = self._put_to_storage(part.url, {}, data, len(data))
+                parts.append({"number": part.number, "etag": etag})
+        self._json(
+            "POST",
+            f"/files/{sha256}/complete",
+            {"size": size, "upload_id": target.upload_id, "parts": parts},
+        )
+        source.seek(start)
+        return True
+
+    def _put_to_storage(
+        self, url: str, headers: dict[str, str], body: Any, size: int
+    ) -> str:
+        """PUT `size` bytes to a presigned URL (no civex session: the URL is
+        the leave), answering the ETag storage gave."""
+        request = urllib.request.Request(url, data=body, method="PUT")
+        for name, value in headers.items():
+            request.add_header(name, value)
+        request.add_header("Content-Length", str(size))
+        request.add_header("Content-Type", "application/octet-stream")
+        try:
+            with urllib.request.urlopen(
+                request, timeout=self._timeout, context=ssl_context()
+            ) as response:
+                return str(response.headers.get("ETag", ""))
+        except urllib.error.HTTPError as e:
+            raise SyncError(
+                f"Storage refused the upload ({e.code})",
+                retryable=e.code in (408, 429) or e.code >= 500,
+                status=e.code,
+            ) from e
+        except (urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
+            raise SyncError(f"Could not reach storage: {_reason(e)}") from e
+
     def file_chunks(self, sha256: str) -> Iterator[bytes]:
         """A file's bytes from the server, as they arrive. Asks at once, so a
         file the server hasn't got raises FileNotFoundError here, before
-        anything is written. The caller checks the hash of what it wrote."""
+        anything is written. The caller checks the hash of what it wrote. An
+        authority offering `direct_files` answers where storage serves the
+        bytes (a 307), which is fetched without the session: the URL is the
+        leave, and the session must not go to another host."""
         try:
             response = self._again_if_expired(
-                lambda: self._open(self._signed_in("GET", f"/files/{sha256}"))
+                lambda: self._open(
+                    self._signed_in("GET", f"/files/{sha256}"), follow=False
+                )
             )
+        except _Redirected as to:
+            response = self._open_storage(to.url, sha256)
         except SyncError as e:
             if e.status == 404:  # the server answered: it doesn't have it
                 raise FileNotFoundError(sha256) from e
@@ -237,12 +312,19 @@ class HttpSyncTransport:
 
         return self._again_if_expired(call)
 
-    def _open(self, request: urllib.request.Request):
+    def _open(self, request: urllib.request.Request, follow: bool = True):
         try:
-            return urllib.request.urlopen(
-                request, timeout=self._timeout, context=ssl_context()
+            if follow:
+                return urllib.request.urlopen(
+                    request, timeout=self._timeout, context=ssl_context()
+                )
+            opener = urllib.request.build_opener(
+                _NoRedirect, urllib.request.HTTPSHandler(context=ssl_context())
             )
+            return opener.open(request, timeout=self._timeout)
         except urllib.error.HTTPError as e:
+            if not follow and e.code in (301, 302, 303, 307, 308):
+                raise _Redirected(e.headers.get("Location") or "") from e
             raise _from_status(e) from e
         except (urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
             problem = certificate_problem(e)
@@ -253,6 +335,41 @@ class HttpSyncTransport:
                     f"Could not reach the server: {problem}", retryable=False
                 ) from e
             raise SyncError(f"Could not reach the server: {_reason(e)}") from e
+
+    def _open_storage(self, url: str, sha256: str):
+        """GET from storage (a presigned URL), with none of the authority's
+        headers. Storage saying it hasn't the object is FileNotFoundError."""
+        if not url:
+            raise SyncError("The server pointed at storage without saying where")
+        request = urllib.request.Request(url, method="GET")
+        try:
+            return urllib.request.urlopen(
+                request, timeout=self._timeout, context=ssl_context()
+            )
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise FileNotFoundError(sha256) from e
+            raise SyncError(
+                f"Storage would not serve the file ({e.code})",
+                retryable=e.code in (408, 429) or e.code >= 500,
+                status=e.code,
+            ) from e
+        except (urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
+            raise SyncError(f"Could not reach storage: {_reason(e)}") from e
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Leaves a redirect to the caller, so the session token never follows
+    one to another host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        return None
+
+
+class _Redirected(Exception):
+    def __init__(self, url: str) -> None:
+        super().__init__(url)
+        self.url = url
 
 
 def _reason(error: Exception) -> str:
@@ -282,9 +399,13 @@ def _from_status(error: urllib.error.HTTPError) -> SyncError:
             retryable=False,
             status=404,
         )
+    if error.code == 501:
+        # The server exists but doesn't do that (a feature its host lacks):
+        # waiting won't change it.
+        return SyncError(text, retryable=False, status=501)
     if error.code in (408, 429) or error.code >= 500:
-        return SyncError(text, retryable=True)
-    return SyncError(text, retryable=False)
+        return SyncError(text, retryable=True, status=error.code)
+    return SyncError(text, retryable=False, status=error.code)
 
 
 def _mismatch(detail: Any) -> str:

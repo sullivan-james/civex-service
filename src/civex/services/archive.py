@@ -36,7 +36,14 @@ def write_zip(
         for name, path in extra_members:
             zf.write(path, arcname=name)
         for name, ref in entries:
-            zf.write(file_svc.local_path(ref.sha256), arcname=name)
+            on_disk = file_svc.local_path(ref.sha256)
+            if on_disk is not None:
+                zf.write(on_disk, arcname=name)
+                continue
+            # Not on a disk here (a bucket): copied through in chunks.
+            with zf.open(name, "w") as member:
+                for chunk in file_svc.stream(ref.sha256):
+                    member.write(chunk)
 
 
 @dataclass

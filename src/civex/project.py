@@ -53,7 +53,23 @@ class Project:
             config=config,
             config_store=FileConfigStore(config.project_root),
             actor=local_actor(config.identity.name),
+            features=local_features(config),
         )
+
+
+def local_features(config: Config) -> frozenset[str]:
+    """What a machine does for the project at `config`: everything, except
+    that a project keeping its files in a bucket (`[store.s3]`) has no drives
+    to manage, and offers files straight to and from the bucket instead."""
+    from civex.domain import features
+
+    s3 = config.store_config.s3
+    if s3 is None:
+        return LOCAL_FEATURES
+    offered = set(LOCAL_FEATURES) - {features.VOLUMES}
+    if s3.direct:
+        offered.add(features.DIRECT_FILES)
+    return frozenset(offered)
 
 
 _README = """\

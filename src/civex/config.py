@@ -191,9 +191,34 @@ class PlacementConfig:
 
 
 @dataclass
+class S3Config:
+    """Files kept in an S3 bucket (or anything speaking its API: MinIO, R2)
+    instead of on drives: `[store.s3]`. Objects are `<prefix>/<sha[:2]>/<sha[2:]>`.
+    Credentials are never here (config.toml is shared and backed up): boto3
+    reads them from the environment, `profile`, or the machine's role."""
+
+    bucket: str
+    prefix: str = ""
+    region: str | None = None
+    endpoint: str | None = None  # e.g. "http://127.0.0.1:9000" for MinIO
+    profile: str | None = None  # an AWS profile name, else the default chain
+    # Files go straight between a device or browser and the bucket by presigned
+    # URL (`direct_files`), never through civex. Off: civex streams them.
+    direct: bool = True
+
+
+# The one logical volume an S3 store is: what its inventory rows and the
+# `location` on a file value name.
+S3_VOLUME = "s3"
+
+
+@dataclass
 class StoreConfig:
     volumes: dict[str, VolumeConfig]
     volume_queue: list[str]
+    # Files in a bucket instead of on drives. With it set the volumes above
+    # are not used (the project has no drives); see `S3Config`.
+    s3: S3Config | None = None
     warn_below_pct: float = (
         10.0  # show warning in UI when less than this % of space remains
     )
@@ -337,12 +362,26 @@ def parse_config(data: dict, root: Path) -> Config:
             )
             for cid, pcfg in sd.get("placement", {}).items()
         }
+        s3: S3Config | None = None
+        if "s3" in sd:
+            s3d = sd["s3"]
+            if not s3d.get("bucket"):
+                raise ConfigError("[store.s3] needs a bucket")
+            s3 = S3Config(
+                bucket=str(s3d["bucket"]),
+                prefix=str(s3d.get("prefix", "")).strip("/"),
+                region=s3d.get("region") or None,
+                endpoint=s3d.get("endpoint") or None,
+                profile=s3d.get("profile") or None,
+                direct=bool(s3d.get("direct", True)),
+            )
         store = StoreConfig(
             volumes=volumes,
             volume_queue=queue,
             warn_below_pct=float(sd.get("warn_below_pct", 10.0)),
             full_below_gb=float(sd.get("full_below_gb", 1.0)),
             placement=placement,
+            s3=s3,
         )
 
     ai: AIConfig | None = None
@@ -512,6 +551,7 @@ def render_config(config: Config) -> str:
             and sc.warn_below_pct == 10.0
             and sc.full_below_gb == 1.0
             and not sc.placement
+            and sc.s3 is None
         )
         if not is_default:
             queue_str = ", ".join(f'"{_ts(n)}"' for n in sc.volume_queue)
@@ -536,6 +576,19 @@ def render_config(config: Config) -> str:
                 lines.append(f'volume = "{_ts(place.volume)}"\n')
                 if place.on_unavailable != "spill":
                     lines.append(f'on_unavailable = "{_ts(place.on_unavailable)}"\n')
+            if sc.s3 is not None:
+                lines.append("\n[store.s3]\n")
+                lines.append(f"bucket = {_tv(sc.s3.bucket)}\n")
+                if sc.s3.prefix:
+                    lines.append(f"prefix = {_tv(sc.s3.prefix)}\n")
+                if sc.s3.region:
+                    lines.append(f"region = {_tv(sc.s3.region)}\n")
+                if sc.s3.endpoint:
+                    lines.append(f"endpoint = {_tv(sc.s3.endpoint)}\n")
+                if sc.s3.profile:
+                    lines.append(f"profile = {_tv(sc.s3.profile)}\n")
+                if not sc.s3.direct:
+                    lines.append("direct = false\n")
 
     if config.plugins.default_timeout_seconds != 60.0:
         lines += [

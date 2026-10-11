@@ -63,6 +63,40 @@ within a few seconds, and work on other volumes carries on.
 is writable, has room, is a separate disk from the project, or already belongs to
 another volume. The app's **Add volume** form shows the same checks as you type.
 
+## Files in a bucket instead
+
+A project can keep its files in an S3 bucket (or anything that speaks S3's API:
+MinIO, Cloudflare R2) instead of on drives. Install the extra and name the
+bucket in `_civex/config.toml`:
+
+```bash
+uv tool install "civex[s3]"
+```
+
+```toml
+[store.s3]
+bucket = "lab-files"
+prefix = "projects/humpbacks"     # optional: a folder inside the bucket
+region = "eu-west-2"              # optional
+endpoint = "http://minio:9000"    # for MinIO and the like
+profile = "lab"                   # an AWS profile; else the default chain
+```
+
+Credentials are never in `config.toml`: boto3 reads them from the environment
+(`AWS_ACCESS_KEY_ID`…), the named profile, or the machine's role. Objects are
+laid out as on a drive (`<prefix>/3f/9c01ab…`), the same inventory records what
+is there, and records, history, sync and clean-up work unchanged. The bucket is
+one volume that is always online, so nothing under **Settings → Storage** or
+`civex store` applies to such a project and those pages aren't shown.
+
+**Files go straight to the bucket.** Unless `direct = false`, downloads from
+the app are a redirect to the bucket, and a device syncing with an authority
+whose files are in a bucket sends and receives them by presigned URL, so the
+bytes never pass through civex. A file sent in parts is checked against its
+hash by a read-back during the next clean-up, and one that doesn't match is
+removed. Uploads from the browser still go through the server, which hashes
+them before putting them in the bucket.
+
 ## Where new files go
 
 1. The collection's **home** volume, if it has one and the home can take the file.

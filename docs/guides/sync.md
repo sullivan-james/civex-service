@@ -75,6 +75,12 @@ Changes and files travel separately, so a missing file never holds up a change.
 - **Receiving:** a file another device added arrives in the background (for
   collections this computer keeps), when you open it, or before an export. Until
   then it is marked **on the server**.
+- **Straight to storage:** an authority whose files are in a bucket (see
+  [Storage volumes](storage.md#files-in-a-bucket-instead)) offers `direct_files`:
+  a device asks it where to put a file and sends the bytes to the bucket itself,
+  then tells the authority it is done; downloads are a redirect to the bucket.
+  The authority only says where and records what arrived. An older device, or an
+  authority with its files on drives, streams them as before.
 
 ### Which files a computer keeps
 

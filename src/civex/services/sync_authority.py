@@ -46,7 +46,7 @@ from civex.domain.sync import (
     problem_with,
     snapshot_cursor,
 )
-from civex.repositories.protocols import FileObjectStore, SyncRepository
+from civex.repositories.protocols import ObjectStore, SyncRepository
 from civex.services.cascades import States, changed_records, record_states
 from civex.services.project_rules import ProjectRules
 from civex.services.record_service import RecordService
@@ -65,13 +65,18 @@ class SyncAuthorityService:
         self,
         repo: SyncRepository,
         applier: SyncApplier,
-        files: FileObjectStore,
+        files: ObjectStore,
         records: RecordService,
         rules: ProjectRules,
         authenticator: Authenticator,
         policy: SyncPolicy | None = None,
+        capabilities: tuple[str, ...] = CAPABILITIES,
     ) -> None:
         self._repo = repo
+        # The optional features this authority offers (`Hello.capabilities`):
+        # what every authority does, plus what its host adds (`direct_files`
+        # when its store hands out presigned URLs).
+        self._capabilities = capabilities
         self._authenticator = authenticator
         # What each caller may change; None: every change a rule allows.
         self._policy = policy
@@ -112,7 +117,7 @@ class SyncAuthorityService:
             protocol_min=PROTOCOL_MIN,
             protocol_max=PROTOCOL_MAX,
             server_version=__version__,
-            capabilities=list(CAPABILITIES),
+            capabilities=list(self._capabilities),
         )
 
     def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage:

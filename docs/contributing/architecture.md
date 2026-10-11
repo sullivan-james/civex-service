@@ -52,7 +52,7 @@ Field types: `integer | float | string | boolean | date | datetime | file | file
 
 Schema inheritance is resolved recursively by `SchemaService.collect_fields()` — a child schema's own fields come first, followed by each ancestor's fields (labelled with their source schema), so a subclassed schema's records carry both its own and its parents' fields.
 
-**File storage** mirrors the git object store: `_civex/objects/<sha256[:2]>/<sha256[2:]>`. Content-addressed and idempotent — the same file uploaded twice is stored once.
+**File storage** mirrors the git object store: `_civex/objects/<sha256[:2]>/<sha256[2:]>`. Content-addressed and idempotent — the same file uploaded twice is stored once. Services see an `ObjectStore` (`repositories/protocols.py`); the drives on this machine are a `VolumeStore` (the same protocol plus everything about a volume as a place), and a project can keep its files in an S3 bucket instead (`[store.s3]`, the `civex[s3]` extra, `repositories/s3/store.py`): one logical volume, the same inventory table, and files that go straight between a device or browser and the bucket by presigned URL.
 
 ## Workflow execution and plugin tiers
 

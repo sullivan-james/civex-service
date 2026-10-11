@@ -69,3 +69,26 @@ def test_a_cursor_that_is_not_one_is_refused(serving):
         "/api/sync/v1/snapshot/schema", params={"after": "nonsense"}, headers=headers
     )
     assert reply.status_code == 422
+
+
+def test_an_authority_with_drives_does_not_hand_out_upload_targets(serving):
+    """Without `direct_files` the routes exist and say so (501), so a device
+    streams the bytes instead; `hello` never offered it."""
+    client, headers = serving
+    sha = "ab" * 32
+    hello = client.get("/api/sync/v1/hello", headers=headers).json()
+    assert "direct_files" not in hello["capabilities"]
+    answer = client.post(
+        f"/api/sync/v1/files/{sha}/upload", json={"size": 3}, headers=headers
+    )
+    assert answer.status_code == 501
+    done = client.post(
+        f"/api/sync/v1/files/{sha}/complete", json={"size": 3}, headers=headers
+    )
+    assert done.status_code == 501
+    assert (
+        client.post(
+            "/api/sync/v1/files/nonsense/upload", json={"size": 3}, headers=headers
+        ).status_code
+        == 422
+    )

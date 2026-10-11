@@ -749,6 +749,11 @@ class StoredObject(Base):
     volume: Mapped[str] = mapped_column(String(255), primary_key=True)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    # When the copy's bytes were checked to hash to `sha256`. A copy civex
+    # wrote itself is verified as it is written (it hashed the bytes); one
+    # that went straight into a bucket in parts (`ObjectStore.upload_target`)
+    # is NULL until a read-back checks it (`ObjectStore.verify`).
+    verified_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
 
 
 class RecordReference(Base):

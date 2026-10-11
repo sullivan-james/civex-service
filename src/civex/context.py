@@ -5,8 +5,9 @@ build_context(project) wires together the SQLAlchemy repos and the file store
 for one `Project` (civex.project): the project's settings, where they are kept,
 who is making changes, and optionally a shared engine. build_local_context(config)
 is the same for the project in a folder on this machine, as the CLI and
-`civex serve` host it. An optional file_store parameter lets callers inject a
-custom object store instead of the default VolumeAwareFileObjectStore.
+`civex serve` host it. An optional file_store parameter lets callers inject an
+object store instead of the one the project's settings name (drives on this
+machine, or a bucket with `[store.s3]`).
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ from typing import TYPE_CHECKING, Callable, Iterator
 
 from civex.domain.dtos import RecordUse
 from civex.config import Config, ConfigStore
+from civex.domain import features
+from civex.domain.exceptions import FeatureUnavailableError
 from civex.project import Project
 
 if TYPE_CHECKING:
@@ -28,7 +31,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from civex.repositories.local.audit_repo import LocalAuditRepository
-    from civex.repositories.local.file_store import VolumeAwareFileObjectStore
+    from civex.repositories.protocols import ObjectStore
     from civex.repositories.local.sync_repo import LocalSyncRepository
     from civex.services.ai.service import AiService
     from civex.services.ai_usage_service import AiUsageService
@@ -89,11 +92,9 @@ class AppContext:
     record_svc: RecordService
     file_svc: FileService
     job_svc: WorkflowJobService
-    store_svc: StoreService
     gc_svc: GCService
     file_info_svc: FileInfoService
     file_access_svc: FileAccessService
-    transfer_svc: TransferService
     audit_svc: LocalAuditRepository
     history_svc: AuditService
     retention_svc: RetentionService
@@ -114,6 +115,25 @@ class AppContext:
     compaction_svc: HistoryCompactionService
     project: Project
     _session: Session
+    # The services of a project whose files are on drives on this machine; None
+    # when they are in a bucket (`store_svc`/`transfer_svc` then say so).
+    _store_svc: StoreService | None = None
+    _transfer_svc: TransferService | None = None
+
+    @property
+    def store_svc(self) -> StoreService:
+        """Drives: adding, adopting, homing collections. Only where files are
+        on drives on this machine (`features.VOLUMES`)."""
+        if self._store_svc is None:
+            raise FeatureUnavailableError(features.VOLUMES)
+        return self._store_svc
+
+    @property
+    def transfer_svc(self) -> TransferService:
+        """Moving files between drives. Only where there are drives."""
+        if self._transfer_svc is None:
+            raise FeatureUnavailableError(features.VOLUMES)
+        return self._transfer_svc
 
     @property
     def config(self) -> Config:
@@ -172,9 +192,24 @@ def context_factory(project: Project) -> ContextFactory:
     return lambda: build_context(project)
 
 
+def make_store(config: Config, session: "Session | None" = None) -> "ObjectStore":
+    """The object store a project's settings name: a bucket when `[store.s3]`
+    is set, else the drives of `[store.volumes]` on this machine."""
+    s3 = config.store_config.s3
+    if s3 is not None:
+        from civex.repositories.s3.store import S3ObjectStore
+
+        return S3ObjectStore(s3, session=session)
+    from civex.repositories.local.file_store import VolumeAwareFileObjectStore
+
+    return VolumeAwareFileObjectStore(
+        config.store_config, config.project_root, session=session
+    )
+
+
 def build_local_context(
     config: Config,
-    file_store: VolumeAwareFileObjectStore | None = None,
+    file_store: ObjectStore | None = None,
 ) -> AppContext:
     """A context on the project in a folder on this machine: its settings in
     its config.toml, changes recorded as its chosen name or the OS user."""
@@ -183,7 +218,7 @@ def build_local_context(
 
 def build_context(
     project: Project,
-    file_store: VolumeAwareFileObjectStore | None = None,
+    file_store: ObjectStore | None = None,
 ) -> AppContext:
     from sqlalchemy.orm import Session
 
@@ -191,7 +226,6 @@ def build_context(
     from civex.repositories.local.audit_repo import LocalAuditRepository
     from civex.repositories.local.dataset_repo import LocalDatasetRepository
     from civex.repositories.local.file_ref_repo import LocalFileReferenceRepository
-    from civex.repositories.local.file_store import VolumeAwareFileObjectStore
     from civex.repositories.local.job_repo import LocalWorkflowJobRepository
     from civex.repositories.local.record_repo import LocalRecordRepository
     from civex.repositories.local.schema_repo import LocalSchemaRepository
@@ -217,10 +251,12 @@ def build_context(
     from civex.services.retention_service import RetentionService
     from civex.services.schema_service import SchemaService
     from civex.services.store_service import StoreService
+    from civex.repositories.local.file_store import VolumeAwareFileObjectStore
     from civex.services.export_definition_service import ExportDefinitionService
     from civex.services.view_service import ViewService
     from civex.services.workflow_job_service import WorkflowJobService
     from civex.services.workflow_service import WorkflowService
+    from civex.repositories.protocols import VolumeStore
 
     config = project.config
     engine = project.engine or _get_engine(config.db.url)
@@ -243,9 +279,12 @@ def build_context(
     audit_repo = LocalAuditRepository(session, actor=project.actor, device_id=device_id)
     view_repo = LocalViewRepository(session)
     if file_store is None:
-        file_store = VolumeAwareFileObjectStore(
-            config.store_config, config.project_root, session=session
-        )
+        file_store = make_store(config, session)
+    # The drives on this machine, when that is where the files are: what the
+    # services that lay files out on disk or move them between drives need.
+    volumes: VolumeStore | None = (
+        file_store if isinstance(file_store, VolumeStore) else None
+    )
 
     schema_svc = SchemaService(schema_repo, audit_repo, record_repo)
     job_svc = WorkflowJobService(job_repo, config.civex_dir, project.config_store)
@@ -257,10 +296,14 @@ def build_context(
         audit_repo,
         schema_svc,
         record_svc,
-        on_purge=lambda collection_id: store_svc.clear_placement(str(collection_id)),
+        on_purge=lambda collection_id: (
+            store_svc.clear_placement(str(collection_id)) if store_svc else None
+        ),
     )
-    file_svc = FileService(file_store)
-    store_svc = StoreService(config, file_store, project.config_store)
+    file_svc = FileService(file_store, volumes)
+    store_svc: StoreService | None = None
+    if isinstance(file_store, VolumeAwareFileObjectStore):
+        store_svc = StoreService(config, file_store, project.config_store)
     gc_svc = GCService(file_store, LocalFileReferenceRepository(session))
     file_info_svc = FileInfoService(
         file_store, LocalFileReferenceRepository(session), dataset_repo
@@ -281,19 +324,21 @@ def build_context(
 
     file_info_svc.describe_records = _describe_records
     file_access_svc = FileAccessService(
-        record_svc, schema_svc, file_store, config.civex_dir
+        record_svc, schema_svc, file_store, config.civex_dir, volumes
     )
     file_access_svc.refs = LocalFileReferenceRepository(session)
-    transfer_svc = TransferService(
-        config,
-        file_store,
-        LocalFileReferenceRepository(session),
-        LocalTransferRepository(session),
-        dataset_repo,
-        store_svc,
-        session.commit,
-        session.rollback,
-    )
+    transfer_svc: TransferService | None = None
+    if volumes is not None and store_svc is not None:
+        transfer_svc = TransferService(
+            config,
+            volumes,
+            LocalFileReferenceRepository(session),
+            LocalTransferRepository(session),
+            dataset_repo,
+            store_svc,
+            session.commit,
+            session.rollback,
+        )
     ai_svc = AiService(schema_svc, dataset_svc, record_svc, job_svc)
     ai_usage_svc = AiUsageService(engine)
     analytics_svc = AnalyticsService(
@@ -343,6 +388,7 @@ def build_context(
     from civex.services.device_keys import DeviceKeys
     from civex.services.sync_authority import SyncAuthorityService
 
+    from civex.domain.sync import CAPABILITIES, DIRECT_FILES
     from civex.services.sync_service import SyncService
     from civex.services.sync_transport import build_transport
 
@@ -356,6 +402,8 @@ def build_context(
         record_svc,
         ProjectRules(schema_svc, dataset_repo, record_repo),
         authenticator=device_keys,
+        capabilities=CAPABILITIES
+        + ((DIRECT_FILES,) if features.DIRECT_FILES in project.features else ()),
     )
     sync_svc = SyncService(
         config,
@@ -407,11 +455,9 @@ def build_context(
         record_svc=record_svc,
         file_svc=file_svc,
         job_svc=job_svc,
-        store_svc=store_svc,
         gc_svc=gc_svc,
         file_info_svc=file_info_svc,
         file_access_svc=file_access_svc,
-        transfer_svc=transfer_svc,
         audit_svc=audit_repo,
         history_svc=history_svc,
         compaction_svc=HistoryCompactionService(audit_repo, LocalDbSpace(engine)),
@@ -432,6 +478,8 @@ def build_context(
         library_svc=library_svc,
         project=project,
         _session=session,
+        _store_svc=store_svc,
+        _transfer_svc=transfer_svc,
     )
     ai_svc._app_ctx = ctx
     return ctx

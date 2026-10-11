@@ -100,8 +100,14 @@ function DownloadLink({
     )
     const abort = new AbortController()
     try {
-      const res = await fetch(href, { signal: abort.signal })
-      if (!res.ok) {
+      // Only the server's answer is wanted: a project whose files are in a
+      // bucket answers with a redirect to it, which is as good as the bytes
+      // (the browser follows it when the download starts, below).
+      const res = await fetch(href, {
+        signal: abort.signal,
+        redirect: 'manual',
+      })
+      if (!res.ok && res.type !== 'opaqueredirect') {
         const body = await res.json().catch(() => null)
         setNote({
           tone:

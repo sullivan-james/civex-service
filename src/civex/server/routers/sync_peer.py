@@ -21,12 +21,19 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import (
+    FileResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from pydantic import BaseModel, Field
 
 from civex.context import AppContext
+from civex.domain.dtos import UploadedPart
 from civex.domain.exceptions import (
     ConfigError,
+    FeatureUnavailableError,
     NotAllowedError,
     NotFoundError,
     ValidationError,
@@ -34,6 +41,7 @@ from civex.domain.exceptions import (
 )
 from civex.domain.library import MAX_BUNDLE, MAX_BYTES, LibraryItemDTO
 from civex.domain.sync import (
+    DIRECT_FILES,
     PROTOCOL_MAX,
     PROTOCOL_MIN,
     Principal,
@@ -152,6 +160,46 @@ class SyncFilesRequest(BaseModel):
 
 class SyncFilesResponse(BaseModel):
     missing: list[str] = Field(description="Those the authority does not have yet.")
+
+
+class SyncUploadTargetRequest(BaseModel):
+    size: int = Field(ge=0, description="How many bytes the file is.")
+
+
+class SyncDirectPart(BaseModel):
+    number: int = Field(description="Which part, from 1, in order.")
+    url: str = Field(description="Where to PUT that part's bytes.")
+
+
+class SyncUploadTargetResponse(BaseModel):
+    """Where to PUT the file so it goes straight into storage (`direct_files`):
+    one URL with `headers` for the whole file, or a URL per part of
+    `part_size` bytes. Then `POST /files/{sha256}/complete`."""
+
+    url: str | None = Field(description="PUT the whole file here, with `headers`.")
+    headers: dict[str, str] = Field(
+        description="Headers the whole-file PUT must carry."
+    )
+    upload_id: str | None = Field(description="Set when the file goes in parts.")
+    part_size: int = Field(description="Bytes per part (the last may be shorter).")
+    parts: list[SyncDirectPart] = Field(description="A URL per part, in order.")
+    expires_at: int = Field(description="Unix time after which the URLs stop working.")
+
+
+class SyncUploadedPart(BaseModel):
+    number: int = Field(description="Which part.")
+    etag: str = Field(description="The ETag storage answered the part's PUT with.")
+
+
+class SyncCompleteUploadRequest(BaseModel):
+    size: int = Field(ge=0, description="How many bytes went in.")
+    filename: str | None = Field(default=None, description="The file's name, if known.")
+    upload_id: str | None = Field(
+        default=None, description="From the target, for parts."
+    )
+    parts: list[SyncUploadedPart] = Field(
+        default_factory=list, description="Each part sent, with its ETag."
+    )
 
 
 class SyncJoinRequest(BaseModel):
@@ -382,12 +430,16 @@ def files_missing(body: SyncFilesRequest, call: Peer = Depends(peer)):
     return SyncFilesResponse(missing=call.ctx.authority_svc.missing_files(body.sha256))
 
 
+def _a_sha(sha256: str) -> None:
+    if len(sha256) != 64 or any(c not in "0123456789abcdef" for c in sha256):
+        raise HTTPException(422, detail="Not a sha256")
+
+
 @router.put("/files/{sha256}", status_code=204)
 async def upload_file(sha256: str, request: Request, call: Peer = Depends(peer)):
     """Store a file under its content hash. The bytes are hashed as they arrive;
     ones that don't match `sha256` are refused."""
-    if len(sha256) != 64 or any(c not in "0123456789abcdef" for c in sha256):
-        raise HTTPException(422, detail="Not a sha256")
+    _a_sha(sha256)
     size = request.headers.get("content-length")
     try:
         ref = await call.ctx.file_svc.store_stream(
@@ -399,15 +451,72 @@ async def upload_file(sha256: str, request: Request, call: Peer = Depends(peer))
         raise HTTPException(422, detail="The content does not match that hash")
 
 
+@router.post(
+    "/files/{sha256}/upload",
+    response_model=SyncUploadTargetResponse,
+    responses={204: {"description": "The authority has this file already."}},
+)
+def upload_target(
+    sha256: str, body: SyncUploadTargetRequest, call: Peer = Depends(peer)
+):
+    """Where to send a file's bytes so they go straight into the authority's
+    storage, never through it (capability `direct_files`). 204 when it holds
+    the file already; 501 when this authority streams files instead."""
+    _a_sha(sha256)
+    if DIRECT_FILES not in call.ctx.features:
+        raise FeatureUnavailableError(DIRECT_FILES)
+    if call.ctx.file_svc.exists(sha256):
+        return Response(status_code=204)
+    target = call.ctx.file_svc.upload_target(sha256, body.size)
+    if target is None:
+        raise FeatureUnavailableError(DIRECT_FILES)
+    return SyncUploadTargetResponse(**target.to_dict())
+
+
+@router.post("/files/{sha256}/complete", status_code=204)
+def complete_upload(
+    sha256: str, body: SyncCompleteUploadRequest, call: Peer = Depends(peer)
+):
+    """Tell the authority a direct upload is done: it checks the object is in
+    storage at the size announced and records it. A file that went in parts
+    is finished here and checked against its hash later."""
+    _a_sha(sha256)
+    if DIRECT_FILES not in call.ctx.features:
+        raise FeatureUnavailableError(DIRECT_FILES)
+    try:
+        call.ctx.file_svc.complete_upload(
+            sha256,
+            body.size,
+            body.filename or sha256,
+            body.upload_id,
+            [UploadedPart(p.number, p.etag) for p in body.parts],
+        )
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    except VolumeUnavailableError as e:
+        raise HTTPException(507, detail=str(e))
+    return Response(status_code=204)
+
+
 @router.get("/files/{sha256}")
 def download_file(sha256: str, call: Peer = Depends(peer)):
     """The bytes of a file the authority holds, for a device that was sent only
-    the record that cites it."""
+    the record that cites it: a 307 to storage when the authority offers
+    `direct_files`, else the bytes."""
+    svc = call.ctx.file_svc
+    if DIRECT_FILES in call.ctx.features:
+        url = svc.download_url(sha256)
+        if url:
+            return RedirectResponse(url, status_code=307)
     try:
-        path = call.ctx.file_svc.local_path(sha256)
+        path = svc.local_path(sha256)
+        if path is not None:
+            return FileResponse(path, media_type="application/octet-stream")
+        if not svc.exists(sha256):
+            raise FileNotFoundError(sha256)
     except (FileNotFoundError, VolumeUnavailableError):
         raise HTTPException(404, detail="That file is not here")
-    return FileResponse(path, media_type="application/octet-stream")
+    return StreamingResponse(svc.stream(sha256), media_type="application/octet-stream")
 
 
 # -- the library: workflows and plugins shared through this authority ----------

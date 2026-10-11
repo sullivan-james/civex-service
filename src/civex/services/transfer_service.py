@@ -56,7 +56,7 @@ from civex.services.transfer_engine import (
 if TYPE_CHECKING:
     from civex.repositories.protocols import (
         DatasetRepository,
-        FileObjectStore,
+        VolumeStore,
         FileReferenceRepository,
         TransferRepository,
     )
@@ -103,7 +103,7 @@ class TransferService:
     def __init__(
         self,
         config: Config,
-        store: FileObjectStore,
+        store: VolumeStore,
         refs: FileReferenceRepository,
         transfers: TransferRepository,
         datasets: DatasetRepository,

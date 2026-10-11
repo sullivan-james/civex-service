@@ -38,6 +38,25 @@ from the next tag forward.
   (history conversion, file moves, sync, run drains) open their contexts
   through a factory, so a host serving many projects can run them per project.
   A project in a folder offers everything it did.
+- **Files in an S3 bucket** (`civex[s3]`): `[store.s3]` in `config.toml`
+  (`bucket`, `prefix`, `region`, `endpoint` for MinIO and the like, `profile`)
+  keeps a project's files in a bucket instead of on drives. Everything else is
+  the same: records, history, sync, clean-up. The bucket is one volume that is
+  always online; Settings → Storage and the drive commands aren't offered for
+  such a project. Credentials come from the environment or an AWS profile,
+  never from config.toml.
+- **Files go straight to storage** where the bucket allows it (`direct_files`,
+  on by default; `direct = false` turns it off): a device syncing with such an
+  authority uploads to and downloads from the bucket by presigned URL, the
+  authority only saying where and recording what arrived, and the app's
+  downloads are a redirect to the bucket. A file that went in in parts is
+  checked against its hash by a read-back during the next clean-up
+  (`stored_objects.verified_at`, migration `b9d4e7f2a1c6`). An older authority
+  or device streams as before.
+- For developers: the store protocol is split into `ObjectStore` (what every
+  service sees) and `VolumeStore` (drives as places), `AppContext.store_svc` and
+  `transfer_svc` exist only where there are drives, and `FileService.local_path`
+  is None where files aren't on disk here.
 
 ## v2.0.0 — syncing between machines, updates from the app (2026-10-07)
 

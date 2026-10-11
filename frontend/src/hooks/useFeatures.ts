@@ -11,7 +11,8 @@ export function useFeatures(): FeatureSet {
     queryFn: featuresApi.get,
     staleTime: Infinity,
   })
-  return data ? new Set(data.features) : localFeatures
+  // An answer without the list (an older server, a stub) is no answer.
+  return Array.isArray(data?.features) ? new Set(data.features) : localFeatures
 }
 
 /** `has('volumes')`: whether this server offers a feature. */

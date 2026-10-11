@@ -16,7 +16,7 @@ from civex.domain.dtos import (
 from civex.domain.exceptions import NotFoundError
 from civex.repositories.protocols import (
     DatasetRepository,
-    FileObjectStore,
+    ObjectStore,
     FileReferenceRepository,
 )
 
@@ -28,7 +28,7 @@ RECORD_USES_SHOWN = 200
 class FileInfoService:
     def __init__(
         self,
-        store: FileObjectStore,
+        store: ObjectStore,
         refs: FileReferenceRepository,
         datasets: DatasetRepository,
     ) -> None:

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { PROJECT, useDriveChoice } from '../../hooks/useDriveChoice'
+import { useHasFeature } from '../../hooks/useFeatures'
 import { Select } from '../ui'
 import { Archive, FolderOpen, HardDrive } from '../ui/icons'
 
@@ -54,9 +55,15 @@ export function MethodStep({
   setDrive: (d: string) => void
 }) {
   const choice = useDriveChoice({ need: 0, allowProject: true, chosen: drive })
+  const has = useHasFeature()
+  // A folder of links or copies is made on a drive of this machine; a server
+  // keeping its files in a bucket offers the zip alone.
+  const offered = METHODS.filter(
+    (m) => (m.id === 'zip' || has('volumes')) && (files || m.id !== 'link'),
+  )
   return (
     <div role="radiogroup" aria-label="Method" className="space-y-3">
-      {METHODS.filter((m) => files || m.id !== 'link').map((m) => (
+      {offered.map((m) => (
         <MethodCard
           key={m.id}
           selected={method === m.id}

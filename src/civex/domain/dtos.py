@@ -399,6 +399,79 @@ class FileRef:
 # a history diff must not count them as an edit.
 DERIVED_FILE_KEYS = ("resolved_filename", "location")
 
+
+@dataclass
+class DirectPart:
+    """One part of a file going straight to storage: which, and where to PUT it."""
+
+    number: int  # from 1, in order
+    url: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"number": self.number, "url": self.url}
+
+
+@dataclass
+class UploadedPart:
+    """A part that went in: which, and the tag storage answered with."""
+
+    number: int
+    etag: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"number": self.number, "etag": self.etag}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> UploadedPart:
+        return cls(number=int(d["number"]), etag=str(d["etag"]))
+
+
+@dataclass
+class DirectUpload:
+    """How to send a file's bytes straight to where they are kept, so they
+    never pass through the civex server (an S3 bucket: presigned URLs). One
+    `url` to PUT the whole file to with `headers`, or, for a big file, an
+    `upload_id` and a URL per part of `part_size` bytes (the last part
+    shorter); either way the uploader then tells the server it is complete
+    (`ObjectStore.complete_upload`). `expires_at` is unix time: after it the
+    URLs stop working and a fresh target must be asked for."""
+
+    url: str | None
+    headers: dict[str, str]
+    upload_id: str | None
+    part_size: int
+    parts: list[DirectPart]
+    expires_at: int
+
+    @property
+    def multipart(self) -> bool:
+        return self.upload_id is not None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "url": self.url,
+            "headers": dict(self.headers),
+            "upload_id": self.upload_id,
+            "part_size": self.part_size,
+            "parts": [p.to_dict() for p in self.parts],
+            "expires_at": self.expires_at,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> DirectUpload:
+        return cls(
+            url=d.get("url"),
+            headers={str(k): str(v) for k, v in (d.get("headers") or {}).items()},
+            upload_id=d.get("upload_id"),
+            part_size=int(d.get("part_size") or 0),
+            parts=[
+                DirectPart(number=int(p["number"]), url=str(p["url"]))
+                for p in d.get("parts") or []
+            ],
+            expires_at=int(d.get("expires_at") or 0),
+        )
+
+
 # Volume states. "online" is the only one that accepts writes.
 VOLUME_ONLINE = "online"
 VOLUME_OFFLINE = "offline"  # the path isn't there (drive not plugged in)

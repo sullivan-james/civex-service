@@ -66,7 +66,7 @@ from civex.domain.sync import (
 from civex.identity import local_actor
 from civex.repositories.protocols import (
     AuditRepository,
-    FileObjectStore,
+    ObjectStore,
     SyncRepository,
 )
 from civex.services.record_service import RecordService
@@ -176,7 +176,7 @@ class SyncService:
         repo: SyncRepository,
         applier: SyncApplier,
         audit: AuditRepository,
-        files: FileObjectStore,
+        files: ObjectStore,
         commit: Callable[[], None],
         make_transport: TransportFactory,
         records: RecordService,
@@ -932,9 +932,11 @@ class SyncService:
         on_bytes: Callable[[int], None] | None = None,
     ) -> bool:
         try:
-            path = self._files.object_path(sha)
-            with open(path, "rb") as f:
-                transport.upload_file(sha, _Counting(f, on_bytes), path.stat().st_size)
+            size = self._files.size_of(sha)
+            if size is None:
+                return False
+            with self._files.open(sha) as f:
+                transport.upload_file(sha, _Counting(f, on_bytes), size)
         except (FileNotFoundError, VolumeUnavailableError):
             return False
         report.files_sent += 1

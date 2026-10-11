@@ -1,4 +1,5 @@
 import { vi } from 'vitest'
+import { localFeatures } from '../../utils/features'
 
 export const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -81,13 +82,17 @@ type Answer =
 
 /** Stand-in for the server: `routes` maps an API path to what it answers (a
  * value, or a function of the request body and method, which may take its time);
- * every call is recorded, headers included. */
+ * every call is recorded, headers included. What the server offers
+ * (`/api/status/features`) is answered as a local civex and not recorded: the
+ * app asks it once at start, so it is no part of any flow's requests. */
 export function fakeServer(routes: Record<string, Answer>) {
   const calls: Call[] = []
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input), 'http://x').pathname
+      if (path === '/api/status/features' && !(path in routes))
+        return json({ features: [...localFeatures], all: {} })
       const body = JSON.parse(String(init?.body ?? '{}'))
       const method = init?.method ?? 'GET'
       const headers = Object.fromEntries(

@@ -54,7 +54,7 @@ from civex.domain.uniqueness import key_values
 from civex.repositories.protocols import (
     AuditRepository,
     DatasetRepository,
-    FileObjectStore,
+    ObjectStore,
     RecordRepository,
 )
 from civex.services.schema_service import SchemaResolver, SchemaService
@@ -497,7 +497,7 @@ class RecordService:
         schema_svc: SchemaService,
         dataset_repo: DatasetRepository,
         record_repo: RecordRepository,
-        file_store: FileObjectStore,
+        file_store: ObjectStore,
         job_svc: WorkflowJobService | None = None,
         audit_repo: AuditRepository | None = None,
     ) -> None:

@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from collections.abc import Iterator
 from typing import Any, Protocol
 
+from civex.domain import features
 from civex.domain import hlc
 
 # The wire formats this civex speaks. MAX goes up when what travels changes in a
@@ -27,6 +28,11 @@ PROTOCOL_MAX = 2
 # Optional features, by name, that a peer can look for in `Hello`. Adding one is
 # not a protocol change; an older peer just doesn't have it.
 CAPABILITIES: tuple[str, ...] = ("library",)
+# Files go straight between a device and the authority's storage (a bucket) by
+# presigned URL: `POST /files/{sha}/upload` answers where, `POST
+# /files/{sha}/complete` records it, and `GET /files/{sha}` answers 307. An
+# authority offers it when its host has the feature of the same name.
+DIRECT_FILES = features.DIRECT_FILES
 
 # The order a project's things must exist in: each refers to the ones before it.
 ENTITY_ORDER = ("schema", "field", "dataset", "view", "record")
