@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 
-from civex.config import load_config
-from civex.context import build_local_context
+from civex.config import Config, load_config
+from civex.context import AppContext, build_local_context
 from civex.domain.sync import SyncProgress
 from civex.services.sync_worker import SyncWorker
 
@@ -20,7 +21,16 @@ log = logging.getLogger(__name__)
 
 
 class SyncJobs:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        load_config: Callable[[], Config] = load_config,
+        open_context: Callable[[Config], AppContext] = build_local_context,
+    ) -> None:
+        # The project this host syncs for, read afresh each time (the remote
+        # may be set or cleared while the server runs), and how a context on
+        # it is opened: the cwd project for `civex serve`.
+        self._load_config = load_config
+        self._open_context = open_context
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -31,9 +41,7 @@ class SyncJobs:
         self.history_progress: SyncProgress | None = None
         # Why the last connect that ran here failed, until another starts.
         self.connect_error: str | None = None
-        self.worker = SyncWorker(
-            load_config, build_local_context, on_progress=self._history
-        )
+        self.worker = SyncWorker(load_config, open_context, on_progress=self._history)
 
     @property
     def progress(self) -> SyncProgress | None:
@@ -97,7 +105,7 @@ class SyncJobs:
             self._connecting.start()
 
     def _connect(self, url: str) -> None:
-        ctx = build_local_context(load_config())
+        ctx = self._open_context(self._load_config())
         try:
             ctx.sync_svc.connect(url, None, progress=self._copied)
             ctx.commit()

@@ -28,6 +28,7 @@ from civex.domain.exceptions import (
     ConflictMovedError,
     DatabaseTooNewError,
     DatabaseUnavailableError,
+    FeatureUnavailableError,
     GCAlreadyRunningError,
     NotFoundError,
     ValidationError,
@@ -121,6 +122,8 @@ def _status_for(exc: CivexError) -> int:
         return 422
     if isinstance(exc, ConfigError):
         return 400
+    if isinstance(exc, FeatureUnavailableError):
+        return 501
     if isinstance(exc, (AllVolumesFull, VolumeFullError)):
         return 507
     if isinstance(exc, (DatabaseUnavailableError, DatabaseTooNewError)):

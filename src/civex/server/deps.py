@@ -3,12 +3,16 @@ from __future__ import annotations
 import uuid
 from collections.abc import Generator
 
-from fastapi import Request
+from fastapi import Depends, Request
 from sqlalchemy.exc import OperationalError
 
 from civex.config import load_config
 from civex.context import AppContext, build_context
-from civex.domain.exceptions import DatabaseUnavailableError
+from civex.domain.exceptions import (
+    ConfigError,
+    DatabaseUnavailableError,
+    FeatureUnavailableError,
+)
 from civex.project import Project
 
 
@@ -120,6 +124,25 @@ def current_project(request: Request) -> Project:
         project = resolve(request)
         request.state.project = project
     return project
+
+
+def requires(feature: str):  # noqa: ANN201 - a FastAPI dependency marker
+    """`dependencies=[requires(VOLUMES)]` on a route or router: 501 with a
+    plain-words detail when the project's host doesn't offer the feature
+    (`domain.features`). The one way a route says what it needs; the host's
+    router list (`app.api_routers`) is the same answer at include time."""
+
+    def check(request: Request) -> None:
+        try:
+            project = current_project(request)
+        except ConfigError:
+            # No project here: the route says so in its own way, as it did
+            # before anything asked about features.
+            return
+        if feature not in project.features:
+            raise FeatureUnavailableError(feature)
+
+    return Depends(check)
 
 
 def get_ctx(request: Request) -> Generator[AppContext, None, None]:

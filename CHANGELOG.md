@@ -31,6 +31,13 @@ from the next tag forward.
   saves settings through its `ConfigStore` rather than writing `config.toml`.
   Nothing changes for a project in a folder; this is the seam a hosted civex
   builds on.
+- What a server does is said once (`domain/features.py`): `GET
+  /api/status/features` lists it, a host that does less leaves those routers
+  out and answers 501 in plain words on what is left, and the app hides the
+  matching nav items and Settings sections. The server's background hosts
+  (history conversion, file moves, sync, run drains) open their contexts
+  through a factory, so a host serving many projects can run them per project.
+  A project in a folder offers everything it did.
 
 ## v2.0.0 — syncing between machines, updates from the app (2026-10-07)
 

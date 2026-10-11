@@ -4,7 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 
-from civex.context import AppContext
+from civex.context import AppContext, context_factory
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.query import RecordQuery
 from civex.server.background import run_pending_jobs
@@ -183,7 +183,7 @@ def create_record(
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
     ctx.commit()
-    background_tasks.add_task(run_pending_jobs)
+    background_tasks.add_task(run_pending_jobs, context_factory(ctx.project))
     return RecordResponse.from_dto(dto)
 
 
@@ -350,7 +350,7 @@ def update_record(
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
     ctx.commit()
-    background_tasks.add_task(run_pending_jobs)
+    background_tasks.add_task(run_pending_jobs, context_factory(ctx.project))
     return RecordResponse.from_dto(dto)
 
 

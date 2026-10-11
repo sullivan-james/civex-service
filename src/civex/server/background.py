@@ -3,6 +3,10 @@ from __future__ import annotations
 import contextlib
 import io
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from civex.context import ContextFactory
 
 log = logging.getLogger(__name__)
 
@@ -44,10 +48,15 @@ def _capture_output():
         root.setLevel(prev_level)
 
 
-def run_pending_jobs() -> None:
-    """Drain the job queue. Safe to call as a FastAPI BackgroundTask."""
-    from civex.config import ConfigError, load_config
-    from civex.context import build_local_context
+def run_pending_jobs(make_context: ContextFactory | None = None) -> None:
+    """Drain the job queue of the project `make_context` opens (the one in the
+    current directory when None). Safe to call as a FastAPI BackgroundTask;
+    a route passes `context_factory(ctx.project)` so the drain works on the
+    project the request was about. Nothing runs where the host doesn't run
+    workflows (`LOCAL_WORKFLOWS`)."""
+    from civex.config import ConfigError
+    from civex.context import local_context
+    from civex.domain.features import LOCAL_WORKFLOWS
     from civex.domain.dtos import ErrorEnvelope
     from civex.domain.exceptions import JobCancelled, NotFoundError
     from civex.plugins import registry as plugin_registry
@@ -55,11 +64,12 @@ def run_pending_jobs() -> None:
     from civex.workflows import executor
 
     try:
-        config = load_config()
+        ctx = (make_context or local_context)()
     except ConfigError:
         return
-
-    ctx = build_local_context(config)
+    if LOCAL_WORKFLOWS not in ctx.features:
+        ctx.close()
+        return
     try:
         while True:
             job = ctx.job_svc.claim_pending()
@@ -76,7 +86,9 @@ def run_pending_jobs() -> None:
                     # log.warning() -- which file failed and why -- lands in
                     # this job's log instead of vanishing into the process's
                     # own stderr (CIVEX-112).
-                    plugin_registry.discover_user_plugins(config.civex_dir / "plugins")
+                    plugin_registry.discover_user_plugins(
+                        ctx.config.civex_dir / "plugins"
+                    )
                     plugins = plugin_registry.all_plugins()
                     wf_def = ctx.job_svc.find_workflow(job.workflow_name)
                     if wf_def is None:
@@ -109,7 +121,7 @@ def run_pending_jobs() -> None:
                             wf_ctx,
                             plugins,
                             initial_outputs=initial_outputs,
-                            default_timeout_seconds=config.plugins.default_timeout_seconds,
+                            default_timeout_seconds=ctx.config.plugins.default_timeout_seconds,
                             should_stop=lambda: ctx.job_svc.should_stop(job.id),
                         )
             except Exception as e:

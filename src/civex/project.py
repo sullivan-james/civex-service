@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from civex.config import Config, ConfigStore, FileConfigStore
+from civex.domain.features import LOCAL_FEATURES
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
@@ -38,6 +39,9 @@ class Project:
     device_id: uuid.UUID | None = None
     engine: Engine | None = None
     migrated: bool = False
+    # What the host offers for this project (`domain.features`): a project in
+    # a folder on this machine gets everything a machine can do.
+    features: frozenset[str] = LOCAL_FEATURES
 
     @classmethod
     def local(cls, config: Config) -> Project:

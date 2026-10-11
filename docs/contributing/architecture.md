@@ -36,6 +36,8 @@ These rules exist so a layer's implementation can change — a different reposit
 
 Settings are saved only through `ctx.config_store` (`ConfigStore`: `load`, `save`, and `flag` for the booleans asked on every request). `FileConfigStore` is `config.toml`; `parse_config` and `render_config` are its pure text form, so a host that keeps a project's settings elsewhere parses and renders the same text. A service never calls `save_config` itself; the database-admin paths (`db_service`, `db_move_service`) and the CLI are the exception, being the local host by definition.
 
+What a server does is said once, in `domain/features.py`: a `Project` carries the features its host offers (everything a machine does, by default), `server/app.api_routers(features)` is the one router list every host includes from, `deps.requires(feature)` makes a route inside a shared router answer 501 in plain words, and `GET /api/status/features` tells the frontend what to hide. The background hosts (`history_jobs`, `transfer_jobs`, `sync_jobs`, `background.run_pending_jobs`) open contexts through a factory they are given, defaulting to the project in the current directory.
+
 A command or route handler never constructs a repository or service directly — it asks `AppContext` for one, keeping the wiring in one file instead of scattered across every CLI command and router.
 
 ## Data model

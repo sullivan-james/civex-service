@@ -10,8 +10,7 @@ import logging
 import threading
 from dataclasses import dataclass
 
-from civex.config import load_config
-from civex.context import build_local_context
+from civex.context import ContextFactory, local_context
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +28,11 @@ class CompactionProgress:
 
 
 class HistoryJobs:
-    def __init__(self) -> None:
+    def __init__(self, make_context: ContextFactory = local_context) -> None:
+        # Opens a context on the project this host serves: the one in the
+        # current directory for `civex serve`, whichever project a host that
+        # serves many hands it.
+        self._make_context = make_context
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -59,7 +62,7 @@ class HistoryJobs:
 
     def _run(self) -> None:
         try:
-            ctx = build_local_context(load_config())
+            ctx = self._make_context()
         except Exception as e:  # noqa: BLE001 - no project to convert: nothing to do
             log.debug("history conversion not started: %s", e)
             return

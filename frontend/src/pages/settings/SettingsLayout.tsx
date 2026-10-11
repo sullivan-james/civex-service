@@ -1,6 +1,8 @@
 import { Suspense } from 'react'
 import { Outlet, useLocation, useSearchParams } from 'react-router'
 import { InfoTip, Page, Skeleton, TabNav } from '../../components/ui'
+import { useFeatures } from '../../hooks/useFeatures'
+import { offered } from '../../utils/features'
 
 /** Settings is a set of pages, one per area, each with its own address
  * (`/settings/storage`), so a section can be linked to and none has to share a
@@ -13,11 +15,13 @@ const settingsSections = [
   },
   {
     to: 'database',
+    feature: 'db_admin',
     label: 'Database',
     info: 'Where this project’s records are stored. You can move them to another kind of database at any time; your original is kept.',
   },
   {
     to: 'storage',
+    feature: 'volumes',
     label: 'Storage',
     info: 'Where Civex keeps your files, and which collections use which volume.',
   },
@@ -38,11 +42,13 @@ const settingsSections = [
   },
   {
     to: 'updates',
+    feature: 'updates',
     label: 'Updates',
     info: 'Which version of civex this is, and updating it. An update closes civex, installs the new version and starts it again.',
   },
   {
     to: 'logs',
+    feature: 'logs',
     label: 'Logs',
     info: 'Every log civex keeps on this computer: this project’s server, the desktop app and its launcher, and updates. Anything that mentions a log links here.',
   },
@@ -51,7 +57,12 @@ const settingsSections = [
     label: 'Advanced',
     info: 'Power-user surfaces: the terminal, raw YAML workflow editing and the plugin editors.',
   },
-] as const
+] as const satisfies readonly {
+  to: string
+  label: string
+  info: string
+  feature?: string
+}[]
 
 /** The tabs inside Settings > Storage, by their address (`?tab=`). */
 const STORAGE_TABS: Record<string, string> = {
@@ -64,6 +75,8 @@ const STORAGE_TABS: Record<string, string> = {
 export default function SettingsLayout() {
   const { pathname } = useLocation()
   const [params] = useSearchParams()
+  const features = useFeatures()
+  const sections = settingsSections.filter((s) => offered(features, s))
   const current = settingsSections.find((s) => pathname.split('/')[2] === s.to)
   // The tab says which area, and for Storage which of its tabs.
   const storageTab =
@@ -80,7 +93,7 @@ export default function SettingsLayout() {
           <TabNav
             label="Settings sections"
             orientation="vertical"
-            tabs={settingsSections.map((section) => ({
+            tabs={sections.map((section) => ({
               id: section.to,
               label: section.label,
               to: section.to,

@@ -9,6 +9,8 @@ import {
   useState,
 } from 'react'
 import { NavLink } from 'react-router'
+import { useFeatures } from '../hooks/useFeatures'
+import { offered } from '../utils/features'
 import {
   Group,
   Panel,
@@ -96,6 +98,9 @@ function readCollapsed(): boolean {
 interface NavItemDef {
   to: string
   label: string
+  /** The server feature this item is part of (`utils/features`); shown only
+   * when the server offers it. */
+  feature?: string
   icon: ComponentType<{
     size?: number
     className?: string
@@ -133,15 +138,35 @@ const navGroups: NavGroupDef[] = [
   {
     heading: 'Automation',
     items: [
-      { to: '/workflows', label: 'Workflows', icon: Workflow },
-      { to: '/runs', label: 'Runs', icon: ListChecks },
+      {
+        to: '/workflows',
+        label: 'Workflows',
+        icon: Workflow,
+        feature: 'local_workflows',
+      },
+      {
+        to: '/runs',
+        label: 'Runs',
+        icon: ListChecks,
+        feature: 'local_workflows',
+      },
     ],
   },
   {
     heading: 'Advanced',
     items: [
-      { to: '/plugins', label: 'Plugins', icon: Puzzle },
-      { to: '/terminal', label: 'Terminal', icon: SquareTerminal },
+      {
+        to: '/plugins',
+        label: 'Plugins',
+        icon: Puzzle,
+        feature: 'plugin_editor',
+      },
+      {
+        to: '/terminal',
+        label: 'Terminal',
+        icon: SquareTerminal,
+        feature: 'terminal',
+      },
     ],
     secondary: true,
   },
@@ -245,9 +270,14 @@ function NavGroups({
   showAdvanced: boolean
   onNavigate?: () => void
 }) {
-  const groups = navGroups.filter(
-    (group) => showAdvanced || group.heading !== 'Advanced',
-  )
+  const features = useFeatures()
+  const groups = navGroups
+    .filter((group) => showAdvanced || group.heading !== 'Advanced')
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => offered(features, item)),
+    }))
+    .filter((group) => group.items.length > 0)
   return (
     <div className="flex flex-col">
       <PinnedNav collapsed={collapsed} onNavigate={onNavigate} />
@@ -320,6 +350,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const { data: uiSettings } = useUISettings()
   const showAdvanced = uiSettings?.show_advanced ?? false
+  const features = useFeatures()
 
   const aiSplitLayout = useDefaultLayout({
     id: 'civex-ai-split',
@@ -400,14 +431,16 @@ export default function Layout({ children }: { children: ReactNode }) {
 
         <SyncButton />
 
-        <Button
-          variant={aiOpen ? 'navActive' : 'nav'}
-          size="sm"
-          aria-pressed={aiOpen}
-          onClick={() => setAiOpen((o) => !o)}
-        >
-          <Sparkles size={14} /> Ask AI
-        </Button>
+        {offered(features, { feature: 'ai' }) && (
+          <Button
+            variant={aiOpen ? 'navActive' : 'nav'}
+            size="sm"
+            aria-pressed={aiOpen}
+            onClick={() => setAiOpen((o) => !o)}
+          >
+            <Sparkles size={14} /> Ask AI
+          </Button>
+        )}
 
         {isDesktop && (
           <>

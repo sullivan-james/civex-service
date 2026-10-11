@@ -7,7 +7,8 @@ from civex import launcher
 from civex.identity import choose_name, local_actor
 from civex.domain.exceptions import ConfigError
 from civex.project import Project
-from civex.server.deps import current_project
+from civex.domain.features import DESKTOP
+from civex.server.deps import current_project, requires
 from civex.server.models import (
     MapSettingsResponse,
     ShortcutResponse,
@@ -90,13 +91,17 @@ def _shortcut_state(root) -> ShortcutResponse:
     return ShortcutResponse(exists=path.exists(), path=str(path))
 
 
-@router.get("/shortcut", response_model=ShortcutResponse)
+@router.get(
+    "/shortcut", response_model=ShortcutResponse, dependencies=[requires(DESKTOP)]
+)
 def get_shortcut(project: Project = Depends(current_project)):
     """Whether this project has a Desktop shortcut that starts civex."""
     return _shortcut_state(project.config.project_root)
 
 
-@router.post("/shortcut", response_model=ShortcutResponse)
+@router.post(
+    "/shortcut", response_model=ShortcutResponse, dependencies=[requires(DESKTOP)]
+)
 def create_shortcut(project: Project = Depends(current_project)):
     """Put a Desktop shortcut that starts civex for this project and opens it
     in the browser. Runs on the machine civex runs on."""

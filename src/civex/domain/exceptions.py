@@ -37,6 +37,18 @@ class AlreadyExistsError(CivexError):
     kind = "already_exists"
 
 
+class FeatureUnavailableError(CivexError):
+    """The server this request reached doesn't offer the feature the route is
+    part of (`domain.features`). Answered 501, never a 404: the route exists,
+    this host doesn't do it."""
+
+    def __init__(self, feature: str) -> None:
+        from civex.domain.features import unavailable_message
+
+        self.feature = feature
+        super().__init__(unavailable_message(feature))
+
+
 class ValidationError(CivexError):
     kind = "validation_error"
 

@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Callable, Iterator
 
 from civex.domain.dtos import RecordUse
 from civex.config import Config, ConfigStore
@@ -125,6 +125,11 @@ class AppContext:
         """Where this project's settings are kept; the one way to save them."""
         return self.project.config_store
 
+    @property
+    def features(self) -> frozenset[str]:
+        """What this server does for this project (`domain.features`)."""
+        return self.project.features
+
     def commit(self) -> None:
         self._session.commit()
 
@@ -146,6 +151,25 @@ class AppContext:
             yield
         finally:
             nested.rollback()
+
+
+# How a background host opens a context when it needs one: a fresh session
+# each time, on whichever project the host serves.
+ContextFactory = Callable[[], "AppContext"]
+
+
+def local_context() -> AppContext:
+    """A context on the project in the current directory: what `civex serve`
+    and the CLI host. The one factory the server's background jobs default to."""
+    from civex.config import load_config
+
+    return build_local_context(load_config())
+
+
+def context_factory(project: Project) -> ContextFactory:
+    """A factory opening fresh contexts on `project`, for work that outlives
+    the request that asked for it (a run drained in the background)."""
+    return lambda: build_context(project)
 
 
 def build_local_context(
