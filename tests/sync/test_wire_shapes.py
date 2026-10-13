@@ -14,7 +14,7 @@ from civex.db.models import AuditLog
 from civex.domain.sync import ENTITY_ORDER, PROTOCOL_MAX, WIRE_FIELDS, SyncEntry
 from civex.repositories.local.sync_repo import _MODELS, _NOT_WRITTEN
 
-from .peers import build_study, new_id, principal
+from civex.testing.peers import build_study, new_id, principal
 
 # Carried for a collection beside its own columns: its schema list.
 NOT_COLUMNS = {"dataset": {"schema_ids", "schemas"}}

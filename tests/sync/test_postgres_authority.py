@@ -10,7 +10,6 @@ Each test makes a database of its own."""
 from __future__ import annotations
 
 import os
-import random
 import uuid
 
 import pytest
@@ -18,12 +17,11 @@ from sqlalchemy import create_engine, text
 
 from civex.config import load_config
 from civex.context import build_local_context
-from civex.domain.sync import SyncError
 from civex.project import scaffold_project
 
-from .peers import build_study, connect, device, flaky, snapshots
-from .test_convergence import differences, quiesce
-from .test_invariants import act, broken_rules, populate
+from civex.testing.peers import build_study, connect, device, snapshots
+from civex.testing.convergence import differences
+from civex.testing.invariants import scenario
 
 _SERVER = os.environ.get("CIVEX_TEST_POSTGRES_URL")
 pytestmark = [
@@ -95,37 +93,5 @@ def test_devices_and_a_postgresql_authority_agree(project, pg_authority):
 def test_random_changes_with_a_postgresql_authority_keep_the_rules(
     project, pg_authority, seed
 ):
-    rng = random.Random(f"invariants-{seed}")
-    first = device(project, pg_authority, "d1", flaky=True)
-    populate(first)
-    connect(first)
-    devices = [first]
-    for name in ("d2", "d3"):
-        other = device(project, pg_authority, name, flaky=True)
-        connect(other)
-        devices.append(other)
-    quiesce(devices)
-    for step in range(40):
-        act(rng.choice(devices), rng, step)
-        if rng.random() < 0.35:
-            who = rng.choice(devices)
-            if rng.random() < 0.3:
-                flaky(who).fail(
-                    rng.choice(["push", "feed", "hello"]),
-                    rng.choice(["refuse", "lose_reply"]),
-                )
-            try:
-                who.sync_svc.sync()
-            except SyncError:
-                pass
-    quiesce(devices)
-    problems = [f"authority: {p}" for p in broken_rules(pg_authority)]
-    expected = snapshots(pg_authority)
-    for ctx in devices:
-        waiting = {str(c.entity_id)[:8] for c in ctx.sync_svc.conflicts()}
-        problems += [
-            d
-            for d in differences(expected, snapshots(ctx))
-            if d.split()[1].rstrip(":") not in waiting
-        ]
+    problems = scenario(project, pg_authority, seed)
     assert not problems, f"seed {seed}:\n" + "\n".join(problems[:20])

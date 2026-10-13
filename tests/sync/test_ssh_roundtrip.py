@@ -17,8 +17,8 @@ from civex.project_host import FILE
 from civex.services import ssh_tunnel
 from civex.services.ssh_tunnel import SshAddress
 
-from .peers import snapshots
-from .test_convergence import populate
+from civex.testing.peers import snapshots
+from civex.testing.convergence import populate
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="the far end of ssh:// is a Unix machine"

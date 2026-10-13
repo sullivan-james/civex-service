@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from .peers import connect, device, snapshots
+from civex.testing.peers import connect, device, snapshots
 
 
 # The real "a collection only holds records of its listed schemas" rule, which

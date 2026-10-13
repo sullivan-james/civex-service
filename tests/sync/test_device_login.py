@@ -12,7 +12,7 @@ from civex.domain.exceptions import ValidationError
 from civex.domain.sync import SyncError
 from civex.services.device_keys import DeviceKeys
 
-from .peers import AsDevice, Loopback, connect, device, device_uuid
+from civex.testing.peers import AsDevice, Loopback, connect, device, device_uuid
 
 
 def _asking(authority, name: str = "laptop"):
@@ -95,7 +95,7 @@ def test_a_device_connects_by_asking_and_waiting(project, authority):
     """The client's side: `connect` without an invite asks, shows the code,
     waits, and once approved joins and copies; connecting again later needs
     nothing, since this computer has joined that address."""
-    from .peers import build_study
+    from civex.testing.peers import build_study
 
     build_study(authority)
     laptop = device(project, authority, "laptop")

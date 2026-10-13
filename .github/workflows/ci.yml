@@ -72,6 +72,41 @@ jobs:
       - name: Run SDK tests
         run: uv run pytest civex-plugin-sdk/tests -q
 
+  postgres:
+    # An authority on PostgreSQL: the migrations' PostgreSQL parts, settling
+    # under its locking, the random sync scenarios, and copying a database
+    # to and from it. The same tests skip without CIVEX_TEST_POSTGRES_URL.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: civex
+          POSTGRES_PASSWORD: civex
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CIVEX_TEST_POSTGRES_URL: postgresql+psycopg2://civex:civex@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # tags version civex and civex-plugin-sdk
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install with dev extras
+        run: uv sync --extra server --extra workflows --extra dev
+
+      - name: Run the PostgreSQL tests
+        run: uv run pytest tests/sync/test_postgres_authority.py tests/db -q -n 2
+
   sdk-sync:
     # civex and civex-plugin-sdk release separately; these keep them in step.
     # See docs/contributing/sdk-release.md.

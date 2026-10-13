@@ -49,29 +49,39 @@ def test_a_device_reads_the_library_and_publishes_only_when_allowed(serving, ctx
 
     ctx.device_keys.allow_publish("laptop", True)
     ctx.commit()
-    taken = client.post("/api/sync/v1/library", json={"items": [_item()]}, headers=headers)
+    taken = client.post(
+        "/api/sync/v1/library", json={"items": [_item()]}, headers=headers
+    )
     assert taken.status_code == 200
     [listed] = taken.json()["items"]
     assert listed["published_by"] == "laptop" and "content" not in listed
 
     one = client.get("/api/sync/v1/library/workflow/tidy", headers=headers).json()
     assert one["content"] == _WORKFLOW
-    assert client.get(
-        "/api/sync/v1/library/workflow/nope", headers=headers
-    ).status_code == 404
+    assert (
+        client.get("/api/sync/v1/library/workflow/nope", headers=headers).status_code
+        == 404
+    )
 
     # Plugins are code: not taken until the admin says so.
-    plugin = _item("plugin", "step", "class Plugin:\n    pass\n", provides="project.step")
-    reply = client.post("/api/sync/v1/library", json={"items": [plugin]}, headers=headers)
+    plugin = _item(
+        "plugin", "step", "class Plugin:\n    pass\n", provides="project.step"
+    )
+    reply = client.post(
+        "/api/sync/v1/library", json={"items": [plugin]}, headers=headers
+    )
     assert reply.status_code == 403
 
     damaged = _item() | {"sha256": "0" * 64}
-    reply = client.post("/api/sync/v1/library", json={"items": [damaged]}, headers=headers)
+    reply = client.post(
+        "/api/sync/v1/library", json={"items": [damaged]}, headers=headers
+    )
     assert reply.status_code == 422
 
-    assert client.delete(
-        "/api/sync/v1/library/workflow/tidy", headers=headers
-    ).status_code == 204
+    assert (
+        client.delete("/api/sync/v1/library/workflow/tidy", headers=headers).status_code
+        == 204
+    )
 
 
 def test_the_library_needs_a_signed_in_device_on_a_serving_server(client, serving):
@@ -90,7 +100,10 @@ def test_the_authority_admin_sets_what_the_library_takes_and_who_publishes(
     reply = client.patch("/api/remote/authority", json={"library": "all"})
     assert reply.status_code == 200 and reply.json()["library"] == "all"
     assert load_config().sync.library == "all"
-    assert client.patch("/api/remote/authority", json={"library": "lots"}).status_code == 422
+    assert (
+        client.patch("/api/remote/authority", json={"library": "lots"}).status_code
+        == 422
+    )
 
     reply = client.post(
         "/api/remote/authority/devices/laptop/publish", json={"allowed": True}

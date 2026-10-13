@@ -109,6 +109,49 @@ duplicate — regressions there are the most cross-cutting.
 `--cov-fail-under` to match, and add a `frontend-test` CI job running
 `npm run test` in `frontend/`.
 
+## The sync harness is shipped: `civex.testing`
+
+What proves an authority correct lives in the package, not only in `tests/`,
+so a host that embeds civex (a hosted service serving many projects) runs the
+same scenarios with **its** app as the authority. Parity is then a test.
+
+```python
+from civex.testing import Projects, device, connect
+from civex.testing.convergence import scenario as converge
+from civex.testing.invariants import scenario as hold_the_rules
+
+projects = Projects(tmp_path)                 # project("laptop") -> a context
+authority = build_context(my_project)         # built however the host builds one
+assert converge(projects, authority, seed=1) == []
+assert hold_the_rules(projects, authority, seed=1) == []
+```
+
+- `device(project, authority, name)` makes a project that syncs to the
+  authority over an in-process loopback carrying the real JSON both ways;
+  `Flaky` drops replies on purpose. `connect`, `follow`, `push`, `snapshots`
+  and `build_study` are the rest of the vocabulary.
+- The two scenarios run three flaky devices through random changes and random
+  syncs and return every problem found, in plain words. A seed replays one.
+- `serve(app)` runs an app under uvicorn on a free port for the real HTTP
+  transport; `fake_s3.FakeS3` stands in for a bucket.
+
+Nothing in it imports pytest. `tests/sync/conftest.py` shows the fixtures
+civex's own suite wraps it in (one `CIVEX_USER_STATE` file per test, since
+device keys are kept per user).
+
+## PostgreSQL
+
+An authority on PostgreSQL is tested by `tests/sync/test_postgres_authority.py`
+and the database tests, which skip unless `CIVEX_TEST_POSTGRES_URL` names a
+server they may create throwaway databases on. CI runs them against a
+`postgres:16` service (`make test-postgres` locally, with your own server or a
+container):
+
+```bash
+docker run --rm -d -p 5432:5432 -e POSTGRES_USER=civex -e POSTGRES_PASSWORD=civex postgres:16
+CIVEX_TEST_POSTGRES_URL=postgresql+psycopg2://civex:civex@127.0.0.1:5432/postgres make test-postgres
+```
+
 ## Running tests
 
 ```bash

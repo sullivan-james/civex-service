@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-from fake_s3 import FakeS3
+from civex.testing.fake_s3 import FakeS3
 from fastapi.testclient import TestClient
 
 from civex.config import (

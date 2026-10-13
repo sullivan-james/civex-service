@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from civex.domain.sync import PROTOCOL_MAX
-from .peers import (
+from civex.testing.peers import (
     by_status,
     device_uuid,
     join,
@@ -61,7 +61,7 @@ def test_sending_the_same_changes_twice_does_nothing_more(project):
     laptop.schema_svc.create("thing")
     laptop.commit()
     from civex.domain.sync import SyncEntry
-    from .peers import wire
+    from civex.testing.peers import wire
 
     entries = [
         SyncEntry.from_dict(wire(e.to_dict()))
@@ -298,7 +298,7 @@ def test_a_joining_device_reads_each_kind_in_pages_with_the_head_taken_first(wor
 
 def _pending(device):
     from civex.domain.sync import SyncEntry
-    from .peers import wire
+    from civex.testing.peers import wire
 
     return [
         SyncEntry.from_dict(wire(e.to_dict()))

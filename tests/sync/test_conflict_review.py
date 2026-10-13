@@ -107,7 +107,7 @@ def test_a_value_of_your_own_can_be_put_back_instead(pair):
 def test_a_value_the_record_would_refuse_is_refused_and_the_conflict_stays_open(
     project, authority
 ):
-    from .peers import build_study, connect, device
+    from civex.testing.peers import build_study, connect, device
 
     laptop = device(project, authority, "laptop")
     record = build_study(laptop)

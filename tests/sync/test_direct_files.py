@@ -8,15 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import os
-import socket
-import threading
-import time
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-import uvicorn
-from fake_s3 import FakeS3
+from civex.testing.fake_s3 import FakeS3
 
 from civex.config import load_config_at
 from civex.context import build_local_context
@@ -25,7 +21,7 @@ from civex.project import scaffold_project
 from civex.repositories.local import inventory
 from civex.repositories.s3 import store as s3_module
 
-from .peers import build_study, principal
+from civex.testing import build_study, principal, serve
 
 
 def _authority(tmp_path: Path, fake: FakeS3, direct: bool = True):
@@ -62,23 +58,10 @@ def server(request, bucket: FakeS3, tmp_path: Path):
 
     from civex.server.app import create_app
 
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
-    uv = uvicorn.Server(
-        uvicorn.Config(create_app(), host="127.0.0.1", port=port, log_level="error")
-    )
-    thread = threading.Thread(target=uv.run, daemon=True)
-    thread.start()
-    for _ in range(100):
-        if uv.started:
-            break
-        time.sleep(0.05)
     try:
-        yield f"http://127.0.0.1:{port}", (invite, invite2), authority, request.param
+        with serve(create_app()) as url:
+            yield url, (invite, invite2), authority, request.param
     finally:
-        uv.should_exit = True
-        thread.join(timeout=5)
         authority.close()
         os.chdir(previous)
 

@@ -1,4 +1,4 @@
-.PHONY: install install-all lock lint lint-check format format-check typecheck test test-fast secrets audit migrations-check check check-all check-fast check-fast-all pre-commit serve dev docs docs-build clean frontend-install frontend-lint frontend-lint-check frontend-format frontend-format-check frontend-build frontend-test
+.PHONY: install install-all lock lint lint-check format format-check typecheck test test-fast test-postgres secrets audit migrations-check check check-all check-fast check-fast-all pre-commit serve dev docs docs-build clean frontend-install frontend-lint frontend-lint-check frontend-format frontend-format-check frontend-build frontend-test
 
 install: ## Sync the dev environment (server + workflows + dev + docs extras)
 	uv sync --extra server --extra workflows --extra dev --extra docs
@@ -45,6 +45,12 @@ test: ## Run the test suite with coverage
 # keeps coverage (CI consumes the report) and only `check-fast` drops it.
 test-fast: ## Test suite without coverage — for tight iteration loops
 	uv run pytest tests/ -q -n $(PYTEST_JOBS)
+
+# CI's `postgres` job. Needs a server it may create databases on, named by
+# CIVEX_TEST_POSTGRES_URL (e.g. postgresql+psycopg2://civex:civex@127.0.0.1:5432/postgres,
+# a throwaway container); the tests skip without it, so `check` can't require it.
+test-postgres: ## The tests that need a PostgreSQL server (CIVEX_TEST_POSTGRES_URL)
+	uv run pytest tests/sync/test_postgres_authority.py tests/db -q -n 2
 
 secrets: ## Scan the repo (working tree + history) for leaked secrets
 	@command -v gitleaks >/dev/null 2>&1 || { echo "gitleaks not found — install via 'brew install gitleaks' or https://github.com/gitleaks/gitleaks#installing"; exit 1; }

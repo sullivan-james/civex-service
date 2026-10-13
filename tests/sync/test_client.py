@@ -8,7 +8,7 @@ import pytest
 
 from civex.domain.sync import SyncError
 
-from .peers import build_study, connect, device, flaky, follow, snapshots
+from civex.testing.peers import build_study, connect, device, flaky, follow, snapshots
 
 
 def data(ctx, record):

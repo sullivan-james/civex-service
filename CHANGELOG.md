@@ -62,6 +62,10 @@ from the next tag forward.
   (or Settings → Sync → *Asking to join*) lets it in, `deny` turns it away, and
   a code nobody approves in 15 minutes lapses. Invites still work. Migration
   `c1e8f4a2b7d3` adds the table of requests.
+- For developers: the sync test harness ships as `civex.testing` (devices
+  against an authority over a loopback, the convergence and invariants
+  scenarios, a test server, a fake bucket), so a host that embeds civex can
+  prove its own authority with civex's tests. CI gains a PostgreSQL job.
 - **What a person may do** is now one concept (`domain/permissions.py`: read,
   write records, change the structure, add files, delete, manage members, each
   everywhere or in named collections). A project in a folder allows everything,

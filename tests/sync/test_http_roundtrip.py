@@ -4,23 +4,19 @@ tests can't show (headers, status mapping, file upload and download)."""
 from __future__ import annotations
 
 import os
-import socket
-import threading
-import time
 from dataclasses import replace
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-import uvicorn
 
 from civex import keys
 from civex.config import load_config, save_config
 from civex.domain.sync import SyncError, session_answer
 from civex.services.device_keys import DeviceKeys
 
-from .peers import snapshots
-from .test_convergence import populate
+from civex.testing import serve, snapshots
+from civex.testing.convergence import populate
 
 
 @pytest.fixture()
@@ -37,23 +33,10 @@ def server(project, tmp_path: Path) -> Iterator[tuple[str, str, object]]:
 
     from civex.server.app import create_app
 
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
-    uv = uvicorn.Server(
-        uvicorn.Config(create_app(), host="127.0.0.1", port=port, log_level="error")
-    )
-    thread = threading.Thread(target=uv.run, daemon=True)
-    thread.start()
-    for _ in range(100):
-        if uv.started:
-            break
-        time.sleep(0.05)
     try:
-        yield f"http://127.0.0.1:{port}", invite, authority
+        with serve(create_app()) as url:
+            yield url, invite, authority
     finally:
-        uv.should_exit = True
-        thread.join(timeout=5)
         os.chdir(previous)
 
 

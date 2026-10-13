@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import text
 
-from .peers import connect, device, snapshots
+from civex.testing.peers import connect, device, snapshots
 
 pytestmark = pytest.mark.usefixtures("strict_schema_lists")
 
@@ -113,7 +113,7 @@ def test_a_record_refused_while_filling_a_new_server_can_be_sent_again_and_fixed
 
 
 def test_following_another_server_forgets_the_old_ones_numbers(pair, project):
-    from .peers import follow
+    from civex.testing.peers import follow
 
     laptop, _, record = pair
     laptop.record_svc.update(str(record.id), {"site": "first", "depth": 1.0})

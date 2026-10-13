@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from civex.domain.sync import SENDING
 
-from .peers import build_study, connect, device
+from civex.testing.peers import build_study, connect, device
 
 
 def _with_file(ctx, record, content: bytes):
