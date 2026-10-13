@@ -725,3 +725,20 @@ def test_files_of_a_selection_are_listed_by_place_and_acted_on(
     assert already.status_code == 422
     nowhere = client.post("/api/file-access/free-up", json={"collection": "papers"})
     assert nowhere.status_code == 422  # follows no server
+
+
+def test_every_file_of_every_collection_is_listed_with_no_scope(
+    client, study, make_schema, make_collection, make_record
+) -> None:
+    study.add("s1", b"one")
+    make_schema("source", fields=[("doc", "file")])
+    make_collection("other")
+    ref = study.ctx.file_svc.store_bytes(b"two", "doc.txt").to_dict()
+    make_record("other", "source", {"doc": ref})
+
+    resp = client.post("/api/file-access/files", json={"below": True})
+    assert resp.status_code == 200, resp.text
+    assert sorted(i["filename"] for i in resp.json()["items"]) == [
+        "doc.txt",
+        "s1.txt",
+    ]

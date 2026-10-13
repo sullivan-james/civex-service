@@ -98,6 +98,50 @@ describe('FilesView', () => {
     )
   })
 
+  it('says which files the server has, lists those not sent, and offers Send now', async () => {
+    const calls = fakeServer({
+      '/api/file-access/files': {
+        ...LISTING,
+        server: [
+          { state: 'sent', files: 1, bytes: 512 },
+          { state: 'unsent', files: 1, bytes: 2048 },
+        ],
+        items: [file({ sent: false }), LISTING.items[1]],
+      },
+      '/api/schemas': [],
+      '/api/remote': {
+        configured: true,
+        serving: false,
+        files_progress: null,
+        files_waiting: { ready: 1, offline: [], missing: 0 },
+      },
+      '/api/remote/files/send': { requested: true },
+      '/api/store/volumes': [],
+    })
+    show()
+    expect(await screen.findByText('On the server · 1')).toBeInTheDocument()
+    const table = screen.getByRole('table')
+    expect(within(table).getByText('Not on the server yet')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByText('Not on the server yet · 1'))
+    await waitFor(() =>
+      expect(
+        calls.filter((c) => c.path === '/api/file-access/files').slice(-1)[0]
+          ?.body,
+      ).toMatchObject({ collection: 'hb', server: 'unsent' }),
+    )
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Send now' }),
+    )
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) => c.path === '/api/remote/files/send' && c.method === 'POST',
+        ),
+      ).toBe(true),
+    )
+  })
+
   it('downloads the ticked files that are only on the server', async () => {
     const calls = fakeServer({
       '/api/file-access/files': LISTING,

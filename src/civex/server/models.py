@@ -2517,6 +2517,11 @@ class FilePickRequest(FileSelectionRequest):
         "the server), `missing`, or the groups `here` (on a drive that can be read "
         "now) and `unreachable` (on one that can't).",
     )
+    server: str | None = Field(
+        default=None,
+        description="Only files the server has (`sent`) or hasn't (`unsent`: on a "
+        "drive here, not sent yet), while this project follows a server.",
+    )
     name: str | None = Field(
         default=None,
         description="Only files whose name, or whose record's name, contains this.",

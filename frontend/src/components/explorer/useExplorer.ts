@@ -98,8 +98,9 @@ export function useExplorer(scope: ExplorerScope) {
     : null
 
   // --- levels: schemas below the scope with records in it
+  // (No collection: every collection; a locked schema has no levels.)
   const { data: counts } = useRecordCounts(
-    scope.dataset ?? '',
+    scope.dataset ?? (scope.lockedSchema ? '' : null),
     rootId ? { within: rootId } : undefined,
   )
   const levels = useMemo<RailLevel[]>(() => {

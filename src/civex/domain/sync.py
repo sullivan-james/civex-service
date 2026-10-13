@@ -566,16 +566,14 @@ def parse_snapshot_cursor(cursor: str) -> tuple[str, str]:
 
 def not_on_server_yet(added_by: str | None) -> tuple[str, str]:
     """(reason, fix) for a file this computer hasn't got and the server hasn't
-    either: the computer that added it hasn't sent it yet. The one wording,
-    wherever it is said (opening it, downloading, an export)."""
-    if added_by:
-        return (
-            f"It is still only on '{added_by}'.",
-            "It arrives here once that computer syncs.",
-        )
+    either: nothing here can send it. Says which computer added it when that is
+    known (a fact; whether it still has the file is not known). The one wording,
+    wherever it is said (opening it, downloading, an export, the files list)."""
+    where = f" It was added on '{added_by}'." if added_by else ""
     return (
-        "It is still only on the computer that added it.",
-        "It arrives here once that computer syncs.",
+        f"It isn't on this computer, and the server hasn't got it.{where}",
+        "The computer that has it sends it when it syncs; if none has, attach "
+        "the file to the record again.",
     )
 
 

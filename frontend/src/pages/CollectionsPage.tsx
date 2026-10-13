@@ -14,12 +14,18 @@ import {
   MonoId,
   Page,
   DataTable,
+  TabNav,
+  TabPanel,
+  useTabParam,
 } from '../components/ui'
+import { RecordsExplorer } from '../components/explorer/RecordsExplorer'
 import { pluralise } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 import { dumpApi, type RestoreResult } from '../api/dump'
 import { CollectionScopeFields } from '../components/collections/CollectionScopeFields'
 import type { CollectionScope } from '../api/collections'
+
+const TABS = [{ id: 'list' }, { id: 'records' }] as const
 
 function CreateCollectionModal({ onClose }: { onClose: () => void }) {
   const create = useCreateCollection()
@@ -126,6 +132,9 @@ export default function CollectionsPage() {
   const [importError, setImportError] = useState<string | null>(null)
   const [importResult, setImportResult] = useState<RestoreResult | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // The collections, or every collection's records (and their files) in the
+  // one explorer, so the whole project can be searched and triaged at once.
+  const [tab, setTab] = useTabParam(TABS, 'list')
 
   async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -147,6 +156,17 @@ export default function CollectionsPage() {
   return (
     <Page
       title="Collections"
+      tabs={
+        <TabNav
+          label="Collections"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { id: 'list' as const, label: 'Collections' },
+            { id: 'records' as const, label: 'All records' },
+          ]}
+        />
+      }
       action={
         <Button variant="primary" onClick={() => setShowCreate(true)}>
           New collection
@@ -186,48 +206,54 @@ export default function CollectionsPage() {
         </p>
       )}
 
-      <DataTable
-        layout="auto"
-        columns={[
-          {
-            key: 'name',
-            header: 'Name',
-            render: (d) => <span className="font-medium">{d.name}</span>,
-          },
-          {
-            key: 'records',
-            header: 'Records',
-            render: (d) => (
-              <Badge variant={d.record_count > 0 ? 'success' : 'default'}>
-                {pluralise(d.record_count, 'record')}
-              </Badge>
-            ),
-          },
-          {
-            key: 'description',
-            header: 'Description',
-            className: 'text-fg-muted',
-            render: (d) => d.description ?? '',
-          },
-          {
-            key: 'id',
-            header: 'ID',
-            width: '7rem',
-            render: (d) => <MonoId id={d.id} />,
-          },
-        ]}
-        rows={data ?? []}
-        getRowId={(d) => d.id}
-        rowHref={(d) => `/collections/${d.id}`}
-        isLoading={isLoading}
-        error={error ? errorMessage(error) : undefined}
-        emptyTitle="No collections yet"
-        emptyAction={
-          <Button variant="primary" onClick={() => setShowCreate(true)}>
-            New collection
-          </Button>
-        }
-      />
+      <TabPanel id="list" value={tab}>
+        <DataTable
+          layout="auto"
+          columns={[
+            {
+              key: 'name',
+              header: 'Name',
+              render: (d) => <span className="font-medium">{d.name}</span>,
+            },
+            {
+              key: 'records',
+              header: 'Records',
+              render: (d) => (
+                <Badge variant={d.record_count > 0 ? 'success' : 'default'}>
+                  {pluralise(d.record_count, 'record')}
+                </Badge>
+              ),
+            },
+            {
+              key: 'description',
+              header: 'Description',
+              className: 'text-fg-muted',
+              render: (d) => d.description ?? '',
+            },
+            {
+              key: 'id',
+              header: 'ID',
+              width: '7rem',
+              render: (d) => <MonoId id={d.id} />,
+            },
+          ]}
+          rows={data ?? []}
+          getRowId={(d) => d.id}
+          rowHref={(d) => `/collections/${d.id}`}
+          isLoading={isLoading}
+          error={error ? errorMessage(error) : undefined}
+          emptyTitle="No collections yet"
+          emptyAction={
+            <Button variant="primary" onClick={() => setShowCreate(true)}>
+              New collection
+            </Button>
+          }
+        />
+      </TabPanel>
+
+      <TabPanel id="records" value={tab}>
+        <RecordsExplorer scopeLabel="All collections" />
+      </TabPanel>
     </Page>
   )
 }

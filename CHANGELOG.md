@@ -48,10 +48,19 @@ from the next tag forward.
 - **Files sync apart from records.** A sync, and filling an empty server, now
   send records only, so they take seconds whatever the files weigh; files go up
   and come down in the background on their own, with their own task in the
-  status bar. That task says why files haven't reached the server (going up, on
-  a drive that can't be read, or not on this computer at all) and offers **Send
-  now** only when some can go. `civex sync send` uploads them from the command
-  line.
+  status bar. That task counts only files this computer can send, says why they
+  haven't gone (going up, or on a drive that can't be read) and offers **Send
+  now** only when some can go; files that are on no drive here and that the
+  server said it hasn't got are a separate "missing" task, since nothing here
+  can send them (migration `d2f6a9c4e8b1` keeps what the server said it lacks).
+  `civex sync send` uploads them from the command line.
+- **Which files are on the server, in the files list.** A collection's (or a
+  record's) **Their files** filters by **On the server** / **Not on the server
+  yet**, marks each file not sent yet, and shows files going up live, with
+  **Send now**. A missing file says so, and which computer added it.
+- **Every collection in one view**: `/collections` has an **All records** tab,
+  the records explorer across every collection, with **Their files** listing
+  every file in the project (a filter or a record narrows it as usual).
 - **Choosing a bucket from the app or the CLI**: Settings → Storage → Tasks →
   **Use a bucket…**, or `civex store bucket check|set|show|clear`. The bucket is
   tried first (reached, written, read back, nothing else under the prefix), and

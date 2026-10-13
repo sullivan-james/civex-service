@@ -1016,6 +1016,21 @@ class ServerFile(Base):
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
 
 
+class ServerLack(Base):
+    """Device: a file the authority said it hasn't got, when last asked (it
+    answered that it lacks it, or a download found nothing there). With no copy
+    here either, nothing can send it: the file is missing, not merely waiting.
+    A file never asked about is in neither table (not known to be missing).
+    Removed when the authority confirms the file; cleared with `server_files`."""
+
+    __tablename__ = "server_lacks"
+
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    asked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+
+
 class SyncOp(Base):
     """Authority: a change a device sent, and what became of it. Seen again
     (the device never got the answer), it is answered from here and not done a

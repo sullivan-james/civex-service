@@ -115,9 +115,9 @@ class FilesWaitingResponse(BaseModel):
     offline: list[OfflineDriveFiles] = Field(
         description="Files only on drives that can't be read right now."
     )
-    not_here: int = Field(
-        description="Files not on this computer; a computer that holds them "
-        "must send them."
+    missing: int = Field(
+        description="Files on no drive here that the server said it hasn't got "
+        "either: nothing here can send them (not in `files_to_send`)."
     )
 
 
@@ -357,7 +357,7 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
                     OfflineDriveFiles(volume=v, files=n, reason=r)
                     for v, n, r in w.offline
                 ],
-                not_here=w.not_here,
+                missing=w.missing,
             )
             if (w := s.files_waiting)
             else None

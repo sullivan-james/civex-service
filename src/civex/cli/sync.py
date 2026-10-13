@@ -160,7 +160,15 @@ def now() -> None:
 
 
 def _files_owed(c) -> None:  # noqa: ANN001 — AppContext
-    owed = c.sync_svc.status().files_to_send
+    status = c.sync_svc.status()
+    owed = status.files_to_send
+    missing = status.files_waiting.missing if status.files_waiting else 0
+    if missing:
+        console.print(
+            f"[yellow]{missing} file(s) records cite are neither on this computer "
+            "nor on the server, so nothing can send them: `civex files list --on "
+            "missing` lists them.[/yellow]"
+        )
     if owed:
         console.print(
             f"[dim]{owed} file(s) aren't on the server yet: `civex sync send` "

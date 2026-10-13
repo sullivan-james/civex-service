@@ -174,7 +174,8 @@ class SyncStatus:
     serving: bool = False  # this project is itself an authority
     download_files: str = "all"
     files_to_fetch: int = 0  # files records here cite that no drive here holds
-    # Files records here cite that the authority hasn't said it holds yet.
+    # Files records here cite that the authority hasn't said it holds and a
+    # drive here has a copy of (readable or not): what goes up.
     files_to_send: int = 0
     # Why those haven't gone (`SyncService.files_waiting`), when there are any.
     files_waiting: FilesWaiting | None = None
@@ -184,12 +185,13 @@ class SyncStatus:
 class FilesWaiting:
     """Why files records here cite aren't on the server: what sending can
     move now, what is on a drive that can't be read (by drive, with its own
-    reason), and what isn't on this computer at all (the server hasn't got it
-    either: a computer that holds it must send it)."""
+    reason), and what is missing: on no drive here, and the server said it
+    hasn't got it either, so nothing here can send it (`files_to_send`
+    doesn't count those)."""
 
     ready: int = 0
     offline: list[tuple[str, int, str]] = field(default_factory=list)
-    not_here: int = 0
+    missing: int = 0
 
 
 class SyncService:
@@ -229,6 +231,9 @@ class SyncService:
 
     def status(self) -> SyncStatus:
         meta = self._repo.meta()
+        # Files the server hasn't got, and why (asked only when there are any).
+        owed = self._repo.count_unconfirmed() if self.fetches_files else 0
+        waiting = self.files_waiting() if owed else None
         return SyncStatus(
             configured=self.configured,
             remote=self._config.sync.remote,
@@ -246,9 +251,9 @@ class SyncService:
             download_files=self._config.sync.download_files,
             files_to_fetch=self.files_to_fetch(),
             files_to_send=(
-                owed := self._repo.count_unconfirmed() if self.fetches_files else 0
+                waiting.ready + sum(n for _, n, _ in waiting.offline) if waiting else 0
             ),
-            files_waiting=self.files_waiting() if owed else None,
+            files_waiting=waiting,
         )
 
     def files_waiting(self, limit: int = 5000) -> FilesWaiting:
@@ -258,9 +263,14 @@ class SyncService:
         waiting = FilesWaiting()
         status: dict[str, Any] = {}
         offline: dict[str, int] = {}
-        for _sha, volumes in self._repo.unconfirmed_copies(limit).items():
+        copies = self._repo.unconfirmed_copies(limit)
+        lacking = self._repo.server_lacks_of({s for s, v in copies.items() if not v})
+        for sha, volumes in copies.items():
             if not volumes:
-                waiting.not_here += 1
+                # Not here: missing once the server said it hasn't got it
+                # either, else not asked about yet (nothing to send from here
+                # whichever it is).
+                waiting.missing += sha in lacking
                 continue
             for v in volumes:
                 if v not in status:
@@ -975,6 +985,7 @@ class SyncService:
             page = shas[at : at + FILE_CHECK_PAGE]
             missing = set(transport.missing_files(page))
             self._repo.confirm_on_server(set(page) - missing)
+            self._repo.note_server_lacks(missing)
             lacking.extend(sha for sha in page if sha in missing)
         if not lacking:
             return
@@ -1007,12 +1018,16 @@ class SyncService:
             if seconds is not None and time.monotonic() - started >= seconds:
                 report.stopped = True
                 return
-            if self._upload(transport, sha, went):
+            why = self._upload(transport, sha, went)
+            if why is None:
                 self._repo.confirm_on_server([sha])
                 self._commit()  # each file's arrival is kept, whatever follows
                 report.sent += 1
-            elif sha not in report.owed:
-                report.owed.append(sha)
+                log.debug("sent file %s", sha[:12])
+            else:
+                if sha not in report.owed:
+                    report.owed.append(sha)
+                log.info("file %s not sent: %s", sha[:12], why)
             done += 1
             say(force=True)
 
@@ -1021,16 +1036,20 @@ class SyncService:
         transport: SyncTransport,
         sha: str,
         on_bytes: Callable[[int], None] | None = None,
-    ) -> bool:
+    ) -> str | None:
+        """Upload one file: None once it is sent, else why no copy here could
+        be read (a failure of the upload itself raises)."""
         try:
             size = self._files.size_of(sha)
             if size is None:
-                return False
+                return "it isn't on this computer"
             with self._files.open(sha) as f:
                 transport.upload_file(sha, _Counting(f, on_bytes), size)
-        except (FileNotFoundError, VolumeUnavailableError):
-            return False
-        return True
+        except VolumeUnavailableError as e:
+            return str(e)
+        except FileNotFoundError:
+            return "its copy here couldn't be read"
+        return None
 
     def _note(
         self,
@@ -1276,6 +1295,11 @@ class SyncService:
         follows one (an authority itself has nobody to fetch from)."""
         return self.configured and not self._config.sync.serve
 
+    def server_lacks(self, shas: set[str]) -> set[str]:
+        """Of these files, those the authority said it hasn't got when last
+        asked (none, when this project follows no authority)."""
+        return self._repo.server_lacks_of(shas) if self.fetches_files else set()
+
     def not_on_server(self, shas: set[str]) -> set[str]:
         """Of these files, those the authority hasn't said it holds (none,
         when this project follows no authority)."""
@@ -1421,7 +1445,7 @@ class SyncService:
 
     def not_here_reasons(self, shas: list[str]) -> dict[str, tuple[str, str]]:
         """(reason, fix) for each of these files the server hasn't got either:
-        where it still is (the computer that added it) and what brings it."""
+        which computer added it, when known, and what brings it."""
         return {
             sha: not_on_server_yet(who)
             for sha, who in self._repo.added_by(shas).items()
@@ -1495,6 +1519,7 @@ class SyncService:
                     chunks = transport.file_chunks(sha)
                 except FileNotFoundError:
                     report.absent.append(sha)
+                    self._repo.note_server_lacks([sha])
                     continue
                 # Straight onto the drive (the one asked for, when it is
                 # fetched to go there, else its collection's): each byte

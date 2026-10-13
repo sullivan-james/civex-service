@@ -290,6 +290,8 @@ export interface FilePick extends FileSelection {
   shas?: string[]
   /** Only files used by exactly one of these numbers of live records. */
   used_by?: number[]
+  /** Only files the server has, or hasn't (while following a server). */
+  server?: ServerState
 }
 
 export type PlaceKind = 'drive' | 'unreachable' | 'server' | 'missing'
@@ -322,6 +324,8 @@ export interface ListedFile {
   fix: string
   place: string
   place_kind: PlaceKind
+  /** Whether the server has it; null when the project follows no server. */
+  sent?: boolean | null
   /** Records not listed here that use the same file: moving it moves it for
    * them too. */
   others?: number
@@ -368,7 +372,12 @@ export interface FileListing {
   /** How many files are used by how many live records (before narrowing by
    * that): the "Used by" pick's choices. */
   sharing?: { records: number; files: number }[]
+  /** Every file by whether the server has it (empty when following none). */
+  server?: { state: ServerState; files: number; bytes: number }[]
 }
+
+/** Whether the server has a file: `unsent` is on a drive here, not sent yet. */
+export type ServerState = 'sent' | 'unsent'
 
 /** What a download from the server did. */
 export interface DownloadResult {

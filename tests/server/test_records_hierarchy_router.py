@@ -94,6 +94,18 @@ def test_counts_within_a_record(client: TestClient, seeded):
     assert resp.json() == {"recording": 2, "selection": 3}
 
 
+def test_counts_across_every_collection(client: TestClient, seeded):
+    _post(client, "/api/collections", {"name": "other", "schemas": ["encounter"]})
+    _post(
+        client,
+        "/api/collections/other/records",
+        {"schema_name": "encounter", "data": {"site": "Elsewhere"}},
+    )
+    resp = client.get("/api/records/counts")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"encounter": 2, "recording": 2, "selection": 3}
+
+
 def test_schema_wide_list_isnt_scoped_to_a_collection(client: TestClient, seeded):
     body = _list(client, url="/api/schemas/selection/records")
     assert body["total"] == 3

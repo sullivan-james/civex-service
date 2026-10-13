@@ -4,11 +4,17 @@ import type {
   FilePick,
   FileUse,
   FileSelection,
+  FileListing,
   ListedFile,
   PlaceSummary,
+  ServerState,
 } from '../../api/fileAccess'
 import { useListParams } from '../../hooks/useListParams'
-import { useFollowsServer } from '../../hooks/useRemote'
+import {
+  useFollowsServer,
+  useRemoteStatus,
+  useSendFilesNow,
+} from '../../hooks/useRemote'
 import { useSchemas } from '../../hooks/useSchemas'
 import { useQueryClient } from '@tanstack/react-query'
 import { useFileListing, useFreeUpFiles } from '../../hooks/useFileListing'
@@ -33,6 +39,8 @@ import {
   TriggerPopover,
   useToast,
 } from '../ui'
+import { ProgressBar } from '../ui/ProgressBar'
+import { describeSyncProgress } from '../../utils/syncProgress'
 import { downloadFiles, type FlowContext } from './fileFlows'
 import { MoveToDriveButton } from './MoveDialog'
 
@@ -54,7 +62,7 @@ export function FilesView({
   /** The explorer's search box: a file's name, or any record's it sits under. */
   search?: string
 }) {
-  const list = useListParams(NS, ['place', 'kind', 'used'], 50)
+  const list = useListParams(NS, ['place', 'kind', 'used', 'server'], 50)
   const { data: schemas = [] } = useSchemas()
   const followsServer = useFollowsServer()
   const [acting, setActing] = useState<'free' | null>(null)
@@ -77,6 +85,7 @@ export function FilesView({
     place: list.picks.place || undefined,
     name: search || undefined,
     used_by: chosenUses.length ? chosenUses : undefined,
+    server: (list.picks.server as ServerState) || undefined,
   }
   const order = list.sort
     ? `${list.sort.dir === 'desc' ? '-' : ''}${list.sort.field}`
@@ -151,8 +160,14 @@ export function FilesView({
             value={list.picks.place}
             onChange={(place) => list.set({ place: place || undefined })}
           />
+          <OnServer
+            counts={data?.server ?? []}
+            value={list.picks.server}
+            onChange={(server) => list.set({ server: server || undefined })}
+          />
         </div>
         <PlacesBar places={data?.summary ?? []} />
+        {followsServer && <Sending unsent={unsentOf(data)} />}
       </div>
 
       <SelectionBar
@@ -242,12 +257,22 @@ export function FilesView({
               header: 'Where',
               sortable: true,
               render: (f) => (
-                <PlaceStatus
-                  place={f.place}
-                  kind={f.place_kind}
-                  reason={f.reason}
-                  fix={f.fix}
-                />
+                <div className="flex flex-wrap items-center gap-x-2">
+                  <PlaceStatus
+                    place={f.place}
+                    kind={f.place_kind}
+                    reason={f.reason}
+                    fix={f.fix}
+                  />
+                  {f.sent === false && f.volume && (
+                    <span
+                      className="text-xs text-fg-muted"
+                      title="Other computers can’t open it until it is sent. It goes up in the background."
+                    >
+                      Not on the server yet
+                    </span>
+                  )}
+                </div>
               ),
             },
           ]}
@@ -448,6 +473,92 @@ function Places({
             : ''}
         </Chip>
       ))}
+    </div>
+  )
+}
+
+const SERVER_LABEL: Record<ServerState, string> = {
+  sent: 'On the server',
+  unsent: 'Not on the server yet',
+}
+
+/** Whether the server has the files, each a filter like a place: click one
+ * to list only those, click it again to list them all. Shown only while the
+ * project follows a server. A file on no drive here isn't counted: nothing
+ * here can send it, and the places say it is missing. */
+function OnServer({
+  counts,
+  value,
+  onChange,
+}: {
+  counts: NonNullable<FileListing['server']>
+  value: string
+  onChange: (state: string) => void
+}) {
+  if (counts.length === 0) return null
+  return (
+    <div
+      className="flex flex-wrap gap-2"
+      role="group"
+      aria-label="On the server"
+    >
+      {counts.map((c) => (
+        <Chip
+          key={c.state}
+          selected={value === c.state}
+          onClick={() => onChange(value === c.state ? '' : c.state)}
+        >
+          <StatusDot tone={c.state === 'sent' ? 'ok' : 'attention'} />
+          {SERVER_LABEL[c.state]} · {c.files.toLocaleString()}
+        </Chip>
+      ))}
+    </div>
+  )
+}
+
+function unsentOf(data: FileListing | undefined): number {
+  return data?.server?.find((c) => c.state === 'unsent')?.files ?? 0
+}
+
+/** Files going up to the server right now, with how far along (the same
+ * words and bar as the status bar), or, when some listed here aren't on the
+ * server and nothing is going, how many and **Send now** (when any of this
+ * project's can be read). Nothing otherwise. */
+function Sending({ unsent }: { unsent: number }) {
+  const { data } = useRemoteStatus()
+  const sendNow = useSendFilesNow()
+  const going = data?.files_progress
+  if (going) {
+    const text = describeSyncProgress(going)
+    return (
+      <div className="flex flex-wrap items-center gap-3 text-sm" role="status">
+        <span className="font-medium">{text.title}</span>
+        {text.fraction != null && (
+          <ProgressBar fraction={text.fraction} label={text.title} />
+        )}
+        <span className="text-fg-muted">{text.count}</span>
+      </div>
+    )
+  }
+  if (unsent === 0) return null
+  // Send now only does something for files on a drive that can be read.
+  const canGo = (data?.files_waiting?.ready ?? 0) > 0
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-sm">
+      <span className="text-fg-muted">
+        {unsent.toLocaleString()} file{unsent === 1 ? '' : 's'} here{' '}
+        {unsent === 1 ? 'isn’t' : 'aren’t'} on the server yet
+        {canGo ? '.' : ': the drive holding them can’t be read.'}
+      </span>
+      {canGo && (
+        <Button
+          size="sm"
+          disabled={sendNow.isPending}
+          onClick={() => sendNow.mutate()}
+        >
+          Send now
+        </Button>
+      )}
     </div>
   )
 }

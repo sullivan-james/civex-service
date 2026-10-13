@@ -162,6 +162,7 @@ def _add_sync_state(ctx: AppContext) -> None:
         message=None,
     )
     ctx.sync_repo.confirm_on_server(["ab" * 32])  # a file the server said it has
+    ctx.sync_repo.note_server_lacks(["cd" * 32])  # one it said it hasn't got
 
 
 def _add_storage_transfer(ctx: AppContext) -> None:

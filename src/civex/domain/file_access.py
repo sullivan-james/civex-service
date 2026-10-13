@@ -149,9 +149,12 @@ class FileItem:
     fix: str = ""
     # The file on disk right now (only filled when asked for).
     source: str | None = None
+    # Whether the server holds it (None: this project follows no server).
+    sent: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "sent": self.sent,
             "path": self.path,
             "sha256": self.sha256,
             "filename": self.filename,
@@ -175,6 +178,10 @@ PLACE_MISSING = "missing"  # on no drive this project knows, and no server
 # Filters that group places.
 PLACE_HERE = "here"  # on a drive of this computer that can be read now
 PLACE_UNREACHABLE = "unreachable"  # on a drive of this computer that can't
+# Whether the server has a file (only while following a server).
+PLACE_SENT = "sent"  # the server holds it
+PLACE_UNSENT = "unsent"  # on a drive here (readable or not), not on the server
+SERVER_STATES = (PLACE_SENT, PLACE_UNSENT)
 
 
 def place_of(item: FileItem) -> tuple[str, str]:
@@ -187,6 +194,17 @@ def place_of(item: FileItem) -> tuple[str, str]:
     if item.state == "remote":
         return PLACE_SERVER, "server"
     return PLACE_MISSING, "missing"
+
+
+def server_state(item: FileItem) -> str | None:
+    """Whether the server has a file: `sent`, `unsent` (on a drive here, so it
+    goes up once it can be read) or None (not following a server, or not here:
+    nothing here can send it, and `place_of` says where it is)."""
+    if item.sent is None:
+        return None
+    if item.sent:
+        return PLACE_SENT
+    return PLACE_UNSENT if item.volume else None
 
 
 def in_place(item: FileItem, wanted: str) -> bool:
@@ -245,6 +263,9 @@ class FileListing:
     items: list[FileItem]
     # How many files of each kind (file field): {field, files, bytes}.
     kinds: list[dict[str, Any]] = field(default_factory=list)
+    # Every file of the selection by whether the server has it
+    # (`server_state`: {state, files, bytes}); empty when following none.
+    server: list[dict[str, Any]] = field(default_factory=list)
     # For each listed file (by `copy_key`): the records here that use it
     # (each a FileItem: the record, the kind of file, where it sits)...
     uses: dict[str, list[FileItem]] = field(default_factory=dict)

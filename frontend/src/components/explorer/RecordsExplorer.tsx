@@ -621,9 +621,17 @@ export function RecordsExplorer({
             // The search box looks for files here (their names, and the
             // records they sit under), not for the records listed above them.
             // Inside a record, its own files are among "their files" too.
+            // With no record chosen and no filter, they are every file here
+            // (the collection's, or every collection's), whatever level the
+            // rail shows: a kind of record narrows only what is filtered.
             selection={{
               ...selectionFor(
-                { ...x.query, search: undefined },
+                {
+                  ...x.query,
+                  search: undefined,
+                  schema:
+                    x.query.within || x.filter ? x.query.schema : undefined,
+                },
                 dataset,
                 undefined,
                 undefined,
