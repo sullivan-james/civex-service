@@ -1,5 +1,10 @@
 import { useState } from 'react'
-import type { LibraryMode, SyncDevice, SyncInvite } from '../../api/remote'
+import type {
+  LibraryMode,
+  SyncDevice,
+  SyncInvite,
+  SyncLogin,
+} from '../../api/remote'
 import { useAuthority, useAuthorityActions } from '../../hooks/useRemote'
 import { errorMessage } from '../../lib/errors'
 import {
@@ -56,8 +61,12 @@ export function SyncServing() {
     revokeDevice,
     setLibrary,
     allowPublish,
+    approveLogin,
+    denyLogin,
   } = useAuthorityActions()
   const [name, setName] = useState('')
+  // The name typed for each device asking to join, by its code.
+  const [naming, setNaming] = useState<Record<string, string>>({})
   const [issued, setIssued] = useState<{ name: string; invite: string } | null>(
     null,
   )
@@ -69,7 +78,10 @@ export function SyncServing() {
     cancelInvite.error ??
     revokeDevice.error ??
     setLibrary.error ??
-    allowPublish.error
+    allowPublish.error ??
+    approveLogin.error ??
+    denyLogin.error
+  const logins = data.logins ?? []
   const devices: DataTableColumn<SyncDevice>[] = [
     ...DEVICES,
     {
@@ -92,7 +104,7 @@ export function SyncServing() {
   return (
     <Card
       title="Other devices following this project"
-      info="A device joins with an invite that works once, then signs in with a key that never leaves it."
+      info="A device joins with an invite that works once, or asks to join and shows a code for you to approve here; from then on it signs in with a key that never leaves it."
       action={
         <Button
           size="sm"
@@ -146,6 +158,60 @@ export function SyncServing() {
               onChange={(mode) => setLibrary.mutate(mode)}
             />
           </Field>
+        )}
+        {logins.length > 0 && (
+          <div className="space-y-2">
+            <p className="font-medium">Asking to join</p>
+            <p className="text-fg-muted">
+              A device connected without an invite and shows a code. Check the
+              code and key match what it shows, give it a name, and let it in.
+            </p>
+            <ul className="space-y-2">
+              {logins.map((r: SyncLogin) => (
+                <li
+                  key={r.code}
+                  className="flex flex-wrap items-end gap-2 rounded border border-border p-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <span className="font-mono text-base">{r.code}</span>
+                    <span className="ml-3 text-xs text-fg-muted">
+                      key <span className="font-mono">{r.fingerprint}</span>,
+                      asked {when(r.requested_at)}
+                    </span>
+                  </div>
+                  <Field label="Name it">
+                    <Input
+                      value={naming[r.code] ?? ''}
+                      placeholder="e.g. field laptop"
+                      onChange={(e) =>
+                        setNaming({ ...naming, [r.code]: e.target.value })
+                      }
+                    />
+                  </Field>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={!naming[r.code]?.trim() || approveLogin.isPending}
+                    onClick={() =>
+                      approveLogin.mutate({
+                        code: r.code,
+                        name: naming[r.code].trim(),
+                      })
+                    }
+                  >
+                    Let in
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={denyLogin.isPending}
+                    onClick={() => denyLogin.mutate(r.code)}
+                  >
+                    Deny
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
         {data.invites.length > 0 && (
           <DataTable

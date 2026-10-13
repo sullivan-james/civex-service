@@ -509,3 +509,37 @@ def test_a_policy_decides_what_a_caller_may_change(project, monkeypatch):
     assert by_status(result, "rejected")[0].message == (
         "laptop may not change collections"
     )
+
+
+def test_a_persons_permissions_are_the_policy_a_device_is_held_to(project, monkeypatch):
+    """A host builds the authority's context for the person a device belongs
+    to; their `Permissions` is the policy, so a device pushes only what its
+    person could do at a browser, judged per collection."""
+    from civex.domain.permissions import READ, WRITE_RECORDS, Permissions
+
+    authority, laptop = project("authority"), project("laptop")
+    laptop.schema_svc.create("sample")
+    mine = laptop.dataset_svc.create("mine", schemas=["sample"])
+    laptop.dataset_svc.create("theirs", schemas=["sample"])
+    laptop.commit()
+    assert set(statuses(push(authority, laptop, "laptop"))) == {"applied"}
+
+    monkeypatch.setattr(
+        authority.authority_svc,
+        "_policy",
+        Permissions.of(READ, WRITE_RECORDS, collections=[mine.id]),
+    )
+    laptop.record_svc.add("mine", "sample", {})
+    laptop.record_svc.add("theirs", "sample", {})
+    laptop.dataset_svc.update("theirs", description="renamed by a device")
+    laptop.commit()
+    result = push(authority, laptop, "laptop")
+    assert statuses(result) == ["applied", "rejected", "rejected"]
+    [record, collection] = [r.message for r in result.results if r.message]
+    assert record == (
+        "laptop may not add, change and restore records, and save filters and "
+        "exports here."
+    )
+    assert collection == (
+        "laptop may not change kinds of record, their fields and collections here."
+    )

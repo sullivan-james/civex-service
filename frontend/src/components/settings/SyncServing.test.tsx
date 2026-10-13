@@ -102,3 +102,42 @@ describe('SyncServing', () => {
     )
   })
 })
+
+describe('devices asking to join', () => {
+  it('lists the code and key, and lets one in by name or turns it away', async () => {
+    authority = {
+      serving: true,
+      fingerprint: 'K7QM-29XD',
+      devices: [],
+      invites: [],
+      logins: [
+        {
+          code: 'ABCD-2345',
+          fingerprint: 'AB12-CD34',
+          requested_at: '2026-10-12T10:00:00Z',
+          expires_at: '2026-10-12T10:15:00Z',
+        },
+      ],
+    } as typeof authority
+    renderCard()
+    expect(await screen.findByText('ABCD-2345')).toBeInTheDocument()
+    expect(screen.getByText('AB12-CD34')).toBeInTheDocument()
+    const letIn = screen.getByRole('button', { name: 'Let in' })
+    expect(letIn).toBeDisabled()
+    await userEvent.type(screen.getByLabelText('Name it'), 'field laptop')
+    await userEvent.click(letIn)
+    await waitFor(() =>
+      expect(
+        calls.find(
+          (c) => c.path === '/api/remote/authority/logins/ABCD-2345/approve',
+        )?.body,
+      ).toEqual({ name: 'field laptop' }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Deny' }))
+    await waitFor(() =>
+      expect(calls.map((c) => c.path)).toContain(
+        '/api/remote/authority/logins/ABCD-2345/deny',
+      ),
+    )
+  })
+})

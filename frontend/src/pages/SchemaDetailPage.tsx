@@ -1,3 +1,4 @@
+import { usePermissions } from '../hooks/useMe'
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router'
 import { errorMessage } from '../lib/errors'
@@ -142,6 +143,7 @@ export default function SchemaDetailPage() {
   const [editing, setEditing] = useState(false)
   const [tab, setTab] = useTabParam<TabId>(TABS, 'fields')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const { can } = usePermissions()
 
   // Fetch by UUID — name changes don't affect the URL
   const { data: schema, isLoading, error } = useSchema(id!)
@@ -227,6 +229,7 @@ export default function SchemaDetailPage() {
           label: 'Delete schema…',
           variant: 'danger',
           onClick: () => setConfirmDelete(true),
+          disabled: !can('delete'),
         },
       ]}
       action={

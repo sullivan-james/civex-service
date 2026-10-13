@@ -135,6 +135,24 @@ function Copying({ s }: { s: RemoteStatus }) {
       </Card>
     )
   }
+  if (s.connecting && s.awaiting_approval)
+    return (
+      <Card title="Waiting to be let in">
+        <p className="text-sm">
+          This computer has asked to join. On the server, approve the code{' '}
+          <span className="font-mono text-base">
+            {s.awaiting_approval.code}
+          </span>{' '}
+          (Settings → Sync, or <code>civex sync device approve</code>). It works
+          until{' '}
+          {new Date(s.awaiting_approval.expires_at * 1000).toLocaleTimeString()}
+          .
+        </p>
+        <div className="mt-2">
+          <Spinner />
+        </div>
+      </Card>
+    )
   if (s.connecting)
     return (
       <Card title="Connecting to the server">

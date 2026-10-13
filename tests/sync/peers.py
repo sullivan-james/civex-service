@@ -121,6 +121,29 @@ class Loopback:
         self._credentials = replace(creds, authority_key=joined.authority_key)
         return joined
 
+    def request_login(self):
+        self.calls.append("request_login")
+        creds = self._credentials
+        started = self._authority.device_keys.request_login(
+            creds.device_id, keys.public_of(creds.private_key)
+        )
+        self._authority.commit()
+        from civex.domain.sync import LoginStarted
+
+        return LoginStarted.from_dict(wire(started.to_dict()))
+
+    def poll_login(self, device_code):
+        self.calls.append("poll_login")
+        joined = self._authority.device_keys.poll_login(device_code)
+        self._authority.commit()
+        if joined is None:
+            return None
+        joined = Joined.from_dict(wire(joined.to_dict()))
+        self._credentials = replace(
+            self._credentials, authority_key=joined.authority_key
+        )
+        return joined
+
     def _svc(self):
         svc = self._authority.authority_svc
         if self._token is not None:
@@ -201,7 +224,6 @@ class Loopback:
         self._svc()
         data = self._authority.file_svc.retrieve(sha256)  # FileNotFoundError
         return iter([data[i : i + 4096] for i in range(0, len(data), 4096)])
-
 
     # -- the library, answered as the peer API answers it ----------------
 

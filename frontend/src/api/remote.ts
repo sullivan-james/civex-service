@@ -32,6 +32,9 @@ export interface RemoteStatus {
   connecting: boolean
   /** Why the last connect started here failed. */
   connect_error: string | null
+  /** This computer asked to join and waits for a person to approve the code
+   * on the server. */
+  awaiting_approval: { code: string; expires_at: number } | null
 }
 
 export interface SyncDevice {
@@ -52,6 +55,16 @@ export interface SyncInvite {
   expires_at: string
 }
 
+/** A device asking to join without an invite, waiting to be approved. */
+export interface SyncLogin {
+  /** The code the device shows; approve or deny it by this. */
+  code: string
+  /** The device's key's short code, to compare with what the device shows. */
+  fingerprint: string
+  requested_at: string
+  expires_at: string
+}
+
 export interface Authority {
   serving: boolean
   /** This authority's key's short code; null until it first invites. */
@@ -59,6 +72,8 @@ export interface Authority {
   devices: SyncDevice[]
   /** Invites not used yet and not expired. */
   invites: SyncInvite[]
+  /** Devices asking to join, waiting for a person to approve. */
+  logins?: SyncLogin[]
   /** What devices allowed to publish may share: off, workflows, or all
    * (plugins too, which are code). */
   library: LibraryMode
@@ -318,6 +333,17 @@ export const remoteApi = {
       `/remote/authority/invites/${encodeURIComponent(name)}/cancel`,
       {},
     ),
+  /** Let in a device that asked to join, as `name`. */
+  approveLogin: ({ code, name }: { code: string; name: string }) =>
+    api.post<Authority>(
+      `/remote/authority/logins/${encodeURIComponent(code)}/approve`,
+      { name },
+    ),
+  denyLogin: (code: string) =>
+    api.post<Authority>(
+      `/remote/authority/logins/${encodeURIComponent(code)}/deny`,
+      {},
+    ),
   revokeDevice: (name: string) =>
     api.post<Authority>(
       `/remote/authority/devices/${encodeURIComponent(name)}/revoke`,
@@ -373,7 +399,10 @@ export const remoteApi = {
    * the background (see `progress`). Without an invite, this computer must
    * have joined that address before. */
   connect: (url: string, invite?: string) =>
-    api.post<{ mode: string }>('/remote/connect', { url, invite }),
+    api.post<{ mode: string; code: string | null; expires_at: number | null }>(
+      '/remote/connect',
+      { url, invite },
+    ),
   disconnect: () => api.post<RemoteStatus>('/remote/disconnect', {}),
   syncNow: () => api.post<{ requested: boolean }>('/remote/sync', {}),
   update: (body: {

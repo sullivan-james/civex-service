@@ -263,3 +263,16 @@ describe('copying from the server', () => {
     )
   })
 })
+
+describe('asking to join', () => {
+  it('shows the code to approve on the server while the connect waits', async () => {
+    status = {
+      ...status,
+      connecting: true,
+      awaiting_approval: { code: 'ABCD-2345', expires_at: 2_000_000_000 },
+    }
+    renderSection()
+    expect(await screen.findByText('Waiting to be let in')).toBeInTheDocument()
+    expect(screen.getByText('ABCD-2345')).toBeInTheDocument()
+  })
+})

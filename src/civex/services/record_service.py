@@ -6,8 +6,10 @@ import re
 import uuid
 from datetime import date as _date, datetime as _dt, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterable, Iterator
 
+from civex.domain import permissions
+from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.file_refs import without_file_locations
 from civex.domain.dtos import (
     OrphanDTO,
@@ -500,7 +502,11 @@ class RecordService:
         file_store: ObjectStore,
         job_svc: WorkflowJobService | None = None,
         audit_repo: AuditRepository | None = None,
+        permissions: Permissions = EVERYTHING,
     ) -> None:
+        # What the caller may do, asked per collection before a record is
+        # made, changed, restored or deleted (`domain.permissions`).
+        self._permissions = permissions
         self._schema_svc = schema_svc
         self._datasets = dataset_repo
         self._records = record_repo
@@ -513,6 +519,12 @@ class RecordService:
         self.not_on_server: Callable[[set[str]], set[str]] = lambda _: set()
         self._job_svc = job_svc
         self._audit = audit_repo
+
+    def _require_each(self, action: str, records: Iterable[Any]) -> None:
+        """`action` in every collection these records are in, before any of
+        them is touched: all or none."""
+        for dataset_id in {r.dataset_id for r in records}:
+            self._permissions.require(action, dataset_id)
 
     # ------------------------------------------------------------------
     # Field ID translation (name-keyed ↔ UUID-keyed record data)
@@ -1500,6 +1512,7 @@ class RecordService:
         dataset = self._datasets.get_by_name(dataset_name, with_count=False)
         if not dataset:
             raise NotFoundError(f"Dataset '{dataset_name}' not found")
+        self._permissions.require(permissions.WRITE_RECORDS, dataset.id)
 
         schema = self._schema_svc.get(schema_name)
         self._check_schema_allowed(dataset, schema)
@@ -1660,6 +1673,7 @@ class RecordService:
         raw = self._records.get_by_prefix(record_id)
         if not raw:
             raise NotFoundError(f"Record '{record_id}' not found")
+        self._permissions.require(permissions.WRITE_RECORDS, raw.dataset_id)
         # Apply field defaults before validation
         shapes = self._schema_svc.resolver()
         shape = shapes(raw.schema_id)
@@ -2487,8 +2501,9 @@ class RecordService:
             return 0
         every = [rid for level in levels for rid in level]
         doomed = set(every)
-        self._handle_referrers(doomed, force)
         records = self._records.list_by_ids(every)
+        self._require_each(permissions.DELETE, records)
+        self._handle_referrers(doomed, force)
         # One instant: it is the entries' time and what the records are stamped
         # with, so every device that applies these entries stamps them alike.
         stamp = _dt.now(timezone.utc)
@@ -2633,7 +2648,9 @@ class RecordService:
                 conflict.fields,
                 conflict.existing_name,
             )
-        before = {r.id: self._snapshot(r) for r in self._records.list_by_ids(every)}
+        rows = self._records.list_by_ids(every)
+        self._require_each(permissions.WRITE_RECORDS, rows)
+        before = {r.id: self._snapshot(r) for r in rows}
         self._records.restore_many(every)
         self._log_restored(every, before)
         return [self.get(str(i)) for i in every]
@@ -2857,7 +2874,9 @@ class RecordService:
             dict.fromkeys(rid for root in plan.ready for rid in plan.groups[root])
         )
         if every:
-            before = {r.id: self._snapshot(r) for r in self._records.list_by_ids(every)}
+            rows = self._records.list_by_ids(every)
+            self._require_each(permissions.WRITE_RECORDS, rows)
+            before = {r.id: self._snapshot(r) for r in rows}
             self._records.restore_many(every)
             self._log_restored(every, before)
         back = set(every)
@@ -2924,7 +2943,9 @@ class RecordService:
             ok -= held
         every = [rid for rid in coming if rid in ok]
         if every:
-            before = {r.id: self._snapshot(r) for r in self._records.list_by_ids(every)}
+            rows = self._records.list_by_ids(every)
+            self._require_each(permissions.WRITE_RECORDS, rows)
+            before = {r.id: self._snapshot(r) for r in rows}
             self._records.restore_many(every)
             self._log_restored(every, before)
         return RestoreSetResultDTO(
@@ -3031,6 +3052,7 @@ class RecordService:
         each by itself, so its siblings stay deleted. Restoring one selection of
         a deleted recording then doesn't bring back all of them."""
         record = self._deleted_record(record_id)
+        self._permissions.require(permissions.WRITE_RECORDS, record.dataset_id)
         plan = self.restore_plan(str(record.id))
         needs_parents = plan.blocked_by is not None and plan.blocked_by.kind == "record"
         if plan.held_back_message and not (with_parents and needs_parents):
@@ -3048,7 +3070,9 @@ class RecordService:
                 conflict.fields,
                 conflict.existing_name,
             )
-        before = {r.id: self._snapshot(r) for r in self._records.list_by_ids(every)}
+        rows = self._records.list_by_ids(every)
+        self._require_each(permissions.WRITE_RECORDS, rows)
+        before = {r.id: self._snapshot(r) for r in rows}
         self._records.restore_many(every)
         self._log_restored(every, before)
         return self.get(str(record.id))
@@ -3098,11 +3122,10 @@ class RecordService:
                 self._purge_chunk(ids[start : start + 500])
 
     def _purge_chunk(self, ids: list[uuid.UUID]) -> None:
+        going = self._records.list_by_ids(ids)
+        self._require_each(permissions.DELETE, going)
         if self._audit:
-            stones = [
-                (gone.id, tombstone(self._snapshot(gone)))
-                for gone in self._records.list_by_ids(ids)
-            ]
+            stones = [(gone.id, tombstone(self._snapshot(gone))) for gone in going]
             self._audit.forget_records(ids)
             for record_id, stone in stones:
                 self._audit.log_change("purge", "record", record_id, stone, None)

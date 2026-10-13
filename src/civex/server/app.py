@@ -14,6 +14,7 @@ from civex.domain.features import LOCAL_FEATURES
 from civex.server.deps import requires
 from civex.server.errors import RequestContextMiddleware, register_error_handlers
 from civex.server.routers import (
+    me,
     logs,
     server_control,
     ai,
@@ -416,6 +417,7 @@ def api_routers(
         (db.router, features_.DB_ADMIN),
         (legal.router, None),
         (status.router, None),
+        (me.router, None),
         (terminal.router, features_.TERMINAL),
         (settings.router, None),
         (updates.router, features_.UPDATES),

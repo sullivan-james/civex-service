@@ -44,6 +44,8 @@ from civex.domain.exceptions import (
 from civex.domain.file_refs import collect_sha256_refs, without_file_locations
 from civex.domain.hosts import is_loopback
 from civex.domain.sync import (
+    Joined,
+    LoginStarted,
     DEFERRED,
     ENTITY_ORDER,
     COPYING,
@@ -387,6 +389,20 @@ class SyncService:
     # Connecting
     # ------------------------------------------------------------------
 
+    def needs_approval(self, url: str, invite: str | None) -> bool:
+        """Whether connecting to `url` must first ask to join: no invite was
+        given and this computer has not joined that address before."""
+        url = url.strip().rstrip("/")
+        return not (invite and invite.strip()) and not user_state.authority_for(url)
+
+    def request_login(self, url: str) -> LoginStarted:
+        """Ask the authority at `url` to let this computer join without an
+        invite. The answer's `user_code` is for a person to approve there;
+        `connect(url, None, login=...)` then waits for that and joins."""
+        url = url.strip().rstrip("/")
+        _check_address(url)
+        return self._make_transport(url, self._credentials(url)).request_login()
+
     def check_connect(self, url: str, invite: str | None) -> str:
         """What connecting to this authority would do, found out without doing
         it: the address is read, the protocol accepted, and who holds data
@@ -407,7 +423,13 @@ class SyncService:
             authority_key=user_state.authority_for(url),
         )
 
-    def _plan_connect(self, url: str, invite: str | None) -> tuple[str, Hello, str]:
+    def _plan_connect(
+        self,
+        url: str,
+        invite: str | None,
+        login: LoginStarted | None = None,
+        on_code: Callable[[LoginStarted], None] | None = None,
+    ) -> tuple[str, Hello, str]:
         url = url.strip().rstrip("/")
         _check_address(url)
         probe = self._make_transport(url, self._credentials(url))
@@ -415,10 +437,20 @@ class SyncService:
             joined = probe.join(invite.strip())
             user_state.save_authority(url, joined.authority_key)
         elif not user_state.authority_for(url):
-            raise SyncError(
-                "This computer hasn't joined that server: ask its admin for an invite",
-                retryable=False,
-            )
+            # Never joined and no invite: ask to join, show the code (or take a
+            # request already made), and wait for a person to approve it.
+            if login is None and on_code is None:
+                raise SyncError(
+                    "This computer hasn't joined that server: ask its admin for an "
+                    "invite, or connect in a way that can wait to be approved",
+                    retryable=False,
+                )
+            if login is None:
+                login = probe.request_login()
+                assert on_code is not None
+                on_code(login)
+            joined = self._await_approval(probe, login)
+            user_state.save_authority(url, joined.authority_key)
         hello = probe.hello()
         self._check_protocol(hello)
         meta = self._repo.meta()
@@ -451,8 +483,30 @@ class SyncService:
             )
         return mode, hello, url
 
+    def _await_approval(self, probe: SyncTransport, login: LoginStarted) -> Joined:
+        """Poll until a person approves the request, it is denied, or it
+        expires (the authority answers the last two with a refusal)."""
+        while True:
+            joined = probe.poll_login(login.device_code)
+            if joined is not None:
+                return joined
+            if time.time() >= login.expires_at:
+                raise SyncError(
+                    "Nobody approved this computer before the code expired. Ask again.",
+                    retryable=False,
+                )
+            self._sleep(login.interval)
+
+    # How waiting is done; a test makes it instant.
+    _sleep: Callable[[float], None] = staticmethod(time.sleep)
+
     def connect(
-        self, url: str, invite: str | None, progress: ProgressFn | None = None
+        self,
+        url: str,
+        invite: str | None,
+        progress: ProgressFn | None = None,
+        login: LoginStarted | None = None,
+        on_code: Callable[[LoginStarted], None] | None = None,
     ) -> str:
         """Point this project at an authority. What happens depends on who holds
         data: an empty project **joins** one that has some (it becomes a copy), an
@@ -464,8 +518,12 @@ class SyncService:
 
         `progress` hears how far copying has got. A joined project is usable
         once it returns; the history from before it joined is fetched after
-        (`fetch_history`), by whatever runs sync next."""
-        mode, hello, url = self._plan_connect(url, invite)
+        (`fetch_history`), by whatever runs sync next.
+
+        Without an invite, a computer that never joined asks to: `on_code` is
+        told the code a person must approve on the authority (and this waits
+        until they do), or `login` is a request already made, to wait on."""
+        mode, hello, url = self._plan_connect(url, invite, login, on_code)
         meta = self._repo.meta()
 
         # The project takes the authority's id; the device keeps its identity.

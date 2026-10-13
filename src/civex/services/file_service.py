@@ -4,18 +4,26 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import AsyncIterable
 
+from civex.domain import permissions
 from civex.domain.dtos import DirectUpload, FileRef, UploadedPart
+from civex.domain.permissions import EVERYTHING, Permissions
 from civex.repositories.protocols import ObjectStore, VolumeStore
 
 _CHUNK = 1024 * 1024
 
 
 class FileService:
-    def __init__(self, store: ObjectStore, volumes: VolumeStore | None = None) -> None:
+    def __init__(
+        self,
+        store: ObjectStore,
+        volumes: VolumeStore | None = None,
+        permissions: Permissions = EVERYTHING,
+    ) -> None:
         # `volumes` is the same store when files are on drives on this machine
         # (where a file has a path on disk); None when they are in a bucket.
         self._store = store
         self._volumes = volumes
+        self._permissions = permissions
 
     # `collection_id` (here and below) is the id of the collection the file is
     # for. It only steers where new content is written -- see
@@ -25,12 +33,14 @@ class FileService:
     def store(self, path: Path, collection_id: str | None = None) -> FileRef:
         """Copy a file from disk into the object store in fixed-size chunks
         (never reading the whole file into memory)."""
+        self._permissions.require(permissions.MANAGE_FILES)
         return self._store.put_path(path, collection_id=collection_id)
 
     def store_bytes(
         self, data: bytes, filename: str, collection_id: str | None = None
     ) -> FileRef:
         """Store raw bytes (e.g. from an HTTP upload) in the object store."""
+        self._permissions.require(permissions.MANAGE_FILES)
         return self._store.put(data, filename, collection_id)
 
     async def store_stream(
@@ -42,6 +52,7 @@ class FileService:
     ) -> FileRef:
         """Store a streamed upload without buffering the whole file in
         memory first. See VolumeAwareFileObjectStore.put_stream."""
+        self._permissions.require(permissions.MANAGE_FILES)
         return await self._store.put_stream(chunks, filename, size_hint, collection_id)
 
     def offline_location(self, sha256: str):
@@ -86,6 +97,7 @@ class FileService:
     def upload_target(self, sha256: str, size: int) -> DirectUpload | None:
         """Where an uploader may put the bytes itself, or None when they must
         be sent through civex (`store_stream`)."""
+        self._permissions.require(permissions.MANAGE_FILES)
         return self._store.upload_target(sha256, size)
 
     def complete_upload(
@@ -96,6 +108,7 @@ class FileService:
         upload_id: str | None = None,
         parts: list[UploadedPart] | None = None,
     ) -> FileRef:
+        self._permissions.require(permissions.MANAGE_FILES)
         return self._store.complete_upload(sha256, size, filename, upload_id, parts)
 
     def download_url(self, sha256: str, filename: str | None = None) -> str | None:

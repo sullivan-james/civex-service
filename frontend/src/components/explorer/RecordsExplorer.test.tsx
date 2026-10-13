@@ -1100,3 +1100,35 @@ describe('RecordsExplorer', () => {
     expect(search().get('filter')).toBe(filter) // one filter for both
   })
 })
+
+describe('what this person may do', () => {
+  it('shows New switched off, saying why, for someone who may only read', async () => {
+    override = (url: URL) => {
+      if (url.pathname === '/api/me')
+        return json({
+          account: { name: 'Dr Example', kind: 'user', manage_url: null },
+          permissions: { actions: { read: ['project'] }, all: {} },
+        })
+      if (url.pathname === '/api/collections/hb')
+        return json({
+          id: 'c1',
+          name: 'hb',
+          description: null,
+          timezone: null,
+          record_count: 0,
+          deleted_at: null,
+          scope: 'local',
+          schemas: ['encounter'],
+        })
+      if (url.pathname.endsWith('/record-counts')) return json({})
+      return undefined
+    }
+    renderExplorer({}, '/collections/hb')
+    const button = await screen.findByRole('button', { name: /New/ })
+    await waitFor(() => expect(button).toBeDisabled())
+    expect(button).toHaveAttribute(
+      'title',
+      'You may not add, change and restore records, and save filters and exports here.',
+    )
+  })
+})

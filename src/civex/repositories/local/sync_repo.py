@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from civex.db.models import (
+    SyncLoginRequest,
     AuditBatch,
     AuditLog,
     Dataset,
@@ -41,6 +42,7 @@ from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.audit_diff import entry_snapshots
 from civex.domain.merge import value_at
 from civex.domain.sync import (
+    LoginRequestDTO,
     OpResult,
     SyncBatchInfo,
     SyncConflictDTO,
@@ -456,6 +458,64 @@ class LocalSyncRepository:
         self._s.add(row)
         self._s.flush()
         return _invite_dto(row)
+
+    # -- devices asking to join, for a person to approve -----------------------
+
+    def add_login_request(
+        self,
+        user_code: str,
+        device_hash: str,
+        device_id: str,
+        public_key: str,
+        expires_at: datetime,
+    ) -> LoginRequestDTO:
+        row = SyncLoginRequest(
+            user_code=user_code,
+            device_hash=device_hash,
+            device_id=device_id,
+            public_key=public_key,
+            expires_at=expires_at,
+        )
+        self._s.add(row)
+        self._s.flush()
+        return _login_dto(row)
+
+    def login_by_device_hash(self, device_hash: str) -> LoginRequestDTO | None:
+        row = self._s.query(SyncLoginRequest).filter_by(device_hash=device_hash).first()
+        return _login_dto(row) if row else None
+
+    def _waiting_logins(self):
+        return self._s.query(SyncLoginRequest).filter(
+            SyncLoginRequest.approved_at.is_(None),
+            SyncLoginRequest.denied_at.is_(None),
+            SyncLoginRequest.expires_at > datetime.now(timezone.utc),
+        )
+
+    def login_waiting(self, user_code: str) -> LoginRequestDTO | None:
+        """The request showing this code that is still waiting (the newest, if
+        a code was ever reused)."""
+        row = (
+            self._waiting_logins()
+            .filter_by(user_code=user_code)
+            .order_by(SyncLoginRequest.created_at.desc())
+            .first()
+        )
+        return _login_dto(row) if row else None
+
+    def pending_logins(self) -> list[LoginRequestDTO]:
+        rows = self._waiting_logins().order_by(SyncLoginRequest.created_at).all()
+        return [_login_dto(r) for r in rows]
+
+    def settle_login(self, id: uuid.UUID, name: str | None, approved: bool) -> None:
+        row = self._s.get(SyncLoginRequest, id)
+        if row is None:
+            return
+        now = datetime.now(timezone.utc)
+        if approved:
+            row.approved_at, row.name = now, name
+        else:
+            row.denied_at = now
+        self._s.flush()
 
     def invite_by_hash(self, code_hash: str) -> SyncInviteDTO | None:
         row = self._s.query(SyncInvite).filter_by(code_hash=code_hash).first()
@@ -1398,6 +1458,20 @@ def _device_dto(row: SyncDevice) -> SyncDeviceDTO:
         last_seen_at=_iso(row.last_seen_at),
         revoked_at=_iso(row.revoked_at),
         may_publish=bool(row.may_publish),
+    )
+
+
+def _login_dto(row: SyncLoginRequest) -> LoginRequestDTO:
+    return LoginRequestDTO(
+        id=row.id,
+        user_code=row.user_code,
+        device_id=row.device_id,
+        public_key=row.public_key,
+        created_at=_iso(row.created_at) or "",
+        expires_at=_iso(row.expires_at) or "",
+        name=row.name,
+        approved_at=_iso(row.approved_at),
+        denied_at=_iso(row.denied_at),
     )
 
 

@@ -80,6 +80,18 @@ class RemoteStatusResponse(BaseModel):
     connect_error: str | None = Field(
         default=None, description="Why the last connect started here failed."
     )
+    awaiting_approval: AwaitingApprovalResponse | None = Field(
+        default=None,
+        description="This computer asked to join and waits for a person to approve "
+        "the code on the server.",
+    )
+
+
+class AwaitingApprovalResponse(BaseModel):
+    code: str = Field(description="The code to approve on the server.")
+    expires_at: int = Field(
+        description="Unix seconds; the code stops working after it."
+    )
 
 
 class SyncResultResponse(BaseModel):
@@ -102,7 +114,15 @@ class RemoteConnectRequest(BaseModel):
 class RemoteConnectResponse(BaseModel):
     mode: str = Field(
         description="joined (became a copy), seeded (filled an empty authority), "
-        "empty (both empty) or resumed (already the same project)."
+        "empty (both empty), resumed (already the same project), or approval: "
+        "this computer asked to join and waits for a person to approve `code` "
+        "on the server; connecting goes on by itself once they do."
+    )
+    code: str | None = Field(
+        default=None, description="The code to approve on the server (mode approval)."
+    )
+    expires_at: int | None = Field(
+        default=None, description="Unix seconds; the code stops working after it."
     )
 
 
@@ -311,6 +331,11 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         ),
         connecting=sync_jobs.connecting,
         connect_error=sync_jobs.connect_error,
+        awaiting_approval=(
+            AwaitingApprovalResponse(code=login.user_code, expires_at=login.expires_at)
+            if (login := sync_jobs.awaiting) and sync_jobs.connecting
+            else None
+        ),
     )
 
 
@@ -336,6 +361,14 @@ def connect(body: RemoteConnectRequest, ctx: AppContext = Depends(get_ctx)):
     the background: `GET /remote` says how far it has got (`progress`), and why
     it stopped if it did (`connect_error`)."""
     try:
+        if ctx.sync_svc.needs_approval(body.url, body.invite):
+            # No invite, never joined: ask to join, and wait for a person to
+            # approve the code in the background, then connect.
+            started = ctx.sync_svc.request_login(body.url)
+            sync_jobs.start_connect(body.url, login=started)
+            return RemoteConnectResponse(
+                mode="approval", code=started.user_code, expires_at=started.expires_at
+            )
         mode = ctx.sync_svc.check_connect(body.url, body.invite)
     except SyncError as e:
         raise _refuse(e)
@@ -468,6 +501,19 @@ class InviteResponse(BaseModel):
     expires_at: str
 
 
+class LoginResponse(BaseModel):
+    code: str = Field(
+        description="The code the device shows; approve or deny it by this."
+    )
+    fingerprint: str = Field(description="The device's key's short code, to compare.")
+    requested_at: str
+    expires_at: str
+
+
+class ApproveLoginRequest(BaseModel):
+    name: str = Field(description="What to call the device.")
+
+
 class AuthorityResponse(BaseModel):
     serving: bool = Field(description="This project accepts devices.")
     fingerprint: str | None = Field(
@@ -476,6 +522,11 @@ class AuthorityResponse(BaseModel):
     devices: list[DeviceResponse] = Field(description="The devices that joined.")
     invites: list[InviteResponse] = Field(
         description="Invites not used yet and not expired."
+    )
+    logins: list[LoginResponse] = Field(
+        default_factory=list,
+        description="Devices asking to join without an invite, waiting for a person "
+        "to approve the code they show.",
     )
     library: str = Field(
         default="workflows",
@@ -531,6 +582,15 @@ def _authority(ctx: AppContext) -> AuthorityResponse:
             )
             for i in keys_svc.pending_invites()
         ],
+        logins=[
+            LoginResponse(
+                code=r.user_code,
+                fingerprint=keys.fingerprint(r.public_key),
+                requested_at=r.created_at,
+                expires_at=r.expires_at,
+            )
+            for r in keys_svc.pending_logins()
+        ],
         library=ctx.sync_svc.library_mode,
     )
 
@@ -572,6 +632,29 @@ def cancel_invite(name: str, ctx: AppContext = Depends(get_ctx)):
     """Cancel a device's invite before it is used."""
     if not ctx.device_keys.cancel_invite(name):
         raise HTTPException(404, detail=f"No invite waiting for {name}")
+    ctx.commit()
+    return _authority(ctx)
+
+
+@router.post("/authority/logins/{code}/approve", response_model=AuthorityResponse)
+def approve_login(
+    code: str, body: ApproveLoginRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """Let in the device showing this code, as `name`. It is a device from now
+    on, exactly as if it had joined with an invite."""
+    try:
+        ctx.device_keys.approve_login(code, body.name)
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    ctx.commit()
+    return _authority(ctx)
+
+
+@router.post("/authority/logins/{code}/deny", response_model=AuthorityResponse)
+def deny_login(code: str, ctx: AppContext = Depends(get_ctx)):
+    """Turn away the device showing this code."""
+    if not ctx.device_keys.deny_login(code):
+        raise HTTPException(404, detail=f"No device is waiting with the code {code}")
     ctx.commit()
     return _authority(ctx)
 

@@ -4,6 +4,7 @@ it and say what happened."""
 
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import os
 import uuid
@@ -65,7 +66,16 @@ def _connect_showing_progress(c, url: str, invite: str | None) -> str:
                 total=p.total,
             )
 
-        mode = c.sync_svc.connect(url, invite, progress=show)
+        def approve(started) -> None:  # noqa: ANN001 - LoginStarted
+            bar.update(task, description="Waiting to be approved")
+            until = datetime.fromtimestamp(started.expires_at).strftime("%H:%M")
+            console.print(
+                "This computer has asked to join. On the server, approve it with\n\n"
+                f"  civex sync device approve {started.user_code} <name>\n\n"
+                f"(or in Settings → Sync). Waiting until {until}; Ctrl+C stops."
+            )
+
+        mode = c.sync_svc.connect(url, invite, progress=show, on_code=approve)
         c.commit()
     if mode == "joined":
         _fetch_history_showing_progress(c)
@@ -410,13 +420,14 @@ def connect(
         "--invite",
         envvar="CIVEX_SYNC_INVITE",
         help="The invite the authority's admin gave. Leave out when this computer "
-        "has joined that address before (connecting again after a copy stopped "
-        "part way).",
+        "has joined that address before, or to ask to join: a code is shown for "
+        "the admin to approve on the server (`civex sync device approve`).",
     ),
 ) -> None:
     """Point this project at an authority. An empty project becomes a copy of
     it; a project with data fills an empty authority. Two projects that both
-    hold data are refused."""
+    hold data are refused. Without an invite, this computer asks to join and
+    waits for the admin to approve the code it shows."""
     c = _ctx()
     try:
         mode = _connect_showing_progress(c, url, invite)
@@ -716,13 +727,52 @@ def device_invite(
     )
 
 
+@device_app.command("approve")
+def device_approve(
+    code: str = typer.Argument(help="The code the device shows (like ABCD-2345)."),
+    name: str = typer.Argument(help="What to call the device."),
+) -> None:
+    """Let in a device that asked to join (`civex sync connect` without an
+    invite shows the code). It is a device from now on, as if invited."""
+    c = _ctx()
+    try:
+        device = c.device_keys.approve_login(code, name)
+        c.commit()
+    except CivexError as e:
+        raise _fail(e)
+    finally:
+        c.close()
+    console.print(
+        f"[success]{escape(device.name)} may follow this project[/success] "
+        f"(key {keys.fingerprint(device.public_key)})."
+    )
+
+
+@device_app.command("deny")
+def device_deny(
+    code: str = typer.Argument(help="The code the device shows."),
+) -> None:
+    """Turn away a device that asked to join."""
+    c = _ctx()
+    try:
+        ok = c.device_keys.deny_login(code)
+        c.commit()
+    finally:
+        c.close()
+    if not ok:
+        raise _fail(ValueError(f"No device is waiting with the code {code}"))
+    console.print(f"Denied {escape(code)}.")
+
+
 @device_app.command("list")
 def device_list() -> None:
-    """List the devices that joined and the invites waiting."""
+    """List the devices that joined, the invites waiting, and the devices
+    asking to join."""
     c = _ctx()
     try:
         devices = c.device_keys.list_devices()
         invites = c.device_keys.pending_invites()
+        logins = c.device_keys.pending_logins()
     finally:
         c.close()
     table = Table()
@@ -739,6 +789,15 @@ def device_list() -> None:
         )
     for i in invites:
         table.add_row(i.name, "", "", "", f"invited, until {i.expires_at}", "")
+    for r in logins:
+        table.add_row(
+            f"code {r.user_code}",
+            keys.fingerprint(r.public_key),
+            "",
+            "",
+            f"asking to join, until {r.expires_at}",
+            "",
+        )
     console.print(table)
 
 

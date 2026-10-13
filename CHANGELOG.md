@@ -57,6 +57,19 @@ from the next tag forward.
   service sees) and `VolumeStore` (drives as places), `AppContext.store_svc` and
   `transfer_svc` exist only where there are drives, and `FileService.local_path`
   is None where files aren't on disk here.
+- **A device can ask to join** instead of being given an invite: connect
+  without one and it shows a code; `civex sync device approve <code> <name>`
+  (or Settings → Sync → *Asking to join*) lets it in, `deny` turns it away, and
+  a code nobody approves in 15 minutes lapses. Invites still work. Migration
+  `c1e8f4a2b7d3` adds the table of requests.
+- **What a person may do** is now one concept (`domain/permissions.py`: read,
+  write records, change the structure, add files, delete, manage members, each
+  everywhere or in named collections). A project in a folder allows everything,
+  as before. A host that knows who is signed in gives each request their
+  permissions: the services refuse at the boundary (403, in plain words), the
+  authority holds a person's device to the same rule, `GET /api/me` says who
+  you are and what you may do, and the app shows a control you may not use
+  switched off with the reason.
 
 ## v2.0.0 — syncing between machines, updates from the app (2026-10-07)
 

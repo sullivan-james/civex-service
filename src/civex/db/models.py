@@ -1090,6 +1090,27 @@ class SyncInvite(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
 
 
+class SyncLoginRequest(Base):
+    """Authority: a device asking to join without an invite. The device shows
+    `user_code` to a person, who approves it here with a name (the device is
+    then added, as an invite would); the device polls with the secret whose
+    hash is `device_hash`. Settled rows (approved, denied, expired) are kept
+    a while for the device to read its answer."""
+
+    __tablename__ = "sync_login_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    user_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    device_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    device_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    public_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(_UTCDateTime(), nullable=False)
+    approved_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    denied_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+
+
 class LibraryItem(Base):
     """Authority: one version of a workflow or plugin shared through its
     library (`domain/library.py`); every version is kept (migration

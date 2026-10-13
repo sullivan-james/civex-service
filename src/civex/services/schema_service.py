@@ -26,7 +26,9 @@ from civex.domain.field_descriptors import (
     RestrictionDescriptor,
     restriction_keys,
 )
+from civex.domain import permissions
 from civex.domain.naming import is_slug, slugify, validate_name
+from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.timezones import validate_timezone
 from civex.domain.uniqueness import UNIQUE_DTYPES, normalise_keys
 from civex.services.cascades import States, log_cascade, record_states
@@ -234,10 +236,13 @@ class SchemaService:
         repo: SchemaRepository,
         audit_repo: AuditRepository | None = None,
         record_repo: RecordRepository | None = None,
+        permissions: Permissions = EVERYTHING,
     ) -> None:
         self._repo = repo
         self._audit = audit_repo
         self._records = record_repo
+        # What the caller may do; asked before any change to the structure.
+        self._permissions = permissions
 
     def create(
         self,
@@ -251,6 +256,7 @@ class SchemaService:
         # before slug validation existed must round-trip byte-for-byte, and
         # silently slugifying its names would break the workflow YAML in the
         # same dump that references them.
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
         if not allow_legacy_name:
             validate_name(name, "schema name")
         if self._repo.get_by_name(name):
@@ -286,6 +292,7 @@ class SchemaService:
         Lets a single caller (e.g. the AI assistant's create_schema tool) produce
         one proposal/approval instead of one per field.
         """
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
         self.create(name, description=description, parent=parent, label=label)
         for f in fields or []:
             self.add_field(
@@ -325,6 +332,7 @@ class SchemaService:
         that has no record name template yet is given `{field}` when this is
         its first field that can be written into a name, so a new schema's
         records have a visible, editable name from the start."""
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
         if dtype not in VALID_DTYPES:
             raise ValueError(
                 f"Unknown dtype '{dtype}'. Choose from: {', '.join(sorted(VALID_DTYPES))}"
@@ -390,6 +398,7 @@ class SchemaService:
         display_template=...,
         label=...,
     ) -> SchemaDTO:
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
         schema = self.get(name)
         if new_name and new_name != name:
             validate_name(new_name, "schema name")
@@ -429,6 +438,7 @@ class SchemaService:
         (under the same parent record, or in the same collection at the top
         level). Refused when existing records already break a key being added,
         naming some of them: the policy would be violated from the start."""
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
         schema = self.get(name)
         own = {f.name: f for f in schema.fields}
         ids: list[list[str]] = []
@@ -669,6 +679,7 @@ class SchemaService:
     def restore_field(self, schema_name: str, field_id: uuid.UUID) -> FieldDTO:
         """Undo delete_field(): the field is back on its schema and every record
         shows the value it held for it again (see SchemaRepository.delete_field)."""
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
         plan = self.restore_field_plan(schema_name, field_id)
         if message := plan.blocked_message:
             raise ValidationError(message)
@@ -710,6 +721,7 @@ class SchemaService:
 
     @_one_action
     def delete_field(self, schema_name: str, field_name: str) -> None:
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
         schema = self.get(schema_name)
         field = next((f for f in schema.fields if f.name == field_name), None)
         if field is None:
@@ -749,6 +761,7 @@ class SchemaService:
         default_value: Any = ...,
         label: Any = ...,
     ) -> FieldDTO:
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
         schema = self.get(schema_name)
         field = next((f for f in schema.fields if f.name == field_name), None)
         if field is None:
@@ -798,6 +811,7 @@ class SchemaService:
     def reorder_fields(
         self, schema_name: str, field_ids: list[uuid.UUID]
     ) -> list[FieldDTO]:
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
         schema = self.get(schema_name)
         own_field_ids = {f.id for f in schema.fields}
         invalid = [fid for fid in field_ids if fid not in own_field_ids]
@@ -894,6 +908,7 @@ class SchemaService:
         Deleted, reversible via restore() within the retention window.
         Schemas that inherit from this one are left untouched and keep
         resolving its fields; see docs/guides/deleting-and-restoring.md."""
+        self._permissions.require(permissions.DELETE)
         schema = self.get(name)
         stamp = datetime.now(
             timezone.utc
@@ -987,6 +1002,7 @@ class SchemaService:
     def restore(self, name: str) -> SchemaDTO:
         """Undo delete(): the schema and the records cascade-deleted with it
         become live again (see SchemaRepository.restore)."""
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
         schema = self._by_name_or_id(name)
         if schema is None:
             raise NotFoundError(f"Schema '{name}' not found")
@@ -1009,6 +1025,7 @@ class SchemaService:
     def purge(self, name: str) -> None:
         """Permanently remove a schema that's already in Recently Deleted —
         a separate, explicit action from delete(). Irreversible."""
+        self._permissions.require(permissions.DELETE)
         schema = self._repo.get_by_name(name, include_deleted=True)
         if schema is None:
             raise NotFoundError(f"Schema '{name}' not found")

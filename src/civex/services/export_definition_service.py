@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from civex.domain import permissions
+from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.dtos import ExportDefinitionDTO, SchemaDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.domain.file_access import LAYOUTS, FileSelection
@@ -33,10 +35,12 @@ class ExportDefinitionService:
         repo: ExportDefinitionRepository,
         schema_svc: SchemaService,
         record_svc: RecordService,
+        permissions: Permissions = EVERYTHING,
     ) -> None:
         self._repo = repo
         self._schemas = schema_svc
         self._records = record_svc
+        self._permissions = permissions
 
     # -- the rules --------------------------------------------------------------
 
@@ -194,6 +198,7 @@ class ExportDefinitionService:
         include_files: bool = True,
         tables: list[dict[str, Any]] | None = None,
     ) -> ExportDefinitionDTO:
+        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
         schema = self._schemas.get(schema_name)
         name = validate_free_name(name, "export name")
         if self._repo.get_by_name(schema.id, name):
@@ -245,6 +250,7 @@ class ExportDefinitionService:
         """Change any part of a definition; what isn't given is left as it was.
         The result is checked as a whole, since parts depend on each other (the
         fields on the kind, the filter on the kind)."""
+        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
         schema = self._schemas.get(schema_name)
         current = self.get(schema_name, name)
         if new_name:
@@ -284,6 +290,7 @@ class ExportDefinitionService:
         )
 
     def delete(self, schema_name: str, name: str) -> None:
+        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
         self._repo.delete(self.get(schema_name, name).id)
 
     # -- where it is offered ------------------------------------------------------

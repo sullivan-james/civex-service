@@ -24,6 +24,7 @@ from civex.domain.dtos import RecordUse
 from civex.config import Config, ConfigStore
 from civex.domain import features
 from civex.domain.exceptions import FeatureUnavailableError
+from civex.domain.permissions import Permissions
 from civex.project import Project
 
 if TYPE_CHECKING:
@@ -149,6 +150,11 @@ class AppContext:
     def features(self) -> frozenset[str]:
         """What this server does for this project (`domain.features`)."""
         return self.project.features
+
+    @property
+    def permissions(self) -> Permissions:
+        """What whoever this context is for may do (`domain.permissions`)."""
+        return self.project.permissions
 
     def commit(self) -> None:
         self._session.commit()
@@ -286,10 +292,17 @@ def build_context(
         file_store if isinstance(file_store, VolumeStore) else None
     )
 
-    schema_svc = SchemaService(schema_repo, audit_repo, record_repo)
+    may = project.permissions
+    schema_svc = SchemaService(schema_repo, audit_repo, record_repo, permissions=may)
     job_svc = WorkflowJobService(job_repo, config.civex_dir, project.config_store)
     record_svc = RecordService(
-        schema_svc, dataset_repo, record_repo, file_store, job_svc, audit_repo
+        schema_svc,
+        dataset_repo,
+        record_repo,
+        file_store,
+        job_svc,
+        audit_repo,
+        permissions=may,
     )
     dataset_svc = DatasetService(
         dataset_repo,
@@ -299,8 +312,9 @@ def build_context(
         on_purge=lambda collection_id: (
             store_svc.clear_placement(str(collection_id)) if store_svc else None
         ),
+        permissions=may,
     )
-    file_svc = FileService(file_store, volumes)
+    file_svc = FileService(file_store, volumes, permissions=may)
     store_svc: StoreService | None = None
     if isinstance(file_store, VolumeAwareFileObjectStore):
         store_svc = StoreService(config, file_store, project.config_store)
@@ -354,9 +368,14 @@ def build_context(
     )
     container_plugin_svc = ContainerPluginService(config.civex_dir)
     policy_svc = PolicyService(config.civex_dir)
-    view_svc = ViewService(view_repo, schema_svc, record_svc, audit_repo)
+    view_svc = ViewService(
+        view_repo, schema_svc, record_svc, audit_repo, permissions=may
+    )
     export_def_svc = ExportDefinitionService(
-        LocalExportDefinitionRepository(session), schema_svc, record_svc
+        LocalExportDefinitionRepository(session),
+        schema_svc,
+        record_svc,
+        permissions=may,
     )
     history_svc = AuditService(
         audit_repo,
@@ -402,6 +421,9 @@ def build_context(
         record_svc,
         ProjectRules(schema_svc, dataset_repo, record_repo),
         authenticator=device_keys,
+        # The same answer a person at a browser gets, asked of each change a
+        # device pushes (the local user's refuses nothing).
+        policy=may,
         capabilities=CAPABILITIES
         + ((DIRECT_FILES,) if features.DIRECT_FILES in project.features else ()),
     )

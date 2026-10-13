@@ -14,7 +14,7 @@ from collections.abc import Callable
 
 from civex.config import Config, load_config
 from civex.context import AppContext, build_local_context
-from civex.domain.sync import SyncProgress
+from civex.domain.sync import LoginStarted, SyncProgress
 from civex.services.sync_worker import SyncWorker
 
 log = logging.getLogger(__name__)
@@ -41,6 +41,8 @@ class SyncJobs:
         self.history_progress: SyncProgress | None = None
         # Why the last connect that ran here failed, until another starts.
         self.connect_error: str | None = None
+        # The request to join a person must approve, while the connect waits.
+        self.awaiting: LoginStarted | None = None
         self.worker = SyncWorker(load_config, open_context, on_progress=self._history)
 
     @property
@@ -87,27 +89,30 @@ class SyncJobs:
         self.ensure_worker()
         self.worker.request()
 
-    def start_connect(self, url: str) -> None:
+    def start_connect(self, url: str, login: LoginStarted | None = None) -> None:
         """Connect to an authority on a thread of its own (already checked, and
         joined with any invite, by `SyncService.check_connect`), saying how far
-        it has got as it goes, then start syncing in the background."""
+        it has got as it goes, then start syncing in the background. With
+        `login`, a request to join a person has yet to approve: it waits for
+        that first (`GET /remote` shows the code meanwhile)."""
         with self._lock:
             if self.connecting:
                 return
             self.connect_error = None
             self.copy_progress = None
+            self.awaiting = login
             self._connecting = threading.Thread(
                 target=self._connect,
-                args=(url,),
+                args=(url, login),
                 daemon=True,
                 name="sync-connect",
             )
             self._connecting.start()
 
-    def _connect(self, url: str) -> None:
+    def _connect(self, url: str, login: LoginStarted | None = None) -> None:
         ctx = self._open_context(self._load_config())
         try:
-            ctx.sync_svc.connect(url, None, progress=self._copied)
+            ctx.sync_svc.connect(url, None, progress=self._copied, login=login)
             ctx.commit()
         except Exception as e:  # noqa: BLE001 - said in the app, not lost
             log.warning("connecting to %s failed: %s", url, e)
@@ -116,6 +121,7 @@ class SyncJobs:
         finally:
             ctx.close()
             self.copy_progress = None
+            self.awaiting = None
         self.sync_now()
 
     def _copied(self, progress: SyncProgress) -> None:

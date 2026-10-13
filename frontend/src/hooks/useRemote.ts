@@ -244,6 +244,14 @@ export function useAuthorityActions() {
       mutationFn: remoteApi.revokeDevice,
       onSuccess: settle,
     }),
+    approveLogin: useMutation({
+      mutationFn: remoteApi.approveLogin,
+      onSuccess: settle,
+    }),
+    denyLogin: useMutation({
+      mutationFn: remoteApi.denyLogin,
+      onSuccess: settle,
+    }),
     setLibrary: useMutation({
       mutationFn: remoteApi.setLibrary,
       onSuccess: settle,

@@ -114,10 +114,14 @@ def test_conflicts_can_be_narrowed_to_one_record(
     assert "No conflicts" in other.output
 
 
-def test_connecting_without_an_invite_needs_to_have_joined(project_dir: Path) -> None:
+def test_connecting_without_an_invite_asks_the_server_to_be_let_in(
+    project_dir: Path,
+) -> None:
+    """Never joined and no invite: the command asks the server for a code to
+    be approved, so a server that can't be reached is what fails."""
     result = runner.invoke(app, ["sync", "connect", "http://127.0.0.1:9"])
     assert result.exit_code == 1
-    assert "invite" in result.output
+    assert "Could not reach" in result.output
 
 
 def test_serving_is_switched_the_same_way_as_in_the_app(project_dir: Path) -> None:

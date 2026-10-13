@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import { localFeatures } from '../../utils/features'
+import { EVERYTHING } from '../../utils/permissions'
 
 export const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -93,6 +94,11 @@ export function fakeServer(routes: Record<string, Answer>) {
       const path = new URL(String(input), 'http://x').pathname
       if (path === '/api/status/features' && !(path in routes))
         return json({ features: [...localFeatures], all: {} })
+      if (path === '/api/me' && !(path in routes))
+        return json({
+          account: { name: 'you', kind: 'local', manage_url: null },
+          permissions: { actions: EVERYTHING, all: {} },
+        })
       const body = JSON.parse(String(init?.body ?? '{}'))
       const method = init?.method ?? 'GET'
       const headers = Object.fromEntries(

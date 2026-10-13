@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useUploadCollection } from '../../hooks/uploadCollection'
 import { useFileUploads } from '../../hooks/useFileUploads'
+import { usePermissions } from '../../hooks/useMe'
 import type { Field } from '../../api/schemas'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
 import { displayLabel } from '../../utils/naming'
@@ -98,6 +99,8 @@ function FileControl({
   const collectionId = useUploadCollection()
   const { current, uploading, run, cancel, stopped, dismiss } =
     useFileUploads(collectionId)
+  const { can, why } = usePermissions()
+  const cannotAdd = can('manage_files') ? undefined : why('manage_files')
   const { accept, maxSize } = toInputProps(field)
   const label = displayLabel(field.name, field.label)
 
@@ -167,7 +170,8 @@ function FileControl({
       <FileDropZone
         multiple={multiple}
         accept={accept}
-        disabled={uploading}
+        disabled={uploading || !!cannotAdd}
+        title={cannotAdd}
         inputLabel={`Add ${label}`}
         onFiles={pick}
       >
@@ -431,9 +435,12 @@ export function RecordFieldGrid({
   onDismissError,
   extra,
   marked,
+  readOnly,
 }: {
   fields: Field[]
   data: Record<string, unknown>
+  /** Why this person may not change the record: values are shown, not edited. */
+  readOnly?: string
   referenceLabels?: Record<string, string | null> | null
   referenceCollections?: Record<string, string> | null
   /** `undefined` clears the field. */
@@ -479,13 +486,24 @@ export function RecordFieldGrid({
             <dd
               className={`min-w-0 break-words text-fg ${numeric ? 'font-mono' : ''}`}
             >
-              <EditableValue
-                field={field}
-                value={data[field.name]}
-                referenceLabels={referenceLabels}
-                referenceCollections={referenceCollections}
-                onSave={(v) => onSave(field.name, v)}
-              />
+              {readOnly ? (
+                <div className="min-h-8 py-1" title={readOnly}>
+                  <FieldValue
+                    value={data[field.name]}
+                    field={field}
+                    referenceLabels={referenceLabels}
+                    referenceCollections={referenceCollections}
+                  />
+                </div>
+              ) : (
+                <EditableValue
+                  field={field}
+                  value={data[field.name]}
+                  referenceLabels={referenceLabels}
+                  referenceCollections={referenceCollections}
+                  onSave={(v) => onSave(field.name, v)}
+                />
+              )}
               {field.type === 'geo' && isGeometry(data[field.name]) && (
                 <LocatorMap
                   bbox={

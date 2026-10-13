@@ -28,6 +28,7 @@ from civex.domain.sync import (
     FeedPage,
     Hello,
     Joined,
+    LoginStarted,
     SessionGrant,
     PushResult,
     SnapshotPage,
@@ -70,6 +71,40 @@ class HttpSyncTransport:
         with self._open(request) as response:
             joined = Joined.from_dict(json.loads(response.read().decode("utf-8")))
         self._credentials = replace(creds, authority_key=joined.authority_key)
+        return joined
+
+    def request_login(self) -> LoginStarted:
+        creds = self._credentials
+        body = {
+            "device_id": creds.device_id,
+            "public_key": keys.public_of(creds.private_key),
+        }
+        request = self._request("POST", "/device-login", data=json.dumps(body).encode())
+        request.add_header("Content-Type", "application/json")
+        try:
+            with self._open(request) as response:
+                return LoginStarted.from_dict(
+                    json.loads(response.read().decode("utf-8"))
+                )
+        except SyncError as e:
+            if e.status == 404:  # an authority from before this way in
+                raise SyncError(
+                    "This computer hasn't joined that server, and the server is "
+                    "too old to approve it from there: ask its admin for an invite",
+                    retryable=False,
+                ) from e
+            raise
+
+    def poll_login(self, device_code: str) -> Joined | None:
+        request = self._request("GET", f"/device-login/{device_code}")
+        with self._open(request) as response:
+            body = json.loads(response.read().decode("utf-8") or "{}")
+        if "authority_key" not in body:
+            return None
+        joined = Joined.from_dict(body)
+        self._credentials = replace(
+            self._credentials, authority_key=joined.authority_key
+        )
         return joined
 
     def hello(self) -> Hello:

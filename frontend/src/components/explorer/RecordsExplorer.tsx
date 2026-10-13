@@ -51,6 +51,7 @@ import { schemaTreeHasFiles } from '../../utils/hierarchy'
 import { useWorkflows } from '../../hooks/useWorkflows'
 import { useExplorer, type ExplorerScope } from './useExplorer'
 import { useCollection } from '../../hooks/useCollections'
+import { usePermissions } from '../../hooks/useMe'
 import { recordRecent } from '../../hooks/usePins'
 import { placeTarget, viewTarget } from '../../utils/navTargets'
 import { viewPatch } from '../../utils/explorerState'
@@ -310,6 +311,10 @@ export function RecordsExplorer({
   // without these there would be no way to create the first of its kind.
   const enabledSchemas = new Set(collection?.schemas ?? [])
   const navigate = useNavigate()
+  // What this person may do here: the controls stay, off, saying why.
+  const { can, why } = usePermissions()
+  const mayWrite = can('write_records', collection?.id)
+  const mayDelete = can('delete', collection?.id)
   const starters = dataset
     ? (x.schemas ?? []).filter(
         (s) => !s.parent_id && enabledSchemas.has(s.name),
@@ -370,22 +375,28 @@ export function RecordsExplorer({
         },
       ]
     : []
-  const newMenu = newItems.length > 0 && (
-    <Menu
-      items={newItems}
-      trigger={({ open, toggle }) => (
-        <Button
-          variant="primary"
-          size="sm"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          onClick={toggle}
-        >
-          <Plus size={14} /> New <ChevronDown size={14} />
-        </Button>
-      )}
-    />
-  )
+  const newMenu =
+    newItems.length > 0 &&
+    (mayWrite ? (
+      <Menu
+        items={newItems}
+        trigger={({ open, toggle }) => (
+          <Button
+            variant="primary"
+            size="sm"
+            aria-haspopup="menu"
+            aria-expanded={open}
+            onClick={toggle}
+          >
+            <Plus size={14} /> New <ChevronDown size={14} />
+          </Button>
+        )}
+      />
+    ) : (
+      <Button variant="primary" size="sm" disabled title={why('write_records')}>
+        <Plus size={14} /> New <ChevronDown size={14} />
+      </Button>
+    ))
 
   if (!listed && !x.page.isLoading && x.levels.length === 0) {
     // Levels come from record counts, so an empty collection has none and the
@@ -632,6 +643,7 @@ export function RecordsExplorer({
                 allMatching={allMatching}
                 onSelectAllMatching={picked.selectAllMatching}
                 onDelete={() => setConfirmDelete(true)}
+                cannotDelete={mayDelete ? undefined : why('delete')}
                 deleting={deleteMany.isPending || deleteMatching.isPending}
                 // Runs are queued for the records ticked, not for "all matching":
                 // that would be every record the filters match, on every page.

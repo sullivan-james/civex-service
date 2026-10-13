@@ -30,6 +30,11 @@ civex sync connect https://… --invite civex_inv_…   # an existing project
 
 - **Invites** work once, for 24 hours (`--hours`), and are shown once. They start
   with `civex_inv_`, so secret scanners catch one pasted by mistake.
+- **Or ask to join.** Connect without an invite and the device shows a code
+  (`ABCD-2345`) and waits. On the authority, `civex sync device approve
+  ABCD-2345 laptop` (or Settings → Sync → *Asking to join*) lets it in by name,
+  `civex sync device deny` turns it away, and a code nobody approves in 15
+  minutes lapses. The device is then a device like any invited one.
 - **Keys:** joining makes the device a key pair. It then signs in with its key for
   short sessions, and checks the authority's key, so a different server at the
   same address gets nothing. `civex sync device revoke <name>` stops a device at
@@ -156,6 +161,15 @@ aren't deleted), and schema rules (templates and unique keys name real fields).
 An action travels whole. Deleting a record takes what's beneath it, and a schema
 change can touch several fields. If it can't go in whole, none of it does, and
 the device is sent back the authority's state, marked **not taken**.
+
+## Who may change what
+
+A project in a folder is yours: everything is allowed. A hosted civex knows who
+is signed in and what they may do (`GET /api/me`: read, write records, change
+the structure, add files, delete, manage members, each everywhere or in named
+collections), and holds a person's device to the same rule as their browser: a
+change a device pushes that its person may not make is refused like any change
+that breaks a rule, and the app shows the control switched off, saying why.
 
 ## Who a change is recorded as
 

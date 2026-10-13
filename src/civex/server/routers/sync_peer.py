@@ -23,6 +23,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import (
     FileResponse,
+    JSONResponse,
     RedirectResponse,
     Response,
     StreamingResponse,
@@ -218,6 +219,29 @@ class SyncJoinResponse(BaseModel):
     device_name: str = Field(description="What the device was invited as.")
 
 
+class SyncLoginRequest(BaseModel):
+    device_id: str = Field(description="This device's id (a UUID).")
+    public_key: str = Field(
+        description="This device's Ed25519 public key, base64 of its 32 bytes."
+    )
+
+
+class SyncLoginStartedResponse(BaseModel):
+    user_code: str = Field(
+        description="The code the device shows; a person approves it on the authority."
+    )
+    device_code: str = Field(description="What the device polls with. Secret.")
+    expires_at: int = Field(description="Unix seconds; after it the request is gone.")
+    interval: int = Field(description="Seconds to wait between polls.")
+    verify_url: str | None = Field(
+        description="Where a person approves it, when the host has a page for that."
+    )
+
+
+class SyncLoginPendingResponse(BaseModel):
+    status: str = Field(description="`pending`: nobody has approved it yet.")
+
+
 class SyncSessionRequest(BaseModel):
     device_id: str = Field(description="The device signing in.")
     at: int = Field(description="Now, in unix seconds, as the device's clock says.")
@@ -349,6 +373,42 @@ def join(
         request,
         lambda: ctx.device_keys.join(body.invite, body.device_id, body.public_key),
     )
+    return SyncJoinResponse(**joined.to_dict())
+
+
+@router.post("/device-login", response_model=SyncLoginStartedResponse)
+def request_login(
+    body: SyncLoginRequest,
+    request: Request,
+    _protocol: int = Depends(_serving),
+    ctx: AppContext = Depends(get_ctx, scope="function"),
+):
+    """Ask to join without an invite (capability `device_login`): the answer
+    carries a short code for a person to approve on the authority, and what to
+    poll with meanwhile (`GET /device-login/{device_code}`)."""
+    started = _once(
+        request,
+        lambda: ctx.device_keys.request_login(body.device_id, body.public_key),
+    )
+    return SyncLoginStartedResponse(**started.to_dict())
+
+
+@router.get(
+    "/device-login/{device_code}",
+    response_model=SyncJoinResponse,
+    responses={202: {"model": SyncLoginPendingResponse}},
+)
+def poll_login(
+    device_code: str,
+    request: Request,
+    _protocol: int = Depends(_serving),
+    ctx: AppContext = Depends(get_ctx, scope="function"),
+):
+    """Whether the request was approved: 202 while it waits, the same answer
+    as a join once a person approved it, 410 once it was denied or expired."""
+    joined = _once(request, lambda: ctx.device_keys.poll_login(device_code))
+    if joined is None:
+        return JSONResponse(status_code=202, content={"status": "pending"})
     return SyncJoinResponse(**joined.to_dict())
 
 

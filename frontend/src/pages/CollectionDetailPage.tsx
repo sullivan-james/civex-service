@@ -24,6 +24,7 @@ import {
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { recordCollectionVisit } from '../hooks/useFrequentCollections'
 import { recordRecent } from '../hooks/usePins'
+import { usePermissions } from '../hooks/useMe'
 import { collectionTarget } from '../utils/navTargets'
 import { RecordsExplorer } from '../components/explorer/RecordsExplorer'
 import { WithHierarchy } from '../components/explorer/HierarchySidebar'
@@ -78,6 +79,7 @@ export default function CollectionDetailPage() {
     if (collectionName) recordCollectionVisit(collectionName)
   }, [collectionName])
   const collectionId = collection?.id
+  const { can } = usePermissions()
   useEffect(() => {
     if (collectionId && collectionName)
       recordRecent(collectionTarget({ id: collectionId, name: collectionName }))
@@ -194,11 +196,16 @@ export default function CollectionDetailPage() {
             />
           }
           secondaryActions={[
-            { label: 'Edit details', onClick: startEditing },
+            {
+              label: 'Edit details',
+              onClick: startEditing,
+              disabled: !can('change_structure'),
+            },
             {
               label: 'Delete collection',
               variant: 'danger',
               onClick: () => setConfirmDelete(true),
+              disabled: !can('delete'),
             },
           ]}
         >

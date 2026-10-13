@@ -5,7 +5,9 @@ from typing import Any
 from civex.domain.dtos import RecordDTO, SchemaDTO, ViewDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.domain.file_access import LAYOUTS, FileSelection
+from civex.domain import permissions
 from civex.domain.naming import validate_free_name
+from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.query import RecordQuery
 from civex.domain.tables import DEFAULT_FORMAT, TableSpec
 from civex.repositories.protocols import AuditRepository, ViewRepository
@@ -22,7 +24,11 @@ class ViewService:
         schema_svc: SchemaService,
         record_svc: RecordService,
         audit_repo: AuditRepository | None = None,
+        permissions: Permissions = EVERYTHING,
     ) -> None:
+        # A saved filter is shared by everyone, so saving one takes the right
+        # to write records, not just to read them.
+        self._permissions = permissions
         self._views = view_repo
         self._schemas = schema_svc
         self._record_svc = record_svc
@@ -60,6 +66,7 @@ class ViewService:
         sort: list[dict[str, Any]] | None = None,
         files_layout: str = "tree",
     ) -> ViewDTO:
+        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
         schema = self._schemas.get(schema_name)
         name = validate_free_name(name, "view name")
         _check_layout(files_layout)
@@ -105,6 +112,7 @@ class ViewService:
         sort=...,
         files_layout=...,
     ) -> ViewDTO:
+        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
         schema = self._schemas.get(schema_name)
         view = self._views.get_by_name(schema.id, view_name)
         if view is None:
@@ -137,6 +145,7 @@ class ViewService:
         return updated
 
     def delete(self, schema_name: str, view_name: str) -> None:
+        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
         view = self.get(schema_name, view_name)
         if self._audit:
             self._audit.log_change("delete", "view", view.id, view.to_dict(), None)

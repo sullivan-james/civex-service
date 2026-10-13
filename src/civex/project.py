@@ -15,7 +15,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from civex.config import Config, ConfigStore, FileConfigStore
+from civex.domain.accounts import Account
 from civex.domain.features import LOCAL_FEATURES
+from civex.domain.permissions import EVERYTHING, Permissions
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
@@ -42,6 +44,12 @@ class Project:
     # What the host offers for this project (`domain.features`): a project in
     # a folder on this machine gets everything a machine can do.
     features: frozenset[str] = LOCAL_FEATURES
+    # What whoever this request is for may do (`domain.permissions`): the
+    # services ask it at their boundaries, and the sync authority asks it about
+    # each pushed change. The local user may do anything.
+    permissions: Permissions = EVERYTHING
+    # Who that is, as the host knows them; None: whoever sits at this machine.
+    account: Account | None = None
 
     @classmethod
     def local(cls, config: Config) -> Project:
