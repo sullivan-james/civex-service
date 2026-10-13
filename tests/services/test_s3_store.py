@@ -377,7 +377,7 @@ def test_a_download_url_names_the_file(fake: FakeS3):
 def test_what_a_real_presigned_put_signs_is_what_the_target_carries():
     """boto3 signs exactly the headers the uploader must send: the target's
     `headers` are those (bar `host`), or S3 would refuse the PUT."""
-    boto3 = pytest.importorskip("boto3")
+    import boto3
     from botocore.config import Config as BotoConfig
 
     client = boto3.client(

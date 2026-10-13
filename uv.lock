@@ -392,6 +392,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "anthropic" },
+    { name = "boto3" },
     { name = "civex-plugin-sdk" },
     { name = "cryptography", version = "48.0.1", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'" },
     { name = "cryptography", version = "50.0.2", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'" },
@@ -421,7 +422,6 @@ desktop = [
     { name = "pywebview" },
 ]
 dev = [
-    { name = "boto3" },
     { name = "httpx2" },
     { name = "mypy" },
     { name = "pip-audit" },
@@ -438,16 +438,12 @@ docs = [
     { name = "mkdocstrings", extra = ["python"] },
     { name = "neoteroi-mkdocs" },
 ]
-s3 = [
-    { name = "boto3" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
     { name = "anthropic", specifier = ">=0.40" },
-    { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.36" },
-    { name = "boto3", marker = "extra == 's3'", specifier = ">=1.36" },
+    { name = "boto3", specifier = ">=1.36" },
     { name = "civex-plugin-sdk", editable = "civex-plugin-sdk" },
     { name = "cryptography", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'", specifier = ">=42" },
     { name = "cryptography", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'", specifier = ">=42,<49" },
@@ -485,7 +481,7 @@ requires-dist = [
     { name = "tzdata", specifier = ">=2024.1" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
-provides-extras = ["desktop", "postgres", "workflows", "server", "ai", "telemetry", "s3", "dev", "docs"]
+provides-extras = ["desktop", "postgres", "workflows", "server", "ai", "telemetry", "dev", "docs"]
 
 [[package]]
 name = "civex-plugin-sdk"

@@ -66,12 +66,8 @@ another volume. The app's **Add volume** form shows the same checks as you type.
 ## Files in a bucket instead
 
 A project can keep its files in an S3 bucket (or anything that speaks S3's API:
-MinIO, Cloudflare R2) instead of on drives. Install the extra and name the
-bucket in `_civex/config.toml`:
-
-```bash
-uv tool install "civex[s3]"
-```
+MinIO, Cloudflare R2) instead of on drives. Name the bucket in
+`_civex/config.toml`:
 
 ```toml
 [store.s3]

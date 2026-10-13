@@ -12,8 +12,8 @@ a GET; `complete_upload` records what went in. A file that went in by parts is
 recorded unverified until `verify` reads it back, since S3 checks each part but
 not the whole. What civex writes itself (`put*`) it hashed, so it is verified.
 
-`boto3` is imported only when a client is needed, and a client can be given
-(tests give a fake), so the module imports without the extra installed.
+`boto3` is imported only when a client is needed (it is slow to import), and a
+client can be given (tests give a fake).
 """
 
 from __future__ import annotations
@@ -46,7 +46,6 @@ from civex.domain.dtos import (
     VolumeStatus,
 )
 from civex.domain.exceptions import (
-    ConfigError,
     GCAlreadyRunningError,
     ValidationError,
     VolumeUnavailableError,
@@ -94,13 +93,11 @@ def _b64(sha256_hex: str) -> str:
 def boto_client(config: S3Config) -> Any:
     """A boto3 S3 client for `config`: credentials from the environment, the
     named profile or the machine's role, never from config.toml."""
-    try:
-        import boto3
-        from botocore.config import Config as BotoConfig
-    except ImportError as e:  # pragma: no cover - depends on the install
-        raise ConfigError(
-            "Files in an S3 bucket need the s3 extra: pip install 'civex[s3]'"
-        ) from e
+    # Imported here, not at the top: boto3 is slow to import and only a
+    # project that names a bucket needs it.
+    import boto3
+    from botocore.config import Config as BotoConfig
+
     session = boto3.session.Session(
         profile_name=config.profile, region_name=config.region
     )

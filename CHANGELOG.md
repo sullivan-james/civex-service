@@ -38,7 +38,7 @@ from the next tag forward.
   (history conversion, file moves, sync, run drains) open their contexts
   through a factory, so a host serving many projects can run them per project.
   A project in a folder offers everything it did.
-- **Files in an S3 bucket** (`civex[s3]`): `[store.s3]` in `config.toml`
+- **Files in an S3 bucket**, in every install: `[store.s3]` in `config.toml`
   (`bucket`, `prefix`, `region`, `endpoint` for MinIO and the like, `profile`)
   keeps a project's files in a bucket instead of on drives. Everything else is
   the same: records, history, sync, clean-up. The bucket is one volume that is
