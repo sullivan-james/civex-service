@@ -8,6 +8,8 @@ import { ThemeProvider } from './hooks/useTheme'
 import { applyUiSize } from './hooks/useUiSize'
 import { ToastProvider } from './components/ui/ToastProvider'
 import { ApiError } from './api/client'
+import { basePath } from './utils/host'
+import { loadExtensions } from './utils/extensions'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -34,7 +36,8 @@ createRoot(document.getElementById('root')!).render(
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
-          <BrowserRouter>
+          {/* Under a host the app lives at its `<base href>` (`utils/host`). */}
+          <BrowserRouter basename={basePath() || undefined}>
             <App />
           </BrowserRouter>
         </ToastProvider>
@@ -42,3 +45,7 @@ createRoot(document.getElementById('root')!).render(
     </ThemeProvider>
   </StrictMode>,
 )
+
+// A host's extensions draw into named slots (`utils/slots`), which update as
+// they register, so the app doesn't wait for them.
+void loadExtensions()

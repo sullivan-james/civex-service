@@ -55,6 +55,12 @@ const RetentionSection = lazy(
   () => import('./components/settings/RetentionSection'),
 )
 const SyncSection = lazy(() => import('./components/settings/SyncSection'))
+const ExtensionSection = lazy(
+  () => import('./components/host/ExtensionSection'),
+)
+const MembersSection = lazy(
+  () => import('./components/settings/MembersSection'),
+)
 const UpdatesSection = lazy(
   () => import('./components/settings/UpdatesSection'),
 )
@@ -146,7 +152,9 @@ export default function App() {
                 path="recently-deleted"
                 element={<Navigate to="/settings/retention" replace />}
               />
+              <Route path="members" element={<MembersSection />} />
               <Route path="sync" element={<SyncSection />} />
+              <Route path="x/:id" element={<ExtensionSection />} />
               <Route path="map" element={<MapSection />} />
               <Route path="updates" element={<UpdatesSection />} />
               <Route path="logs" element={<LogsSection />} />

@@ -6,11 +6,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from civex.domain import features as features_
 from civex.domain.features import LOCAL_FEATURES
+from civex.server.app_page import render_app_page
 from civex.server.deps import requires
 from civex.server.errors import RequestContextMiddleware, register_error_handlers
 from civex.server.routers import (
@@ -471,8 +472,8 @@ def create_app(features: frozenset[str] = LOCAL_FEATURES) -> FastAPI:
             # Never reused without asking: a browser that kept it would load
             # an older app after an update (its assets have hashed names, so
             # those may be cached).
-            return FileResponse(
-                str(_DIST / "index.html"), headers={"Cache-Control": "no-cache"}
+            return HTMLResponse(
+                render_app_page(_DIST), headers={"Cache-Control": "no-cache"}
             )
     else:
 

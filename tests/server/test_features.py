@@ -123,7 +123,11 @@ def test_me_says_who_and_what_they_may_do(client: TestClient, tmp_path: Path):
             if collection["id"]
             else Permissions.everything(),
             account=Account(
-                "Dr Example", "user", "https://hub.example/p/lab/study/settings"
+                "Dr Example",
+                "user",
+                "https://hub.example/p/lab/study/settings",
+                home_url="https://hub.example/",
+                project="lab / study",
             ),
         )
 
@@ -143,6 +147,8 @@ def test_me_says_who_and_what_they_may_do(client: TestClient, tmp_path: Path):
         "name": "Dr Example",
         "kind": "user",
         "manage_url": "https://hub.example/p/lab/study/settings",
+        "home_url": "https://hub.example/",
+        "project": "lab / study",
     }
     assert me["permissions"]["actions"] == {
         "read": ["project"],

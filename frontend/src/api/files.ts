@@ -1,4 +1,5 @@
 import { api } from './client'
+import { apiUrl } from '../utils/host'
 
 /** Where a file is stored, stamped on file values in record responses. */
 export interface FileLocation {
@@ -160,7 +161,10 @@ export const filesApi = {
       const sent = (loaded: number) =>
         Math.min(total, Math.max(0, loaded - list.length))
       const xhr = new XMLHttpRequest()
-      xhr.open('PUT', `/api/files/batch${collectionQuery(collectionId, true)}`)
+      xhr.open(
+        'PUT',
+        apiUrl(`/files/batch${collectionQuery(collectionId, true)}`),
+      )
       xhr.upload.onprogress = (e) =>
         onProgress?.({ loaded: sent(e.loaded), total, saving: false })
       xhr.upload.onload = () =>

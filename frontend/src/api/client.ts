@@ -1,4 +1,7 @@
-const BASE = '/api'
+import { apiUrl, loginRedirect } from '../utils/host'
+
+/** `/api`, under the path the app is served at (`utils/host`). */
+const BASE = apiUrl('')
 
 /** Some endpoints (e.g. PUT /workflows/{stem}, CIVEX-109) send structured
  * data as `detail` rather than a plain string. `.detail` carries that raw
@@ -37,6 +40,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
 
   if (!res.ok) {
+    if (res.status === 401) signInAgain()
     const body = await res.json().catch(() => ({}))
     throw new ApiError(body.detail, res.status, body)
   }
@@ -47,6 +51,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if ((res.headers.get('content-type') ?? '').includes('text/html'))
     throw new ApiError(NOT_THE_API, res.status)
   return res.json()
+}
+
+/** A session that has ended (401) sends the person to the host's sign-in page,
+ * which brings them back here; a local civex has none, so the error stands.
+ * The one place this is decided. */
+export function signInAgain(): void {
+  const to = loginRedirect()
+  if (to) window.location.assign(to)
 }
 
 export const NOT_THE_API =

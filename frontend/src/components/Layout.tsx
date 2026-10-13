@@ -33,6 +33,8 @@ import { useToast } from './ui/ToastProvider'
 import { Button } from './ui/Button'
 import { IconButton } from './ui/IconButton'
 import { Menu as Dropdown } from './ui/Menu'
+import { basePath } from '../utils/host'
+import { HostProject } from './host/HostProject'
 import {
   RefreshCw,
   Sparkles,
@@ -416,6 +418,8 @@ export default function Layout({ children }: { children: ReactNode }) {
           civex
         </NavLink>
 
+        <HostProject />
+
         <Button
           variant="nav"
           size="sm"
@@ -611,7 +615,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           Licenses &amp; policies
         </NavLink>
         <a
-          href="/docs"
+          href={`${basePath()}/docs`}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg hover:underline"

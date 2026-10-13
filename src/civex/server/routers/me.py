@@ -21,6 +21,13 @@ class AccountResponse(BaseModel):
     manage_url: str | None = Field(
         description="Where members and roles are managed, when the host has such a page."
     )
+    home_url: str | None = Field(
+        default=None,
+        description="The host's page of this person's projects, to go back to.",
+    )
+    project: str | None = Field(
+        default=None, description="What the host calls this project."
+    )
 
 
 class PermissionsResponse(BaseModel):

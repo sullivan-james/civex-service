@@ -24,6 +24,7 @@ import {
 } from '../ui'
 import { describeSyncProgress } from '../../utils/syncProgress'
 import { SyncServing } from './SyncServing'
+import { useHasFeature } from '../../hooks/useFeatures'
 
 const INTERVALS = [
   { seconds: 0, label: 'Never' },
@@ -326,6 +327,15 @@ function NameCard() {
 
 export default function SyncSection() {
   const { data } = useRemoteStatus()
+  const has = useHasFeature()
+  // A hosted project is the authority its devices follow, and people sign in
+  // by name: only the devices are left to manage here.
+  if (has('accounts'))
+    return (
+      <div className="max-w-2xl">
+        <SyncServing />
+      </div>
+    )
   if (!data) return <Skeleton className="h-9 w-80" />
   return (
     <div className="space-y-5">

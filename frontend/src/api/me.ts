@@ -8,6 +8,10 @@ export interface Me {
     name: string
     kind: 'local' | 'user' | string
     manage_url: string | null
+    /** The host's page of this person's projects, to go back to. */
+    home_url?: string | null
+    /** What the host calls this project (`acme / survey`). */
+    project?: string | null
   }
   permissions: {
     actions: Record<string, string[]>

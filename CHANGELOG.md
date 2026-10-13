@@ -74,6 +74,17 @@ from the next tag forward.
   authority holds a person's device to the same rule, `GET /api/me` says who
   you are and what you may do, and the app shows a control you may not use
   switched off with the reason.
+- The app can be served under a path of its own (`/p/<owner>/<project>/`):
+  its assets, requests and routes follow the page's `<base href>`, which the
+  server writes (`server/app_page.render_app_page`, also used by a host along
+  with a boot object: where to sign in again after a 401, and extensions to
+  load). Pins, recents and other things kept in the browser are kept per
+  project. A host with accounts gets a Settings → *Members & access* section
+  (who you are, what you may do, a link to where members are managed), Sync
+  becomes *Devices*, and a collection says *View only* / *Who can edit*. A
+  host's extensions draw into five named places (`utils/slots.ts`) and get
+  civex's own controls from `@civex/ui` (`frontend/packages/ui`). Nothing
+  changes for a local civex.
 
 ## v2.0.0 — syncing between machines, updates from the app (2026-10-07)
 

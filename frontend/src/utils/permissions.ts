@@ -42,6 +42,25 @@ export function can(
 }
 
 /** Why a control is off: the one sentence beside a disabled control. */
-export function notAllowed(action: Action, words = ACTIONS): string {
+export function notAllowed(
+  action: Action,
+  words: Partial<Record<string, string>> = ACTIONS,
+): string {
   return `You may not ${words[action] ?? action} here.`
+}
+
+/** Where `scopes` let an action be done, in words: everywhere, or the named
+ * collections. */
+export function whereAllowed(
+  scopes: readonly string[],
+  names: ReadonlyMap<string, string>,
+): string {
+  if (scopes.includes(PROJECT)) return 'Everywhere in this project'
+  const collections = scopes
+    .filter((s) => s.startsWith('collection:'))
+    .map((s) => s.slice('collection:'.length))
+    .map((id) => names.get(id) ?? 'a collection')
+  return collections.length === 1
+    ? `In ${collections[0]}`
+    : `In ${collections.slice(0, -1).join(', ')} and ${collections[collections.length - 1]}`
 }

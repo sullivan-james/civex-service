@@ -7,6 +7,7 @@ import { PlaceStatus, VolumeStatus } from '../files/Where'
 import { Button, Chip, TriggerPopover } from '../ui'
 import { AlertTriangle, HardDrive, Upload } from '../ui/icons'
 import { FileInfoPanel } from './FileInfoPanel'
+import { apiUrl } from '../../utils/host'
 
 type FileLike = Pick<
   FileRef,
@@ -81,7 +82,7 @@ function DownloadLink({
     text: string
   } | null>(null)
   const name = file.resolved_filename ?? file.filename
-  const href = `/api/files/${file.sha256}?filename=${encodeURIComponent(name)}`
+  const href = `${apiUrl(`/files/${file.sha256}`)}?filename=${encodeURIComponent(name)}`
 
   useEffect(() => {
     if (!note || note.tone !== 'info') return

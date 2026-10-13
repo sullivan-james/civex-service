@@ -3,6 +3,7 @@ import { TabNav, TabPanel, type TabDef } from '../../ui'
 import type { StorageTab } from '../../../hooks/useStorageAttention'
 import { CollectionsTab } from './CollectionsTab'
 import { StorageAttention } from './StorageAttention'
+import { Slot } from '../../host/Slot'
 import { TasksTab } from './TasksTab'
 import { VolumesTab } from './VolumesTab'
 
@@ -44,6 +45,7 @@ export default function StorageSettings() {
 
   return (
     <div className="space-y-5">
+      <Slot name="storage.summary" />
       <StorageAttention onGo={go} />
 
       <TabNav label="Storage" tabs={TABS} value={tab} onChange={go} />

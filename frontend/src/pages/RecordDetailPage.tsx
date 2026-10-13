@@ -59,6 +59,7 @@ import {
   useMergeConflicts,
   useResolveConflict,
 } from '../hooks/useRemote'
+import { Slot } from '../components/host/Slot'
 
 const RECORD_TABS = [
   { id: 'fields' },
@@ -220,6 +221,7 @@ export default function RecordDetailPage() {
         }
         action={
           <>
+            <Slot name="record.header" props={{ recordId: record.id }} />
             {/* Every file under this record, by name and folder: an Encounter
                 holds none itself, but its Recordings and Selections do. */}
             {schema && schemas && schemaTreeHasFiles(schema, schemas) && (

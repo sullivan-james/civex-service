@@ -34,7 +34,7 @@ export interface RemoteStatus {
   connect_error: string | null
   /** This computer asked to join and waits for a person to approve the code
    * on the server. */
-  awaiting_approval: { code: string; expires_at: number } | null
+  awaiting_approval?: { code: string; expires_at: number } | null
 }
 
 export interface SyncDevice {

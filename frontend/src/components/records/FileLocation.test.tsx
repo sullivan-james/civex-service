@@ -353,7 +353,9 @@ describe('FileLink download check', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(
       'Download started.',
     )
-    expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'manual' })
+    expect((fetchMock.mock.calls[0] as unknown[])[1]).toMatchObject({
+      redirect: 'manual',
+    })
     expect(clicked).toHaveBeenCalled()
     clicked.mockRestore()
   })

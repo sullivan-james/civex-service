@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { Page } from '../components/ui'
 import { useTheme } from '../hooks/useTheme'
+import { apiUrl } from '../utils/host'
 
 // xterm renders to canvas, which can't resolve CSS custom properties, so
 // the current token values are read out of computed styles instead.
@@ -54,7 +55,7 @@ export default function TerminalPage() {
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(
-      `${protocol}//${window.location.host}/api/terminal/ws`,
+      `${protocol}//${window.location.host}${apiUrl('/terminal/ws')}`,
     )
     ws.binaryType = 'arraybuffer'
 

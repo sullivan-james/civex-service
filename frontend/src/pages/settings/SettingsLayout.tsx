@@ -3,6 +3,7 @@ import { Outlet, useLocation, useSearchParams } from 'react-router'
 import { InfoTip, Page, Skeleton, TabNav } from '../../components/ui'
 import { useFeatures } from '../../hooks/useFeatures'
 import { offered } from '../../utils/features'
+import { useSlot } from '../../hooks/useSlot'
 
 /** Settings is a set of pages, one per area, each with its own address
  * (`/settings/storage`), so a section can be linked to and none has to share a
@@ -31,6 +32,12 @@ const settingsSections = [
     info: 'How long deleted items, change history and workflow runs are kept. Nothing is removed by itself: a clean-up applies these, or deletes everything before a date you choose.',
   },
   {
+    to: 'members',
+    feature: 'accounts',
+    label: 'Members & access',
+    info: 'Who you are here and what you may do. Members and their roles are managed on the host’s own pages.',
+  },
+  {
     to: 'sync',
     label: 'Sync',
     info: 'Keep this project in step with another Civex that holds the shared copy. Changes are saved here first and sent when it can be reached.',
@@ -57,12 +64,22 @@ const settingsSections = [
     label: 'Advanced',
     info: 'Power-user surfaces: the terminal, raw YAML workflow editing and the plugin editors.',
   },
-] as const satisfies readonly {
+] as const satisfies readonly Section[]
+
+interface Section {
   to: string
   label: string
   info: string
   feature?: string
-}[]
+}
+
+/** Under a host with accounts the project is the authority its devices
+ * follow, and Sync holds only those devices. */
+const HOSTED_SYNC: Section = {
+  to: 'sync',
+  label: 'Devices',
+  info: 'The computers that keep a copy of this project and sync with it. Each one signed in as a person who may use this project.',
+}
 
 /** The tabs inside Settings > Storage, by their address (`?tab=`). */
 const STORAGE_TABS: Record<string, string> = {
@@ -76,8 +93,24 @@ export default function SettingsLayout() {
   const { pathname } = useLocation()
   const [params] = useSearchParams()
   const features = useFeatures()
-  const sections = settingsSections.filter((s) => offered(features, s))
-  const current = settingsSections.find((s) => pathname.split('/')[2] === s.to)
+  const extensions = useSlot('settings.sections')
+  const sections: Section[] = [
+    ...(settingsSections as readonly Section[])
+      .filter((s) => offered(features, s))
+      .map((s) =>
+        s.to === 'sync' && features.has('accounts') ? HOSTED_SYNC : s,
+      ),
+    // A host's own sections (`utils/slots`), at `/settings/x/<id>`.
+    ...extensions.map((e) => ({
+      to: `x/${e.id}`,
+      label: e.label ?? e.id,
+      info: '',
+    })),
+  ]
+  const [, , area, sub] = pathname.split('/')
+  const current = sections.find(
+    (s) => s.to === area || s.to === `${area}/${sub}`,
+  )
   // The tab says which area, and for Storage which of its tabs.
   const storageTab =
     current?.to === 'storage'
@@ -104,7 +137,7 @@ export default function SettingsLayout() {
           {current && (
             <h2 className="flex items-center gap-1 text-base font-semibold text-fg">
               {current.label}
-              <InfoTip side="bottom">{current.info}</InfoTip>
+              {current.info && <InfoTip side="bottom">{current.info}</InfoTip>}
             </h2>
           )}
           {/* Sections load on demand; the section list stays put meanwhile. */}

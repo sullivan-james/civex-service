@@ -6,8 +6,11 @@
  * where you left off" needs no bookkeeping from the user.
  */
 
-export const PINS_KEY = 'civex.pins'
-export const RECENTS_KEY = 'civex.recents'
+import { projectKey } from './host'
+
+// Per project: a host serving several keeps each one's apart (`utils/host`).
+export const PINS_KEY = projectKey('civex.pins')
+export const RECENTS_KEY = projectKey('civex.recents')
 export const MAX_RECENTS = 12
 
 export type PinKind = 'view' | 'collection' | 'record' | 'place'

@@ -25,6 +25,7 @@ import { PublishDialog } from '../components/workflows/PublishDialog'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import { WorkflowSharing } from '../components/workflows/WorkflowSharing'
 import { WorkflowSummary } from '../components/workflows/WorkflowSummary'
+import { Slot } from '../components/host/Slot'
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
@@ -124,15 +125,18 @@ export default function WorkflowPage() {
         </span>
       }
       action={
-        row.local ? (
-          <Button variant="primary" onClick={() => setRunning(true)}>
-            Run
-          </Button>
-        ) : (
-          <Button variant="primary" onClick={() => setInstalling(true)}>
-            Install…
-          </Button>
-        )
+        <>
+          <Slot name="workflow.actions" props={{ workflow: stem }} />
+          {row.local ? (
+            <Button variant="primary" onClick={() => setRunning(true)}>
+              Run
+            </Button>
+          ) : (
+            <Button variant="primary" onClick={() => setInstalling(true)}>
+              Install…
+            </Button>
+          )}
+        </>
       }
       secondaryActions={secondary}
     >

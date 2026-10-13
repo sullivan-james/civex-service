@@ -2,6 +2,7 @@ import { api, ApiError } from './client'
 import type { RecordQueryParams, SortEntry } from './query'
 import type { FilterTreeWire } from '../utils/filterTree'
 import type { FilesLayout } from './views'
+import { apiUrl } from '../utils/host'
 
 /** The formats a table can be made in, with what each is for. */
 export type TableFormat = 'csv' | 'xlsx' | 'tsv' | 'json' | 'jsonl'
@@ -431,7 +432,7 @@ export const fileAccessApi = {
     progressId?: string,
     name?: string,
   ) => {
-    const res = await fetch('/api/file-access/zip', {
+    const res = await fetch(apiUrl('/file-access/zip'), {
       method: 'POST',
       headers: tagged(progressId) ?? { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...selection, allow_partial: allowPartial, name }),

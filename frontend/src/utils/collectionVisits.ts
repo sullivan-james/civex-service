@@ -5,7 +5,9 @@
  * actually works in are one click away.
  */
 
-export const VISITS_KEY = 'civex.collectionVisits'
+import { projectKey } from './host'
+
+export const VISITS_KEY = projectKey('civex.collectionVisits')
 
 export interface CollectionVisit {
   count: number

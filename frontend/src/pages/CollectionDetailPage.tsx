@@ -35,6 +35,8 @@ import { inCollection } from '../utils/auditFilter'
 import { errorMessage } from '../lib/errors'
 import { CollectionExportsSection } from '../components/exports/CollectionExportsSection'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
+import { Slot } from '../components/host/Slot'
+import { WhoCanEdit } from '../components/host/WhoCanEdit'
 
 const COLLECTION_TABS = [
   { id: 'records' },
@@ -176,6 +178,11 @@ export default function CollectionDetailPage() {
           meta={collection.description ?? undefined}
           action={
             <>
+              <Slot
+                name="collection.header"
+                props={{ collectionId: collection.id }}
+              />
+              <WhoCanEdit collectionId={collection.id} />
               <PinButton
                 target={collectionTarget(collection)}
                 noun="collection"

@@ -4,6 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Assets are addressed from the page's <base href>, so one build serves at
+  // `/` and under a host's `/p/<owner>/<project>/` alike.
+  base: './',
   build: {
     rolldownOptions: {
       output: {
