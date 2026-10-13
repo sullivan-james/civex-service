@@ -79,6 +79,7 @@ def _connect_showing_progress(c, url: str, invite: str | None) -> str:
         c.commit()
     if mode == "joined":
         _fetch_history_showing_progress(c)
+    _files_owed(c)
     return mode
 
 
@@ -114,10 +115,7 @@ def _fail(e: Exception) -> typer.Exit:
 
 
 def _describe(report) -> None:  # noqa: ANN001 — SyncReport
-    console.print(
-        f"Received {report.pulled}, sent {report.pushed}"
-        + (f", files sent {report.files_sent}" if report.files_sent else "")
-    )
+    console.print(f"Received {report.pulled}, sent {report.pushed}")
     if report.conflicts:
         console.print(
             f"[warning]{report.conflicts} value(s) did not go in as made; "
@@ -127,7 +125,7 @@ def _describe(report) -> None:  # noqa: ANN001 — SyncReport
         console.print(f"[warning]{report.rejected} change(s) were refused.[/warning]")
     if report.waiting:
         console.print(
-            f"[dim]{report.waiting} change(s) are waiting for a file; they go on the next sync.[/dim]"
+            f"[dim]{report.waiting} change(s) are waiting; they go on the next sync.[/dim]"
         )
 
 
@@ -140,7 +138,12 @@ def _default(ctx: typer.Context) -> None:
 
 @app.command("now")
 def now() -> None:
-    """Send this project's changes and bring in everyone else's."""
+    """Send this project's changes and bring in everyone else's.
+
+    Records only: files go on their own, so a large file never holds up a
+    change. The app and `civex sync watch` send them in the background;
+    `civex sync send` sends them now.
+    """
     c = _ctx()
     try:
         if not c.sync_svc.configured:
@@ -149,10 +152,77 @@ def now() -> None:
             )
             raise typer.Exit(1)
         _describe(c.sync_svc.sync())
+        _files_owed(c)
     except (SyncError, CivexError) as e:
         raise _fail(e)
     finally:
         c.close()
+
+
+def _files_owed(c) -> None:  # noqa: ANN001 — AppContext
+    owed = c.sync_svc.status().files_to_send
+    if owed:
+        console.print(
+            f"[dim]{owed} file(s) aren't on the server yet: `civex sync send` "
+            "sends them now (the app and `civex sync watch` send them in the "
+            "background).[/dim]"
+        )
+
+
+@app.command("send")
+def send(
+    everything: bool = typer.Option(
+        False,
+        "--check-all",
+        help="Ask the server about every file again, not only those it hasn't "
+        "said it holds (in case one it held has gone).",
+    ),
+) -> None:
+    """Upload the files this project's records cite that the server lacks,
+    now, with a progress bar. Records sync separately (`civex sync now`);
+    stopping (Ctrl+C) keeps what has gone up, and the rest goes later."""
+    from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
+
+    from civex.cli.utils import format_bytes
+
+    c = _ctx()
+    try:
+        if not c.sync_svc.fetches_files:
+            raise _fail(ValueError("This project doesn't follow an authority."))
+        with Progress(
+            TextColumn("Sending files"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TextColumn("{task.fields[sent]}"),
+            console=console,
+            transient=True,
+        ) as bar:
+            task = bar.add_task("files", total=None, sent="")
+
+            def told(p) -> None:  # noqa: ANN001 — SyncProgress
+                rate = f", {format_bytes(int(p.rate))}/s" if p.rate else ""
+                bar.update(
+                    task,
+                    total=p.total,
+                    completed=p.done,
+                    sent=f"{format_bytes(p.bytes_done or 0)}{rate}",
+                )
+
+            try:
+                report = c.sync_svc.send_files(everything=everything, progress=told)
+            except KeyboardInterrupt:
+                console.print("Stopped; what went up is kept.")
+                return
+    except SyncError as e:
+        raise _fail(e)
+    finally:
+        c.close()
+    console.print(f"[success]Sent {report.sent} file(s).[/success]")
+    if report.owed:
+        console.print(
+            f"[warning]{len(report.owed)} can't be read on this computer right now "
+            "(a drive that isn't plugged in?); they go once they can.[/warning]"
+        )
 
 
 @app.command("user")

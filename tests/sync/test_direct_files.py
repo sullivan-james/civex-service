@@ -85,6 +85,7 @@ def test_files_go_between_a_device_and_the_bucket(project, server, bucket, monke
     assert laptop.sync_svc.connect(url, invite) == "seeded"
     laptop.commit()
     laptop.sync_svc.sync()
+    laptop.sync_svc.send_files()
     laptop.commit()
 
     key = f"projects/study/{small.sha256[:2]}/{small.sha256[2:]}"
@@ -105,6 +106,7 @@ def test_files_go_between_a_device_and_the_bucket(project, server, bucket, monke
     laptop.commit()
     bucket.calls.clear()
     laptop.sync_svc.sync()
+    laptop.sync_svc.send_files()
     laptop.commit()
     assert authority.file_svc.retrieve(ref.sha256) == big
     unverified = inventory.unverified(authority._session, "s3", "", 10)

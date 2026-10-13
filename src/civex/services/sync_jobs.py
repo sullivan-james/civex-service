@@ -39,15 +39,23 @@ class SyncJobs:
         self.copy_progress: SyncProgress | None = None
         # The history from before joining, while the worker fetches it.
         self.history_progress: SyncProgress | None = None
+        # Files going up or coming down, beside syncing.
+        self.files_progress: SyncProgress | None = None
         # Why the last connect that ran here failed, until another starts.
         self.connect_error: str | None = None
         # The request to join a person must approve, while the connect waits.
         self.awaiting: LoginStarted | None = None
-        self.worker = SyncWorker(load_config, open_context, on_progress=self._history)
+        self.worker = SyncWorker(
+            load_config,
+            open_context,
+            on_progress=self._history,
+            on_files=self._files,
+        )
 
     @property
     def progress(self) -> SyncProgress | None:
-        """What to show: a copy going on first, else history arriving."""
+        """What to show for syncing: a copy going on first, else history
+        arriving. Files moving are shown apart (`files_progress`)."""
         return self.copy_progress or self.history_progress
 
     @property
@@ -57,6 +65,9 @@ class SyncJobs:
 
     def _history(self, progress: SyncProgress | None) -> None:
         self.history_progress = progress
+
+    def _files(self, progress: SyncProgress | None) -> None:
+        self.files_progress = progress
 
     def ensure_worker(self) -> None:
         with self._lock:
@@ -84,6 +95,11 @@ class SyncJobs:
         worker has started, so the status bar shows it on the next read."""
         self.ensure_worker()
         self.worker.request_files(total)
+
+    def send_now(self) -> None:
+        """Send the files the authority lacks now, beside any sync."""
+        self.ensure_worker()
+        self.worker.request_send()
 
     def sync_now(self) -> None:
         self.ensure_worker()

@@ -180,7 +180,7 @@ function chipText(file: FileLike): string {
 
 /** Said of a file here that the server hasn't said it holds. */
 const NOT_SENT =
-  "Not on the server yet: other computers can't open it until it is sent. It goes with the next sync."
+  "Not on the server yet: other computers can't open it until it is sent. It goes up in the background, apart from syncing."
 
 /** What the chip says on hover, before anything is clicked: where, whether it
  * is there, and that there is more. */

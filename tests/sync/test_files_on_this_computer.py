@@ -14,6 +14,7 @@ def _with_file(laptop, record, content: bytes, field: str = "scan"):
     laptop.record_svc.update(str(record.id), {**_plain(data), field: ref.to_dict()})
     laptop.commit()
     laptop.sync_svc.sync()
+    laptop.sync_svc.send_files()
     return ref
 
 
@@ -118,6 +119,7 @@ def test_a_file_a_kept_collection_also_uses_stays(pair):
     )
     laptop.commit()
     laptop.sync_svc.sync()
+    laptop.sync_svc.send_files()
 
     report = laptop.sync_svc.free_up("study", dry_run=False)
     assert (report.files, report.kept_shared) == (0, 1)
@@ -197,6 +199,7 @@ def test_a_download_says_how_many_listed_files_it_covers_and_where_the_rest_are(
     )
     laptop.commit()
     laptop.sync_svc.sync()
+    laptop.sync_svc.send_files()
     phone.sync_svc.sync()
     svc = phone.file_access_svc
     everything = FileSelection(query=RecordQuery(dataset="study"))
@@ -216,6 +219,7 @@ def test_a_download_says_how_many_listed_files_it_covers_and_where_the_rest_are(
     laptop.commit()
     laptop.file_svc.object_path(lost.sha256).unlink()  # unplugged before sending
     laptop.sync_svc.sync()
+    laptop.sync_svc.send_files()
     phone.sync_svc.sync()
     _, rows = svc.chosen(everything, place="server")
     got = svc.download(rows)

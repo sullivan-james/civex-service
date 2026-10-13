@@ -472,25 +472,27 @@ def test_a_file_the_device_cannot_read_does_not_hold_the_change_back(pair, autho
     ref, _path, _saved = _record_with_unreadable_file(laptop, record)
 
     report = laptop.sync_svc.sync()
+    sent = laptop.sync_svc.send_files()
 
     assert report.pushed >= 1 and laptop.sync_repo.count_pending() == 0
     assert data(authority, record)["scan"]["sha256"] == ref.sha256
     assert not authority.file_svc.exists(ref.sha256)
-    assert report.owed_files == [ref.sha256]
+    assert sent.owed == [ref.sha256] and sent.sent == 0
 
 
 def test_the_owed_file_goes_by_itself_when_it_can_be_read_again(pair, authority):
     laptop, _, record = pair
     ref, path, saved = _record_with_unreadable_file(laptop, record)
     laptop.sync_svc.sync()
-    again = laptop.sync_svc.sync()  # still unplugged: nothing to do, nothing breaks
-    assert again.owed_files == [ref.sha256]
+    laptop.sync_svc.send_files()
+    again = laptop.sync_svc.send_files()  # still unplugged: nothing breaks
+    assert again.owed == [ref.sha256]
 
     path.write_bytes(saved)  # the drive is plugged back in
-    report = laptop.sync_svc.sync()
+    report = laptop.sync_svc.send_files()
 
     assert authority.file_svc.exists(ref.sha256)
-    assert report.files_sent == 1 and report.owed_files == []
+    assert report.sent == 1 and report.owed == []
 
 
 def test_one_lost_file_does_not_hold_up_unrelated_changes(pair, authority):
@@ -506,7 +508,9 @@ def test_one_lost_file_does_not_hold_up_unrelated_changes(pair, authority):
     assert status.last_error is None  # owing a file is not a failure
 
 
-def test_files_a_change_cites_are_sent_first(pair, authority):
+def test_a_change_goes_before_the_files_it_cites(pair, authority):
+    """Records and files converge separately: a sync sends the change at once,
+    and the file follows when files are sent (in the background)."""
     laptop, _, record = pair
     laptop.schema_svc.add_field("encounter", "scan", "file")
     laptop.commit()
@@ -519,9 +523,12 @@ def test_files_a_change_cites_are_sent_first(pair, authority):
 
     report = laptop.sync_svc.sync()
 
-    assert report.files_sent == 1 and report.pushed >= 1
-    assert authority.file_svc.exists(ref.sha256)
+    assert report.pushed >= 1
     assert data(authority, record)["scan"]["sha256"] == ref.sha256
+    assert not authority.file_svc.exists(ref.sha256)  # not yet: files go apart
+
+    assert laptop.sync_svc.send_files().sent == 1
+    assert authority.file_svc.exists(ref.sha256)
 
 
 # --- identity ---------------------------------------------------------------

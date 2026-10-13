@@ -45,6 +45,13 @@ from the next tag forward.
   always online; Settings → Storage and the drive commands aren't offered for
   such a project. Credentials come from the environment or an AWS profile,
   never from config.toml.
+- **Files sync apart from records.** A sync, and filling an empty server, now
+  send records only, so they take seconds whatever the files weigh; files go up
+  and come down in the background on their own, with their own task in the
+  status bar. That task says why files haven't reached the server (going up, on
+  a drive that can't be read, or not on this computer at all) and offers **Send
+  now** only when some can go. `civex sync send` uploads them from the command
+  line.
 - **Choosing a bucket from the app or the CLI**: Settings → Storage → Tasks →
   **Use a bucket…**, or `civex store bucket check|set|show|clear`. The bucket is
   tried first (reached, written, read back, nothing else under the prefix), and

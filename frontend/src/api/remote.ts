@@ -15,6 +15,10 @@ export interface RemoteStatus {
   files_to_fetch: number
   /** Files records here cite that the server hasn't said it holds yet. */
   files_to_send: number
+  /** Why those haven't gone; null when there are none. */
+  files_waiting?: FilesWaiting | null
+  /** Files going up or coming down, which happens apart from syncing. */
+  files_progress?: SyncProgress | null
   /** This project is itself an authority. */
   serving: boolean
   /** Changes made here that have not been sent. */
@@ -163,15 +167,24 @@ export interface SyncProgress {
   done: number
   total: number | null
   kind: string | null
-  /** Downloading files: bytes so far, and how fast (bytes a second). */
+  /** Moving files: bytes so far, and how fast (bytes a second). */
   bytes_done?: number
   rate?: number
+}
+
+/** Why files not on the server haven't gone. */
+export interface FilesWaiting {
+  /** Sending can move these now. */
+  ready: number
+  /** Only on drives that can't be read right now, in the drive's own words. */
+  offline: { volume: string; files: number; reason: string }[]
+  /** Not on this computer; a computer that has them must send them. */
+  not_here: number
 }
 
 export interface SyncResult {
   pulled: number
   pushed: number
-  files_sent: number
   conflicts: number
   rejected: number
 }
@@ -405,6 +418,9 @@ export const remoteApi = {
     ),
   disconnect: () => api.post<RemoteStatus>('/remote/disconnect', {}),
   syncNow: () => api.post<{ requested: boolean }>('/remote/sync', {}),
+  /** Upload the files the authority lacks now: files go apart from syncing. */
+  sendFilesNow: () =>
+    api.post<{ requested: boolean }>('/remote/files/send', {}),
   update: (body: {
     paused?: boolean
     interval_seconds?: number

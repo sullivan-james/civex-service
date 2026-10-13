@@ -14,7 +14,6 @@ export function describeResult(r: SyncResult): string {
   const parts: string[] = []
   if (r.pulled) parts.push(`received ${plural(r.pulled, 'change')}`)
   if (r.pushed) parts.push(`sent ${plural(r.pushed, 'change')}`)
-  if (r.files_sent) parts.push(`uploaded ${plural(r.files_sent, 'file')}`)
   let text = parts.length ? `Synced: ${parts.join(', ')}` : 'Already up to date'
   if (r.conflicts) text += `. ${plural(r.conflicts, 'value')} to review`
   if (r.rejected) text += `. ${plural(r.rejected, 'change')} refused`
@@ -39,7 +38,7 @@ export function syncNotice(
   if (!r) return asked ? { variant: 'success', message: 'Synced' } : null
   // What is left for a person (clashes, refusals) is the status bar's to say.
   const done = { ...r, conflicts: 0, rejected: 0 }
-  const did = done.pulled || done.pushed || done.files_sent
+  const did = done.pulled || done.pushed
   if (!did && (!asked || r.conflicts || r.rejected)) return null
   return { variant: 'success', message: describeResult(done) }
 }

@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from civex.db.models import (
+    StoredObject,
     SyncLoginRequest,
     AuditBatch,
     AuditLog,
@@ -188,6 +189,28 @@ class LocalSyncRepository:
         return self._s.execute(
             select(func.count()).select_from(query.subquery())
         ).scalar_one()
+
+    def unconfirmed_copies(self, limit: int) -> dict[str, list[str]]:
+        """Up to `limit` files live records cite that the authority hasn't said
+        it holds, each with the volumes holding a copy here (none: not on this
+        computer), for saying why they haven't gone."""
+        shas = list(
+            self._s.scalars(
+                self._referenced()
+                .where(FileReference.sha256.not_in(select(ServerFile.sha256)))
+                .order_by(FileReference.sha256)
+                .limit(limit)
+            )
+        )
+        where: dict[str, list[str]] = {sha: [] for sha in shas}
+        for at in range(0, len(shas), 500):
+            for sha, volume in self._s.execute(
+                select(StoredObject.sha256, StoredObject.volume).where(
+                    StoredObject.sha256.in_(shas[at : at + 500])
+                )
+            ):
+                where[sha].append(volume)
+        return where
 
     def unconfirmed_of(self, shas: set[str]) -> set[str]:
         """Of these files, those the authority hasn't said it holds."""

@@ -1,5 +1,6 @@
 """When a project syncs by itself: after edits, on an interval, on request; and
-how it backs off when the authority can't be reached."""
+how it backs off when the authority can't be reached. Files move on a loop of
+their own (`files_tick`), never as part of a sync."""
 
 from __future__ import annotations
 
@@ -20,6 +21,8 @@ class Rig:
         self.to_fetch = 0
         self.fetches: list[dict] = []
         self.fail_fetch: Exception | None = None
+        self.sends: list[dict] = []
+        self.fail_send: Exception | None = None
         self.sync_config = SyncConfig(remote="http://a", interval_seconds=60)
         self.worker = SyncWorker(self._config, self._ctx, clock=lambda: self.now)
 
@@ -27,7 +30,7 @@ class Rig:
         return SimpleNamespace(sync=self.sync_config)
 
     def _ctx(self, _config):
-        def sync(check_files=True, progress=None):
+        def sync():
             self.calls += 1
             out = self.outcomes.pop(0) if self.outcomes else "report"
             if isinstance(out, Exception):
@@ -44,6 +47,12 @@ class Rig:
             self.to_fetch = 0
             return SimpleNamespace(absent=[], stopped=False, fetched=done)
 
+        def send_files(**kw):
+            self.sends.append(kw)
+            if self.fail_send:
+                raise self.fail_send
+            return SimpleNamespace(sent=0, owed=[], stopped=False)
+
         return SimpleNamespace(
             sync_repo=SimpleNamespace(
                 count_pending=lambda: self.pending,
@@ -53,6 +62,7 @@ class Rig:
                 sync=sync,
                 files_to_fetch=lambda: self.to_fetch,
                 fetch_files=fetch_files,
+                send_files=send_files,
             ),
             close=lambda: None,
         )
@@ -60,6 +70,10 @@ class Rig:
     def tick(self, advance: float = 0.0):
         self.now += advance
         return self.worker.tick()
+
+    def files_tick(self, advance: float = 0.0):
+        self.now += advance
+        return self.worker.files_tick()
 
 
 def test_it_syncs_at_once_then_waits_for_the_interval() -> None:
@@ -141,25 +155,28 @@ def test_files_kept_here_are_downloaded_in_the_background_and_nothing_else():
     r = Rig()
     r.to_fetch = 3  # what the collections kept here still lack
     r.tick()
+    assert r.fetches == []  # a sync moves no files
+    r.files_tick()
     assert len(r.fetches) == 1 and r.to_fetch == 0
-    r.tick(1000)  # nothing left to fetch (none kept, or all here): no call
+    r.files_tick(1000)  # nothing left to fetch (none kept, or all here): no call
     assert len(r.fetches) == 1
 
 
 def test_asking_for_downloads_shows_progress_at_once_and_runs_before_any_sync():
     seen: list = []
     r = Rig()
-    r.worker._on_progress = seen.append
+    r.worker._on_files = seen.append
     r.to_fetch = 4
     r.worker.request_files(4)
     # Shown the moment it is asked for, before the worker has done anything.
     assert seen and (seen[0].phase, seen[0].done, seen[0].total) == ("files", 0, 4)
 
-    r.worker._backoff_until = r.now + 500  # an earlier sync failed
+    r.worker._files_backoff_until = r.now + 500  # an earlier pass failed
     r.sync_config.paused = True
-    r.tick()
+    r.files_tick()
     assert len(r.fetches) == 1  # asked for: not held by the back-off or a pause
     assert r.calls == 0  # and no sync was needed first
+    assert r.sends == []  # asked to download, not to upload
     assert seen[-1] is None  # all here: the bar goes
 
 
@@ -168,9 +185,44 @@ def test_a_download_that_cannot_reach_the_server_does_not_leave_a_bar():
 
     seen: list = []
     r = Rig()
-    r.worker._on_progress = seen.append
+    r.worker._on_files = seen.append
     r.to_fetch = 2
     r.fail_fetch = SyncError("no server")
     r.worker.request_files(2)
-    r.tick()
+    r.files_tick()
     assert seen[-1] is None
+
+
+def test_a_sync_sends_no_files_and_the_files_loop_does():
+    r = Rig()
+    r.pending = 1
+    r.tick()
+    assert r.calls == 1 and r.sends == []
+
+    r.files_tick()
+    assert len(r.sends) == 1
+    assert r.sends[0]["everything"] is True  # the first look asks about every file
+    r.files_tick(1)
+    assert r.sends[-1]["everything"] is False  # then only those not confirmed
+
+
+def test_send_now_asks_about_every_file_even_while_paused():
+    r = Rig()
+    r.files_tick()
+    r.sync_config.paused = True
+    r.files_tick(1)
+    assert len(r.sends) == 1  # paused: nothing moves by itself
+
+    r.worker.request_send()
+    r.files_tick(1)
+    assert len(r.sends) == 2 and r.sends[-1]["everything"] is True
+
+
+def test_a_failed_upload_waits_a_while_and_does_not_hold_up_syncing():
+    r = Rig()
+    r.fail_send = SyncError("no server")
+    r.files_tick()
+    r.files_tick(10)
+    assert len(r.sends) == 1  # backing off
+    r.pending = 1
+    assert r.tick() == "report"  # syncing carries on regardless

@@ -108,17 +108,12 @@ describe('useSyncTasks', () => {
     })
   })
 
-  it('says when files here are not on the server yet', async () => {
+  it('leaves files to their own task', async () => {
     const { result } = tasksFor({ ...base, files_to_send: 3 })
-    await waitFor(() => expect(result.current).toHaveLength(1))
-    expect(result.current[0]).toMatchObject({
-      title: '3 files not on the server yet',
-      tone: 'info',
-    })
-    expect(result.current[0].actions?.map((a) => a.label)).toContain('Send now')
+    await waitFor(() => expect(result.current).toHaveLength(0))
   })
 
-  it('counts files with changes while a sync runs or has failed', async () => {
+  it('counts changes while a sync runs or has failed', async () => {
     const running = tasksFor({
       ...base,
       running: true,
@@ -126,13 +121,11 @@ describe('useSyncTasks', () => {
       files_to_send: 2,
     })
     await waitFor(() => expect(running.result.current).toHaveLength(1))
-    expect(running.result.current[0].detail).toBe(
-      '1 change and 2 files to send',
-    )
-    const failed = tasksFor({ ...base, last_error: 'gone', files_to_send: 1 })
+    expect(running.result.current[0].detail).toBe('1 change to send')
+    const failed = tasksFor({ ...base, last_error: 'gone', pending: 2 })
     await waitFor(() => expect(failed.result.current).toHaveLength(1))
     expect(failed.result.current[0].note).toBe(
-      '1 file saved here, not yet sent',
+      '2 changes saved here, not yet sent',
     )
   })
 })

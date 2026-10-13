@@ -84,6 +84,7 @@ def test_files_travel_both_ways_over_ssh(project, lab):
     )
     laptop.commit()
     laptop.sync_svc.sync()
+    laptop.sync_svc.send_files()
     assert authority.file_svc.retrieve(ref.sha256) == content
 
     _, invite2 = authority.device_keys.invite("tablet")
@@ -103,6 +104,7 @@ def test_one_tunnel_serves_every_call(project, lab):
     laptop.commit()
     first = ssh_tunnel.local_url(url)
     laptop.sync_svc.sync()
+    laptop.sync_svc.send_files()
     assert ssh_tunnel.local_url(url) == first
 
 

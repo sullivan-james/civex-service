@@ -63,6 +63,11 @@ class RemoteStatusResponse(BaseModel):
         "holds yet: still to be sent (or not sent yet because they can't be read "
         "here).",
     )
+    files_waiting: FilesWaitingResponse | None = Field(
+        default=None,
+        description="Why files not on the server yet haven't gone; null when "
+        "there are none.",
+    )
     last_result: SyncResultResponse | None = Field(
         default=None,
         description="What the last sync run by this server did; null after a "
@@ -73,6 +78,11 @@ class RemoteStatusResponse(BaseModel):
         description="How far a long step has got while one runs here: copying "
         "the project from the authority, filling an empty one, or fetching the "
         "history from before joining.",
+    )
+    files_progress: SyncProgressResponse | None = Field(
+        default=None,
+        description="Files going up to the server or coming down from it, which "
+        "happens beside syncing, while it runs here.",
     )
     connecting: bool = Field(
         default=False, description="A connect started here is still running."
@@ -94,10 +104,26 @@ class AwaitingApprovalResponse(BaseModel):
     )
 
 
+class OfflineDriveFiles(BaseModel):
+    volume: str = Field(description="The drive holding them.")
+    files: int
+    reason: str = Field(description="Why the drive can't be read, in its own words.")
+
+
+class FilesWaitingResponse(BaseModel):
+    ready: int = Field(description="Files sending can move now.")
+    offline: list[OfflineDriveFiles] = Field(
+        description="Files only on drives that can't be read right now."
+    )
+    not_here: int = Field(
+        description="Files not on this computer; a computer that holds them "
+        "must send them."
+    )
+
+
 class SyncResultResponse(BaseModel):
     pulled: int = Field(description="Changes from others brought in.")
     pushed: int = Field(description="Changes of this project's that were sent.")
-    files_sent: int
     conflicts: int = Field(description="Values that did not go in as made.")
     rejected: int = Field(description="Changes the authority refused.")
 
@@ -301,7 +327,6 @@ def _last_result() -> SyncResultResponse | None:
     return SyncResultResponse(
         pulled=r.pulled,
         pushed=r.pushed,
-        files_sent=r.files_sent,
         conflicts=r.conflicts,
         rejected=r.rejected,
     )
@@ -325,9 +350,26 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         download_files=s.download_files,
         files_to_fetch=s.files_to_fetch,
         files_to_send=s.files_to_send,
+        files_waiting=(
+            FilesWaitingResponse(
+                ready=w.ready,
+                offline=[
+                    OfflineDriveFiles(volume=v, files=n, reason=r)
+                    for v, n, r in w.offline
+                ],
+                not_here=w.not_here,
+            )
+            if (w := s.files_waiting)
+            else None
+        ),
         last_result=_last_result(),
         progress=(
             SyncProgressResponse(**p.to_dict()) if (p := sync_jobs.progress) else None
+        ),
+        files_progress=(
+            SyncProgressResponse(**f.to_dict())
+            if (f := sync_jobs.files_progress)
+            else None
         ),
         connecting=sync_jobs.connecting,
         connect_error=sync_jobs.connect_error,
@@ -390,6 +432,16 @@ def sync_now(ctx: AppContext = Depends(get_ctx)):
     if not ctx.sync_svc.configured:
         raise HTTPException(400, detail="This project is not following an authority")
     sync_jobs.sync_now()
+    return {"requested": True}
+
+
+@router.post("/files/send", status_code=202)
+def send_files_now(ctx: AppContext = Depends(get_ctx)):
+    """Send the files the authority lacks now. Files go on their own, beside
+    syncing (a sync moves records only); `GET /remote` shows how far it has got."""
+    if not ctx.sync_svc.fetches_files:
+        raise HTTPException(400, detail="This project is not following an authority")
+    sync_jobs.send_now()
     return {"requested": True}
 
 

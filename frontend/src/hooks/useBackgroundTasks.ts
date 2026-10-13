@@ -3,6 +3,7 @@ import { useAutomationTasks } from './tasks/useAutomationTasks'
 import { useFileJobTasks } from './tasks/useFileJobTasks'
 import { useHistoryTasks } from './tasks/useHistoryTasks'
 import { useMoveTasks } from './tasks/useMoveTasks'
+import { useServerFilesTasks } from './tasks/useServerFilesTasks'
 import { useSyncTasks } from './tasks/useSyncTasks'
 import { useUpdateTasks } from './tasks/useUpdateTasks'
 
@@ -15,6 +16,7 @@ export function useBackgroundTasks(): BackgroundTask[] {
     ...useFileJobTasks(),
     ...useMoveTasks(),
     ...useSyncTasks(),
+    ...useServerFilesTasks(),
     ...useAutomationTasks(),
     ...useHistoryTasks(),
     ...useUpdateTasks(),
