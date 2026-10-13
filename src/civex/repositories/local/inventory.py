@@ -226,3 +226,16 @@ def remove_absent(session: Session, volume: str, present: set[str], batch: int) 
             )
             removed += len(gone)
         last = rows[-1]
+
+
+def held(session: Session) -> dict[str, tuple[int, int]]:
+    """Files and bytes recorded on each volume (a drive's name, or the bucket's
+    `S3_VOLUME`): what a project would leave behind if it stopped using one."""
+    rows = session.execute(
+        select(
+            StoredObject.volume,
+            func.count(),
+            func.coalesce(func.sum(StoredObject.size), 0),
+        ).group_by(StoredObject.volume)
+    ).all()
+    return {str(volume): (int(files), int(size)) for volume, files, size in rows}

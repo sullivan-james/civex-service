@@ -4,6 +4,7 @@
  * answered, so nothing flickers on load. */
 export const LOCAL_FEATURES = [
   'volumes',
+  'store_admin',
   'local_workflows',
   'plugin_editor',
   'terminal',

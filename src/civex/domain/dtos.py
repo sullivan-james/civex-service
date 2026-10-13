@@ -1425,3 +1425,42 @@ class OrphanDTO:
 
     record: RecordDTO
     above: list[RecordDTO]
+
+
+@dataclass(frozen=True)
+class BucketCheck:
+    """Whether civex can keep files in a bucket, worked out by trying
+    (`BucketService.check`): `problems` stop it being used; `warnings` don't."""
+
+    problems: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.problems
+
+
+@dataclass(frozen=True)
+class BucketStatus:
+    """Where a project's files are kept (`BucketService.status`): the bucket it
+    names, or None for drives; what each holds; and whether switching is
+    allowed now (`can_switch`, else `blocked` says why in plain words).
+    `left_on_drives` counts files recorded on drives while a bucket is set,
+    which a project using a bucket can't reach."""
+
+    bucket: str | None
+    prefix: str = ""
+    region: str | None = None
+    endpoint: str | None = None
+    profile: str | None = None
+    direct: bool = True
+    bucket_files: int = 0
+    bucket_bytes: int = 0
+    drive_files: int = 0
+    drive_bytes: int = 0
+    can_switch: bool = True
+    blocked: str | None = None
+
+    @property
+    def left_on_drives(self) -> int:
+        return self.drive_files if self.bucket else 0

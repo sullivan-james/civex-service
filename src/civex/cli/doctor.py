@@ -30,7 +30,8 @@ def doctor(
     checks look for integrity issues: dangling reference/reference_list values
     left over from before deletes checked for referrers, and live records that
     sit under a deleted record (out of sight; `civex record restore-above`
-    puts one back in place).
+    puts one back in place). It also warns when the project keeps its files in
+    a bucket but files are still recorded on drives, out of reach.
 
     With --fix, deletes cached plugin environments that point at a Python that
     no longer exists (uv rebuilds them the next time the plugin runs).
@@ -61,7 +62,19 @@ def doctor(
     ctx = get_ctx()
     dangling = ctx.record_svc.find_dangling_references()
     orphans, orphan_total = ctx.record_svc.orphans(50)
+    stranded = ctx.bucket_svc.status()
     ctx.close()
+
+    if stranded.left_on_drives:
+        console.print(
+            f"{_MARK['warn']} Files: {stranded.left_on_drives:,} file(s) are "
+            f"recorded on drives, but this project keeps its files in the bucket "
+            f"'{stranded.bucket}', so they can't be reached."
+        )
+        console.print(
+            "     [dim]Take [store.s3] out of _civex/config.toml to reach them "
+            "again; civex doesn't move files between drives and a bucket.[/dim]"
+        )
 
     if not dangling and not orphan_total:
         console.print("[success]No integrity issues found.[/success]")

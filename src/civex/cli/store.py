@@ -25,6 +25,10 @@ from civex.cli import transfers as _transfers  # noqa: E402
 app.command("move")(_transfers.move)
 app.add_typer(_transfers.transfers_app, name="transfers")
 
+from civex.cli.bucket import bucket_app  # noqa: E402
+
+app.add_typer(bucket_app, name="bucket")
+
 
 @app.command("list")
 def store_list() -> None:

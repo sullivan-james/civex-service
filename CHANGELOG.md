@@ -45,6 +45,13 @@ from the next tag forward.
   always online; Settings → Storage and the drive commands aren't offered for
   such a project. Credentials come from the environment or an AWS profile,
   never from config.toml.
+- **Choosing a bucket from the app or the CLI**: Settings → Storage → Tasks →
+  **Use a bucket…**, or `civex store bucket check|set|show|clear`. The bucket is
+  tried first (reached, written, read back, nothing else under the prefix), and
+  a project switches between drives and a bucket only while the place it leaves
+  holds none of its files, since files are never moved between the two. A
+  project using a bucket shows it under Settings → Storage; `civex doctor`
+  warns about files left on drives.
 - **Files go straight to storage** where the bucket allows it (`direct_files`,
   on by default; `direct = false` turns it off): a device syncing with such an
   authority uploads to and downloads from the bucket by presigned URL, the

@@ -109,6 +109,17 @@ class FakeS3:
         self.objects.pop((Bucket, Key), None)
         return {}
 
+    def list_objects_v2(
+        self, Bucket: str, Prefix: str = "", MaxKeys: int = 1000
+    ) -> dict[str, Any]:
+        self.calls.append("list_objects_v2")
+        items = [
+            {"Key": key, "Size": len(data), "LastModified": modified}
+            for (bucket, key), (data, modified) in sorted(self.objects.items())
+            if bucket == Bucket and key.startswith(Prefix)
+        ][:MaxKeys]
+        return {"Contents": items, "KeyCount": len(items)} if items else {"KeyCount": 0}
+
     def get_paginator(self, name: str) -> _Paginator:
         if name == "list_objects_v2":
             items = [

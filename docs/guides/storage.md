@@ -66,8 +66,24 @@ another volume. The app's **Add volume** form shows the same checks as you type.
 ## Files in a bucket instead
 
 A project can keep its files in an S3 bucket (or anything that speaks S3's API:
-MinIO, Cloudflare R2) instead of on drives. Name the bucket in
-`_civex/config.toml`:
+MinIO, Cloudflare R2) instead of on drives. Choose it under **Settings →
+Storage → Tasks → Use a bucket…**, or from the command line:
+
+```bash
+export AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=…
+civex store bucket check lab-files --endpoint http://127.0.0.1:9000   # try it
+civex store bucket set lab-files --prefix projects/humpbacks          # use it
+civex store bucket show --check
+civex store bucket clear                                              # drives again
+```
+
+Either way civex tries the bucket first: it must be reachable, accept a write,
+read it back and delete it, and hold nothing under the prefix already (another
+project's files there would look unused to a clean-up here). **Files are never
+moved between drives and a bucket**, so a project can switch only while the
+place it leaves holds none of its files: start a project in a bucket, or switch
+before adding files. `civex doctor` warns if files are still recorded on drives
+while a bucket is in use. The settings are saved in `_civex/config.toml`:
 
 ```toml
 [store.s3]
@@ -82,8 +98,8 @@ Credentials are never in `config.toml`: boto3 reads them from the environment
 (`AWS_ACCESS_KEY_ID`…), the named profile, or the machine's role. Objects are
 laid out as on a drive (`<prefix>/3f/9c01ab…`), the same inventory records what
 is there, and records, history, sync and clean-up work unchanged. The bucket is
-one volume that is always online, so nothing under **Settings → Storage** or
-`civex store` applies to such a project and those pages aren't shown.
+one volume that is always online, so the drive pages and commands don't apply
+to such a project: **Settings → Storage** shows the bucket instead.
 
 **Files go straight to the bucket.** Unless `direct = false`, downloads from
 the app are a redirect to the bucket, and a device syncing with an authority

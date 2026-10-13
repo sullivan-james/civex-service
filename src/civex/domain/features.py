@@ -13,6 +13,7 @@ hides what the server doesn't do. Pure: no imports from the rest of civex.
 from __future__ import annotations
 
 VOLUMES = "volumes"
+STORE_ADMIN = "store_admin"
 LOCAL_WORKFLOWS = "local_workflows"
 PLUGIN_EDITOR = "plugin_editor"
 TERMINAL = "terminal"
@@ -30,6 +31,7 @@ HUB_COMPUTE = "hub_compute"
 # detail of the 501 a route answers when its feature is off).
 FEATURES: dict[str, str] = {
     VOLUMES: "storage drives, where files are kept, moving and cleaning them up",
+    STORE_ADMIN: "choosing where the project's files are kept: drives or a bucket",
     LOCAL_WORKFLOWS: "workflows and runs on this machine",
     PLUGIN_EDITOR: "editing plugins on this machine",
     TERMINAL: "a terminal on this machine",
@@ -48,6 +50,7 @@ FEATURES: dict[str, str] = {
 LOCAL_FEATURES: frozenset[str] = frozenset(
     {
         VOLUMES,
+        STORE_ADMIN,
         LOCAL_WORKFLOWS,
         PLUGIN_EDITOR,
         TERMINAL,

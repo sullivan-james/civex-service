@@ -22,7 +22,8 @@ const settingsSections = [
   },
   {
     to: 'storage',
-    feature: 'volumes',
+    // Drives, or the bucket a project keeps its files in instead.
+    feature: 'store_admin',
     label: 'Storage',
     info: 'Where Civex keeps your files, and which collections use which volume.',
   },

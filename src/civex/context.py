@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from civex.services.record_service import RecordService
     from civex.services.retention_service import RetentionService
     from civex.services.schema_service import SchemaService
+    from civex.services.bucket_service import BucketService
     from civex.services.store_service import StoreService
     from civex.services.export_definition_service import ExportDefinitionService
     from civex.services.history_compaction import HistoryCompactionService
@@ -114,6 +115,8 @@ class AppContext:
     sync_svc: SyncService
     library_svc: LibraryService
     compaction_svc: HistoryCompactionService
+    # Where files are kept: drives or a bucket (`features.STORE_ADMIN`).
+    bucket_svc: BucketService
     project: Project
     _session: Session
     # The services of a project whose files are on drives on this machine; None
@@ -256,6 +259,7 @@ def build_context(
     from civex.services.record_service import RecordService
     from civex.services.retention_service import RetentionService
     from civex.services.schema_service import SchemaService
+    from civex.services.bucket_service import BucketService
     from civex.services.store_service import StoreService
     from civex.repositories.local.file_store import VolumeAwareFileObjectStore
     from civex.services.export_definition_service import ExportDefinitionService
@@ -263,6 +267,8 @@ def build_context(
     from civex.services.workflow_job_service import WorkflowJobService
     from civex.services.workflow_service import WorkflowService
     from civex.repositories.protocols import VolumeStore
+    from civex.repositories.local import inventory
+    from civex.repositories.s3.store import boto_client
 
     config = project.config
     engine = project.engine or _get_engine(config.db.url)
@@ -498,6 +504,11 @@ def build_context(
         device_keys=device_keys,
         sync_svc=sync_svc,
         library_svc=library_svc,
+        bucket_svc=BucketService(
+            project.config_store,
+            held=lambda: inventory.held(session),
+            client_for=boto_client,
+        ),
         project=project,
         _session=session,
         _store_svc=store_svc,
