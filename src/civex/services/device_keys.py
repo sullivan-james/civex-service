@@ -6,6 +6,12 @@ then on signs in by signing a request with the private key it never sends
 (`start_session`), for a token that lasts `SESSION_SECONDS`. `authenticate`
 turns that token back into the device, as the authority's `Authenticator`.
 
+The other way in needs no invite: the device asks to join (`request_login`)
+and shows a short code; the admin approves it here with a name
+(`approve_login`), which admits the device exactly as an invite would, and the
+device, polling (`poll_login`), is told it joined. A hosted civex approves on
+its own pages, for the signed-in person; this is the same flow.
+
 Nothing a device sends after joining can be reused for long: a token expires
 within minutes, and the key that makes new ones never leaves the device.
 """
@@ -26,8 +32,12 @@ from civex.domain.sync import (
     CLOCK_SKEW_SECONDS,
     INVITE_HOURS,
     INVITE_PREFIX,
+    LOGIN_MINUTES,
+    LOGIN_POLL_SECONDS,
     SESSION_SECONDS,
     Joined,
+    LoginRequestDTO,
+    LoginStarted,
     Principal,
     SessionGrant,
     SyncDeviceDTO,
@@ -39,6 +49,9 @@ from civex.domain.sync import (
 from civex.repositories.protocols import SyncRepository
 
 MAX_INVITE_HOURS = 24 * 30
+# The code a person reads off a device: letters and digits that can't be
+# misread (no 0/O, 1/I), in two groups of four.
+_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
 def _hash(code: str) -> str:
@@ -128,16 +141,101 @@ class DeviceKeys:
         # Taken only if nobody took it meanwhile (two joins at once).
         if not self._repo.use_invite(found.id):
             raise _refused("That invite was used already. Ask for a new one.")
-        # The same machine joining again (connected afresh) replaces itself.
+        return self._admit(found.name, device_id, public_key)
+
+    def _admit(self, name: str, device_id: str, public_key: str) -> Joined:
+        """Add the device, by whichever way it came in. The same machine
+        joining again (connected afresh) replaces itself."""
         again = self._repo.live_device(device_id)
         if again is not None:
             self._repo.revoke_device(again.name)
-        self._repo.add_device(found.name, device_id, public_key)
+        self._repo.add_device(name, device_id, public_key)
         return Joined(
             project_id=self._repo.meta().project_id,
             authority_key=keys.public_of(self._private_key()),
-            device_name=found.name,
+            device_name=name,
         )
+
+    # -- asking to join, for a person to approve -------------------------------
+
+    def request_login(self, device_id: str, public_key: str) -> LoginStarted:
+        """A device without an invite asks to join. The code a person reads off
+        it is kept as it is (short-lived, and what the admin picks from a
+        list); the secret it polls with is kept hashed."""
+        try:
+            device_id = str(uuid.UUID(device_id))
+        except ValueError:
+            raise SyncError("The device id is not valid", retryable=False)
+        if not keys.is_public_key(public_key):
+            raise SyncError("The device's key is not valid", retryable=False)
+        self._private_key()  # the authority's key, made before anyone can join
+        user_code = "-".join(
+            "".join(secrets.choice(_CODE_ALPHABET) for _ in range(4)) for _ in range(2)
+        )
+        device_code = secrets.token_urlsafe(32)
+        expires = datetime.now(timezone.utc) + timedelta(minutes=LOGIN_MINUTES)
+        self._repo.add_login_request(
+            user_code, _hash(device_code), device_id, public_key, expires
+        )
+        return LoginStarted(
+            user_code=user_code,
+            device_code=device_code,
+            expires_at=int(expires.timestamp()),
+            interval=LOGIN_POLL_SECONDS,
+        )
+
+    def poll_login(self, device_code: str) -> Joined | None:
+        """What became of a request: `Joined` once a person approved it, None
+        while it waits, and a refusal (410) once it was denied or expired."""
+        found = self._repo.login_by_device_hash(_hash(device_code))
+        gone = SyncError(
+            "That request to join is no longer waiting: it was denied, or it "
+            "expired before anyone approved it. Ask again.",
+            retryable=False,
+            status=410,
+        )
+        if found is None or found.denied_at:
+            raise gone
+        if found.approved_at:
+            return Joined(
+                project_id=self._repo.meta().project_id,
+                authority_key=keys.public_of(self._private_key()),
+                device_name=found.name or "device",
+            )
+        if datetime.fromisoformat(found.expires_at) <= datetime.now(timezone.utc):
+            raise gone
+        return None
+
+    def pending_logins(self) -> list[LoginRequestDTO]:
+        """Devices waiting to be let in, oldest first."""
+        return self._repo.pending_logins()
+
+    def approve_login(self, user_code: str, name: str) -> SyncDeviceDTO:
+        """Let the device showing `user_code` in, as `name`: it is a device
+        from this moment, and learns so the next time it asks."""
+        name = name.strip()
+        if not name:
+            raise ValidationError("A device needs a name")
+        found = self._repo.login_waiting(user_code.strip().upper())
+        if found is None:
+            raise ValidationError(f"No device is waiting with the code {user_code}")
+        named = self._repo.device_named(name)
+        if named is not None and named.device_id != found.device_id:
+            raise ValidationError(
+                f"A device called '{name}' already follows this project"
+            )
+        self._admit(name, found.device_id, found.public_key)
+        self._repo.settle_login(found.id, name, approved=True)
+        device = self._repo.live_device(found.device_id)
+        assert device is not None
+        return device
+
+    def deny_login(self, user_code: str) -> bool:
+        found = self._repo.login_waiting(user_code.strip().upper())
+        if found is None:
+            return False
+        self._repo.settle_login(found.id, None, approved=False)
+        return True
 
     def start_session(self, device_id: str, at: int, signature: str) -> SessionGrant:
         device = self._repo.live_device(device_id)

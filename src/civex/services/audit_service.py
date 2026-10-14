@@ -41,7 +41,7 @@ from civex.domain.dtos import (
     RevertResultDTO,
 )
 from civex.domain.exceptions import NotFoundError, ValidationError
-from civex.repositories.protocols import AuditRepository, FileObjectStore
+from civex.repositories.protocols import AuditRepository, ObjectStore
 from civex.services.dataset_service import DatasetService
 from civex.services.record_service import RecordService
 from civex.services.schema_service import SchemaService
@@ -60,7 +60,7 @@ class AuditService:
         schema_svc: SchemaService,
         record_svc: RecordService,
         dataset_svc: DatasetService,
-        files: FileObjectStore,
+        files: ObjectStore,
         sync_conflicts: Callable[[list[uuid.UUID]], dict[uuid.UUID, list[Any]]]
         | None = None,
     ) -> None:

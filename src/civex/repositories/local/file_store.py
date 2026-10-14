@@ -33,11 +33,19 @@ import shutil
 import re
 import time
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterable, Callable, Iterable, Iterator, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncIterable,
+    BinaryIO,
+    Callable,
+    Iterable,
+    Iterator,
+)
 
 from civex import fs_locations
+from civex.repositories.local import inventory
 from civex.processes import pid_alive
 from civex.config import StoreConfig, VolumeConfig
 from civex.domain.dtos import (
@@ -46,9 +54,11 @@ from civex.domain.dtos import (
     VOLUME_READONLY,
     VOLUME_RETIRED,
     VOLUME_WRONG_DRIVE,
+    DirectUpload,
     FileCopy,
     FileRef,
     StoredObjectInfo,
+    UploadedPart,
     VolumeStatus,
 )
 from civex.domain.placement import PLACEMENT_FAIL
@@ -562,8 +572,36 @@ class VolumeAwareFileObjectStore:
             raise FileNotFoundError(f"Object {sha256} not found in any volume")
         return path.read_bytes()
 
+    def open(self, sha256: str) -> BinaryIO:
+        return self.object_path(sha256).open("rb")
+
     def exists(self, sha256: str) -> bool:
         return self._find_object(sha256) is not None
+
+    # -- straight to storage: not from a drive -------------------------------
+    #
+    # A drive on this machine can only be written through this process, so
+    # there is no target to hand an uploader, and nothing this store writes
+    # is ever unverified: it hashed every byte itself.
+
+    def upload_target(self, sha256: str, size: int) -> DirectUpload | None:
+        return None
+
+    def complete_upload(
+        self,
+        sha256: str,
+        size: int,
+        original_filename: str,
+        upload_id: str | None = None,
+        parts: list[UploadedPart] | None = None,
+    ) -> FileRef:
+        raise VolumeUnavailableError("Files on a drive are not uploaded directly")
+
+    def download_url(self, sha256: str, filename: str | None = None) -> str | None:
+        return None
+
+    def verify(self) -> list[str]:
+        return []
 
     # -- where is it? -------------------------------------------------------
 
@@ -571,27 +609,9 @@ class VolumeAwareFileObjectStore:
         """Every copy the inventory records of each file, as (volume, size), on
         volumes that exist, in the order the volumes are configured. A file
         with no copy here is absent. A few queries, no disk access."""
-        wanted = list(dict.fromkeys(shas))
-        out: dict[str, list[tuple[str, int]]] = {}
-        if self._session is None or not wanted:
-            return out
-        from sqlalchemy import select
-
-        from civex.db.models import StoredObject
-
-        order = {name: i for i, name in enumerate(self._cfg.volumes)}
-        for i in range(0, len(wanted), _LOCATE_CHUNK):
-            rows = self._session.execute(
-                select(
-                    StoredObject.sha256, StoredObject.volume, StoredObject.size
-                ).where(StoredObject.sha256.in_(wanted[i : i + _LOCATE_CHUNK]))
-            )
-            for sha, volume, size in rows:
-                if volume in order:
-                    out.setdefault(sha, []).append((volume, int(size)))
-        for found in out.values():
-            found.sort(key=lambda row: order[row[0]])
-        return out
+        if self._session is None:
+            return {}
+        return inventory.copies(self._session, shas, self._cfg.volumes)
 
     def homes(self) -> dict[str, str]:
         """Collection id -> its home drive (each keeps a copy of every file its
@@ -610,28 +630,9 @@ class VolumeAwareFileObjectStore:
     ) -> dict[tuple[uuid.UUID, str], str]:
         """(record, file) -> the volume of the copy that record uses, for the
         records that point at one on a volume that exists. A few queries."""
-        wanted = list(dict.fromkeys(record_ids))
-        out: dict[tuple[uuid.UUID, str], str] = {}
-        if self._session is None or not wanted:
-            return out
-        from sqlalchemy import select
-
-        from civex.db.models import FileReference
-
-        for i in range(0, len(wanted), _LOCATE_CHUNK):
-            for record_id, sha, volume in self._session.execute(
-                select(
-                    FileReference.record_id,
-                    FileReference.sha256,
-                    FileReference.volume,
-                ).where(
-                    FileReference.record_id.in_(wanted[i : i + _LOCATE_CHUNK]),
-                    FileReference.volume.is_not(None),
-                )
-            ):
-                if volume in self._cfg.volumes and record_id is not None:
-                    out[(record_id, sha)] = volume
-        return out
+        if self._session is None:
+            return {}
+        return inventory.copies_used(self._session, record_ids, self._cfg.volumes)
 
     def locate_volumes(self, shas: Iterable[str]) -> dict[str, str | None]:
         """The volume to use for each file, for a whole batch at once: of its
@@ -1520,71 +1521,12 @@ class VolumeAwareFileObjectStore:
         a copy that is gone point at the newest copy left, or at none."""
         if self._session is None:
             return
-        from sqlalchemy import delete, select, update
-
-        from civex.db.models import FileReference, StoredObject
-
-        query = delete(StoredObject).where(StoredObject.sha256 == sha256)
-        if volume is not None:
-            query = query.where(StoredObject.volume == volume)
-        self._session.execute(query)
-        left = (
-            select(StoredObject.volume)
-            .where(StoredObject.sha256 == sha256)
-            .order_by(StoredObject.created_at.desc(), StoredObject.volume)
-            .limit(1)
-            .scalar_subquery()
-        )
-        pointing = update(FileReference).where(FileReference.sha256 == sha256)
-        if volume is not None:
-            pointing = pointing.where(FileReference.volume == volume)
-        self._session.execute(pointing.values(volume=left))
+        inventory.forget_copy(self._session, sha256, volume)
 
     def _upsert_inventory(self, rows: list[tuple[str, str, int]]) -> None:
+        # Verified as written: this store hashed every byte it put on a drive.
         assert self._session is not None
-        from civex.db.models import StoredObject
-
-        from sqlalchemy import Table
-        from sqlalchemy.dialects.postgresql import insert as pg_insert
-        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-
-        insert = (
-            pg_insert
-            if self._session.get_bind().dialect.name == "postgresql"
-            else sqlite_insert
-        )
-        table = cast(Table, StoredObject.__table__)
-        now = datetime.now(timezone.utc)
-        stmt = insert(table).values(
-            [
-                {"sha256": sha, "volume": vol, "size": size, "created_at": now}
-                for sha, vol, size in rows
-            ]
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["sha256", "volume"],
-            set_={"size": stmt.excluded.size},
-        )
-        self._session.execute(stmt)
-        # Records waiting for one of these files (cited before a copy was here,
-        # such as one another device added) point at the copy just recorded.
-        from sqlalchemy import update
-
-        from civex.db.models import FileReference
-
-        by_volume: dict[str, list[str]] = {}
-        for sha, vol, _ in rows:
-            by_volume.setdefault(vol, []).append(sha)
-        for vol, shas in by_volume.items():
-            for i in range(0, len(shas), _LOCATE_CHUNK):
-                self._session.execute(
-                    update(FileReference)
-                    .where(
-                        FileReference.sha256.in_(shas[i : i + _LOCATE_CHUNK]),
-                        FileReference.volume.is_(None),
-                    )
-                    .values(volume=vol)
-                )
+        inventory.upsert_copies(self._session, rows, verified=True)
 
     def reconcile_inventory(self) -> dict[str, int]:
         """Bring the `stored_objects` table back in line with disk: add rows

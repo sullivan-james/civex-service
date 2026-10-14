@@ -27,7 +27,12 @@ from typing import Any, Callable, Iterator
 
 from civex import __version__
 from civex.domain.dtos import FileRef, RecordDTO
-from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.domain import features
+from civex.domain.exceptions import (
+    FeatureUnavailableError,
+    NotFoundError,
+    ValidationError,
+)
 from civex.domain.sync import not_on_server_yet
 from civex.domain import tables as table_rules
 from civex.domain import templating
@@ -68,7 +73,11 @@ from civex.domain.file_access import (
     group_folder,
     safe_segment,
 )
-from civex.repositories.protocols import FileObjectStore, FileReferenceRepository
+from civex.repositories.protocols import (
+    FileReferenceRepository,
+    ObjectStore,
+    VolumeStore,
+)
 from civex.services.progress import Progress
 from civex.services.record_service import RecordService
 from civex.services.schema_service import SchemaService
@@ -92,12 +101,17 @@ class FileAccessService:
         self,
         records: RecordService,
         schemas: SchemaService,
-        store: FileObjectStore,
+        store: ObjectStore,
         civex_dir: Path,
+        volumes: VolumeStore | None = None,
     ) -> None:
         self._records = records
         self._schemas = schemas
         self._store = store
+        # The drives on this machine (the same store), where exports can be
+        # made as folders of links or copies; None when files are in a bucket,
+        # which offers a zip and nothing on disk.
+        self._volumes = volumes
         self._civex_dir = civex_dir
         # Which live records use a file (for files shared with records not
         # picked); set by `build_local_context`.
@@ -128,6 +142,13 @@ class FileAccessService:
         self.why_not_here: Callable[[list[str]], dict[str, tuple[str, str]]] | None = (
             None
         )
+
+    def _drives(self) -> VolumeStore:
+        """The drives files can be laid out on; a host without any answers
+        that folders aren't offered here."""
+        if self._volumes is None:
+            raise FeatureUnavailableError(features.VOLUMES)
+        return self._volumes
 
     # -- planning ------------------------------------------------------------
 
@@ -728,7 +749,7 @@ class FileAccessService:
         """Where a reachable file is on disk, from the volume the inventory
         already named -- never a search across volumes."""
         assert item.volume is not None
-        return self._store.path_on(item.sha256, item.volume)
+        return self._drives().path_on(item.sha256, item.volume)
 
     def _with_source(self, item: FileItem) -> FileItem:
         if not item.available or item.volume is None:
@@ -852,8 +873,10 @@ class FileAccessService:
     # -- where exports go ----------------------------------------------------
 
     def _in_project(self, volume: str) -> bool:
+        if self._volumes is None:
+            return False
         try:
-            root = self._store.volume_path(volume).resolve()
+            root = self._volumes.volume_path(volume).resolve()
         except (KeyError, OSError):
             return False
         return root.is_relative_to(self._civex_dir.parent.resolve())
@@ -868,11 +891,11 @@ class FileAccessService:
         `<volume>/_exports` on a volume outside the project."""
         if location == PROJECT:
             return self._civex_dir / PROJECT_EXPORTS
-        if location not in self._store.volume_names():
+        if location not in self._drives().volume_names():
             raise NotFoundError(f"There is no drive called '{location}'.")
         if self._in_project(location):
             return self._civex_dir / PROJECT_EXPORTS
-        return self._store.volume_path(location) / VOLUME_EXPORTS
+        return self._drives().volume_path(location) / VOLUME_EXPORTS
 
     def destination(self, location: str, name: str | None) -> Path:
         """The folder an export called `name` has at `location`. The same name
@@ -909,6 +932,7 @@ class FileAccessService:
         `list_exports` / `remove_export`."""
         if mode not in EXPORT_MODES:
             raise ValidationError(f"mode must be one of: {', '.join(EXPORT_MODES)}")
+        self._drives()  # folders of links or copies need drives
         plan = plan or self.plan(selection, progress=progress, fetch=True)
         if not plan.complete and not allow_partial:
             raise FilesUnavailableError(plan)
@@ -920,7 +944,7 @@ class FileAccessService:
             )
         else:
             location = PROJECT if volume in (None, "", PROJECT) else volume
-            if location not in (PROJECT, *self._store.volume_names()):
+            if location not in (PROJECT, *self._drives().volume_names()):
                 raise NotFoundError(f"There is no drive called '{location}'.")
         if plan.items or plan.tables:
             self._check_writable(location)
@@ -957,6 +981,7 @@ class FileAccessService:
         in place; a copy is yours to change."""
         if mode not in EXPORT_MODES:
             raise ValidationError(f"mode must be one of: {', '.join(EXPORT_MODES)}")
+        self._drives()  # folders of links or copies need drives
         plan = plan or self.plan(selection, progress=progress, fetch=True)
         if not plan.complete and not allow_partial:
             raise FilesUnavailableError(plan)
@@ -1084,8 +1109,12 @@ class FileAccessService:
         if need <= 0:
             return
         free: int | None
-        if location and location != PROJECT and location in self._store.volume_names():
-            free = self._store.room_on(location)
+        if (
+            location
+            and location != PROJECT
+            and location in self._drives().volume_names()
+        ):
+            free = self._drives().room_on(location)
         else:
             anchor = dest
             while not anchor.exists() and anchor != anchor.parent:
@@ -1104,13 +1133,17 @@ class FileAccessService:
     # -- looking after exports -----------------------------------------------
 
     def _export_roots(self) -> list[tuple[str, Path]]:
+        if self._volumes is None:  # no drives, so no folders were ever made
+            return []
         roots = [(PROJECT, self._civex_dir / PROJECT_EXPORTS)]
-        for volume in self._store.volume_names():
+        for volume in self._volumes.volume_names():
             if (
                 not self._in_project(volume)
-                and self._store.volume_status(volume).reachable
+                and self._volumes.volume_status(volume).reachable
             ):
-                roots.append((volume, self._store.volume_path(volume) / VOLUME_EXPORTS))
+                roots.append(
+                    (volume, self._volumes.volume_path(volume) / VOLUME_EXPORTS)
+                )
         return roots
 
     def list_exports(self) -> list[ExportInfo]:
@@ -1299,7 +1332,7 @@ class FileAccessService:
     ) -> tuple[MovePlan, list[str]]:
         """`plan_move`'s plan and `shas_to_move`'s content from one pass (the
         transfer's steps cost a lookup per batch of files)."""
-        if volume not in self._store.volume_names():
+        if volume not in self._drives().volume_names():
             raise NotFoundError(f"There is no drive called '{volume}'.")
         size = {i.sha256: i.size for i in items}
         on_drives = sorted({i.sha256 for i in items if place_of(i)[1] == "drive"})
@@ -1333,7 +1366,9 @@ class FileAccessService:
         (the transfer's own rule)."""
         if self.refs is None:
             return iter(())
-        return plan_steps(self._store, self.refs, self.move_spec(shas, volume, records))
+        return plan_steps(
+            self._drives(), self.refs, self.move_spec(shas, volume, records)
+        )
 
     @staticmethod
     def move_spec(shas: list[str], volume: str, records: list[str]) -> TransferSpec:

@@ -4,6 +4,7 @@ import { errorMessage } from '../../lib/errors'
 import type { Field, FieldKind, Schema } from '../../api/schemas'
 import { useDeleteField, useReorderFields } from '../../hooks/useSchemas'
 import { useFieldTypes } from '../../hooks/useFieldTypes'
+import { usePermissions } from '../../hooks/useMe'
 import {
   Button,
   ConfirmDialog,
@@ -44,6 +45,10 @@ export function SchemaFieldsSection({
   )
   const [adding, setAdding] = useState(false)
   const [newKind, setNewKind] = useState<FieldKind | null>(null)
+  const { can, why } = usePermissions()
+  const cannotChange = can('change_structure')
+    ? undefined
+    : why('change_structure')
   const [dirty, setDirty] = useState(false)
   const [formKey, setFormKey] = useState(0)
   const [pendingNav, setPendingNav] = useState<(() => void) | null>(null)
@@ -202,7 +207,12 @@ export function SchemaFieldsSection({
             {schema.fields.length === 1 ? 'field' : 'fields'}
           </p>
           {!adding && (
-            <Button size="sm" onClick={startAdding}>
+            <Button
+              size="sm"
+              onClick={startAdding}
+              disabled={!!cannotChange}
+              title={cannotChange}
+            >
               + Add field
             </Button>
           )}

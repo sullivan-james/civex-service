@@ -21,6 +21,85 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## Unreleased
+
+- A server serves the project it is asked for, not the one in its working
+  directory: `deps.current_project` resolves it once per request (a host
+  serving many projects installs `app.state.project_resolver`), a context is
+  built from a `Project` (`build_context`: settings, where they are kept, who
+  changes are recorded as, optionally a shared engine), and every service
+  saves settings through its `ConfigStore` rather than writing `config.toml`.
+  Nothing changes for a project in a folder; this is the seam a hosted civex
+  builds on.
+- What a server does is said once (`domain/features.py`): `GET
+  /api/status/features` lists it, a host that does less leaves those routers
+  out and answers 501 in plain words on what is left, and the app hides the
+  matching nav items and Settings sections. The server's background hosts
+  (history conversion, file moves, sync, run drains) open their contexts
+  through a factory, so a host serving many projects can run them per project.
+  A project in a folder offers everything it did.
+- **Files in an S3 bucket**, in every install: `[store.s3]` in `config.toml`
+  (`bucket`, `prefix`, `region`, `endpoint` for MinIO and the like, `profile`)
+  keeps a project's files in a bucket instead of on drives. Everything else is
+  the same: records, history, sync, clean-up. The bucket is one volume that is
+  always online; Settings → Storage and the drive commands aren't offered for
+  such a project. Credentials come from the environment or an AWS profile,
+  never from config.toml.
+- **Files sync apart from records.** A sync, and filling an empty server, now
+  send records only, so they take seconds whatever the files weigh; files go up
+  and come down in the background on their own, with their own task in the
+  status bar. That task says why files haven't reached the server (going up, on
+  a drive that can't be read, or not on this computer at all) and offers **Send
+  now** only when some can go. `civex sync send` uploads them from the command
+  line.
+- **Choosing a bucket from the app or the CLI**: Settings → Storage → Tasks →
+  **Use a bucket…**, or `civex store bucket check|set|show|clear`. The bucket is
+  tried first (reached, written, read back, nothing else under the prefix), and
+  a project switches between drives and a bucket only while the place it leaves
+  holds none of its files, since files are never moved between the two. A
+  project using a bucket shows it under Settings → Storage; `civex doctor`
+  warns about files left on drives.
+- **Files go straight to storage** where the bucket allows it (`direct_files`,
+  on by default; `direct = false` turns it off): a device syncing with such an
+  authority uploads to and downloads from the bucket by presigned URL, the
+  authority only saying where and recording what arrived, and the app's
+  downloads are a redirect to the bucket. A file that went in in parts is
+  checked against its hash by a read-back during the next clean-up
+  (`stored_objects.verified_at`, migration `b9d4e7f2a1c6`). An older authority
+  or device streams as before.
+- For developers: the store protocol is split into `ObjectStore` (what every
+  service sees) and `VolumeStore` (drives as places), `AppContext.store_svc` and
+  `transfer_svc` exist only where there are drives, and `FileService.local_path`
+  is None where files aren't on disk here.
+- **A device can ask to join** instead of being given an invite: connect
+  without one and it shows a code; `civex sync device approve <code> <name>`
+  (or Settings → Sync → *Asking to join*) lets it in, `deny` turns it away, and
+  a code nobody approves in 15 minutes lapses. Invites still work. Migration
+  `c1e8f4a2b7d3` adds the table of requests.
+- For developers: the sync test harness ships as `civex.testing` (devices
+  against an authority over a loopback, the convergence and invariants
+  scenarios, a test server, a fake bucket), so a host that embeds civex can
+  prove its own authority with civex's tests. CI gains a PostgreSQL job.
+- **What a person may do** is now one concept (`domain/permissions.py`: read,
+  write records, change the structure, add files, delete, manage members, each
+  everywhere or in named collections). A project in a folder allows everything,
+  as before. A host that knows who is signed in gives each request their
+  permissions: the services refuse at the boundary (403, in plain words), the
+  authority holds a person's device to the same rule, `GET /api/me` says who
+  you are and what you may do, and the app shows a control you may not use
+  switched off with the reason.
+- The app can be served under a path of its own (`/p/<owner>/<project>/`):
+  its assets, requests and routes follow the page's `<base href>`, which the
+  server writes (`server/app_page.render_app_page`, also used by a host along
+  with a boot object: where to sign in again after a 401, and extensions to
+  load). Pins, recents and other things kept in the browser are kept per
+  project. A host with accounts gets a Settings → *Members & access* section
+  (who you are, what you may do, a link to where members are managed), Sync
+  becomes *Devices*, and a collection says *View only* / *Who can edit*. A
+  host's extensions draw into five named places (`utils/slots.ts`) and get
+  civex's own controls from `@civex/ui` (`frontend/packages/ui`). Nothing
+  changes for a local civex.
+
 ## v2.0.0 — syncing between machines, updates from the app (2026-10-07)
 
 ### Breaking

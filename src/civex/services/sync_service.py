@@ -29,7 +29,7 @@ from civex.config import (
     DOWNLOAD_MODES,
     LIBRARY_MODES,
     Config,
-    save_config,
+    ConfigStore,
 )
 from civex.domain import hlc
 from civex.domain.audit_diff import BEFORE, apply_delta, entry_snapshots
@@ -41,9 +41,11 @@ from civex.domain.exceptions import (
     ValidationError,
     VolumeUnavailableError,
 )
-from civex.domain.file_refs import collect_sha256_refs, without_file_locations
+from civex.domain.file_refs import without_file_locations
 from civex.domain.hosts import is_loopback
 from civex.domain.sync import (
+    Joined,
+    LoginStarted,
     DEFERRED,
     ENTITY_ORDER,
     COPYING,
@@ -66,7 +68,7 @@ from civex.domain.sync import (
 from civex.identity import local_actor
 from civex.repositories.protocols import (
     AuditRepository,
-    FileObjectStore,
+    ObjectStore,
     SyncRepository,
 )
 from civex.services.record_service import RecordService
@@ -97,18 +99,25 @@ log = logging.getLogger(__name__)
 class SyncReport:
     pulled: int = 0  # changes from others brought in
     pushed: int = 0  # changes of ours the authority settled
-    files_sent: int = 0
     conflicts: int = 0  # values that did not go in as made
     rejected: int = 0  # changes the authority refused
-    waiting: int = 0  # changes held back (a file is not available yet)
-    # Files the authority still lacks because this computer cannot read them
-    # (a drive that is unplugged, bytes not recovered yet). The changes citing
-    # them have gone; the files follow when they can be read.
-    owed_files: list[str] = field(default_factory=list)
+    waiting: int = 0  # changes held back (a refusal waiting for review)
 
     @property
     def changed(self) -> bool:
-        return bool(self.pulled or self.pushed or self.files_sent)
+        return bool(self.pulled or self.pushed)
+
+
+@dataclass
+class FileSendReport:
+    """What a pass of sending files did (`SyncService.send_files`)."""
+
+    sent: int = 0
+    # Files the authority still lacks because this computer cannot read them
+    # (a drive that is unplugged, bytes not recovered yet). The changes citing
+    # them went long ago; the files follow when they can be read.
+    owed: list[str] = field(default_factory=list)
+    stopped: bool = False  # ran out of `seconds` with more to send
 
 
 @dataclass
@@ -167,6 +176,20 @@ class SyncStatus:
     files_to_fetch: int = 0  # files records here cite that no drive here holds
     # Files records here cite that the authority hasn't said it holds yet.
     files_to_send: int = 0
+    # Why those haven't gone (`SyncService.files_waiting`), when there are any.
+    files_waiting: FilesWaiting | None = None
+
+
+@dataclass
+class FilesWaiting:
+    """Why files records here cite aren't on the server: what sending can
+    move now, what is on a drive that can't be read (by drive, with its own
+    reason), and what isn't on this computer at all (the server hasn't got it
+    either: a computer that holds it must send it)."""
+
+    ready: int = 0
+    offline: list[tuple[str, int, str]] = field(default_factory=list)
+    not_here: int = 0
 
 
 class SyncService:
@@ -176,12 +199,16 @@ class SyncService:
         repo: SyncRepository,
         applier: SyncApplier,
         audit: AuditRepository,
-        files: FileObjectStore,
+        files: ObjectStore,
         commit: Callable[[], None],
         make_transport: TransportFactory,
         records: RecordService,
+        config_store: ConfigStore,
     ) -> None:
         self._config = config
+        # Where `[sync]` is saved (config.toml for a local project); never
+        # written to directly, so a hosted project's settings live elsewhere.
+        self._config_store = config_store
         self._repo = repo
         self._applier = applier
         self._audit = audit
@@ -218,8 +245,32 @@ class SyncService:
             serving=self._config.sync.serve,
             download_files=self._config.sync.download_files,
             files_to_fetch=self.files_to_fetch(),
-            files_to_send=self._repo.count_unconfirmed() if self.fetches_files else 0,
+            files_to_send=(
+                owed := self._repo.count_unconfirmed() if self.fetches_files else 0
+            ),
+            files_waiting=self.files_waiting() if owed else None,
         )
+
+    def files_waiting(self, limit: int = 5000) -> FilesWaiting:
+        """Why files haven't gone to the server, from the inventory and each
+        drive's own status (asked once per drive): `limit` files at most are
+        looked at, so a project with a great many waiting stays quick."""
+        waiting = FilesWaiting()
+        status: dict[str, Any] = {}
+        offline: dict[str, int] = {}
+        for _sha, volumes in self._repo.unconfirmed_copies(limit).items():
+            if not volumes:
+                waiting.not_here += 1
+                continue
+            for v in volumes:
+                if v not in status:
+                    status[v] = self._files.volume_status(v)
+            if any(status[v].reachable for v in volumes):
+                waiting.ready += 1
+            else:
+                offline[volumes[0]] = offline.get(volumes[0], 0) + 1
+        waiting.offline = [(v, n, status[v].reason) for v, n in sorted(offline.items())]
+        return waiting
 
     def conflicts(
         self, status: str | None = "open", entity_id: uuid.UUID | None = None
@@ -383,6 +434,20 @@ class SyncService:
     # Connecting
     # ------------------------------------------------------------------
 
+    def needs_approval(self, url: str, invite: str | None) -> bool:
+        """Whether connecting to `url` must first ask to join: no invite was
+        given and this computer has not joined that address before."""
+        url = url.strip().rstrip("/")
+        return not (invite and invite.strip()) and not user_state.authority_for(url)
+
+    def request_login(self, url: str) -> LoginStarted:
+        """Ask the authority at `url` to let this computer join without an
+        invite. The answer's `user_code` is for a person to approve there;
+        `connect(url, None, login=...)` then waits for that and joins."""
+        url = url.strip().rstrip("/")
+        _check_address(url)
+        return self._make_transport(url, self._credentials(url)).request_login()
+
     def check_connect(self, url: str, invite: str | None) -> str:
         """What connecting to this authority would do, found out without doing
         it: the address is read, the protocol accepted, and who holds data
@@ -403,7 +468,13 @@ class SyncService:
             authority_key=user_state.authority_for(url),
         )
 
-    def _plan_connect(self, url: str, invite: str | None) -> tuple[str, Hello, str]:
+    def _plan_connect(
+        self,
+        url: str,
+        invite: str | None,
+        login: LoginStarted | None = None,
+        on_code: Callable[[LoginStarted], None] | None = None,
+    ) -> tuple[str, Hello, str]:
         url = url.strip().rstrip("/")
         _check_address(url)
         probe = self._make_transport(url, self._credentials(url))
@@ -411,10 +482,20 @@ class SyncService:
             joined = probe.join(invite.strip())
             user_state.save_authority(url, joined.authority_key)
         elif not user_state.authority_for(url):
-            raise SyncError(
-                "This computer hasn't joined that server: ask its admin for an invite",
-                retryable=False,
-            )
+            # Never joined and no invite: ask to join, show the code (or take a
+            # request already made), and wait for a person to approve it.
+            if login is None and on_code is None:
+                raise SyncError(
+                    "This computer hasn't joined that server: ask its admin for an "
+                    "invite, or connect in a way that can wait to be approved",
+                    retryable=False,
+                )
+            if login is None:
+                login = probe.request_login()
+                assert on_code is not None
+                on_code(login)
+            joined = self._await_approval(probe, login)
+            user_state.save_authority(url, joined.authority_key)
         hello = probe.hello()
         self._check_protocol(hello)
         meta = self._repo.meta()
@@ -447,8 +528,30 @@ class SyncService:
             )
         return mode, hello, url
 
+    def _await_approval(self, probe: SyncTransport, login: LoginStarted) -> Joined:
+        """Poll until a person approves the request, it is denied, or it
+        expires (the authority answers the last two with a refusal)."""
+        while True:
+            joined = probe.poll_login(login.device_code)
+            if joined is not None:
+                return joined
+            if time.time() >= login.expires_at:
+                raise SyncError(
+                    "Nobody approved this computer before the code expired. Ask again.",
+                    retryable=False,
+                )
+            self._sleep(login.interval)
+
+    # How waiting is done; a test makes it instant.
+    _sleep: Callable[[float], None] = staticmethod(time.sleep)
+
     def connect(
-        self, url: str, invite: str | None, progress: ProgressFn | None = None
+        self,
+        url: str,
+        invite: str | None,
+        progress: ProgressFn | None = None,
+        login: LoginStarted | None = None,
+        on_code: Callable[[LoginStarted], None] | None = None,
     ) -> str:
         """Point this project at an authority. What happens depends on who holds
         data: an empty project **joins** one that has some (it becomes a copy), an
@@ -460,8 +563,12 @@ class SyncService:
 
         `progress` hears how far copying has got. A joined project is usable
         once it returns; the history from before it joined is fetched after
-        (`fetch_history`), by whatever runs sync next."""
-        mode, hello, url = self._plan_connect(url, invite)
+        (`fetch_history`), by whatever runs sync next.
+
+        Without an invite, a computer that never joined asks to: `on_code` is
+        told the code a person must approve on the authority (and this waits
+        until they do), or `login` is a request already made, to wait on."""
+        mode, hello, url = self._plan_connect(url, invite, login, on_code)
         meta = self._repo.meta()
 
         # The project takes the authority's id; the device keeps its identity.
@@ -480,7 +587,7 @@ class SyncService:
             )
             self._commit()
         self._config.sync.remote = url
-        save_config(self._config)
+        self._config_store.save(self._config)
 
         with sync_lock(self._config.civex_dir):
             transport = self._transport()
@@ -501,7 +608,7 @@ class SyncService:
     def disconnect(self) -> None:
         remote = self._config.sync.remote
         self._config.sync.remote = None
-        save_config(self._config)
+        self._config_store.save(self._config)
         if remote:
             user_state.forget_authority(remote)
 
@@ -509,7 +616,7 @@ class SyncService:
         """Whether this project accepts devices (is an authority for them). The
         devices it knows stay on record either way."""
         self._config.sync.serve = on
-        save_config(self._config)
+        self._config_store.save(self._config)
 
     @property
     def library_mode(self) -> str:
@@ -523,11 +630,11 @@ class SyncService:
                 f"The library takes one of: {', '.join(LIBRARY_MODES)}"
             )
         self._config.sync.library = mode
-        save_config(self._config)
+        self._config_store.save(self._config)
 
     def set_paused(self, paused: bool) -> None:
         self._config.sync.paused = paused
-        save_config(self._config)
+        self._config_store.save(self._config)
 
     def set_interval(self, seconds: int) -> None:
         if seconds != 0 and seconds < 5:
@@ -535,7 +642,7 @@ class SyncService:
                 "The interval must be at least 5 seconds, or 0 to sync only when asked"
             )
         self._config.sync.interval_seconds = seconds
-        save_config(self._config)
+        self._config_store.save(self._config)
 
     def _check_protocol(self, hello: Hello) -> None:
         theirs = (hello.protocol_min, hello.protocol_max)
@@ -569,19 +676,16 @@ class SyncService:
     # Syncing
     # ------------------------------------------------------------------
 
-    def sync(
-        self, check_files: bool = True, progress: ProgressFn | None = None
-    ) -> SyncReport:
-        """Pull, push, pull. Raises `SyncBusy` when another sync is running and
+    def sync(self) -> SyncReport:
+        """Pull, push, pull: the project's data only. Files go separately and
+        afterwards (`send_files`, `fetch_files`), so a large upload never holds
+        up a change. Raises `SyncBusy` when another sync is running and
         `SyncError` when the authority can't be reached or refuses this device
-        (`retryable` says whether trying later can help). Files the authority
-        hasn't said it holds are always sent (when they can be read here);
-        `check_files` asks it about every file again, in case one it held has
-        gone. `progress` is told how sending files is going."""
+        (`retryable` says whether trying later can help)."""
         with sync_lock(self._config.civex_dir):
             log.info("sync with %s: starting", self._config.sync.remote)
             try:
-                report = self._sync(check_files, progress)
+                report = self._sync()
             except SyncError as e:
                 log.warning(
                     "sync with %s failed (%s): %s",
@@ -594,12 +698,11 @@ class SyncService:
                 self._commit()
                 raise
             log.info(
-                "sync with %s: received %d, sent %d, files sent %d, conflicts %d, "
-                "refused %d, waiting %d",
+                "sync with %s: received %d, sent %d, conflicts %d, refused %d, "
+                "waiting %d",
                 self._config.sync.remote,
                 report.pulled,
                 report.pushed,
-                report.files_sent,
                 report.conflicts,
                 report.rejected,
                 report.waiting,
@@ -614,9 +717,7 @@ class SyncService:
         except Exception:  # noqa: BLE001 - nothing to save; the error matters more
             pass
 
-    def _sync(
-        self, check_files: bool = True, progress: ProgressFn | None = None
-    ) -> SyncReport:
+    def _sync(self) -> SyncReport:
         transport = self._transport()
         hello = transport.hello()
         self._check_protocol(hello)
@@ -635,8 +736,7 @@ class SyncService:
         if meta.cursor < hello.feed_floor:
             self._copy_again(transport, hello, report)
         report.pulled += self._pull(transport)
-        report.pushed += self._push(transport, report, progress)
-        self._send_missing_files(transport, report, check_files, progress)
+        report.pushed += self._push(transport, report)
         if report.pushed or report.conflicts:
             report.pulled += self._pull(transport)
         return report
@@ -741,19 +841,13 @@ class SyncService:
 
     # -- push -------------------------------------------------------------
 
-    def _push(
-        self,
-        transport: SyncTransport,
-        report: SyncReport,
-        progress: ProgressFn | None = None,
-    ) -> int:
+    def _push(self, transport: SyncTransport, report: SyncReport) -> int:
         total = 0
         while True:
             pending = self._repo.pending_entries(PUSH_BATCH)
             if not pending:
                 return total
             ready, folded = self._send_whole(pending)
-            ready = self._with_files(transport, ready, report, progress)
             if not ready:
                 report.waiting += len(pending)
                 return total
@@ -819,38 +913,28 @@ class SyncService:
                 self._repo.mark_folded(entries, "synced")
         return ready, {k: v for k, v in folded.items() if any(e.id == k for e in ready)}
 
-    def _with_files(
+    def send_files(
         self,
-        transport: SyncTransport,
-        entries: list[SyncEntry],
-        report: SyncReport,
+        everything: bool = False,
+        seconds: float | None = None,
         progress: ProgressFn | None = None,
-    ) -> list[SyncEntry]:
-        """Send the files these changes cite that the authority lacks. The
-        changes always go: a file this computer cannot read right now (a drive
-        that is unplugged, bytes still to be recovered) is skipped, and
-        `_send_missing_files` finds it again once it can be read. Data and files
-        converge separately, so a missing file never holds up a change."""
-        cited = {s for e in entries for s in collect_sha256_refs(e.new_data or {})}
-        cited = self._repo.unconfirmed_of(cited)
-        if cited:
-            self._send_files(transport, sorted(cited), report, progress)
-        return entries
-
-    def _send_missing_files(
-        self,
-        transport: SyncTransport,
-        report: SyncReport,
-        everything: bool = True,
-        progress: ProgressFn | None = None,
-    ) -> None:
+    ) -> FileSendReport:
         """Make the authority hold every file a live record here cites and this
-        computer can read. What is missing is worked out from the references
-        catalog and the authority's answer, so a drive plugged back in, or files
-        added later, are simply found. Without `everything`, only files the
-        authority hasn't yet said it holds are asked about (no request at all
-        when there are none); with it, every file is asked about again. A file
-        that still can't be read is counted and left for next time."""
+        computer can read. Apart from syncing: the records citing them went
+        already (or go whenever they sync), and the authority takes a change
+        whatever files it holds, so data and files converge separately. What is
+        missing is worked out from the references catalog and the authority's
+        answer, so a drive plugged back in, or files added later, are simply
+        found. Without `everything`, only files the authority hasn't yet said
+        it holds are asked about (no request at all when there are none); with
+        it, every file is asked about again, in case one it held has gone.
+        `seconds` stops a background pass between files; a file that can't be
+        read is counted in `owed` and left for next time. Raises `SyncError`
+        when the authority can't be reached. Takes no sync lock: uploading
+        changes no record, and the same file sent twice is stored once."""
+        report = FileSendReport()
+        if not self.fetches_files:
+            return report
         shas: list[str] = []
         after = ""
         while page := self._repo.referenced_shas(
@@ -858,27 +942,34 @@ class SyncService:
         ):
             shas.extend(page)
             after = page[-1]
-        self._send_files(transport, shas, report, progress)
-        if report.owed_files:
+        if not shas:
+            return report
+        self._send_files(self._transport(), shas, report, progress, seconds)
+        self._commit()
+        if report.owed:
             log.info(
                 "sync with %s: %d file(s) the authority lacks cannot be read here "
                 "yet; they go when they can: %s",
                 self._config.sync.remote,
-                len(report.owed_files),
-                ", ".join(x[:10] for x in report.owed_files[:5]),
+                len(report.owed),
+                ", ".join(x[:10] for x in report.owed[:5]),
             )
+        return report
 
     def _send_files(
         self,
         transport: SyncTransport,
         shas: list[str],
-        report: SyncReport,
+        report: FileSendReport,
         progress: ProgressFn | None = None,
+        seconds: float | None = None,
     ) -> None:
         """The one way files go to the authority: it is asked which of `shas`
         it lacks, the rest are noted as on the server, and each it lacks that
         can be read here is uploaded and noted, with `progress` told how far
-        along it is (files, and bytes as they go)."""
+        along it is (files, and bytes as they go). Stops between files once
+        `seconds` are spent."""
+        started = time.monotonic()
         lacking: list[str] = []
         for at in range(0, len(shas), FILE_CHECK_PAGE):
             page = shas[at : at + FILE_CHECK_PAGE]
@@ -913,10 +1004,15 @@ class SyncService:
 
         say(force=True)
         for sha in lacking:
-            if self._upload(transport, sha, report, went):
+            if seconds is not None and time.monotonic() - started >= seconds:
+                report.stopped = True
+                return
+            if self._upload(transport, sha, went):
                 self._repo.confirm_on_server([sha])
-            elif sha not in report.owed_files:
-                report.owed_files.append(sha)
+                self._commit()  # each file's arrival is kept, whatever follows
+                report.sent += 1
+            elif sha not in report.owed:
+                report.owed.append(sha)
             done += 1
             say(force=True)
 
@@ -924,16 +1020,16 @@ class SyncService:
         self,
         transport: SyncTransport,
         sha: str,
-        report: SyncReport,
         on_bytes: Callable[[int], None] | None = None,
     ) -> bool:
         try:
-            path = self._files.object_path(sha)
-            with open(path, "rb") as f:
-                transport.upload_file(sha, _Counting(f, on_bytes), path.stat().st_size)
+            size = self._files.size_of(sha)
+            if size is None:
+                return False
+            with self._files.open(sha) as f:
+                transport.upload_file(sha, _Counting(f, on_bytes), size)
         except (FileNotFoundError, VolumeUnavailableError):
             return False
-        report.files_sent += 1
         return True
 
     def _note(
@@ -1253,7 +1349,7 @@ class SyncService:
             self._config.sync.collection_files.pop(cid, None)
         else:
             self._config.sync.collection_files[cid] = mode
-        save_config(self._config)
+        self._config_store.save(self._config)
         return self.collection_mode(cid)
 
     def free_up(self, collection: str, dry_run: bool = True) -> FreeUpReport:
@@ -1339,7 +1435,7 @@ class SyncService:
                 f"Choose one of: {', '.join(DOWNLOAD_MODES)} (got '{mode}')"
             )
         self._config.sync.download_files = mode
-        save_config(self._config)
+        self._config_store.save(self._config)
 
     def fetch_file(self, sha256: str) -> bool:
         """Download one file a record here cites from the authority, onto the
@@ -1488,13 +1584,9 @@ class SyncService:
             nonlocal head, batch, sent
             if not batch:
                 return
-            ready = self._with_files(transport, batch, SyncReport())
-            if len(ready) < len(batch):
-                raise SyncError(
-                    "A file this project cites can't be read right now (is a drive "
-                    "unplugged?), so it can't be sent yet",
-                    retryable=True,
-                )
+            # Records only: the files they cite follow separately
+            # (`send_files`), so an empty authority has the whole project in
+            # moments, however large its files.
             result = transport.push(batch)
             head = result.head_seq
             if any(r.status == DEFERRED for r in result.results):

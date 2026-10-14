@@ -48,6 +48,7 @@ import { ActivityFeed } from '../components/audit/ActivityFeed'
 import { underRecord } from '../utils/auditFilter'
 import { DeletedFieldValues } from '../components/records/DeletedFieldValues'
 import { RecordFieldGrid } from '../components/records/RecordFieldGrid'
+import { usePermissions } from '../hooks/useMe'
 import { MergeView } from '../components/sync/MergeView'
 import { ReviewStepper } from '../components/sync/ReviewStepper'
 import { RecordConflicts } from '../components/sync/RecordConflicts'
@@ -58,6 +59,7 @@ import {
   useMergeConflicts,
   useResolveConflict,
 } from '../hooks/useRemote'
+import { Slot } from '../components/host/Slot'
 
 const RECORD_TABS = [
   { id: 'fields' },
@@ -76,6 +78,7 @@ export default function RecordDetailPage() {
 
   const { data: record, isLoading, error } = useRecord(id, 3000)
   const { data: collection } = useCollection(record?.dataset_id ?? '')
+  const { can, why } = usePermissions()
   const { data: schemas } = useSchemas()
   const { data: presets } = useAvailableExports(
     record ? { schema: record.schema_name } : null,
@@ -218,6 +221,7 @@ export default function RecordDetailPage() {
         }
         action={
           <>
+            <Slot name="record.header" props={{ recordId: record.id }} />
             {/* Every file under this record, by name and folder: an Encounter
                 holds none itself, but its Recordings and Selections do. */}
             {schema && schemas && schemaTreeHasFiles(schema, schemas) && (
@@ -342,6 +346,11 @@ export default function RecordDetailPage() {
               referenceLabels={record.reference_labels}
               referenceCollections={record.reference_collections}
               onSave={saveField}
+              readOnly={
+                can('write_records', record.dataset_id)
+                  ? undefined
+                  : why('write_records')
+              }
               errors={saveErrors}
               onDismissError={() => updateRecord.reset()}
               marked={conflictLayout.marked}

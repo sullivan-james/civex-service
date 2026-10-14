@@ -44,8 +44,7 @@ export function useRefreshOnSync() {
     seen.current = now
     if (!before) return
     const r = data.last_result
-    const changed =
-      !!r && r.pulled + r.pushed + r.conflicts + r.rejected + r.files_sent > 0
+    const changed = !!r && r.pulled + r.pushed + r.conflicts + r.rejected > 0
     const synced = now.synced !== before.synced && changed
     const downloaded = before.busy && !now.busy
     if (synced || downloaded) void qc.invalidateQueries()
@@ -130,6 +129,12 @@ export function useConnectRemote() {
 export function useDisconnectRemote() {
   const refresh = useRefreshing()
   return useMutation({ mutationFn: remoteApi.disconnect, onSuccess: refresh })
+}
+
+/** Upload the files the authority lacks now, apart from syncing. */
+export function useSendFilesNow() {
+  const refresh = useRefreshing()
+  return useMutation({ mutationFn: remoteApi.sendFilesNow, onSuccess: refresh })
 }
 
 export function useSyncNow() {
@@ -242,6 +247,14 @@ export function useAuthorityActions() {
     }),
     revokeDevice: useMutation({
       mutationFn: remoteApi.revokeDevice,
+      onSuccess: settle,
+    }),
+    approveLogin: useMutation({
+      mutationFn: remoteApi.approveLogin,
+      onSuccess: settle,
+    }),
+    denyLogin: useMutation({
+      mutationFn: remoteApi.denyLogin,
       onSuccess: settle,
     }),
     setLibrary: useMutation({

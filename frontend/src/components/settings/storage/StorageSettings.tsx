@@ -1,8 +1,11 @@
 import { useSearchParams } from 'react-router'
 import { TabNav, TabPanel, type TabDef } from '../../ui'
+import { useFeatures } from '../../../hooks/useFeatures'
 import type { StorageTab } from '../../../hooks/useStorageAttention'
+import { BucketStorage } from './BucketStorage'
 import { CollectionsTab } from './CollectionsTab'
 import { StorageAttention } from './StorageAttention'
+import { Slot } from '../../host/Slot'
 import { TasksTab } from './TasksTab'
 import { VolumesTab } from './VolumesTab'
 
@@ -18,6 +21,20 @@ const TABS: TabDef<TabId>[] = [
  * and housekeeping. The tab and any volume filter live in the address
  * (`?tab=collections&volume=archive`), so every view can be linked to. */
 export default function StorageSettings() {
+  const features = useFeatures()
+  // A project whose files are in a bucket has no drives: there is only the bucket.
+  if (!features.has('volumes'))
+    return (
+      <div className="space-y-5">
+        <Slot name="storage.summary" />
+        <BucketStorage />
+      </div>
+    )
+  return <DriveStorage />
+}
+
+/** The drives files live on, which collections use which, and housekeeping. */
+function DriveStorage() {
   const [params, setParams] = useSearchParams()
   // Addresses from before Moves and Maintenance became Tasks still land there.
   const asked = params.get('tab')
@@ -44,6 +61,7 @@ export default function StorageSettings() {
 
   return (
     <div className="space-y-5">
+      <Slot name="storage.summary" />
       <StorageAttention onGo={go} />
 
       <TabNav label="Storage" tabs={TABS} value={tab} onChange={go} />

@@ -8,6 +8,7 @@ import {
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RecordFieldGrid } from './RecordFieldGrid'
 import { filesApi, type FileRef } from '../../api/files'
 import type { Field } from '../../api/schemas'
@@ -44,13 +45,19 @@ function renderGrid(
 ) {
   const onSave = vi.fn()
   render(
-    <MemoryRouter>
-      <RecordFieldGrid
-        fields={[fileField(type, restrictions)]}
-        data={data}
-        onSave={onSave}
-      />
-    </MemoryRouter>,
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <MemoryRouter>
+        <RecordFieldGrid
+          fields={[fileField(type, restrictions)]}
+          data={data}
+          onSave={onSave}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
   return onSave
 }

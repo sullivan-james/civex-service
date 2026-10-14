@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from civex import fs_open
+from civex.domain.features import OPEN_FOLDER
 from civex.context import AppContext
 from civex.domain.exceptions import CivexError, NotFoundError, ValidationError
 from civex.domain.hosts import is_loopback
@@ -233,6 +234,7 @@ def export_files(
         raise HTTPException(422, detail=str(e))
     opened = (
         body.open
+        and OPEN_FOLDER in ctx.features
         and _from_this_machine(request)
         and fs_open.open_folder(Path(result.dest))
     )

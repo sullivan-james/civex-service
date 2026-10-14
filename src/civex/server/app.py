@@ -5,17 +5,23 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import HTTPException, FastAPI
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, FastAPI
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from civex.domain import features as features_
+from civex.domain.features import LOCAL_FEATURES
+from civex.server.app_page import render_app_page
+from civex.server.deps import requires
 from civex.server.errors import RequestContextMiddleware, register_error_handlers
 from civex.server.routers import (
+    me,
     logs,
     server_control,
     ai,
     analytics,
     audit,
+    bucket,
     datasets,
     db,
     dump,
@@ -382,7 +388,52 @@ def create_sync_app() -> FastAPI:
     return app
 
 
-def create_app() -> FastAPI:
+def api_routers(
+    features: frozenset[str] = LOCAL_FEATURES,
+) -> list[tuple[APIRouter, str | None]]:
+    """Every API router a host with `features` includes, with the feature each
+    is wholly part of (None: part of every civex). The one list, so
+    `create_app`, `create_sync_app` and a host serving many projects can't
+    disagree about what the API is."""
+    routers: list[tuple[APIRouter, str | None]] = [
+        (ai.router, features_.AI),
+        (server_control.router, features_.DESKTOP),
+        (logs.router, features_.LOGS),
+        (schemas.router, None),
+        (datasets.router, None),
+        (dump.router, None),
+        (plugins.router, features_.PLUGIN_EDITOR),
+        (records.router, None),
+        (export_definitions.router, None),
+        (file_access.router, None),
+        (files.router, None),
+        (workflows.router, features_.LOCAL_WORKFLOWS),
+        (jobs.router, features_.LOCAL_WORKFLOWS),
+        (jobs.automation_router, features_.LOCAL_WORKFLOWS),
+        (audit.router, None),
+        (retention.router, None),
+        (store.router, features_.VOLUMES),
+        (bucket.router, features_.STORE_ADMIN),
+        (sync_peer.router, None),
+        (remote.router, None),
+        (transfers.router, features_.VOLUMES),
+        (db.router, features_.DB_ADMIN),
+        (legal.router, None),
+        (status.router, None),
+        (me.router, None),
+        (terminal.router, features_.TERMINAL),
+        (settings.router, None),
+        (updates.router, features_.UPDATES),
+        (analytics.router, None),
+        (views.router, None),
+        (views.all_views_router, None),
+    ]
+    return [(r, f) for r, f in routers if f is None or f in features]
+
+
+def create_app(features: frozenset[str] = LOCAL_FEATURES) -> FastAPI:
+    """The app for a project on this machine, or, with a narrower `features`,
+    for a host that does less (a hosted project has no drives or terminal)."""
     app = _base_app(
         description=_DESCRIPTION, openapi_tags=_OPENAPI_TAGS, lifespan=_lifespan
     )
@@ -396,35 +447,12 @@ def create_app() -> FastAPI:
 
     register_error_handlers(app)
 
-    app.include_router(ai.router, prefix="/api")
-    app.include_router(server_control.router, prefix="/api")
-    app.include_router(logs.router, prefix="/api")
-    app.include_router(schemas.router, prefix="/api")
-    app.include_router(datasets.router, prefix="/api")
-    app.include_router(dump.router, prefix="/api")
-    app.include_router(plugins.router, prefix="/api")
-    app.include_router(records.router, prefix="/api")
-    app.include_router(export_definitions.router, prefix="/api")
-    app.include_router(file_access.router, prefix="/api")
-    app.include_router(files.router, prefix="/api")
-    app.include_router(workflows.router, prefix="/api")
-    app.include_router(jobs.router, prefix="/api")
-    app.include_router(jobs.automation_router, prefix="/api")
-    app.include_router(audit.router, prefix="/api")
-    app.include_router(retention.router, prefix="/api")
-    app.include_router(store.router, prefix="/api")
-    app.include_router(sync_peer.router, prefix="/api")
-    app.include_router(remote.router, prefix="/api")
-    app.include_router(transfers.router, prefix="/api")
-    app.include_router(db.router, prefix="/api")
-    app.include_router(legal.router, prefix="/api")
-    app.include_router(status.router, prefix="/api")
-    app.include_router(terminal.router, prefix="/api")
-    app.include_router(settings.router, prefix="/api")
-    app.include_router(updates.router, prefix="/api")
-    app.include_router(analytics.router, prefix="/api")
-    app.include_router(views.router, prefix="/api")
-    app.include_router(views.all_views_router, prefix="/api")
+    for router, feature in api_routers(features):
+        app.include_router(
+            router,
+            prefix="/api",
+            dependencies=[requires(feature)] if feature else [],
+        )
 
     if (_DIST / "index.html").exists():
         app.mount(
@@ -446,8 +474,8 @@ def create_app() -> FastAPI:
             # Never reused without asking: a browser that kept it would load
             # an older app after an update (its assets have hashed names, so
             # those may be cached).
-            return FileResponse(
-                str(_DIST / "index.html"), headers={"Cache-Control": "no-cache"}
+            return HTMLResponse(
+                render_app_page(_DIST), headers={"Cache-Control": "no-cache"}
             )
     else:
 

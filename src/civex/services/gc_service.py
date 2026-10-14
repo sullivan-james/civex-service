@@ -4,7 +4,7 @@ import logging
 import time
 from civex.domain.dtos import GCReport, StoredObjectInfo
 from civex.domain.exceptions import NotFoundError, ValidationError
-from civex.repositories.protocols import FileObjectStore, FileReferenceRepository
+from civex.repositories.protocols import ObjectStore, FileReferenceRepository
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class GCService:
     GC at all.
     """
 
-    def __init__(self, store: FileObjectStore, refs: FileReferenceRepository) -> None:
+    def __init__(self, store: ObjectStore, refs: FileReferenceRepository) -> None:
         self._store = store
         self._refs = refs
 
@@ -115,6 +115,11 @@ class GCService:
             # usage accounting can't silently diverge from disk.
             if not dry_run and not errors:
                 self._store.reconcile_inventory()
+                # Copies recorded unverified (a file that went straight into a
+                # bucket in parts) are read back and checked; one that doesn't
+                # hash to its name is removed, like any blob nothing can use.
+                for sha in self._store.verify():
+                    log.warning("GC: removed %s, whose bytes did not match", sha)
 
             # Abandoned uploads aren't on any one volume; a clean-up of a single
             # volume leaves them for a store-wide pass.

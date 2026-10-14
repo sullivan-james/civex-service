@@ -24,6 +24,7 @@ import {
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { recordCollectionVisit } from '../hooks/useFrequentCollections'
 import { recordRecent } from '../hooks/usePins'
+import { usePermissions } from '../hooks/useMe'
 import { collectionTarget } from '../utils/navTargets'
 import { RecordsExplorer } from '../components/explorer/RecordsExplorer'
 import { WithHierarchy } from '../components/explorer/HierarchySidebar'
@@ -34,6 +35,8 @@ import { inCollection } from '../utils/auditFilter'
 import { errorMessage } from '../lib/errors'
 import { CollectionExportsSection } from '../components/exports/CollectionExportsSection'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../lib/deleteImpact'
+import { Slot } from '../components/host/Slot'
+import { WhoCanEdit } from '../components/host/WhoCanEdit'
 
 const COLLECTION_TABS = [
   { id: 'records' },
@@ -78,6 +81,7 @@ export default function CollectionDetailPage() {
     if (collectionName) recordCollectionVisit(collectionName)
   }, [collectionName])
   const collectionId = collection?.id
+  const { can } = usePermissions()
   useEffect(() => {
     if (collectionId && collectionName)
       recordRecent(collectionTarget({ id: collectionId, name: collectionName }))
@@ -174,6 +178,11 @@ export default function CollectionDetailPage() {
           meta={collection.description ?? undefined}
           action={
             <>
+              <Slot
+                name="collection.header"
+                props={{ collectionId: collection.id }}
+              />
+              <WhoCanEdit collectionId={collection.id} />
               <PinButton
                 target={collectionTarget(collection)}
                 noun="collection"
@@ -194,11 +203,16 @@ export default function CollectionDetailPage() {
             />
           }
           secondaryActions={[
-            { label: 'Edit details', onClick: startEditing },
+            {
+              label: 'Edit details',
+              onClick: startEditing,
+              disabled: !can('change_structure'),
+            },
             {
               label: 'Delete collection',
               variant: 'danger',
               onClick: () => setConfirmDelete(true),
+              disabled: !can('delete'),
             },
           ]}
         >

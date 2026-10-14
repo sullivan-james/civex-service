@@ -6,8 +6,9 @@ import type {
   StoredSession,
   UserEntry,
 } from '../types/ai'
+import { projectKey } from '../utils/host'
 
-const SESSIONS_KEY = 'civex-ai-sessions'
+const SESSIONS_KEY = projectKey('civex-ai-sessions')
 const MAX_SESSIONS = 15
 
 function loadSessions(): StoredSession[] {

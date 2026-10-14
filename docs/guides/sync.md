@@ -30,6 +30,11 @@ civex sync connect https://… --invite civex_inv_…   # an existing project
 
 - **Invites** work once, for 24 hours (`--hours`), and are shown once. They start
   with `civex_inv_`, so secret scanners catch one pasted by mistake.
+- **Or ask to join.** Connect without an invite and the device shows a code
+  (`ABCD-2345`) and waits. On the authority, `civex sync device approve
+  ABCD-2345 laptop` (or Settings → Sync → *Asking to join*) lets it in by name,
+  `civex sync device deny` turns it away, and a code nobody approves in 15
+  minutes lapses. The device is then a device like any invited one.
 - **Keys:** joining makes the device a key pair. It then signs in with its key for
   short sessions, and checks the authority's key, so a different server at the
   same address gets nothing. `civex sync device revoke <name>` stops a device at
@@ -63,18 +68,30 @@ that waiting can't fix, such as a revoked device, says so and waits for you.
 
 ## Files
 
-Changes and files travel separately, so a missing file never holds up a change.
+Changes and files travel separately. A sync moves records only, so it takes
+seconds however large the files are, and a missing file never holds up a change.
+Files move in the background, on their own, beside syncing.
 
 - **Sending:** a device uploads files its records use that the authority lacks,
-  with progress in the status bar. A file on an unplugged drive is sent once it
-  can be read. Until the server has a file, its chip says **not on the server
-  yet** (other computers can't open it) and the status bar counts such files,
-  with **Send now**. civex remembers which files the server has said it holds and
-  asks only about the rest; every few minutes and on every manual sync it asks
-  about all of them again.
+  with their own progress in the status bar. A file on an unplugged drive is
+  sent once it can be read. Until the server has a file, its chip says **not on
+  the server yet** (other computers can't open it), and the status bar counts
+  such files and says why they haven't gone: going up in the background, on a
+  drive that can't be read, or not on this computer at all (a computer that has
+  them must send them). **Send now** (`civex sync send` from the command line)
+  sends at once; `civex sync now` syncs records only and says how many files are
+  still to go. civex remembers which files the server has said it holds and asks
+  only about the rest; every few minutes, on **Send now** and on every manual
+  sync it asks about all of them again.
 - **Receiving:** a file another device added arrives in the background (for
   collections this computer keeps), when you open it, or before an export. Until
   then it is marked **on the server**.
+- **Straight to storage:** an authority whose files are in a bucket (see
+  [Storage volumes](storage.md#files-in-a-bucket-instead)) offers `direct_files`:
+  a device asks it where to put a file and sends the bytes to the bucket itself,
+  then tells the authority it is done; downloads are a redirect to the bucket.
+  The authority only says where and records what arrived. An older device, or an
+  authority with its files on drives, streams them as before.
 
 ### Which files a computer keeps
 
@@ -150,6 +167,15 @@ aren't deleted), and schema rules (templates and unique keys name real fields).
 An action travels whole. Deleting a record takes what's beneath it, and a schema
 change can touch several fields. If it can't go in whole, none of it does, and
 the device is sent back the authority's state, marked **not taken**.
+
+## Who may change what
+
+A project in a folder is yours: everything is allowed. A hosted civex knows who
+is signed in and what they may do (`GET /api/me`: read, write records, change
+the structure, add files, delete, manage members, each everywhere or in named
+collections), and holds a person's device to the same rule as their browser: a
+change a device pushes that its person may not make is refused like any change
+that breaks a rule, and the app shows the control switched off, saying why.
 
 ## Who a change is recorded as
 

@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Button, Modal, ModalBody, ModalFooter, ModalHeader } from '../ui'
 import { Sparkles } from '../ui/icons'
+import { basePath } from '../../utils/host'
 
 // Bump this if the attestation's substance changes materially (e.g. a new
 // data-sharing risk) -- a new key means everyone sees it again once, rather
@@ -68,7 +69,10 @@ export default function AiAttestationGate({
         </p>
         <p className="text-fg-muted text-xs">
           Review this project&apos;s data-handling policies under{' '}
-          <a href="/legal" className="text-accent hover:underline">
+          <a
+            href={`${basePath()}/legal`}
+            className="text-accent hover:underline"
+          >
             Licenses &amp; policies
           </a>{' '}
           before enabling this with sensitive data.

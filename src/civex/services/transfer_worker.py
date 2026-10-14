@@ -17,6 +17,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable
 
+from civex.domain import features
 from civex.domain.exceptions import CivexError
 from civex.domain.transfers import TransferProgress, TransferRecord
 from civex.services.transfer_engine import TransferControl
@@ -58,6 +59,8 @@ class TransferWorker:
         while not should_stop():
             ctx = self._context()
             try:
+                if features.VOLUMES not in ctx.features:
+                    return result  # no drives here: nothing to move between
                 record = ctx.transfer_svc.next_runnable(skip)
                 if record is None:
                     return result

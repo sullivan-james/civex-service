@@ -7,6 +7,7 @@ import { PlaceStatus, VolumeStatus } from '../files/Where'
 import { Button, Chip, TriggerPopover } from '../ui'
 import { AlertTriangle, HardDrive, Upload } from '../ui/icons'
 import { FileInfoPanel } from './FileInfoPanel'
+import { apiUrl } from '../../utils/host'
 
 type FileLike = Pick<
   FileRef,
@@ -81,7 +82,7 @@ function DownloadLink({
     text: string
   } | null>(null)
   const name = file.resolved_filename ?? file.filename
-  const href = `/api/files/${file.sha256}?filename=${encodeURIComponent(name)}`
+  const href = `${apiUrl(`/files/${file.sha256}`)}?filename=${encodeURIComponent(name)}`
 
   useEffect(() => {
     if (!note || note.tone !== 'info') return
@@ -100,8 +101,14 @@ function DownloadLink({
     )
     const abort = new AbortController()
     try {
-      const res = await fetch(href, { signal: abort.signal })
-      if (!res.ok) {
+      // Only the server's answer is wanted: a project whose files are in a
+      // bucket answers with a redirect to it, which is as good as the bytes
+      // (the browser follows it when the download starts, below).
+      const res = await fetch(href, {
+        signal: abort.signal,
+        redirect: 'manual',
+      })
+      if (!res.ok && res.type !== 'opaqueredirect') {
         const body = await res.json().catch(() => null)
         setNote({
           tone:
@@ -173,7 +180,7 @@ function chipText(file: FileLike): string {
 
 /** Said of a file here that the server hasn't said it holds. */
 const NOT_SENT =
-  "Not on the server yet: other computers can't open it until it is sent. It goes with the next sync."
+  "Not on the server yet: other computers can't open it until it is sent. It goes up in the background, apart from syncing."
 
 /** What the chip says on hover, before anything is clicked: where, whether it
  * is there, and that there is more. */

@@ -123,8 +123,14 @@ def _add_sync_state(ctx: AppContext) -> None:
     from civex import keys
 
     _, invite = ctx.device_keys.invite("laptop")
-    ctx.device_keys.join(invite, str(uuid.uuid4()), keys.public_of(keys.new_private_key()))
+    ctx.device_keys.join(
+        invite, str(uuid.uuid4()), keys.public_of(keys.new_private_key())
+    )
     ctx.device_keys.invite("phone")  # one still waiting
+    # A device asking to join without an invite, waiting to be approved.
+    ctx.device_keys.request_login(
+        str(uuid.uuid4()), keys.public_of(keys.new_private_key())
+    )
     ctx.device_keys.allow_publish("laptop", True)
     # A shared workflow in the library (its lists are JSON columns).
     from civex.domain.library import LibraryItemDTO

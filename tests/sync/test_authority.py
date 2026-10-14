@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from civex.domain.sync import PROTOCOL_MAX
-from .peers import (
+from civex.testing.peers import (
     by_status,
     device_uuid,
     join,
@@ -61,7 +61,7 @@ def test_sending_the_same_changes_twice_does_nothing_more(project):
     laptop.schema_svc.create("thing")
     laptop.commit()
     from civex.domain.sync import SyncEntry
-    from .peers import wire
+    from civex.testing.peers import wire
 
     entries = [
         SyncEntry.from_dict(wire(e.to_dict()))
@@ -298,7 +298,7 @@ def test_a_joining_device_reads_each_kind_in_pages_with_the_head_taken_first(wor
 
 def _pending(device):
     from civex.domain.sync import SyncEntry
-    from .peers import wire
+    from civex.testing.peers import wire
 
     return [
         SyncEntry.from_dict(wire(e.to_dict()))
@@ -508,4 +508,38 @@ def test_a_policy_decides_what_a_caller_may_change(project, monkeypatch):
     assert statuses(result) == ["applied", "rejected"]
     assert by_status(result, "rejected")[0].message == (
         "laptop may not change collections"
+    )
+
+
+def test_a_persons_permissions_are_the_policy_a_device_is_held_to(project, monkeypatch):
+    """A host builds the authority's context for the person a device belongs
+    to; their `Permissions` is the policy, so a device pushes only what its
+    person could do at a browser, judged per collection."""
+    from civex.domain.permissions import READ, WRITE_RECORDS, Permissions
+
+    authority, laptop = project("authority"), project("laptop")
+    laptop.schema_svc.create("sample")
+    mine = laptop.dataset_svc.create("mine", schemas=["sample"])
+    laptop.dataset_svc.create("theirs", schemas=["sample"])
+    laptop.commit()
+    assert set(statuses(push(authority, laptop, "laptop"))) == {"applied"}
+
+    monkeypatch.setattr(
+        authority.authority_svc,
+        "_policy",
+        Permissions.of(READ, WRITE_RECORDS, collections=[mine.id]),
+    )
+    laptop.record_svc.add("mine", "sample", {})
+    laptop.record_svc.add("theirs", "sample", {})
+    laptop.dataset_svc.update("theirs", description="renamed by a device")
+    laptop.commit()
+    result = push(authority, laptop, "laptop")
+    assert statuses(result) == ["applied", "rejected", "rejected"]
+    [record, collection] = [r.message for r in result.results if r.message]
+    assert record == (
+        "laptop may not add, change and restore records, and save filters and "
+        "exports here."
+    )
+    assert collection == (
+        "laptop may not change kinds of record, their fields and collections here."
     )

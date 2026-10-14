@@ -4,6 +4,7 @@ it and say what happened."""
 
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import os
 import uuid
@@ -65,10 +66,20 @@ def _connect_showing_progress(c, url: str, invite: str | None) -> str:
                 total=p.total,
             )
 
-        mode = c.sync_svc.connect(url, invite, progress=show)
+        def approve(started) -> None:  # noqa: ANN001 - LoginStarted
+            bar.update(task, description="Waiting to be approved")
+            until = datetime.fromtimestamp(started.expires_at).strftime("%H:%M")
+            console.print(
+                "This computer has asked to join. On the server, approve it with\n\n"
+                f"  civex sync device approve {started.user_code} <name>\n\n"
+                f"(or in Settings → Sync). Waiting until {until}; Ctrl+C stops."
+            )
+
+        mode = c.sync_svc.connect(url, invite, progress=show, on_code=approve)
         c.commit()
     if mode == "joined":
         _fetch_history_showing_progress(c)
+    _files_owed(c)
     return mode
 
 
@@ -104,10 +115,7 @@ def _fail(e: Exception) -> typer.Exit:
 
 
 def _describe(report) -> None:  # noqa: ANN001 — SyncReport
-    console.print(
-        f"Received {report.pulled}, sent {report.pushed}"
-        + (f", files sent {report.files_sent}" if report.files_sent else "")
-    )
+    console.print(f"Received {report.pulled}, sent {report.pushed}")
     if report.conflicts:
         console.print(
             f"[warning]{report.conflicts} value(s) did not go in as made; "
@@ -117,7 +125,7 @@ def _describe(report) -> None:  # noqa: ANN001 — SyncReport
         console.print(f"[warning]{report.rejected} change(s) were refused.[/warning]")
     if report.waiting:
         console.print(
-            f"[dim]{report.waiting} change(s) are waiting for a file; they go on the next sync.[/dim]"
+            f"[dim]{report.waiting} change(s) are waiting; they go on the next sync.[/dim]"
         )
 
 
@@ -130,7 +138,12 @@ def _default(ctx: typer.Context) -> None:
 
 @app.command("now")
 def now() -> None:
-    """Send this project's changes and bring in everyone else's."""
+    """Send this project's changes and bring in everyone else's.
+
+    Records only: files go on their own, so a large file never holds up a
+    change. The app and `civex sync watch` send them in the background;
+    `civex sync send` sends them now.
+    """
     c = _ctx()
     try:
         if not c.sync_svc.configured:
@@ -139,10 +152,77 @@ def now() -> None:
             )
             raise typer.Exit(1)
         _describe(c.sync_svc.sync())
+        _files_owed(c)
     except (SyncError, CivexError) as e:
         raise _fail(e)
     finally:
         c.close()
+
+
+def _files_owed(c) -> None:  # noqa: ANN001 — AppContext
+    owed = c.sync_svc.status().files_to_send
+    if owed:
+        console.print(
+            f"[dim]{owed} file(s) aren't on the server yet: `civex sync send` "
+            "sends them now (the app and `civex sync watch` send them in the "
+            "background).[/dim]"
+        )
+
+
+@app.command("send")
+def send(
+    everything: bool = typer.Option(
+        False,
+        "--check-all",
+        help="Ask the server about every file again, not only those it hasn't "
+        "said it holds (in case one it held has gone).",
+    ),
+) -> None:
+    """Upload the files this project's records cite that the server lacks,
+    now, with a progress bar. Records sync separately (`civex sync now`);
+    stopping (Ctrl+C) keeps what has gone up, and the rest goes later."""
+    from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
+
+    from civex.cli.utils import format_bytes
+
+    c = _ctx()
+    try:
+        if not c.sync_svc.fetches_files:
+            raise _fail(ValueError("This project doesn't follow an authority."))
+        with Progress(
+            TextColumn("Sending files"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TextColumn("{task.fields[sent]}"),
+            console=console,
+            transient=True,
+        ) as bar:
+            task = bar.add_task("files", total=None, sent="")
+
+            def told(p) -> None:  # noqa: ANN001 — SyncProgress
+                rate = f", {format_bytes(int(p.rate))}/s" if p.rate else ""
+                bar.update(
+                    task,
+                    total=p.total,
+                    completed=p.done,
+                    sent=f"{format_bytes(p.bytes_done or 0)}{rate}",
+                )
+
+            try:
+                report = c.sync_svc.send_files(everything=everything, progress=told)
+            except KeyboardInterrupt:
+                console.print("Stopped; what went up is kept.")
+                return
+    except SyncError as e:
+        raise _fail(e)
+    finally:
+        c.close()
+    console.print(f"[success]Sent {report.sent} file(s).[/success]")
+    if report.owed:
+        console.print(
+            f"[warning]{len(report.owed)} can't be read on this computer right now "
+            "(a drive that isn't plugged in?); they go once they can.[/warning]"
+        )
 
 
 @app.command("user")
@@ -153,11 +233,14 @@ def user(
     """Show or set the author name recorded on changes in this project. It is
     saved in this project's config.toml; the default is your operating-system
     user."""
+    from civex.config import FileConfigStore
     from civex.identity import choose_name, local_actor
 
     config = cli_load_config()
     if reset or name:
-        choose_name(config, None if reset else name)
+        config = choose_name(
+            FileConfigStore(config.project_root), None if reset else name
+        )
     console.print(
         f"Recorded as {escape(local_actor(config.identity.name) or '(unknown)')}"
     )
@@ -407,13 +490,14 @@ def connect(
         "--invite",
         envvar="CIVEX_SYNC_INVITE",
         help="The invite the authority's admin gave. Leave out when this computer "
-        "has joined that address before (connecting again after a copy stopped "
-        "part way).",
+        "has joined that address before, or to ask to join: a code is shown for "
+        "the admin to approve on the server (`civex sync device approve`).",
     ),
 ) -> None:
     """Point this project at an authority. An empty project becomes a copy of
     it; a project with data fills an empty authority. Two projects that both
-    hold data are refused."""
+    hold data are refused. Without an invite, this computer asks to join and
+    waits for the admin to approve the code it shows."""
     c = _ctx()
     try:
         mode = _connect_showing_progress(c, url, invite)
@@ -713,13 +797,52 @@ def device_invite(
     )
 
 
+@device_app.command("approve")
+def device_approve(
+    code: str = typer.Argument(help="The code the device shows (like ABCD-2345)."),
+    name: str = typer.Argument(help="What to call the device."),
+) -> None:
+    """Let in a device that asked to join (`civex sync connect` without an
+    invite shows the code). It is a device from now on, as if invited."""
+    c = _ctx()
+    try:
+        device = c.device_keys.approve_login(code, name)
+        c.commit()
+    except CivexError as e:
+        raise _fail(e)
+    finally:
+        c.close()
+    console.print(
+        f"[success]{escape(device.name)} may follow this project[/success] "
+        f"(key {keys.fingerprint(device.public_key)})."
+    )
+
+
+@device_app.command("deny")
+def device_deny(
+    code: str = typer.Argument(help="The code the device shows."),
+) -> None:
+    """Turn away a device that asked to join."""
+    c = _ctx()
+    try:
+        ok = c.device_keys.deny_login(code)
+        c.commit()
+    finally:
+        c.close()
+    if not ok:
+        raise _fail(ValueError(f"No device is waiting with the code {code}"))
+    console.print(f"Denied {escape(code)}.")
+
+
 @device_app.command("list")
 def device_list() -> None:
-    """List the devices that joined and the invites waiting."""
+    """List the devices that joined, the invites waiting, and the devices
+    asking to join."""
     c = _ctx()
     try:
         devices = c.device_keys.list_devices()
         invites = c.device_keys.pending_invites()
+        logins = c.device_keys.pending_logins()
     finally:
         c.close()
     table = Table()
@@ -736,6 +859,15 @@ def device_list() -> None:
         )
     for i in invites:
         table.add_row(i.name, "", "", "", f"invited, until {i.expires_at}", "")
+    for r in logins:
+        table.add_row(
+            f"code {r.user_code}",
+            keys.fingerprint(r.public_key),
+            "",
+            "",
+            f"asking to join, until {r.expires_at}",
+            "",
+        )
     console.print(table)
 
 

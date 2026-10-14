@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from sqlalchemy import text
 
-from .peers import connect
+from civex.testing.peers import connect
 
 
 def _named(ctx, name):
@@ -49,7 +49,7 @@ def test_a_device_cannot_write_as_the_server(pair, authority):
 
 
 def test_a_change_made_on_the_server_has_no_device(project, authority):
-    from .peers import build_study, device
+    from civex.testing.peers import build_study, device
 
     laptop = device(project, authority, "laptop")
     record = build_study(laptop)

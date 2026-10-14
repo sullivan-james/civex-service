@@ -202,7 +202,10 @@ def test_a_failed_update_still_starts_the_old_civex(
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
+    # No project here: the routes ask which project they serve, and the
+    # answer must be "none", not whatever sits above the checkout.
+    monkeypatch.chdir(tmp_path)
     from civex.server.app import create_app
 
     return TestClient(create_app())

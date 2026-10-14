@@ -24,6 +24,7 @@ import {
 } from '../ui'
 import { describeSyncProgress } from '../../utils/syncProgress'
 import { SyncServing } from './SyncServing'
+import { useHasFeature } from '../../hooks/useFeatures'
 
 const INTERVALS = [
   { seconds: 0, label: 'Never' },
@@ -135,6 +136,24 @@ function Copying({ s }: { s: RemoteStatus }) {
       </Card>
     )
   }
+  if (s.connecting && s.awaiting_approval)
+    return (
+      <Card title="Waiting to be let in">
+        <p className="text-sm">
+          This computer has asked to join. On the server, approve the code{' '}
+          <span className="font-mono text-base">
+            {s.awaiting_approval.code}
+          </span>{' '}
+          (Settings → Sync, or <code>civex sync device approve</code>). It works
+          until{' '}
+          {new Date(s.awaiting_approval.expires_at * 1000).toLocaleTimeString()}
+          .
+        </p>
+        <div className="mt-2">
+          <Spinner />
+        </div>
+      </Card>
+    )
   if (s.connecting)
     return (
       <Card title="Connecting to the server">
@@ -308,6 +327,15 @@ function NameCard() {
 
 export default function SyncSection() {
   const { data } = useRemoteStatus()
+  const has = useHasFeature()
+  // A hosted project is the authority its devices follow, and people sign in
+  // by name: only the devices are left to manage here.
+  if (has('accounts'))
+    return (
+      <div className="max-w-2xl">
+        <SyncServing />
+      </div>
+    )
   if (!data) return <Skeleton className="h-9 w-80" />
   return (
     <div className="space-y-5">

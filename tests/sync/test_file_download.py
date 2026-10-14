@@ -24,6 +24,7 @@ def _with_file(laptop, record, content: bytes):
     )
     laptop.commit()
     laptop.sync_svc.sync()
+    laptop.sync_svc.send_files()
     return ref
 
 
@@ -57,6 +58,7 @@ def test_a_file_the_server_has_not_got_yet_is_left_for_later(pair, authority):
     laptop.schema_svc.add_field("encounter", "scan", "file")
     laptop.commit()
     laptop.sync_svc.sync()
+    laptop.sync_svc.send_files()
     ref = laptop.file_svc.store_bytes(b"not sent", "scan.bin")
     laptop.record_svc.update(
         str(record.id), {"site": "x", "depth": 1.0, "scan": ref.to_dict()}
@@ -64,6 +66,7 @@ def test_a_file_the_server_has_not_got_yet_is_left_for_later(pair, authority):
     laptop.commit()
     laptop.file_svc.object_path(ref.sha256).unlink()  # its drive is unplugged
     laptop.sync_svc.sync()
+    laptop.sync_svc.send_files()
     phone.sync_svc.sync()
 
     report = phone.sync_svc.fetch_files()

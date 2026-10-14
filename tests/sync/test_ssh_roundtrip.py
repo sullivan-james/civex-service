@@ -17,8 +17,8 @@ from civex.project_host import FILE
 from civex.services import ssh_tunnel
 from civex.services.ssh_tunnel import SshAddress
 
-from .peers import snapshots
-from .test_convergence import populate
+from civex.testing.peers import snapshots
+from civex.testing.convergence import populate
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="the far end of ssh:// is a Unix machine"
@@ -84,6 +84,7 @@ def test_files_travel_both_ways_over_ssh(project, lab):
     )
     laptop.commit()
     laptop.sync_svc.sync()
+    laptop.sync_svc.send_files()
     assert authority.file_svc.retrieve(ref.sha256) == content
 
     _, invite2 = authority.device_keys.invite("tablet")
@@ -103,6 +104,7 @@ def test_one_tunnel_serves_every_call(project, lab):
     laptop.commit()
     first = ssh_tunnel.local_url(url)
     laptop.sync_svc.sync()
+    laptop.sync_svc.send_files()
     assert ssh_tunnel.local_url(url) == first
 
 

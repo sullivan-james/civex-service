@@ -2,20 +2,26 @@ import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Navigate, Route, Routes } from 'react-router'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import SettingsLayout from './SettingsLayout'
 
 function renderAt(path: string) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
   render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/settings" element={<SettingsLayout />}>
-          <Route index element={<Navigate to="appearance" replace />} />
-          <Route path="appearance" element={<p>Appearance page</p>} />
-          <Route path="storage" element={<p>Storage page</p>} />
-          <Route path="map" element={<p>Map page</p>} />
-        </Route>
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/settings" element={<SettingsLayout />}>
+            <Route index element={<Navigate to="appearance" replace />} />
+            <Route path="appearance" element={<p>Appearance page</p>} />
+            <Route path="storage" element={<p>Storage page</p>} />
+            <Route path="map" element={<p>Map page</p>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 

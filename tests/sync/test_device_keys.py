@@ -20,7 +20,7 @@ from civex.domain.sync import (
 )
 from civex.services.device_keys import DeviceKeys
 
-from .peers import build_study, connect, device
+from civex.testing.peers import build_study, connect, device
 
 
 def _device() -> tuple[str, str]:

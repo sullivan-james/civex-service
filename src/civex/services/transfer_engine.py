@@ -61,7 +61,7 @@ from civex.domain.transfers import (
 )
 
 if TYPE_CHECKING:
-    from civex.repositories.protocols import FileObjectStore, FileReferenceRepository
+    from civex.repositories.protocols import VolumeStore, FileReferenceRepository
 
 log = logging.getLogger(__name__)
 
@@ -178,7 +178,7 @@ class _Run:
 
     def __init__(
         self,
-        store: FileObjectStore,
+        store: VolumeStore,
         refs: FileReferenceRepository,
         spec: TransferSpec,
         control: TransferControl,
@@ -321,7 +321,7 @@ class _Run:
 
 
 def _items(
-    store: FileObjectStore,
+    store: VolumeStore,
     refs: FileReferenceRepository,
     spec: TransferSpec,
     run: _Run,
@@ -350,7 +350,7 @@ def _items(
 
 
 def _file_items(
-    store: FileObjectStore,
+    store: VolumeStore,
     refs: FileReferenceRepository,
     spec: TransferSpec,
     run: _Run,
@@ -391,7 +391,7 @@ def scope_of(spec: TransferSpec) -> Scope:
 
 
 def plan_steps(
-    store: FileObjectStore,
+    store: VolumeStore,
     refs: FileReferenceRepository,
     spec: TransferSpec,
 ) -> Iterator[Step]:
@@ -455,7 +455,7 @@ def _pages(refs: FileReferenceRepository, spec: TransferSpec) -> Iterator[list[s
         yield shas
 
 
-def _choose_target(store: FileObjectStore, run: _Run, size: int) -> str:
+def _choose_target(store: VolumeStore, run: _Run, size: int) -> str:
     """The first target that can take `size` more bytes, as the write queue
     would. Raises VolumeNotResponding when the only thing in the way is a volume
     that has gone quiet (which may well come back), TargetFull otherwise."""
@@ -478,7 +478,7 @@ def _choose_target(store: FileObjectStore, run: _Run, size: int) -> str:
 
 
 def run_transfer(
-    store: FileObjectStore,
+    store: VolumeStore,
     refs: FileReferenceRepository,
     spec: TransferSpec,
     *,
@@ -553,7 +553,7 @@ def _accounted(p: TransferProgress) -> int:
     return p.files_done + p.files_skipped + p.files_failed
 
 
-def _move(store: FileObjectStore, run: _Run, item: _Item) -> None:
+def _move(store: VolumeStore, run: _Run, item: _Item) -> None:
     """Move one file, or record why it couldn't be."""
     if item.there is not None:
         # On the target already: only its pointers move (and copies they
@@ -629,7 +629,7 @@ def _move(store: FileObjectStore, run: _Run, item: _Item) -> None:
 
 
 def _copy_with_retries(
-    store: FileObjectStore,
+    store: VolumeStore,
     run: _Run,
     item: _Item,
     target: str,

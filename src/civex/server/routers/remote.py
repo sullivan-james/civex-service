@@ -63,6 +63,11 @@ class RemoteStatusResponse(BaseModel):
         "holds yet: still to be sent (or not sent yet because they can't be read "
         "here).",
     )
+    files_waiting: FilesWaitingResponse | None = Field(
+        default=None,
+        description="Why files not on the server yet haven't gone; null when "
+        "there are none.",
+    )
     last_result: SyncResultResponse | None = Field(
         default=None,
         description="What the last sync run by this server did; null after a "
@@ -74,18 +79,51 @@ class RemoteStatusResponse(BaseModel):
         "the project from the authority, filling an empty one, or fetching the "
         "history from before joining.",
     )
+    files_progress: SyncProgressResponse | None = Field(
+        default=None,
+        description="Files going up to the server or coming down from it, which "
+        "happens beside syncing, while it runs here.",
+    )
     connecting: bool = Field(
         default=False, description="A connect started here is still running."
     )
     connect_error: str | None = Field(
         default=None, description="Why the last connect started here failed."
     )
+    awaiting_approval: AwaitingApprovalResponse | None = Field(
+        default=None,
+        description="This computer asked to join and waits for a person to approve "
+        "the code on the server.",
+    )
+
+
+class AwaitingApprovalResponse(BaseModel):
+    code: str = Field(description="The code to approve on the server.")
+    expires_at: int = Field(
+        description="Unix seconds; the code stops working after it."
+    )
+
+
+class OfflineDriveFiles(BaseModel):
+    volume: str = Field(description="The drive holding them.")
+    files: int
+    reason: str = Field(description="Why the drive can't be read, in its own words.")
+
+
+class FilesWaitingResponse(BaseModel):
+    ready: int = Field(description="Files sending can move now.")
+    offline: list[OfflineDriveFiles] = Field(
+        description="Files only on drives that can't be read right now."
+    )
+    not_here: int = Field(
+        description="Files not on this computer; a computer that holds them "
+        "must send them."
+    )
 
 
 class SyncResultResponse(BaseModel):
     pulled: int = Field(description="Changes from others brought in.")
     pushed: int = Field(description="Changes of this project's that were sent.")
-    files_sent: int
     conflicts: int = Field(description="Values that did not go in as made.")
     rejected: int = Field(description="Changes the authority refused.")
 
@@ -102,7 +140,15 @@ class RemoteConnectRequest(BaseModel):
 class RemoteConnectResponse(BaseModel):
     mode: str = Field(
         description="joined (became a copy), seeded (filled an empty authority), "
-        "empty (both empty) or resumed (already the same project)."
+        "empty (both empty), resumed (already the same project), or approval: "
+        "this computer asked to join and waits for a person to approve `code` "
+        "on the server; connecting goes on by itself once they do."
+    )
+    code: str | None = Field(
+        default=None, description="The code to approve on the server (mode approval)."
+    )
+    expires_at: int | None = Field(
+        default=None, description="Unix seconds; the code stops working after it."
     )
 
 
@@ -281,7 +327,6 @@ def _last_result() -> SyncResultResponse | None:
     return SyncResultResponse(
         pulled=r.pulled,
         pushed=r.pushed,
-        files_sent=r.files_sent,
         conflicts=r.conflicts,
         rejected=r.rejected,
     )
@@ -305,12 +350,34 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         download_files=s.download_files,
         files_to_fetch=s.files_to_fetch,
         files_to_send=s.files_to_send,
+        files_waiting=(
+            FilesWaitingResponse(
+                ready=w.ready,
+                offline=[
+                    OfflineDriveFiles(volume=v, files=n, reason=r)
+                    for v, n, r in w.offline
+                ],
+                not_here=w.not_here,
+            )
+            if (w := s.files_waiting)
+            else None
+        ),
         last_result=_last_result(),
         progress=(
             SyncProgressResponse(**p.to_dict()) if (p := sync_jobs.progress) else None
         ),
+        files_progress=(
+            SyncProgressResponse(**f.to_dict())
+            if (f := sync_jobs.files_progress)
+            else None
+        ),
         connecting=sync_jobs.connecting,
         connect_error=sync_jobs.connect_error,
+        awaiting_approval=(
+            AwaitingApprovalResponse(code=login.user_code, expires_at=login.expires_at)
+            if (login := sync_jobs.awaiting) and sync_jobs.connecting
+            else None
+        ),
     )
 
 
@@ -336,6 +403,14 @@ def connect(body: RemoteConnectRequest, ctx: AppContext = Depends(get_ctx)):
     the background: `GET /remote` says how far it has got (`progress`), and why
     it stopped if it did (`connect_error`)."""
     try:
+        if ctx.sync_svc.needs_approval(body.url, body.invite):
+            # No invite, never joined: ask to join, and wait for a person to
+            # approve the code in the background, then connect.
+            started = ctx.sync_svc.request_login(body.url)
+            sync_jobs.start_connect(body.url, login=started)
+            return RemoteConnectResponse(
+                mode="approval", code=started.user_code, expires_at=started.expires_at
+            )
         mode = ctx.sync_svc.check_connect(body.url, body.invite)
     except SyncError as e:
         raise _refuse(e)
@@ -357,6 +432,16 @@ def sync_now(ctx: AppContext = Depends(get_ctx)):
     if not ctx.sync_svc.configured:
         raise HTTPException(400, detail="This project is not following an authority")
     sync_jobs.sync_now()
+    return {"requested": True}
+
+
+@router.post("/files/send", status_code=202)
+def send_files_now(ctx: AppContext = Depends(get_ctx)):
+    """Send the files the authority lacks now. Files go on their own, beside
+    syncing (a sync moves records only); `GET /remote` shows how far it has got."""
+    if not ctx.sync_svc.fetches_files:
+        raise HTTPException(400, detail="This project is not following an authority")
+    sync_jobs.send_now()
     return {"requested": True}
 
 
@@ -468,6 +553,19 @@ class InviteResponse(BaseModel):
     expires_at: str
 
 
+class LoginResponse(BaseModel):
+    code: str = Field(
+        description="The code the device shows; approve or deny it by this."
+    )
+    fingerprint: str = Field(description="The device's key's short code, to compare.")
+    requested_at: str
+    expires_at: str
+
+
+class ApproveLoginRequest(BaseModel):
+    name: str = Field(description="What to call the device.")
+
+
 class AuthorityResponse(BaseModel):
     serving: bool = Field(description="This project accepts devices.")
     fingerprint: str | None = Field(
@@ -476,6 +574,11 @@ class AuthorityResponse(BaseModel):
     devices: list[DeviceResponse] = Field(description="The devices that joined.")
     invites: list[InviteResponse] = Field(
         description="Invites not used yet and not expired."
+    )
+    logins: list[LoginResponse] = Field(
+        default_factory=list,
+        description="Devices asking to join without an invite, waiting for a person "
+        "to approve the code they show.",
     )
     library: str = Field(
         default="workflows",
@@ -531,6 +634,15 @@ def _authority(ctx: AppContext) -> AuthorityResponse:
             )
             for i in keys_svc.pending_invites()
         ],
+        logins=[
+            LoginResponse(
+                code=r.user_code,
+                fingerprint=keys.fingerprint(r.public_key),
+                requested_at=r.created_at,
+                expires_at=r.expires_at,
+            )
+            for r in keys_svc.pending_logins()
+        ],
         library=ctx.sync_svc.library_mode,
     )
 
@@ -572,6 +684,29 @@ def cancel_invite(name: str, ctx: AppContext = Depends(get_ctx)):
     """Cancel a device's invite before it is used."""
     if not ctx.device_keys.cancel_invite(name):
         raise HTTPException(404, detail=f"No invite waiting for {name}")
+    ctx.commit()
+    return _authority(ctx)
+
+
+@router.post("/authority/logins/{code}/approve", response_model=AuthorityResponse)
+def approve_login(
+    code: str, body: ApproveLoginRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """Let in the device showing this code, as `name`. It is a device from now
+    on, exactly as if it had joined with an invite."""
+    try:
+        ctx.device_keys.approve_login(code, body.name)
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    ctx.commit()
+    return _authority(ctx)
+
+
+@router.post("/authority/logins/{code}/deny", response_model=AuthorityResponse)
+def deny_login(code: str, ctx: AppContext = Depends(get_ctx)):
+    """Turn away the device showing this code."""
+    if not ctx.device_keys.deny_login(code):
+        raise HTTPException(404, detail=f"No device is waiting with the code {code}")
     ctx.commit()
     return _authority(ctx)
 

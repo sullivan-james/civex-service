@@ -1,6 +1,9 @@
 import { Suspense } from 'react'
 import { Outlet, useLocation, useSearchParams } from 'react-router'
 import { InfoTip, Page, Skeleton, TabNav } from '../../components/ui'
+import { useFeatures } from '../../hooks/useFeatures'
+import { offered } from '../../utils/features'
+import { useSlot } from '../../hooks/useSlot'
 
 /** Settings is a set of pages, one per area, each with its own address
  * (`/settings/storage`), so a section can be linked to and none has to share a
@@ -13,11 +16,14 @@ const settingsSections = [
   },
   {
     to: 'database',
+    feature: 'db_admin',
     label: 'Database',
     info: 'Where this project’s records are stored. You can move them to another kind of database at any time; your original is kept.',
   },
   {
     to: 'storage',
+    // Drives, or the bucket a project keeps its files in instead.
+    feature: 'store_admin',
     label: 'Storage',
     info: 'Where Civex keeps your files, and which collections use which volume.',
   },
@@ -25,6 +31,12 @@ const settingsSections = [
     to: 'retention',
     label: 'Retention',
     info: 'How long deleted items, change history and workflow runs are kept. Nothing is removed by itself: a clean-up applies these, or deletes everything before a date you choose.',
+  },
+  {
+    to: 'members',
+    feature: 'accounts',
+    label: 'Members & access',
+    info: 'Who you are here and what you may do. Members and their roles are managed on the host’s own pages.',
   },
   {
     to: 'sync',
@@ -38,11 +50,13 @@ const settingsSections = [
   },
   {
     to: 'updates',
+    feature: 'updates',
     label: 'Updates',
     info: 'Which version of civex this is, and updating it. An update closes civex, installs the new version and starts it again.',
   },
   {
     to: 'logs',
+    feature: 'logs',
     label: 'Logs',
     info: 'Every log civex keeps on this computer: this project’s server, the desktop app and its launcher, and updates. Anything that mentions a log links here.',
   },
@@ -51,7 +65,22 @@ const settingsSections = [
     label: 'Advanced',
     info: 'Power-user surfaces: the terminal, raw YAML workflow editing and the plugin editors.',
   },
-] as const
+] as const satisfies readonly Section[]
+
+interface Section {
+  to: string
+  label: string
+  info: string
+  feature?: string
+}
+
+/** Under a host with accounts the project is the authority its devices
+ * follow, and Sync holds only those devices. */
+const HOSTED_SYNC: Section = {
+  to: 'sync',
+  label: 'Devices',
+  info: 'The computers that keep a copy of this project and sync with it. Each one signed in as a person who may use this project.',
+}
 
 /** The tabs inside Settings > Storage, by their address (`?tab=`). */
 const STORAGE_TABS: Record<string, string> = {
@@ -64,7 +93,25 @@ const STORAGE_TABS: Record<string, string> = {
 export default function SettingsLayout() {
   const { pathname } = useLocation()
   const [params] = useSearchParams()
-  const current = settingsSections.find((s) => pathname.split('/')[2] === s.to)
+  const features = useFeatures()
+  const extensions = useSlot('settings.sections')
+  const sections: Section[] = [
+    ...(settingsSections as readonly Section[])
+      .filter((s) => offered(features, s))
+      .map((s) =>
+        s.to === 'sync' && features.has('accounts') ? HOSTED_SYNC : s,
+      ),
+    // A host's own sections (`utils/slots`), at `/settings/x/<id>`.
+    ...extensions.map((e) => ({
+      to: `x/${e.id}`,
+      label: e.label ?? e.id,
+      info: '',
+    })),
+  ]
+  const [, , area, sub] = pathname.split('/')
+  const current = sections.find(
+    (s) => s.to === area || s.to === `${area}/${sub}`,
+  )
   // The tab says which area, and for Storage which of its tabs.
   const storageTab =
     current?.to === 'storage'
@@ -80,7 +127,7 @@ export default function SettingsLayout() {
           <TabNav
             label="Settings sections"
             orientation="vertical"
-            tabs={settingsSections.map((section) => ({
+            tabs={sections.map((section) => ({
               id: section.to,
               label: section.label,
               to: section.to,
@@ -91,7 +138,7 @@ export default function SettingsLayout() {
           {current && (
             <h2 className="flex items-center gap-1 text-base font-semibold text-fg">
               {current.label}
-              <InfoTip side="bottom">{current.info}</InfoTip>
+              {current.info && <InfoTip side="bottom">{current.info}</InfoTip>}
             </h2>
           )}
           {/* Sections load on demand; the section list stays put meanwhile. */}

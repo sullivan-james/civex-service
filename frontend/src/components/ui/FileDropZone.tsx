@@ -17,6 +17,7 @@ export function FileDropZone({
   'aria-describedby': describedBy,
   'aria-invalid': invalid,
   required,
+  title,
 }: {
   onFiles: (files: File[]) => void
   multiple?: boolean
@@ -31,6 +32,8 @@ export function FileDropZone({
   'aria-describedby'?: string
   'aria-invalid'?: boolean
   required?: boolean
+  /** Shown on hover; says why the zone is off when `disabled`. */
+  title?: string
 }) {
   const [over, setOver] = useState(false)
 
@@ -51,6 +54,7 @@ export function FileDropZone({
       }}
       onDragLeave={() => setOver(false)}
       onDrop={drop}
+      title={title}
       className={`relative flex min-h-12 items-center justify-center rounded-md border-2 border-dashed px-4 py-3 text-center text-sm transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent ${
         disabled
           ? 'cursor-not-allowed border-border text-fg-subtle opacity-60'

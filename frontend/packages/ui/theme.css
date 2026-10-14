@@ -1,0 +1,5 @@
+/* civex's theme (tokens, dark mode, the type scale) and the classes its
+   controls use, for a host's pages. The tokens live in the app's own
+   stylesheet; this only points at it, so there is one set. */
+@import '../../src/index.css';
+@source '../../src/components/ui';

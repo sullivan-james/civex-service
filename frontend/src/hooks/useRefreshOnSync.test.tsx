@@ -13,7 +13,6 @@ const status = (over: Record<string, unknown> = {}) => ({
   last_result: {
     pulled: 0,
     pushed: 0,
-    files_sent: 0,
     conflicts: 0,
     rejected: 0,
   },
@@ -47,7 +46,6 @@ describe('useRefreshOnSync', () => {
           last_result: {
             pulled: 3,
             pushed: 0,
-            files_sent: 0,
             conflicts: 0,
             rejected: 0,
           },

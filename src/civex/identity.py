@@ -30,11 +30,11 @@ def local_actor(configured: str | None = None) -> str | None:
     return name[:_MAX_LEN] or None
 
 
-def choose_name(config, name: str | None) -> None:  # noqa: ANN001 - Config
+def choose_name(store, name: str | None):  # noqa: ANN001 - ConfigStore -> Config
     """Choose the name recorded on changes made in this project (`[identity]
-    name` in its config.toml), or with a blank go back to the computer's user.
-    The one rule the app and the CLI both set it by."""
-    from civex.config import save_config
-
+    name` in its settings), or with a blank go back to the computer's user.
+    The one rule the app and the CLI both set it by. Returns the saved config."""
+    config = store.load()
     config.identity.name = (name or "").strip()[:100] or None
-    save_config(config)
+    store.save(config)
+    return config

@@ -9,7 +9,7 @@ from sqlalchemy import update
 
 from civex.db.models import Record
 
-from .peers import connect, device
+from civex.testing.peers import connect, device
 
 pytestmark = pytest.mark.usefixtures("strict_schema_lists")
 

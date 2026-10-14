@@ -1,8 +1,84 @@
-"""Shared project-initialisation logic used by both the CLI and the desktop launcher."""
+"""A project: what a context is built from, and how one is first made.
+
+`Project` is a project as whoever hosts it sees it. `civex serve` and the CLI
+host the one project in the current directory (`Project.local`); a service
+hosting many projects builds one per request, with its own settings store,
+engine and signed-in actor. Everything downstream (`build_context`, the
+services) takes a `Project` and never asks where it came from.
+"""
 
 from __future__ import annotations
 
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from civex.config import Config, ConfigStore, FileConfigStore
+from civex.domain.accounts import Account
+from civex.domain.features import LOCAL_FEATURES
+from civex.domain.permissions import EVERYTHING, Permissions
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Engine
+
+
+@dataclass
+class Project:
+    """What a context is built from.
+
+    `actor` is who changes made through this context are recorded as (the
+    project's chosen name or the OS user locally; the signed-in person on a
+    hosted service). `device_id` is this machine's device, when the project
+    follows an authority; None lets the context work it out. `engine` lets a
+    host share one connection pool across projects (None: one per database
+    URL), and `migrated` says the host already brought the database up to
+    date, so the context needn't check on every request."""
+
+    config: Config
+    config_store: ConfigStore
+    actor: str | None = None
+    device_id: uuid.UUID | None = None
+    engine: Engine | None = None
+    migrated: bool = False
+    # What the host offers for this project (`domain.features`): a project in
+    # a folder on this machine gets everything a machine can do.
+    features: frozenset[str] = LOCAL_FEATURES
+    # What whoever this request is for may do (`domain.permissions`): the
+    # services ask it at their boundaries, and the sync authority asks it about
+    # each pushed change. The local user may do anything.
+    permissions: Permissions = EVERYTHING
+    # Who that is, as the host knows them; None: whoever sits at this machine.
+    account: Account | None = None
+
+    @classmethod
+    def local(cls, config: Config) -> Project:
+        """The project at `config.project_root`, kept in its config.toml, with
+        changes recorded as its chosen name or the OS user."""
+        from civex.identity import local_actor
+
+        return cls(
+            config=config,
+            config_store=FileConfigStore(config.project_root),
+            actor=local_actor(config.identity.name),
+            features=local_features(config),
+        )
+
+
+def local_features(config: Config) -> frozenset[str]:
+    """What a machine does for the project at `config`: everything, except
+    that a project keeping its files in a bucket (`[store.s3]`) has no drives
+    to manage, and offers files straight to and from the bucket instead."""
+    from civex.domain import features
+
+    s3 = config.store_config.s3
+    if s3 is None:
+        return LOCAL_FEATURES
+    offered = set(LOCAL_FEATURES) - {features.VOLUMES}
+    if s3.direct:
+        offered.add(features.DIRECT_FILES)
+    return frozenset(offered)
+
 
 _README = """\
 This directory is managed by civex (https://civexdata.github.io/civex-docs/).

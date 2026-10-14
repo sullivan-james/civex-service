@@ -28,7 +28,6 @@ const before = { last_synced_at: 'T1', last_error: null, last_error_at: null }
 const result = (over = {}) => ({
   pulled: 0,
   pushed: 0,
-  files_sent: 0,
   conflicts: 0,
   rejected: 0,
   ...over,

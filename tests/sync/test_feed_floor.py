@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from .peers import snapshots
-from .test_convergence import differences
+from civex.testing.peers import snapshots
+from civex.testing.convergence import differences
 
 
 def _prune_everything(authority) -> None:

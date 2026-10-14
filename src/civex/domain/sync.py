@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from collections.abc import Iterator
 from typing import Any, Protocol
 
+from civex.domain import features
 from civex.domain import hlc
 
 # The wire formats this civex speaks. MAX goes up when what travels changes in a
@@ -26,7 +27,16 @@ PROTOCOL_MIN = 2
 PROTOCOL_MAX = 2
 # Optional features, by name, that a peer can look for in `Hello`. Adding one is
 # not a protocol change; an older peer just doesn't have it.
-CAPABILITIES: tuple[str, ...] = ("library",)
+CAPABILITIES: tuple[str, ...] = ("library", "device_login")
+# A device may ask to join without an invite: it shows a short code, a person
+# approves it on the authority (`POST /device-login`, polled at
+# `GET /device-login/{device_code}`).
+DEVICE_LOGIN = "device_login"
+# Files go straight between a device and the authority's storage (a bucket) by
+# presigned URL: `POST /files/{sha}/upload` answers where, `POST
+# /files/{sha}/complete` records it, and `GET /files/{sha}` answers 307. An
+# authority offers it when its host has the feature of the same name.
+DIRECT_FILES = features.DIRECT_FILES
 
 # The order a project's things must exist in: each refers to the ones before it.
 ENTITY_ORDER = ("schema", "field", "dataset", "view", "record")
@@ -611,6 +621,10 @@ class SyncMetaDTO:
 # scanning) recognises one pasted where it shouldn't be.
 INVITE_PREFIX = "civex_inv_"
 INVITE_HOURS = 24
+# A request to join by approval lasts this long, and the device asks every
+# `LOGIN_POLL_SECONDS` whether it was approved.
+LOGIN_MINUTES = 15
+LOGIN_POLL_SECONDS = 3
 SESSION_SECONDS = 15 * 60
 # How far a device's clock may be from the authority's when signing in.
 CLOCK_SKEW_SECONDS = 5 * 60
@@ -634,6 +648,54 @@ class DeviceCredentials:
     device_id: str
     private_key: str
     authority_key: str | None = None
+
+
+@dataclass(frozen=True)
+class LoginStarted:
+    """The authority's answer to a device asking to join without an invite:
+    the short `user_code` a person reads off the device and approves on the
+    authority (or at `verify_url`, when the host has a page for it), and the
+    secret `device_code` the device polls with until then."""
+
+    user_code: str
+    device_code: str
+    expires_at: int  # unix seconds
+    interval: int  # seconds between polls
+    verify_url: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "user_code": self.user_code,
+            "device_code": self.device_code,
+            "expires_at": self.expires_at,
+            "interval": self.interval,
+            "verify_url": self.verify_url,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> LoginStarted:
+        return cls(
+            user_code=str(d["user_code"]),
+            device_code=str(d["device_code"]),
+            expires_at=int(d["expires_at"]),
+            interval=max(1, int(d.get("interval") or LOGIN_POLL_SECONDS)),
+            verify_url=d.get("verify_url") or None,
+        )
+
+
+@dataclass
+class LoginRequestDTO:
+    """A device waiting to be let in (the authority's side of `LoginStarted`)."""
+
+    id: uuid.UUID
+    user_code: str
+    device_id: str
+    public_key: str
+    created_at: str
+    expires_at: str
+    name: str | None  # given when approved
+    approved_at: str | None
+    denied_at: str | None
 
 
 @dataclass(frozen=True)
@@ -830,6 +892,15 @@ class SyncTransport(Protocol):
     as the device its credentials name."""
 
     def join(self, invite: str) -> Joined: ...
+    def request_login(self) -> LoginStarted:
+        """Ask to join without an invite: a code for a person to approve."""
+        ...
+
+    def poll_login(self, device_code: str) -> Joined | None:
+        """Whether the request was approved yet: `Joined` once it was, None
+        while it waits; SyncError (410) once it was denied or expired."""
+        ...
+
     def hello(self) -> Hello: ...
     def push(self, entries: list[SyncEntry]) -> PushResult: ...
     def feed(self, after: int, limit: int) -> FeedPage: ...

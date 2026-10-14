@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
-from civex.context import AppContext
+from civex.context import AppContext, context_factory
 from civex.domain.exceptions import NotFoundError
 from civex.server.background import run_pending_jobs
 from civex.server.deps import get_ctx
@@ -57,7 +57,7 @@ def resume_automation(
 ):
     """Lift a pause. Triggers fire and queued runs are picked up again."""
     ctx.job_svc.resume()
-    background_tasks.add_task(run_pending_jobs)
+    background_tasks.add_task(run_pending_jobs, context_factory(ctx.project))
     return _state(ctx)
 
 
@@ -230,16 +230,16 @@ def rerun_jobs(
         )
     ctx.commit()
     if started:
-        background_tasks.add_task(run_pending_jobs)
+        background_tasks.add_task(run_pending_jobs, context_factory(ctx.project))
     return RerunJobsResponse(
         started=[WorkflowJobResponse.from_dto(j) for j in started], skipped=skipped
     )
 
 
 @router.post("/drain", status_code=202)
-def drain_jobs(background_tasks: BackgroundTasks):
+def drain_jobs(background_tasks: BackgroundTasks, ctx: AppContext = Depends(get_ctx)):
     """Kick off the worker to process all pending jobs."""
-    background_tasks.add_task(run_pending_jobs)
+    background_tasks.add_task(run_pending_jobs, context_factory(ctx.project))
     return {"status": "draining"}
 
 
@@ -303,7 +303,7 @@ def rerun_job(
         original.workflow_name, record, input_data=original.input_data
     )
     ctx.commit()
-    background_tasks.add_task(run_pending_jobs)
+    background_tasks.add_task(run_pending_jobs, context_factory(ctx.project))
     return WorkflowJobResponse.from_dto(job)
 
 

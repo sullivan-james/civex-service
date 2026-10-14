@@ -1,4 +1,5 @@
 import type { ApprovalResolution, ToolCallEntry } from '../../types/ai'
+import { basePath } from '../../utils/host'
 
 // Mutating "act" tools follow the propose → user-approves-in-UI → REST flow.
 export const ACT_TOOL_NAMES = new Set([
@@ -55,7 +56,7 @@ async function apiSend(
   method: string,
   body?: unknown,
 ): Promise<void> {
-  const res = await fetch(path, {
+  const res = await fetch(`${basePath()}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: body !== undefined ? JSON.stringify(body) : undefined,

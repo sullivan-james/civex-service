@@ -1,5 +1,6 @@
 import { api } from './client'
 import { parseSSE } from '../lib/sse'
+import { apiUrl } from '../utils/host'
 
 export interface AiConfig {
   configured: boolean
@@ -158,7 +159,7 @@ export async function* streamChat(
   messages: ChatMessage[],
   signal?: AbortSignal,
 ): AsyncGenerator<AiEvent> {
-  const res = await fetch('/api/ai/chat', {
+  const res = await fetch(apiUrl('/ai/chat'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages }),

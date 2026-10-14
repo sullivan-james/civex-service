@@ -1,9 +1,13 @@
 """
 AppContext bundles all services for a single CLI command invocation (or HTTP request).
 
-build_local_context() wires together the SQLAlchemy repos and the local file store.
-An optional file_store parameter lets callers inject a custom object
-store instead of the default LocalFileObjectStore.
+build_context(project) wires together the SQLAlchemy repos and the file store
+for one `Project` (civex.project): the project's settings, where they are kept,
+who is making changes, and optionally a shared engine. build_local_context(config)
+is the same for the project in a folder on this machine, as the CLI and
+`civex serve` host it. An optional file_store parameter lets callers inject an
+object store instead of the one the project's settings name (drives on this
+machine, or a bucket with `[store.s3]`).
 """
 
 from __future__ import annotations
@@ -14,17 +18,21 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Callable, Iterator
 
 from civex.domain.dtos import RecordUse
-from civex.config import Config
+from civex.config import Config, ConfigStore
+from civex.domain import features
+from civex.domain.exceptions import FeatureUnavailableError
+from civex.domain.permissions import Permissions
+from civex.project import Project
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
     from sqlalchemy.orm import Session
 
     from civex.repositories.local.audit_repo import LocalAuditRepository
-    from civex.repositories.local.file_store import VolumeAwareFileObjectStore
+    from civex.repositories.protocols import ObjectStore
     from civex.repositories.local.sync_repo import LocalSyncRepository
     from civex.services.ai.service import AiService
     from civex.services.ai_usage_service import AiUsageService
@@ -42,6 +50,7 @@ if TYPE_CHECKING:
     from civex.services.record_service import RecordService
     from civex.services.retention_service import RetentionService
     from civex.services.schema_service import SchemaService
+    from civex.services.bucket_service import BucketService
     from civex.services.store_service import StoreService
     from civex.services.export_definition_service import ExportDefinitionService
     from civex.services.history_compaction import HistoryCompactionService
@@ -85,11 +94,9 @@ class AppContext:
     record_svc: RecordService
     file_svc: FileService
     job_svc: WorkflowJobService
-    store_svc: StoreService
     gc_svc: GCService
     file_info_svc: FileInfoService
     file_access_svc: FileAccessService
-    transfer_svc: TransferService
     audit_svc: LocalAuditRepository
     history_svc: AuditService
     retention_svc: RetentionService
@@ -108,7 +115,49 @@ class AppContext:
     sync_svc: SyncService
     library_svc: LibraryService
     compaction_svc: HistoryCompactionService
+    # Where files are kept: drives or a bucket (`features.STORE_ADMIN`).
+    bucket_svc: BucketService
+    project: Project
     _session: Session
+    # The services of a project whose files are on drives on this machine; None
+    # when they are in a bucket (`store_svc`/`transfer_svc` then say so).
+    _store_svc: StoreService | None = None
+    _transfer_svc: TransferService | None = None
+
+    @property
+    def store_svc(self) -> StoreService:
+        """Drives: adding, adopting, homing collections. Only where files are
+        on drives on this machine (`features.VOLUMES`)."""
+        if self._store_svc is None:
+            raise FeatureUnavailableError(features.VOLUMES)
+        return self._store_svc
+
+    @property
+    def transfer_svc(self) -> TransferService:
+        """Moving files between drives. Only where there are drives."""
+        if self._transfer_svc is None:
+            raise FeatureUnavailableError(features.VOLUMES)
+        return self._transfer_svc
+
+    @property
+    def config(self) -> Config:
+        """This project's settings, as they were when the context was built."""
+        return self.project.config
+
+    @property
+    def config_store(self) -> ConfigStore:
+        """Where this project's settings are kept; the one way to save them."""
+        return self.project.config_store
+
+    @property
+    def features(self) -> frozenset[str]:
+        """What this server does for this project (`domain.features`)."""
+        return self.project.features
+
+    @property
+    def permissions(self) -> Permissions:
+        """What whoever this context is for may do (`domain.permissions`)."""
+        return self.project.permissions
 
     def commit(self) -> None:
         self._session.commit()
@@ -133,18 +182,59 @@ class AppContext:
             nested.rollback()
 
 
+# How a background host opens a context when it needs one: a fresh session
+# each time, on whichever project the host serves.
+ContextFactory = Callable[[], "AppContext"]
+
+
+def local_context() -> AppContext:
+    """A context on the project in the current directory: what `civex serve`
+    and the CLI host. The one factory the server's background jobs default to."""
+    from civex.config import load_config
+
+    return build_local_context(load_config())
+
+
+def context_factory(project: Project) -> ContextFactory:
+    """A factory opening fresh contexts on `project`, for work that outlives
+    the request that asked for it (a run drained in the background)."""
+    return lambda: build_context(project)
+
+
+def make_store(config: Config, session: "Session | None" = None) -> "ObjectStore":
+    """The object store a project's settings name: a bucket when `[store.s3]`
+    is set, else the drives of `[store.volumes]` on this machine."""
+    s3 = config.store_config.s3
+    if s3 is not None:
+        from civex.repositories.s3.store import S3ObjectStore
+
+        return S3ObjectStore(s3, session=session)
+    from civex.repositories.local.file_store import VolumeAwareFileObjectStore
+
+    return VolumeAwareFileObjectStore(
+        config.store_config, config.project_root, session=session
+    )
+
+
 def build_local_context(
     config: Config,
-    file_store: VolumeAwareFileObjectStore | None = None,
+    file_store: ObjectStore | None = None,
+) -> AppContext:
+    """A context on the project in a folder on this machine: its settings in
+    its config.toml, changes recorded as its chosen name or the OS user."""
+    return build_context(Project.local(config), file_store)
+
+
+def build_context(
+    project: Project,
+    file_store: ObjectStore | None = None,
 ) -> AppContext:
     from sqlalchemy.orm import Session
 
     from civex.db.migrate import ensure_schema_current
     from civex.repositories.local.audit_repo import LocalAuditRepository
-    from civex.identity import local_actor
     from civex.repositories.local.dataset_repo import LocalDatasetRepository
     from civex.repositories.local.file_ref_repo import LocalFileReferenceRepository
-    from civex.repositories.local.file_store import VolumeAwareFileObjectStore
     from civex.repositories.local.job_repo import LocalWorkflowJobRepository
     from civex.repositories.local.record_repo import LocalRecordRepository
     from civex.repositories.local.schema_repo import LocalSchemaRepository
@@ -169,14 +259,21 @@ def build_local_context(
     from civex.services.record_service import RecordService
     from civex.services.retention_service import RetentionService
     from civex.services.schema_service import SchemaService
+    from civex.services.bucket_service import BucketService
     from civex.services.store_service import StoreService
+    from civex.repositories.local.file_store import VolumeAwareFileObjectStore
     from civex.services.export_definition_service import ExportDefinitionService
     from civex.services.view_service import ViewService
     from civex.services.workflow_job_service import WorkflowJobService
     from civex.services.workflow_service import WorkflowService
+    from civex.repositories.protocols import VolumeStore
+    from civex.repositories.local import inventory
+    from civex.repositories.s3.store import boto_client
 
-    engine = _get_engine(config.db.url)
-    ensure_schema_current(engine)
+    config = project.config
+    engine = project.engine or _get_engine(config.db.url)
+    if not project.migrated:
+        ensure_schema_current(engine)
     session = Session(engine)
     schema_repo = LocalSchemaRepository(session)
     dataset_repo = LocalDatasetRepository(session)
@@ -184,36 +281,49 @@ def build_local_context(
         session, is_postgres=engine.dialect.name == "postgresql"
     )
     job_repo = LocalWorkflowJobRepository(session)
-    device_id = None
-    if config.sync.remote:
+    device_id = project.device_id
+    if device_id is None and config.sync.remote:
         # Syncing: every entry written here carries which device made it.
         from civex import user_state
         from civex.repositories.local.sync_repo import LocalSyncRepository as _Sync
 
         device_id = user_state.device_id_for(_Sync(session).meta().project_id)
-    audit_repo = LocalAuditRepository(
-        session, actor=local_actor(config.identity.name), device_id=device_id
-    )
+    audit_repo = LocalAuditRepository(session, actor=project.actor, device_id=device_id)
     view_repo = LocalViewRepository(session)
     if file_store is None:
-        file_store = VolumeAwareFileObjectStore(
-            config.store_config, config.project_root, session=session
-        )
+        file_store = make_store(config, session)
+    # The drives on this machine, when that is where the files are: what the
+    # services that lay files out on disk or move them between drives need.
+    volumes: VolumeStore | None = (
+        file_store if isinstance(file_store, VolumeStore) else None
+    )
 
-    schema_svc = SchemaService(schema_repo, audit_repo, record_repo)
-    job_svc = WorkflowJobService(job_repo, config.civex_dir)
+    may = project.permissions
+    schema_svc = SchemaService(schema_repo, audit_repo, record_repo, permissions=may)
+    job_svc = WorkflowJobService(job_repo, config.civex_dir, project.config_store)
     record_svc = RecordService(
-        schema_svc, dataset_repo, record_repo, file_store, job_svc, audit_repo
+        schema_svc,
+        dataset_repo,
+        record_repo,
+        file_store,
+        job_svc,
+        audit_repo,
+        permissions=may,
     )
     dataset_svc = DatasetService(
         dataset_repo,
         audit_repo,
         schema_svc,
         record_svc,
-        on_purge=lambda collection_id: store_svc.clear_placement(str(collection_id)),
+        on_purge=lambda collection_id: (
+            store_svc.clear_placement(str(collection_id)) if store_svc else None
+        ),
+        permissions=may,
     )
-    file_svc = FileService(file_store)
-    store_svc = StoreService(config, file_store)
+    file_svc = FileService(file_store, volumes, permissions=may)
+    store_svc: StoreService | None = None
+    if isinstance(file_store, VolumeAwareFileObjectStore):
+        store_svc = StoreService(config, file_store, project.config_store)
     gc_svc = GCService(file_store, LocalFileReferenceRepository(session))
     file_info_svc = FileInfoService(
         file_store, LocalFileReferenceRepository(session), dataset_repo
@@ -234,19 +344,21 @@ def build_local_context(
 
     file_info_svc.describe_records = _describe_records
     file_access_svc = FileAccessService(
-        record_svc, schema_svc, file_store, config.civex_dir
+        record_svc, schema_svc, file_store, config.civex_dir, volumes
     )
     file_access_svc.refs = LocalFileReferenceRepository(session)
-    transfer_svc = TransferService(
-        config,
-        file_store,
-        LocalFileReferenceRepository(session),
-        LocalTransferRepository(session),
-        dataset_repo,
-        store_svc,
-        session.commit,
-        session.rollback,
-    )
+    transfer_svc: TransferService | None = None
+    if volumes is not None and store_svc is not None:
+        transfer_svc = TransferService(
+            config,
+            volumes,
+            LocalFileReferenceRepository(session),
+            LocalTransferRepository(session),
+            dataset_repo,
+            store_svc,
+            session.commit,
+            session.rollback,
+        )
     ai_svc = AiService(schema_svc, dataset_svc, record_svc, job_svc)
     ai_usage_svc = AiUsageService(engine)
     analytics_svc = AnalyticsService(
@@ -262,9 +374,14 @@ def build_local_context(
     )
     container_plugin_svc = ContainerPluginService(config.civex_dir)
     policy_svc = PolicyService(config.civex_dir)
-    view_svc = ViewService(view_repo, schema_svc, record_svc, audit_repo)
+    view_svc = ViewService(
+        view_repo, schema_svc, record_svc, audit_repo, permissions=may
+    )
     export_def_svc = ExportDefinitionService(
-        LocalExportDefinitionRepository(session), schema_svc, record_svc
+        LocalExportDefinitionRepository(session),
+        schema_svc,
+        record_svc,
+        permissions=may,
     )
     history_svc = AuditService(
         audit_repo,
@@ -296,6 +413,7 @@ def build_local_context(
     from civex.services.device_keys import DeviceKeys
     from civex.services.sync_authority import SyncAuthorityService
 
+    from civex.domain.sync import CAPABILITIES, DIRECT_FILES
     from civex.services.sync_service import SyncService
     from civex.services.sync_transport import build_transport
 
@@ -309,6 +427,11 @@ def build_local_context(
         record_svc,
         ProjectRules(schema_svc, dataset_repo, record_repo),
         authenticator=device_keys,
+        # The same answer a person at a browser gets, asked of each change a
+        # device pushes (the local user's refuses nothing).
+        policy=may,
+        capabilities=CAPABILITIES
+        + ((DIRECT_FILES,) if features.DIRECT_FILES in project.features else ()),
     )
     sync_svc = SyncService(
         config,
@@ -319,6 +442,7 @@ def build_local_context(
         session.commit,
         build_transport,
         record_svc,
+        project.config_store,
     )
 
     # Files another device added are fetched from the authority when opened or
@@ -340,7 +464,6 @@ def build_local_context(
     )
     file_access_svc.why_not_here = lambda shas: _sync().not_here_reasons(shas)
 
-    from civex.identity import local_actor
     from civex.repositories.local.library_repo import LocalLibraryRepository
     from civex.services.library_service import LibraryService
 
@@ -351,7 +474,7 @@ def build_local_context(
         workflow_svc,
         plugin_svc,
         transport=lambda: _sync().transport(),
-        author=lambda: local_actor(config.identity.name),
+        author=lambda: project.actor,
     )
 
     ctx: AppContext = AppContext(
@@ -360,11 +483,9 @@ def build_local_context(
         record_svc=record_svc,
         file_svc=file_svc,
         job_svc=job_svc,
-        store_svc=store_svc,
         gc_svc=gc_svc,
         file_info_svc=file_info_svc,
         file_access_svc=file_access_svc,
-        transfer_svc=transfer_svc,
         audit_svc=audit_repo,
         history_svc=history_svc,
         compaction_svc=HistoryCompactionService(audit_repo, LocalDbSpace(engine)),
@@ -383,7 +504,15 @@ def build_local_context(
         device_keys=device_keys,
         sync_svc=sync_svc,
         library_svc=library_svc,
+        bucket_svc=BucketService(
+            project.config_store,
+            held=lambda: inventory.held(session),
+            client_for=boto_client,
+        ),
+        project=project,
         _session=session,
+        _store_svc=store_svc,
+        _transfer_svc=transfer_svc,
     )
     ai_svc._app_ctx = ctx
     return ctx

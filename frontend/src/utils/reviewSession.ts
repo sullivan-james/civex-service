@@ -2,7 +2,9 @@
  * record pages can show where they are in it (the stepper) and settled ones stay
  * on the list after they have nothing left to settle. */
 
-const KEY = 'civex.syncReview'
+import { projectKey } from './host'
+
+const KEY = projectKey('civex.syncReview')
 
 export interface ReviewStep {
   id: string

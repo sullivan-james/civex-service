@@ -13,6 +13,7 @@ export function SelectionBar({
   allMatching,
   onSelectAllMatching,
   onDelete,
+  cannotDelete,
   deleting = false,
   actions,
 }: {
@@ -23,6 +24,8 @@ export function SelectionBar({
   onSelectAllMatching: () => void
   /** For a list whose rows can be deleted. */
   onDelete?: () => void
+  /** Why this person may not delete here: the button is shown, off, saying so. */
+  cannotDelete?: string
   deleting?: boolean
   /** Other things to do with the selection, before Delete. */
   actions?: ReactNode
@@ -50,7 +53,8 @@ export function SelectionBar({
         <Button
           variant="danger"
           size="sm"
-          disabled={deleting}
+          disabled={deleting || !!cannotDelete}
+          title={cannotDelete}
           onClick={onDelete}
         >
           {deleting ? 'Deleting…' : `Delete ${count.toLocaleString()}`}

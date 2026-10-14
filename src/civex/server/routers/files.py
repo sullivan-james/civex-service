@@ -6,11 +6,18 @@ from dataclasses import asdict
 
 from civex.domain.sync import SyncError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import (
+    FileResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from pydantic import BaseModel, Field
 
 from civex.context import AppContext
+from civex.domain import features
 from civex.domain.exceptions import AllVolumesFull, VolumeUnavailableError
+from civex.server.files import attachment
 from civex.server.deps import get_ctx
 from civex.server.models import FileInfoResponse, FileRefResponse
 
@@ -183,8 +190,45 @@ async def upload_batch(
     return BatchUploadResponse(files=stored)
 
 
+def _serve(ctx: AppContext, sha256: str, filename: str, request: Request) -> Response:
+    """The bytes, however this project keeps them: a 307 to storage when it
+    hands out URLs and this host offers `direct_files` (a browser follows it;
+    a check with HEAD is answered here), the file from disk with Range and
+    ETag support, or streamed through when there is no path. Raises
+    FileNotFoundError when the content isn't here."""
+    if request.method == "HEAD":
+        if ctx.file_svc.local_path(sha256) is None and not ctx.file_svc.exists(sha256):
+            raise FileNotFoundError(sha256)
+        return Response(media_type="application/octet-stream")
+    if features.DIRECT_FILES in ctx.features:
+        url = ctx.file_svc.download_url(sha256, filename or None)
+        if url:
+            return RedirectResponse(url, status_code=307)
+    path = ctx.file_svc.local_path(sha256)
+    if path is not None:
+        # Streamed from disk in chunks (with Range/ETag support) rather than
+        # read into memory. `filename` sets Content-Disposition: attachment,
+        # properly quoted/encoded; without it no disposition header is sent.
+        return FileResponse(
+            path, media_type="application/octet-stream", filename=filename or None
+        )
+    if not ctx.file_svc.exists(sha256):
+        raise FileNotFoundError(sha256)
+    headers = {"Content-Disposition": attachment(filename)} if filename else {}
+    return StreamingResponse(
+        ctx.file_svc.stream(sha256),
+        media_type="application/octet-stream",
+        headers=headers,
+    )
+
+
 @router.get("/{sha256}")
-def download_file(sha256: str, filename: str = "", ctx: AppContext = Depends(get_ctx)):
+def download_file(
+    sha256: str,
+    request: Request,
+    filename: str = "",
+    ctx: AppContext = Depends(get_ctx),
+):
     """Fetch raw file bytes by content hash.
 
     This endpoint is content-addressed only — it has no notion of which
@@ -193,9 +237,13 @@ def download_file(sha256: str, filename: str = "", ctx: AppContext = Depends(get
     filename (e.g. scripted access) should read `resolved_filename` off the
     record via the records API and pass it as `?filename=`; the record-UI
     download link does this implicitly via the `download` attribute.
+
+    Where the project keeps its files in a bucket that hands out URLs
+    (`direct_files`), the answer is a 307 to one, and the bytes never pass
+    through civex.
     """
     try:
-        path = ctx.file_svc.local_path(sha256)
+        return _serve(ctx, sha256, filename, request)
     except FileNotFoundError:
         # "Not there" and "on a drive that isn't plugged in" are different
         # problems with different fixes: say which.
@@ -216,11 +264,7 @@ def download_file(sha256: str, filename: str = "", ctx: AppContext = Depends(get
                 reason, fix = ctx.sync_svc.not_here_reasons([sha256])[sha256]
                 raise HTTPException(404, detail=f"{reason} {fix}")
             ctx.commit()
-            return FileResponse(
-                ctx.file_svc.local_path(sha256),
-                media_type="application/octet-stream",
-                filename=filename or None,
-            )
+            return _serve(ctx, sha256, filename, request)
         if offline is not None:
             volume, status = offline
             raise HTTPException(
@@ -233,12 +277,18 @@ def download_file(sha256: str, filename: str = "", ctx: AppContext = Depends(get
         raise HTTPException(
             404, detail=f"Object {sha256} not found locally or on remote"
         )
-    # Streamed from disk in chunks (with Range/ETag support) rather than read
-    # into memory. `filename` sets Content-Disposition: attachment, properly
-    # quoted/encoded; without it no disposition header is sent.
-    return FileResponse(
-        path, media_type="application/octet-stream", filename=filename or None
-    )
+
+
+@router.head("/{sha256}", include_in_schema=False)
+def check_file(
+    sha256: str,
+    request: Request,
+    filename: str = "",
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Whether the file can be served now, answered here even where a GET is
+    a redirect to storage: the app checks before it starts a download."""
+    return download_file(sha256, request, filename, ctx)
 
 
 @router.get("/{sha256}/info", response_model=FileInfoResponse)

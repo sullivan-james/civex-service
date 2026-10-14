@@ -69,3 +69,92 @@ def test_a_cursor_that_is_not_one_is_refused(serving):
         "/api/sync/v1/snapshot/schema", params={"after": "nonsense"}, headers=headers
     )
     assert reply.status_code == 422
+
+
+def test_an_authority_with_drives_does_not_hand_out_upload_targets(serving):
+    """Without `direct_files` the routes exist and say so (501), so a device
+    streams the bytes instead; `hello` never offered it."""
+    client, headers = serving
+    sha = "ab" * 32
+    hello = client.get("/api/sync/v1/hello", headers=headers).json()
+    assert "direct_files" not in hello["capabilities"]
+    answer = client.post(
+        f"/api/sync/v1/files/{sha}/upload", json={"size": 3}, headers=headers
+    )
+    assert answer.status_code == 501
+    done = client.post(
+        f"/api/sync/v1/files/{sha}/complete", json={"size": 3}, headers=headers
+    )
+    assert done.status_code == 501
+    assert (
+        client.post(
+            "/api/sync/v1/files/nonsense/upload", json={"size": 3}, headers=headers
+        ).status_code
+        == 422
+    )
+
+
+def test_a_device_asks_to_join_over_http_and_is_let_in_by_the_admin(serving, ctx):
+    """The two unauthenticated routes of the device-login flow, and the admin's
+    approval through the people-facing API."""
+    import uuid
+
+    from civex import keys
+
+    client, headers = serving
+    plain = {"X-Civex-Protocol": headers["X-Civex-Protocol"]}
+    private = keys.new_private_key()
+    body = {"device_id": str(uuid.uuid4()), "public_key": keys.public_of(private)}
+    asked = client.post("/api/sync/v1/device-login", headers=plain, json=body)
+    assert asked.status_code == 200, asked.text
+    started = asked.json()
+    assert started["verify_url"] is None and started["interval"] >= 1
+    hello = client.get("/api/sync/v1/hello", headers=headers).json()
+    assert "device_login" in hello["capabilities"]
+
+    poll = f"/api/sync/v1/device-login/{started['device_code']}"
+    assert client.get(poll, headers=plain).status_code == 202
+    waiting = client.get("/api/remote/authority").json()["logins"]
+    assert [w["code"] for w in waiting] == [started["user_code"]]
+    assert waiting[0]["fingerprint"] == keys.fingerprint(body["public_key"])
+
+    approved = client.post(
+        f"/api/remote/authority/logins/{started['user_code']}/approve",
+        json={"name": "tablet"},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["logins"] == []
+    assert "tablet" in [d["name"] for d in approved.json()["devices"]]
+    joined = client.get(poll, headers=plain)
+    assert joined.status_code == 200 and joined.json()["device_name"] == "tablet"
+
+    # Denied: the device is told so, once.
+    other = client.post(
+        "/api/sync/v1/device-login",
+        headers=plain,
+        json={
+            "device_id": str(uuid.uuid4()),
+            "public_key": keys.public_of(keys.new_private_key()),
+        },
+    ).json()
+    denied = client.post(f"/api/remote/authority/logins/{other['user_code']}/deny")
+    assert denied.status_code == 200
+    assert (
+        client.get(
+            f"/api/sync/v1/device-login/{other['device_code']}", headers=plain
+        ).status_code
+        == 410
+    )
+    assert (
+        client.post(
+            f"/api/remote/authority/logins/{other['user_code']}/deny"
+        ).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            f"/api/remote/authority/logins/{other['user_code']}/approve",
+            json={"name": "x"},
+        ).status_code
+        == 422
+    )

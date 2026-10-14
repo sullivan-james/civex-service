@@ -10,13 +10,18 @@ Whoever hosts it (the server on a thread, `civex sync watch` in a terminal) call
 
 With the interval set to never, only a request syncs. A project that joined an
 authority fetches the history from before it joined a few pages per tick after
-that, so it never holds up a sync, and then (with `[sync] download_files` at
-"all", the default) the files its records cite that aren't here, for up to
-`FILES_SECONDS` a tick. A failure backs off (doubling, up to 15 minutes) so a server that is down is not
-hammered; a refusal that waiting cannot fix (a revoked token, a different
-project) waits the full 15 minutes and keeps saying why. Pausing stops all of it.
-The sync itself is `SyncService.sync`, which is safe to repeat and holds a lock so
-two hosts never run at once.
+that, so it never holds up a sync. A failure backs off (doubling, up to 15
+minutes) so a server that is down is not hammered; a refusal that waiting cannot
+fix (a revoked token, a different project) waits the full 15 minutes and keeps
+saying why. Pausing stops all of it. The sync itself is `SyncService.sync`, which
+is safe to repeat and holds a lock so two hosts never run at once.
+
+**Files are not part of a sync.** A sync moves the project's data only; files
+go on a loop of their own (`files_tick`, on its own thread in `run`), so a
+large upload never holds up a change and a change never waits for a file: it
+sends what the authority lacks (`SyncService.send_files`), then (with `[sync]
+download_files` at "all", the default) fetches what is cited and not here, for
+up to `FILES_SECONDS` each a tick.
 """
 
 from __future__ import annotations
@@ -60,18 +65,29 @@ class SyncWorker:
         open_context: Callable[[Config], AppContext],
         clock: Callable[[], float] = time.monotonic,
         on_progress: ProgressSink | None = None,
+        on_files: ProgressSink | None = None,
     ) -> None:
         self._load_config = load_config
         self._open = open_context
         self._clock = clock
         # Told how far a long step has got, and None when it is done.
         self._on_progress = on_progress or (lambda _: None)
+        # The same for files going up or coming down, which run beside a sync.
+        self._on_files = on_files or self._on_progress
         self._requested = threading.Event()
         # Downloading what this computer keeps was asked for (a collection was
         # just set to keep its files here): done first, before any sync.
         self._files_asked = threading.Event()
-        # Set by either request, so the loop doesn't sleep through it.
+        # Sending files was asked for (Send now, a manual sync): every file is
+        # asked about again, at the next files tick.
+        self._send_asked = threading.Event()
+        # Set by a request, so a loop doesn't sleep through it: one for the
+        # sync loop, one for the files loop.
         self._wake = threading.Event()
+        self._files_wake = threading.Event()
+        # When the files loop last failed to reach the authority: it waits a
+        # while before trying again, like a sync.
+        self._files_backoff_until = 0.0
         self._failures = 0
         self._backoff_until = 0.0
         self._next_interval = 0.0
@@ -96,14 +112,22 @@ class SyncWorker:
         read rather than after the first file has arrived."""
         if total > 0:
             self._files_total, self._files_done = total, 0
-            self._on_progress(SyncProgress(FILES, 0, total))
+            self._on_files(SyncProgress(FILES, 0, total))
         self._files_asked.set()
-        self._wake.set()
+        self._files_wake.set()
+
+    def request_send(self) -> None:
+        """Send files the authority lacks now (Send now), asking it about
+        every file again."""
+        self._send_asked.set()
+        self._files_wake.set()
 
     def request(self) -> None:
-        """Ask for a sync at the next tick, whatever the schedule says."""
+        """Ask for a sync at the next tick, whatever the schedule says. Files
+        are looked at again too (a person asking wants everything up to date)."""
         self._requested.set()
         self._wake.set()
+        self.request_send()
 
     def tick(self) -> SyncReport | None:
         """Sync if one is due. Returns what it did, or None when nothing ran
@@ -112,15 +136,7 @@ class SyncWorker:
         config = self._load_config()
         if not config.sync.remote:
             self._requested.clear()
-            self._files_asked.clear()
             return None
-        if self._files_asked.is_set():
-            self._files_asked.clear()
-            ctx = self._open(config)
-            try:
-                self._fetch_files(ctx, asked=True)
-            finally:
-                ctx.close()
         if config.sync.paused and not self._requested.is_set():
             return None  # pausing stops the schedule; asking for one still works
         ctx = self._open(config)
@@ -128,12 +144,66 @@ class SyncWorker:
             report = self._maybe_sync(ctx, config)
             if not config.sync.paused:
                 self._fetch_history(ctx)
-                # Only collections kept on this computer (see collection_mode):
-                # the service limits it, so nothing is fetched when none are.
-                self._fetch_files(ctx)
             return report
         finally:
             ctx.close()
+
+    def files_tick(self) -> None:
+        """Move files, beside syncing: send what the authority lacks, then
+        fetch what this computer keeps and hasn't got. Each for a while at
+        most, so a pause or a change of settings is noticed between files."""
+        config = self._load_config()
+        if not config.sync.remote:
+            self._files_asked.clear()
+            self._send_asked.clear()
+            return
+        asked = self._files_asked.is_set()
+        sending = self._send_asked.is_set()
+        if config.sync.paused and not (asked or sending):
+            return
+        self._files_asked.clear()
+        self._send_asked.clear()
+        if not (asked or sending) and self._clock() < self._files_backoff_until:
+            return
+        ctx = self._open(config)
+        try:
+            if not asked or sending:
+                self._send_files(ctx, everything=sending)
+            # Only collections kept on this computer (see collection_mode):
+            # the service limits it, so nothing is fetched when none are.
+            self._fetch_files(ctx, asked=asked)
+        finally:
+            ctx.close()
+
+    def _send_files(self, ctx: AppContext, everything: bool) -> None:
+        """Upload, for a while, the files the authority hasn't said it holds
+        (every file it is asked about again, when `everything` or every
+        `FILE_CHECK_EVERY`)."""
+        now = self._clock()
+        everything = everything or now - self._last_file_check >= FILE_CHECK_EVERY
+        sending = False
+
+        def told(p: SyncProgress) -> None:
+            nonlocal sending
+            sending = True
+            self._on_files(p)
+
+        try:
+            report = ctx.sync_svc.send_files(
+                everything=everything, seconds=FILES_SECONDS, progress=told
+            )
+        except SyncError as e:
+            log.info("sending files failed (%s); it carries on later", e)
+            self._files_backoff_until = now + MAX_BACKOFF / 5
+            if sending:
+                self._on_files(None)
+            return
+        if everything:
+            self._last_file_check = now
+        if sending and not report.stopped:  # no bar left where uploading ended
+            self._on_files(None)
+        if report.stopped:
+            self._files_wake.set()  # more to send: carry on at once
 
     def _fetch_history(self, ctx: AppContext) -> None:
         """A few pages of the history from before this project joined, while
@@ -154,7 +224,7 @@ class SyncWorker:
         """Download files this project's records cite that aren't here, for a
         while, while the authority is answering (or at once, when `asked`)."""
         now = self._clock()
-        waiting = now < self._backoff_until and not asked
+        waiting = now < self._files_backoff_until and not asked
         if waiting or ctx.sync_repo.meta().history_from:
             return
         if now - self._absent_since >= FILE_CHECK_EVERY:
@@ -164,21 +234,21 @@ class SyncWorker:
         if left <= 0:
             if self._files_total:
                 self._files_total = self._files_done = 0
-                self._on_progress(None)
+                self._on_files(None)
             return
         if not self._files_total:
             self._files_total, self._files_done = left, 0
         base = self._files_done
         # Said before the first file starts (one can take minutes), so a person
         # sees at once that it is under way and how many there are.
-        self._on_progress(SyncProgress(FILES, base, max(self._files_total, base)))
+        self._on_files(SyncProgress(FILES, base, max(self._files_total, base)))
 
         rate = RateWindow()
         got = [0]  # bytes so far in this pass
 
         def say() -> None:
             total = max(self._files_total, self._files_done)
-            self._on_progress(
+            self._on_files(
                 SyncProgress(
                     FILES,
                     self._files_done,
@@ -208,12 +278,15 @@ class SyncWorker:
             # Nothing is moving: no bar stuck where it was. The failure is
             # what the next sync reports.
             self._files_total = self._files_done = 0
-            self._on_progress(None)
+            self._on_files(None)
+            self._files_backoff_until = now + MAX_BACKOFF / 5
             return
         self._absent.update(report.absent)
         if not report.stopped:  # all that could be fetched now is here
             self._files_total = self._files_done = 0
-            self._on_progress(None)
+            self._on_files(None)
+        else:
+            self._files_wake.set()  # more to fetch: carry on at once
 
     def _maybe_sync(self, ctx: AppContext, config: Config) -> SyncReport | None:
         now = self._clock()
@@ -237,21 +310,7 @@ class SyncWorker:
         self._last_attempt = now
         log.info("background sync: %s", "requested" if asked else "due")
         try:
-            files = asked or now - self._last_file_check >= FILE_CHECK_EVERY
-            sending = False
-
-            def told(p: SyncProgress) -> None:
-                nonlocal sending
-                sending = True
-                self._on_progress(p)
-
-            try:
-                report = ctx.sync_svc.sync(check_files=files, progress=told)
-            finally:
-                if sending:  # no bar left where uploading stopped
-                    self._on_progress(None)
-            if files:
-                self._last_file_check = now
+            report = ctx.sync_svc.sync()
             self.last_report = report
         except SyncBusy:
             return None
@@ -272,11 +331,34 @@ class SyncWorker:
         return report
 
     def run(self, stop: threading.Event, poll: float = 2.0) -> None:
+        """Sync on this thread and move files on another until `stop`, so a
+        file taking minutes never holds up a change."""
+        files = threading.Thread(
+            target=self.run_files, args=(stop, poll), daemon=True, name="sync-files"
+        )
+        files.start()
+        try:
+            self._loop(stop, poll, self.tick, self._wake, "sync tick failed")
+        finally:
+            self._files_wake.set()
+            files.join(5.0)
+
+    def run_files(self, stop: threading.Event, poll: float = 2.0) -> None:
+        self._loop(stop, poll, self.files_tick, self._files_wake, "files tick failed")
+
+    @staticmethod
+    def _loop(
+        stop: threading.Event,
+        poll: float,
+        tick: Callable[[], object],
+        wake: threading.Event,
+        what: str,
+    ) -> None:
         while not stop.is_set():
             try:
-                self.tick()
+                tick()
             except Exception:  # noqa: BLE001 - one bad tick must not end syncing
-                log.exception("sync tick failed")
+                log.exception(what)
             # Sleep until the next look, or until someone asks for something.
-            self._wake.wait(poll)
-            self._wake.clear()
+            wake.wait(poll)
+            wake.clear()

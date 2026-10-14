@@ -9,7 +9,7 @@ from datetime import timedelta
 import civex.services.sync_service as sync_service
 from civex.db.models import Record, Schema
 
-from .peers import build_study, connect, device, push, snapshots
+from civex.testing.peers import build_study, connect, device, push, snapshots
 
 
 def _record_ids(ctx) -> set[str]:

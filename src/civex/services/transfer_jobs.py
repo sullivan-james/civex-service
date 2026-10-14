@@ -19,8 +19,7 @@ from __future__ import annotations
 import logging
 import threading
 
-from civex.config import load_config
-from civex.context import AppContext, build_local_context
+from civex.context import AppContext, ContextFactory, local_context
 from civex.domain.exceptions import ValidationError
 from civex.domain.transfers import (
     CONTROL_CANCEL,
@@ -40,7 +39,11 @@ IDLE_POLL = 3.0
 
 
 class TransferJobs:
-    def __init__(self) -> None:
+    def __init__(self, make_context: ContextFactory = local_context) -> None:
+        # Opens a context on the project this host moves files for, afresh
+        # each time: a transfer runs for hours, and volumes may be edited
+        # meanwhile. The cwd project for `civex serve`.
+        self._make_context = make_context
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._stopping = threading.Event()
@@ -181,9 +184,7 @@ class TransferJobs:
         self._wake.set()
 
     def _context(self) -> AppContext:
-        # Read afresh each time: a transfer runs for hours, and volumes may be
-        # edited meanwhile.
-        return build_local_context(load_config())
+        return self._make_context()
 
 
 jobs = TransferJobs()

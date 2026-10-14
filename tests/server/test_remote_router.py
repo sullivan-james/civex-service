@@ -28,7 +28,8 @@ def test_syncing_now_needs_an_authority(client: TestClient) -> None:
 
 def test_connecting_to_nothing_is_a_bad_gateway(client: TestClient) -> None:
     resp = client.post(
-        "/api/remote/connect", json={"url": "http://127.0.0.1:9", "invite": "civex_inv_x"}
+        "/api/remote/connect",
+        json={"url": "http://127.0.0.1:9", "invite": "civex_inv_x"},
     )
     assert resp.status_code == 502
 
@@ -89,12 +90,15 @@ def test_reopening_nothing_reopens_nothing(client: TestClient) -> None:
     assert resp.json() == {"reopened": 0}
 
 
-def test_connecting_again_without_an_invite_needs_to_have_joined(
+def test_connecting_without_an_invite_asks_the_server_to_be_let_in(
     client: TestClient,
 ) -> None:
+    """Never joined and no invite: the app asks the server for a code to be
+    approved, so a server that can't be reached is a bad gateway, not a
+    request for an invite."""
     resp = client.post("/api/remote/connect", json={"url": "http://127.0.0.1:9"})
-    assert resp.status_code == 400
-    assert "invite" in resp.json()["detail"]
+    assert resp.status_code == 502
+    assert "Could not reach" in resp.json()["detail"]
 
 
 def test_history_storage_says_what_is_left_and_reclaims(client: TestClient) -> None:
@@ -148,3 +152,28 @@ def test_files_on_this_computer_per_collection(client, make_collection):
     )
     # A project that follows no server has nowhere to fetch files back from.
     assert client.post("/api/remote/files/study/free-up").status_code == 422
+
+
+def test_connecting_without_an_invite_asks_to_join_and_waits(client, monkeypatch):
+    """No invite and never joined: the app asks the authority for a code, says
+    so at once, and the connect waits in the background for the approval."""
+    from civex.domain.sync import LoginStarted
+    from civex.server.routers import remote
+    from civex.services.sync_service import SyncService
+
+    started = LoginStarted("ABCD-2345", "secret", expires_at=2_000_000_000, interval=1)
+    monkeypatch.setattr(SyncService, "request_login", lambda self, url: started)
+    begun: list[tuple[str, object]] = []
+    monkeypatch.setattr(
+        remote.sync_jobs,
+        "start_connect",
+        lambda url, login=None: begun.append((url, login)),
+    )
+    answer = client.post("/api/remote/connect", json={"url": "https://hub.example"})
+    assert answer.status_code == 202, answer.text
+    assert answer.json() == {
+        "mode": "approval",
+        "code": "ABCD-2345",
+        "expires_at": 2_000_000_000,
+    }
+    assert begun == [("https://hub.example", started)]

@@ -337,6 +337,29 @@ describe('FileLink download check', () => {
     clicked.mockRestore()
   })
 
+  it('starts the download when the server points at storage instead of serving the bytes', async () => {
+    const clicked = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {})
+    // What fetch gives for a redirect it was told not to follow.
+    const redirect = { ok: false, status: 0, type: 'opaqueredirect' }
+    const fetchMock = vi.fn(async () => redirect as unknown as Response)
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    renderIt(<FileLink file={file()}>Download</FileLink>)
+
+    await user.click(screen.getByRole('link', { name: 'Download' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Download started.',
+    )
+    expect((fetchMock.mock.calls[0] as unknown[])[1]).toMatchObject({
+      redirect: 'manual',
+    })
+    expect(clicked).toHaveBeenCalled()
+    clicked.mockRestore()
+  })
+
   it('leaves a modified click (open in a new tab) to the browser', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)

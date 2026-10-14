@@ -749,6 +749,11 @@ class StoredObject(Base):
     volume: Mapped[str] = mapped_column(String(255), primary_key=True)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    # When the copy's bytes were checked to hash to `sha256`. A copy civex
+    # wrote itself is verified as it is written (it hashed the bytes); one
+    # that went straight into a bucket in parts (`ObjectStore.upload_target`)
+    # is NULL until a read-back checks it (`ObjectStore.verify`).
+    verified_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
 
 
 class RecordReference(Base):
@@ -1083,6 +1088,27 @@ class SyncInvite(Base):
     expires_at: Mapped[datetime] = mapped_column(_UTCDateTime(), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+
+
+class SyncLoginRequest(Base):
+    """Authority: a device asking to join without an invite. The device shows
+    `user_code` to a person, who approves it here with a name (the device is
+    then added, as an invite would); the device polls with the secret whose
+    hash is `device_hash`. Settled rows (approved, denied, expired) are kept
+    a while for the device to read its answer."""
+
+    __tablename__ = "sync_login_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    user_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    device_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    device_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    public_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(_UTCDateTime(), nullable=False)
+    approved_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    denied_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
 
 
 class LibraryItem(Base):

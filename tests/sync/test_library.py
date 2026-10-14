@@ -19,7 +19,7 @@ from civex.domain.exceptions import NotAllowedError, ValidationError
 from civex.domain.library import ABSENT, DIFFERENT, OLDER, PLUGIN, SAME, WORKFLOW
 from civex.plugins import registry
 
-from .peers import connect, device
+from civex.testing.peers import connect, device
 
 _BUILTIN_ONLY = """\
 name: tidy-sites
@@ -122,7 +122,11 @@ def test_a_device_publishes_only_once_the_admin_allows_it(authority, pair):
 
     _allow(authority, "laptop")
     [item] = laptop.library_svc.publish(WORKFLOW, "tidy-sites").items
-    assert (item.kind, item.name, item.published_by) == (WORKFLOW, "tidy-sites", "laptop")
+    assert (item.kind, item.name, item.published_by) == (
+        WORKFLOW,
+        "tidy-sites",
+        "laptop",
+    )
     assert item.triggers == ["record_created on encounter"]
 
     authority.device_keys.allow_publish("laptop", False)
@@ -176,7 +180,9 @@ def test_plugins_travel_only_if_the_authority_takes_code(authority, pair):
         (WORKFLOW, "uses-shared", None),
     ]
     assert published[1].pins == {"project.shared_step": 1}
-    assert published[0].contract and published[0].contract["id"] == "project.shared_step"
+    assert (
+        published[0].contract and published[0].contract["id"] == "project.shared_step"
+    )
     assert _project_files(authority, "plugins") == []
 
     _leave(laptop)
@@ -198,9 +204,7 @@ def test_plugins_travel_only_if_the_authority_takes_code(authority, pair):
     assert not (phone.plugin_svc.directory.parent / ".staging").exists()
 
 
-def test_a_workflow_installs_the_plugin_version_it_was_published_with(
-    authority, pair
-):
+def test_a_workflow_installs_the_plugin_version_it_was_published_with(authority, pair):
     laptop, phone = pair
     _publish_shared(authority, laptop)
     laptop.plugin_svc.save("shared_step", _PLUGIN_BREAKING)
@@ -227,9 +231,7 @@ def test_a_workflow_installs_the_plugin_version_it_was_published_with(
     )
 
 
-def test_an_update_that_would_break_a_workflow_here_waits_to_be_forced(
-    authority, pair
-):
+def test_an_update_that_would_break_a_workflow_here_waits_to_be_forced(authority, pair):
     laptop, phone = pair
     _publish_shared(authority, laptop)
     laptop.plugin_svc.save("shared_step", _PLUGIN_BREAKING)
@@ -283,7 +285,9 @@ def test_the_authority_installs_from_its_own_library_like_a_device(authority, pa
 
     # And it publishes as itself, whatever devices may send.
     authority.sync_svc.set_library("off")
-    authority.workflow_svc.save("its-own", _BUILTIN_ONLY.replace("tidy-sites", "its-own"))
+    authority.workflow_svc.save(
+        "its-own", _BUILTIN_ONLY.replace("tidy-sites", "its-own")
+    )
     [own] = authority.library_svc.publish(WORKFLOW, "its-own").items
     assert own.version == 1
 
@@ -354,11 +358,7 @@ def test_a_plugin_that_loads_as_something_else_than_it_said_is_not_installed(
     laptop, phone = pair
     _publish_shared(authority, laptop)
     _leave(laptop)
-    row = (
-        authority._session.query(LibraryItem)
-        .filter_by(kind=PLUGIN)
-        .one()
-    )
+    row = authority._session.query(LibraryItem).filter_by(kind=PLUGIN).one()
     lying = _PLUGIN.replace("project.shared_step", "project.other_thing")
     from civex.domain.library import sha256_of
 
@@ -408,7 +408,14 @@ _CONTRACT = {
             {"id": "project.x"},
             "can't be read",
         ),
-        (PLUGIN, "../escape", _PLUGIN, "project.x", _CONTRACT, "can't be a plugin's name"),
+        (
+            PLUGIN,
+            "../escape",
+            _PLUGIN,
+            "project.x",
+            _CONTRACT,
+            "can't be a plugin's name",
+        ),
         (WORKFLOW, "not-yaml", "steps: [", None, None, "not a workflow"),
         (
             WORKFLOW,

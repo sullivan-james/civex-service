@@ -18,6 +18,7 @@ import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 from civex.domain.exceptions import ConfigError
 
@@ -190,9 +191,34 @@ class PlacementConfig:
 
 
 @dataclass
+class S3Config:
+    """Files kept in an S3 bucket (or anything speaking its API: MinIO, R2)
+    instead of on drives: `[store.s3]`. Objects are `<prefix>/<sha[:2]>/<sha[2:]>`.
+    Credentials are never here (config.toml is shared and backed up): boto3
+    reads them from the environment, `profile`, or the machine's role."""
+
+    bucket: str
+    prefix: str = ""
+    region: str | None = None
+    endpoint: str | None = None  # e.g. "http://127.0.0.1:9000" for MinIO
+    profile: str | None = None  # an AWS profile name, else the default chain
+    # Files go straight between a device or browser and the bucket by presigned
+    # URL (`direct_files`), never through civex. Off: civex streams them.
+    direct: bool = True
+
+
+# The one logical volume an S3 store is: what its inventory rows and the
+# `location` on a file value name.
+S3_VOLUME = "s3"
+
+
+@dataclass
 class StoreConfig:
     volumes: dict[str, VolumeConfig]
     volume_queue: list[str]
+    # Files in a bucket instead of on drives. With it set the volumes above
+    # are not used (the project has no drives); see `S3Config`.
+    s3: S3Config | None = None
     warn_below_pct: float = (
         10.0  # show warning in UI when less than this % of space remains
     )
@@ -282,10 +308,15 @@ def _optional_days(value: object) -> int | None:
 
 
 def load_config() -> Config:
+    """The configuration of the project the current directory is in."""
     root = find_project_root()
     if root is None:
         raise ConfigError("No civex project found. Run `civex init` to create one.")
+    return load_config_at(root)
 
+
+def load_config_at(root: Path) -> Config:
+    """The configuration of the project at `root`, read from its config.toml."""
     config_path = root / "_civex" / "config.toml"
 
     def _read() -> dict:
@@ -299,7 +330,14 @@ def load_config() -> Config:
             f"Malformed config file ({config_path}): {e}. "
             "If the database URL contains backslashes (Windows path), replace them with forward slashes."
         )
+    return parse_config(data, root)
 
+
+def parse_config(data: dict, root: Path) -> Config:
+    """A `Config` from what a config.toml holds (the parsed TOML), for the
+    project at `root`. Pure: whoever keeps the text (a file beside the
+    project, a hosted service's database) parses it with this, and writes it
+    back with `render_config`, so there is one reading of every setting."""
     store: StoreConfig | None = None
     if "store" in data:
         sd = data["store"]
@@ -324,12 +362,26 @@ def load_config() -> Config:
             )
             for cid, pcfg in sd.get("placement", {}).items()
         }
+        s3: S3Config | None = None
+        if "s3" in sd:
+            s3d = sd["s3"]
+            if not s3d.get("bucket"):
+                raise ConfigError("[store.s3] needs a bucket")
+            s3 = S3Config(
+                bucket=str(s3d["bucket"]),
+                prefix=str(s3d.get("prefix", "")).strip("/"),
+                region=s3d.get("region") or None,
+                endpoint=s3d.get("endpoint") or None,
+                profile=s3d.get("profile") or None,
+                direct=bool(s3d.get("direct", True)),
+            )
         store = StoreConfig(
             volumes=volumes,
             volume_queue=queue,
             warn_below_pct=float(sd.get("warn_below_pct", 10.0)),
             full_below_gb=float(sd.get("full_below_gb", 1.0)),
             placement=placement,
+            s3=s3,
         )
 
     ai: AIConfig | None = None
@@ -457,29 +509,21 @@ def _tk(s: str) -> str:
 
 
 def read_automation_paused(civex_dir: Path) -> bool:
-    """Whether automation is paused, read straight from `config.toml`. Cheap
-    and cwd-independent, because every trigger, queue claim and workflow step
-    asks, and a worker in another process must see a Stop at once."""
-    try:
-        data = tomllib.loads((civex_dir / "config.toml").read_text("utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        return False
-    return bool(data.get("automation", {}).get("paused", False))
+    """Whether automation is paused, read straight from `config.toml` (see
+    `read_flag`): every trigger, queue claim and workflow step asks, and a
+    worker in another process must see a Stop at once."""
+    return read_flag(civex_dir, "automation", "paused")
 
 
 def read_sync_flag(civex_dir: Path, key: str) -> bool:
     """A boolean from `[sync]` (`serve`, `paused`), read straight from
-    `config.toml`: cheap and cwd-independent, for what is asked per request or
-    per background tick."""
-    try:
-        data = tomllib.loads((civex_dir / "config.toml").read_text("utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        return False
-    return bool(data.get("sync", {}).get(key, False))
+    `config.toml` (see `read_flag`)."""
+    return read_flag(civex_dir, "sync", key)
 
 
-def save_config(config: Config) -> None:
-    """Write config back to _civex/config.toml with backup/restore on failure."""
+def render_config(config: Config) -> str:
+    """A `Config` as config.toml text: only what differs from the defaults is
+    written. Pure, and the inverse of `parse_config`."""
     lines: list[str] = [
         "[db]\n",
         f'url = "{_ts(config.db.url)}"\n',
@@ -507,6 +551,7 @@ def save_config(config: Config) -> None:
             and sc.warn_below_pct == 10.0
             and sc.full_below_gb == 1.0
             and not sc.placement
+            and sc.s3 is None
         )
         if not is_default:
             queue_str = ", ".join(f'"{_ts(n)}"' for n in sc.volume_queue)
@@ -531,6 +576,19 @@ def save_config(config: Config) -> None:
                 lines.append(f'volume = "{_ts(place.volume)}"\n')
                 if place.on_unavailable != "spill":
                     lines.append(f'on_unavailable = "{_ts(place.on_unavailable)}"\n')
+            if sc.s3 is not None:
+                lines.append("\n[store.s3]\n")
+                lines.append(f"bucket = {_tv(sc.s3.bucket)}\n")
+                if sc.s3.prefix:
+                    lines.append(f"prefix = {_tv(sc.s3.prefix)}\n")
+                if sc.s3.region:
+                    lines.append(f"region = {_tv(sc.s3.region)}\n")
+                if sc.s3.endpoint:
+                    lines.append(f"endpoint = {_tv(sc.s3.endpoint)}\n")
+                if sc.s3.profile:
+                    lines.append(f"profile = {_tv(sc.s3.profile)}\n")
+                if not sc.s3.direct:
+                    lines.append("direct = false\n")
 
     if config.plugins.default_timeout_seconds != 60.0:
         lines += [
@@ -594,18 +652,22 @@ def save_config(config: Config) -> None:
     if retention_lines:
         lines += ["\n[retention]\n", *retention_lines]
 
-    config_path = config.civex_dir / "config.toml"
     content = "".join(lines)
 
-    # Validate the generated TOML before touching the file.
+    # Validate the generated TOML before anyone keeps it.
     try:
-        import tomllib
-
         tomllib.loads(content)
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(
             f"Generated config is invalid TOML: {e}\n\nContent:\n{content}"
         ) from e
+    return content
+
+
+def save_config(config: Config) -> None:
+    """Write config back to _civex/config.toml, atomically."""
+    config_path = config.civex_dir / "config.toml"
+    content = render_config(config)
 
     # Write a temporary file beside it, check that parses, then swap it in with
     # one atomic rename. Every request reads this file, and a transfer rewrites
@@ -624,3 +686,46 @@ def save_config(config: Config) -> None:
         raise ConfigError(
             f"Failed to write config (the original is untouched): {e}"
         ) from e
+
+
+class ConfigStore(Protocol):
+    """Where a project's settings are kept. The project beside a `_civex/`
+    folder keeps them in its config.toml (`FileConfigStore`); a service hosting
+    many projects keeps each project's in its own database. Services change
+    settings through the store they were given, never by writing a file, so
+    the same service runs in both places.
+
+    `flag` answers one boolean fresh from wherever the settings are kept, for
+    what is asked on every request or trigger (`[automation] paused`, `[sync]
+    serve`), which another process may have just changed."""
+
+    def load(self) -> Config: ...
+    def save(self, config: Config) -> None: ...
+    def flag(self, section: str, key: str) -> bool: ...
+
+
+class FileConfigStore:
+    """The settings of the project at `root`, in `_civex/config.toml`."""
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+
+    def load(self) -> Config:
+        return load_config_at(self._root)
+
+    def save(self, config: Config) -> None:
+        save_config(config)
+
+    def flag(self, section: str, key: str) -> bool:
+        return read_flag(self._root / "_civex", section, key)
+
+
+def read_flag(civex_dir: Path, section: str, key: str) -> bool:
+    """A boolean from one table of `config.toml`, read straight from the file:
+    cheap and cwd-independent, for what is asked per request or per background
+    tick. False when the file can't be read."""
+    try:
+        data = tomllib.loads((civex_dir / "config.toml").read_text("utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    return bool(data.get(section, {}).get(key, False))

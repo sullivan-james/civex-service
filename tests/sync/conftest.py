@@ -1,18 +1,14 @@
-"""Several civex projects in one test: an authority and the devices that follow it."""
+"""Several civex projects in one test: an authority and the devices that follow
+it, with the shipped harness (`civex.testing`)."""
 
 from __future__ import annotations
 
-import os
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from civex.config import load_config
-from civex.context import AppContext, build_local_context
-from civex.project import scaffold_project
-
-from .peers import build_study, connect, device
+from civex.testing import Projects, build_study, connect, device
 
 
 @pytest.fixture(autouse=True)
@@ -22,26 +18,11 @@ def _user_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture()
-def project(tmp_path: Path) -> Iterator[Callable[[str], AppContext]]:
+def project(tmp_path: Path) -> Iterator[Projects]:
     """project("laptop") -> a context on a new, empty project of that name."""
-    made: list[AppContext] = []
-
-    def _make(name: str) -> AppContext:
-        root = tmp_path / name
-        scaffold_project(root, db_url=f"sqlite:///{(root / 'civex.db').as_posix()}")
-        previous = os.getcwd()
-        os.chdir(root)
-        try:
-            config = load_config()
-        finally:
-            os.chdir(previous)
-        ctx = build_local_context(config)
-        made.append(ctx)
-        return ctx
-
-    yield _make
-    for ctx in made:
-        ctx.close()
+    projects = Projects(tmp_path)
+    yield projects
+    projects.close()
 
 
 @pytest.fixture()

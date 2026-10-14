@@ -10,6 +10,8 @@ from contextlib import contextmanager, nullcontext
 from civex.services.cascades import States, log_cascade, record_states
 from civex.domain.dtos import DatasetDTO, RestorePlanDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
+from civex.domain import permissions
+from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.scopes import GLOBAL, LOCAL, validate_scope
 from civex.domain.timezones import validate_timezone
 from civex.repositories.protocols import AuditRepository, DatasetRepository
@@ -33,7 +35,9 @@ class DatasetService:
         schema_svc: SchemaService | None = None,
         record_svc: RecordService | None = None,
         on_purge: Callable[[uuid.UUID], object] | None = None,
+        permissions: Permissions = EVERYTHING,
     ) -> None:
+        self._permissions = permissions
         self._datasets = dataset_repo
         self._audit = audit_repo
         self._schema_svc = schema_svc
@@ -86,6 +90,7 @@ class DatasetService:
         scope: str = LOCAL,
         schemas: list[str] | None = None,
     ) -> DatasetDTO:
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
         if self._datasets.get_by_name(name):
             raise AlreadyExistsError(f"Dataset '{name}' already exists")
         if timezone:
@@ -158,6 +163,7 @@ class DatasetService:
     ) -> DatasetDTO:
         """`timezone`: None = unchanged, "" = clear, otherwise an IANA zone.
         `scope` / `schemas`: None = unchanged; `schemas` replaces the list."""
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
         if timezone:
             timezone = validate_timezone(timezone)
         dataset = self.get(name)
@@ -196,6 +202,7 @@ class DatasetService:
     def add_schemas(self, name: str, schemas: list[str]) -> DatasetDTO:
         """Enable more schemas on a collection, along with any ancestor
         schemas they need. Idempotent: schemas already listed are kept."""
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
         dataset = self.get(name)
         wanted = set(dataset.schemas)
         for schema_name in schemas:
@@ -216,6 +223,7 @@ class DatasetService:
         DatasetRepository.delete) moves to Recently Deleted, reversible via
         restore() within the retention window. A global collection that other
         collections reference can't be deleted."""
+        self._permissions.require(permissions.DELETE)
         dataset = self.get(name)
         self._check_not_referenced(dataset, "delete")
         stamp = datetime.now(
@@ -288,6 +296,7 @@ class DatasetService:
     def restore(self, name: str) -> DatasetDTO:
         """Undo delete(): the collection and the records cascade-deleted
         with it become live again (see DatasetRepository.restore)."""
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
         dataset = self._datasets.get_by_name(name, include_deleted=True)
         if dataset is None:
             raise NotFoundError(f"Dataset '{name}' not found")
@@ -310,6 +319,7 @@ class DatasetService:
     def purge(self, name: str) -> None:
         """Permanently remove a collection that's already in Recently
         Deleted — a separate, explicit action from delete(). Irreversible."""
+        self._permissions.require(permissions.DELETE)
         dataset = self._datasets.get_by_name(name, include_deleted=True)
         if dataset is None:
             raise NotFoundError(f"Dataset '{name}' not found")

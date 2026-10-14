@@ -1,4 +1,5 @@
 import { api } from './client'
+import { apiUrl } from '../utils/host'
 
 /** A log civex keeps on this computer (`GET /logs`). */
 export interface LogSource {
@@ -40,7 +41,8 @@ export const logsApi = {
     if (q) p.set('q', q)
     return api.get<LogRead>(`/logs/${encodeURIComponent(id)}?${p}`)
   },
-  downloadUrl: (id: string) => `/api/logs/${encodeURIComponent(id)}/download`,
+  downloadUrl: (id: string) =>
+    apiUrl(`/logs/${encodeURIComponent(id)}/download`),
   /** Show the log's folder in the file manager (from this computer only). */
   open: (id: string) =>
     api.post<{ opened: boolean }>(`/logs/${encodeURIComponent(id)}/open`, {}),

@@ -10,7 +10,7 @@ import civex.services.sync_service as sync_service
 from civex.domain.sync import COPYING, FILLING, HISTORY, SyncError
 from civex.services.sync_worker import SyncWorker
 
-from .peers import build_study, connect, device, flaky, snapshots
+from civex.testing.peers import build_study, connect, device, flaky, snapshots
 
 
 @pytest.fixture()

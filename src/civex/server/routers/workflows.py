@@ -12,7 +12,7 @@ from fastapi import (
 )
 from starlette.datastructures import UploadFile
 
-from civex.context import AppContext
+from civex.context import AppContext, context_factory
 from civex.domain.exceptions import (
     AllVolumesFull,
     NotFoundError,
@@ -189,7 +189,7 @@ def run_workflow_on_many(
         started.append(ctx.job_svc.enqueue_manual(name, record))
     ctx.commit()
     if started:
-        background_tasks.add_task(run_pending_jobs)
+        background_tasks.add_task(run_pending_jobs, context_factory(ctx.project))
     return RunManyResponse(
         started=[WorkflowJobResponse.from_dto(j) for j in started], skipped=skipped
     )
@@ -268,5 +268,5 @@ async def run_workflow(
 
     job = ctx.job_svc.enqueue_manual(name, record, input_data=input_data)
     ctx.commit()
-    background_tasks.add_task(run_pending_jobs)
+    background_tasks.add_task(run_pending_jobs, context_factory(ctx.project))
     return WorkflowJobResponse.from_dto(job)
