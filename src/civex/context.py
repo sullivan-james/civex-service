@@ -453,6 +453,8 @@ def build_context(
 
     record_svc.files_from_server = lambda: _sync().fetches_files
     record_svc.not_on_server = lambda shas: _sync().not_on_server(shas)
+    record_svc.server_lacks = lambda shas: _sync().server_lacks(shas)
+    record_svc.why_not_here = lambda shas: _sync().not_here_reasons(shas)
     file_info_svc.files_from_server = lambda: _sync().fetches_files
     file_access_svc.fetch_missing = (
         lambda shas, on_file=None, volume=None, on_bytes=None: _sync().fetch_files(

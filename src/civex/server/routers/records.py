@@ -143,6 +143,24 @@ def list_records(
     return _page(ctx, query, columns, child_counts, limit, offset)
 
 
+@router.get("/records/counts")
+def record_counts_everywhere(
+    query: RecordQuery = Depends(record_query),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Record counts grouped by schema name across every collection: a
+    collection's `record-counts`, for the explorer browsing all of them."""
+    query.dataset = None
+    query.schema = None
+    query.sort = None
+    try:
+        return ctx.record_svc.schema_counts(query)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+
+
 @router.get("/schemas/{schema_name}/records", response_model=PaginatedRecordResponse)
 def list_schema_records(
     schema_name: str,

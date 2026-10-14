@@ -109,14 +109,16 @@ export function useRecordPage(
 
 /** Matching records per schema (optionally scoped to one record's
  * descendants via `params.within`). */
+/** Records per schema in a collection; `null` counts every collection, and
+ * '' waits (the collection isn't known yet). */
 export function useRecordCounts(
-  datasetName: string,
+  datasetName: string | null,
   params?: RecordQueryParams,
 ) {
   return useQuery({
     queryKey: ['record-counts', datasetName, params ?? null],
-    queryFn: () => recordsApi.counts(datasetName, params),
-    enabled: !!datasetName,
+    queryFn: () => recordsApi.counts(datasetName ?? '', params),
+    enabled: datasetName !== '',
   })
 }
 

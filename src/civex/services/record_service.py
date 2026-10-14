@@ -11,6 +11,7 @@ from typing import Any, Callable, Iterable, Iterator
 from civex.domain import permissions
 from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.file_refs import without_file_locations
+from civex.domain.sync import not_on_server_yet
 from civex.domain.dtos import (
     OrphanDTO,
     DERIVED_FILE_KEYS,
@@ -517,6 +518,12 @@ class RecordService:
         # Of these files, those the authority hasn't said it holds (set by
         # `context.py`; nothing when the project follows no authority).
         self.not_on_server: Callable[[set[str]], set[str]] = lambda _: set()
+        # Of these files, those the authority said it hasn't got, and (reason,
+        # fix) for one neither here nor there (set by `context.py`).
+        self.server_lacks: Callable[[set[str]], set[str]] = lambda _: set()
+        self.why_not_here: Callable[[list[str]], dict[str, tuple[str, str]]] = (
+            lambda _: {}
+        )
         self._job_svc = job_svc
         self._audit = audit_repo
 
@@ -738,8 +745,20 @@ class RecordService:
             if ref.get("sha256") and (r.id, ref["sha256"]) not in used
         }
         volume_of = self._files.locate_volumes(unpointed) if unpointed else {}
-        from_server = None in volume_of.values() and self.files_from_server()
-        unsent = self.not_on_server(wanted)
+        following = self.files_from_server()
+        from_server = None in volume_of.values() and following
+        unsent = self.not_on_server(wanted) if following else set()
+        # Not here, and the server said it hasn't got it: nobody can fetch it,
+        # so it is said as missing, with which computer added it. (Not asked
+        # about yet: on the server, as usual, until the server is asked.)
+        lost = (
+            self.server_lacks(
+                {sha for sha, v in volume_of.items() if v is None and sha in unsent}
+            )
+            if following
+            else set()
+        )
+        why = self.why_not_here(sorted(lost)) if lost else {}
         status = {
             name: self._files.volume_status(name)
             for name in {v for v in volume_of.values() if v} | set(used.values())
@@ -747,6 +766,16 @@ class RecordService:
 
         def location(record_id: uuid.UUID, sha: str | None) -> dict[str, Any]:
             volume = used.get((record_id, sha or "")) or volume_of.get(sha or "")
+            if volume is None and sha in lost:
+                reason, fix = why.get(sha or "", not_on_server_yet(None))
+                return {
+                    "volume": None,
+                    "state": "absent",
+                    "available": False,
+                    "reason": reason,
+                    "fix": fix,
+                    "sent": False,
+                }
             if volume is None and from_server:
                 # Another device added it: it is fetched when opened or
                 # exported (and, unless this device keeps only what it opens,
@@ -757,6 +786,7 @@ class RecordService:
                     "available": None,
                     "reason": "Not downloaded to this computer yet.",
                     "fix": "Opening or exporting it downloads it from the server.",
+                    "sent": sha not in unsent,
                 }
             if volume is None:
                 # Not on any volume we know of (yet): don't claim it is gone --
@@ -777,9 +807,9 @@ class RecordService:
                 # a person is told which drive to plug in where the file is.
                 "reason": st.reason,
                 "fix": st.fix,
-                # Here, but the server hasn't said it holds it: other devices
-                # can't get it yet. Only said while this project syncs.
-                **({"sent": False} if sha in unsent else {}),
+                # Whether the server holds it (False: other devices can't get
+                # it yet). Only said while this project syncs.
+                **({"sent": sha not in unsent} if following else {}),
             }
 
         def decorate(record_id: uuid.UUID, value: Any) -> Any:

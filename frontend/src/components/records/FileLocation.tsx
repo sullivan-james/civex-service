@@ -171,6 +171,7 @@ function chipText(file: FileLike): string {
   const loc = file.location
   if (!loc) return ''
   if (loc.state === 'remote') return 'not on this computer'
+  if (loc.state === 'absent') return 'missing'
   if (loc.volume === null) return 'location unknown'
   if (loc.available === false)
     return `${loc.volume} · ${loc.state.replace('_', ' ')}`
@@ -188,6 +189,8 @@ function hint(file: FileLike): string {
   const loc = file.location
   if (loc?.state === 'remote')
     return 'Not downloaded to this computer yet: opening it downloads it.'
+  if (loc?.state === 'absent')
+    return 'Not on this computer, and the server hasn’t got it. Click for details.'
   if (!loc || loc.volume === null)
     return 'Not found on any drive yet. Click for details.'
   if (loc.available === false)
@@ -278,7 +281,11 @@ function FileLocationPanel({
             <PlaceStatus
               place=""
               kind="missing"
-              reason="It isn't on any drive Civex knows about here."
+              reason={
+                loc.state === 'absent'
+                  ? [loc.reason, loc.fix].filter(Boolean).join(' ')
+                  : "It isn't on any drive Civex knows about here."
+              }
             />
           ) : (
             <>
@@ -291,7 +298,7 @@ function FileLocationPanel({
             </>
           )}
         </p>
-        {loc.sent === false && loc.state !== 'remote' && (
+        {loc.sent === false && loc.volume && (
           <p className="text-fg-muted">{NOT_SENT}</p>
         )}
         {loc.available === false && loc.volume && (

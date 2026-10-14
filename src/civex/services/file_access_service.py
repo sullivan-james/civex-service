@@ -43,6 +43,10 @@ from civex.domain.transfers import KIND_FILES, TransferSpec
 from civex.services.transfer_engine import Step, plan_steps
 from civex.domain.file_refs import collect_sha256_refs
 from civex.domain.file_access import (
+    PLACE_SENT,
+    PLACE_UNSENT,
+    SERVER_STATES,
+    server_state,
     copy_key,
     MovePlan,
     FileListing,
@@ -386,6 +390,7 @@ class FileAccessService:
                             available=location.get("available") is True,
                             reason=location.get("reason") or "",
                             fix=location.get("fix") or "",
+                            sent=location.get("sent"),
                         )
                     )
                 paths.setdefault((str(record.id), field_name), []).append(where)
@@ -1209,16 +1214,20 @@ class FileAccessService:
         shas: list[str] | None = None,
         used_by: list[int] | None = None,
         progress: Progress | None = None,
+        server: str | None = None,
     ) -> tuple[FilePlan, list[FileItem]]:
         """The files a person has picked: a selection's files, narrowed to its
         kinds of file (`selection.fields`), a place (`in_place`), a name (in
         the file's name or the names of the records it sits under), and
         ticked files (`shas`: a file with every use of it listed here; records
         outside the selection that use it are not picked), and how many live
-        records use a file (`used_by`, see `use_counts`). The one rule
+        records use a file (`used_by`, see `use_counts`), and whether the
+        server has it (`server`: `sent` or `unsent`, see `server_state`). The one rule
         behind the file list and every action on it, so what is listed is what
         is acted on. The plan returned is of every kind (what the list's
         choices are counted from)."""
+        if server is not None and server not in SERVER_STATES:
+            raise ValidationError(f"server must be one of: {', '.join(SERVER_STATES)}")
         plan = self.plan(dataclasses.replace(selection, fields=None), progress=progress)
         kinds = set(selection.fields) if selection.fields else None
         needle = (name or "").strip().casefold()
@@ -1228,6 +1237,7 @@ class FileAccessService:
             for i in plan.items
             if (kinds is None or i.field in kinds)
             and (place is None or in_place(i, place))
+            and (server is None or server_state(i) == server)
             and (
                 not needle
                 or needle in i.filename.casefold()
@@ -1263,6 +1273,7 @@ class FileAccessService:
         offset: int = 0,
         limit: int = 100,
         used_by: list[int] | None = None,
+        server: str | None = None,
     ) -> FileListing:
         """A page of a selection's files, one row per file as it is stored (a
         file several records use is one row, with `uses` naming them), narrowed
@@ -1273,7 +1284,7 @@ class FileAccessService:
         keeps the files used by exactly so many live records (anywhere), and
         `sharing` counts the files by that. `sort`: path, name, size, record
         or place; a leading "-" reverses it."""
-        plan, items = self.chosen(selection, place, name)
+        plan, items = self.chosen(selection, place, name, server=server)
         of_kind = (
             [i for i in plan.items if i.field in set(selection.fields)]
             if selection.fields
@@ -1302,6 +1313,7 @@ class FileAccessService:
         return FileListing(
             total=len(rows),
             summary=_places(_one_each(of_kind)),
+            server=_by_server(of_kind),
             items=page,
             kinds=_kinds(plan.items),
             uses={copy_key(i): uses[copy_key(i)] for i in page},
@@ -1751,6 +1763,21 @@ def _places(items: list[FileItem]) -> list[PlaceSummary]:
         row.bytes += item.size
     rank = {"drive": 0, "unreachable": 1, "server": 2, "missing": 3}
     return sorted(out.values(), key=lambda r: (rank[r.kind], -r.bytes, r.place))
+
+
+def _by_server(items: list[FileItem]) -> list[dict[str, Any]]:
+    """Every file of a selection by whether the server has it (`server_state`;
+    counted by content, which the server holds once), on the server first.
+    Empty when this project follows no server."""
+    out: dict[str, dict[str, Any]] = {}
+    for item in {i.sha256: i for i in items}.values():
+        state = server_state(item)
+        if state is None:
+            continue
+        row = out.setdefault(state, {"state": state, "files": 0, "bytes": 0})
+        row["files"] += 1
+        row["bytes"] += item.size
+    return [out[k] for k in (PLACE_SENT, PLACE_UNSENT) if k in out]
 
 
 def _one_each(items: list[FileItem]) -> list[FileItem]:

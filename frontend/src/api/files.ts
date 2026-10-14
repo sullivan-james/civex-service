@@ -6,7 +6,8 @@ export interface FileLocation {
   /** The volume holding it; null when it isn't on any volume Civex knows. */
   volume: string | null
   /** `remote`: another device added it and it isn't on this computer yet;
-   * opening or exporting it downloads it from the server. */
+   * opening or exporting it downloads it from the server. `absent`: not on
+   * this computer and the server said it hasn't got it (missing). */
   state:
     | 'online'
     | 'offline'
@@ -15,16 +16,16 @@ export interface FileLocation {
     | 'retired'
     | 'unknown'
     | 'remote'
+    | 'absent'
   /** Can be opened right now; null when unknown. */
   available: boolean | null
   /** Why it can't be opened, in plain words (blank when it can). */
   reason?: string
   /** What to do about it, e.g. which drive to plug in (blank when nothing). */
   fix?: string
-  /** `false`: on this computer, but the server hasn't said it holds it, so
-   * other computers can't open it yet. Absent when it has, or when the project
-   * doesn't sync. */
-  sent?: false
+  /** Whether the server has said it holds it (`false`: other computers
+   * can't open it yet). Absent when the project doesn't sync. */
+  sent?: boolean
 }
 
 export interface FileRef {

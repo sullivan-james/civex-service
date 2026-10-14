@@ -163,6 +163,12 @@ def test_a_file_the_server_lacks_is_unreachable_once_the_export_has_tried(
     plan = phone.file_access_svc.plan(selection, fetch=True)
     assert not plan.complete
     (group,) = plan.unavailable
-    # Where it still is: the device that added it (its token's name).
-    assert group.reason == "It is still only on 'laptop'."
-    assert group.fix == "It arrives here once that computer syncs."
+    # Which device added it (its token's name).
+    assert (
+        group.reason
+        == "It isn't on this computer, and the server hasn't got it. It was added on 'laptop'."
+    )
+    assert (
+        group.fix
+        == "The computer that has it sends it when it syncs; if none has, attach the file to the record again."
+    )

@@ -309,10 +309,18 @@ def _picked(body: FilePickRequest, ctx: AppContext, progress: Progress | None = 
         selection.query.sort = body.sort
     try:
         return ctx.file_access_svc.chosen(
-            selection, body.place, body.name, body.shas, body.used_by, progress
+            selection,
+            body.place,
+            body.name,
+            body.shas,
+            body.used_by,
+            progress,
+            server=body.server,
         )[1]
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
 
 
 @router.post("/files")
@@ -324,7 +332,10 @@ def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
     drive's name, `server` or `missing`; `place_kind`: drive, unreachable,
     server or missing), narrowed by place, name (the file's, or any record's
     it sits under) and the selection's own filter; and `summary`, where all
-    of the selection's files are, by place. Counts are of files."""
+    of the selection's files are, by place. While this project follows a
+    server, each file says whether the server has it (`sent`), `server`
+    counts them (`sent`, and `unsent`: on a drive here, not sent yet), and
+    `server` in the request narrows to either. Counts are of files."""
     selection = _base_selection(body, ctx)
     if body.sort:
         selection.query.sort = body.sort
@@ -337,6 +348,7 @@ def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
             body.offset,
             body.limit,
             body.used_by,
+            server=body.server,
         )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
@@ -345,6 +357,7 @@ def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
     return {
         "total": listing.total,
         "summary": [vars(p) for p in listing.summary],
+        "server": listing.server,
         "kinds": listing.kinds,
         "sharing": listing.sharing,
         "items": [

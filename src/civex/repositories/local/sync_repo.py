@@ -31,6 +31,7 @@ from civex.db.models import (
     RecordReference,
     Schema,
     ServerFile,
+    ServerLack,
     SyncConflict,
     SyncDevice,
     SyncInvite,
@@ -228,10 +229,45 @@ class LocalSyncRepository:
 
     def confirm_on_server(self, shas: Iterable[str]) -> None:
         """The authority has said it holds these files."""
-        new = self.unconfirmed_of(set(shas))
+        wanted = set(shas)
+        new = self.unconfirmed_of(wanted)
         if new:
             self._s.add_all(ServerFile(sha256=sha) for sha in sorted(new))
-            self._s.flush()
+        self._clear_lacks(wanted)
+        self._s.flush()
+
+    def note_server_lacks(self, shas: Iterable[str]) -> None:
+        """The authority has just said it hasn't got these files."""
+        listed = sorted(set(shas))
+        if not listed:
+            return
+        self._clear_lacks(set(listed))
+        now = datetime.now(timezone.utc)
+        self._s.add_all(ServerLack(sha256=sha, asked_at=now) for sha in listed)
+        self._s.flush()
+
+    def server_lacks_of(self, shas: set[str]) -> set[str]:
+        """Of these files, those the authority said it hasn't got, when asked."""
+        listed = sorted(shas)
+        out: set[str] = set()
+        for at in range(0, len(listed), 500):
+            out.update(
+                self._s.scalars(
+                    select(ServerLack.sha256).where(
+                        ServerLack.sha256.in_(listed[at : at + 500])
+                    )
+                )
+            )
+        return out
+
+    def _clear_lacks(self, shas: set[str]) -> None:
+        listed = sorted(shas)
+        for at in range(0, len(listed), 500):
+            self._s.execute(
+                delete(ServerLack)
+                .where(ServerLack.sha256.in_(listed[at : at + 500]))
+                .execution_options(synchronize_session=False)
+            )
 
     def _not_here(self):  # type: ignore[no-untyped-def]
         """Files live records here cite that no drive here is recorded to hold
@@ -276,10 +312,11 @@ class LocalSyncRepository:
         )
 
     def added_by(self, shas: list[str]) -> dict[str, str | None]:
-        """Which device (else author) added each of these files: the earliest
-        history entry of a record citing it whose new side has it and old side
-        hasn't. A few lookups per file, for the handful a person is told about
-        (files nobody can fetch yet), never a list."""
+        """Which device added each of these files (its name, as the authority
+        stamped it; None when unknown, since a person's name is not a
+        computer): the earliest history entry of a record citing it whose new
+        side has it and old side hasn't. A few lookups per file, for the
+        handful a person is told about (files nobody can fetch), never a list."""
         out: dict[str, str | None] = {}
         for sha in dict.fromkeys(shas):
             holders = [
@@ -301,7 +338,7 @@ class LocalSyncRepository:
             ):
                 old, new = entry_snapshots(row.old_data, row.new_data, row.delta)
                 if sha in json.dumps(new or {}) and sha not in json.dumps(old or {}):
-                    out[sha] = row.device or row.actor
+                    out[sha] = row.device
                     break
         return out
 
@@ -1157,8 +1194,9 @@ class LocalSyncRepository:
             .values(hub_seq=None)
             .execution_options(synchronize_session=False)
         )
-        # And which files it said it holds: the new one is asked afresh.
+        # And which files it said it holds or lacks: the new one is asked afresh.
         self._s.execute(delete(ServerFile))
+        self._s.execute(delete(ServerLack))
         self._s.expire_all()
 
     def never_taken(self, things: set[tuple[str, uuid.UUID]]) -> set[uuid.UUID]:

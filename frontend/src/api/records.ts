@@ -134,9 +134,12 @@ export const recordsApi = {
 
   /** Matching records per schema name (`within` scopes it to one record's
    * descendants). */
+  /** Records per schema in a collection, or in every collection (''). */
   counts: (datasetName: string, params?: RecordQueryParams) =>
     api.get<Record<string, number>>(
-      `/collections/${encodeURIComponent(datasetName)}/record-counts${recordQueryString(params)}`,
+      datasetName
+        ? `/collections/${encodeURIComponent(datasetName)}/record-counts${recordQueryString(params)}`
+        : `/records/counts${recordQueryString(params)}`,
     ),
 
   get: (id: string) => api.get<CivexRecord>(`/records/${id}`),

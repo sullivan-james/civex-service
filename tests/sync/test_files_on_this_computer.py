@@ -3,6 +3,8 @@ the server, and freeing space by removing copies the server holds."""
 
 from __future__ import annotations
 
+import pytest
+
 from civex.domain.exceptions import ValidationError
 
 
@@ -225,8 +227,8 @@ def test_a_download_says_how_many_listed_files_it_covers_and_where_the_rest_are(
     got = svc.download(rows)
     assert got["absent_where"] == [
         {
-            "reason": "It is still only on 'laptop'.",
-            "fix": "It arrives here once that computer syncs.",
+            "reason": "It isn't on this computer, and the server hasn't got it. It was added on 'laptop'.",
+            "fix": "The computer that has it sends it when it syncs; if none has, attach the file to the record again.",
             "files": 1,
         }
     ]
@@ -273,3 +275,36 @@ def test_freeing_space_removes_every_copy_on_this_computer(pair, tmp_path):
     phone.sync_svc.free_up("study", dry_run=False)
     assert phone.file_svc._store.copies([ref.sha256]) == {}
     assert not (drive / ref.sha256[:2] / ref.sha256[2:]).exists()
+
+
+def test_the_files_list_says_which_files_the_server_has(pair):
+    from civex.domain.file_access import FileSelection
+    from civex.domain.query import RecordQuery
+
+    laptop, _, record = pair
+    sent = _with_file(laptop, record, b"went up")  # sync + send
+    # A second file, not sent yet.
+    later = laptop.file_svc.store_bytes(b"not yet", "later.bin")
+    laptop.schema_svc.add_field("encounter", "later", "file")
+    data = laptop.record_svc.get(str(record.id)).data
+    laptop.record_svc.update(
+        str(record.id),
+        {**_plain(data), "scan": data["scan"], "later": later.to_dict()},
+    )
+    laptop.commit()
+
+    svc = laptop.file_access_svc
+    everything = FileSelection(query=RecordQuery(dataset="study"))
+    listing = svc.listing(everything)
+    assert listing.server == [
+        {"state": "sent", "files": 1, "bytes": len(b"went up")},
+        {"state": "unsent", "files": 1, "bytes": len(b"not yet")},
+    ]
+    assert {i.sha256: i.sent for i in listing.items} == {
+        sent.sha256: True,
+        later.sha256: False,
+    }
+    unsent = svc.listing(everything, server="unsent")
+    assert [i.sha256 for i in unsent.items] == [later.sha256]
+    with pytest.raises(ValidationError):
+        svc.listing(everything, server="maybe")

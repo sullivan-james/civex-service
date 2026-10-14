@@ -35,7 +35,7 @@ def test_a_file_waits_to_be_sent_until_the_server_has_it(pair):
     laptop.sync_svc.send_files()
 
     assert laptop.sync_svc.status().files_to_send == 0
-    assert "sent" not in _location(laptop, record)
+    assert _location(laptop, record)["sent"] is True
 
 
 def test_sending_is_shown_as_it_goes(pair):
@@ -87,7 +87,7 @@ def test_a_file_downloaded_from_the_server_is_known_to_be_there(pair):
     phone.commit()
 
     assert phone.sync_svc.status().files_to_send == 0
-    assert "sent" not in _location(phone, record)
+    assert _location(phone, record)["sent"] is True
 
 
 def test_following_another_server_forgets_what_the_old_one_held(pair):
@@ -121,13 +121,27 @@ def test_files_waiting_say_why_they_havent_gone(pair):
     laptop.sync_svc.sync()
     waiting = laptop.sync_svc.status().files_waiting
     assert waiting is not None
-    assert (waiting.ready, waiting.offline, waiting.not_here) == (1, [], 0)
+    assert (waiting.ready, waiting.offline, waiting.missing) == (1, [], 0)
 
-    # Not on this computer at all (never downloaded here, say).
+    # Not on this computer at all (lost here, say).
     laptop.file_svc._store.delete(ref.sha256)
     laptop.commit()
-    waiting = laptop.sync_svc.status().files_waiting
-    assert (waiting.ready, waiting.not_here) == (0, 1)
+    # Until the server is asked, nothing says it is missing (just not here).
+    assert laptop.sync_svc.status().files_waiting.missing == 0
+    assert _location(laptop, record)["state"] == "remote"
+    laptop.sync_svc.send_files()  # asks: the server hasn't got it either
+    status = laptop.sync_svc.status()
+    # Missing, not "to send": nothing here can send it.
+    assert (status.files_waiting.ready, status.files_waiting.missing) == (0, 1)
+    assert status.files_to_send == 0
+    location = _location(laptop, record)
+    assert (location["state"], location["sent"]) == ("absent", False)
+    # Which computer added it, by the name the server knows it by (never the
+    # person's name, as if it were a computer).
+    assert location["reason"] == (
+        "It isn't on this computer, and the server hasn't got it. "
+        "It was added on 'laptop'."
+    )
 
     laptop.sync_repo.confirm_on_server([ref.sha256])
     assert laptop.sync_svc.status().files_waiting is None  # nothing waiting

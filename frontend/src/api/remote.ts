@@ -178,8 +178,9 @@ export interface FilesWaiting {
   ready: number
   /** Only on drives that can't be read right now, in the drive's own words. */
   offline: { volume: string; files: number; reason: string }[]
-  /** Not on this computer; a computer that has them must send them. */
-  not_here: number
+  /** On no drive here, and the server said it hasn't got them either:
+   * nothing here can send them (not counted in `files_to_send`). */
+  missing: number
 }
 
 export interface SyncResult {
