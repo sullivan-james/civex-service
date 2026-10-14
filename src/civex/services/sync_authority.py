@@ -32,6 +32,7 @@ from civex.domain.sync import (
     ENTITY_ORDER,
     MERGED,
     PROTOCOL_MAX,
+    PROTOCOL_RETIRING,
     PROTOCOL_MIN,
     REJECTED,
     FeedPage,
@@ -118,6 +119,7 @@ class SyncAuthorityService:
             protocol_max=PROTOCOL_MAX,
             server_version=__version__,
             capabilities=list(self._capabilities),
+            protocol_retiring=PROTOCOL_RETIRING,
         )
 
     def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage:

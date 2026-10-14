@@ -128,4 +128,23 @@ describe('useSyncTasks', () => {
       '2 changes saved here, not yet sent',
     )
   })
+
+  it('warns before the server stops accepting this civex', async () => {
+    const { result } = tasksFor({
+      ...base,
+      last_result: {
+        pulled: 0,
+        pushed: 0,
+        conflicts: 0,
+        rejected: 0,
+        server_version: '2.1.0',
+        notice: 'The server will stop accepting this version of civex.',
+      },
+    })
+    await waitFor(() => expect(result.current).toHaveLength(1))
+    expect(result.current[0]).toMatchObject({
+      title: 'Update civex soon',
+      tone: 'attention',
+    })
+  })
 })

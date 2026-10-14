@@ -14,7 +14,7 @@ from collections.abc import Callable
 
 from civex.config import Config, load_config
 from civex.context import AppContext, build_local_context
-from civex.domain.sync import LoginStarted, SyncProgress
+from civex.domain.sync import LoginStarted, SyncProgress, plain_failure
 from civex.services.sync_worker import SyncWorker
 
 log = logging.getLogger(__name__)
@@ -41,8 +41,10 @@ class SyncJobs:
         self.history_progress: SyncProgress | None = None
         # Files going up or coming down, beside syncing.
         self.files_progress: SyncProgress | None = None
-        # Why the last connect that ran here failed, until another starts.
+        # Why the last connect that ran here failed, until another starts, in a
+        # person's words, and the technical text behind it.
         self.connect_error: str | None = None
+        self.connect_error_detail: str | None = None
         # The request to join a person must approve, while the connect waits.
         self.awaiting: LoginStarted | None = None
         self.worker = SyncWorker(
@@ -115,6 +117,7 @@ class SyncJobs:
             if self.connecting:
                 return
             self.connect_error = None
+            self.connect_error_detail = None
             self.copy_progress = None
             self.awaiting = login
             self._connecting = threading.Thread(
@@ -130,9 +133,11 @@ class SyncJobs:
         try:
             ctx.sync_svc.connect(url, None, progress=self._copied, login=login)
             ctx.commit()
-        except Exception as e:  # noqa: BLE001 - said in the app, not lost
-            log.warning("connecting to %s failed: %s", url, e)
-            self.connect_error = str(e) or type(e).__name__
+        except Exception as raw:  # noqa: BLE001 - said in the app, not lost
+            e = plain_failure(raw)
+            log.warning("connecting to %s failed: %s", url, e, exc_info=e is not raw)
+            self.connect_error = str(e) or type(raw).__name__
+            self.connect_error_detail = e.detail or None
             return
         finally:
             ctx.close()

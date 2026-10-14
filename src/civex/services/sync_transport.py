@@ -449,7 +449,9 @@ def _mismatch(detail: Any) -> str:
     if not isinstance(detail, dict) or "protocol_max" not in detail:
         return str(detail or "The server speaks another sync protocol")
     theirs = (int(detail["protocol_min"]), int(detail["protocol_max"]))
-    return protocol_mismatch(theirs, "the server", "this computer")
+    return protocol_mismatch(
+        theirs, "the server", "this computer", detail.get("server_version")
+    )
 
 
 def build_transport(base_url: str, credentials: DeviceCredentials) -> HttpSyncTransport:
