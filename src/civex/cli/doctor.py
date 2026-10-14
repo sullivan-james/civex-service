@@ -8,6 +8,7 @@ from civex.cli.utils import get_ctx
 from civex.config import find_project_root
 from civex.console import console
 from civex.install_check import remove_stale_environments, run_install_checks
+from civex.services import db_service
 
 _MARK = {
     "ok": "[success]ok[/success]",
@@ -30,7 +31,9 @@ def doctor(
     checks look for integrity issues: dangling reference/reference_list values
     left over from before deletes checked for referrers, and live records that
     sit under a deleted record (out of sight; `civex record restore-above`
-    puts one back in place). It also warns when the project keeps its files in
+    puts one back in place). It checks the database has every table and
+    column this civex expects, whatever revision it is stamped at. It also
+    warns when the project keeps its files in
     a bucket but files are still recorded on drives, out of reach.
 
     With --fix, deletes cached plugin environments that point at a Python that
@@ -60,6 +63,20 @@ def doctor(
         return
 
     ctx = get_ctx()
+    lacking = db_service.structure_problems(ctx.config.db.url)
+    if lacking:
+        shown = ", ".join(lacking[:8]) + (" …" if len(lacking) > 8 else "")
+        console.print(
+            f"{_MARK['fail']} Database: it is stamped as up to date but lacks "
+            f"what this civex expects: {shown}"
+        )
+        console.print(
+            "     [dim]A migration it was stamped past never ran here. Back up "
+            "the database, then apply the missing migrations (`civex db "
+            "current` shows its revision).[/dim]"
+        )
+        ctx.close()  # the data checks would trip over what is missing
+        raise typer.Exit(1)
     dangling = ctx.record_svc.find_dangling_references()
     orphans, orphan_total = ctx.record_svc.orphans(50)
     stranded = ctx.bucket_svc.status()

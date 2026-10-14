@@ -180,6 +180,20 @@ def _known_revision(script, revision: str) -> bool:
         return False
 
 
+def structure_problems(url: str) -> list[str]:
+    """What the database at `url` lacks of what this civex expects (tables
+    and columns, `migrate.missing_structure`), empty when nothing."""
+    from sqlalchemy import create_engine
+
+    from civex.db.migrate import missing_structure
+
+    engine = create_engine(url)
+    try:
+        return missing_structure(engine)
+    finally:
+        engine.dispose()
+
+
 def apply_migrations(url: str) -> None:
     from sqlalchemy import create_engine
 

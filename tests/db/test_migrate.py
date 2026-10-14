@@ -123,3 +123,18 @@ def test_concurrent_first_use_migrates_cleanly(tmp_path: Path):
 
     assert errors == []
     assert _alembic_revision(engine) == _script_head()
+
+
+def test_a_database_stamped_current_but_missing_a_column_is_found(
+    tmp_path: Path,
+) -> None:
+    from civex.db.migrate import missing_structure
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'p.db'}")
+    ensure_schema_current(engine)
+    assert missing_structure(engine) == []
+    # As if a migration it was stamped past never ran here.
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE views DROP COLUMN files_layout"))
+        conn.execute(text("DROP TABLE server_lacks"))
+    assert sorted(missing_structure(engine)) == ["server_lacks", "views.files_layout"]
