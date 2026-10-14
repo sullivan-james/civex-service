@@ -1027,7 +1027,7 @@ class ServerLack(Base):
 
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
     asked_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_now
+        _UTCDateTime(), nullable=False, default=_now
     )
 
 
