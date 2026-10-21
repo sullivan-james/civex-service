@@ -41,10 +41,10 @@ function describeDeleteImpact(childCount: number, recordCount: number): string {
   const records = `${recordCount.toLocaleString()} record${recordCount === 1 ? '' : 's'}`
   const children = `${childCount} child type${childCount === 1 ? '' : 's'}`
   if (childCount > 0 && recordCount > 0) {
-    return `Deleting it will also delete ${records} typed by it. This record type has ${children} that inherit from it — they'll keep working, pointing at a hidden parent, until it's restored.`
+    return `Deleting it will also delete ${records} typed by it. This schema has ${children} that inherit from it — they'll keep working, pointing at a hidden parent, until it's restored.`
   }
   if (childCount > 0) {
-    return `This record type has ${children} that inherit from it — they'll keep working, pointing at a hidden parent, until it's restored.`
+    return `This schema has ${children} that inherit from it — they'll keep working, pointing at a hidden parent, until it's restored.`
   }
   if (recordCount > 0) {
     return `Deleting it will also delete ${records}.`
@@ -185,7 +185,7 @@ export default function SchemaDetailPage() {
         error={
           <SchemaMissing
             id={id!}
-            message={error ? errorMessage(error) : 'Record type not found'}
+            message={error ? errorMessage(error) : 'Schema not found'}
           />
         }
       />
@@ -206,7 +206,7 @@ export default function SchemaDetailPage() {
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span
             className="font-mono text-xs text-fg-subtle"
-            title="Record type name — what workflows and CSV headers reference"
+            title="Schema name — what workflows and CSV headers reference"
           >
             {schema.name}
           </span>
@@ -226,7 +226,7 @@ export default function SchemaDetailPage() {
       }
       secondaryActions={[
         {
-          label: 'Delete record type…',
+          label: 'Delete schema…',
           variant: 'danger',
           onClick: () => setConfirmDelete(true),
           disabled: !can('delete'),
@@ -253,12 +253,7 @@ export default function SchemaDetailPage() {
         <MetaEditor schema={schema} onDone={() => setEditing(false)} />
       )}
 
-      <TabNav
-        label="Record type"
-        tabs={[...TABS]}
-        value={tab}
-        onChange={setTab}
-      />
+      <TabNav label="Schema" tabs={[...TABS]} value={tab} onChange={setTab} />
       <TabPanel id="fields" value={tab}>
         <SchemaFieldsSection schema={schema} allSchemas={allSchemas} />
       </TabPanel>
@@ -308,14 +303,14 @@ export default function SchemaDetailPage() {
 
           return (
             <ConfirmDialog
-              title="Delete record type"
+              title="Delete schema"
               body={
                 <>
                   <p>
-                    Delete record type '{schema.name}'?{' '}
+                    Delete schema '{schema.name}'?{' '}
                     {impactReady
                       ? describeDeleteImpact(childCount, recordCount)
-                      : 'Checking what depends on this record type…'}
+                      : 'Checking what depends on this schema…'}
                   </p>
                 </>
               }
@@ -323,7 +318,7 @@ export default function SchemaDetailPage() {
                 impactReady
                   ? recordCount > 0
                     ? `Delete schema and ${recordCount.toLocaleString()} record${recordCount === 1 ? '' : 's'}`
-                    : 'Delete record type'
+                    : 'Delete schema'
                   : 'Checking…'
               }
               variant="danger"

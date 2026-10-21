@@ -1,13 +1,13 @@
 # Five-minute tour
 
-One example from start to finish: a *Sample* record type, a collection to hold
+One example from start to finish: a *Sample* schema, a collection to hold
 samples, a sample record, and a workflow that fills a field by itself. Use the
 app or the CLI; both build the same project.
 
-If you haven't yet, read [Record types, collections and records](concepts.md)
-first: a record type is the blank form, a record is one filled-in copy.
+If you haven't yet, read [Schemas, collections and records](concepts.md)
+first: a schema is the blank form, a record is one filled-in copy.
 
-## 1. A record type: what a sample looks like
+## 1. A schema: what a sample looks like
 
 You do this **once**. Every sample you add afterwards uses this form.
 
@@ -18,12 +18,10 @@ You do this **once**. Every sample you add afterwards uses this form.
     and a blank sample opens. Its form ends with **+ Add field**: add *number*
     (whole number, required), *depth* (number, unit `m`), *condition* (text,
     allowed values `good`, `damaged`, `lost`) and *summary* (text). Each one is
-    added to every sample, and together they are the Sample record type, which
-    you can see under **Record types** whenever you want.
+    added to every sample, and together they are the Sample schema, which
+    you can see under **Schemas** whenever you want.
 
 === "CLI"
-
-    The CLI calls a record type a *schema*:
 
     ```bash
     civex schema create sample --label "Sample" --description "One physical sample"
@@ -43,7 +41,7 @@ You do this **once**. Every sample you add afterwards uses this form.
 
 ## 2. A collection to hold samples
 
-A collection is the binder. It says which record types may go in it.
+A collection is the binder. It says which schemas may go in it.
 
 === "Web UI"
 
@@ -83,7 +81,7 @@ This is the step you repeat: one record per sample, on the same form.
     Added record f623c8d7-eb75-41e1-b2ec-d6feb7f02f7a.
     ```
 
-!!! tip "Not a new record type"
+!!! tip "Not a new schema"
     The second sample is **New ▸ Sample** again. **Something else…** is only
     for a kind of thing the collection doesn't have yet.
 
@@ -140,7 +138,7 @@ the run.
 | To… | Read |
 |---|---|
 | Bring in a spreadsheet or a folder of files | [Import data](../how-to/import-data.md) |
-| Put samples inside visits and sites | [Record types & fields](../guides/schemas-and-fields.md#types-inside-other-types) |
+| Put samples inside visits and sites | [Schemas & fields](../guides/schemas-and-fields.md#types-inside-other-types) |
 | Keep files on an external drive | [Put files on another drive](../how-to/storage-drives.md) |
 | Work on several computers | [Sync a project](../how-to/set-up-sync.md) |
 | Automate more | [Fill fields from file names](../how-to/fill-fields-from-filenames.md) |

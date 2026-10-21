@@ -22,10 +22,10 @@ export function RecordCountsWidget({ filters }: RecordCountsWidgetProps) {
 
   return (
     <WidgetCard
-      title="Records by type"
-      description="Current record totals, by record type"
+      title="Records by schema"
+      description="Current record totals, by schema"
       viewRunsTo="/schemas"
-      viewRunsLabel="View record types"
+      viewRunsLabel="View schemas"
     >
       {error ? (
         <ErrorState message={errorMessage(error)} />

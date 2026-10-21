@@ -9,7 +9,7 @@ import { FieldKindPicker } from './FieldKindPicker'
 
 /** The last row of a record form: "+ Add field", like adding a column to a
  * sheet. It expands in place into the same kind picker and field form as
- * the record type's page, and the field lands on the type (the toast says
+ * the schema's page, and the field lands on the type (the toast says
  * so), so every record of the kind gets it. */
 export function AddFieldRow({
   schema,

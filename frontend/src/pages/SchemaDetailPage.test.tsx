@@ -90,12 +90,10 @@ describe('SchemaDetailPage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByRole('tab', { name: 'Fields' })
-    expect(
-      screen.queryByRole('menuitem', { name: /Delete record type/ }),
-    ).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /Delete schema/ })).toBeNull()
     await user.click(screen.getByRole('button', { name: 'More actions' }))
     expect(
-      screen.getByRole('menuitem', { name: /Delete record type/ }),
+      screen.getByRole('menuitem', { name: /Delete schema/ }),
     ).toBeInTheDocument()
   })
 })

@@ -21,7 +21,7 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
 
   return (
     <CreateResourceModal
-      resourceLabel="record type"
+      resourceLabel="schema"
       slugKind="Schema"
       onClose={onClose}
       isPending={create.isPending}
@@ -67,11 +67,11 @@ export default function SchemasPage() {
 
   return (
     <Page
-      title="Record types"
-      info="A record type is a blank form: the fields a kind of thing has. You design it once, then add a record every time you have another one."
+      title="Schemas"
+      info="A schema is a blank form: the fields a kind of thing has. You design it once, then add a record every time you have another one."
       action={
         <Button variant="primary" onClick={() => setShowCreate(true)}>
-          New record type
+          New schema
         </Button>
       }
     >
@@ -127,11 +127,11 @@ export default function SchemasPage() {
         rowHref={(s) => `/schemas/${s.id}`}
         isLoading={isLoading}
         error={error ? errorMessage(error) : undefined}
-        emptyTitle="No record types yet"
+        emptyTitle="No schemas yet"
         emptyMessage="Made when you press New ▸ Something else… in a collection."
         emptyAction={
           <Button variant="primary" onClick={() => setShowCreate(true)}>
-            New record type
+            New schema
           </Button>
         }
       />

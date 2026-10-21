@@ -17,7 +17,7 @@ North Ridge/                      ← site
 Samples.csv                       ← optional table of the records
 ```
 
-Record names come from each record type's name template. Without one, a folder is
+Record names come from each schema's name template. Without one, a folder is
 named after the first value, which may just be `1`. Set a template first if the
 folders should read well:
 

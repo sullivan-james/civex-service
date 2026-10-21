@@ -793,7 +793,7 @@ export function RecordsExplorer({
               className="text-accent hover:underline"
               to={`/schemas/${listed.parent_id}`}
             >
-              open the record type it goes inside
+              open the schema it goes inside
             </Link>{' '}
             to start from the top of the hierarchy.
           </p>

@@ -8,7 +8,7 @@ database administrator are needed. Use it from the web app or the command line.
 
 1. [Install](getting-started/install.md)
 2. [Your first project](getting-started/first-project.md)
-3. [Record types, collections and records](getting-started/concepts.md), the three ideas
+3. [Schemas, collections and records](getting-started/concepts.md), the three ideas
 4. [Five-minute tour](getting-started/tour.md)
 
 ## I want to…
@@ -27,7 +27,7 @@ database administrator are needed. Use it from the web app or the command line.
 
 ```mermaid
 flowchart LR
-    T["Record type<br/><i>a blank form</i>"]:::rt -->|is the form for| R["Record<br/><i>one filled-in form</i>"]:::rec
+    T["Schema<br/><i>a blank form</i>"]:::rt -->|is the form for| R["Record<br/><i>one filled-in form</i>"]:::rec
     C["Collection<br/><i>the binder</i>"]:::coll -->|holds| R
     R -->|has| F[Files]
     R -->|triggers| W[Workflow]
@@ -38,7 +38,7 @@ flowchart LR
 
 | | What it is | Example |
 |---|---|---|
-| <span class="rt">Record type</span> | A blank form: the fields one kind of thing has, designed once. Called a *schema* in the CLI and API. Types can go inside other types | Site › Visit › Sample |
+| <span class="rt">Schema</span> | A blank form: the fields one kind of thing has, designed once. Called a *schema* in the CLI and API. Types can go inside other types | Site › Visit › Sample |
 | **Field** | One box on the form, with a type and rules | `depth` (number, in m), `photo` (file) |
 | <span class="coll">Collection</span> | The binder: holds records of the types it lists | `survey-2024` |
 | <span class="rec">Record</span> | One filled-in form: this site, this sample | *North Ridge › 2024-03-15 › Sample 03* |

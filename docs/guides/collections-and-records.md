@@ -1,11 +1,11 @@
 # Collections & records
 
 A **collection** is the binder: it holds records, one collection per study or
-season, as suits you. It says which [record types](schemas-and-fields.md) its
-records may be (`--schema`, since the CLI calls a record type a *schema*), and
-who may link to them. A **record** is one filled-in form of a record type: this
+season, as suits you. It says which [schemas](schemas-and-fields.md) its
+records may be (`--schema`), and
+who may link to them. A **record** is one filled-in form of a schema: this
 site, this sample. If the two blur together, read
-[Record types, collections and records](../getting-started/concepts.md).
+[Schemas, collections and records](../getting-started/concepts.md).
 
 ## Collections
 
@@ -26,7 +26,7 @@ survey-2024
 
 | Setting | Means |
 |---|---|
-| **Record types** (`--schema`, `add-schema`) | Records here can only be of these. A new collection with none holds nothing. A type that goes inside another needs its parent listed too (`add-schema` adds parents for you). A type with records here can't be removed |
+| **Schemas** (`--schema`, `add-schema`) | Records here can only be of these. A new collection with none holds nothing. A type that goes inside another needs its parent listed too (`add-schema` adds parents for you). A type with records here can't be removed |
 | **Scope** (`--scope`) | `local` (default): only records here can link to these. `global`: any collection can, for shared lists such as species, instruments or people |
 | **Timezone** (`--timezone`) | How times without a UTC offset are read and shown. See [Times and timezones](schemas-and-fields.md#times-and-timezones) |
 
@@ -46,10 +46,10 @@ page.
 ## Adding records
 
 === "Web UI"
-    In a collection, the **New** menu lists the record types you can add here
+    In a collection, the **New** menu lists the schemas you can add here
     (**New ▸ New site**). Inside a record, it lists the types that go inside it
     (inside a visit: **New ▸ New sample**). This is the step you repeat; the
-    record type is made once. **Add and add another** saves
+    schema is made once. **Add and add another** saves
     and gives you a blank form. **New ▸ Import data…** brings in a spreadsheet or
     a folder of files: see [Import data](../how-to/import-data.md).
 
@@ -98,14 +98,14 @@ any unique prefix of it works wherever an id is asked for.
 
 A collection's page (and a record's **Contains** tab) is one explorer:
 
-- **Levels:** the collection's record types top-down (Site → Visit → Sample),
+- **Levels:** the collection's schemas top-down (Site → Visit → Sample),
   with counts. A row shows its children ("3 visits →"). Click to go down, and
   use the trail to go back up.
 - **Search** is scoped to where you are.
 - **+ Filter** builds AND/OR conditions on this level's fields, a parent's, or
   any child's: "Visits that have a Sample whose `depth` is empty" is one
   condition. Reference values are picked by name.
-- **Saved filters** are the record type's [views](views.md). **Save as view…** saves
+- **Saved filters** are the schema's [views](views.md). **Save as view…** saves
   yours, and everyone sees it.
 - **Columns** include parents' fields and fields through a reference. Click a
   header to sort.
@@ -158,6 +158,6 @@ See [Undo a mistake](../how-to/undo-mistakes.md) and
 
 ## Copying a project's data
 
-`civex dump` writes record types, collections, records and workflows to one YAML
+`civex dump` writes schemas, collections, records and workflows to one YAML
 file, and `civex restore` reads it into another project. It leaves out files,
 history and settings. See [Back up a project](../how-to/back-up.md).

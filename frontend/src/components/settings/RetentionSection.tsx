@@ -101,7 +101,7 @@ function RetentionForm({ settings }: { settings: RetentionSettings }) {
         <div className="flex flex-wrap items-end gap-4">
           <Field
             label="Restorable for (days)"
-            info="How long a deleted collection, record type or record can be restored."
+            info="How long a deleted collection, schema or record can be restored."
           >
             <Input
               type="number"

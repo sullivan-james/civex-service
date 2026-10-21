@@ -133,7 +133,7 @@ describe('NewRecordPage', () => {
     const user = userEvent.setup()
     renderAt(['/collections/hb/new?schema=encounter'])
     await user.click(await screen.findByRole('button', { name: /Add field/ }))
-    // the same kind picker as the record type's page, under the rows
+    // the same kind picker as the schema's page, under the rows
     expect(await screen.findByText('Text')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
