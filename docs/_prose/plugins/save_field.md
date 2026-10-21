@@ -8,7 +8,7 @@ Write a single value to a field on the trigger record. Use this to persist the o
 - id: save_result
   plugin: civex.save_field
   config:
-    field: start_time
+    field: taken_at
   inputs:
     value: extract.value
 ```

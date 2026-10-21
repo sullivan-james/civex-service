@@ -8,7 +8,8 @@ database administrator are needed. Use it from the web app or the command line.
 
 1. [Install](getting-started/install.md)
 2. [Your first project](getting-started/first-project.md)
-3. [Five-minute tour](getting-started/tour.md)
+3. [Record types, collections and records](getting-started/concepts.md), the three ideas
+4. [Five-minute tour](getting-started/tour.md)
 
 ## I want to…
 
@@ -26,21 +27,25 @@ database administrator are needed. Use it from the web app or the command line.
 
 ```mermaid
 flowchart LR
-    S[Schema] -->|defines| R[Record]
-    C[Collection] -->|holds| R
+    T["Record type<br/><i>a blank form</i>"]:::rt -->|is the form for| R["Record<br/><i>one filled-in form</i>"]:::rec
+    C["Collection<br/><i>the binder</i>"]:::coll -->|holds| R
     R -->|has| F[Files]
     R -->|triggers| W[Workflow]
+    classDef rt fill:#dbeafe,stroke:#1e3a8a,color:#1e3a8a
+    classDef coll fill:#fef3c7,stroke:#78350f,color:#78350f
+    classDef rec fill:#dcfce7,stroke:#14532d,color:#14532d
 ```
 
 | | What it is | Example |
 |---|---|---|
-| **Schema** | A kind of record: its fields and rules. Schemas nest | Encounter › Recording › Selection |
-| **Field** | A typed value on a schema | `take` (integer), `audio` (file) |
-| **Collection** | Holds records of the schemas it lists | `humpbacks-2024` |
-| **Record** | One encounter, one recording… | *South Bay › Take 03* |
+| <span class="rt">Record type</span> | A blank form: the fields one kind of thing has, designed once. Called a *schema* in the CLI and API. Types can go inside other types | Site › Visit › Sample |
+| **Field** | One box on the form, with a type and rules | `depth` (number, in m), `photo` (file) |
+| <span class="coll">Collection</span> | The binder: holds records of the types it lists | `survey-2024` |
+| <span class="rec">Record</span> | One filled-in form: this site, this sample | *North Ridge › 2024-03-15 › Sample 03* |
 | **Volume** | A folder or drive where files are stored | `_civex/objects`, `/media/archive` |
-| **Workflow** | YAML steps that run when records change | read a start time from a file name |
+| **Workflow** | YAML steps that run when records change | read a time from a file name |
 | **Authority** | The civex other computers sync with | `https://lab-pc.tail1234.ts.net` |
 
-The [guides](guides/schemas-and-fields.md) explain each in depth, and the
+The same survey example runs through every page. The
+[guides](guides/schemas-and-fields.md) explain each piece in depth, and the
 [reference](reference/cli/index.md) lists every command and endpoint.

@@ -39,6 +39,8 @@ export function NameLabelFields({
   onEnter,
 }: NameLabelFieldsProps) {
   const [derive, setDerive] = useState(deriveName)
+  // What the person sees: a schema is a "record type" in the app.
+  const shown = kind === 'Schema' ? 'Record type' : kind
   const error = value.name ? nameError(value.name) : null
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -47,7 +49,7 @@ export function NameLabelFields({
 
   return (
     <>
-      <Field label={`${kind} label`} span={4}>
+      <Field label={`${shown} label`} span={4}>
         <Input
           size="sm"
           value={value.label}
@@ -58,14 +60,12 @@ export function NameLabelFields({
             })
           }
           onKeyDown={handleKeyDown}
-          placeholder={
-            kind === 'Field' ? 'Recording Date' : 'Acoustic Recording'
-          }
+          placeholder={kind === 'Field' ? 'Visited On' : 'Soil Sample'}
           autoFocus={autoFocus}
         />
       </Field>
       <Field
-        label={`${kind} name`}
+        label={`${shown} name`}
         span={4}
         error={error}
         info="Used by workflows and CSV headers."
@@ -79,9 +79,7 @@ export function NameLabelFields({
             onChange({ label: value.label, name: e.target.value })
           }}
           onKeyDown={handleKeyDown}
-          placeholder={
-            kind === 'Field' ? 'recording_date' : 'acoustic_recording'
-          }
+          placeholder={kind === 'Field' ? 'visited_on' : 'soil_sample'}
         />
       </Field>
     </>

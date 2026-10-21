@@ -13,8 +13,8 @@ import { HomeShortcuts } from '../components/home/HomeShortcuts'
 import { DesktopShortcut } from '../components/settings/DesktopShortcut'
 
 const ONBOARDING_STEPS = [
-  { to: '/collections', title: 'Import data' },
-  { to: '/schemas', title: 'Create a record type' },
+  { to: '/schemas', title: 'Design your record types' },
+  { to: '/collections', title: 'Add records to a collection' },
   { to: '/runs', title: 'Automate the rest' },
 ]
 

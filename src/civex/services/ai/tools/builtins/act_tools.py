@@ -165,11 +165,11 @@ class CreateSchemaTool(AiTool):
         "properties": {
             "name": {
                 "type": "string",
-                "description": "Machine key: lowercase letters, digits and underscores, not starting with a digit (e.g. acoustic_recording). Workflows and CSV headers reference this.",
+                "description": "Machine key: lowercase letters, digits and underscores, not starting with a digit (e.g. soil_sample). Workflows and CSV headers reference this.",
             },
             "label": {
                 "type": "string",
-                "description": "Human-facing display name; free text with spaces and capitals (e.g. 'Acoustic Recording'). Set this whenever the natural name is not already a slug.",
+                "description": "Human-facing display name; free text with spaces and capitals (e.g. 'Soil Sample'). Set this whenever the natural name is not already a slug.",
             },
             "description": {"type": "string"},
             "parent": {
@@ -184,11 +184,11 @@ class CreateSchemaTool(AiTool):
                     "properties": {
                         "name": {
                             "type": "string",
-                            "description": "Machine key: lowercase letters, digits and underscores, not starting with a digit (e.g. acoustic_recording). Workflows and CSV headers reference this.",
+                            "description": "Machine key: lowercase letters, digits and underscores, not starting with a digit (e.g. soil_sample). Workflows and CSV headers reference this.",
                         },
                         "label": {
                             "type": "string",
-                            "description": "Human-facing display name; free text with spaces and capitals (e.g. 'Acoustic Recording'). Set this whenever the natural name is not already a slug.",
+                            "description": "Human-facing display name; free text with spaces and capitals (e.g. 'Soil Sample'). Set this whenever the natural name is not already a slug.",
                         },
                         "type": {
                             "type": "string",
@@ -376,11 +376,11 @@ class AddSchemaFieldTool(AiTool):
             },
             "name": {
                 "type": "string",
-                "description": "Machine key: lowercase letters, digits and underscores, not starting with a digit (e.g. acoustic_recording). Workflows and CSV headers reference this.",
+                "description": "Machine key: lowercase letters, digits and underscores, not starting with a digit (e.g. soil_sample). Workflows and CSV headers reference this.",
             },
             "label": {
                 "type": "string",
-                "description": "Human-facing display name; free text with spaces and capitals (e.g. 'Acoustic Recording'). Set this whenever the natural name is not already a slug.",
+                "description": "Human-facing display name; free text with spaces and capitals (e.g. 'Soil Sample'). Set this whenever the natural name is not already a slug.",
             },
             "type": {
                 "type": "string",
@@ -454,11 +454,11 @@ class UpdateSchemaFieldTool(AiTool):
             },
             "rename": {
                 "type": "string",
-                "description": "Machine key: lowercase letters, digits and underscores, not starting with a digit (e.g. acoustic_recording). Workflows and CSV headers reference this.",
+                "description": "Machine key: lowercase letters, digits and underscores, not starting with a digit (e.g. soil_sample). Workflows and CSV headers reference this.",
             },
             "label": {
                 "type": "string",
-                "description": "Human-facing display name; free text with spaces and capitals (e.g. 'Acoustic Recording'). Set this whenever the natural name is not already a slug.",
+                "description": "Human-facing display name; free text with spaces and capitals (e.g. 'Soil Sample'). Set this whenever the natural name is not already a slug.",
             },
             "required": {"type": "boolean"},
             "restrictions": {"type": "object"},

@@ -118,7 +118,7 @@ describe('RecordMissing', () => {
   it('says when a deleted record went with its deleted schema', async () => {
     renderIn(<RecordMissing id={DELETED} />)
     expect(
-      await screen.findByText(/typed by the schema .*selection.*deleted too/),
+      await screen.findByText(/of the record type .*selection.*deleted too/),
     ).toBeInTheDocument()
   })
 

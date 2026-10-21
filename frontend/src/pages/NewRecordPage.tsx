@@ -110,7 +110,7 @@ export default function NewRecordPage() {
                 ? errorMessage(error)
                 : !collection
                   ? 'Collection not found'
-                  : 'Unknown schema'
+                  : 'Unknown record type'
             }
           />
         }

@@ -15,12 +15,12 @@ Create one new record per table row. Every row produces a new record; use `civex
 - id: create
   plugin: civex.rows_to_records
   config:
-    schema: Selection
-    dataset: field-season-2024
+    schema: Sample
+    dataset: survey-2024
     field_mapping:
-      "Begin Time (s)": start_time
-      "End Time (s)": end_time
-      "Selection": selection_number
+      "Taken at": taken_at
+      "Depth (m)": depth
+      "Sample": number
   inputs:
     table: parse.table
 ```

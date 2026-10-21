@@ -1,0 +1,17 @@
+/* One colour per idea, used wherever the docs name the three building blocks.
+   Record types are blue (the blank form), collections are amber (the binder),
+   records are green (a filled-in form). Keep these in step with the mermaid
+   classDefs in index.md and getting-started/concepts.md. */
+.rt, .coll, .rec {
+  display: inline-block;
+  padding: 0 .4em;
+  border-radius: .3em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rt   { background: #dbeafe; color: #1e3a8a; }
+.coll { background: #fef3c7; color: #78350f; }
+.rec  { background: #dcfce7; color: #14532d; }
+[data-md-color-scheme="slate"] .rt   { background: #1e3a8a; color: #dbeafe; }
+[data-md-color-scheme="slate"] .coll { background: #78350f; color: #fef3c7; }
+[data-md-color-scheme="slate"] .rec  { background: #14532d; color: #dcfce7; }

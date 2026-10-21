@@ -22,18 +22,18 @@ reference: `{sha256, filename, size}`. Where the bytes live is covered in
     `civex record add` and `civex record update` ask for a path:
 
     ```text
-      audio (file) []: /data/recordings/20240315_090000.wav
-      clips (file_list): /data/clip1.wav
-      clips (file_list): /data/clip2.wav
-      clips (file_list):                      ← blank to finish
+      reading (file) []: /data/readings/20240315_090000.csv
+      photos (file_list): /data/photo1.jpg
+      photos (file_list): /data/photo2.jpg
+      photos (file_list):                      ← blank to finish
     ```
 
 === "API"
     Upload, then put the returned reference in the field:
 
     ```bash
-    curl -X POST "http://localhost:8000/api/files?collection=humpbacks" -F "file=@take1.wav"
-    # → {"sha256": "3f9c…", "filename": "take1.wav", "size": 200000}
+    curl -X POST "http://localhost:8000/api/files?collection=survey-2024" -F "file=@photo.jpg"
+    # → {"sha256": "3f9c…", "filename": "photo.jpg", "size": 200000}
     ```
 
     `?collection=` sends the file to that collection's home drive.
@@ -44,7 +44,7 @@ A removed or replaced file stays stored until
 ## Restricting what a field accepts
 
 ```bash
-civex schema add-field recording audio --type file --accept ".wav,.flac"
+civex schema add-field sample photo --type file --accept ".jpg,.png"
 civex schema add-field document pdf --type file --accept ".pdf" --max-size 10485760   # 10 MB
 ```
 
@@ -84,8 +84,8 @@ when the file is on one that isn't connected.
 
 Above a collection's or record's list of records, **Records | Their files**
 switches to the files of exactly the records listed and everything beneath them,
-under the same filters. Filter Recordings to `site = North Ridge`, switch, and
-you see their audio.
+under the same filters. Filter Visits to `site = North Ridge`, switch, and
+you see their photos and readings.
 
 - Each row is a file as stored. A file three records use is one row, and **Used
   by N records** lists them.
@@ -106,10 +106,10 @@ The same in a terminal, using the selection options of `civex files`, plus `--on
 for a place and `--name` for a file or record name:
 
 ```bash
-civex files list   --in humpbacks --on field-ssd
-civex files gather --in humpbacks --on field-ssd --to archive
+civex files list   --in survey-2024 --on field-ssd
+civex files gather --in survey-2024 --on field-ssd --to archive
 civex files fetch  --under 2d69dc46
-civex files free   --in humpbacks --name ".wav"
+civex files free   --in survey-2024 --name ".jpg"
 ```
 
 ## On a project that syncs

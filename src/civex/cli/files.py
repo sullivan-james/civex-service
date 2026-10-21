@@ -82,9 +82,7 @@ def _files_selection(
         # An export saved with a schema: its kind, fields, filter and layout. The
         # collection (--in) and/or record (--under) it is run on are given here.
         if "/" not in export:
-            console.print(
-                "[error]--export is `schema/name`, e.g. encounter/contours.[/error]"
-            )
+            console.print("[error]--export is `schema/name`, e.g. site/photos.[/error]")
             raise typer.Exit(1)
         schema_name, _, export_name = export.partition("/")
         ctx = get_ctx()
@@ -104,9 +102,7 @@ def _files_selection(
     if view:
         # A saved view is a preset: its filter, its file columns and its layout.
         if "/" not in view:
-            console.print(
-                "[error]--view is `schema/view`, e.g. recording/tables.[/error]"
-            )
+            console.print("[error]--view is `schema/view`, e.g. sample/photos.[/error]")
             raise typer.Exit(1)
         schema_name, _, view_name = view.partition("/")
         ctx = get_ctx()
@@ -179,7 +175,7 @@ _TABLE = typer.Option(
     "--table",
     "-t",
     help=f"Also make a table of the records, one per kind of record, named for the "
-    f"kind (Selections.csv). One of: {', '.join(FORMATS)}.",
+    f"kind (Samples.csv). One of: {', '.join(FORMATS)}.",
 )
 _COLUMN = typer.Option(
     None,
@@ -207,7 +203,7 @@ _LAYOUT = typer.Option(
     "--layout",
     help="tree: a folder per record above each file (default); grouped: the "
     "folders above, but the records holding the files gathered into one folder "
-    "named for their kind (Encounter/Recording/Selections); flat: every file in "
+    "named for their kind (Site/Visit/Samples); flat: every file in "
     f"one folder. One of: {', '.join(LAYOUTS)}.",
 )
 
@@ -341,7 +337,7 @@ def files_export(
     """Build a folder of the files, named and arranged by their records.
 
     With --table FORMAT the folder also holds a table of those records (one per
-    kind, named for it: Selections.csv, or .tsv .xlsx .json .jsonl), whose file
+    kind, named for it: Samples.csv, or .tsv .xlsx .json .jsonl), whose file
     columns say where each file is in the folder; --column picks its columns and
     --no-files makes the table alone.
 
