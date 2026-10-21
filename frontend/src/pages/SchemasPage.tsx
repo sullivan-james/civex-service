@@ -128,7 +128,7 @@ export default function SchemasPage() {
         isLoading={isLoading}
         error={error ? errorMessage(error) : undefined}
         emptyTitle="No schemas yet"
-        emptyMessage="Made when you press New ▸ Something else… in a collection."
+        emptyMessage="Make one here, or with New ▸ New schema… in a collection."
         emptyAction={
           <Button variant="primary" onClick={() => setShowCreate(true)}>
             New schema

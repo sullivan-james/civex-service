@@ -53,7 +53,7 @@ import { useWorkflows } from '../../hooks/useWorkflows'
 import { useExplorer, type ExplorerScope } from './useExplorer'
 import { useCollection } from '../../hooks/useCollections'
 import { usePermissions } from '../../hooks/useMe'
-import { NewKindDialog } from './NewKindDialog'
+import { NewSchemaDialog } from './NewSchemaDialog'
 import { recordRecent } from '../../hooks/usePins'
 import { placeTarget, viewTarget } from '../../utils/navTargets'
 import { viewPatch } from '../../utils/explorerState'
@@ -375,7 +375,7 @@ export function RecordsExplorer({
         ...(mayAddKind
           ? [
               {
-                label: 'Something else…',
+                label: 'New schema…',
                 icon: Plus,
                 onClick: () => setNewKind(true),
               },
@@ -412,7 +412,7 @@ export function RecordsExplorer({
     ))
 
   const kindDialog = newKind && collection && (
-    <NewKindDialog
+    <NewSchemaDialog
       collection={collection}
       schemas={x.schemas ?? []}
       within={

@@ -261,20 +261,20 @@ describe('RecordsExplorer', () => {
       expect(item(/New recording/)).not.toBeInTheDocument()
     })
 
-    it('offers Something else… so a kind can start from the list', async () => {
+    it('offers New schema… so a schema can start from the list', async () => {
       override = emptyCollection([])
       renderExplorer({}, '/collections/hb')
       expect(await screen.findByText('Nothing here yet')).toBeInTheDocument()
       await openNew()
-      expect(item(/Something else/)).toBeInTheDocument()
-      await userEvent.click(item(/Something else/)!)
+      expect(item(/New schema/)).toBeInTheDocument()
+      await userEvent.click(item(/New schema/)!)
       expect(
-        await screen.findByRole('dialog', { name: 'New' }),
+        await screen.findByRole('dialog', { name: 'New schema' }),
       ).toBeInTheDocument()
-      expect(screen.getByLabelText(/What are you adding/)).toBeInTheDocument()
+      expect(screen.getByLabelText(/Schema label/)).toBeInTheDocument()
     })
 
-    it('keeps Something else… for people who may change the structure', async () => {
+    it('keeps New schema… for people who may change the structure', async () => {
       override = (url) => {
         if (url.pathname === '/api/me')
           return json({
@@ -289,19 +289,18 @@ describe('RecordsExplorer', () => {
       renderExplorer({}, '/collections/hb')
       expect(await screen.findByText('Nothing here yet')).toBeInTheDocument()
       await openNew()
-      expect(item(/Something else/)).not.toBeInTheDocument()
+      expect(item(/New schema/)).not.toBeInTheDocument()
       expect(item(/Import data/)).toBeInTheDocument()
     })
   })
 
   describe('inside a record', () => {
-    it('Something else… makes a kind that goes inside this one', async () => {
+    it('New schema… makes one that goes inside the record it was pressed in', async () => {
       renderExplorer({ root: { id: 'e1' } }, '/records/e1?tab=contains')
       await openNew()
-      await userEvent.click(item(/Something else/)!)
-      expect(
-        await screen.findByRole('dialog', { name: /New, inside encounters/ }),
-      ).toBeInTheDocument()
+      await userEvent.click(item(/New schema/)!)
+      await screen.findByRole('dialog', { name: 'New schema' })
+      expect(screen.getByText(/goes inside/).textContent).toMatch(/Encounter/)
     })
   })
 

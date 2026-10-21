@@ -31,7 +31,7 @@ flowchart LR
 
 | | How many | Looks like | Made where |
 |---|---|---|---|
-| <span class="rt">Schema</span> | A handful per project | *Sample*, *Site*, *Visit* | **New ▸ Something else…** in a collection, then **+ Add field** on the record. **Schemas** in the sidebar shows them all |
+| <span class="rt">Schema</span> | A handful per project | *Sample*, *Site*, *Visit* | **New ▸ New schema…** in a collection, then **+ Add field** on the record. **Schemas** in the sidebar shows them all |
 | <span class="coll">Collection</span> | One per study or season | *survey-2024* | **Collections → New collection** |
 | <span class="rec">Record</span> | Hundreds or thousands | *Sample 03*, *North Ridge* | Inside a collection: **New ▸ Sample** |
 
@@ -70,7 +70,7 @@ flowchart LR
 ```
 
 The top row is the three schemas. Everything below is records. Where you
-press **New** decides the nesting: **New ▸ Something else…** inside a site
+press **New** decides the nesting: **New ▸ New schema…** inside a site
 makes a kind that goes inside sites. It can't be moved later.
 
 ## The same example everywhere

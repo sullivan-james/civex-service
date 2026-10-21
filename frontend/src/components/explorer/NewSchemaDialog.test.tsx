@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { ToastProvider } from '../ui'
-import { NewKindDialog } from './NewKindDialog'
+import { NewSchemaDialog } from './NewSchemaDialog'
 import type { Collection } from '../../api/collections'
 import type { Schema } from '../../api/schemas'
 
@@ -62,7 +62,7 @@ function Where() {
   return <output data-testid="where">{pathname + search}</output>
 }
 
-function renderDialog(props: Partial<Parameters<typeof NewKindDialog>[0]>) {
+function renderDialog(props: Partial<Parameters<typeof NewSchemaDialog>[0]>) {
   const onClose = vi.fn()
   render(
     <QueryClientProvider client={new QueryClient()}>
@@ -73,7 +73,7 @@ function renderDialog(props: Partial<Parameters<typeof NewKindDialog>[0]>) {
               path="*"
               element={
                 <>
-                  <NewKindDialog
+                  <NewSchemaDialog
                     collection={COLLECTION}
                     schemas={[SITE, VISIT]}
                     onClose={onClose}
@@ -92,12 +92,14 @@ function renderDialog(props: Partial<Parameters<typeof NewKindDialog>[0]>) {
 }
 const where = () => screen.getByTestId('where').textContent
 
-describe('NewKindDialog', () => {
+describe('NewSchemaDialog', () => {
   it('makes a new kind, lists it on the collection and opens a blank one', async () => {
     const user = userEvent.setup()
     const onClose = renderDialog({})
-    await user.type(screen.getByLabelText(/What are you adding/), 'Sample')
-    await user.click(screen.getByRole('button', { name: 'New sample' }))
+    await user.type(screen.getByLabelText(/Schema label/), 'Sample')
+    await user.click(
+      screen.getByRole('button', { name: 'Create and add the first record' }),
+    )
     await waitFor(() =>
       expect(where()).toBe('/collections/c1/new?schema=sample'),
     )
@@ -113,11 +115,10 @@ describe('NewKindDialog', () => {
   it('pressed inside a record, the kind goes inside that kind and under that record', async () => {
     const user = userEvent.setup()
     renderDialog({ within: { id: 'r1', schema: SITE } })
-    await user.type(
-      screen.getByLabelText(/What are you adding/),
-      'Survey point',
+    await user.type(screen.getByLabelText(/Schema label/), 'Survey point')
+    await user.click(
+      screen.getByRole('button', { name: 'Create and add the first record' }),
     )
-    await user.click(screen.getByRole('button', { name: 'New survey point' }))
     await waitFor(() =>
       expect(where()).toBe('/collections/c1/new?schema=survey_point&parent=r1'),
     )
@@ -129,9 +130,11 @@ describe('NewKindDialog', () => {
   it('reuses a kind that exists where it fits, and refuses one that does not', async () => {
     const user = userEvent.setup()
     renderDialog({ within: { id: 'r1', schema: SITE } })
-    const box = screen.getByLabelText(/What are you adding/)
+    const box = screen.getByLabelText(/Schema label/)
     await user.type(box, 'Visit')
-    expect(screen.getByText('You already have visits.')).toBeInTheDocument()
+    expect(
+      screen.getByText(/Visit exists already; a new record/),
+    ).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'New visit' }))
     await waitFor(() =>
       expect(where()).toBe('/collections/c1/new?schema=visit&parent=r1'),
@@ -146,8 +149,10 @@ describe('NewKindDialog', () => {
   it('will not make a top-level kind of one that goes inside another', async () => {
     const user = userEvent.setup()
     renderDialog({})
-    await user.type(screen.getByLabelText(/What are you adding/), 'Visit')
+    await user.type(screen.getByLabelText(/Schema label/), 'Visit')
     expect(screen.getByText(/goes somewhere else/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^New/ })).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: /Create and add/ }),
+    ).toBeDisabled()
   })
 })
