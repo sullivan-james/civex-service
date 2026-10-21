@@ -29,6 +29,9 @@ descriptors later; nothing here assumes they live in `restrictions`.
     precision            year / month / day
     geometry_types       tick the shapes accepted
     bbox                 west, south, east, north in degrees
+    from_filename        a file field of the schema and a pattern that reads
+                         this field's value out of the file's name
+                         (`domain/filename_extract.py`)
 """
 
 from __future__ import annotations
@@ -79,6 +82,17 @@ _MIN_MAX_NUM = (
     _R("max", "Largest allowed", "number"),
 )
 
+# A text, number or date field filled from a file's name as the record is
+# saved: `{"field": <file or file_list field>, "pattern": <pattern>}`.
+_FROM_FILENAME = _R(
+    "from_filename",
+    "Fill from a file's name",
+    "from_filename",
+    "When this field is left blank and the file is attached, the value is "
+    "read from the file's name as the record is saved, before its rules and "
+    "unique keys are checked. A value you type is kept.",
+)
+
 _FILE_RULES = (
     _R(
         "accept",
@@ -123,6 +137,7 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
                     "Leave empty to allow any text.",
                 ),
                 _R("max_length", "Longest allowed", "integer"),
+                _FROM_FILENAME,
             ),
         ),
         FieldTypeDescriptor(
@@ -132,7 +147,7 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
             "Integer",
             "Enter a whole number.",
             "42",
-            _MIN_MAX_NUM,
+            (*_MIN_MAX_NUM, _FROM_FILENAME),
         ),
         FieldTypeDescriptor(
             "float",
@@ -151,6 +166,7 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
                     "Every value is stored in this unit. Nothing already stored is "
                     "ever converted if you change it.",
                 ),
+                _FROM_FILENAME,
             ),
         ),
         FieldTypeDescriptor(
@@ -177,6 +193,7 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
                 ),
                 _R("min", "Earliest", "date_bound"),
                 _R("max", "Latest", "date_bound"),
+                _FROM_FILENAME,
             ),
         ),
         FieldTypeDescriptor(
@@ -196,6 +213,7 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
                 ),
                 _R("min", "Not before", "datetime_bound"),
                 _R("max", "Not after", "datetime_bound"),
+                _FROM_FILENAME,
             ),
         ),
         FieldTypeDescriptor(

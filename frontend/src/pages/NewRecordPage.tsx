@@ -26,6 +26,7 @@ import {
 } from '../components/records/FilenameExtractor'
 import { ScanText } from '../components/ui/icons'
 import { displayLabel } from '../utils/naming'
+import { previewFromFilename } from '../utils/filenameExtract'
 import { errorMessage } from '../lib/errors'
 import { useBack } from '../hooks/useBack'
 import { AddFieldRow } from '../components/schemas/AddFieldRow'
@@ -209,9 +210,26 @@ export default function NewRecordPage() {
                   fileSources.length === 0
                 )
                   return null
+                // A field with a from-filename rule is filled by the server
+                // as the record is added; say what it will get, from the
+                // file attached so far, so there is nothing to type.
+                const preview = previewFromFilename(field, values)
                 const open = extracting === field.name
                 return (
                   <>
+                    {preview && (
+                      <p
+                        role="status"
+                        className="mt-1 text-xs text-fg-subtle"
+                        data-testid={`from-filename-${field.name}`}
+                      >
+                        {preview.result.error
+                          ? `${preview.filename} fits the pattern but ${preview.result.error}: type a value instead.`
+                          : preview.result.value === null
+                            ? `${preview.filename} doesn't fit the pattern: type a value, or leave it blank.`
+                            : `Will be filled with ${String(preview.result.value)} from ${preview.filename}.`}
+                      </p>
+                    )}
                     <Button
                       size="sm"
                       variant="ghost"

@@ -30,6 +30,7 @@ from civex.domain.dtos import (
     RestoreSetResultDTO,
     SchemaDTO,
 )
+from civex.domain import filename_extract
 from civex.domain import geo as geo_domain
 from civex.domain.audit_diff import tombstone
 from civex.domain import partial_dates, templating, units
@@ -986,6 +987,96 @@ class RecordService:
             for r, ids in zip(records, per_record_ids)
         ]
 
+    def _fill_from_filenames(
+        self,
+        data: dict[str, Any],
+        shape: ResolvedSchema | None,
+        parent: RecordDTO | None,
+    ) -> dict[str, Any]:
+        """`data` with every blank field that carries a `from_filename` rule
+        set from the name of the file in the field the rule names
+        (`domain/filename_extract`): the record's own file, or, when the file
+        field is inherited, the file on the nearest record above that has one
+        (`parent`, then up). A value the caller gave is never replaced, and a
+        name the pattern doesn't fit leaves the field blank; a name it fits
+        but that doesn't read as the field's type is refused naming the
+        field, as a typed value would be. Runs before defaults, validation
+        and unique keys, so the derived value is held to all of them."""
+        if shape is None:
+            return data
+        # Own fields only: a child record holds no values for inherited
+        # fields (they live on the record above), so a rule on one is for
+        # records of that schema.
+        rules = [
+            (rf.field, rule)
+            for rf in shape.fields
+            if rf.source_schema_name == shape.schema.name
+            and (rule := filename_extract.rule_of(rf.field.restrictions))
+        ]
+        if not rules:
+            return data
+        inherited = {
+            rf.field.name
+            for rf in shape.fields
+            if rf.source_schema_name != shape.schema.name
+        }
+        result = dict(data)
+        for field, (source_name, pattern) in rules:
+            if not _is_blank_value(result.get(field.name)):
+                continue
+            source = shape.by_name.get(source_name)
+            if source is None:
+                continue
+            filename = filename_extract.first_filename(result.get(source_name))
+            if filename is None and parent is not None and source_name in inherited:
+                # An inherited file field's file is on a record above.
+                filename = self._filename_above(parent, str(source.id))
+            if filename is None:
+                continue
+            try:
+                value = filename_extract.extract(filename, pattern, field.dtype)
+            except ValueError as e:
+                raise FieldValueError(
+                    f"Field '{field.name}': could not be filled from '{filename}': {e}",
+                    f"data.{field.id}",
+                ) from None
+            if value is not None:
+                result[field.name] = value
+        return result
+
+    def _parent_if_needed(
+        self, raw: RecordDTO, shape: ResolvedSchema | None, data: dict[str, Any]
+    ) -> RecordDTO | None:
+        """The record above `raw`, fetched only when a blank field's
+        `from_filename` rule reads an inherited file field `data` has no file
+        in: one query, and only for the records that need it."""
+        if shape is None or raw.parent_record_id is None:
+            return None
+        own = {f.name for f in shape.schema.fields}
+        for rf in shape.fields:
+            rule = filename_extract.rule_of(rf.field.restrictions)
+            if rule is None or not _is_blank_value(data.get(rf.field.name)):
+                continue
+            if rule[0] in own or filename_extract.first_filename(data.get(rule[0])):
+                continue
+            return self._records.get_by_id(raw.parent_record_id, include_deleted=True)
+        return None
+
+    def _filename_above(self, record: RecordDTO, field_id: str) -> str | None:
+        """The name of the file in field `field_id` on `record` or the nearest
+        record above it that has one (stored data is keyed by field id)."""
+        current: RecordDTO | None = record
+        while current is not None:
+            filename = filename_extract.first_filename(current.data.get(field_id))
+            if filename is not None:
+                return filename
+            if current.parent_record_id is None:
+                return None
+            current = self._records.get_by_id(
+                current.parent_record_id, include_deleted=True
+            )
+        return None
+
     def _apply_defaults(
         self, data: dict[str, Any], shape: ResolvedSchema | None
     ) -> dict[str, Any]:
@@ -1549,8 +1640,14 @@ class RecordService:
         schema = self._schema_svc.get(schema_name)
         self._check_schema_allowed(dataset, schema)
 
-        # Apply field defaults before validation
         shape = self._schema_svc.resolve(schema)
+        parent_record = (
+            self._records.get_by_prefix(parent_record_id)
+            if schema.parent_id and parent_record_id
+            else None
+        )
+        # Fields read from a file's name first, then defaults, then validation.
+        data = self._fill_from_filenames(data, shape, parent_record)
         data = self._apply_defaults(data, shape)
         if shape is not None:
             data = _strip_derived_file_keys(data, shape.fields)
@@ -1562,7 +1659,6 @@ class RecordService:
                 raise ValidationError(
                     f"Schema '{schema.name}' inherits from another schema — a parent record ID is required"
                 )
-            parent_record = self._records.get_by_prefix(parent_record_id)
             if not parent_record:
                 raise NotFoundError(f"Parent record '{parent_record_id}' not found")
             self._check_parent(parent_record, dataset, schema)
@@ -1706,9 +1802,16 @@ class RecordService:
         if not raw:
             raise NotFoundError(f"Record '{record_id}' not found")
         self._permissions.require(permissions.WRITE_RECORDS, raw.dataset_id)
-        # Apply field defaults before validation
         shapes = self._schema_svc.resolver()
         shape = shapes(raw.schema_id)
+        # Fields read from a file's name first, then defaults, then validation.
+        # The parent is only looked up when a rule reads an inherited file
+        # field the record itself doesn't carry.
+        data = self._fill_from_filenames(
+            data,
+            shape,
+            self._parent_if_needed(raw, shape, data),
+        )
         data = self._apply_defaults(data, shape)
         old_data = self._ids_to_names(raw.data, shape)
         dataset = (

@@ -4,6 +4,7 @@ import { useFileUploads } from '../../hooks/useFileUploads'
 import { usePermissions } from '../../hooks/useMe'
 import type { Field } from '../../api/schemas'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
+import { fromFilenameRule } from '../../utils/filenameExtract'
 import { displayLabel } from '../../utils/naming'
 import { isGeometry, parseLocation, type Geometry } from '../../utils/geo'
 import { LocatorMap } from '../ui/LocatorMap'
@@ -370,10 +371,18 @@ export function EditableValue({
   )
 }
 
-/** What the schema demands of a field, as short phrases: "0–100", "≤ 5 MB". */
-export function restrictionHints(field: Field): string[] {
+/** What the schema demands of a field, as short phrases: "0–100", "≤ 5 MB".
+ * `fields` (the record's) names the file field a value is read from. */
+export function restrictionHints(field: Field, fields?: Field[]): string[] {
   const r = (field.restrictions ?? {}) as Record<string, unknown>
   const hints: string[] = []
+  const rule = fromFilenameRule(r)
+  if (rule) {
+    const source = fields?.find((f) => f.name === rule.field)
+    hints.push(
+      `filled from ${source ? displayLabel(source.name, source.label) : rule.field}'s name`,
+    )
+  }
   const range = (lo: unknown, hi: unknown, from = '≥', to = '≤') => {
     if (lo !== undefined && hi !== undefined) hints.push(`${lo} – ${hi}`)
     else if (lo !== undefined) hints.push(`${from} ${lo}`)
@@ -461,7 +470,7 @@ export function RecordFieldGrid({
       <dl className="grid grid-cols-[minmax(8rem,14rem)_1fr] items-start gap-x-6 gap-y-3">
         {fields.map((field) => {
           const numeric = field.type === 'integer' || field.type === 'float'
-          const hints = restrictionHints(field)
+          const hints = restrictionHints(field, fields)
           return (
             <div key={field.name} className="contents">
               <dt

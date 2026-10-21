@@ -1,8 +1,9 @@
 /**
  * Filename pattern extraction — the frontend counterpart to the token-based
- * date format parsed server-side by `_parse_by_format` in
- * `civex/plugins/builtins/extract_from_filename.py`, and the plain-regex
- * capture-group extraction in `civex/plugins/builtins/match_files_to_records.py`.
+ * date format parsed server-side by `civex/domain/filename_extract.py`
+ * (`parse_by_format`, which the `civex.extract_from_filename` plugin and the
+ * `from_filename` field rule both use), and the plain-regex capture-group
+ * extraction in `civex/plugins/builtins/match_files_to_records.py`.
  *
  * Keeping this logic in JS (rather than round-tripping every keystroke to
  * the server) is what makes a live preview against real filenames possible.
