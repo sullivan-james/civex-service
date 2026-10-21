@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Button } from './Button'
+import { InfoTip } from './Tooltip'
 import { Field } from './Field'
 import { Input } from './Input'
 import { nameError, slugify } from '../../utils/naming'
@@ -51,9 +52,12 @@ export function NameLabelFields({
 
   return (
     <>
-      <Field label={`${kind} label`} span={4}>
+      <Field
+        label="Name"
+        span={6}
+        info={`What the ${kind.toLowerCase()} is called everywhere in the app.`}
+      >
         <Input
-          size="sm"
           value={value.label}
           onChange={(e) =>
             onChange({
@@ -68,13 +72,12 @@ export function NameLabelFields({
       </Field>
       {showName || error ? (
         <Field
-          label={`${kind} name`}
-          span={4}
+          label="Key"
+          span={6}
           error={error}
-          info="Used by workflows and CSV headers."
+          info="The identifier workflows, CSV headers and the API use. Changing it means updating workflows that use it."
         >
           <Input
-            size="sm"
             className="font-mono"
             value={value.name}
             onChange={(e) => {
@@ -86,9 +89,12 @@ export function NameLabelFields({
           />
         </Field>
       ) : (
-        <p className="col-span-4 text-xs text-fg-subtle">
-          Name for workflows and CSV headers:{' '}
-          <span className="font-mono">{value.name || '…'}</span>{' '}
+        <p className="col-span-full flex items-center gap-1 text-xs text-fg-subtle">
+          Key <span className="font-mono">{value.name || '…'}</span>
+          <InfoTip>
+            The identifier workflows, CSV headers and the API use. It follows
+            the name until you change it.
+          </InfoTip>
           <Button
             variant="link"
             size="sm"

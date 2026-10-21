@@ -150,6 +150,7 @@ detail, set a tile server in **Settings → Map** (`[map] tile_url` and
 
 | | `name` | `label` |
 |---|---|---|
+| In the app | **Key**, folded under the name with a *change* link | **Name** |
 | Is | the machine key | the display name |
 | Looks like | `visited_on` (lowercase, digits, `_`) | `Visited On` (anything) |
 | Used by | workflow YAML, CSV headers, templates, API paths | the app, `schema show`, forms |
