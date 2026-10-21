@@ -6,6 +6,7 @@ import { useFieldTypes } from '../../hooks/useFieldTypes'
 import {
   Button,
   CheckRow,
+  Disclosure,
   Field,
   FormGrid,
   Input,
@@ -150,12 +151,41 @@ export function FieldForm(props: FieldFormProps) {
     }
   }
 
-  // The rule the chosen kind leads with comes first.
-  const ordered = descriptor
-    ? [...descriptor.restrictions].sort(
-        (a, b) => Number(b.key === focus) - Number(a.key === focus),
-      )
-    : []
+  // Most fields need no rules. The one the chosen kind leads with (a
+  // choice's values, a quantity's unit, a link's target) is part of the kind
+  // and shows inline; on an existing field, so does any rule already set.
+  // Everything else waits behind "More rules".
+  const isSet = (key: string) => {
+    const v = rules[key]
+    return !(
+      v === undefined ||
+      v === null ||
+      v === '' ||
+      (Array.isArray(v) && v.length === 0)
+    )
+  }
+  const leads = (key: string) =>
+    key === focus || (mode === 'edit' && isSet(key))
+  const all = descriptor?.restrictions ?? []
+  const lead = all.filter((d) => leads(d.key))
+  const more = all.filter((d) => !leads(d.key))
+  const renderRule = (desc: (typeof all)[number]) => {
+    const Control = CONTROLS[desc.control]
+    return Control ? (
+      <Control
+        key={desc.key}
+        desc={desc}
+        rules={rules}
+        set={setRule}
+        problem={setProblem}
+        ctx={ctx}
+      />
+    ) : (
+      <p key={desc.key} className="text-xs text-fg-subtle">
+        {desc.label} can't be edited here yet.
+      </p>
+    )
+  }
 
   return (
     <div className="space-y-7">
@@ -208,28 +238,20 @@ export function FieldForm(props: FieldFormProps) {
         )}
       </section>
 
-      {(ordered.length > 0 || !descriptor) && (
+      {!descriptor && <Skeleton className="h-16 w-full" />}
+      {lead.length > 0 && (
         <section aria-label="Rules" className="space-y-5">
-          <h4 className="text-sm font-semibold text-fg">Rules</h4>
-          {!descriptor && <Skeleton className="h-16 w-full" />}
-          {ordered.map((desc) => {
-            const Control = CONTROLS[desc.control]
-            return Control ? (
-              <Control
-                key={desc.key}
-                desc={desc}
-                rules={rules}
-                set={setRule}
-                problem={setProblem}
-                ctx={ctx}
-              />
-            ) : (
-              <p key={desc.key} className="text-xs text-fg-subtle">
-                {desc.label} can't be edited here yet.
-              </p>
-            )
-          })}
+          {lead.map(renderRule)}
         </section>
+      )}
+      {more.length > 0 && (
+        <Disclosure
+          summary="More rules"
+          defaultOpen={false}
+          className="rounded-md border border-border"
+        >
+          <div className="space-y-5 px-4 pb-4 pt-2">{more.map(renderRule)}</div>
+        </Disclosure>
       )}
 
       {(problemList.length > 0 || mutation.error) && (
