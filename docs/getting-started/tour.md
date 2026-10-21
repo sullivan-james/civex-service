@@ -13,10 +13,15 @@ You do this **once**. Every sample you add afterwards uses this form.
 
 === "Web UI"
 
-    `civex serve --open`, then **Record types → New record type**, labelled
-    *Sample*. On its page, **Add field** four times: *number* (whole number,
-    required), *depth* (number, unit `m`), *condition* (text, allowed values
-    `good`, `damaged`, `lost`) and *summary* (text).
+    `civex serve --open`, then **Collections → New collection**, named
+    `survey-2024`. It has no record types yet, so its page offers **Start
+    with a record**: type *Sample* and you land on a blank sample. Use **Add a
+    field to every sample…** four times: *number* (whole number, required),
+    *depth* (number, unit `m`), *condition* (text, allowed values `good`,
+    `damaged`, `lost`) and *summary* (text). The record type is made for you;
+    you can see it later under **Record types**.
+
+    Fill in the first sample while you're there (step 3), or add it next.
 
 === "CLI"
 
@@ -44,7 +49,8 @@ A collection is the binder. It says which record types may go in it.
 
 === "Web UI"
 
-    **Collections → New collection**, named `survey-2024`, with **Sample** ticked.
+    Already done above: starting with a record listed *Sample* on
+    `survey-2024`. For a later type, **Edit** the collection and tick it.
 
 === "CLI"
 

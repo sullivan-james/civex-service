@@ -94,7 +94,8 @@ export function CollectionScopeFields({
       >
         {live.length === 0 ? (
           <p className="text-sm text-fg-muted">
-            No record types yet — create one first.
+            No record types yet. Once the collection exists, start it with a
+            record and the type is made for you.
           </p>
         ) : (
           <ul className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border p-2">

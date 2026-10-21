@@ -52,6 +52,7 @@ import { useWorkflows } from '../../hooks/useWorkflows'
 import { useExplorer, type ExplorerScope } from './useExplorer'
 import { useCollection } from '../../hooks/useCollections'
 import { usePermissions } from '../../hooks/useMe'
+import { StartWithRecordDialog } from './StartWithRecordDialog'
 import { recordRecent } from '../../hooks/usePins'
 import { placeTarget, viewTarget } from '../../utils/navTargets'
 import { viewPatch } from '../../utils/explorerState'
@@ -314,6 +315,7 @@ export function RecordsExplorer({
   // What this person may do here: the controls stay, off, saying why.
   const { can, why } = usePermissions()
   const mayWrite = can('write_records', collection?.id)
+  const [starting, setStarting] = useState(false)
   const mayDelete = can('delete', collection?.id)
   const starters = dataset
     ? (x.schemas ?? []).filter(
@@ -404,16 +406,36 @@ export function RecordsExplorer({
     // top-level schemas here instead, or there is no way to create the first
     // record (a child schema needs a parent record, so it can't start one).
     const noSchemas = !!collection && collection.schemas.length === 0
+    const mayStart = mayWrite && can('change_structure')
     return (
       <div className="space-y-3">
         <EmptyState
           title="No records yet"
           message={
             noSchemas
-              ? 'This collection has no record types yet. Edit the collection and choose the record types it is for.'
+              ? mayStart
+                ? 'Say what you record here and add the first one. The record type is made for you; its fields are added on the record.'
+                : 'This collection has no record types yet. Someone who can change the structure can start it with a record, or edit the collection and choose the record types it is for.'
               : (emptyHint ?? 'Add a record to get started.')
           }
+          action={
+            noSchemas && mayStart ? (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => setStarting(true)}
+              >
+                <Plus size={14} /> Start with a record
+              </Button>
+            ) : undefined
+          }
         />
+        {starting && collection && (
+          <StartWithRecordDialog
+            collection={collection}
+            onClose={() => setStarting(false)}
+          />
+        )}
         {(x.rootId ? childStarters : starters).length > 0 && (
           <div className="flex justify-center">{newMenu}</div>
         )}

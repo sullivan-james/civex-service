@@ -436,6 +436,8 @@ export function RecordFieldGrid({
   extra,
   marked,
   readOnly,
+  footer,
+  empty,
 }: {
   fields: Field[]
   data: Record<string, unknown>
@@ -452,92 +454,104 @@ export function RecordFieldGrid({
   extra?: (field: Field) => ReactNode
   /** Fields (by name) to draw attention to, such as ones a sync did not take. */
   marked?: ReadonlySet<string>
+  /** Under the rows: e.g. the button that adds a field to the record type. */
+  footer?: ReactNode
+  /** Shown instead of the rows when the record type has no fields yet. */
+  empty?: ReactNode
 }) {
   return (
-    <dl className="grid grid-cols-[minmax(8rem,14rem)_1fr] items-start gap-x-6 gap-y-3">
-      {fields.map((field) => {
-        const numeric = field.type === 'integer' || field.type === 'float'
-        const hints = restrictionHints(field)
-        return (
-          <div key={field.name} className="contents">
-            <dt
-              className={`pt-1 ${marked?.has(field.name) ? '-ml-2 border-l-2 border-attention pl-2' : ''}`}
-              data-marked={marked?.has(field.name) ? 'true' : undefined}
-              title={`${field.name} (${field.type})`}
-            >
-              <span className="text-fg-muted">
-                {displayLabel(field.name, field.label)}
-              </span>
-              {field.required && (
-                <span
-                  className="ml-1 text-attention"
-                  title="Required"
-                  aria-label="required"
-                >
-                  *
+    <>
+      {fields.length === 0 && empty && (
+        <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-fg-muted">
+          {empty}
+        </p>
+      )}
+      <dl className="grid grid-cols-[minmax(8rem,14rem)_1fr] items-start gap-x-6 gap-y-3">
+        {fields.map((field) => {
+          const numeric = field.type === 'integer' || field.type === 'float'
+          const hints = restrictionHints(field)
+          return (
+            <div key={field.name} className="contents">
+              <dt
+                className={`pt-1 ${marked?.has(field.name) ? '-ml-2 border-l-2 border-attention pl-2' : ''}`}
+                data-marked={marked?.has(field.name) ? 'true' : undefined}
+                title={`${field.name} (${field.type})`}
+              >
+                <span className="text-fg-muted">
+                  {displayLabel(field.name, field.label)}
                 </span>
-              )}
-              {hints.length > 0 && (
-                <span className="block text-xs text-fg-subtle">
-                  {hints.join(' · ')}
-                </span>
-              )}
-            </dt>
-            <dd
-              className={`min-w-0 break-words text-fg ${numeric ? 'font-mono' : ''}`}
-            >
-              {readOnly ? (
-                <div className="min-h-8 py-1" title={readOnly}>
-                  <FieldValue
-                    value={data[field.name]}
-                    field={field}
-                    referenceLabels={referenceLabels}
-                    referenceCollections={referenceCollections}
-                  />
-                </div>
-              ) : (
-                <EditableValue
-                  field={field}
-                  value={data[field.name]}
-                  referenceLabels={referenceLabels}
-                  referenceCollections={referenceCollections}
-                  onSave={(v) => onSave(field.name, v)}
-                />
-              )}
-              {field.type === 'geo' && isGeometry(data[field.name]) && (
-                <LocatorMap
-                  bbox={
-                    Array.isArray(field.restrictions?.bbox)
-                      ? (field.restrictions.bbox as number[])
-                      : null
-                  }
-                  location={data[field.name] as Geometry}
-                  className="mt-2 max-w-xs"
-                />
-              )}
-              {extra?.(field)}
-              {errors?.[field.name] && (
-                <div className="mt-1 flex items-start gap-2 rounded-md border border-danger-subtle-border bg-danger-subtle px-3 py-2">
-                  <div className="min-w-0 flex-1 font-sans">
-                    <FormError
-                      message={errors[field.name].message}
-                      technical={errors[field.name].technical}
+                {field.required && (
+                  <span
+                    className="ml-1 text-attention"
+                    title="Required"
+                    aria-label="required"
+                  >
+                    *
+                  </span>
+                )}
+                {hints.length > 0 && (
+                  <span className="block text-xs text-fg-subtle">
+                    {hints.join(' · ')}
+                  </span>
+                )}
+              </dt>
+              <dd
+                className={`min-w-0 break-words text-fg ${numeric ? 'font-mono' : ''}`}
+              >
+                {readOnly ? (
+                  <div className="min-h-8 py-1" title={readOnly}>
+                    <FieldValue
+                      value={data[field.name]}
+                      field={field}
+                      referenceLabels={referenceLabels}
+                      referenceCollections={referenceCollections}
                     />
                   </div>
-                  {onDismissError && (
-                    <IconButton
-                      icon={X}
-                      variant="danger"
-                      onClick={onDismissError}
-                      aria-label="Dismiss error"
-                    />
-                  )}
-                </div>
-              )}
-            </dd>
-          </div>
-        )
-      })}
-    </dl>
+                ) : (
+                  <EditableValue
+                    field={field}
+                    value={data[field.name]}
+                    referenceLabels={referenceLabels}
+                    referenceCollections={referenceCollections}
+                    onSave={(v) => onSave(field.name, v)}
+                  />
+                )}
+                {field.type === 'geo' && isGeometry(data[field.name]) && (
+                  <LocatorMap
+                    bbox={
+                      Array.isArray(field.restrictions?.bbox)
+                        ? (field.restrictions.bbox as number[])
+                        : null
+                    }
+                    location={data[field.name] as Geometry}
+                    className="mt-2 max-w-xs"
+                  />
+                )}
+                {extra?.(field)}
+                {errors?.[field.name] && (
+                  <div className="mt-1 flex items-start gap-2 rounded-md border border-danger-subtle-border bg-danger-subtle px-3 py-2">
+                    <div className="min-w-0 flex-1 font-sans">
+                      <FormError
+                        message={errors[field.name].message}
+                        technical={errors[field.name].technical}
+                      />
+                    </div>
+                    {onDismissError && (
+                      <IconButton
+                        icon={X}
+                        variant="danger"
+                        onClick={onDismissError}
+                        aria-label="Dismiss error"
+                      />
+                    )}
+                  </div>
+                )}
+              </dd>
+            </div>
+          )
+        })}
+      </dl>
+      {footer}
+    </>
   )
 }

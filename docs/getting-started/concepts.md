@@ -32,7 +32,7 @@ flowchart LR
 
 | | How many | Looks like | Made where |
 |---|---|---|---|
-| <span class="rt">Record type</span> | A handful per project | *Sample*, *Site*, *Visit* | **Record types** in the sidebar, once |
+| <span class="rt">Record type</span> | A handful per project | *Sample*, *Site*, *Visit* | From a record: **Start with a record** in an empty collection, then **Add a field to every sample…** on the record. Or **Record types** in the sidebar |
 | <span class="coll">Collection</span> | One per study or season | *survey-2024* | **Collections → New collection** |
 | <span class="rec">Record</span> | Hundreds or thousands | *Sample 03*, *North Ridge* | Inside a collection: **New ▸ New sample** |
 

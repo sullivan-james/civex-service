@@ -261,14 +261,43 @@ describe('RecordsExplorer', () => {
       expect(item(/New recording/)).not.toBeInTheDocument()
     })
 
-    it('says so when no schemas are enabled yet', async () => {
+    it('starts from a record when no record types are enabled yet', async () => {
       override = emptyCollection([])
+      renderExplorer({}, '/collections/hb')
+      expect(
+        await screen.findByText(/Say what you record here/),
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByRole('button', { name: /^New/ }),
+      ).not.toBeInTheDocument()
+      await userEvent.click(
+        screen.getByRole('button', { name: /Start with a record/ }),
+      )
+      // the dialog asks for the kind of thing, in the record type's words
+      expect(
+        await screen.findByRole('dialog', { name: /Start with a record/ }),
+      ).toBeInTheDocument()
+      expect(screen.getByLabelText(/Record type label/)).toBeInTheDocument()
+    })
+
+    it('only offers to start when this person may change the structure', async () => {
+      override = (url) => {
+        if (url.pathname === '/api/me')
+          return json({
+            account: null,
+            permissions: {
+              actions: { read: ['project'], write_records: ['project'] },
+              all: {},
+            },
+          })
+        return emptyCollection([])(url)
+      }
       renderExplorer({}, '/collections/hb')
       expect(
         await screen.findByText(/has no record types yet/),
       ).toBeInTheDocument()
       expect(
-        screen.queryByRole('button', { name: /New/ }),
+        screen.queryByRole('button', { name: /Start with a record/ }),
       ).not.toBeInTheDocument()
     })
   })

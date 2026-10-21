@@ -19,6 +19,7 @@ import { useAvailableExports } from '../hooks/useExportDefinitions'
 import { describeDefinition } from '../utils/exportBuilder'
 import {
   Badge,
+  Button,
   DetailSkeleton,
   ErrorState,
   Page,
@@ -49,6 +50,9 @@ import { underRecord } from '../utils/auditFilter'
 import { DeletedFieldValues } from '../components/records/DeletedFieldValues'
 import { RecordFieldGrid } from '../components/records/RecordFieldGrid'
 import { usePermissions } from '../hooks/useMe'
+import { AddFieldDialog } from '../components/schemas/AddFieldDialog'
+import { displayLabel } from '../utils/naming'
+import { Plus } from '../components/ui/icons'
 import { MergeView } from '../components/sync/MergeView'
 import { ReviewStepper } from '../components/sync/ReviewStepper'
 import { RecordConflicts } from '../components/sync/RecordConflicts'
@@ -80,6 +84,7 @@ export default function RecordDetailPage() {
   const { data: collection } = useCollection(record?.dataset_id ?? '')
   const { can, why } = usePermissions()
   const { data: schemas } = useSchemas()
+  const [addingField, setAddingField] = useState(false)
   const { data: presets } = useAvailableExports(
     record ? { schema: record.schema_name } : null,
   )
@@ -354,7 +359,33 @@ export default function RecordDetailPage() {
               errors={saveErrors}
               onDismissError={() => updateRecord.reset()}
               marked={conflictLayout.marked}
+              footer={
+                schema && (
+                  <div className="mt-3">
+                    <Button
+                      size="sm"
+                      onClick={() => setAddingField(true)}
+                      disabled={!can('change_structure')}
+                      title={
+                        can('change_structure')
+                          ? undefined
+                          : why('change_structure')
+                      }
+                    >
+                      <Plus size={14} /> Add a field to every{' '}
+                      {displayLabel(schema.name, schema.label).toLowerCase()}…
+                    </Button>
+                  </div>
+                )
+              }
             />
+            {addingField && schema && (
+              <AddFieldDialog
+                schema={schema}
+                allSchemas={schemas}
+                onClose={() => setAddingField(false)}
+              />
+            )}
             <DeletedFieldValues fields={record.deleted_fields ?? []} />
           </UploadCollectionContext.Provider>
         </TabPanel>

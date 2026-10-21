@@ -57,6 +57,19 @@ beforeEach(() => {
           data: {},
           ancestors: [],
         })
+      if (url.pathname === '/api/schemas/field-types')
+        return json({
+          types: [],
+          kinds: [
+            {
+              key: 'text',
+              label: 'Text',
+              type: 'string',
+              description: 'Words',
+              focus: null,
+            },
+          ],
+        })
       if (url.pathname === '/api/schemas') return json(SCHEMAS)
       if (url.pathname === '/api/collections/hb')
         return json({ id: 'c', name: 'hb', description: null, record_count: 0 })
@@ -115,6 +128,22 @@ describe('NewRecordPage', () => {
       </QueryClientProvider>,
     )
   }
+
+  it('adds a field to every record of the type from the form', async () => {
+    const user = userEvent.setup()
+    renderAt(['/collections/hb/new?schema=encounter'])
+    await user.click(
+      await screen.findByRole('button', {
+        name: /Add a field to every encounter/,
+      }),
+    )
+    const dialog = await screen.findByRole('dialog', {
+      name: /Add a field to every encounter/,
+    })
+    expect(dialog).toBeInTheDocument()
+    // the same kind picker as the record type's page
+    expect(await screen.findByText('Text')).toBeInTheDocument()
+  })
 
   it('Cancel returns to where the person came from', async () => {
     const user = userEvent.setup()
