@@ -23,7 +23,6 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
     <CreateResourceModal
       resourceLabel="record type"
       slugKind="Schema"
-      hint="A record type is a blank form: the fields one kind of thing has, such as a site or a sample. You design it once, then add a record each time you have another one. If what you want has the same fields as a type you already have, add a record to a collection instead."
       onClose={onClose}
       isPending={create.isPending}
       error={create.error}
@@ -129,7 +128,7 @@ export default function SchemasPage() {
         isLoading={isLoading}
         error={error ? errorMessage(error) : undefined}
         emptyTitle="No record types yet"
-        emptyMessage="A record type is a blank form for one kind of thing you record, such as a site or a sample. Make one per kind, then add records of it to a collection."
+        emptyMessage="Made when you press New ▸ Something else… in a collection."
         emptyAction={
           <Button variant="primary" onClick={() => setShowCreate(true)}>
             New record type

@@ -13,7 +13,7 @@ import { HomeShortcuts } from '../components/home/HomeShortcuts'
 import { DesktopShortcut } from '../components/settings/DesktopShortcut'
 
 const ONBOARDING_STEPS = [
-  { to: '/collections', title: 'Start a collection and add a record' },
+  { to: '/collections', title: 'Start a collection' },
   { to: '/collections', title: 'Bring in a spreadsheet or folder' },
   { to: '/runs', title: 'Automate the rest' },
 ]

@@ -28,9 +28,7 @@ import { ScanText } from '../components/ui/icons'
 import { displayLabel } from '../utils/naming'
 import { errorMessage } from '../lib/errors'
 import { useBack } from '../hooks/useBack'
-import { usePermissions } from '../hooks/useMe'
-import { AddFieldDialog } from '../components/schemas/AddFieldDialog'
-import { Plus } from '../components/ui/icons'
+import { AddFieldRow } from '../components/schemas/AddFieldRow'
 
 const PARENT = '__parent__'
 
@@ -48,12 +46,7 @@ export default function NewRecordPage() {
   const [extracting, setExtracting] = useState<string | null>(null)
   // Bumped after "Add and add another", so every field starts again blank.
   const [round, setRound] = useState(0)
-  const [addingField, setAddingField] = useState(false)
   const toast = useToast()
-  const { can, why } = usePermissions()
-  const cannotChange = can('change_structure')
-    ? undefined
-    : why('change_structure')
 
   const { data: collection, isLoading, error } = useCollection(id!)
   const { data: schemas } = useSchemas()
@@ -208,25 +201,7 @@ export default function NewRecordPage() {
               }
               errors={errors}
               onDismissError={() => createRecord.reset()}
-              empty={
-                <>
-                  This form has no fields yet. Add the first one: every{' '}
-                  {label.toLowerCase()} will have it.
-                </>
-              }
-              footer={
-                <div className="mt-3">
-                  <Button
-                    size="sm"
-                    onClick={() => setAddingField(true)}
-                    disabled={!!cannotChange}
-                    title={cannotChange}
-                  >
-                    <Plus size={14} /> Add a field to every{' '}
-                    {label.toLowerCase()}…
-                  </Button>
-                </div>
-              }
+              footer={<AddFieldRow schema={schema} allSchemas={schemas} />}
               extra={(field) => {
                 if (
                   field.name === PARENT ||
@@ -261,13 +236,6 @@ export default function NewRecordPage() {
             />
           </Card>
         </UploadCollectionContext.Provider>
-        {addingField && (
-          <AddFieldDialog
-            schema={schema}
-            allSchemas={schemas}
-            onClose={() => setAddingField(false)}
-          />
-        )}
         <div className="flex gap-2">
           <Button
             variant="primary"

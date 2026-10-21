@@ -129,20 +129,13 @@ describe('NewRecordPage', () => {
     )
   }
 
-  it('adds a field to every record of the type from the form', async () => {
+  it('adds a field in place, as the last row of the form', async () => {
     const user = userEvent.setup()
     renderAt(['/collections/hb/new?schema=encounter'])
-    await user.click(
-      await screen.findByRole('button', {
-        name: /Add a field to every encounter/,
-      }),
-    )
-    const dialog = await screen.findByRole('dialog', {
-      name: /Add a field to every encounter/,
-    })
-    expect(dialog).toBeInTheDocument()
-    // the same kind picker as the record type's page
+    await user.click(await screen.findByRole('button', { name: /Add field/ }))
+    // the same kind picker as the record type's page, under the rows
     expect(await screen.findByText('Text')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('Cancel returns to where the person came from', async () => {

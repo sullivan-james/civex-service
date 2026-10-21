@@ -32,9 +32,9 @@ flowchart LR
 
 | | How many | Looks like | Made where |
 |---|---|---|---|
-| <span class="rt">Record type</span> | A handful per project | *Sample*, *Site*, *Visit* | From a record: **Start with a record** in an empty collection, then **Add a field to every sample…** on the record. Or **Record types** in the sidebar |
+| <span class="rt">Record type</span> | A handful per project | *Sample*, *Site*, *Visit* | **New ▸ Something else…** in a collection, then **+ Add field** on the record. **Record types** in the sidebar shows them all |
 | <span class="coll">Collection</span> | One per study or season | *survey-2024* | **Collections → New collection** |
-| <span class="rec">Record</span> | Hundreds or thousands | *Sample 03*, *North Ridge* | Inside a collection: **New ▸ New sample** |
+| <span class="rec">Record</span> | Hundreds or thousands | *Sample 03*, *North Ridge* | Inside a collection: **New ▸ Sample** |
 
 ## Which one do I want?
 
@@ -48,7 +48,7 @@ Ask yourself about the thing you're about to create:
   a new <span class="rec">record</span> of that type, not a new type.
 
 !!! warning "If you're making a new record type every time you add data, stop"
-    You want **New ▸ New sample** inside your <span class="coll">collection</span>.
+    You want **New ▸ Sample** inside your <span class="coll">collection</span>.
     A record type is the form, not the data. A project with one record type per
     measurement has no way to list, filter or export them together; a project with
     one *Sample* type and five hundred sample records does.
@@ -70,9 +70,9 @@ flowchart LR
     classDef rec fill:#dcfce7,stroke:#14532d,color:#14532d
 ```
 
-The top row is the three record types, designed once. Everything below is
-records. You choose the parent when you create the type (**Goes inside**), and
-it can't be changed later.
+The top row is the three record types. Everything below is records. Where you
+press **New** decides the nesting: **New ▸ Something else…** inside a site
+makes a kind that goes inside sites. It can't be moved later.
 
 ## The same example everywhere
 

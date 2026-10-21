@@ -25,6 +25,7 @@ import {
   TableSkeleton,
   SegmentedControl,
   Field,
+  Skeleton,
 } from '../ui'
 import { ChevronDown, Columns3, Download, Plus, Upload } from '../ui/icons'
 import { toTableRows } from '../records/tableRows'
@@ -52,7 +53,7 @@ import { useWorkflows } from '../../hooks/useWorkflows'
 import { useExplorer, type ExplorerScope } from './useExplorer'
 import { useCollection } from '../../hooks/useCollections'
 import { usePermissions } from '../../hooks/useMe'
-import { StartWithRecordDialog } from './StartWithRecordDialog'
+import { NewKindDialog } from './NewKindDialog'
 import { recordRecent } from '../../hooks/usePins'
 import { placeTarget, viewTarget } from '../../utils/navTargets'
 import { viewPatch } from '../../utils/explorerState'
@@ -315,7 +316,8 @@ export function RecordsExplorer({
   // What this person may do here: the controls stay, off, saying why.
   const { can, why } = usePermissions()
   const mayWrite = can('write_records', collection?.id)
-  const [starting, setStarting] = useState(false)
+  const [newKind, setNewKind] = useState(false)
+  const mayAddKind = mayWrite && can('change_structure')
   const mayDelete = can('delete', collection?.id)
   const starters = dataset
     ? (x.schemas ?? []).filter(
@@ -370,6 +372,15 @@ export function RecordsExplorer({
               `/collections/${dataset}/new?${new URLSearchParams({ schema: s.name })}`,
             ),
         })),
+        ...(mayAddKind
+          ? [
+              {
+                label: 'Something else…',
+                icon: Plus,
+                onClick: () => setNewKind(true),
+              },
+            ]
+          : []),
         {
           label: 'Import data…',
           icon: Upload,
@@ -400,45 +411,37 @@ export function RecordsExplorer({
       </Button>
     ))
 
+  const kindDialog = newKind && collection && (
+    <NewKindDialog
+      collection={collection}
+      schemas={x.schemas ?? []}
+      within={
+        x.rootId && x.scopeSchema
+          ? { id: x.rootId, schema: x.scopeSchema }
+          : null
+      }
+      onClose={() => setNewKind(false)}
+    />
+  )
+
+  // Until the collection and its counts have answered, nothing is listed and
+  // there is no New: a menu opened now would be replaced by the loaded one.
+  if (!listed && (!x.countsLoaded || (dataset && !collection)))
+    return <Skeleton className="h-32 w-full" />
+
   if (!listed && !x.page.isLoading && x.levels.length === 0) {
     // Levels come from record counts, so an empty collection has none and the
     // list's own "Add" button never renders -- offer the collection's own
     // top-level schemas here instead, or there is no way to create the first
     // record (a child schema needs a parent record, so it can't start one).
-    const noSchemas = !!collection && collection.schemas.length === 0
-    const mayStart = mayWrite && can('change_structure')
     return (
       <div className="space-y-3">
         <EmptyState
-          title="No records yet"
-          message={
-            noSchemas
-              ? mayStart
-                ? 'Say what you record here and add the first one. The record type is made for you; its fields are added on the record.'
-                : 'This collection has no record types yet. Someone who can change the structure can start it with a record, or edit the collection and choose the record types it is for.'
-              : (emptyHint ?? 'Add a record to get started.')
-          }
-          action={
-            noSchemas && mayStart ? (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setStarting(true)}
-              >
-                <Plus size={14} /> Start with a record
-              </Button>
-            ) : undefined
-          }
+          title="Nothing here yet"
+          message={emptyHint}
+          action={newMenu || undefined}
         />
-        {starting && collection && (
-          <StartWithRecordDialog
-            collection={collection}
-            onClose={() => setStarting(false)}
-          />
-        )}
-        {(x.rootId ? childStarters : starters).length > 0 && (
-          <div className="flex justify-center">{newMenu}</div>
-        )}
+        {kindDialog}
       </div>
     )
   }
@@ -820,6 +823,7 @@ export function RecordsExplorer({
           onClose={() => setConfirmDelete(false)}
         />
       )}
+      {kindDialog}
     </div>
   )
 }

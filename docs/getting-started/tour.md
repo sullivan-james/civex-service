@@ -14,14 +14,12 @@ You do this **once**. Every sample you add afterwards uses this form.
 === "Web UI"
 
     `civex serve --open`, then **Collections → New collection**, named
-    `survey-2024`. It has no record types yet, so its page offers **Start
-    with a record**: type *Sample* and you land on a blank sample. Use **Add a
-    field to every sample…** four times: *number* (whole number, required),
-    *depth* (number, unit `m`), *condition* (text, allowed values `good`,
-    `damaged`, `lost`) and *summary* (text). The record type is made for you;
-    you can see it later under **Record types**.
-
-    Fill in the first sample while you're there (step 3), or add it next.
+    `survey-2024`. On its page press **New ▸ Something else…**, type *Sample*,
+    and a blank sample opens. Its form ends with **+ Add field**: add *number*
+    (whole number, required), *depth* (number, unit `m`), *condition* (text,
+    allowed values `good`, `damaged`, `lost`) and *summary* (text). Each one is
+    added to every sample, and together they are the Sample record type, which
+    you can see under **Record types** whenever you want.
 
 === "CLI"
 
@@ -49,8 +47,8 @@ A collection is the binder. It says which record types may go in it.
 
 === "Web UI"
 
-    Already done above: starting with a record listed *Sample* on
-    `survey-2024`. For a later type, **Edit** the collection and tick it.
+    Already done: the collection was made first, and *Sample* was listed on it
+    when you pressed **New ▸ Something else…**.
 
 === "CLI"
 
@@ -64,7 +62,7 @@ This is the step you repeat: one record per sample, on the same form.
 
 === "Web UI"
 
-    Open `survey-2024`, then **New ▸ New sample**. Fill in number, depth and
+    Open `survey-2024`, then **New ▸ Sample**. Fill in number, depth and
     condition, leave summary blank, and save. **Add and add another** keeps the
     form open for the next one.
 
@@ -86,9 +84,8 @@ This is the step you repeat: one record per sample, on the same form.
     ```
 
 !!! tip "Not a new record type"
-    The second sample is **New ▸ New sample** again, not a second record type.
-    A record type is made once per *kind* of thing; a record is made once per
-    *thing*.
+    The second sample is **New ▸ Sample** again. **Something else…** is only
+    for a kind of thing the collection doesn't have yet.
 
 ## 4. A workflow: fill a field automatically
 

@@ -437,7 +437,6 @@ export function RecordFieldGrid({
   marked,
   readOnly,
   footer,
-  empty,
 }: {
   fields: Field[]
   data: Record<string, unknown>
@@ -454,18 +453,11 @@ export function RecordFieldGrid({
   extra?: (field: Field) => ReactNode
   /** Fields (by name) to draw attention to, such as ones a sync did not take. */
   marked?: ReadonlySet<string>
-  /** Under the rows: e.g. the button that adds a field to the record type. */
+  /** Under the rows: the "+ Add field" row on a record form. */
   footer?: ReactNode
-  /** Shown instead of the rows when the record type has no fields yet. */
-  empty?: ReactNode
 }) {
   return (
     <>
-      {fields.length === 0 && empty && (
-        <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-fg-muted">
-          {empty}
-        </p>
-      )}
       <dl className="grid grid-cols-[minmax(8rem,14rem)_1fr] items-start gap-x-6 gap-y-3">
         {fields.map((field) => {
           const numeric = field.type === 'integer' || field.type === 'float'

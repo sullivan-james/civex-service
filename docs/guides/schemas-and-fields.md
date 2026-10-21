@@ -47,14 +47,12 @@ Location    location    geo                 ↑ site
 Three record types, designed once. From here on the project only gets records:
 sites, visits and samples.
 
-**In the app** you rarely go to Record types for this. An empty collection
-offers **Start with a record**: say what you record (*Sample*) and you land on
-a blank sample with **Add a field to every sample…**, which is the same field
-editor as the type's page. That button is on every record of the type, so a
-field missing from the form is added where you notice it. **Record types** in
-the sidebar shows the whole form, reorders fields and sets the rules. Type the
-label and the name fills itself in; the rules offered depend on the kind of
-field you pick.
+**In the app** a record type starts from the list: **New ▸ Something else…**
+in a collection (or inside a record, for a kind that goes inside it), then
+**+ Add field** at the end of the record's form. Each field is added to every
+record of the kind. **Record types** in the sidebar shows the whole form,
+reorders fields and sets the rules. Type the label and the name fills itself
+in; the rules offered depend on the kind of field you pick.
 
 ## Field types
 
