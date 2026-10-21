@@ -47,7 +47,8 @@ class DatasetService:
         self._on_purge = on_purge
 
     def _check_schema_list(self, names: list[str]) -> list[str]:
-        """Every name must be a live schema, and every listed child schema's
+        """A collection with no list holds records of every schema. One with a
+        list holds only those: every name must be a live schema, and every listed child schema's
         ancestors must be listed too: a child record's parent record lives in
         the same collection, so the collection has to be able to hold it."""
         unique = sorted(set(names))
@@ -177,7 +178,13 @@ class DatasetService:
         schema_names: list[str] | None = None
         if schemas is not None:
             schema_names = self._check_schema_list(schemas)
-            in_use = self._datasets.schemas_in_use(dataset.id) - set(schema_names)
+            # An empty list is "every schema", so clearing it never strands a
+            # record; a list of some schemas must keep the ones with records.
+            in_use = (
+                self._datasets.schemas_in_use(dataset.id) - set(schema_names)
+                if schema_names
+                else set()
+            )
             if in_use:
                 raise ValidationError(
                     f"Cannot remove schema '{sorted(in_use)[0]}' from "

@@ -16,9 +16,9 @@ a number, in metres, not below 0". You design it once.
 **A <span class="rec">record</span> is one filled-in copy of that form.** Every time you
 have another sample, you fill in a new copy. You don't redesign the form.
 
-**A <span class="coll">collection</span> is the binder the filled-in forms go in.** It
-says which schemas may go in it, and that's all it does. One per study,
-site or season, as suits you.
+**A <span class="coll">collection</span> is the binder the filled-in forms go in.**
+Forms of any kind go in any binder. One per study, site or season, as suits
+you.
 
 ```mermaid
 flowchart LR
@@ -31,7 +31,7 @@ flowchart LR
 
 | | How many | Looks like | Made where |
 |---|---|---|---|
-| <span class="rt">Schema</span> | A handful per project | *Sample*, *Site*, *Visit* | **New ▸ New schema…** in a collection, then **+ Add field** on the record. **Schemas** in the sidebar shows them all |
+| <span class="rt">Schema</span> | A handful per project | *Sample*, *Site*, *Visit* | **New schema…** in a collection (its own button, apart from New) takes you to the Schemas page with the collection remembered; or **Schemas** in the sidebar |
 | <span class="coll">Collection</span> | One per study or season | *survey-2024* | **Collections → New collection** |
 | <span class="rec">Record</span> | Hundreds or thousands | *Sample 03*, *North Ridge* | Inside a collection: **New ▸ Sample** |
 
@@ -70,8 +70,8 @@ flowchart LR
 ```
 
 The top row is the three schemas. Everything below is records. Where you
-press **New** decides the nesting: **New ▸ New schema…** inside a site
-makes a kind that goes inside sites. It can't be moved later.
+press **New schema…** decides the nesting: inside a site it starts a schema
+that goes inside sites. It can't be moved later.
 
 ## The same example everywhere
 

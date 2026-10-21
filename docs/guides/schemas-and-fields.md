@@ -47,12 +47,13 @@ Location    location    geo                 ↑ site
 Three schemas, designed once. From here on the project only gets records:
 sites, visits and samples.
 
-**In the app** a schema starts from the list: **New ▸ New schema…**
-in a collection (or inside a record, for a kind that goes inside it), then
-**+ Add field** at the end of the record's form. Each field is added to every
-record of the kind. **Schemas** in the sidebar shows the whole form,
-reorders fields and sets the rules. Type the label and the name fills itself
-in; the rules offered depend on the kind of field you pick.
+**In the app** a schema is made on the **Schemas** page. From a collection,
+**New schema…** (its own button, apart from New) takes you there with the collection remembered (and,
+inside a record, the schema the new one goes inside), so the new schema is
+listed where you were. Its page is where fields are added; **+ Add field** at
+the end of any record's form adds one from there too, to every record of the
+kind. Type the label and the name fills itself in; the rules offered depend on
+the kind of field you pick.
 
 ## Field types
 

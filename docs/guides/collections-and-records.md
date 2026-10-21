@@ -1,17 +1,16 @@
 # Collections & records
 
-A **collection** is the binder: it holds records, one collection per study or
-season, as suits you. It says which [schemas](schemas-and-fields.md) its
-records may be (`--schema`), and
-who may link to them. A **record** is one filled-in form of a schema: this
+A **collection** is the binder: it holds records of any
+[schema](schemas-and-fields.md), one collection per study or season, as suits
+you, and says who may link to them. A **record** is one filled-in form of a schema: this
 site, this sample. If the two blur together, read
 [Schemas, collections and records](../getting-started/concepts.md).
 
 ## Collections
 
 ```bash
-civex collection create survey-2024 --schema site --schema visit \
-  --description "2024 field season" --timezone Europe/London
+civex collection create survey-2024 --description "2024 field season" \
+  --timezone Europe/London
 civex collection show survey-2024
 ```
 
@@ -21,24 +20,25 @@ survey-2024
   2024 field season
   Timezone  Europe/London
   Scope     local
-  Schemas   site, visit
 ```
 
 | Setting | Means |
 |---|---|
-| **Schemas** (`--schema`, `add-schema`) | Records here can only be of these. A new collection with none holds nothing. A type that goes inside another needs its parent listed too (`add-schema` adds parents for you). A type with records here can't be removed |
 | **Scope** (`--scope`) | `local` (default): only records here can link to these. `global`: any collection can, for shared lists such as species, instruments or people |
 | **Timezone** (`--timezone`) | How times without a UTC offset are read and shown. See [Times and timezones](schemas-and-fields.md#times-and-timezones) |
 
 ```bash
-civex collection add-schema survey-2024 sample
-civex collection create taxonomy --scope global --schema species
+civex collection create taxonomy --scope global
 civex collection list
 ```
 
 A `reference` field links to records in its own collection or in a global one,
 never in another local collection. A global collection that others link to can't
 be made local or deleted.
+
+Every collection holds records of every schema. For a script that wants a
+collection limited to some, `--schema` (and `add-schema`) give it a list of
+its own; nothing in the app asks for one.
 
 **In the app:** **Collections → New collection**, and **Edit** on a collection's
 page.

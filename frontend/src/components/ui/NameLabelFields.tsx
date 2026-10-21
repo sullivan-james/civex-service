@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from './Button'
 import { Field } from './Field'
 import { Input } from './Input'
 import { nameError, slugify } from '../../utils/naming'
@@ -39,6 +40,9 @@ export function NameLabelFields({
   onEnter,
 }: NameLabelFieldsProps) {
   const [derive, setDerive] = useState(deriveName)
+  // The name is for workflows and CSV headers; most people never need to
+  // see it, so while it follows the label it is one line with a way in.
+  const [showName, setShowName] = useState(!deriveName)
   const error = value.name ? nameError(value.name) : null
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -62,24 +66,39 @@ export function NameLabelFields({
           autoFocus={autoFocus}
         />
       </Field>
-      <Field
-        label={`${kind} name`}
-        span={4}
-        error={error}
-        info="Used by workflows and CSV headers."
-      >
-        <Input
-          size="sm"
-          className="font-mono"
-          value={value.name}
-          onChange={(e) => {
-            setDerive(false)
-            onChange({ label: value.label, name: e.target.value })
-          }}
-          onKeyDown={handleKeyDown}
-          placeholder={kind === 'Field' ? 'visited_on' : 'soil_sample'}
-        />
-      </Field>
+      {showName || error ? (
+        <Field
+          label={`${kind} name`}
+          span={4}
+          error={error}
+          info="Used by workflows and CSV headers."
+        >
+          <Input
+            size="sm"
+            className="font-mono"
+            value={value.name}
+            onChange={(e) => {
+              setDerive(false)
+              onChange({ label: value.label, name: e.target.value })
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder={kind === 'Field' ? 'visited_on' : 'soil_sample'}
+          />
+        </Field>
+      ) : (
+        <p className="col-span-4 text-xs text-fg-subtle">
+          Name for workflows and CSV headers:{' '}
+          <span className="font-mono">{value.name || '…'}</span>{' '}
+          <Button
+            variant="link"
+            size="sm"
+            className="text-xs"
+            onClick={() => setShowName(true)}
+          >
+            change
+          </Button>
+        </p>
+      )}
     </>
   )
 }

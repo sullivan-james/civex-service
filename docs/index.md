@@ -40,7 +40,7 @@ flowchart LR
 |---|---|---|
 | <span class="rt">Schema</span> | A blank form: the fields one kind of thing has, designed once. Called a *schema* in the CLI and API. Types can go inside other types | Site › Visit › Sample |
 | **Field** | One box on the form, with a type and rules | `depth` (number, in m), `photo` (file) |
-| <span class="coll">Collection</span> | The binder: holds records of the types it lists | `survey-2024` |
+| <span class="coll">Collection</span> | The binder: holds records of any schema | `survey-2024` |
 | <span class="rec">Record</span> | One filled-in form: this site, this sample | *North Ridge › 2024-03-15 › Sample 03* |
 | **Volume** | A folder or drive where files are stored | `_civex/objects`, `/media/archive` |
 | **Workflow** | YAML steps that run when records change | read a time from a file name |

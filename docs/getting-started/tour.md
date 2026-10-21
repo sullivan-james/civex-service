@@ -14,12 +14,12 @@ You do this **once**. Every sample you add afterwards uses this form.
 === "Web UI"
 
     `civex serve --open`, then **Collections → New collection**, named
-    `survey-2024`. On its page press **New ▸ New schema…**, type *Sample*,
-    and a blank sample opens. Its form ends with **+ Add field**: add *number*
-    (whole number, required), *depth* (number, unit `m`), *condition* (text,
-    allowed values `good`, `damaged`, `lost`) and *summary* (text). Each one is
-    added to every sample, and together they are the Sample schema, which
-    you can see under **Schemas** whenever you want.
+    `survey-2024`. Its page says what to do first: **New schema…**, which
+    takes you to the Schemas page with the collection remembered. **New schema**, labelled
+    *Sample*, opens its page: **Add field** four times, *number* (whole
+    number, required), *depth* (number, unit `m`), *condition* (text, allowed
+    values `good`, `damaged`, `lost`) and *summary* (text). Then back to
+    `survey-2024`.
 
 === "CLI"
 
@@ -41,17 +41,16 @@ You do this **once**. Every sample you add afterwards uses this form.
 
 ## 2. A collection to hold samples
 
-A collection is the binder. It says which schemas may go in it.
+A collection is the binder: it holds records of any schema.
 
 === "Web UI"
 
-    Already done: the collection was made first, and *Sample* was listed on it
-    when you pressed **New ▸ New schema…**.
+    Already done: the collection was made first, in step 1.
 
 === "CLI"
 
     ```bash
-    civex collection create survey-2024 --schema sample --description "2024 field season"
+    civex collection create survey-2024 --description "2024 field season"
     ```
 
 ## 3. A record
@@ -82,8 +81,8 @@ This is the step you repeat: one record per sample, on the same form.
     ```
 
 !!! tip "Not a new schema"
-    The second sample is **New ▸ Sample** again. **New schema…** is only
-    for a kind of thing the collection doesn't have yet.
+    The second sample is **New ▸ Sample** again. **New schema…** is only for
+    a kind of record the collection doesn't have yet.
 
 ## 4. A workflow: fill a field automatically
 

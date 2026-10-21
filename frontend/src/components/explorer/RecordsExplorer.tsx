@@ -53,7 +53,7 @@ import { useWorkflows } from '../../hooks/useWorkflows'
 import { useExplorer, type ExplorerScope } from './useExplorer'
 import { useCollection } from '../../hooks/useCollections'
 import { usePermissions } from '../../hooks/useMe'
-import { NewSchemaDialog } from './NewSchemaDialog'
+import { EmptyCollectionGuide } from './EmptyCollectionGuide'
 import { recordRecent } from '../../hooks/usePins'
 import { placeTarget, viewTarget } from '../../utils/navTargets'
 import { viewPatch } from '../../utils/explorerState'
@@ -69,7 +69,6 @@ export interface RecordsExplorerProps extends ExplorerScope {
   /** Extra buttons on the toolbar (e.g. Import). */
   toolbarActions?: ReactNode
   /** Shown instead of the table when there is nothing in scope at all. */
-  emptyHint?: ReactNode
 }
 
 /** The one way records are browsed: a collection, a single record's
@@ -80,7 +79,6 @@ export interface RecordsExplorerProps extends ExplorerScope {
 export function RecordsExplorer({
   scopeLabel,
   toolbarActions,
-  emptyHint,
   ...scope
 }: RecordsExplorerProps) {
   const x = useExplorer(scope)
@@ -311,13 +309,16 @@ export function RecordsExplorer({
   // The collection's own top-level schemas: where a record can start. Levels
   // come from record counts, so a schema with no records yet has none, and
   // without these there would be no way to create the first of its kind.
-  const enabledSchemas = new Set(collection?.schemas ?? [])
+  // A collection holds records of every schema, unless it was given a list
+  // of its own (the CLI's --schema), in which case only those.
+  const ownList = collection?.schemas ?? []
+  const enabledSchemas = new Set(
+    ownList.length ? ownList : (x.schemas ?? []).map((s) => s.name),
+  )
   const navigate = useNavigate()
   // What this person may do here: the controls stay, off, saying why.
   const { can, why } = usePermissions()
   const mayWrite = can('write_records', collection?.id)
-  const [newKind, setNewKind] = useState(false)
-  const mayAddKind = mayWrite && can('change_structure')
   const mayDelete = can('delete', collection?.id)
   const starters = dataset
     ? (x.schemas ?? []).filter(
@@ -372,15 +373,6 @@ export function RecordsExplorer({
               `/collections/${dataset}/new?${new URLSearchParams({ schema: s.name })}`,
             ),
         })),
-        ...(mayAddKind
-          ? [
-              {
-                label: 'New schema…',
-                icon: Plus,
-                onClick: () => setNewKind(true),
-              },
-            ]
-          : []),
         {
           label: 'Import data…',
           icon: Upload,
@@ -411,19 +403,6 @@ export function RecordsExplorer({
       </Button>
     ))
 
-  const kindDialog = newKind && collection && (
-    <NewSchemaDialog
-      collection={collection}
-      schemas={x.schemas ?? []}
-      within={
-        x.rootId && x.scopeSchema
-          ? { id: x.rootId, schema: x.scopeSchema }
-          : null
-      }
-      onClose={() => setNewKind(false)}
-    />
-  )
-
   // Until the collection and its counts have answered, nothing is listed and
   // there is no New: a menu opened now would be replaced by the loaded one.
   if (!listed && (!x.countsLoaded || (dataset && !collection)))
@@ -435,14 +414,19 @@ export function RecordsExplorer({
     // top-level schemas here instead, or there is no way to create the first
     // record (a child schema needs a parent record, so it can't start one).
     return (
-      <div className="space-y-3">
-        <EmptyState
-          title="Nothing here yet"
-          message={emptyHint}
-          action={newMenu || undefined}
-        />
-        {kindDialog}
-      </div>
+      <EmptyCollectionGuide
+        collection={dataset ? collection : null}
+        schemas={x.schemas ?? []}
+        within={
+          x.rootId && x.scopeSchema
+            ? { id: x.rootId, schema: x.scopeSchema }
+            : null
+        }
+        newMenu={newMenu}
+        cannotAddSchema={
+          can('change_structure') ? undefined : why('change_structure')
+        }
+      />
     )
   }
 
@@ -823,7 +807,6 @@ export function RecordsExplorer({
           onClose={() => setConfirmDelete(false)}
         />
       )}
-      {kindDialog}
     </div>
   )
 }
