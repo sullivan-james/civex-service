@@ -348,6 +348,10 @@ class ExportDefinitionDTO:
     # make beside them (`civex.domain.tables.TableSpec`s as dicts).
     include_files: bool = True
     tables: list[dict[str, Any]] = field(default_factory=list)
+    # How a run hands it over (civex.domain.file_access.METHODS) and, for a
+    # copy, the drive to copy onto (None: the project folder).
+    method: str = "link"
+    volume: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -360,6 +364,8 @@ class ExportDefinitionDTO:
             "files_layout": self.files_layout,
             "include_files": self.include_files,
             "tables": self.tables,
+            "method": self.method,
+            "volume": self.volume,
             "created_at": self.created_at.isoformat(),
         }
 

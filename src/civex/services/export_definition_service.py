@@ -17,7 +17,7 @@ from civex.domain import permissions
 from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.dtos import ExportDefinitionDTO, SchemaDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
-from civex.domain.file_access import LAYOUTS, FileSelection
+from civex.domain.file_access import LAYOUTS, FileSelection, METHODS
 from civex.domain.naming import validate_free_name
 from civex.domain import templating
 from civex.domain.query import RecordQuery
@@ -65,12 +65,18 @@ class ExportDefinitionService:
         layout: str,
         include_files: bool = True,
         tables: list[dict[str, Any]] | None = None,
+        method: str = "link",
+        volume: str | None = None,
     ) -> SchemaDTO | None:
         """Everything a definition has to satisfy at once, or a ValidationError
         saying which part doesn't. Returns the holder's schema (None for "any
         kind beneath")."""
         if layout not in LAYOUTS:
             raise ValidationError(f"A files layout is one of: {', '.join(LAYOUTS)}.")
+        if method not in METHODS:
+            raise ValidationError(f"An export is made as one of: {', '.join(METHODS)}.")
+        if volume and method != "copy":
+            raise ValidationError("A drive is only chosen for an export that copies.")
         if not include_files and not tables:
             raise ValidationError("An export takes files, tables, or both.")
         if not include_files and fields:
@@ -94,10 +100,10 @@ class ExportDefinitionService:
             where = f"'{schema.name}' or the kinds beneath it"
         for spec in specs:
             self._check_table(spec, schema, holder_schema, where, layout)
+        # Nothing here can hold a file yet: the export still saves, and takes
+        # the files of whatever file fields are added later.
         if not include_files:
             available = []
-        elif not available:
-            raise ValidationError(f"Nothing in {where} can hold a file.")
         for name in fields:
             if name not in available:
                 raise ValidationError(
@@ -197,6 +203,8 @@ class ExportDefinitionService:
         files_layout: str = "tree",
         include_files: bool = True,
         tables: list[dict[str, Any]] | None = None,
+        method: str = "link",
+        volume: str | None = None,
     ) -> ExportDefinitionDTO:
         self._permissions.require_somewhere(permissions.WRITE_RECORDS)
         schema = self._schemas.get(schema_name)
@@ -207,7 +215,15 @@ class ExportDefinitionService:
             )
         fields = list(dict.fromkeys(fields or []))
         holder_schema = self._check(
-            schema, holder, fields, filter_tree, files_layout, include_files, tables
+            schema,
+            holder,
+            fields,
+            filter_tree,
+            files_layout,
+            include_files,
+            tables,
+            method,
+            volume,
         )
         return self._repo.create(
             schema.id,
@@ -218,6 +234,8 @@ class ExportDefinitionService:
             files_layout,
             include_files,
             tables,
+            method,
+            volume if method == "copy" else None,
         )
 
     def get(self, schema_name: str, name: str) -> ExportDefinitionDTO:
@@ -246,6 +264,8 @@ class ExportDefinitionService:
         files_layout=...,
         include_files=...,
         tables=...,
+        method=...,
+        volume=...,
     ) -> ExportDefinitionDTO:
         """Change any part of a definition; what isn't given is left as it was.
         The result is checked as a whole, since parts depend on each other (the
@@ -267,6 +287,10 @@ class ExportDefinitionService:
             current.include_files if include_files is ... else bool(include_files)
         )
         new_tables = current.tables if tables is ... else tables
+        new_method = current.method if method is ... else str(method)
+        new_volume = current.volume if volume is ... else volume
+        if new_method != "copy":
+            new_volume = None  # a drive only means something for a copy
         if not new_include and fields is ...:
             new_fields = []  # file fields only mean something with files
         holder_schema = self._check(
@@ -277,6 +301,8 @@ class ExportDefinitionService:
             new_layout,
             new_include,
             new_tables,
+            new_method,
+            new_volume,
         )
         return self._repo.update(
             current.id,
@@ -287,6 +313,8 @@ class ExportDefinitionService:
             files_layout=new_layout,
             include_files=new_include,
             tables=new_tables,
+            method=new_method,
+            volume=new_volume,
         )
 
     def delete(self, schema_name: str, name: str) -> None:

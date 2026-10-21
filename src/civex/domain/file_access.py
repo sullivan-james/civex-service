@@ -55,6 +55,9 @@ LAYOUT_TREE = "tree"
 LAYOUT_GROUPED = "grouped"
 LAYOUT_FLAT = "flat"
 LAYOUTS = (LAYOUT_TREE, LAYOUT_GROUPED, LAYOUT_FLAT)
+# How a saved export is handed over when run: a folder of links on the files'
+# drive, real copies on a drive, or one zip file.
+METHODS = ("link", "copy", "zip")
 
 # Where exports made without an explicit folder go: `exports/<name>` in the
 # project, or `_exports/<name>` in a volume outside it (named so the volume's

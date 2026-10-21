@@ -234,6 +234,8 @@ class ExportDefinitionRepository(Protocol):
         files_layout: str,
         include_files: bool = True,
         tables: list[dict[str, Any]] | None = None,
+        method: str = "link",
+        volume: str | None = None,
     ) -> ExportDefinitionDTO: ...
     def update(
         self,
@@ -245,6 +247,8 @@ class ExportDefinitionRepository(Protocol):
         files_layout: str = ...,
         include_files: bool = ...,
         tables: list[dict[str, Any]] = ...,
+        method: str = ...,
+        volume: str | None = ...,
     ) -> ExportDefinitionDTO: ...
     def delete(self, id: uuid.UUID) -> None: ...
 
