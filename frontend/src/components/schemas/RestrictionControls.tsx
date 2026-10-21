@@ -9,6 +9,7 @@ import {
   Button,
   Checkbox,
   Chip,
+  IconButton,
   InfoTip,
   Input,
   Select,
@@ -16,6 +17,7 @@ import {
   Tooltip,
 } from '../ui'
 import { LocatorMap } from '../ui/LocatorMap'
+import { X } from '../ui/icons'
 import {
   zonedLocalToUTC,
   utcToZonedLocal,
@@ -326,38 +328,48 @@ export function FromFilenameControl({
 }: ControlProps) {
   const rule = fromFilenameRule(rules)
   const field = rule?.field ?? ''
-  const pattern = rule?.pattern ?? ''
+  // The patterns tried in order; a lone empty row is "no pattern yet".
+  const patterns = rule?.patterns.length ? rule.patterns : ['']
   const kind = ctx.type ?? ctx.existing?.type ?? 'string'
   const isDate = DATE_KINDS.has(kind)
   const fileFields = ctx.fields.filter(
     (f) => f.dtype === 'file' || f.dtype === 'file_list',
   )
   const [sample, setSample] = useState('')
-  const patternErr =
-    field && pattern.trim() ? patternProblem(pattern, kind) : null
-  const incomplete = !!field && !pattern.trim()
+  const rowErrors = patterns.map((p) =>
+    field && p.trim() ? patternProblem(p, kind) : null,
+  )
+  const patternErr = rowErrors.find((e) => e) ?? null
+  const incomplete = !!field && patterns.some((p) => !p.trim())
   useEffect(() => {
     problem(
       desc.key,
       incomplete
-        ? `${desc.label}: give a pattern, or choose no file field.`
+        ? `${desc.label}: give every pattern, or remove the empty row.`
         : patternErr
           ? `${desc.label}: ${patternErr}.`
           : null,
     )
     return () => problem(desc.key, null)
   }, [incomplete, patternErr, desc.key, desc.label, problem])
-  const update = (nextField: string, nextPattern: string) =>
+  // Stored as the one string when there is one pattern (the simple form),
+  // else the list, which is what the server reads either way.
+  const update = (nextField: string, nextPatterns: string[]) =>
     set(
       desc.key,
-      nextField ? { field: nextField, pattern: nextPattern } : undefined,
+      nextField
+        ? {
+            field: nextField,
+            pattern: nextPatterns.length === 1 ? nextPatterns[0] : nextPatterns,
+          }
+        : undefined,
     )
   const tried =
-    sample && field && pattern && !patternErr
-      ? extractFromFilename(sample, pattern, kind)
+    sample && field && !incomplete && !patternErr
+      ? extractFromFilename(sample, patterns, kind)
       : null
   return (
-    <Shell label={desc.label} help={desc.help} error={patternErr}>
+    <Shell label={desc.label} help={desc.help}>
       {fileFields.length === 0 ? (
         <p className="text-xs text-fg-subtle">
           Add a file field to this type first.
@@ -367,7 +379,7 @@ export function FromFilenameControl({
           size="sm"
           value={field}
           aria-label="File field"
-          onChange={(e) => update(e.target.value, pattern)}
+          onChange={(e) => update(e.target.value, patterns)}
           className="max-w-xs"
         >
           <option value="">— not filled from a file —</option>
@@ -380,19 +392,61 @@ export function FromFilenameControl({
       )}
       {field && (
         <>
-          <Input
+          {patterns.map((pattern, i) => {
+            const label = patterns.length > 1 ? `Pattern ${i + 1}` : 'Pattern'
+            return (
+              <div key={i} className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Input
+                    size="sm"
+                    value={pattern}
+                    aria-label={label}
+                    placeholder={
+                      isDate ? 'YYYYMMDD[-_]HHmmSS' : 'site-([A-Z]+)_'
+                    }
+                    onChange={(e) =>
+                      update(
+                        field,
+                        patterns.map((p, j) => (j === i ? e.target.value : p)),
+                      )
+                    }
+                    className="max-w-md font-mono"
+                  />
+                  {patterns.length > 1 && (
+                    <IconButton
+                      icon={X}
+                      aria-label={`Remove pattern ${i + 1}`}
+                      onClick={() =>
+                        update(
+                          field,
+                          patterns.filter((_, j) => j !== i),
+                        )
+                      }
+                    />
+                  )}
+                </div>
+                {rowErrors[i] && (
+                  <p role="alert" className="text-xs text-danger">
+                    {rowErrors[i]}
+                  </p>
+                )}
+              </div>
+            )
+          })}
+          <Button
             size="sm"
-            value={pattern}
-            aria-label="Pattern"
-            placeholder={isDate ? 'YYYYMMDD[-_]HHmmSS' : 'site-([A-Z]+)_'}
-            onChange={(e) => update(field, e.target.value)}
-            className="max-w-md font-mono"
-          />
+            variant="ghost"
+            onClick={() => update(field, [...patterns, ''])}
+            disabled={incomplete}
+          >
+            Add another pattern
+          </Button>
           <p className="text-xs text-fg-subtle">
             {isDate
-              ? `Tokens: ${FILENAME_FORMAT_TOKENS_HELP}. Anything else is a regular expression, so [-_] takes a dash or an underscore.`
+              ? `Tokens: ${FILENAME_FORMAT_TOKENS_HELP}. Anything else is a regular expression, so [-_] takes a dash or an underscore. Or a regular expression with named groups (?P<year>…), (?P<month>…), (?P<day>…), (?P<hour>…), (?P<minute>…), (?P<second>…).`
               : 'A regular expression. The first capture group ( ) is the value, or the whole match without one.'}{' '}
-            It needn't describe the whole name.
+            A pattern needn't describe the whole name. With several, the first
+            that matches is used.
           </p>
           <Input
             size="sm"

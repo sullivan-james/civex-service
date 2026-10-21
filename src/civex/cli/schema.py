@@ -197,6 +197,11 @@ def _parse_bbox(text: str) -> list[float]:
     return parts
 
 
+def _one_or_many(patterns: list[str]) -> str | list[str]:
+    """A rule's `pattern`: the one string when one was given, else the list."""
+    return patterns[0] if len(patterns) == 1 else list(patterns)
+
+
 def _typed_restrictions(
     dtype: str,
     unit: Optional[str],
@@ -309,13 +314,16 @@ def schema_add_field(
         "when it is left blank (string, integer, float, date, datetime). "
         "Needs --filename-pattern.",
     ),
-    filename_pattern: Optional[str] = typer.Option(
+    filename_pattern: Optional[list[str]] = typer.Option(
         None,
         "--filename-pattern",
         help="How to read the value out of the file name: for a date or "
         "datetime a token format such as YYYYMMDD[-_]HHmmSS (tokens YYYY MM "
-        "DD HH mm SS, anything else a regular expression); for text and "
-        "numbers a regular expression whose first capture group is the value.",
+        "DD HH mm SS, anything else a regular expression) or a regular "
+        "expression with named groups year, month, day, hour, minute, "
+        "second; for text and numbers a regular expression whose first "
+        "capture group is the value. Give it more than once to try several "
+        "patterns in order.",
     ),
 ) -> None:
     """Add a field to a schema.
@@ -400,7 +408,7 @@ def schema_add_field(
             raise typer.Exit(1)
         restrictions["from_filename"] = {
             "field": from_file,
-            "pattern": filename_pattern,
+            "pattern": _one_or_many(filename_pattern),
         }
 
     ctx = _ctx()
@@ -555,12 +563,14 @@ def schema_update_field(
         "With --filename-pattern; either alone changes just that part of "
         "an existing rule.",
     ),
-    filename_pattern: Optional[str] = typer.Option(
+    filename_pattern: Optional[list[str]] = typer.Option(
         None,
         "--filename-pattern",
         help="How to read the value out of the file name: a token format "
-        "such as YYYYMMDD[-_]HHmmSS for a date or datetime, else a regular "
-        "expression whose first capture group is the value.",
+        "such as YYYYMMDD[-_]HHmmSS or a regular expression with named "
+        "groups (year, month, day, ...) for a date or datetime, else a "
+        "regular expression whose first capture group is the value. Give it "
+        "more than once to try several patterns in order.",
     ),
     clear_restrictions: bool = typer.Option(
         False, "--clear-restrictions", help="Remove all restrictions"
@@ -673,7 +683,7 @@ def schema_update_field(
                 if from_file is not None:
                     rule["field"] = from_file
                 if filename_pattern is not None:
-                    rule["pattern"] = filename_pattern
+                    rule["pattern"] = _one_or_many(filename_pattern)
                 new_restrictions["from_filename"] = rule
             old_unit = (field.restrictions or {}).get("unit")
             if unit is not None and old_unit and old_unit != unit:

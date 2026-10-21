@@ -162,6 +162,13 @@ class AppContext:
     def commit(self) -> None:
         self._session.commit()
 
+    def rollback(self) -> None:
+        """Forget everything this context has changed since its last commit:
+        for a request that does several things as one and must leave nothing
+        when a later one is refused (a file stored, then a record save that
+        failed its checks)."""
+        self._session.rollback()
+
     def close(self) -> None:
         self._session.close()
 

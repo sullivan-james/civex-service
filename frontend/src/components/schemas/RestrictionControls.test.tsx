@@ -321,7 +321,7 @@ describe('fill from a file name', () => {
       screen.getByRole('option', { name: 'Track (Encounter)' }),
     ).toBeTruthy()
     expect(rules()).toEqual({ from_filename: { field: 'track', pattern: '' } })
-    expect(problems()[0]).toMatch(/give a pattern/)
+    expect(problems()[0]).toMatch(/give every pattern/)
     await userEvent.type(screen.getByLabelText('Pattern'), 'site-(\\w+)_')
     expect(rules()).toEqual({
       from_filename: { field: 'track', pattern: 'site-(\\w+)_' },
@@ -360,6 +360,60 @@ describe('fill from a file name', () => {
     expect(problems()).toEqual([])
     await userEvent.type(pattern, '(')
     expect(problems()[0]).toMatch(/regular expression/)
+  })
+
+  it('takes several patterns, tried in order, and stores one as a string', async () => {
+    render(
+      <Harness
+        d={d}
+        context={{ ...withFiles, type: 'datetime' }}
+        initial={{
+          from_filename: { field: 'audio', pattern: 'DDMMYYYY_HHmmSS' },
+        }}
+      />,
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Add another pattern' }),
+    )
+    // An empty row blocks saving until it is filled or removed.
+    expect(problems()[0]).toMatch(/give every pattern/)
+    await userEvent.type(screen.getByLabelText('Pattern 2'), 'YYYY-MM-DD')
+    expect(rules()).toEqual({
+      from_filename: {
+        field: 'audio',
+        pattern: ['DDMMYYYY_HHmmSS', 'YYYY-MM-DD'],
+      },
+    })
+    expect(problems()).toEqual([])
+    const sample = screen.getByLabelText('Try a file name')
+    await userEvent.type(sample, 'site_2024-03-15.csv')
+    expect(screen.getByTestId('tried')).toHaveTextContent(
+      'Gives 2024-03-15T00:00:00',
+    )
+    await userEvent.clear(sample)
+    await userEvent.type(sample, '15032024_093000.csv')
+    expect(screen.getByTestId('tried')).toHaveTextContent(
+      'Gives 2024-03-15T09:30:00',
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Remove pattern 1' }),
+    )
+    expect(rules()).toEqual({
+      from_filename: { field: 'audio', pattern: 'YYYY-MM-DD' },
+    })
+  })
+
+  it('reads a date regex with named groups', async () => {
+    render(
+      <Harness
+        d={d}
+        context={{ ...withFiles, type: 'date' }}
+        initial={{
+          from_filename: { field: 'audio', pattern: '(?P<year>\\d{4})' },
+        }}
+      />,
+    )
+    expect(problems()[0]).toMatch(/named groups needs month, day/)
   })
 
   it('choosing no file field removes the rule', async () => {
