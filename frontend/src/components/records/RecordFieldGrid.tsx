@@ -470,8 +470,9 @@ export function restrictionHints(field: Field, fields?: Field[]): string[] {
   const rule = fromFilenameRule(r)
   if (rule) {
     const source = fields?.find((f) => f.name === rule.field)
+    const name = source ? displayLabel(source.name, source.label) : rule.field
     hints.push(
-      `filled from ${source ? displayLabel(source.name, source.label) : rule.field}'s name`,
+      `Filled from ${name}'s name when the file changes; you can still edit it.`,
     )
   }
   const range = (lo: unknown, hi: unknown, from = '≥', to = '≤') => {

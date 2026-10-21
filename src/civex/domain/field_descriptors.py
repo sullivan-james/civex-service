@@ -88,9 +88,10 @@ _FROM_FILENAME = _R(
     "from_filename",
     "Fill from a file's name",
     "from_filename",
-    "When this field is left blank and the file is attached, the value is "
-    "read from the file's name as the record is saved, before its rules and "
-    "unique keys are checked. A value you type is kept.",
+    "When the file is attached or replaced, the value is read from its name "
+    "as the record is saved, before the field's rules and unique keys are "
+    "checked. You can still edit it: what you type stays until the file "
+    "changes.",
 )
 
 _FILE_RULES = (

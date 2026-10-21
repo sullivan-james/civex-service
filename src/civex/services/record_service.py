@@ -992,16 +992,34 @@ class RecordService:
         data: dict[str, Any],
         shape: ResolvedSchema | None,
         parent: RecordDTO | None,
+        stored: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """`data` with every blank field that carries a `from_filename` rule
-        set from the name of the file in the field the rule names
-        (`domain/filename_extract`): the record's own file, or, when the file
-        field is inherited, the file on the nearest record above that has one
-        (`parent`, then up). A value the caller gave is never replaced, and a
-        name the pattern doesn't fit leaves the field blank; a name it fits
-        but that doesn't read as the field's type is refused naming the
-        field, as a typed value would be. Runs before defaults, validation
-        and unique keys, so the derived value is held to all of them."""
+        """`data` with each field that carries a `from_filename` rule read
+        from the name of the file in the field the rule names
+        (`domain/filename_extract`). The rule follows the file, not the
+        field's emptiness, and this is the one place that decides:
+
+        - A blank field with a file present is filled.
+        - The source file changed in this save (on add, any file; on update,
+          the incoming file's sha256 or name differs from the one in `stored`,
+          the record's data as it was, by field name; for a `file_list`, the
+          first file's): the value is read again and replaces what the field
+          held, since the old value belonged to the old file.
+        - The same file, and the field edited by hand or left as it was: what
+          is there is kept. A hand edit is an override until the file changes,
+          and a value given in the same save as the new file (on add, every
+          value given) is such an edit, so a new file never discards it.
+        - A name no pattern fits leaves the field as it is: a blank stays
+          blank and a value stays, never blanked because the new file doesn't
+          fit.
+
+        An inherited file field's file is on the nearest record above
+        (`parent`, then up); a child's save doesn't change it, so it counts as
+        unchanged, and a child's field is filled only while blank. A parent's
+        save never reaches into its children. A name a pattern fits but that
+        doesn't read as the field's type is refused naming the field, as a
+        typed value would be. Runs before defaults, validation and unique
+        keys, so the derived value is held to all of them."""
         if shape is None:
             return data
         # Own fields only: a child record holds no values for inherited
@@ -1022,16 +1040,27 @@ class RecordService:
         }
         result = dict(data)
         for field, (source_name, patterns) in rules:
-            if not _is_blank_value(result.get(field.name)):
-                continue
             source = shape.by_name.get(source_name)
             if source is None:
                 continue
-            filename = filename_extract.first_filename(result.get(source_name))
-            if filename is None and parent is not None and source_name in inherited:
-                # An inherited file field's file is on a record above.
-                filename = self._filename_above(parent, str(source.id))
-            if filename is None:
+            incoming = result.get(source_name)
+            filename = filename_extract.first_filename(incoming)
+            if source_name in inherited:
+                # An inherited file field's file is on a record above, which
+                # this save doesn't change.
+                changed = False
+                if filename is None and parent is not None:
+                    filename = self._filename_above(parent, str(source.id))
+            elif stored is None:
+                changed = filename is not None
+            else:
+                changed = filename_extract.first_file_key(
+                    incoming
+                ) != filename_extract.first_file_key(stored.get(source_name))
+            current = result.get(field.name)
+            blank = _is_blank_value(current)
+            edited = not blank and (stored is None or current != stored.get(field.name))
+            if filename is None or not (blank or (changed and not edited)):
                 continue
             try:
                 value = filename_extract.extract(filename, patterns, field.dtype)
@@ -1802,16 +1831,18 @@ class RecordService:
         self._permissions.require(permissions.WRITE_RECORDS, raw.dataset_id)
         shapes = self._schema_svc.resolver()
         shape = shapes(raw.schema_id)
+        old_data = self._ids_to_names(raw.data, shape)
         # Fields read from a file's name first, then defaults, then validation.
-        # The parent is only looked up when a rule reads an inherited file
-        # field the record itself doesn't carry.
+        # The stored data says whether the file changed; the parent is only
+        # looked up when a rule reads an inherited file field the record
+        # itself doesn't carry.
         data = self._fill_from_filenames(
             data,
             shape,
             self._parent_if_needed(raw, shape, data),
+            stored=old_data,
         )
         data = self._apply_defaults(data, shape)
-        old_data = self._ids_to_names(raw.data, shape)
         dataset = (
             self._datasets.get_by_id(
                 raw.dataset_id,
