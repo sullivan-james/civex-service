@@ -3,6 +3,7 @@ import { Link, useParams, useNavigate } from 'react-router'
 import {
   useRecord,
   useRecordCounts,
+  useRecordFileSaver,
   useUpdateRecord,
   useDeleteRecord,
 } from '../hooks/useRecords'
@@ -89,6 +90,8 @@ export default function RecordDetailPage() {
   const [savingField, setSavingField] = useState<string | null>(null)
   // quiet: the field itself shows the outcome (new value, or the error under it)
   const updateRecord = useUpdateRecord({ quiet: true })
+  // A file chosen in a field is stored and the record saved as one request.
+  const saveFile = useRecordFileSaver(id ?? '')
   const deleteRecord = useDeleteRecord(collection?.name ?? '')
   // What the authority did not take of this record's changes (nothing, and not
   // even asked for, while there is nothing to review).
@@ -347,6 +350,7 @@ export default function RecordDetailPage() {
               referenceLabels={record.reference_labels}
               referenceCollections={record.reference_collections}
               onSave={saveField}
+              fileSaver={saveFile}
               readOnly={
                 can('write_records', record.dataset_id)
                   ? undefined

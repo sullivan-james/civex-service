@@ -1,4 +1,7 @@
-import { api } from './client'
+import { api, ApiError } from './client'
+import { apiUrl } from '../utils/host'
+import { UploadConnectionError, type UploadInfo } from './files'
+import type { Field } from './schemas'
 import { auditUrl, type AuditView, type PaginatedAuditLog } from './audit'
 import {
   recordQueryString,
@@ -115,6 +118,22 @@ function batchHeaders(batchId?: string): Record<string, string> | undefined {
     : undefined
 }
 
+/** A file to send with a record, named for the field it goes in. */
+export interface FileUpload {
+  field: string
+  file: File
+}
+
+/** Stores one file into `field` of a record and saves the record, reporting
+ * progress; what a record page hands the field grid so a file chosen there
+ * is one request (`recordsApi.attachFile`). */
+export type FileSaver = (
+  field: Field,
+  file: File,
+  onProgress: (info: UploadInfo) => void,
+  signal: AbortSignal,
+) => Promise<CivexRecord>
+
 export const recordsApi = {
   /** Names for any number of ids in one request. Ids that aren't records, or
    * whose record is gone, are not in the answer. */
@@ -161,6 +180,23 @@ export const recordsApi = {
       batchHeaders(options?.batchId),
     ),
 
+  /** A record and the files chosen for it, created as one request: the
+   * record is made only if every file could be stored and the record passes
+   * its checks, else nothing is kept (`POST .../records/with-files`). */
+  createWithFiles: (
+    datasetName: string,
+    body: { schema_name: string; data: object; parent_record_id?: string },
+    files: FileUpload[],
+  ) => {
+    const form = new FormData()
+    form.append('record', JSON.stringify(body))
+    for (const { field, file } of files) form.append(field, file, file.name)
+    return api.upload<CivexRecord>(
+      `/collections/${encodeURIComponent(datasetName)}/records/with-files`,
+      form,
+    )
+  },
+
   update: (
     id: string,
     body: { data: object },
@@ -171,6 +207,65 @@ export const recordsApi = {
       body,
       batchHeaders(options?.batchId),
     ),
+
+  /** One file into a record's file field and the record saved, as one
+   * request (`PUT /records/{id}/files/{field}`): appended to a list of files,
+   * in place of a single file. Reports progress as `filesApi.uploadBatch`
+   * does. A save civex refuses (a rule, a unique key) rejects with an
+   * `ApiError` carrying the field error, and nothing was stored; a dropped
+   * connection with an `UploadConnectionError`; aborting `signal` with an
+   * `AbortError`. */
+  attachFile: (
+    id: string,
+    field: string,
+    file: File,
+    onProgress?: (info: UploadInfo) => void,
+    signal?: AbortSignal,
+  ): Promise<CivexRecord> =>
+    new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new DOMException('Upload cancelled', 'AbortError'))
+        return
+      }
+      const query = new URLSearchParams({
+        name: file.name,
+        size: String(file.size),
+      })
+      const xhr = new XMLHttpRequest()
+      xhr.open(
+        'PUT',
+        apiUrl(`/records/${id}/files/${encodeURIComponent(field)}?${query}`),
+      )
+      xhr.upload.onprogress = (e) =>
+        onProgress?.({ loaded: e.loaded, total: file.size, saving: false })
+      xhr.upload.onload = () =>
+        onProgress?.({ loaded: file.size, total: file.size, saving: true })
+      signal?.addEventListener('abort', () => xhr.abort(), { once: true })
+      xhr.onabort = () =>
+        reject(new DOMException('Upload cancelled', 'AbortError'))
+      xhr.onload = () => {
+        let body: Record<string, unknown> = {}
+        try {
+          body = JSON.parse(xhr.responseText)
+        } catch {
+          /* not JSON */
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(body as unknown as CivexRecord)
+        } else if (xhr.status === 502 || xhr.status === 504) {
+          reject(
+            new UploadConnectionError(`Couldn't reach civex (${xhr.status})`),
+          )
+        } else {
+          reject(
+            new ApiError(body.detail ?? `HTTP ${xhr.status}`, xhr.status, body),
+          )
+        }
+      }
+      xhr.onerror = () =>
+        reject(new UploadConnectionError("Couldn't reach civex"))
+      xhr.send(file)
+    }),
 
   delete: (id: string) => api.delete<void>(`/records/${id}`),
 

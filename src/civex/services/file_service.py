@@ -55,6 +55,15 @@ class FileService:
         self._permissions.require(permissions.MANAGE_FILES)
         return await self._store.put_stream(chunks, filename, size_hint, collection_id)
 
+    def discard(self, sha256: str) -> bool:
+        """Remove content just stored that turned out not to be wanted: a file
+        taken in for a record save that was then refused. Every reachable copy
+        goes (there is one, the one just written). The caller must know the
+        content was new, since this doesn't ask what else uses it; anything
+        it misses is left to the clean-up (`GCService`)."""
+        self._permissions.require(permissions.MANAGE_FILES)
+        return self._store.delete(sha256)
+
     def offline_location(self, sha256: str):
         """(volume, status) if the content is recorded on a volume that can't be
         reached right now -- so a missing file can be told apart from one on a
