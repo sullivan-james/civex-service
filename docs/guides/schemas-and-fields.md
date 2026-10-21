@@ -87,7 +87,7 @@ imports and workflows.
 | `--accept` | `file`, `file_list` | `--accept ".jpg,.png"` |
 | `--max-size` | `file`, `file_list` | `--max-size 10485760` (bytes) |
 | `--references` | `reference`, `reference_list` | `--references species` |
-| `--from-file` + `--filename-pattern` | `string`, `integer`, `float`, `date`, `datetime` | `--from-file reading --filename-pattern "YYYYMMDD[-_]HHmmSS"` (filled from the file's name when left blank; see [Fill fields from file names](../how-to/fill-fields-from-filenames.md)) |
+| `--from-file` + `--filename-pattern` | `string`, `integer`, `float`, `date`, `datetime` | `--from-file reading --filename-pattern "YYYYMMDD[-_]HHmmSS"` (read from the file's name when the file is attached or replaced; see [Fill fields from file names](../how-to/fill-fields-from-filenames.md)) |
 
 Some rules are set in the app (or over the API, as `restrictions`) only: a
 `date`/`datetime` minimum and maximum, a `datetime` field's own timezone, and a

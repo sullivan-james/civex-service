@@ -185,15 +185,32 @@ def extract(filename: str, patterns: str | Sequence[str], kind: str) -> Any:
     return None
 
 
+def _first_file(value: Any) -> dict[str, Any] | None:
+    """The file reference in a `file` or `file_list` value (the first file of
+    a list), or None when there is no file."""
+    if isinstance(value, list):
+        value = value[0] if value else None
+    return value if isinstance(value, dict) else None
+
+
 def first_filename(value: Any) -> str | None:
     """The file name in a `file` or `file_list` value (the first file of a
     list), or None when there is no file."""
-    if isinstance(value, list):
-        value = value[0] if value else None
-    if isinstance(value, dict):
-        name = value.get("filename")
-        return name if isinstance(name, str) and name else None
-    return None
+    ref = _first_file(value)
+    name = ref.get("filename") if ref else None
+    return name if isinstance(name, str) and name else None
+
+
+def first_file_key(value: Any) -> tuple[Any, Any] | None:
+    """What identifies the file in a `file` or `file_list` value (the first
+    file of a list): its content hash and its name, or None when there is no
+    file. Two values with different keys hold different files as far as a
+    rule reading the name is concerned: new content under the same name, or
+    the same content under a new name, is a new file."""
+    ref = _first_file(value)
+    if ref is None:
+        return None
+    return ref.get("sha256"), ref.get("filename")
 
 
 def rule_of(restrictions: dict[str, Any] | None) -> tuple[str, tuple[str, ...]] | None:
@@ -219,6 +236,7 @@ __all__ = [
     "TOKENS",
     "compile_pattern",
     "extract",
+    "first_file_key",
     "first_filename",
     "is_named",
     "parse_by_format",

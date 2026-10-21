@@ -8,10 +8,10 @@ attached, so nobody types it.
 
 A text, number, date or date-time field can carry a rule: *fill me from this
 file field's name, with this pattern*. From then on, whenever a record is saved
-with that field blank and the file attached, the value is read from the file's
-name **as part of the same save**, before the field's own rules and the schema's
-unique keys are checked. So it works for a required field and for a field that
-must be unique, and nothing runs afterwards.
+with the file attached or replaced, the value is read from the file's name **as
+part of the same save**, before the field's own rules and the schema's unique
+keys are checked. So it works for a required field and for a field that must be
+unique, and nothing runs afterwards.
 
 In the app, open the `sample` schema, pick `taken_at` and set **Fill from a
 file's name**: choose the file field (`reading`), give the pattern, and try it
@@ -43,13 +43,22 @@ ID         number  reading               taken_at
 f75b804d…  3       20240315_093000.csv  2024-03-15T09:30:00+00:00
 ```
 
-What the rule does, exactly:
+The rule follows the file, not whether the field is empty:
 
-- **A value you type is kept.** Only a blank field is filled. Clearing the
-  field and saving again fills it again from the file.
-- **A name that fits no pattern leaves the field blank.** If the field is
-  required, the save is refused for the missing value, as it would be without
-  the rule; otherwise you type the value yourself.
+- **A blank field with a file is filled.** Clearing the field and saving again
+  fills it again from the file.
+- **A different file fills it again.** When the file is replaced (for a list,
+  its first file; a new name counts, since the name is what is read), the value
+  is read from the new name and replaces what the field held: the old value
+  belonged to the old file.
+- **With the same file, what you type stays.** A hand edit is an override
+  until the file changes. A value you give in the same save as the new file
+  (or when adding the record) is yours too, and is kept.
+- **A name that fits no pattern leaves the field as it is.** A blank stays
+  blank and a value stays; a new file that doesn't fit never empties the
+  field. If a required field stays blank, the save is refused for the missing
+  value, as it would be without the rule; otherwise you type the value
+  yourself.
 - **A name that fits but doesn't make the field's type** (`sample_ab` for a
   whole number, a 13th month) refuses the save, naming the field, like any other
   value the field doesn't allow.
@@ -59,7 +68,8 @@ What the rule does, exactly:
 - **A list of files gives its first file's name.**
 - **The file may be on the record above.** A rule on a child schema may name a
   file field inherited from the parent schema; the name is read from the nearest
-  record above that has the file.
+  record above that has the file, and only while the child's field is blank:
+  replacing the parent's file doesn't reach into the records beneath it.
 - Records that already exist are not touched. The app's **Fill from filename**
   button on a record does one field by hand; for many records at once, see the
   workflow below.

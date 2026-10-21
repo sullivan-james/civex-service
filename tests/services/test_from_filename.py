@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import pytest
 
+from fastapi.testclient import TestClient
+
 from civex.context import AppContext
 from civex.domain import filename_extract
 from civex.domain.exceptions import (
@@ -15,12 +17,18 @@ from civex.domain.exceptions import (
 )
 
 
-def _file(ctx: AppContext, name: str) -> dict:
-    return ctx.file_svc.store_bytes(b"x", name).to_dict()
+def _file(ctx: AppContext, name: str, content: bytes | None = None) -> dict:
+    """A stored file called `name`; its bytes are the name unless given, so
+    two names are two files."""
+    return ctx.file_svc.store_bytes(content or name.encode(), name).to_dict()
 
 
 def _rule(field: str, pattern: str) -> dict:
     return {"from_filename": {"field": field, "pattern": pattern}}
+
+
+def _field_id(ctx: AppContext, schema: str, name: str) -> str:
+    return str(next(f for f in ctx.schema_svc.get(schema).fields if f.name == name).id)
 
 
 @pytest.fixture()
@@ -168,6 +176,8 @@ def test_the_derived_value_is_part_of_the_same_save(ctx: AppContext, recordings)
 
 
 def test_a_typed_value_is_kept(ctx: AppContext, recordings):
+    """A value given with the file is the person's, not an old file's: the
+    file arriving doesn't discard it (the other fields are still filled)."""
     rec = ctx.record_svc.add(
         "study",
         "recording",
@@ -177,13 +187,18 @@ def test_a_typed_value_is_kept(ctx: AppContext, recordings):
     assert rec.data["take"] == 3
 
 
-def test_a_name_the_pattern_does_not_fit_leaves_the_field_blank(
+def test_a_name_the_pattern_does_not_fit_leaves_the_field_as_it_is(
     ctx: AppContext, recordings
 ):
     rec = ctx.record_svc.add("study", "recording", {"audio": _file(ctx, "x.wav")})
     assert rec.data["name"] == "x"
     assert rec.data.get("take") is None
     assert rec.data.get("start") is None
+    # A typed value stays too.
+    typed = ctx.record_svc.add(
+        "study", "recording", {"audio": _file(ctx, "x.wav"), "take": 4}
+    )
+    assert typed.data["take"] == 4
 
 
 def test_no_file_means_nothing_is_derived(ctx: AppContext, recordings):
@@ -255,14 +270,144 @@ def test_update_fills_a_blank_field_when_the_file_arrives(ctx: AppContext, recor
     assert updated.data["name"] == "20240315_093000_t7"
 
 
-def test_update_keeps_a_value_already_there(ctx: AppContext, recordings):
+def test_update_with_a_new_file_reads_the_fields_again(ctx: AppContext, recordings):
+    """The value belonged to the old file: a different file replaces it,
+    whether it was typed or derived."""
     rec = ctx.record_svc.add(
         "study", "recording", {"audio": _file(ctx, "a_t1.wav"), "take": 9}
     )
+    assert rec.data["take"] == 9
     updated = ctx.record_svc.update(
-        str(rec.id), {"audio": _file(ctx, "a_t2.wav"), "take": 9}
+        str(rec.id), {**rec.data, "audio": _file(ctx, "b_t2.wav")}
+    )
+    assert updated.data["take"] == 2
+    assert updated.data["name"] == "b_t2"
+
+
+def test_update_keeps_a_hand_edit_while_the_file_is_the_same(
+    ctx: AppContext, recordings
+):
+    """A hand edit is an override until the file changes."""
+    rec = ctx.record_svc.add("study", "recording", {"audio": _file(ctx, "a_t1.wav")})
+    assert rec.data["take"] == 1
+    edited = ctx.record_svc.update(str(rec.id), {**rec.data, "take": 9})
+    assert edited.data["take"] == 9
+    # Saved again with the same file and nothing typed: still the edit.
+    again = ctx.record_svc.update(str(rec.id), dict(edited.data))
+    assert again.data["take"] == 9
+    # Until the file changes.
+    replaced = ctx.record_svc.update(
+        str(rec.id), {**again.data, "audio": _file(ctx, "a_t3.wav")}
+    )
+    assert replaced.data["take"] == 3
+
+
+def test_a_value_given_with_the_new_file_is_kept(ctx: AppContext, recordings):
+    """A value set in the same save as the new file is the person's, so the
+    new file doesn't discard it (the fields left alone are read again)."""
+    rec = ctx.record_svc.add("study", "recording", {"audio": _file(ctx, "a_t1.wav")})
+    updated = ctx.record_svc.update(
+        str(rec.id), {**rec.data, "audio": _file(ctx, "b_t2.wav"), "take": 9}
     )
     assert updated.data["take"] == 9
+    assert updated.data["name"] == "b_t2"
+
+
+def test_the_same_bytes_under_a_new_name_are_a_new_file(ctx: AppContext, recordings):
+    """The rule reads the name, so a file renamed is a file changed, even
+    though its content (and so its hash) is the same."""
+    rec = ctx.record_svc.add(
+        "study", "recording", {"audio": _file(ctx, "a_t1.wav", b"same bytes")}
+    )
+    assert rec.data["take"] == 1
+    renamed = ctx.record_svc.update(
+        str(rec.id), {**rec.data, "audio": _file(ctx, "a_t5.wav", b"same bytes")}
+    )
+    assert renamed.data["take"] == 5
+
+
+def test_the_same_name_with_new_content_is_a_new_file(ctx: AppContext, recordings):
+    rec = ctx.record_svc.add("study", "recording", {"audio": _file(ctx, "a_t1.wav")})
+    edited = ctx.record_svc.update(str(rec.id), {**rec.data, "take": 9})
+    assert edited.data["take"] == 9
+    replaced = ctx.record_svc.update(
+        str(rec.id), {**edited.data, "audio": _file(ctx, "a_t1.wav", b"re-recorded")}
+    )
+    assert replaced.data["take"] == 1
+
+
+def test_a_new_file_that_fits_no_pattern_leaves_the_value(ctx: AppContext, recordings):
+    rec = ctx.record_svc.add("study", "recording", {"audio": _file(ctx, "a_t1.wav")})
+    assert rec.data["take"] == 1
+    updated = ctx.record_svc.update(
+        str(rec.id), {**rec.data, "audio": _file(ctx, "other.wav")}
+    )
+    assert updated.data["take"] == 1
+    assert updated.data["name"] == "other"
+    # And removing the file blanks nothing.
+    gone = ctx.record_svc.update(str(rec.id), {**updated.data, "audio": None})
+    assert gone.data["take"] == 1
+
+
+def test_a_file_list_is_read_again_only_when_its_first_file_changes(
+    ctx: AppContext, make_schema, make_collection
+):
+    make_collection("study")
+    make_schema("doc", fields=[("photos", "file_list")])
+    ctx.schema_svc.add_field(
+        "doc", "site", "string", restrictions=_rule("photos", r"^([A-Z]+)_")
+    )
+    rec = ctx.record_svc.add("study", "doc", {"photos": [_file(ctx, "NR_1.jpg")]})
+    rec = ctx.record_svc.update(str(rec.id), {**rec.data, "site": "Nairn"})
+    # Another file after the first: the first is the same, the edit stays.
+    appended = ctx.record_svc.update(
+        str(rec.id),
+        {**rec.data, "photos": [*rec.data["photos"], _file(ctx, "SW_2.jpg")]},
+    )
+    assert appended.data["site"] == "Nairn"
+    # The first file replaced: read again.
+    replaced = ctx.record_svc.update(
+        str(rec.id),
+        {
+            **appended.data,
+            "photos": [_file(ctx, "AB_3.jpg"), *appended.data["photos"]],
+        },
+    )
+    assert replaced.data["site"] == "AB"
+
+
+def test_a_file_replaced_through_the_attach_route_overwrites_the_field(
+    client: TestClient, ctx: AppContext, recordings
+):
+    """`PUT /records/{id}/files/{field}` saves the record through `patch`, so
+    a replaced file re-reads the field in the same save: one `update` entry
+    holds both the file and the value read from its name."""
+
+    def attach(record_id: str, name: str, body: bytes):
+        r = client.put(
+            f"/api/records/{record_id}/files/audio?name={name}&size={len(body)}",
+            content=body,
+            headers={"content-length": str(len(body))},
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["data"]
+
+    rec = ctx.record_svc.add("study", "recording", {})
+    ctx.commit()
+    first = attach(str(rec.id), "a_t1.wav", b"first take")
+    assert first["take"] == 1
+    second = attach(str(rec.id), "b_t2.wav", b"second take")
+    assert second["take"] == 2
+    assert second["name"] == "b_t2"
+
+    entries = ctx.history_svc.page(entity_id=rec.id)
+    assert sorted(e.action for e in entries) == ["create", "update", "update"]
+    last = max((e for e in entries if e.action == "update"), key=lambda e: e.timestamp)
+    delta = last.delta or {}
+    audio = _field_id(ctx, "recording", "audio")
+    take = _field_id(ctx, "recording", "take")
+    assert delta[f"data.{audio}"]["after"]["filename"] == "b_t2.wav"
+    assert delta[f"data.{take}"] == {"before": 1, "after": 2}
 
 
 def test_a_datetime_is_read_in_the_collection_timezone(
@@ -298,6 +443,34 @@ def test_the_file_may_be_on_the_record_above(
     # And on update, where the parent is fetched only because it is needed.
     updated = ctx.record_svc.update(str(child.id), {})
     assert updated.data["trip"] == "T12"
+
+
+def test_a_child_field_is_filled_only_while_blank_from_the_record_above(
+    ctx: AppContext, make_schema, make_collection
+):
+    """The child doesn't hold the parent's file, so on its saves that file
+    counts as unchanged: a hand edit stays. And a parent's save never reaches
+    into its children."""
+    make_collection("study")
+    make_schema("encounter", fields=[("track", "file")])
+    make_schema("sighting", parent="encounter")
+    ctx.schema_svc.add_field(
+        "sighting", "trip", "string", restrictions=_rule("track", r"^(\w+)_")
+    )
+    parent = ctx.record_svc.add(
+        "study", "encounter", {"track": _file(ctx, "T12_20240315.gpx")}
+    )
+    child = ctx.record_svc.add(
+        "study", "sighting", {"trip": "typed"}, parent_record_id=str(parent.id)
+    )
+    assert child.data["trip"] == "typed"
+    edited = ctx.record_svc.update(str(child.id), {"trip": "edited"})
+    assert edited.data["trip"] == "edited"
+    ctx.record_svc.update(str(parent.id), {"track": _file(ctx, "T99_20240316.gpx")})
+    assert ctx.record_svc.get(str(child.id)).data["trip"] == "edited"
+    # Blank again, it is read from the parent's file as it is now.
+    cleared = ctx.record_svc.update(str(child.id), {"trip": None})
+    assert cleared.data["trip"] == "T99"
 
 
 def test_a_rule_on_the_parent_schema_is_not_applied_to_child_records(
