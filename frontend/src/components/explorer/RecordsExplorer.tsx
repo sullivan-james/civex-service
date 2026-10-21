@@ -410,7 +410,7 @@ export function RecordsExplorer({
           title="No records yet"
           message={
             noSchemas
-              ? 'This collection has no schemas yet. Edit the collection and choose the schemas it is for.'
+              ? 'This collection has no record types yet. Edit the collection and choose the record types it is for.'
               : (emptyHint ?? 'Add a record to get started.')
           }
         />
@@ -768,7 +768,7 @@ export function RecordsExplorer({
               className="text-accent hover:underline"
               to={`/schemas/${listed.parent_id}`}
             >
-              open its parent schema
+              open the record type it goes inside
             </Link>{' '}
             to start from the top of the hierarchy.
           </p>

@@ -54,7 +54,7 @@ export function RestoreBatchDialog({
             <p className="text-sm text-fg">
               {[
                 plan.collections > 0 && n(plan.collections, 'collection'),
-                plan.schemas > 0 && n(plan.schemas, 'schema'),
+                plan.schemas > 0 && n(plan.schemas, 'record type'),
                 plan.fields > 0 && n(plan.fields, 'field'),
                 plan.records > 0 && n(plan.records, 'record'),
               ]

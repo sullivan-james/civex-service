@@ -102,15 +102,15 @@ can override it.
 ```bash
 civex sync files                       # per collection: here, not here, setting
 civex sync files opened                # default for the project (or: all)
-civex sync keep humpbacks              # keep this one here
+civex sync keep survey-2024              # keep this one here
 civex sync keep archive-2019 --opened  # or --reset to follow the default
 civex sync free archive-2019           # remove local copies
 civex sync fetch                       # download everything kept, now
 ```
 
 ```text
-Collection  Keeps                 On this computer  Not on this computer
-humpbacks   every file (default)           0 (0 B)                     2
+Collection   Keeps                 On this computer  Not on this computer
+survey-2024   every file (default)           0 (0 B)                     2
 ```
 
 **Free up space** removes only copies the server confirms it holds, never one a

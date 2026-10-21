@@ -19,9 +19,9 @@ only happens when you choose to. For the short version, see
 
 ```bash
 civex record delete <id>
-civex collection delete study-2024
-civex schema delete trial
-civex schema remove-field trial score
+civex collection delete survey-2024
+civex schema delete sample
+civex schema remove-field sample depth
 ```
 
 ## Restoring
@@ -29,9 +29,9 @@ civex schema remove-field trial score
 ```bash
 civex trash list                              # newest first; --kind, --search
 civex record restore <id>
-civex collection restore study-2024
-civex schema restore trial
-civex schema restore-field trial <field id>   # id from: civex trash list --kind field
+civex collection restore survey-2024
+civex schema restore sample
+civex schema restore-field sample <field id>   # id from: civex trash list --kind field
 ```
 
 **In the app:** **Activity** → **Deleted** → **Restore** on the row, or
@@ -77,8 +77,8 @@ deleted parent. Its page says so, with **Restore …** to put the parent back, a
 
 ```bash
 civex record purge <id>              # must be deleted first
-civex collection purge study-2024
-civex schema purge trial
+civex collection purge survey-2024
+civex schema purge sample
 civex trash purge-expired            # everything deleted longer ago than purge_after_days
 ```
 

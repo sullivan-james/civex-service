@@ -203,7 +203,7 @@ export default function JobDetailPage() {
               </dd>
             </div>
             <div>
-              <dt className="text-fg-muted font-medium">Schema</dt>
+              <dt className="text-fg-muted font-medium">Record type</dt>
               <dd className="text-fg">{job.schema_name}</dd>
             </div>
             <div>

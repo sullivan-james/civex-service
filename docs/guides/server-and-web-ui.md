@@ -72,8 +72,8 @@ runs. Two you're likely to script against:
 
 ```bash
 # Upload a file; use the returned sha256 as a file field's value
-curl -X POST http://localhost:8000/api/files -F "file=@recording.wav"
-# → {"sha256": "abc123…", "filename": "recording.wav", "size": 4096000}
+curl -X POST http://localhost:8000/api/files -F "file=@20240315_093000.csv"
+# → {"sha256": "abc123…", "filename": "20240315_093000.csv", "size": 4096000}
 
 # Run a workflow against a record
 curl -X POST http://localhost:8000/api/workflows/extract-start-time/run \

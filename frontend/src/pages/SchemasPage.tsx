@@ -21,8 +21,9 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
 
   return (
     <CreateResourceModal
-      resourceLabel="schema"
+      resourceLabel="record type"
       slugKind="Schema"
+      hint="A record type is a blank form: the fields one kind of thing has, such as a site or a sample. You design it once, then add a record each time you have another one. If what you want has the same fields as a type you already have, add a record to a collection instead."
       onClose={onClose}
       isPending={create.isPending}
       error={create.error}
@@ -36,8 +37,8 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
       }}
       extraFields={
         <Field
-          label="Parent schema (optional)"
-          info="This schema inherits all of the parent's fields, and its records must belong to a parent record."
+          label="Goes inside (optional)"
+          info="Records of this type sit inside a record of the type you pick here (a Sample inside a Visit), and can use its fields."
         >
           <Select
             value={parent}
@@ -67,10 +68,11 @@ export default function SchemasPage() {
 
   return (
     <Page
-      title="Schemas"
+      title="Record types"
+      info="A record type is a blank form: the fields a kind of thing has. You design it once, then add a record every time you have another one."
       action={
         <Button variant="primary" onClick={() => setShowCreate(true)}>
-          New schema
+          New record type
         </Button>
       }
     >
@@ -95,7 +97,7 @@ export default function SchemasPage() {
           },
           {
             key: 'parent',
-            header: 'Parent',
+            header: 'Goes inside',
             render: (s) =>
               s.parent_id ? (
                 <Badge variant="accent">{labelById[s.parent_id] ?? '—'}</Badge>
@@ -126,10 +128,11 @@ export default function SchemasPage() {
         rowHref={(s) => `/schemas/${s.id}`}
         isLoading={isLoading}
         error={error ? errorMessage(error) : undefined}
-        emptyTitle="No schemas yet"
+        emptyTitle="No record types yet"
+        emptyMessage="A record type is a blank form for one kind of thing you record, such as a site or a sample. Make one per kind, then add records of it to a collection."
         emptyAction={
           <Button variant="primary" onClick={() => setShowCreate(true)}>
-            New schema
+            New record type
           </Button>
         }
       />

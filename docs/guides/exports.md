@@ -11,27 +11,27 @@ A file's path is the names of the records above it, then the record that holds
 it, then the file's name:
 
 ```text
-Encounter 7/Recording A/Selection 3/table.txt
+North Ridge/2024-03-15/Sample 03/photo.jpg
 ```
 
-- Names are the record names shown in the app (the schema's name template).
-- The record holding a file is a folder too, so many selections each holding
-  `table.txt` never clash.
+- Names are the record names shown in the app (the record type's name template).
+- The record holding a file is a folder too, so many samples each holding
+  `photo.jpg` never clash.
 - Two records with the same name in one place get a short id each
-  (`Recording A~3f9c01ab`). Nothing else changes.
-- Paths start below where you export from: exporting within Encounter 7 drops
-  `Encounter 7/`. Across several collections, the collection's name leads.
+  (`2024-03-15~3f9c01ab`). Nothing else changes.
+- Paths start below where you export from: exporting within North Ridge drops
+  `North Ridge/`. Across several collections, the collection's name leads.
 
 ## Layouts
 
 | Layout | Gives | Use when |
 |---|---|---|
-| `tree` (default) | `Encounter 7/Recording A/Selection 3/table.txt` | You want the hierarchy |
-| `grouped` | `Encounter 7/Recording A/Selections/table.txt` | Files of one kind together, under their parents |
-| `flat` | `table.txt` | One folder for everything |
+| `tree` (default) | `North Ridge/2024-03-15/Sample 03/photo.jpg` | You want the hierarchy |
+| `grouped` | `North Ridge/2024-03-15/Samples/photo.jpg` | Files of one kind together, under their parents |
+| `flat` | `photo.jpg` | One folder for everything |
 
 Where records share a folder (`grouped`, `flat`), two different files with the
-same name are told apart by their record (`Selection 2 - table.txt`).
+same name are told apart by their record (`Sample 02 - photo.jpg`).
 
 ## How the folder is made
 
@@ -64,8 +64,8 @@ A table has three independent choices:
 
 | Choice | Options |
 |---|---|
-| **Rows** | One kind of record, e.g. every Recording |
-| **Where it's written** | Once at the top, or in each folder of a kind ("a table of each Recording's Selections") |
+| **Rows** | One kind of record, e.g. every Visit |
+| **Where it's written** | Once at the top, or in each folder of a kind ("a table of each Visit's Samples") |
 | **Columns** | Own fields, fields of the records above, one hop through a reference (`species.common`), `id`, `created_at`, `updated_at` |
 
 A column holding files gives each file's **path in the export**, so the table
@@ -76,35 +76,35 @@ From the CLI, `--table csv` makes one table per kind at the top. On a saved
 export, `--table-of` and `--table-in` set a single table's rows and folder:
 
 ```bash
-# in each recording's folder, a table of its selections
-civex schema exports add encounter "Per recording" --kind selection \
-  --table csv --table-of selection --table-in recording
+# in each visit's folder, a table of its samples
+civex schema exports add site "Per visit" --kind sample \
+  --table csv --table-of sample --table-in visit
 ```
 
 For several tables, describe them in JSON:
 
 ```bash
-civex schema exports add encounter "Sheets" --kind selection --tables-json '[
-  {"format": "csv", "kind": "selection", "where": "recording"},
-  {"format": "csv", "kind": "selection", "where": "selection", "shape": "fields"}
+civex schema exports add site "Sheets" --kind sample --tables-json '[
+  {"format": "csv", "kind": "sample", "where": "visit"},
+  {"format": "csv", "kind": "sample", "where": "sample", "shape": "fields"}
 ]'
 ```
 
 ## Saved exports
 
-A saved export belongs to a schema and **starts from** it: it takes that kind
-and everything inside it. Saved on Encounter, it is offered on every Encounter,
-Recording and Selection page, and on collections that use them. It never names a
+A saved export belongs to a record type (a schema) and **starts from** it: it takes that kind
+and everything inside it. Saved on Site, it is offered on every Site,
+Visit and Sample page, and on collections that use them. It never names a
 collection or a record. Those are where it is *run*.
 
 ```bash
-civex schema exports add encounter "Contour files" --kind selection --field contour --layout flat
-civex schema exports list encounter --available   # every export that runs within an encounter
-civex schema exports set encounter "Contour files" --layout grouped
-civex schema exports remove encounter "Contour files"
+civex schema exports add site "Photo files" --kind sample --field photo --layout flat
+civex schema exports list site --available   # every export that runs within a site
+civex schema exports set site "Photo files" --layout grouped
+civex schema exports remove site "Photo files"
 
-civex files export --export "encounter/Contour files" --in my-collection --name contours
-civex files list   --export "encounter/Contour files" --under <encounter id>
+civex files export --export "site/Photo files" --in survey-2024 --name photos
+civex files list   --export "site/Photo files" --under <site id>
 ```
 
 `schema exports add --filter` takes a JSON filter tree. To export what a saved
@@ -120,9 +120,9 @@ view lists, use `civex files export --view schema/view`.
   folders on disk and removes them.
 - **The builder** has three steps:
     1. **What**: one card per kind, top down. Tick the file fields to take and the
-       tables to write (*All Recordings in one table*, *A details sheet for each
-       Recording*, *A table of each Recording's Selections*). A ticked table shows
-       its format, name and **columns** on its row. **Only some Selections…**
+       tables to write (*All Visits in one table*, *A details sheet for each
+       Visit*, *A table of each Visit's Samples*). A ticked table shows
+       its format, name and **columns** on its row. **Only some Samples…**
        filters.
     2. **Layout**: the three layouts, with pictures.
     3. **Finish**: a live preview of the folder tree with each table in place,

@@ -1,9 +1,9 @@
 # Views
 
-A **view** is a saved filter, column set and sort on a schema. Views show as
+A **view** is a saved filter, column set and sort on a record type (a schema). Views show as
 chips above a list of records, so the lists a team keeps reaching for are one
 click away. A view belongs to its schema, not to a person or a collection: a view
-on `recording` works on recordings in every collection, for everyone.
+on `sample` works on samples in every collection, for everyone.
 
 ## Save one
 
@@ -11,10 +11,10 @@ Set up a list in a collection the way you want it, then **Save as view…**. It
 keeps:
 
 - **Filters**: an AND/OR tree that may test this schema's fields, a parent's
-  fields, or any child's ("encounters that have a selection whose `quality` is
+  fields, or any child's ("visits that have a sample whose `depth` is
   empty").
 - **Columns**, in order: including parents' fields and one hop through a
-  reference (`site.code`).
+  reference (`species.common`).
 - **Sort**: one field, ascending or descending.
 
 Any name works except one containing `/`, `\` or control characters
@@ -31,15 +31,15 @@ Any name works except one containing `/`, `\` or control characters
 ## Export one
 
 ```bash
-civex view export recording "Needs review (QC)"                 # → Needs review (QC).csv
-civex view export recording "Needs review (QC)" --format xlsx
-civex view export recording qc --output qc.csv
+civex view export sample "Needs review (QC)"                 # → Needs review (QC).csv
+civex view export sample "Needs review (QC)" --format xlsx
+civex view export sample qc --output qc.csv
 ```
 
 Formats: `csv`, `tsv`, `xlsx`, `json`, `jsonl`. If the view has file columns,
 the output is a zip of the table plus the files, and each file cell holds the
-file's path inside the zip. Joined columns are named `site.code`, and in JSON
-they nest as `{"site": {"code": …}}`.
+file's path inside the zip. Joined columns are named `species.common`, and in JSON
+they nest as `{"species": {"common": …}}`.
 
 A view can also drive a folder export or a move:
-`civex files export --view recording/qc`, `civex files gather --view recording/qc --to archive`.
+`civex files export --view sample/qc`, `civex files gather --view sample/qc --to archive`.

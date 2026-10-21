@@ -80,7 +80,7 @@ class SaveWorkflowTool(AiTool):
         "properties": {
             "stem": {
                 "type": "string",
-                "description": "Filename stem (letters, numbers, hyphens, underscores only). Example: 'parse-audio-dates'",
+                "description": "Filename stem (letters, numbers, hyphens, underscores only). Example: 'read-sample-time'",
             },
             "content": {
                 "type": "string",

@@ -18,13 +18,13 @@ def schema_create(
     name: str = typer.Argument(
         ...,
         help="Schema name — the machine key used by workflows and CSV headers "
-        "(lowercase, underscores, e.g. acoustic_recording)",
+        "(lowercase, underscores, e.g. soil_sample)",
     ),
     label: Optional[str] = typer.Option(
         None,
         "--label",
         "-l",
-        help="Human-facing display name, free text (e.g. 'Acoustic Recording')",
+        help="Human-facing display name, free text (e.g. 'Soil Sample')",
     ),
     description: Optional[str] = typer.Option(
         None, "--description", "-d", help="Schema description"
@@ -235,13 +235,13 @@ def schema_add_field(
     field_name: str = typer.Argument(
         ...,
         help="Field name — the machine key used by workflows and CSV headers "
-        "(lowercase, underscores, e.g. recording_date)",
+        "(lowercase, underscores, e.g. visited_on)",
     ),
     label: Optional[str] = typer.Option(
         None,
         "--label",
         "-l",
-        help="Human-facing display name, free text (e.g. 'Recording Date')",
+        help="Human-facing display name, free text (e.g. 'Visited On')",
     ),
     dtype: str = typer.Option(
         ...,

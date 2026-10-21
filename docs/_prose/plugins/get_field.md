@@ -5,8 +5,8 @@ Read the value of a field from the trigger record. Reach for this whenever a lat
 <!-- civex:tables -->
 
 ```yaml
-- id: read_audio
+- id: read_reading
   plugin: civex.get_field
   config:
-    field: audio_file
+    field: reading
 ```

@@ -141,8 +141,8 @@ civex sync conflicts
 ```
 
 ```text
-Id                                    Kind      What        Field  Yours      Theirs              State
-9abf50d9-19ea-4f8d-88f7-c56e14eb5e5f  conflict  East Point  Site   South Bay  East Point (sulli)  open
+Id                                    Kind      What        Field  Yours        Theirs              State
+9abf50d9-19ea-4f8d-88f7-c56e14eb5e5f  conflict  East Shore  name   North Ridge  East Shore (sulli)  open
 ```
 
 Settle it with the id from that table:
@@ -166,7 +166,7 @@ work on:
 ```bash
 civex sync files                  # per collection: here, not here, the setting
 civex sync files opened           # default: fetch a file only when it's opened
-civex sync keep humpbacks         # but keep this collection's files here
+civex sync keep survey-2024         # but keep this collection's files here
 civex sync free archive-2019      # remove local copies the server holds
 ```
 
