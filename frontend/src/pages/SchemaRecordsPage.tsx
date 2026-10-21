@@ -38,7 +38,7 @@ export default function SchemaRecordsPage() {
         breadcrumbs={breadcrumbs}
         error={
           <ErrorState
-            message={error ? errorMessage(error) : 'Record type not found'}
+            message={error ? errorMessage(error) : 'Schema not found'}
           />
         }
       />

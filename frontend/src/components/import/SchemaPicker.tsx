@@ -3,7 +3,7 @@ import { displayLabel } from '../../utils/naming'
 import { NEW_SCHEMA } from './importWizardTypes'
 import type { Schema } from '../../api/schemas'
 
-/** "Which record type" chooser: pick an existing schema or create one
+/** "Which schema" chooser: pick an existing schema or create one
  * inline. Purely presentational — side effects of changing schema (e.g.
  * resetting a parent-record choice, re-running column suggestions) are the
  * caller's job, not this component's. */
@@ -24,14 +24,14 @@ export function SchemaPicker({
 }) {
   return (
     <div className="space-y-2">
-      <Subheading as="span">Record type</Subheading>
+      <Subheading as="span">Schema</Subheading>
       <Select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-full max-w-sm"
       >
-        <option value="">— Select a record type —</option>
-        <option value={NEW_SCHEMA}>+ Create a new record type</option>
+        <option value="">— Select a schema —</option>
+        <option value={NEW_SCHEMA}>+ Create a new schema</option>
         {schemas?.map((s) => (
           <option key={s.id} value={s.id}>
             {displayLabel(s.name, s.label)}

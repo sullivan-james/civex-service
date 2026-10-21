@@ -22,8 +22,7 @@ function describeSchemaChange(entry: AuditLogEntry): AuditSummary {
     case 'delete':
       return {
         title: `Schema "${name}" deleted`,
-        detail:
-          'Moved to Recently Deleted, along with every record typed by it.',
+        detail: 'Moved to Recently Deleted, along with every schemad by it.',
       }
     case 'restore':
       return {

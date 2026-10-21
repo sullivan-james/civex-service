@@ -34,7 +34,7 @@ export function RecordGrowthWidget({ filters }: RecordGrowthWidgetProps) {
   return (
     <WidgetCard
       title="Record growth"
-      description="New records over time, by collection and record type"
+      description="New records over time, by collection and schema"
       viewRunsTo="/collections"
       viewRunsLabel="View collections"
     >

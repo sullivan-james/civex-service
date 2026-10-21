@@ -264,9 +264,7 @@ describe('RecordsExplorer', () => {
     it('says so when no schemas are enabled yet', async () => {
       override = emptyCollection([])
       renderExplorer({}, '/collections/hb')
-      expect(
-        await screen.findByText(/has no record types yet/),
-      ).toBeInTheDocument()
+      expect(await screen.findByText(/has no schemas yet/)).toBeInTheDocument()
       expect(
         screen.queryByRole('button', { name: /New/ }),
       ).not.toBeInTheDocument()

@@ -22,7 +22,7 @@ import type { ParsedCsv } from '../../utils/csv'
 import type { Schema, Field as SchemaField } from '../../api/schemas'
 import type { Mode, Strategy } from './importWizardTypes'
 
-/** Step 2: which record type, which field(s), and (for files) how to
+/** Step 2: which schema, which field(s), and (for files) how to
  * strategise. Renders SchemaPicker itself only when the schema wasn't
  * already fixed by the entry point (e.g. entering from the schema page). */
 export function MapStep({
@@ -292,7 +292,7 @@ export function MapStep({
                   <span className="block text-xs text-fg-muted">
                     {canMatch
                       ? 'Update the matching record, or create one if no key matches.'
-                      : 'Only available for a record type that is a child of another record.'}
+                      : 'Only available for a schema that is a child of another record.'}
                   </span>
                 </span>
               </label>

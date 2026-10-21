@@ -88,7 +88,7 @@ export function ConfirmStep({
         <p className="text-sm text-fg">
           {isNewSchema && (
             <>
-              Creates a new record type{' '}
+              Creates a new schema{' '}
               <Badge variant="accent">{newSchemaName || '(unnamed)'}</Badge>
               .{' '}
             </>
@@ -163,7 +163,7 @@ export function ConfirmStep({
               span={6}
               info={
                 mode === 'csv'
-                  ? `Creates a "${targetSchemaName || 'record'}_import" record type — attach a new CSV to it to repeat this import.`
+                  ? `Creates a "${targetSchemaName || 'record'}_import" schema — attach a new CSV to it to repeat this import.`
                   : 'Re-run it later from the Workflows page with a new folder of files.'
               }
             >

@@ -91,7 +91,7 @@ nav:
   - Getting started:
       - Install: getting-started/install.md
       - Your first project: getting-started/first-project.md
-      - Record types, collections, records: getting-started/concepts.md
+      - Schemas, collections, records: getting-started/concepts.md
       - Five-minute tour: getting-started/tour.md
   - How-to:
       - Import data: how-to/import-data.md
@@ -103,7 +103,7 @@ nav:
       - Back up a project: how-to/back-up.md
   - Guides:
       - Data:
-          - Record types & fields: guides/schemas-and-fields.md
+          - Schemas & fields: guides/schemas-and-fields.md
           - Collections & records: guides/collections-and-records.md
           - Views: guides/views.md
           - Deleting & restoring: guides/deleting-and-restoring.md

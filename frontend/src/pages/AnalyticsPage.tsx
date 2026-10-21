@@ -34,7 +34,7 @@ const TRIGGER_OPTIONS = [
 
 const ENTITY_TYPE_OPTIONS = [
   { value: 'record', label: 'Record' },
-  { value: 'schema', label: 'Record type' },
+  { value: 'schema', label: 'Schema' },
   { value: 'field', label: 'Field' },
   { value: 'dataset', label: 'Dataset' },
 ]

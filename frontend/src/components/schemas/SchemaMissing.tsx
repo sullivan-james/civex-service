@@ -22,7 +22,7 @@ export function SchemaMissing({
   return (
     <div className="space-y-3">
       <ErrorState
-        message={`The record type “${plan.name}” was deleted${when}. It can be restored.`}
+        message={`The schema “${plan.name}” was deleted${when}. It can be restored.`}
       />
       <p className="text-sm text-fg-muted">
         {plan.records > 0

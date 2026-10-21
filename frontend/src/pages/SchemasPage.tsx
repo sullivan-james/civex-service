@@ -21,9 +21,9 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
 
   return (
     <CreateResourceModal
-      resourceLabel="record type"
+      resourceLabel="schema"
       slugKind="Schema"
-      hint="A record type is a blank form: the fields one kind of thing has, such as a site or a sample. You design it once, then add a record each time you have another one. If what you want has the same fields as a type you already have, add a record to a collection instead."
+      hint="A schema is a blank form: the fields one kind of thing has, such as a site or a sample. You design it once, then add a record each time you have another one. If what you want has the same fields as a type you already have, add a record to a collection instead."
       onClose={onClose}
       isPending={create.isPending}
       error={create.error}
@@ -68,11 +68,11 @@ export default function SchemasPage() {
 
   return (
     <Page
-      title="Record types"
-      info="A record type is a blank form: the fields a kind of thing has. You design it once, then add a record every time you have another one."
+      title="Schemas"
+      info="A schema is a blank form: the fields a kind of thing has. You design it once, then add a record every time you have another one."
       action={
         <Button variant="primary" onClick={() => setShowCreate(true)}>
-          New record type
+          New schema
         </Button>
       }
     >
@@ -128,11 +128,11 @@ export default function SchemasPage() {
         rowHref={(s) => `/schemas/${s.id}`}
         isLoading={isLoading}
         error={error ? errorMessage(error) : undefined}
-        emptyTitle="No record types yet"
-        emptyMessage="A record type is a blank form for one kind of thing you record, such as a site or a sample. Make one per kind, then add records of it to a collection."
+        emptyTitle="No schemas yet"
+        emptyMessage="A schema is a blank form for one kind of thing you record, such as a site or a sample. Make one per kind, then add records of it to a collection."
         emptyAction={
           <Button variant="primary" onClick={() => setShowCreate(true)}>
-            New record type
+            New schema
           </Button>
         }
       />

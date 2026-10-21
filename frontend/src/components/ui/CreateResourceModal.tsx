@@ -14,7 +14,7 @@ export interface CreateResourceModalProps {
   nameLabel?: string
   namePlaceholder?: string
   /** A plain-language sentence or two at the top of the form, for resources a
-   * first-time user hasn't met yet ("A record type is a blank form…"). */
+   * first-time user hasn't met yet ("A schema is a blank form…"). */
   hint?: ReactNode
   /**
    * Resources whose `name` is a machine key referenced elsewhere (schemas,

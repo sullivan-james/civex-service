@@ -43,7 +43,7 @@ describe('describeAuditEntry — schema', () => {
       makeEntry({ action: 'delete', old_data: { name: 'trial' } }),
     )
     expect(summary.title).toBe('Schema "trial" deleted')
-    expect(summary.detail).toContain('every record typed by it')
+    expect(summary.detail).toContain('every schemad by it')
   })
 })
 

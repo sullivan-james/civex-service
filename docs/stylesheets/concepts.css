@@ -1,5 +1,5 @@
 /* One colour per idea, used wherever the docs name the three building blocks.
-   Record types are blue (the blank form), collections are amber (the binder),
+   Schemas are blue (the blank form), collections are amber (the binder),
    records are green (a filled-in form). Keep these in step with the mermaid
    classDefs in index.md and getting-started/concepts.md. */
 .rt, .coll, .rec {

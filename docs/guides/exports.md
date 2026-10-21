@@ -14,7 +14,7 @@ it, then the file's name:
 North Ridge/2024-03-15/Sample 03/photo.jpg
 ```
 
-- Names are the record names shown in the app (the record type's name template).
+- Names are the record names shown in the app (the schema's name template).
 - The record holding a file is a folder too, so many samples each holding
   `photo.jpg` never clash.
 - Two records with the same name in one place get a short id each
@@ -92,7 +92,7 @@ civex schema exports add site "Sheets" --kind sample --tables-json '[
 
 ## Saved exports
 
-A saved export belongs to a record type (a schema) and **starts from** it: it takes that kind
+A saved export belongs to a schema (a schema) and **starts from** it: it takes that kind
 and everything inside it. Saved on Site, it is offered on every Site,
 Visit and Sample page, and on collections that use them. It never names a
 collection or a record. Those are where it is *run*.

@@ -19,7 +19,7 @@ Nothing is written before **Confirm**.
 
 ### A spreadsheet
 
-Each row becomes a record. In **Map**, choose the record type, then for each
+Each row becomes a record. In **Map**, choose the schema, then for each
 column choose the field it goes into, **+ Create new field**, or **Skip this
 column**. Columns are matched to fields by name to start with.
 
@@ -29,7 +29,7 @@ North Ridge,2024-03-15,41
 East Shore,2024-03-16,131
 ```
 
-Mapped to the `sample` record type (`--schema sample`): `site` → *site*,
+Mapped to the `sample` schema (`--schema sample`): `site` → *site*,
 `taken_at` → *taken at*, and
 `depth_ft` → *depth*, a field stored in metres, with the column's unit set to
 `ft`. The two records get depths of `12.4968` and `39.9288`.
@@ -51,7 +51,7 @@ become records:
 - **Match to existing records by a key in the filename**: for files named after
   records that already exist, such as `sample_03.jpg` going to Sample 03. A
   matching record is updated, and a new one is made where no key matches. This is
-  available for a record type that sits inside another, once you choose the
+  available for a schema that sits inside another, once you choose the
   parent.
 
 **Also fill a field from the filename** reads a value out of each name with a

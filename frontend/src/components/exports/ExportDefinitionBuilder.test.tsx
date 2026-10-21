@@ -285,7 +285,7 @@ describe('choosing a layout', () => {
     expect(within(grouped).getByText('Item 2 - file.txt')).toBeTruthy()
     expect(within(flat).queryByText('Parent 1')).toBeNull()
     expect(within(flat).getAllByText(/ - file\.txt$/)).toHaveLength(3)
-    // Nothing tied to anyone’s own record types.
+    // Nothing tied to anyone’s own schemas.
     expect(document.body.textContent).not.toMatch(
       /encounter 1|recording 1|selection 1/i,
     )
