@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useUploadCollection } from '../../hooks/uploadCollection'
-import { useFileUploads } from '../../hooks/useFileUploads'
+import { useFileUploads, type FileSender } from '../../hooks/useFileUploads'
 import { usePermissions } from '../../hooks/useMe'
 import type { Field } from '../../api/schemas'
+import type { FileSaver } from '../../api/records'
+import { ApiError } from '../../api/client'
+import { fieldSaveErrors } from './saveErrors'
+import { isPendingFile, pendingFile, type PendingFile } from './pendingFiles'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
 import { fromFilenameRule } from '../../utils/filenameExtract'
 import { displayLabel } from '../../utils/naming'
@@ -78,28 +82,66 @@ function toSaved(field: Field, draft: unknown): unknown | undefined | null {
  * is when a file would go: removing one, or replacing one (which removes the
  * current file). The file's type and size are checked first, so a file the
  * field won't take is refused before anything is uploaded. */
+/** A refused save as the words shown under the field: the field error civex
+ * answered, in plain language (`fieldSaveErrors`); anything else as it is. */
+function refusalOf(err: unknown, field: Field): unknown {
+  if (!(err instanceof ApiError)) return err
+  const said = fieldSaveErrors(err, [field.name], field.name)
+  return new Error(said[field.name]?.message ?? err.message)
+}
+
 function FileControl({
   field,
   value,
   onSave,
+  fileSaver,
+  holdFiles,
 }: {
   field: Field
   value: unknown
   onSave: (value: unknown | undefined) => void
+  /** Saves the record with each file as one request; `onSave` is then not
+   * called for files, since the record is already saved. */
+  fileSaver?: FileSaver
+  /** Keep chosen files in the browser (`PendingFile`) instead of storing
+   * them: a record that doesn't exist yet sends them with its creation. */
+  holdFiles?: boolean
 }) {
   const multiple = field.type === 'file_list'
-  const refs: FileRef[] = multiple
-    ? ((value as FileRef[] | null | undefined) ?? [])
+  const items: (FileRef | PendingFile)[] = multiple
+    ? ((value as (FileRef | PendingFile)[] | null | undefined) ?? [])
     : value
-      ? [value as FileRef]
+      ? [value as FileRef | PendingFile]
       : []
+  const refs = items.filter((r): r is FileRef => !isPendingFile(r))
   const [error, setError] = useState<string | null>(null)
   // A file waiting on "are you sure": one to remove, or a replacement to swap in.
   const [removing, setRemoving] = useState<FileRef | null>(null)
   const [replacement, setReplacement] = useState<File | null>(null)
   const collectionId = useUploadCollection()
-  const { current, uploading, run, cancel, stopped, dismiss } =
-    useFileUploads(collectionId)
+  // With a saver, each file is one request that stores it and saves the
+  // record; a refusal is answered as the field's error, in plain words.
+  const sender = useMemo<FileSender | undefined>(
+    () =>
+      fileSaver
+        ? async (file, onProgress, signal) => {
+            let record
+            try {
+              record = await fileSaver(field, file, onProgress, signal)
+            } catch (err) {
+              throw refusalOf(err, field)
+            }
+            const saved = record.data[field.name]
+            const list = Array.isArray(saved) ? saved : saved ? [saved] : []
+            return list[list.length - 1] as FileRef
+          }
+        : undefined,
+    [fileSaver, field],
+  )
+  const { current, uploading, run, cancel, stopped, dismiss } = useFileUploads(
+    collectionId,
+    sender,
+  )
   const { can, why } = usePermissions()
   const cannotAdd = can('manage_files') ? undefined : why('manage_files')
   const { accept, maxSize } = toInputProps(field)
@@ -115,11 +157,19 @@ function FileControl({
         return
       }
     }
+    if (holdFiles) {
+      // Nothing is stored until the record is added.
+      const pending = files.map(pendingFile)
+      onSave(multiple ? [...items, ...pending] : pending[0])
+      return
+    }
     try {
       // Files that finished are kept, whether the batch was cancelled or
       // stopped on one that couldn't be added (`UploadStopped` offers the rest).
       const { refs: done } = await run(files)
-      if (done.length) onSave(multiple ? [...refs, ...done] : done[0])
+      // With a saver the record was saved with each file as it went in.
+      if (done.length && !fileSaver)
+        onSave(multiple ? [...refs, ...done] : done[0])
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't add the file")
     }
@@ -127,43 +177,72 @@ function FileControl({
 
   function pick(files: File[]) {
     // Replacing removes the current file, so that one is confirmed.
-    if (!multiple && refs.length) setReplacement(files[0])
+    if (!multiple && items.length && !isPendingFile(items[0]))
+      setReplacement(files[0])
     else void attach(files)
   }
 
   function remove(sha256: string) {
-    const rest = refs.filter((r) => r.sha256 !== sha256)
+    const rest = items.filter((r) => isPendingFile(r) || r.sha256 !== sha256)
+    onSave(multiple ? rest : undefined)
+  }
+
+  function removePending(index: number) {
+    const rest = items.filter((_, i) => i !== index)
     onSave(multiple ? rest : undefined)
   }
 
   return (
     <div className="space-y-2">
-      {refs.map((ref) => (
-        <div
-          key={ref.sha256}
-          className="flex items-center gap-2 text-sm text-fg"
-        >
-          <Paperclip size={14} className="shrink-0 text-fg-muted" />
-          <FileLink
-            file={ref}
-            className="truncate text-accent hover:underline"
-            title={`Download · ${(ref.size / 1024).toFixed(1)} KB`}
+      {items.map((item, i) =>
+        isPendingFile(item) ? (
+          <div
+            key={`pending-${i}`}
+            className="flex items-center gap-2 text-sm text-fg"
+            data-testid="pending-file"
           >
-            {ref.resolved_filename ?? ref.filename}
-          </FileLink>
-          <span className="shrink-0 text-xs text-fg-muted">
-            {(ref.size / 1024).toFixed(1)} KB
-          </span>
-          <FileLocationChip file={ref} />
-          <IconButton
-            icon={X}
-            variant="danger"
-            onClick={() => setRemoving(ref)}
-            aria-label={`Remove ${ref.filename}`}
-          />
-        </div>
-      ))}
-      {refs.length === 0 && (
+            <Paperclip size={14} className="shrink-0 text-fg-muted" />
+            <span className="truncate">{item.filename}</span>
+            <span className="shrink-0 text-xs text-fg-muted">
+              {(item.size / 1024).toFixed(1)} KB
+            </span>
+            <span className="shrink-0 rounded-full bg-canvas-inset px-2 py-0.5 text-xs text-fg-muted">
+              not added yet
+            </span>
+            <IconButton
+              icon={X}
+              variant="danger"
+              onClick={() => removePending(i)}
+              aria-label={`Remove ${item.filename}`}
+            />
+          </div>
+        ) : (
+          <div
+            key={item.sha256}
+            className="flex items-center gap-2 text-sm text-fg"
+          >
+            <Paperclip size={14} className="shrink-0 text-fg-muted" />
+            <FileLink
+              file={item}
+              className="truncate text-accent hover:underline"
+              title={`Download · ${(item.size / 1024).toFixed(1)} KB`}
+            >
+              {item.resolved_filename ?? item.filename}
+            </FileLink>
+            <span className="shrink-0 text-xs text-fg-muted">
+              {(item.size / 1024).toFixed(1)} KB
+            </span>
+            <FileLocationChip file={item} />
+            <IconButton
+              icon={X}
+              variant="danger"
+              onClick={() => setRemoving(item)}
+              aria-label={`Remove ${item.filename}`}
+            />
+          </div>
+        ),
+      )}
+      {items.length === 0 && (
         <span className="inline-flex items-center rounded-full bg-attention-subtle px-3 py-1 text-xs font-semibold text-attention-emphasis">
           empty
         </span>
@@ -176,7 +255,7 @@ function FileControl({
         inputLabel={`Add ${label}`}
         onFiles={pick}
       >
-        {multiple ? undefined : refs.length ? (
+        {multiple ? undefined : items.length ? (
           <span>
             Drop a file here or <span className="text-accent">browse</span> to
             replace it
@@ -250,12 +329,16 @@ export function EditableValue({
   referenceLabels,
   referenceCollections,
   onSave,
+  fileSaver,
+  holdFiles,
 }: {
   field: Field
   value: unknown
   referenceLabels?: Record<string, string | null> | null
   referenceCollections?: Record<string, string> | null
   onSave: (value: unknown | undefined) => void
+  fileSaver?: FileSaver
+  holdFiles?: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<unknown>(value)
@@ -288,7 +371,15 @@ export function EditableValue({
   }
 
   if (field.type === 'file' || field.type === 'file_list')
-    return <FileControl field={field} value={value} onSave={onSave} />
+    return (
+      <FileControl
+        field={field}
+        value={value}
+        onSave={onSave}
+        fileSaver={fileSaver}
+        holdFiles={holdFiles}
+      />
+    )
 
   if (field.type === 'reference' || field.type === 'reference_list')
     return (
@@ -445,9 +536,17 @@ export function RecordFieldGrid({
   extra,
   marked,
   readOnly,
+  fileSaver,
+  holdFiles,
 }: {
   fields: Field[]
   data: Record<string, unknown>
+  /** Stores a file into a field and saves the record as one request (the
+   * record page); without it a file is saved through `onSave`. */
+  fileSaver?: FileSaver
+  /** Hold chosen files in the browser until the record is added (a new
+   * record); they reach `onSave` as `PendingFile`s. */
+  holdFiles?: boolean
   /** Why this person may not change the record: values are shown, not edited. */
   readOnly?: string
   referenceLabels?: Record<string, string | null> | null
@@ -511,6 +610,8 @@ export function RecordFieldGrid({
                   referenceLabels={referenceLabels}
                   referenceCollections={referenceCollections}
                   onSave={(v) => onSave(field.name, v)}
+                  fileSaver={fileSaver}
+                  holdFiles={holdFiles}
                 />
               )}
               {field.type === 'geo' && isGeometry(data[field.name]) && (

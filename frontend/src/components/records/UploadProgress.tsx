@@ -73,7 +73,7 @@ export function UploadStopped({
     <div role="alert" className="space-y-1 text-xs">
       <p className="text-danger">
         {stop.total > 1 && `Added ${stop.added} of ${stop.total} files. `}
-        Couldn&rsquo;t add <span className="break-all">{stop.name}</span>:{' '}
+        Not added &mdash; <span className="break-all">{stop.name}</span>:{' '}
         {stop.message}
       </p>
       <div className="flex gap-3">

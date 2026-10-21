@@ -154,6 +154,19 @@ def test_blank_fields_are_filled_from_the_file_name(ctx: AppContext, recordings)
     assert rec.data["start"] == "2024-03-15T09:30:00+00:00"
 
 
+def test_the_derived_value_is_part_of_the_same_save(ctx: AppContext, recordings):
+    """One save, one history entry, and the value read from the file's name
+    is in it: nothing runs afterwards to fill the field."""
+    rec = ctx.record_svc.add(
+        "study", "recording", {"audio": _file(ctx, "20240315_093000_t3.wav")}
+    )
+    ctx.commit()
+    entries = ctx.history_svc.page(entity_id=rec.id)
+    assert [e.action for e in entries] == ["create"]
+    take = next(f for f in ctx.schema_svc.get("recording").fields if f.name == "take")
+    assert entries[0].new_data["data"][str(take.id)] == 3
+
+
 def test_a_typed_value_is_kept(ctx: AppContext, recordings):
     rec = ctx.record_svc.add(
         "study",
