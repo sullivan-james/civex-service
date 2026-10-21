@@ -98,6 +98,20 @@ export function useSyncTasks(): BackgroundTask[] {
       },
     ]
 
+  // The server will stop accepting this civex at its next update: said
+  // before it happens, so nobody is cut off without warning.
+  if (data.last_result?.notice)
+    return [
+      {
+        id: 'sync',
+        tone: 'attention',
+        icon: RefreshCw,
+        title: 'Update civex soon',
+        detail: data.last_result.notice,
+        actions: [details],
+      },
+    ]
+
   if (data.open_conflicts > 0)
     return [
       {

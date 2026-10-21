@@ -60,7 +60,9 @@ from civex.domain.sync import (
     SyncError,
     SyncProgress,
     agree,
+    plain_failure,
     protocol_mismatch,
+    retiring_notice,
     not_on_server_yet,
     SyncTransport,
     snapshot_cursor,
@@ -102,6 +104,10 @@ class SyncReport:
     conflicts: int = 0  # values that did not go in as made
     rejected: int = 0  # changes the authority refused
     waiting: int = 0  # changes held back (a refusal waiting for review)
+    # The civex the server runs, and what to tell a person when it will stop
+    # accepting this one at its next update (`retiring_notice`), as it said.
+    server_version: str | None = None
+    notice: str | None = None
 
     @property
     def changed(self) -> bool:
@@ -658,7 +664,9 @@ class SyncService:
         theirs = (hello.protocol_min, hello.protocol_max)
         if agree(theirs) is None:
             raise SyncError(
-                protocol_mismatch(theirs, "the server", "this computer"),
+                protocol_mismatch(
+                    theirs, "the server", "this computer", hello.server_version
+                ),
                 retryable=False,
             )
 
@@ -696,17 +704,22 @@ class SyncService:
             log.info("sync with %s: starting", self._config.sync.remote)
             try:
                 report = self._sync()
-            except SyncError as e:
+            except Exception as raw:
+                e = plain_failure(raw)
                 log.warning(
-                    "sync with %s failed (%s): %s",
+                    "sync with %s failed (%s): %s%s",
                     self._config.sync.remote,
                     "will retry" if e.retryable else "will not retry until fixed",
                     e,
+                    f" [{e.detail}]" if e.detail else "",
+                    exc_info=e is not raw,
                 )
                 self._commit_quietly()
                 self._repo.record_outcome(str(e))
                 self._commit()
-                raise
+                if e is raw:
+                    raise
+                raise e from raw
             log.info(
                 "sync with %s: received %d, sent %d, conflicts %d, refused %d, "
                 "waiting %d",
@@ -742,7 +755,10 @@ class SyncService:
                 "to finish it.",
                 retryable=False,
             )
-        report = SyncReport()
+        report = SyncReport(
+            server_version=hello.server_version,
+            notice=retiring_notice(hello.protocol_retiring, hello.protocol_version),
+        )
         if meta.cursor < hello.feed_floor:
             self._copy_again(transport, hello, report)
         report.pulled += self._pull(transport)
