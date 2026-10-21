@@ -31,6 +31,13 @@ import {
 } from '../../utils/partialDates'
 import { UNIT_GROUPS, canonicalUnit } from '../../utils/units'
 import { displayLabel } from '../../utils/naming'
+import { FILENAME_FORMAT_TOKENS_HELP } from '../../utils/filenamePattern'
+import {
+  DATE_KINDS,
+  extractFromFilename,
+  fromFilenameRule,
+  patternProblem,
+} from '../../utils/filenameExtract'
 import {
   TemplateBuilder,
   type TemplateField,
@@ -41,7 +48,10 @@ export type Rules = Record<string, unknown>
 /** What a control may need to know about the field it is editing. */
 export interface ControlContext {
   schemaName: string
-  /** The schema's fields, for the file-name template. */
+  /** The type of the field being edited (its storage type, e.g. `datetime`). */
+  type?: string
+  /** The schema's fields (own and inherited), for the file-name template and
+   * the file field a value is read from. */
   fields: TemplateField[]
   schemas: Schema[]
   /** The field as saved, when editing (not creating). */
@@ -301,6 +311,119 @@ export function FilenameTemplateControl({
         label={desc.label}
         placeholder="Keep the original name"
       />
+    </Shell>
+  )
+}
+
+/** Which file field's name fills this field, and the pattern that reads it;
+ * tried live on a file name. The rule is `{field, pattern}` or nothing. */
+export function FromFilenameControl({
+  desc,
+  rules,
+  set,
+  problem,
+  ctx,
+}: ControlProps) {
+  const rule = fromFilenameRule(rules)
+  const field = rule?.field ?? ''
+  const pattern = rule?.pattern ?? ''
+  const kind = ctx.type ?? ctx.existing?.type ?? 'string'
+  const isDate = DATE_KINDS.has(kind)
+  const fileFields = ctx.fields.filter(
+    (f) => f.dtype === 'file' || f.dtype === 'file_list',
+  )
+  const [sample, setSample] = useState('')
+  const patternErr =
+    field && pattern.trim() ? patternProblem(pattern, kind) : null
+  const incomplete = !!field && !pattern.trim()
+  useEffect(() => {
+    problem(
+      desc.key,
+      incomplete
+        ? `${desc.label}: give a pattern, or choose no file field.`
+        : patternErr
+          ? `${desc.label}: ${patternErr}.`
+          : null,
+    )
+    return () => problem(desc.key, null)
+  }, [incomplete, patternErr, desc.key, desc.label, problem])
+  const update = (nextField: string, nextPattern: string) =>
+    set(
+      desc.key,
+      nextField ? { field: nextField, pattern: nextPattern } : undefined,
+    )
+  const tried =
+    sample && field && pattern && !patternErr
+      ? extractFromFilename(sample, pattern, kind)
+      : null
+  return (
+    <Shell label={desc.label} help={desc.help} error={patternErr}>
+      {fileFields.length === 0 ? (
+        <p className="text-xs text-fg-subtle">
+          Add a file field to this type first.
+        </p>
+      ) : (
+        <Select
+          size="sm"
+          value={field}
+          aria-label="File field"
+          onChange={(e) => update(e.target.value, pattern)}
+          className="max-w-xs"
+        >
+          <option value="">— not filled from a file —</option>
+          {fileFields.map((f) => (
+            <option key={f.name} value={f.name}>
+              {f.source ? `${f.label} (${f.source})` : f.label}
+            </option>
+          ))}
+        </Select>
+      )}
+      {field && (
+        <>
+          <Input
+            size="sm"
+            value={pattern}
+            aria-label="Pattern"
+            placeholder={isDate ? 'YYYYMMDD[-_]HHmmSS' : 'site-([A-Z]+)_'}
+            onChange={(e) => update(field, e.target.value)}
+            className="max-w-md font-mono"
+          />
+          <p className="text-xs text-fg-subtle">
+            {isDate
+              ? `Tokens: ${FILENAME_FORMAT_TOKENS_HELP}. Anything else is a regular expression, so [-_] takes a dash or an underscore.`
+              : 'A regular expression. The first capture group ( ) is the value, or the whole match without one.'}{' '}
+            It needn't describe the whole name.
+          </p>
+          <Input
+            size="sm"
+            value={sample}
+            aria-label="Try a file name"
+            placeholder="Try it on a file name, e.g. 20240315_093000.wav"
+            onChange={(e) => setSample(e.target.value)}
+            className="max-w-md"
+          />
+          {tried && (
+            <p role="status" data-testid="tried" className="text-xs">
+              {tried.error ? (
+                <span className="text-danger">
+                  Matches, but {tried.error}: the record would be refused.
+                </span>
+              ) : tried.value === null ? (
+                <span className="text-fg-subtle">
+                  No match: the field would stay blank.
+                </span>
+              ) : (
+                <span className="text-fg-muted">
+                  Gives{' '}
+                  <code className="rounded-md border border-border bg-canvas px-1.5 py-0.5 font-mono">
+                    {String(tried.value)}
+                  </code>
+                </span>
+              )}
+            </p>
+          )}
+        </>
+      )}
     </Shell>
   )
 }
